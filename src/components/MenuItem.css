@@ -1,0 +1,30 @@
+.menu-item-label {
+    font-size: 13px;
+}
+
+.menu-item {
+    height: 24px;
+    background-color: transparent;
+    border: none;
+    box-shadow: none;
+    cursor: pointer;
+    padding: .1em 1em;
+    border-radius: 4px;
+    color: rgb(66, 66, 66);
+    position: relative;
+}
+
+.menu-item:hover {
+    background: #e3e5e7;
+}
+
+.menu-item .subMenu {
+    position: absolute;
+    width: 85px;
+    top: 0;
+    left: 77px;
+}
+
+.menu-item-active {
+    background: #e3e5e7;
+}

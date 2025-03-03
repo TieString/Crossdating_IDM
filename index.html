@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crossdating-Tauri</title>
+  <style>
+    .titlebar {
+      height: 35px;
+      /* background: #329ea3; */
+      user-select: none;
+      display: flex;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      font-size: 13px;
+      /* color: rgb(66, 66, 66); */
+      min-width: 680px;
+    }
+
+    .titlebar .titlebar-button {
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      width: 45px;
+      height: 35px;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .titlebar .titlebar-button img {
+      width: 20px;
+      height: 20px;
+    }
+
+    .titlebar .titlebar-button:hover {
+      background: #e3e5e7;
+    }
+
+    .titlebar #titlebar-close:hover {
+      background: rgb(213, 44, 28);
+      color: white;
+    }
+
+    .titlebar .window-control {
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .titlebar .menu {
+      display: flex;
+      align-items: center;
+      padding-left: 10px;
+    }
+
+    .titlebar .menu .title-menu-item {
+      background-color: transparent;
+      border: none;
+      box-shadow: none;
+      cursor: unset;
+      margin: 0.5em 0;
+      padding: .1em 1em;
+      border-radius: 4px;
+      color: rgb(66, 66, 66);
+    }
+
+    .titlebar .menu .title-menu-item:hover {
+      background-color: #e8e8e8;
+    }
+
+    .titlebar .drag-region {
+      flex-grow: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .titlebar .address-container {
+      display: flex;
+      width: 60%;
+      height: 24px;
+      background-color: #292b343c;
+      align-items: center;
+      justify-content: center;
+      color: #ffffff;
+      border-radius: 5px;
+      padding: 0 10px;
+      max-width: 540px;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+
+    .titlebar .address-container .menu-title {
+      width: 100%;
+      text-overflow: ellipsis;
+    }
+
+    body {
+      display: flex;
+      height: 100%;
+    }
+
+    body #root {
+      flex-grow: 1;
+    }
+
+    .container {
+      display: flex;
+      flex-direction: column;
+      /* 垂直方向布局 */
+      height: 100vh;
+      /* 父容器占满整个视口高度 */
+    }
+
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div class="titlebar">
+      <!-- Menu Section -->
+      <div class="menu">
+        <div class="title-menu-item-container">
+          <button class="title-menu-item" id="title-submenu-file-button">文件(F)</button>
+          <div class="title-submenu-container" id="title-submenu-file-container"></div> <!-- 这里是 React 组件Menu的挂载点 -->
+        </div>
+        <div class="title-menu-item-container">
+          <button class="title-menu-item" id="title-submenu-edit-button">编辑(E)</button>
+          <div class="title-submenu-container" id="title-submenu-edit-container"></div> <!-- 这里是 React 组件Menu的挂载点 -->
+        </div>
+        <button class="title-menu-item" id="title-submenu-undo-button">↩</button>
+        <button class="title-menu-item" id="title-submenu-redo-button">↪</button>
+
+      </div>
+
+      <!-- Drag Region -->
+      <div data-tauri-drag-region class="drag-region">
+        <div data-tauri-drag-region class="address-container">
+          <span data-tauri-drag-region class="menu-title" id="menu-title"></span>
+        </div>
+      </div>
+
+      <!-- Window Control Buttons -->
+      <div class="window-control">
+        <div class="titlebar-button" id="titlebar-minimize">
+          <img src="https://api.iconify.design/mdi:window-minimize.svg" alt="minimize" />
+        </div>
+        <div class="titlebar-button" id="titlebar-maximize">
+          <img src="https://api.iconify.design/mdi:window-maximize.svg" alt="maximize" />
+        </div>
+        <div class="titlebar-button" id="titlebar-close">
+          <img src="https://api.iconify.design/mdi:close.svg" alt="close" />
+        </div>
+      </div>
+    </div>
+    <div id="root"></div>
+  </div>
+  <script type="module">
+    import { getCurrentWindow } from '@tauri-apps/api/window';
+
+    // when using `"withGlobalTauri": true`, you may use
+    // const { getCurrentWindow } = window.__TAURI__.window;
+
+    const appWindow = getCurrentWindow();
+
+    document
+      .getElementById('titlebar-minimize')
+      ?.addEventListener('click', () => appWindow.minimize());
+    document
+      .getElementById('titlebar-maximize')
+      ?.addEventListener('click', () => appWindow.toggleMaximize());
+    document
+      .getElementById('titlebar-close')
+      ?.addEventListener('click', () => appWindow.close());
+  </script>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
+</html>

@@ -1,0 +1,24 @@
+.home_container {
+    min-width: 670px;
+    width: 50vw;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.home_container .data_container {
+    height: 100px;
+    overflow-y: scroll;
+    flex-grow: 1;
+}
+
+
+p {
+    white-space: pre-wrap;
+    font-family: 'consolas';
+}
+
+#tree_selector {
+    /*设置最小宽度*/
+    min-width: 72.5714px;
+}
