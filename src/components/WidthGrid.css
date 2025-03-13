@@ -1,0 +1,11 @@
+.width-grid{
+    font-size: 16px;
+    /* font-family: "consolas"; */
+    line-height: 24px;
+    border-radius: 3px;
+    cursor:text;
+}
+
+.width-grid:hover{
+    outline: 1px solid #ccc;
+}

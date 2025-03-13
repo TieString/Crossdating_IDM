@@ -3,11 +3,14 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
-import { deleteYearFromRwl, formateRwlFromMapToString, insertYearToRwl, readRwlToMap } from "../utils/rwlOperator.ts";
+import { deleteYearFromRwl, formateRwlFromMapToString, insertYearToRwl, readRwlToMap } from "../utils/RwlOperator.ts";
 import MenuItem from "../components/MenuItem.tsx";
 import Menu from "../components/Menu.tsx";
 import { createRoot } from "react-dom/client";
-
+import WidthContainer from "../components/WidthContainer.tsx";
+import { Command } from '@tauri-apps/plugin-shell'
+import { parseCofechaResult, readOutFile, splitReportByParts } from "../utils/COFECHAFormatter.ts";
+import { ICofechaResult } from "../types.ts";
 
 // Extend HTMLElement type
 declare global {
@@ -16,32 +19,58 @@ declare global {
     }
 }
 
+// 在组件外部定义一个 `title` 处理工具函数
+const formatTitle = (fileName: string | null, isModified: boolean) => {
+    return fileName ? `${fileName}${isModified ? " *" : ""}` : "未命名文件";
+};
+
 
 export default function Home() {
 
-    const [rwlStr, setRwlStr] = useState<string>("")
+    const rwlDataRef = useRef<Map<string, any>>(new Map());// 存储 rwl_data 的 ref 结构化的宽度数据
     const [treeOptions, setTreeOptions] = useState<string[]>([])  // 存储树种选项
     const [selectedTree, setSelectedTree] = useState<string>("全部");  // 存储选中的树种编号
     const [year, setYear] = useState<string>("")
     const filePathRef = useRef<string | null>(null);
-    const rwlDataRef = useRef<Map<string, any>>(new Map());// 存储 rwl_data 的 ref 结构化的宽度数据
+    const [fileName, setFileName] = useState<string | null>(null); // 存储文件名
+    const [isModified, setIsModified] = useState(false); // 记录文件是否被修改
+    const outFileContent = useRef<string>("")
+    const [potentialProblemsDetail, setPotentialProblemsDetail] = useState<Map<string, string>>(new Map)
+    const [cofechaResult, setCofechaResult] = useState<ICofechaResult>()
+    const [selectedPart, setSelectedPart] = useState("全部"); // 选中的部分
+    const cofechaParts = useRef<Map<string, string>>(new Map);
+    const [_, setRender] = useState(0); // 只是用来触发重新渲染
+    const emitRender = () => {
+        setRender(prev => prev + 1); // 触发重新渲染
+    };
 
-    // 当 rwl_data 更新时，更新树种选项
     useEffect(() => {
-        if (rwlDataRef.current.size > 0) {
-            const options = Array.from(rwlDataRef.current.keys());  // 获取所有键名
-            setTreeOptions(options);  // 更新树种选项
-        }
-    }, [rwlDataRef.current]);  // 依赖项是 rwlDataRef rwlDataRef 更新时更新选项
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.ctrlKey && event.key === "s") {
+                event.preventDefault();
+                HandleSave();
+            }
+        };
 
-    // 监听 selectedTree 变化，并更新 rwl_value
+        document.body.addEventListener("keydown", handleKeyDown);
+
+        return () => {
+            document.body.removeEventListener("keydown", handleKeyDown);
+        };
+    }, []);  // 空依赖数组，确保只注册一次
+
+    // 更新窗口标题
     useEffect(() => {
-        if (rwlDataRef.current.size > 0 && selectedTree) {
-            const rwl_str = formateRwlFromMapToString(rwlDataRef.current, selectedTree);
-            setRwlStr(rwl_str);
-        }
-    }, [selectedTree, rwlDataRef.current]); // 依赖 selectedTree 和 rwlDataRef
+        const title = formatTitle(fileName, isModified);
+        getCurrentWindow().setTitle(title); // 更新 Tauri 窗口标题
+        const menuTitle = document.getElementById("menu-title");
+        if (menuTitle) menuTitle.textContent = title
+    }, [fileName, isModified]);
 
+    // 标记文件为修改状态
+    const markAsModified = () => {
+        setIsModified(true);
+    };
 
 
     // 读取文件的处理
@@ -74,10 +103,14 @@ export default function Home() {
             const rwl_data = readRwlToMap(content);
             if (rwl_data) {
                 rwlDataRef.current = rwl_data;  // 存储 rwl_data 到状态
-                const rwl_str = formateRwlFromMapToString(rwl_data, selectedTree)
-                setRwlStr(rwl_str)
+                const options = Array.from(rwl_data.keys());  // 获取所有键名
+                setTreeOptions(options);  // 更新树种选项
             }
-            filePathRef.current = filePath
+            filePathRef.current = filePath;
+            setFileName(filePath); // 更新文件名
+            // await runCofecha();
+            await readCofechaFile();
+            setIsModified(false); // 新打开的文件默认未修改
         } catch (error) {
             console.error("读取文件时出错:", error);
         }
@@ -99,13 +132,51 @@ export default function Home() {
 
         try {
             const rwlStr = formateRwlFromMapToString(rwlDataRef.current);
-            console.log(rwlDataRef.current)
             await writeTextFile(filePathRef.current, rwlStr);
             console.log("文件已成功保存到:", filePathRef.current);
+            setIsModified(false); // 文件保存后标记为未修改
+            
+            await runCofecha();
+            await readCofechaFile();
         } catch (error) {
             console.error("写入文件时出错:", error);
         }
     }
+
+    const readCofechaFile = async () => {
+        outFileContent.current = await readOutFile();
+        emitRender()
+        const result = parseCofechaResult(outFileContent.current)
+        
+        setCofechaResult(result)
+        setPotentialProblemsDetail(result.possibleProblemsDetail)
+        cofechaParts.current = splitReportByParts(outFileContent.current)
+    }
+
+
+    const runCofecha = async () => {
+        const command = Command.create("bin/cofecha");
+        command.on('close', async data => {
+            // Terminate the process
+            await child.kill();
+            console.log(`command finished with code ${data.code} and signal ${data.signal}`)
+        });
+        command.stdout.on("data", line => console.log("stdout:", line))
+        command.stderr.on("data", err => console.error("stderr:", err))
+
+        const child = await command.spawn()
+        // 向 stdin 传递数据
+        child.write("very\n");
+        child.write(`${filePathRef.current}\n`)
+        child.write("\n") // echo.
+        child.write("\n");
+        child.write("\n");
+        child.write("\n");
+        child.write("\n");
+
+        console.log("COFECHA 运行完成");
+    };
+
     const HandleSaveAs = async () => {
         try {
             // 如果没有文件路径，提示用户保存文件
@@ -124,11 +195,11 @@ export default function Home() {
                 console.log("用户取消了保存操作");
                 return;
             }
-            console.log(rwlDataRef.current)
             const rwlStr = formateRwlFromMapToString(rwlDataRef.current)
             // 写入文件
             await writeTextFile(filePathToSave, rwlStr);
             console.log("文件已成功保存到:", filePathToSave);
+            setIsModified(false); // 文件保存后标记为未修改
         } catch (error) {
             console.error("写入文件时出错:", error);
         }
@@ -142,12 +213,15 @@ export default function Home() {
         }
         if (selectedTree === "全部") {
             alert("请选择一根树芯")
+            return;
         }
         let treeData = rwlDataRef.current.get(selectedTree)
         treeData = insertYearToRwl(treeData, yearToInsert)
         const updatedRwlData = new Map(rwlDataRef.current); // 创建一个新的 Map 对象，避免直接修改状态
         updatedRwlData.set(selectedTree, treeData); // 更新指定树的数据
         rwlDataRef.current = updatedRwlData
+        markAsModified()
+        emitRender()
     }
 
     const HandleDelete = () => {
@@ -156,11 +230,17 @@ export default function Home() {
             alert('请输入有效的年份');
             return;
         }
+        if (selectedTree === "全部") {
+            alert("请选择一根树芯")
+            return;
+        }
         let treeData = rwlDataRef.current.get(selectedTree)
         treeData = deleteYearFromRwl(treeData, yearToInsert)
         const updatedRwlData = new Map(rwlDataRef.current); // 创建一个新的 Map 对象，避免直接修改状态
         updatedRwlData.set(selectedTree, treeData); // 更新指定树的数据
         rwlDataRef.current = updatedRwlData
+        markAsModified()
+        emitRender()
     }
 
 
@@ -253,23 +333,58 @@ export default function Home() {
 
     return (
         <>
-            <div className="home_container">
-                <div className="side_bar">
-                    <select name="trees" id="tree_selector" onChange={(e) => { setSelectedTree(e.target.value) }}>
-                        <option key="全部" value="全部">全部</option>
-                        {treeOptions.map((tree) => (
-                            <option key={tree} value={tree}>
-                                {tree}
-                            </option>
-                        ))}
-                    </select>
-                    <input type="text" id="year_insert_pos" onChange={(e) => setYear(e.target.value)} placeholder="需要操作的年份" />
-                    <button onClick={HandleInsert}>插入</button>
-                    <button onClick={HandleDelete}>删除</button>
-                    <hr />
+            <div className="home-container">
+                <div className="width-module">
+                    <div className="control-bar">
+                        <select name="trees" id="tree_selector" onChange={(e) => { setSelectedTree(e.target.value) }}>
+                            <option key="全部" value="全部">📜 全部</option>
+                            {treeOptions.map((tree) => (
+                                <option key={tree} value={tree}>
+                                    - {tree}
+                                </option>
+                            ))}
+                        </select>
+                        <input type="text" id="year_to_edit" onChange={(e) => setYear(e.target.value)} placeholder="需要操作的年份" />
+                        <button onClick={HandleInsert}>插入</button>
+                        <button onClick={HandleDelete}>删除</button>
+                    </div>
+                    <div className="data-container">
+                        <WidthContainer siteData={rwlDataRef.current} selected={selectedTree} masterSeries={cofechaResult?.masterDatingSeries} />
+                    </div>
+                    <div className="problems-container">
+                        <p className="potential-problems">
+                            {potentialProblemsDetail.get(selectedTree)}
+                        </p>
+                    </div>
                 </div>
-                <div className="data_container">
-                    <p>{rwlStr}</p>
+                <div className="cofecha-module">
+                    <div className="statics-info">
+                        <span>*A*<br />{cofechaResult?.possibleProblemsCount}</span>
+                        <span>Master series<br />{cofechaResult?.masterSeriesYear}</span>
+                        <span>Intercorrelation<br />{cofechaResult?.seriesIntercorrelation}</span>
+                        <span>Mean sensitivity<br />{cofechaResult?.averageMeanSensitivity}</span>
+                        <span>Mean length<br />{cofechaResult?.meanLength}</span>
+                    </div>
+                    {/* <div className="graph">
+
+                    </div> */}
+                    <div className="full-text">
+                        <select name="cofecha" id="cofecha-selector" onChange={(e) => {
+                            setSelectedPart(e.target.value);
+                        }}>
+                            <option key="全部" value="全部">📜 全部内容</option>
+                            <option key="part1" value="PART 1">📌 PART 1: Summary</option>
+                            <option key="part2" value="PART 2">📉 PART 2: Time Plot of Series</option>
+                            <option key="part3" value="PART 3">📈 PART 3: Master Dating Series</option>
+                            <option key="part4" value="PART 4">📊 PART 4: Master Bar Plot</option>
+                            <option key="part5" value="PART 5">📊 PART 5: Corrlation of Series by Segment</option>
+                            <option key="part6" value="PART 6">⚠️ PART 6: Potential Problems</option>
+                            <option key="part7" value="PART 7">📊 PART 7: Descriptive Statistics</option>
+                        </select>
+                        <p>
+                            {selectedPart === "全部" ? outFileContent.current : cofechaParts.current.get(selectedPart)}
+                        </p>
+                    </div>
                 </div>
             </div>
         </>

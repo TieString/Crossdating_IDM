@@ -90,3 +90,72 @@ export function formateRwlFromMapToString(rwl_data: RwlSiteData, selectedTree?: 
 }
 
 
+// 撤销
+export function rwlUndo(rwl_data: RwlSiteData, offset: number) {
+    
+}
+
+
+export class RwlEditor {
+    private rwlData: RwlTreeData;
+    private undoStack: RwlTreeData[] = [];
+    private redoStack: RwlTreeData[] = [];
+
+    constructor(initialData: RwlTreeData) {
+        this.rwlData = new Map(initialData); // 复制初始数据
+    }
+
+    // 获取当前 RWL 数据
+    getData(): RwlTreeData {
+        return new Map(this.rwlData);
+    }
+
+    // 插年：在 year 处插入 0，其他年份向前移动
+    insertYear(year: number): void {
+        this.saveToUndoStack(); // 记录当前状态
+        this.redoStack = []; // 清空 redo 记录
+
+        let newRwl: RwlTreeData = new Map();
+        this.rwlData.forEach((value, key) => {
+            let offset = (key <= year) ? 1 : 0;
+            newRwl.set(key - offset, value);
+            if (key === year) newRwl.set(key, 0);
+        });
+
+        this.rwlData = newRwl;
+    }
+
+    // 删年：在 year 处删除 0，其他年份向后移动
+    deleteYear(year: number): void {
+        this.saveToUndoStack(); // 记录当前状态
+        this.redoStack = []; // 清空 redo 记录
+
+        let newRwl: RwlTreeData = new Map();
+        this.rwlData.forEach((value, key) => {
+            if (key === year) return;
+            let offset = (key < year) ? 1 : 0;
+            newRwl.set(key + offset, value);
+        });
+
+        this.rwlData = newRwl;
+    }
+
+    // 撤销（Undo）
+    undo(): void {
+        if (this.undoStack.length === 0) return; // 没有可撤销的操作
+        this.redoStack.push(new Map(this.rwlData)); // 记录当前状态到 redo
+        this.rwlData = this.undoStack.pop()!; // 恢复上一个状态
+    }
+
+    // 恢复（Redo）
+    redo(): void {
+        if (this.redoStack.length === 0) return; // 没有可恢复的操作
+        this.undoStack.push(new Map(this.rwlData)); // 记录当前状态到 undo
+        this.rwlData = this.redoStack.pop()!; // 恢复前一个撤销的状态
+    }
+
+    // 记录当前状态到 Undo 栈
+    private saveToUndoStack(): void {
+        this.undoStack.push(new Map(this.rwlData));
+    }
+}

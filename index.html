@@ -115,6 +115,17 @@
       /* 父容器占满整个视口高度 */
     }
 
+    #title-submenu-undo-button, #title-submenu-redo-button {
+      cursor: pointer;
+      transform: rotate(180deg);
+    }
+    #title-submenu-undo-button:hover, #title-submenu-redo-button:hover {
+      color: rgb(107, 107, 107);
+      background-color: #e3e5e7;
+    }
+    #title-submenu-undo-button:active, #title-submenu-redo-button:active {
+      color: rgb(164, 164, 164);
+    }
   </style>
 </head>
 
@@ -131,8 +142,8 @@
           <button class="title-menu-item" id="title-submenu-edit-button">编辑(E)</button>
           <div class="title-submenu-container" id="title-submenu-edit-container"></div> <!-- 这里是 React 组件Menu的挂载点 -->
         </div>
-        <button class="title-menu-item" id="title-submenu-undo-button">↩</button>
-        <button class="title-menu-item" id="title-submenu-redo-button">↪</button>
+        <button class="title-menu-item" id="title-submenu-undo-button">↪</button>
+        <button class="title-menu-item" id="title-submenu-redo-button">↩</button>
 
       </div>
 

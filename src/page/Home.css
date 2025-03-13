@@ -1,15 +1,15 @@
-.home_container {
-    min-width: 670px;
-    width: 50vw;
+.home-container {
     height: 100%;
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
+    width: calc(100vw - 8px);
 }
 
-.home_container .data_container {
+.home-container .data-container {
     height: 100px;
     overflow-y: scroll;
     flex-grow: 1;
+    padding: 10px;
 }
 
 
@@ -21,4 +21,98 @@ p {
 #tree_selector {
     /*设置最小宽度*/
     min-width: 72.5714px;
+    height: 24px;
+    border-radius: 5px;
+    width: 85px;
+    margin-right: 10px;
 }
+
+#year_to_edit {
+    margin-right: 10px;
+    width: 54%;
+}
+
+button {
+    margin-right: 5px;
+}
+
+.width-module {
+    height: 100%;
+    min-width: 670px;
+    display: flex;
+    flex-direction: column;
+}
+
+.width-module .control-bar{
+    margin: 5px 10px;
+}
+
+.cofecha-module {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    width: 100px;
+    min-width: 580px;
+}
+
+.cofecha-module .statics-info {
+    height: 45px;
+    margin: 3px;
+}
+
+.cofecha-module .graph {
+    height: 300px;
+    border: 1px solid #000;
+}
+
+.cofecha-module .full-text {
+    height: 100px;
+    overflow: auto;
+    flex-grow: 1;
+    border: 1px solid #ccc;
+    padding: 10px;
+    background-color: #f9f9f9;
+    overflow: auto;
+}
+
+.full-text p{
+    white-space: pre;
+    margin-top: 0;
+}
+
+.width-module .problems-container {
+    max-height: 200px;
+    max-width: 100%;
+    border: 1px solid #ccc;
+    padding: 10px;
+    background-color: #f9f9f9;
+    overflow: auto;
+}
+
+.width-module .problems-container .potential-problems {
+    white-space: pre;
+    max-width: 100px;
+}
+
+.statics-info {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    align-items: center;
+}
+
+#cofecha-selector{
+    position: static;
+    width: 300px;
+    height: 24px;
+    border-radius: 5px;
+}
+
+option{
+    display: block;
+    padding: 2px 5px;
+}
+
+p{
+    margin: 0;
+}
+

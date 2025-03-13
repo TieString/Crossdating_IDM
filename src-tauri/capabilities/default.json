@@ -12,11 +12,42 @@
     "core:window:allow-set-title",
     "fs:default",
     "fs:allow-write-text-file",
+    "fs:allow-desktop-read-recursive",
     "fs:allow-read-text-file",
+    "fs:allow-document-write",
+    "fs:allow-resource-read",
+    "fs:allow-resource-write",
     "core:window:allow-start-dragging",
     "core:window:allow-close",
     "core:window:allow-minimize",
     "core:window:allow-maximize",
-    "core:window:allow-toggle-maximize"
+    "core:window:allow-toggle-maximize",
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "cmd": "cofecha",
+          "name": "bin/cofecha"
+        }
+      ]
+    },
+    {
+      "identifier": "shell:allow-kill",
+      "allow": [
+        {
+          "cmd": "cofecha",
+          "name": "bin/cofecha"
+        }
+      ]
+    },
+    {
+      "identifier": "shell:allow-stdin-write",
+      "allow": [
+        {
+          "cmd": "cofecha",
+          "name": "bin/cofecha"
+        }
+      ]
+    }
   ]
 }

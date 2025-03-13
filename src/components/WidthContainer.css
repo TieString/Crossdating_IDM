@@ -1,0 +1,9 @@
+.width-grid-container {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr); /* 始终保持 12 列 */
+    /* 自动调整列宽 */
+    gap: 5px;
+    /* 控制间距 */
+    text-align: right;
+    font-family: "consolas";
+}

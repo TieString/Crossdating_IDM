@@ -38,6 +38,9 @@
       "wix": {
         "language": "zh-CN"
       }
-    }
+    },
+    "externalBin":[
+      "bin/cofecha"
+    ]
   }
 }

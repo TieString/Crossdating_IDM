@@ -1,0 +1,69 @@
+import { useEffect, useRef, useState } from 'react';
+import './WidthGrid.css'
+
+
+export default function WidthGrid({ year, gridValue, masterSeriesValue }: { year?: number, gridValue: string | number, masterSeriesValue?: number }) {
+    const [_text, setText] = useState("");
+    const spanRef = useRef<HTMLSpanElement>(null);
+
+    useEffect(() => {
+        // setText(gridValue.toString());
+    }, [])
+
+    // 进入编辑模式
+    const handleDoubleClick = () => {
+        const span = spanRef.current;
+        if (span) {
+            span.contentEditable = "true";
+            span.focus();
+            // document.execCommand("selectAll", false, undefined); // 自动选中文本
+        }
+    };
+
+    // 退出编辑模式并保存内容
+    const handleBlur = () => {
+        const span = spanRef.current;
+        if (span) {
+            setText(span.innerText.trim()); // 去除首尾空格
+            span.contentEditable = "false";
+        }
+    };
+
+    // 监听 Enter 键保存内容
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === "Enter") {
+            e.preventDefault(); // 防止换行
+            spanRef.current?.blur(); // 触发 onBlur 事件
+        }
+    };
+
+    // 计算颜色深度（负值越大，颜色越深）
+    const getBackgroundColor = () => {
+        if (masterSeriesValue !== undefined && masterSeriesValue < -0.5) {
+            const intensity = Math.min(1, Math.abs(masterSeriesValue) / 2); // 归一化到 0 ~ 1 范围
+            return `rgba(255, 255, 0, ${intensity})`; // 颜色为黄色 (R255, G255, B0)，透明度 0 ~ 1
+        }
+        return "transparent"; // 默认无背景
+    };
+    // 计算字体颜色（小于 -1 变红）
+    const getTextColor = () => {
+        return masterSeriesValue !== undefined && masterSeriesValue < -1 ? "red" : "black";
+    };
+    return (
+        <>
+            <span ref={spanRef}
+                onDoubleClick={handleDoubleClick}
+                onBlur={handleBlur}
+                onKeyDown={handleKeyDown}
+                className="width-grid" title={year?.toString() + "\n" + masterSeriesValue}
+                style={{
+                    backgroundColor: getBackgroundColor(),
+                    color: getTextColor(),
+                    fontWeight: masterSeriesValue !== undefined && masterSeriesValue < -1 ? "bold" : "normal" // 小于 -1 加粗
+                }} // 动态背景 & 文字颜色
+            >
+                {gridValue}
+            </span>
+        </>
+    )
+}
