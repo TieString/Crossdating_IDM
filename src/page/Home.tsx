@@ -16,7 +16,7 @@ import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { RwlEditor, readRwlToMap, formateRwlFromMapToString } from "../utils/rwlOperator.ts";
 // import MenuItem from "../components/MenuItem.tsx";
 import Menu from "../components/Menu.tsx";
-import { createRoot } from "react-dom/client";
+import { createRoot, Root } from "react-dom/client";
 import WidthContainer from "../components/WidthContainer.tsx";
 import { Command } from '@tauri-apps/plugin-shell'
 import { parseCofechaResult, readOutFile, splitReportByParts } from "../utils/COFECHAFormatter.ts";
@@ -302,54 +302,30 @@ export default function Home() {
 
     const [activeMenu, setActiveMenu] = useState<"file" | "edit" | null>(null);
 
+    // 用 useRef 存储根节点，避免重复创建
+    const fileMenuRoot = useRef<Root | null>(null);
+    const editMenuRoot = useRef<Root | null>(null);
+
     useEffect(() => {
-        const buttons = document.querySelectorAll(".title-menu-item"); // 选取所有菜单按钮
-        buttons.forEach(button => {
-            (button as HTMLElement).style.backgroundColor = "transparent"; // 先重置所有按钮
-        });
-
-        const activeButton = document.getElementById(`title-submenu-${activeMenu}-button`);
-        if (activeButton) activeButton.style.backgroundColor = "#e8e8e8"; // 仅修改当前激活的按钮
-
         const menuContainerFile = document.getElementById("title-submenu-file-container");
         const menuContainerEdit = document.getElementById("title-submenu-edit-container");
-        const titleMenuFileButton = document.getElementById("title-submenu-file-button");
-        const titleMenuEditButton = document.getElementById("title-submenu-edit-button");
-        // 添加点击事件监听器
-        titleMenuFileButton?.addEventListener("click", (e) => {
-            e.stopPropagation();
-            activeMenu === "file" ? setActiveMenu(null) : setActiveMenu("file")
-        })
-        titleMenuEditButton?.addEventListener("click", (e) => {
-            e.stopPropagation();
-            activeMenu === "edit" ? setActiveMenu(null) : setActiveMenu("edit")
-        })
 
-        // 确保 `createRoot` 只创建一次
-        if (menuContainerFile && !menuContainerFile.__root) {
-            menuContainerFile.__root = createRoot(menuContainerFile);
-            menuContainerFile.__root.render(<Menu items={menuFileItems} />);
+        // **1️⃣ 只在第一次渲染时创建 React Root**
+        if (!fileMenuRoot.current && menuContainerFile) {
+            fileMenuRoot.current = createRoot(menuContainerFile);
+            fileMenuRoot.current.render(<Menu items={menuFileItems} />);
         }
-        if (menuContainerEdit && !menuContainerEdit.__root) {
-            menuContainerEdit.__root = createRoot(menuContainerEdit);
-            menuContainerEdit.__root.render(<Menu items={menuEditItems} />);
+        if (!editMenuRoot.current && menuContainerEdit) {
+            editMenuRoot.current = createRoot(menuContainerEdit);
+            editMenuRoot.current.render(<Menu items={menuEditItems} />);
         }
 
-        // 渲染当前激活的菜单
-        if (activeMenu === "file" && menuContainerFile && menuContainerFile.__root) {
-            menuContainerFile.style.display = "block";
-            if (menuContainerEdit) menuContainerEdit.style.display = "none"; // 关闭另一个菜单
-        } else if (activeMenu === "edit" && menuContainerEdit && menuContainerEdit.__root) {
-            menuContainerEdit.style.display = "block";
-            if (menuContainerFile) menuContainerFile.style.display = "none"; // 关闭另一个菜单
-        } else {
-            // 如果 `activeMenu` 为空，则隐藏所有菜单
-            if (menuContainerFile) menuContainerFile.style.display = "none";
-            if (menuContainerEdit) menuContainerEdit.style.display = "none";
+        // **2️⃣ 监听点击事件（只绑定一次）**
+        interface ClickTarget {
+            target: EventTarget | null;
         }
 
-        // 监听点击外部区域，自动关闭菜单
-        const handleClickOutside = (event: MouseEvent) => {
+        const handleClickOutside = (event: MouseEvent & ClickTarget) => {
             if (
                 !menuContainerFile?.contains(event.target as Node) &&
                 !menuContainerEdit?.contains(event.target as Node)
@@ -357,10 +333,57 @@ export default function Home() {
                 setActiveMenu(null);
             }
         };
-
         document.addEventListener("click", handleClickOutside);
-        return () => document.removeEventListener("click", handleClickOutside);
-    }, [activeMenu]);
+        const titleMenuFileButton = document.getElementById("title-submenu-file-button");
+        const titleMenuEditButton = document.getElementById("title-submenu-edit-button");
+        // 添加点击事件监听器
+        interface MenuClickEvent extends MouseEvent {
+            target: EventTarget | null;
+        }
+
+        const handleFileButtonClick = (e: MenuClickEvent) => {
+            e.stopPropagation();
+            activeMenu === "file" ? setActiveMenu(null) : setActiveMenu("file")
+        };
+
+        titleMenuFileButton?.addEventListener("click", handleFileButtonClick);
+
+        const handleEditButtonClick = (e: MenuClickEvent) => {
+            e.stopPropagation(); 
+            activeMenu === "edit" ? setActiveMenu(null) : setActiveMenu("edit")
+        };
+        titleMenuEditButton?.addEventListener("click", handleEditButtonClick);
+
+        return () => {
+            document.removeEventListener("click", handleClickOutside);
+            document.removeEventListener("click", handleFileButtonClick);
+            document.removeEventListener("click", handleEditButtonClick); 
+        };
+        }, []); // ✅ `useEffect` 只执行一次，避免重复绑定事件
+
+    // **3️⃣ 仅在 activeMenu 变化时更新 UI**
+    useEffect(() => {
+        document.querySelectorAll(".title-menu-item").forEach(button => {
+            (button as HTMLElement).style.backgroundColor = "transparent";
+        });
+
+        const activeButton = document.getElementById(`title-submenu-${activeMenu}-button`);
+        if (activeButton) activeButton.style.backgroundColor = "#e8e8e8";
+
+        const menuContainerFile = document.getElementById("title-submenu-file-container");
+        const menuContainerEdit = document.getElementById("title-submenu-edit-container");
+
+        if (activeMenu === "file") {
+            if (menuContainerFile) menuContainerFile.style.display = "block";
+            if (menuContainerEdit) menuContainerEdit.style.display = "none";
+        } else if (activeMenu === "edit") {
+            if (menuContainerEdit) menuContainerEdit.style.display = "block";
+            if (menuContainerFile) menuContainerFile.style.display = "none";
+        } else {
+            if (menuContainerFile) menuContainerFile.style.display = "none";
+            if (menuContainerEdit) menuContainerEdit.style.display = "none";
+        }
+    }, [activeMenu]); // ✅ 仅当 `activeMenu` 变化时更新 UI
 
     const getTextColor = () => {
         const count = cofechaResult?.possibleProblemsCount;
