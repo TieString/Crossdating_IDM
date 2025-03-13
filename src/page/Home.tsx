@@ -1,10 +1,20 @@
+// TODO:
+/** 1.保存后自动使用COFECHA检验 √
+ *  2.加载CHFECHA内容，并提取最重要部分，主序列系数显示（将小于-1的值高亮出来，越小越亮） √
+ *  3.悬浮在宽度上提示年份 √
+ *  4.编辑操作撤销重做 √
+ *  5.曲线图
+ *  6.双击更改年份内容
+ *  7.年轮宽度示意图
+ * */
+
 import "./Home.css";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
-import { deleteYearFromRwl, formateRwlFromMapToString, insertYearToRwl, readRwlToMap } from "../utils/RwlOperator.ts";
-import MenuItem from "../components/MenuItem.tsx";
+import { RwlEditor, readRwlToMap, formateRwlFromMapToString } from "../utils/rwlOperator.ts";
+// import MenuItem from "../components/MenuItem.tsx";
 import Menu from "../components/Menu.tsx";
 import { createRoot } from "react-dom/client";
 import WidthContainer from "../components/WidthContainer.tsx";
@@ -27,7 +37,7 @@ const formatTitle = (fileName: string | null, isModified: boolean) => {
 
 export default function Home() {
 
-    const rwlDataRef = useRef<Map<string, any>>(new Map());// 存储 rwl_data 的 ref 结构化的宽度数据
+    const rwlEditorRef = useRef<RwlEditor>(new RwlEditor(new Map()));// 存储 rwl_data 的 ref 结构化的宽度数据
     const [treeOptions, setTreeOptions] = useState<string[]>([])  // 存储树种选项
     const [selectedTree, setSelectedTree] = useState<string>("全部");  // 存储选中的树种编号
     const [year, setYear] = useState<string>("")
@@ -39,25 +49,48 @@ export default function Home() {
     const [cofechaResult, setCofechaResult] = useState<ICofechaResult>()
     const [selectedPart, setSelectedPart] = useState("全部"); // 选中的部分
     const cofechaParts = useRef<Map<string, string>>(new Map);
+
     const [_, setRender] = useState(0); // 只是用来触发重新渲染
     const emitRender = () => {
         setRender(prev => prev + 1); // 触发重新渲染
     };
 
     useEffect(() => {
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.ctrlKey && event.key === "s") {
-                event.preventDefault();
-                HandleSave();
-            }
+        const titleMenuUndoButton = document.getElementById("title-submenu-undo-button");
+        const titleMenuRedoButton = document.getElementById("title-submenu-redo-button");
+        // 添加点击事件监听器
+        const handleUndoClick = (e: Event) => {
+            e.stopPropagation();
+            HandleUndo();
         };
-
+        const handleRedoClick = (e: Event) => {
+            e.stopPropagation();
+            HandleRedo();
+        };
+        // 绑定事件
+        titleMenuUndoButton?.addEventListener("click", handleUndoClick);
+        titleMenuRedoButton?.addEventListener("click", handleRedoClick);
         document.body.addEventListener("keydown", handleKeyDown);
-
+        // 组件卸载时移除监听，避免重复绑定
         return () => {
+            titleMenuUndoButton?.removeEventListener("click", handleUndoClick);
+            titleMenuRedoButton?.removeEventListener("click", handleRedoClick);
             document.body.removeEventListener("keydown", handleKeyDown);
         };
-    }, []);  // 空依赖数组，确保只注册一次
+    }, []);
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+        if (event.ctrlKey && event.key === "s") {
+            event.preventDefault();
+            HandleSave();
+        } else if (event.ctrlKey && event.key === "z") {
+            event.preventDefault();
+            HandleUndo();
+        } else if (event.ctrlKey && event.key === "y") {
+            event.preventDefault();
+            HandleRedo();
+        }
+    };
 
     // 更新窗口标题
     useEffect(() => {
@@ -89,6 +122,7 @@ export default function Home() {
                 return;
             }
 
+            filePathRef.current = filePath; // 更新文件路径
             const menuTitle = document.getElementById("menu-title")
             if (menuTitle) {
                 menuTitle.textContent = filePath;
@@ -100,44 +134,34 @@ export default function Home() {
             // 读取文件内容
             const content = await readTextFile(filePath);
             // 提取并存储数据 编号：(year:width)
-            const rwl_data = readRwlToMap(content);
-            if (rwl_data) {
-                rwlDataRef.current = rwl_data;  // 存储 rwl_data 到状态
-                const options = Array.from(rwl_data.keys());  // 获取所有键名
+            const rwlData = readRwlToMap(content);
+            if (rwlData) {
+                rwlEditorRef.current = new RwlEditor(rwlData);
+                const options = Array.from(rwlData.keys());  // 获取所有键名
                 setTreeOptions(options);  // 更新树种选项
             }
-            filePathRef.current = filePath;
             setFileName(filePath); // 更新文件名
-            // await runCofecha();
-            await readCofechaFile();
-            setIsModified(false); // 新打开的文件默认未修改
+            setIsModified(false);
+            runCofecha();
+            emitRender();
         } catch (error) {
             console.error("读取文件时出错:", error);
         }
     }
 
-    /** //TODO:1.保存后自动使用COFECHA检验
-     *         2.加载CHFECHA内容，并提取最重要部分，主序列系数显示（将小于-1的值高亮出来，越小越亮）
-     *         3.悬浮在宽度上提示年份
-     *         4.编辑操作撤销重做
-     *         5.曲线图
-     *         6.双击更改年份内容
-     *         7.年轮宽度示意图
-     * */
     const HandleSave = async () => {
         if (!filePathRef.current) {
-            alert("请先打开一个文件");
+            console.log("请先打开一个文件");
             return;
         }
 
         try {
-            const rwlStr = formateRwlFromMapToString(rwlDataRef.current);
+            const rwlStr = formateRwlFromMapToString(rwlEditorRef.current.getData());
             await writeTextFile(filePathRef.current, rwlStr);
             console.log("文件已成功保存到:", filePathRef.current);
             setIsModified(false); // 文件保存后标记为未修改
-            
+
             await runCofecha();
-            await readCofechaFile();
         } catch (error) {
             console.error("写入文件时出错:", error);
         }
@@ -147,7 +171,7 @@ export default function Home() {
         outFileContent.current = await readOutFile();
         emitRender()
         const result = parseCofechaResult(outFileContent.current)
-        
+
         setCofechaResult(result)
         setPotentialProblemsDetail(result.possibleProblemsDetail)
         cofechaParts.current = splitReportByParts(outFileContent.current)
@@ -160,6 +184,7 @@ export default function Home() {
             // Terminate the process
             await child.kill();
             console.log(`command finished with code ${data.code} and signal ${data.signal}`)
+            await readCofechaFile();
         });
         command.stdout.on("data", line => console.log("stdout:", line))
         command.stderr.on("data", err => console.error("stderr:", err))
@@ -181,7 +206,7 @@ export default function Home() {
         try {
             // 如果没有文件路径，提示用户保存文件
             if (!filePathRef.current) {
-                alert("请先打开一个文件");
+                console.log("请先打开一个文件");
                 return;
             }
 
@@ -195,7 +220,7 @@ export default function Home() {
                 console.log("用户取消了保存操作");
                 return;
             }
-            const rwlStr = formateRwlFromMapToString(rwlDataRef.current)
+            const rwlStr = formateRwlFromMapToString(rwlEditorRef.current.getData())
             // 写入文件
             await writeTextFile(filePathToSave, rwlStr);
             console.log("文件已成功保存到:", filePathToSave);
@@ -208,56 +233,63 @@ export default function Home() {
     const HandleInsert = () => {
         const yearToInsert = parseInt(year ?? '');  // 转换为数字
         if (isNaN(yearToInsert)) {
-            alert('请输入有效的年份');
+            alert('无效的数值');
             return;
         }
         if (selectedTree === "全部") {
-            alert("请选择一根树芯")
+            alert("请选择一个编号")
             return;
         }
-        let treeData = rwlDataRef.current.get(selectedTree)
-        treeData = insertYearToRwl(treeData, yearToInsert)
-        const updatedRwlData = new Map(rwlDataRef.current); // 创建一个新的 Map 对象，避免直接修改状态
-        updatedRwlData.set(selectedTree, treeData); // 更新指定树的数据
-        rwlDataRef.current = updatedRwlData
+        rwlEditorRef.current.insertYear(selectedTree, yearToInsert);
         markAsModified()
         emitRender()
     }
 
     const HandleDelete = () => {
-        const yearToInsert = parseInt(year ?? '');  // 转换为数字
-        if (isNaN(yearToInsert)) {
-            alert('请输入有效的年份');
+        const yearToDelete = parseInt(year ?? '');  // 转换为数字
+        if (isNaN(yearToDelete)) {
+            alert('无效的数值');
             return;
         }
         if (selectedTree === "全部") {
-            alert("请选择一根树芯")
+            alert("请选择一个编号")
             return;
         }
-        let treeData = rwlDataRef.current.get(selectedTree)
-        treeData = deleteYearFromRwl(treeData, yearToInsert)
-        const updatedRwlData = new Map(rwlDataRef.current); // 创建一个新的 Map 对象，避免直接修改状态
-        updatedRwlData.set(selectedTree, treeData); // 更新指定树的数据
-        rwlDataRef.current = updatedRwlData
+        rwlEditorRef.current.deleteYear(selectedTree, yearToDelete);
         markAsModified()
         emitRender()
     }
 
+    const HandleUndo = () => {
+        rwlEditorRef.current.undo();
+        setIsModified(true);
+        emitRender();
+    };
+
+    const HandleRedo = () => {
+        rwlEditorRef.current.redo();
+        setIsModified(true);
+        emitRender();
+    };
+
+    const handleGridClick = (year: number) => {
+        setYear(year.toString());
+    };
 
     const menuEditItems = [
-        { label: '撤销' },
-        { label: '恢复' },
-        {
-            label: '文件(F)',
-            children: (
-                <div>
-                    <MenuItem label="新建文件" />
-                    <MenuItem label="打开文件" />
-                    <MenuItem label="保存" />
-                    <MenuItem label="另存为" />
-                </div>
-            ),
-        },
+        { label: '撤销', onClick: HandleUndo },
+        { label: '恢复', onClick: HandleRedo },
+        // {
+        //     label: '文件(F)',
+        //     children: (
+        //         <div>
+        //             <MenuItem label="新建文件" />
+        //             <MenuItem label="打开文件" />
+        //             <MenuItem label="保存" />
+        //             <MenuItem label="另存为" />
+        //         </div>
+        //     ),
+        // },
         { label: '查找' },
         { label: '替换' },
     ];
@@ -330,7 +362,10 @@ export default function Home() {
         return () => document.removeEventListener("click", handleClickOutside);
     }, [activeMenu]);
 
-
+    const getTextColor = () => {
+        const count = cofechaResult?.possibleProblemsCount;
+        return count !== undefined && count >= 100 ? "red" : "black";
+    };
     return (
         <>
             <div className="home-container">
@@ -340,16 +375,26 @@ export default function Home() {
                             <option key="全部" value="全部">📜 全部</option>
                             {treeOptions.map((tree) => (
                                 <option key={tree} value={tree}>
-                                    - {tree}
+                                    -{cofechaResult?.possibleProblemsDetail.has(tree) ? "⚠️" : "🪵"}{tree}
                                 </option>
                             ))}
                         </select>
-                        <input type="text" id="year_to_edit" onChange={(e) => setYear(e.target.value)} placeholder="需要操作的年份" />
+                        <input
+                            type="text"
+                            id="year_to_edit"
+                            onChange={(e) => setYear(e.target.value)}
+                            value={year} placeholder="输入或点击需要操作的年份"
+                        />
                         <button onClick={HandleInsert}>插入</button>
                         <button onClick={HandleDelete}>删除</button>
                     </div>
-                    <div className="data-container">
-                        <WidthContainer siteData={rwlDataRef.current} selected={selectedTree} masterSeries={cofechaResult?.masterDatingSeries} />
+                    <div className={`data-container ${activeMenu ? "z-index-1" : ""}`}>
+                        <WidthContainer
+                            siteData={rwlEditorRef.current.getData()}
+                            selected={selectedTree}
+                            masterSeries={cofechaResult?.masterDatingSeries}
+                            onYearClick={handleGridClick} // 添加 onYearClick 事件处理函数
+                        />
                     </div>
                     <div className="problems-container">
                         <p className="potential-problems">
@@ -359,7 +404,10 @@ export default function Home() {
                 </div>
                 <div className="cofecha-module">
                     <div className="statics-info">
-                        <span>*A*<br />{cofechaResult?.possibleProblemsCount}</span>
+                        <span style={{ color: getTextColor() }}>
+                            *A*<br />
+                            {cofechaResult?.possibleProblemsCount}
+                        </span>
                         <span>Master series<br />{cofechaResult?.masterSeriesYear}</span>
                         <span>Intercorrelation<br />{cofechaResult?.seriesIntercorrelation}</span>
                         <span>Mean sensitivity<br />{cofechaResult?.averageMeanSensitivity}</span>
@@ -374,19 +422,19 @@ export default function Home() {
                         }}>
                             <option key="全部" value="全部">📜 全部内容</option>
                             <option key="part1" value="PART 1">📌 PART 1: Summary</option>
-                            <option key="part2" value="PART 2">📉 PART 2: Time Plot of Series</option>
-                            <option key="part3" value="PART 3">📈 PART 3: Master Dating Series</option>
+                            <option key="part2" value="PART 2">📈 PART 2: Time Plot of Series</option>
+                            <option key="part3" value="PART 3">📉 PART 3: Master Dating Series</option>
                             <option key="part4" value="PART 4">📊 PART 4: Master Bar Plot</option>
-                            <option key="part5" value="PART 5">📊 PART 5: Corrlation of Series by Segment</option>
+                            <option key="part5" value="PART 5">📰 PART 5: Corrlation of Series by Segment</option>
                             <option key="part6" value="PART 6">⚠️ PART 6: Potential Problems</option>
-                            <option key="part7" value="PART 7">📊 PART 7: Descriptive Statistics</option>
+                            <option key="part7" value="PART 7">🪧 PART 7: Descriptive Statistics</option>
                         </select>
                         <p>
                             {selectedPart === "全部" ? outFileContent.current : cofechaParts.current.get(selectedPart)}
                         </p>
                     </div>
                 </div>
-            </div>
+            </div >
         </>
     )
 }

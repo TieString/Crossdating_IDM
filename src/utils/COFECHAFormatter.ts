@@ -6,7 +6,7 @@ const readOutFile = async (): Promise<string> => {
         const content = await readTextFile('VERYCOF.OUT', { baseDir: BaseDirectory.Resource }); // 路径相对于应用程序数据目录
         return content;
     } catch (error) {
-        alert('读取文件出错:' + error);
+        console.log('读取文件出错:' + error);
         return "读取文件出错"
     }
 }

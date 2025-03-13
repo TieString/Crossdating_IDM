@@ -23,13 +23,13 @@ p {
     min-width: 72.5714px;
     height: 24px;
     border-radius: 5px;
-    width: 85px;
+    width: 100px;
     margin-right: 10px;
 }
 
 #year_to_edit {
     margin-right: 10px;
-    width: 54%;
+    width: 51%;
 }
 
 button {
@@ -71,7 +71,6 @@ button {
     flex-grow: 1;
     border: 1px solid #ccc;
     padding: 10px;
-    background-color: #f9f9f9;
     overflow: auto;
 }
 
@@ -116,3 +115,6 @@ p{
     margin: 0;
 }
 
+.z-index-1{
+    z-index: -1;
+}

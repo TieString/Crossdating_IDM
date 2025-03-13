@@ -2,7 +2,19 @@ import { useEffect, useRef, useState } from 'react';
 import './WidthGrid.css'
 
 
-export default function WidthGrid({ year, gridValue, masterSeriesValue }: { year?: number, gridValue: string | number, masterSeriesValue?: number }) {
+export default function WidthGrid({ year, gridValue, masterSeriesValue, isEditable = false, onYearClick }: {
+    year?: number,
+    gridValue: string | number,
+    masterSeriesValue?: number,
+    isEditable?: boolean,
+    onYearClick?: (year: number) => void; // ✅ 传递点击的年份
+}) {
+    const handleClick = () => {
+        if (year !== undefined && onYearClick) {
+            onYearClick(year); // 触发父组件的回调
+        }
+    };
+
     const [_text, setText] = useState("");
     const spanRef = useRef<HTMLSpanElement>(null);
 
@@ -49,17 +61,20 @@ export default function WidthGrid({ year, gridValue, masterSeriesValue }: { year
     const getTextColor = () => {
         return masterSeriesValue !== undefined && masterSeriesValue < -1 ? "red" : "black";
     };
+
     return (
         <>
             <span ref={spanRef}
+                onClick={handleClick} // ✅ 点击时触发 `onYearClick`
                 onDoubleClick={handleDoubleClick}
                 onBlur={handleBlur}
                 onKeyDown={handleKeyDown}
-                className="width-grid" title={year?.toString() + "\n" + masterSeriesValue}
+                className={`width-grid ${gridValue === 0 ? "highlight-zero" : ""} ${`width-grid ${isEditable ? "" : "disabled"}`}`}
+                title={(year ? year.toString() : "") + "\n" + (masterSeriesValue ? masterSeriesValue.toString() : "")}
                 style={{
                     backgroundColor: getBackgroundColor(),
                     color: getTextColor(),
-                    fontWeight: masterSeriesValue !== undefined && masterSeriesValue < -1 ? "bold" : "normal" // 小于 -1 加粗
+                    fontWeight: masterSeriesValue !== undefined && masterSeriesValue < -1 ? "bold" : "normal", // 小于 -1 加粗
                 }} // 动态背景 & 文字颜色
             >
                 {gridValue}

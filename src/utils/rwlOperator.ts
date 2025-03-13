@@ -90,68 +90,58 @@ export function formateRwlFromMapToString(rwl_data: RwlSiteData, selectedTree?: 
 }
 
 
-// 撤销
-export function rwlUndo(rwl_data: RwlSiteData, offset: number) {
-    
-}
-
-
 export class RwlEditor {
-    private rwlData: RwlTreeData;
-    private undoStack: RwlTreeData[] = [];
-    private redoStack: RwlTreeData[] = [];
+    private rwlData: RwlSiteData; // 现在存储的是 RwlSiteData
+    private undoStack: RwlSiteData[] = [];
+    private redoStack: RwlSiteData[] = [];
 
-    constructor(initialData: RwlTreeData) {
-        this.rwlData = new Map(initialData); // 复制初始数据
+    constructor(initialData: RwlSiteData) {
+        this.rwlData = new Map(initialData); // 复制初始数据，避免修改原始对象
     }
 
     // 获取当前 RWL 数据
-    getData(): RwlTreeData {
+    getData(): RwlSiteData {
         return new Map(this.rwlData);
     }
 
-    // 插年：在 year 处插入 0，其他年份向前移动
-    insertYear(year: number): void {
-        this.saveToUndoStack(); // 记录当前状态
+    // 插年：在 year 处插入 0
+    insertYear(tree: string, year: number): void {
+        this.saveToUndoStack(); // 记录操作前状态
         this.redoStack = []; // 清空 redo 记录
 
-        let newRwl: RwlTreeData = new Map();
-        this.rwlData.forEach((value, key) => {
-            let offset = (key <= year) ? 1 : 0;
-            newRwl.set(key - offset, value);
-            if (key === year) newRwl.set(key, 0);
-        });
+        if (!this.rwlData.has(tree)) return;
+        let treeData = this.rwlData.get(tree)!;
+        if (!treeData.has(year)) return;
 
-        this.rwlData = newRwl;
+        let updatedTree = insertYearToRwl(treeData, year);
+        this.rwlData.set(tree, updatedTree);
     }
 
-    // 删年：在 year 处删除 0，其他年份向后移动
-    deleteYear(year: number): void {
-        this.saveToUndoStack(); // 记录当前状态
-        this.redoStack = []; // 清空 redo 记录
+    // 删年：在 year 处删除 0
+    deleteYear(tree: string, year: number): void {
+        this.saveToUndoStack();
+        this.redoStack = [];
 
-        let newRwl: RwlTreeData = new Map();
-        this.rwlData.forEach((value, key) => {
-            if (key === year) return;
-            let offset = (key < year) ? 1 : 0;
-            newRwl.set(key + offset, value);
-        });
+        if (!this.rwlData.has(tree)) return;
+        let treeData = this.rwlData.get(tree)!;
+        if (!treeData.has(year)) return;
 
-        this.rwlData = newRwl;
+        let updatedTree = deleteYearFromRwl(treeData, year);
+        this.rwlData.set(tree, updatedTree);
     }
 
     // 撤销（Undo）
     undo(): void {
-        if (this.undoStack.length === 0) return; // 没有可撤销的操作
-        this.redoStack.push(new Map(this.rwlData)); // 记录当前状态到 redo
-        this.rwlData = this.undoStack.pop()!; // 恢复上一个状态
+        if (this.undoStack.length === 0) return;
+        this.redoStack.push(new Map(this.rwlData));
+        this.rwlData = this.undoStack.pop()!;
     }
 
     // 恢复（Redo）
     redo(): void {
-        if (this.redoStack.length === 0) return; // 没有可恢复的操作
-        this.undoStack.push(new Map(this.rwlData)); // 记录当前状态到 undo
-        this.rwlData = this.redoStack.pop()!; // 恢复前一个撤销的状态
+        if (this.redoStack.length === 0) return;
+        this.undoStack.push(new Map(this.rwlData));
+        this.rwlData = this.redoStack.pop()!;
     }
 
     // 记录当前状态到 Undo 栈
