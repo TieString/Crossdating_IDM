@@ -125,27 +125,30 @@ export function splitReportByParts(text: string): Map<string, string> {
 
     return parts;
 }
-
 function extractPossibleProblemsDetail(text: string): Map<string, string> {
     const possibleProblems = new Map<string, string>();
 
-    // 匹配所有 RDU 编号及其内容
-    const rduRegex = /(RDU\d{3,})[\s\S]*?(?=(RDU\d{3,}|\={10,}|$))/g;
-    let rduMatch;
+    // 按 `==========` 分割成多个块
+    const sections = text.split(/=+/);
 
-    while ((rduMatch = rduRegex.exec(text)) !== null) {
-        const rduID = rduMatch[1]; // RDU 编号
-        const rduContent = rduMatch[0]; // 该 RDU 段落内容
+    for (const section of sections) {
+        const lines = section.trim().split("\n").map(line => line.trim()).filter(line => line);
 
-        // 3. 在 RDU 内容中提取 `[A]` 部分
-        const aMatch = rduContent.match(/\[A\][\s\S]*?(?=\[[B-E]\]|\={10,}|$)/);
+        if (lines.length === 0) continue; // 跳过空块
+
+        // 取第一行的第一个字符串作为 key
+        const seriesID = lines[0].split(/\s+/)[0]; // 按空格分割，取第一个单词
+
+        // 查找 `[A] Segment` 部分
+        const aMatch = section.match(/\[A\] Segment[\s\S]*?(?=\[[B-E]\]|\={10,}|$)/);
         if (aMatch) {
-            possibleProblems.set(rduID, aMatch[0].trim());
+            possibleProblems.set(seriesID, aMatch[0].trim());
         }
     }
 
     return possibleProblems;
 }
+
 
 
 export { readOutFile, parseCofechaResult };

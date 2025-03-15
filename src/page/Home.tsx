@@ -171,7 +171,8 @@ export default function Home() {
         outFileContent.current = await readOutFile();
         emitRender()
         const result = parseCofechaResult(outFileContent.current)
-
+        console.log(result);
+        
         setCofechaResult(result)
         setPotentialProblemsDetail(result.possibleProblemsDetail)
         cofechaParts.current = splitReportByParts(outFileContent.current)
@@ -448,7 +449,7 @@ export default function Home() {
                             <option key="part2" value="PART 2">📈 PART 2: Time Plot of Series</option>
                             <option key="part3" value="PART 3">📉 PART 3: Master Dating Series</option>
                             <option key="part4" value="PART 4">📊 PART 4: Master Bar Plot</option>
-                            <option key="part5" value="PART 5">📰 PART 5: Corrlation of Series by Segment</option>
+                            <option key="part5" value="PART 5">📰 PART 5: Correlation of Series by Segment</option>
                             <option key="part6" value="PART 6">⚠️ PART 6: Potential Problems</option>
                             <option key="part7" value="PART 7">🪧 PART 7: Descriptive Statistics</option>
                         </select>
