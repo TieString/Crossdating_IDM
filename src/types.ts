@@ -4,7 +4,7 @@ export interface IFileResult {
     path: string;
 }
 
-export type RwlTreeData = Map<number, number>
+export type RwlTreeData = Map<number, number | null>
 
 export type RwlSiteData = Map<string, RwlTreeData>
 

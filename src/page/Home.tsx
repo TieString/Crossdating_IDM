@@ -14,13 +14,13 @@ import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { RwlEditor, readRwlToMap, formateRwlFromMapToString } from "../utils/rwlOperator.ts";
-// import MenuItem from "../components/MenuItem.tsx";
 import Menu from "../components/Menu.tsx";
 import { createRoot, Root } from "react-dom/client";
 import WidthContainer from "../components/WidthContainer.tsx";
 import { Command } from '@tauri-apps/plugin-shell'
 import { parseCofechaResult, readOutFile, splitReportByParts } from "../utils/COFECHAFormatter.ts";
 import { ICofechaResult } from "../types.ts";
+import { TreeChartManager } from "../components/TreeChartMannager.tsx";
 
 // Extend HTMLElement type
 declare global {
@@ -135,6 +135,8 @@ export default function Home() {
             const content = await readTextFile(filePath);
             // 提取并存储数据 编号：(year:width)
             const rwlData = readRwlToMap(content);
+            console.log(rwlData);
+            (rwlData)
             if (rwlData) {
                 rwlEditorRef.current = new RwlEditor(rwlData);
                 const options = Array.from(rwlData.keys());  // 获取所有键名
@@ -172,7 +174,7 @@ export default function Home() {
         emitRender()
         const result = parseCofechaResult(outFileContent.current)
         console.log(result);
-        
+
         setCofechaResult(result)
         setPotentialProblemsDetail(result.possibleProblemsDetail)
         cofechaParts.current = splitReportByParts(outFileContent.current)
@@ -187,8 +189,8 @@ export default function Home() {
             console.log(`command finished with code ${data.code} and signal ${data.signal}`)
             await readCofechaFile();
         });
-        command.stdout.on("data", line => console.log("stdout:", line))
-        command.stderr.on("data", err => console.error("stderr:", err))
+        // command.stdout.on("data", line => console.log("stdout:", line))
+        // command.stderr.on("data", err => console.error("stderr:", err))
 
         const child = await command.spawn()
         // 向 stdin 传递数据
@@ -200,7 +202,6 @@ export default function Home() {
         child.write("\n");
         child.write("\n");
 
-        console.log("COFECHA 运行完成");
     };
 
     const HandleSaveAs = async () => {
@@ -350,7 +351,7 @@ export default function Home() {
         titleMenuFileButton?.addEventListener("click", handleFileButtonClick);
 
         const handleEditButtonClick = (e: MenuClickEvent) => {
-            e.stopPropagation(); 
+            e.stopPropagation();
             activeMenu === "edit" ? setActiveMenu(null) : setActiveMenu("edit")
         };
         titleMenuEditButton?.addEventListener("click", handleEditButtonClick);
@@ -358,9 +359,9 @@ export default function Home() {
         return () => {
             document.removeEventListener("click", handleClickOutside);
             document.removeEventListener("click", handleFileButtonClick);
-            document.removeEventListener("click", handleEditButtonClick); 
+            document.removeEventListener("click", handleEditButtonClick);
         };
-        }, []); // ✅ `useEffect` 只执行一次，避免重复绑定事件
+    }, []); // ✅ `useEffect` 只执行一次，避免重复绑定事件
 
     // **3️⃣ 仅在 activeMenu 变化时更新 UI**
     useEffect(() => {
@@ -390,6 +391,8 @@ export default function Home() {
         const count = cofechaResult?.possibleProblemsCount;
         return count !== undefined && count >= 100 ? "red" : "black";
     };
+
+
     return (
         <>
             <div className="home-container">
@@ -420,11 +423,14 @@ export default function Home() {
                             onYearClick={handleGridClick} // 添加 onYearClick 事件处理函数
                         />
                     </div>
-                    <div className="problems-container">
-                        <p className="potential-problems">
-                            {potentialProblemsDetail.get(selectedTree)}
-                        </p>
-                    </div>
+                    {potentialProblemsDetail.get(selectedTree) ?
+                        (<div className="problems-container">
+                            <p className="potential-problems">
+                                {potentialProblemsDetail.get(selectedTree)}
+                            </p>
+                        </div>)
+                        : null
+                    }
                 </div>
                 <div className="cofecha-module">
                     <div className="statics-info">
@@ -437,9 +443,7 @@ export default function Home() {
                         <span>Mean sensitivity<br />{cofechaResult?.averageMeanSensitivity}</span>
                         <span>Mean length<br />{cofechaResult?.meanLength}</span>
                     </div>
-                    {/* <div className="graph">
 
-                    </div> */}
                     <div className="full-text">
                         <select name="cofecha" id="cofecha-selector" onChange={(e) => {
                             setSelectedPart(e.target.value);
@@ -457,6 +461,13 @@ export default function Home() {
                             {selectedPart === "全部" ? outFileContent.current : cofechaParts.current.get(selectedPart)}
                         </p>
                     </div>
+                    
+                    {/* 折线图 */}
+                    {rwlEditorRef.current?.getData()?.size > 0 && (
+                        <div className="line-chart">
+                            <TreeChartManager fullData={rwlEditorRef.current.getData()} />
+                        </div>
+                    )}
                 </div>
             </div >
         </>

@@ -47,7 +47,10 @@ export function readRwlToMap(rwl_str: string): RwlSiteData | undefined {
         // 获取年份和宽度
         const tree_code: string = parts[0]
         const year: number = parseInt(parts[1])
-        const width_array: Array<number> = parts.slice(2).map(Number)
+        const width_array: (number | null)[] = parts.slice(2).map(s => {
+            const trimmed = s.trim()
+            return trimmed === '' ? null : Number(trimmed)
+        })
         // 将数据存入字典
         if (!rwl_data.has(tree_code)) {
             rwl_data.set(tree_code, new Map())
@@ -61,33 +64,50 @@ export function readRwlToMap(rwl_str: string): RwlSiteData | undefined {
 }
 
 // 将RwlTreeData类型的数据格式化为字符串，以样点名称 年份 宽度 宽度 宽度...的格式输出，每整十年换行
-export function formateRwlFromMapToString(rwl_data: RwlSiteData, selectedTree?: string): string {
-    if (selectedTree && selectedTree !== '全部') {
-        // 如果选择了一棵树，则只输出该树的数据
-        const treeData = rwl_data.get(selectedTree)
-        if (!treeData) return ''  // 或者抛出错误
-        rwl_data = new Map([[selectedTree, treeData]])
-    }
-    let rwl_str = ''
-    rwl_data?.forEach((value, key) => {
-        // 获取第一个年份
-        const first_year = value.keys().next().value
-        value.forEach((width, year) => {
-            if (year === first_year) {
-                rwl_str += key.padStart(6, " ") + year.toString().padStart(6, " ") + width.toString().padStart(6, " ")
-                return
-            }
-            if (year % 10 === 0) {
-                rwl_str += '\r\n' + key.padStart(6, " ") + year.toString().padStart(6, " ") + width.toString().padStart(6, " ")
-            } else {
-                rwl_str += width.toString().padStart(6, " ")
-            }
-        })
-        rwl_str += '\r\n'
+export function formateRwlFromMapToString(
+  rwl_data: RwlSiteData,
+  selectedTree?: string
+): string {
+  // 可选：只导出选中树
+  if (selectedTree && selectedTree !== '全部') {
+    const treeData = rwl_data.get(selectedTree)
+    if (!treeData) return ''
+    rwl_data = new Map([[selectedTree, treeData]])
+  }
+
+  let rwl_str = ''
+
+  rwl_data.forEach((treeMap, treeCode) => {
+    const entries = Array.from(treeMap.entries()).sort((a, b) => a[0] - b[0]) // 按年份排序
+    let interrupt_flag = false // 中断标志 表示上一个值是否-9999
+    entries.forEach(([year, width], index) => {
+      const isFirst = index === 0
+      const isTenth = year % 10 === 0
+      const isLast = index === entries.length - 1
+
+      const widthStr = (width === null ? '' : width).toString().padStart(6, ' ')
+
+      // 新行：首行或整十年或上一年是中断
+      if (isFirst || isTenth || interrupt_flag) {
+        if (!isFirst) rwl_str += '\r\n'
+        rwl_str += treeCode.padStart(6, ' ') + year.toString().padStart(6, ' ') + widthStr
+        interrupt_flag = false
+      } else {
+        rwl_str += widthStr
+      }
+
+      // 中断行（-9999 且不是最后一项）
+      if (width === -9999 && !isLast) {
+        interrupt_flag = true
+      }
     })
 
-    return rwl_str
+    rwl_str += '\r\n' // 每棵树结束后换行
+  })
+
+  return rwl_str.trimEnd() + '\r\n'
 }
+
 
 
 export class RwlEditor {

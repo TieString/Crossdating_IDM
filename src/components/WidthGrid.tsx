@@ -4,7 +4,7 @@ import './WidthGrid.css'
 
 export default function WidthGrid({ year, gridValue, masterSeriesValue, isEditable = false, onYearClick }: {
     year?: number,
-    gridValue: string | number,
+    gridValue: string | number | null,
     masterSeriesValue?: number,
     isEditable?: boolean,
     onYearClick?: (year: number) => void; // ✅ 传递点击的年份
