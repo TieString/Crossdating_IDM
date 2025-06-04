@@ -46,13 +46,13 @@ export default function ({ siteData: site, masterSeries, selected, onYearClick }
             let nextValidYear: number | undefined = undefined;
             let interruptPadCount: number | undefined = undefined;
 
-            if (width === -9999 && !isLast) {
+            if ((width === -9999 || width === 999) && !isLast) {
                 interrupted = true;
 
                 // 找下一个有效年份并计算需补格子数
                 for (let j = i + 1; j < entries.length; j++) {
                     const [nextYear, nextWidth] = entries[j];
-                    if (nextWidth !== -9999) {
+                    if (nextWidth !== -9999 && nextWidth !== 999) {
                         nextValidYear = nextYear;
                         interruptPadCount = nextValidYear % 10;
                         break;
@@ -100,7 +100,7 @@ export default function ({ siteData: site, masterSeries, selected, onYearClick }
                         />
 
                         {/* 当前行为中断值或末尾值时补空格 */}
-                        {(width === -9999) && [...Array((10 - year % 10) - 1)].map((_, i) => (
+                        {(width === -9999||width === 999) && [...Array((10 - year % 10) - 1)].map((_, i) => (
                             <div key={`endpad-${key}-${year}-${i}`}></div>
                         ))}
 

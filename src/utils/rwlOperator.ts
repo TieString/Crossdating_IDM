@@ -65,47 +65,47 @@ export function readRwlToMap(rwl_str: string): RwlSiteData | undefined {
 
 // 将RwlTreeData类型的数据格式化为字符串，以样点名称 年份 宽度 宽度 宽度...的格式输出，每整十年换行
 export function formateRwlFromMapToString(
-  rwl_data: RwlSiteData,
-  selectedTree?: string
+    rwl_data: RwlSiteData,
+    selectedTree?: string
 ): string {
-  // 可选：只导出选中树
-  if (selectedTree && selectedTree !== '全部') {
-    const treeData = rwl_data.get(selectedTree)
-    if (!treeData) return ''
-    rwl_data = new Map([[selectedTree, treeData]])
-  }
+    // 可选：只导出选中树
+    if (selectedTree && selectedTree !== '全部') {
+        const treeData = rwl_data.get(selectedTree)
+        if (!treeData) return ''
+        rwl_data = new Map([[selectedTree, treeData]])
+    }
 
-  let rwl_str = ''
+    let rwl_str = ''
 
-  rwl_data.forEach((treeMap, treeCode) => {
-    const entries = Array.from(treeMap.entries()).sort((a, b) => a[0] - b[0]) // 按年份排序
-    let interrupt_flag = false // 中断标志 表示上一个值是否-9999
-    entries.forEach(([year, width], index) => {
-      const isFirst = index === 0
-      const isTenth = year % 10 === 0
-      const isLast = index === entries.length - 1
+    rwl_data.forEach((treeMap, treeCode) => {
+        const entries = Array.from(treeMap.entries()).sort((a, b) => a[0] - b[0]) // 按年份排序
+        let interrupt_flag = false // 中断标志 表示上一个值是否-9999
+        entries.forEach(([year, width], index) => {
+            const isFirst = index === 0
+            const isTenth = year % 10 === 0
+            const isLast = index === entries.length - 1
 
-      const widthStr = (width === null ? '' : width).toString().padStart(6, ' ')
+            const widthStr = (width === null ? '' : width).toString().padStart(6, ' ')
 
-      // 新行：首行或整十年或上一年是中断
-      if (isFirst || isTenth || interrupt_flag) {
-        if (!isFirst) rwl_str += '\r\n'
-        rwl_str += treeCode.padStart(6, ' ') + year.toString().padStart(6, ' ') + widthStr
-        interrupt_flag = false
-      } else {
-        rwl_str += widthStr
-      }
+            // 新行：首行或整十年或上一年是中断
+            if (isFirst || isTenth || interrupt_flag) {
+                if (!isFirst) rwl_str += '\r\n'
+                rwl_str += treeCode.padStart(6, ' ') + year.toString().padStart(6, ' ') + widthStr
+                interrupt_flag = false
+            } else {
+                rwl_str += widthStr
+            }
 
-      // 中断行（-9999 且不是最后一项）
-      if (width === -9999 && !isLast) {
-        interrupt_flag = true
-      }
+            // 中断行（-9999 且不是最后一项）
+            if ((width === -9999 || width === 999) && !isLast) {
+                interrupt_flag = true
+            }
+        })
+
+        rwl_str += '\r\n' // 每棵树结束后换行
     })
 
-    rwl_str += '\r\n' // 每棵树结束后换行
-  })
-
-  return rwl_str.trimEnd() + '\r\n'
+    return rwl_str.trimEnd() + '\r\n'
 }
 
 
