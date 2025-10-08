@@ -102,8 +102,9 @@ function extractMasterDatingSeries(text: string): Map<number, number> {
 }
 
 
+//DONE: 处理同号 PART 时，合并其内容而非覆盖（例如两个 PART 3）[v1.1.3]
 export function splitReportByParts(text: string): Map<string, string> {
-    const parts = new Map<string, string>();
+ const parts = new Map<string, string>();
 
     // 1. 先提取 PART 1（从文件开头到 PART 2: 之前）
     const part2Index = text.indexOf("PART 2:");
@@ -120,11 +121,15 @@ export function splitReportByParts(text: string): Map<string, string> {
         const partTitle = match[1].split("\n")[0].trim(); // 提取 PART X: 标题
         const partNumber = partTitle.split(" ")[1].replace(":", ""); // 提取 `X`
         const partContent = match[1].trim(); // 获取该部分的内容
-        parts.set(`PART ${partNumber}`, partContent);
+        const key = `PART ${partNumber}`;
+        // 同号 PART（分页续页）=> 合并
+    parts.set(key, parts.has(key) ? `${parts.get(key)}\n${partContent}` : partContent);
     }
 
     return parts;
 }
+
+
 function extractPossibleProblemsDetail(text: string): Map<string, string> {
     const possibleProblems = new Map<string, string>();
 
