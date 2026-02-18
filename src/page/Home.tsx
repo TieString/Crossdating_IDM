@@ -12,7 +12,7 @@ import "./Home.css";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { readTextFile, writeTextFile, mkdir,exists } from "@tauri-apps/plugin-fs";
 import { RwlEditor, readRwlToMap, formateRwlFromMapToString } from "../utils/rwlOperator.ts";
 import Menu from "../components/Menu.tsx";
 import { createRoot, Root } from "react-dom/client";
@@ -31,7 +31,7 @@ declare global {
 
 // 在组件外部定义一个 `title` 处理工具函数
 const formatTitle = (fileName: string | null, isModified: boolean) => {
-    return fileName ? `${fileName}${isModified ? " *" : ""}` : "未命名文件";
+    return fileName ? `${fileName}${isModified ? " *" : ""}` : "交叉定年-IDM";
 };
 
 
@@ -416,6 +416,9 @@ export default function Home() {
                         <button onClick={HandleDelete}>删除</button>
                     </div>
                     <div className={`data-container ${activeMenu ? "z-index-1" : ""}`}>
+                        {/* 加载图片，居中展示，加透明度，在打开文件后隐藏，检查如果treeOptions有值则隐藏 */}
+                        <img src="IDM.png" className={`loading-image ${treeOptions.length > 0 ? "hidden" : ""}`} />
+
                         <WidthContainer
                             siteData={rwlEditorRef.current.getData()}
                             selected={selectedTree}
@@ -457,7 +460,7 @@ export default function Home() {
                             <option key="part6" value="PART 6">⚠️ PART 6: Potential Problems</option>
                             <option key="part7" value="PART 7">🪧 PART 7: Descriptive Statistics</option>
                         </select>
-                        <p>
+                        <p id="cofecha-text">
                             {selectedPart === "全部" ? outFileContent.current : cofechaParts.current.get(selectedPart)}
                         </p>
                     </div>

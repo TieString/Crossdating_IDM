@@ -6,6 +6,7 @@
 }
 
 .home-container .data-container {
+    position: relative;
     height: 100px;
     overflow-y: scroll;
     flex-grow: 1;
@@ -100,10 +101,14 @@ button {
 }
 
 #cofecha-selector{
-    position: static;
+    position: fixed;
     width: 300px;
     height: 24px;
     border-radius: 5px;
+}
+
+#cofecha-text{
+    margin-top: 30px;
 }
 
 option{
@@ -117,4 +122,19 @@ p{
 
 .z-index-1{
     z-index: -1;
+}
+
+.data-container .loading-image {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    opacity: 0.2;
+    width: 100%;
+    height: auto;
+    pointer-events: none;
+}
+
+.hidden {
+    display: none;
 }

@@ -130,7 +130,8 @@ export function MultiLineChart({ data }: Props) {
       backgroundColor: color,
       fill: false,
       borderWidth: 2,
-      tension: 0.2,
+      tension: 0,     // 贝塞尔曲线张力参数，0为直线，配合 cubicInterpolationMode 使用  
+      cubicInterpolationMode: 'default', // 保持默认直线插值（配合 tension: 0）
       pointRadius: 2,
       pointHoverRadius: 4
     })
@@ -212,7 +213,11 @@ export function MultiLineChart({ data }: Props) {
         }
       },
       tooltip: {
-        enabled: false
+        enabled: true,
+        position: "average",
+        caretPadding: 30,   // 越大离点越远
+        padding: 8,        // tooltip 内边距
+
       },
       legend: {
         position: 'top'
