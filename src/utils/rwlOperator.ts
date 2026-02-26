@@ -4,7 +4,7 @@ import { RwlSiteData } from '../types';
 
 
 // 插年：在year处插入0，之前的年份总体向前移动1年，最新年份不变
-export function insertYearToRwl(rwlData: RwlTreeData, year: number): RwlTreeData {
+function insertYearToRwl(rwlData: RwlTreeData, year: number): RwlTreeData {
     let rwl_new: RwlTreeData = new Map()
     rwlData.forEach((value, key) => {
         let offset = (key <= year) ? 1 : 0
@@ -15,7 +15,7 @@ export function insertYearToRwl(rwlData: RwlTreeData, year: number): RwlTreeData
 }
 
 // 删年：在year处删除0，之前的年份总体向后移动1年，最新年份不变
-export function deleteYearFromRwl(rwlData: RwlTreeData, year: number): RwlTreeData {
+function deleteYearFromRwl(rwlData: RwlTreeData, year: number): RwlTreeData {
     let rwl_new: RwlTreeData = new Map()
     rwlData.forEach((value, key) => {
         if (key === year) return

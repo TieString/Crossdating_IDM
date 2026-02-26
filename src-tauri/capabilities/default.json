@@ -11,12 +11,28 @@
     "dialog:default",
     "core:window:allow-set-title",
     "fs:default",
-    "fs:allow-write-text-file",
     "fs:allow-desktop-read-recursive",
+    "fs:allow-write-text-file",
     "fs:allow-read-text-file",
     "fs:allow-document-write",
     "fs:allow-resource-read",
     "fs:allow-resource-write",
+    "fs:allow-mkdir",
+    "fs:allow-exists",
+    "fs:allow-remove",
+    "fs:allow-rename",
+    "fs:scope-appdata-recursive",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        {
+          "path": "$APPDATA"
+        },
+        {
+          "path": "$APPDATA/**"
+        }
+      ]
+    },
     "core:window:allow-start-dragging",
     "core:window:allow-close",
     "core:window:allow-minimize",
@@ -26,8 +42,8 @@
       "identifier": "shell:allow-spawn",
       "allow": [
         {
-          "cmd": "cofecha",
-          "name": "bin/cofecha"
+          "name": "bin/cofecha",
+          "sidecar": true
         }
       ]
     },
@@ -35,8 +51,8 @@
       "identifier": "shell:allow-kill",
       "allow": [
         {
-          "cmd": "cofecha",
-          "name": "bin/cofecha"
+          "name": "bin/cofecha",
+          "sidecar": true
         }
       ]
     },
@@ -44,8 +60,8 @@
       "identifier": "shell:allow-stdin-write",
       "allow": [
         {
-          "cmd": "cofecha",
-          "name": "bin/cofecha"
+          "name": "bin/cofecha",
+          "sidecar": true
         }
       ]
     }

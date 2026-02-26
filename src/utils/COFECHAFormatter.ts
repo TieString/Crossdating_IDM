@@ -1,13 +1,26 @@
-import { BaseDirectory, readTextFile } from "@tauri-apps/plugin-fs";
+import { exists, readTextFile } from "@tauri-apps/plugin-fs";
 import { ICofechaResult } from "../types";
-
+import { getCofechaWorkDir } from "./fileManager";
+import { join } from "@tauri-apps/api/path";
+/**
+ * 从工作空间读取COFECHA输出文件内容的异步函数
+ * @returns {Promise<string>} 返回一个Promise，解析为文件内容字符串
+ */
 const readOutFile = async (): Promise<string> => {
     try {
-        const content = await readTextFile('VERYCOF.OUT', { baseDir: BaseDirectory.Resource }); // 路径相对于应用程序数据目录
+        // 使用readTextFile函数读取文件，文件路径相对于应用程序资源目录
+        const outPath = await join(await getCofechaWorkDir(), "VERYCOF.OUT");
+        if (!await exists(outPath)) {
+            console.error("VERYCOF.OUT not found:", outPath);
+            return "VERYCOF.OUT not found";
+        }
+        const content = await readTextFile(outPath); // 路径相对于应用程序数据目录
+        console.log("正在读取工作空间文件");
+        
         return content;
     } catch (error) {
         console.log('读取文件出错:' + error);
-        return "读取文件出错"
+        return "读取文件出错";
     }
 }
 

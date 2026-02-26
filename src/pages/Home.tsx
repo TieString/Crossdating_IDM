@@ -3,24 +3,25 @@
  *  2.加载CHFECHA内容，并提取最重要部分，主序列系数显示（将小于-1的值高亮出来，越小越亮） √
  *  3.悬浮在宽度上提示年份 √
  *  4.编辑操作撤销重做 √
- *  5.曲线图
- *  6.双击更改年份内容
- *  7.年轮宽度示意图
+ *  5.曲线图 √
+ *  6.双击更改年份内容 
+ *  7.年轮宽度示意图 
  * */
 
 import "./Home.css";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { readTextFile, writeTextFile, mkdir,exists } from "@tauri-apps/plugin-fs";
+import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { RwlEditor, readRwlToMap, formateRwlFromMapToString } from "../utils/rwlOperator.ts";
 import Menu from "../components/Menu.tsx";
 import { createRoot, Root } from "react-dom/client";
 import WidthContainer from "../components/WidthContainer.tsx";
-import { Command } from '@tauri-apps/plugin-shell'
 import { parseCofechaResult, readOutFile, splitReportByParts } from "../utils/COFECHAFormatter.ts";
 import { ICofechaResult } from "../types.ts";
-import { TreeChartManager } from "../components/TreeChartMannager.tsx";
+import { TreeChartManager } from "../components/TreeChartManager.tsx";
+import { runCofecha } from "../utils/COFECHARunner.ts";
+
 
 // Extend HTMLElement type
 declare global {
@@ -111,7 +112,10 @@ export default function Home() {
         try {
             // 打开文件选择对话框，让用户选择要读取的文件
             const filePath = await open({
-                filters: [{ name: "Tucson Files", extensions: ["rwl"] }], // 仅限 .rwl 文件
+                filters: [
+                    { name: "Tucson Files", extensions: ["rwl"] }, // 仅限 .rwl 文件
+                    {name: "所有文件", extensions: ["*"]}   // 允许所有文件
+                ],
                 // title: "打开文件",
                 multiple: false, // 仅允许选择一个文件
             });
@@ -144,7 +148,8 @@ export default function Home() {
             }
             setFileName(filePath); // 更新文件名
             setIsModified(false);
-            runCofecha();
+            await runCofecha(content);
+            await readCofechaFile();
             emitRender();
         } catch (error) {
             console.error("读取文件时出错:", error);
@@ -163,7 +168,8 @@ export default function Home() {
             console.log("文件已成功保存到:", filePathRef.current);
             setIsModified(false); // 文件保存后标记为未修改
 
-            await runCofecha();
+            await runCofecha(rwlStr);
+            await readCofechaFile();
         } catch (error) {
             console.error("写入文件时出错:", error);
         }
@@ -176,33 +182,11 @@ export default function Home() {
         console.log(result);
 
         setCofechaResult(result)
+        // 左下角潜在问题内容
         setPotentialProblemsDetail(result.possibleProblemsDetail)
+        // 分割报告内容
         cofechaParts.current = splitReportByParts(outFileContent.current)
     }
-
-
-    const runCofecha = async () => {
-        const command = Command.create("bin/cofecha");
-        command.on('close', async data => {
-            // Terminate the process
-            await child.kill();
-            console.log(`command finished with code ${data.code} and signal ${data.signal}`)
-            await readCofechaFile();
-        });
-        // command.stdout.on("data", line => console.log("stdout:", line))
-        // command.stderr.on("data", err => console.error("stderr:", err))
-
-        const child = await command.spawn()
-        // 向 stdin 传递数据
-        child.write("very\n");
-        child.write(`${filePathRef.current}\n`)
-        child.write("\n") // echo.
-        child.write("\n");
-        child.write("\n");
-        child.write("\n");
-        child.write("\n");
-
-    };
 
     const HandleSaveAs = async () => {
         try {
