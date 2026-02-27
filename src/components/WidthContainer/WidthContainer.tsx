@@ -1,7 +1,8 @@
 import { Fragment, ReactNode } from 'react';
-import { RwlSiteData } from '../types';
-import WidthGrid from './WidthGrid';
-import "./WidthContainer.css"
+import { RwlSiteData } from '@/features/rwl';
+import WidthGrid from './WidthGrid/WidthGrid';
+import style from "./WidthContainer.module.css"
+import { stopMarker } from '@/shared/constants';
 
 interface RenderItem {
     key: string;
@@ -13,6 +14,7 @@ interface RenderItem {
     nextValidYear?: number;
     interruptPadCount?: number;
 }
+
 
 export default function ({ siteData: site, masterSeries, selected, onYearClick }: {
     siteData: RwlSiteData,
@@ -46,13 +48,13 @@ export default function ({ siteData: site, masterSeries, selected, onYearClick }
             let nextValidYear: number | undefined = undefined;
             let interruptPadCount: number | undefined = undefined;
 
-            if ((width === -9999 || width === 999) && !isLast) {
+            if ((width === stopMarker.value) && !isLast) {
                 interrupted = true;
 
                 // 找下一个有效年份并计算需补格子数
                 for (let j = i + 1; j < entries.length; j++) {
                     const [nextYear, nextWidth] = entries[j];
-                    if (nextWidth !== -9999 && nextWidth !== 999) {
+                    if (nextWidth !== stopMarker.value) {
                         nextValidYear = nextYear;
                         interruptPadCount = nextValidYear % 10;
                         break;
@@ -74,7 +76,7 @@ export default function ({ siteData: site, masterSeries, selected, onYearClick }
     });
 
     return (
-        <div className='width-grid-container'>
+        <div className={style["width-grid-container"]}>
             {renderItems.map(({ key, year, width, firstYear, interrupted, nextValidYear, interruptPadCount }) => {
                 const isLineStart = year === firstYear || year % 10 === 0;
                 const needEmptyStart = (year % 10 === 0 && year - firstYear <= 10);
@@ -89,18 +91,23 @@ export default function ({ siteData: site, masterSeries, selected, onYearClick }
                         {/* 每行起始编号与年份 */}
                         {isLineStart && <WidthGrid gridValue={key} />}
                         {isLineStart && <WidthGrid gridValue={year} />}
-
-                        {/* 实际宽度值 */}
-                        <WidthGrid
-                            gridValue={width}
-                            year={year}
-                            masterSeriesValue={masterSeries?.get(year)}
-                            isEditable={true}
-                            onYearClick={handleYearClick}
-                        />
-
+                        {/* 如果width是-9999则只显示传递gridValue */}
+                        {/* 否则传递所有信息 */}
+                        {width === stopMarker.value
+                            ? <WidthGrid gridValue={width} />
+                            : (
+                                <WidthGrid
+                                    gridValue={width}
+                                    year={year}
+                                    tree={key}
+                                    masterSeriesValue={masterSeries?.get(year)}
+                                    isEditable={true}
+                                    onYearClick={handleYearClick}
+                                />
+                            )
+                        }
                         {/* 当前行为中断值或末尾值时补空格 */}
-                        {(width === -9999||width === 999) && [...Array((10 - year % 10) - 1)].map((_, i) => (
+                        {(width === stopMarker.value) && [...Array((10 - year % 10) - 1)].map((_, i) => (
                             <div key={`endpad-${key}-${year}-${i}`}></div>
                         ))}
 
@@ -108,9 +115,9 @@ export default function ({ siteData: site, masterSeries, selected, onYearClick }
                         {interrupted && nextValidYear !== undefined && (
                             <>
                                 <WidthGrid gridValue={key} />
-                                <WidthGrid gridValue={nextValidYear} />
+                                <WidthGrid  gridValue={nextValidYear} />
                                 {[...Array(interruptPadCount ?? 0)].map((_, i) => (
-                                    <div key={`interrupt-pad-${key}-${nextValidYear}-${i}`}></div>
+                                    <div className={style["interrupt-year"]} key={`interrupt-pad-${key}-${nextValidYear}-${i}`}></div>
                                 ))}
                             </>
                         )}

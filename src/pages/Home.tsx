@@ -8,19 +8,20 @@
  *  7.年轮宽度示意图 
  * */
 
-import "./Home.css";
+import style from "./Home.module.css";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
-import { RwlEditor, readRwlToMap, formateRwlFromMapToString } from "../utils/rwlOperator.ts";
-import Menu from "../components/Menu.tsx";
+import { RwlEditor, readRwlToMap, formateRwlFromMapToString, registerChangeYearWidth } from "@/features/rwl/rwlOperator.ts";
+import Menu from "@/components/Menu/Menu.tsx";
 import { createRoot, Root } from "react-dom/client";
-import WidthContainer from "../components/WidthContainer.tsx";
-import { parseCofechaResult, readOutFile, splitReportByParts } from "../utils/COFECHAFormatter.ts";
-import { ICofechaResult } from "../types.ts";
-import { TreeChartManager } from "../components/TreeChartManager.tsx";
-import { runCofecha } from "../utils/COFECHARunner.ts";
+import WidthContainer from "@/components/WidthContainer/WidthContainer.tsx";
+import { parseCofechaResult, readOutFile, splitReportByParts } from "@/features/cofecha/formatter.ts";
+import { ICofechaResult } from "@/features/cofecha/types.ts";
+import { TreeChartManager } from "@/components/Chart/TreeChartManager.tsx";
+import { runCofecha } from "@/services/cofecha/runner.ts";
+import { readRwlFile } from "@/features/rwl/io";
 
 
 // Extend HTMLElement type
@@ -101,6 +102,14 @@ export default function Home() {
         if (menuTitle) menuTitle.textContent = title
     }, [fileName, isModified]);
 
+    // 在 Home 中注册rwlEditorRef的方法，供外部调用以更新年轮宽度数据
+    useEffect(() => {
+        registerChangeYearWidth((tree, year, width) => {
+            rwlEditorRef.current?.changeYearWidth(tree, year, width);
+        });
+    }, [/* 无需依赖 */]);
+
+
     // 标记文件为修改状态
     const markAsModified = () => {
         setIsModified(true);
@@ -114,7 +123,7 @@ export default function Home() {
             const filePath = await open({
                 filters: [
                     { name: "Tucson Files", extensions: ["rwl"] }, // 仅限 .rwl 文件
-                    {name: "所有文件", extensions: ["*"]}   // 允许所有文件
+                    { name: "所有文件", extensions: ["*"] }   // 允许所有文件
                 ],
                 // title: "打开文件",
                 multiple: false, // 仅允许选择一个文件
@@ -138,12 +147,10 @@ export default function Home() {
             // 读取文件内容
             const content = await readTextFile(filePath);
             // 提取并存储数据 编号：(year:width)
-            const rwlData = readRwlToMap(content);
-            console.log(rwlData);
-            (rwlData)
-            if (rwlData) {
-                rwlEditorRef.current = new RwlEditor(rwlData);
-                const options = Array.from(rwlData.keys());  // 获取所有键名
+            const rwlData = await readRwlFile(filePath); // 解析 RWL 内容并更新状态
+            if (rwlData.data) {
+                rwlEditorRef.current = new RwlEditor(rwlData.data);
+                const options = Array.from(rwlData.data.keys());  // 获取所有键名
                 setTreeOptions(options);  // 更新树种选项
             }
             setFileName(filePath); // 更新文件名
@@ -167,6 +174,7 @@ export default function Home() {
             await writeTextFile(filePathRef.current, rwlStr);
             console.log("文件已成功保存到:", filePathRef.current);
             setIsModified(false); // 文件保存后标记为未修改
+            console.log(rwlStr);
 
             await runCofecha(rwlStr);
             await readCofechaFile();
@@ -379,10 +387,10 @@ export default function Home() {
 
     return (
         <>
-            <div className="home-container">
-                <div className="width-module">
-                    <div className="control-bar">
-                        <select name="trees" id="tree_selector" onChange={(e) => { setSelectedTree(e.target.value) }}>
+            <div className={style["home-container"]}>
+                <div className={style["width-module"]}>
+                    <div className={style["control-bar"]}>
+                        <select name="trees" id={style["tree_selector"]} onChange={(e) => { setSelectedTree(e.target.value) }}>
                             <option key="全部" value="全部">📜 全部</option>
                             {treeOptions.map((tree) => (
                                 <option key={tree} value={tree}>
@@ -392,16 +400,16 @@ export default function Home() {
                         </select>
                         <input
                             type="text"
-                            id="year_to_edit"
+                            id={style["year_to_edit"]}
                             onChange={(e) => setYear(e.target.value)}
                             value={year} placeholder="输入或点击需要操作的年份"
                         />
                         <button onClick={HandleInsert}>插入</button>
                         <button onClick={HandleDelete}>删除</button>
                     </div>
-                    <div className={`data-container ${activeMenu ? "z-index-1" : ""}`}>
+                    <div className={`${style["data-container"]} ${activeMenu ? style["z-index-1"] : ""}`}>
                         {/* 加载图片，居中展示，加透明度，在打开文件后隐藏，检查如果treeOptions有值则隐藏 */}
-                        <img src="IDM.png" className={`loading-image ${treeOptions.length > 0 ? "hidden" : ""}`} />
+                        <img src="IDM.png" className={`${style["loading-image"]} ${treeOptions.length > 0 ? style["hidden"] : ""}`} />
 
                         <WidthContainer
                             siteData={rwlEditorRef.current.getData()}
@@ -411,16 +419,16 @@ export default function Home() {
                         />
                     </div>
                     {potentialProblemsDetail.get(selectedTree) ?
-                        (<div className="problems-container">
-                            <p className="potential-problems">
+                        (<div className={style["problems-container"]}>
+                            <p className={style["potential-problems"]}>
                                 {potentialProblemsDetail.get(selectedTree)}
                             </p>
                         </div>)
                         : null
                     }
                 </div>
-                <div className="cofecha-module">
-                    <div className="statics-info">
+                <div className={style["cofecha-module"]}>
+                    <div className={style["statics-info"]}>
                         <span style={{ color: getTextColor() }}>
                             *A*<br />
                             {cofechaResult?.possibleProblemsCount}
@@ -431,8 +439,8 @@ export default function Home() {
                         <span>Mean length<br />{cofechaResult?.meanLength}</span>
                     </div>
 
-                    <div className="full-text">
-                        <select name="cofecha" id="cofecha-selector" onChange={(e) => {
+                    <div className={style["full-text"]}>
+                        <select name="cofecha" id={style["cofecha-selector"]} onChange={(e) => {
                             setSelectedPart(e.target.value);
                         }}>
                             <option key="全部" value="全部">📜 全部内容</option>
@@ -444,14 +452,14 @@ export default function Home() {
                             <option key="part6" value="PART 6">⚠️ PART 6: Potential Problems</option>
                             <option key="part7" value="PART 7">🪧 PART 7: Descriptive Statistics</option>
                         </select>
-                        <p id="cofecha-text">
+                        <p id={style["cofecha-text"]}>
                             {selectedPart === "全部" ? outFileContent.current : cofechaParts.current.get(selectedPart)}
                         </p>
                     </div>
-                    
+
                     {/* 折线图 */}
                     {rwlEditorRef.current?.getData()?.size > 0 && (
-                        <div className="line-chart">
+                        <div className={style["line-chart"]}>
                             <TreeChartManager fullData={rwlEditorRef.current.getData()} />
                         </div>
                     )}

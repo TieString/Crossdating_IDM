@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import './WidthGrid.css'
+import style from './WidthGrid.module.css'
+import { callChangeYearWidth } from '@/features/rwl/rwlOperator';
 
 
-export default function WidthGrid({ year, gridValue, masterSeriesValue, isEditable = false, onYearClick }: {
+export default function WidthGrid({ year, tree, gridValue, masterSeriesValue, isEditable = false, onYearClick }: {
     year?: number,
+    tree?: string,
     gridValue: string | number | null,
     masterSeriesValue?: number,
     isEditable?: boolean,
@@ -36,8 +38,14 @@ export default function WidthGrid({ year, gridValue, masterSeriesValue, isEditab
     const handleBlur = () => {
         const span = spanRef.current;
         if (span) {
-            setText(span.innerText.trim()); // 去除首尾空格
+            const text = span.innerText.trim();
+            setText(text);
             span.contentEditable = "false";
+            // 计算并调用全局桥函数
+            const newWidth = text === '' ? null : Number(text);
+            if (tree !== undefined && year !== undefined) {
+                callChangeYearWidth(tree, year, newWidth);
+            }
         }
     };
 
@@ -69,7 +77,7 @@ export default function WidthGrid({ year, gridValue, masterSeriesValue, isEditab
                 onDoubleClick={handleDoubleClick}
                 onBlur={handleBlur}
                 onKeyDown={handleKeyDown}
-                className={`width-grid ${gridValue === 0 ? "highlight-zero" : ""} ${`width-grid ${isEditable ? "" : "disabled"}`}`}
+                className={`${style["width-grid"]} ${gridValue === 0 ? style["highlight-zero"] : ""} ${isEditable ? "" : style["disabled"]}`}
                 title={(year ? year.toString() : "") + "\n" + (masterSeriesValue ? masterSeriesValue.toString() : "")}
                 style={{
                     backgroundColor: getBackgroundColor(),

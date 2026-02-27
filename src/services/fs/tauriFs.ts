@@ -1,0 +1,1 @@
+// read/write/mkdir/exists，统一 baseDir/scope 策略

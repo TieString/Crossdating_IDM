@@ -1,6 +1,7 @@
-import { RwlTreeData } from "../types";
+import { RwlTreeData } from "./types";
 import { message } from '@tauri-apps/plugin-dialog';
-import { RwlSiteData } from '../types';
+import { RwlSiteData } from './types';
+import { stopMarker } from "@/shared/constants";
 
 
 // 插年：在year处插入0，之前的年份总体向前移动1年，最新年份不变
@@ -22,6 +23,15 @@ function deleteYearFromRwl(rwlData: RwlTreeData, year: number): RwlTreeData {
         let offset = (key < year) ? 1 : 0
         rwl_new.set(key + offset, value)
     })
+    return rwl_new
+}
+
+// 更改年：在year处更改为width，其他年份不变
+function changeYearWidth(rwlData: RwlTreeData, year: number, width: number | null): RwlTreeData {
+    let rwl_new: RwlTreeData = new Map(rwlData)
+    if (rwl_new.has(year)) {
+        rwl_new.set(year, width)
+    }
     return rwl_new
 }
 
@@ -97,7 +107,7 @@ export function formateRwlFromMapToString(
             }
 
             // 中断行（-9999 且不是最后一项）
-            if ((width === -9999 || width === 999) && !isLast) {
+            if ((width === stopMarker.value) && !isLast) {
                 interrupt_flag = true
             }
         })
@@ -150,6 +160,18 @@ export class RwlEditor {
         this.rwlData.set(tree, updatedTree);
     }
 
+    changeYearWidth(tree: string, year: number, width: number | null): void {
+        this.saveToUndoStack();
+        this.redoStack = [];
+
+        if (!this.rwlData.has(tree)) return;
+        let treeData = this.rwlData.get(tree)!;
+        if (!treeData.has(year)) return;
+
+        let updatedTree = changeYearWidth(treeData, year, width);
+        this.rwlData.set(tree, updatedTree);
+    }
+
     // 撤销（Undo）
     undo(): void {
         if (this.undoStack.length === 0) return;
@@ -168,4 +190,15 @@ export class RwlEditor {
     private saveToUndoStack(): void {
         this.undoStack.push(new Map(this.rwlData));
     }
+}
+
+// 新增：全局注册/调用桥
+export let changeYearWidthHandler: ((tree: string, year: number, width: number | null) => void) | null = null;
+
+export function registerChangeYearWidth(handler: (tree: string, year: number, width: number | null) => void) {
+    changeYearWidthHandler = handler;
+}
+
+export function callChangeYearWidth(tree: string, year: number, width: number | null) {
+    changeYearWidthHandler?.(tree, year, width);
 }

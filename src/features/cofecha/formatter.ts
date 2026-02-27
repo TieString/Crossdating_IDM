@@ -1,6 +1,6 @@
 import { exists, readTextFile } from "@tauri-apps/plugin-fs";
-import { ICofechaResult } from "../types";
-import { getCofechaWorkDir } from "./fileManager";
+import { ICofechaResult } from "./types";
+import { getCofechaWorkDir } from "@/services/fs/workspace";
 import { join } from "@tauri-apps/api/path";
 /**
  * 从工作空间读取COFECHA输出文件内容的异步函数

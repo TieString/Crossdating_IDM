@@ -1,3 +1,5 @@
+// cofecha-work 目录生命周期、清理策略
+
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { exists, mkdir } from "@tauri-apps/plugin-fs";
 

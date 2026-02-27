@@ -1,5 +1,5 @@
 // MenuItem.tsx
-import './MenuItem.css'
+import style from './MenuItem.module.css'
 
 interface MenuItemProps {
   label: string;
@@ -12,14 +12,14 @@ const MenuItem: React.FC<MenuItemProps> = ({ label, onClick, isActive, children 
 
   return (
     <div
-      className={`menu-item ${isActive ? "menu-item-active" : ""}`}
+      className={`${style["menu-item"]} ${isActive ? style["menu-item-active"] : ""}`}
       onClick={(e) => {
         e.stopPropagation();
         if (onClick) onClick(); // 🔹 确保 `onClick` 被执行
       }}
     >
-      <div className="menu-item-label">{label}</div>
-      {isActive && children && <div className="subMenu">{children}</div>}
+      <div className={style["menu-item-label"]}>{label}</div>
+      {isActive && children && <div className={style["subMenu"]}>{children}</div>}
     </div>
   );
 };

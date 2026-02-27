@@ -1,7 +1,7 @@
 // Menu.tsx
 import React, { useState } from 'react';
-import MenuItem from './MenuItem';
-import './Menu.css'
+import MenuItem from './MenuItem/MenuItem';
+import styles from './Menu.module.css';
 
 interface MenuProps {
   items: { label: string; onClick?: () => void; children?: React.ReactNode }[];
@@ -18,7 +18,7 @@ const Menu: React.FC<MenuProps> = ({ items }) => {
   };
 
   return (
-    <div className="subMenu">
+    <div className={styles["subMenu"]}>
       {items.map((item, index) => (
         <MenuItem
           isActive={activeMenuItem === item.label}

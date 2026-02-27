@@ -14,9 +14,10 @@
 }
 
 
-p {
+.home-container p {
     white-space: pre-wrap;
     font-family: 'consolas';
+    margin: 0;
 }
 
 #tree_selector {
@@ -33,7 +34,7 @@ p {
     width: 51%;
 }
 
-button {
+.home-container button {
     margin-right: 5px;
 }
 
@@ -100,7 +101,7 @@ button {
     align-items: center;
 }
 
-#cofecha-selector{
+.home-container #cofecha-selector{
     position: fixed;
     width: 300px;
     height: 24px;
@@ -111,13 +112,9 @@ button {
     margin-top: 30px;
 }
 
-option{
+.home-container option{
     display: block;
     padding: 2px 5px;
-}
-
-p{
-    margin: 0;
 }
 
 .z-index-1{

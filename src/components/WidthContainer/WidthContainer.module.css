@@ -7,3 +7,8 @@
     text-align: right;
     font-family: "consolas";
 }
+
+.interrupt-year{
+    background-color: #eeeeee;
+    /* 可根据需要调整颜色 */
+}

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { MultiLineChart } from './MultiLineChart.tsx'
-import { RwlSiteData } from '../types.ts'
+import { RwlSiteData } from '@/features/rwl'
 
 type Props = {
   fullData: RwlSiteData

@@ -1,7 +1,7 @@
 import { Command } from "@tauri-apps/plugin-shell";
 import { writeTextFile, readTextFile, exists } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
-import { getCofechaWorkDir } from "./fileManager";
+import { getCofechaWorkDir } from "@/services/fs";
 
 const COFECHA_SIDECAR_NAME = "bin/cofecha"; // 必须与 externalBin 条目一致:contentReference[oaicite:4]{index=4}
 
