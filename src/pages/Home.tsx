@@ -4,7 +4,7 @@
  *  3.悬浮在宽度上提示年份 √
  *  4.编辑操作撤销重做 √
  *  5.曲线图 √
- *  6.双击更改年份内容 
+ *  6.双击更改年份内容 √
  *  7.年轮宽度示意图 
  * */
 
@@ -13,11 +13,12 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
-import { RwlEditor, readRwlToMap, formateRwlFromMapToString, registerChangeYearWidth } from "@/features/rwl/rwlOperator.ts";
+import { RwlEditor, formateRwlFromMapToString, registerChangeYearWidth } from "@/features/rwl/edit";
+import type { RwlSiteData } from "@/features/rwl/types";
 import Menu from "@/components/Menu/Menu.tsx";
 import { createRoot, Root } from "react-dom/client";
 import WidthContainer from "@/components/WidthContainer/WidthContainer.tsx";
-import { parseCofechaResult, readOutFile, splitReportByParts } from "@/features/cofecha/formatter.ts";
+import { parseCofechaResult, splitReportByParts } from "@/features/cofecha/formatter.ts";
 import { ICofechaResult } from "@/features/cofecha/types.ts";
 import { TreeChartManager } from "@/components/Chart/TreeChartManager.tsx";
 import { runCofecha } from "@/services/cofecha/runner.ts";
@@ -40,8 +41,17 @@ const formatTitle = (fileName: string | null, isModified: boolean) => {
 export default function Home() {
 
     const rwlEditorRef = useRef<RwlEditor>(new RwlEditor(new Map()));// 存储 rwl_data 的 ref 结构化的宽度数据
+    // 保存加载/最后一次保存时的基准数据，用于和当前编辑器内容比较
+    const originalDataRef = useRef<RwlSiteData>(new Map());
     const [treeOptions, setTreeOptions] = useState<string[]>([])  // 存储树种选项
     const [selectedTree, setSelectedTree] = useState<string>("全部");  // 存储选中的树种编号
+
+    // 每当 treeOptions 变化时，若当前选中项不在新列表中则重置为全部
+    useEffect(() => {
+        if (selectedTree !== "全部" && !treeOptions.includes(selectedTree)) {
+            setSelectedTree("全部");
+        }
+    }, [treeOptions]);
     const [year, setYear] = useState<string>("")
     const filePathRef = useRef<string | null>(null);
     const [fileName, setFileName] = useState<string | null>(null); // 存储文件名
@@ -56,6 +66,36 @@ export default function Home() {
     const emitRender = () => {
         setRender(prev => prev + 1); // 触发重新渲染
     };
+
+
+    // 比较两个 RWL 数据是否相等
+    const rwlDataEquals = (a: RwlSiteData, b: RwlSiteData) => {
+        if (a.size !== b.size) return false;
+        for (let [tree, mapA] of a) {
+            const mapB = b.get(tree);
+            if (!mapB) return false;
+            if (mapA.size !== mapB.size) return false;
+            for (let [year, widthA] of mapA) {
+                const widthB = mapB.get(year);
+                if (widthA !== widthB) return false;
+            }
+        }
+        return true;
+    };
+
+    // 辅助：当编辑器内部数据变化时自动更新 isModified 并触发渲染
+    const setupEditor = (editor: RwlEditor) => {
+        editor.registerChangeCallback(() => {
+            const changed = !rwlDataEquals(originalDataRef.current, editor.getData());
+            setIsModified(changed);
+            emitRender();
+        });
+    };
+
+    // 初始引用的编辑器也需要注册回调
+    useEffect(() => {
+        setupEditor(rwlEditorRef.current);
+    }, []);
 
     useEffect(() => {
         const titleMenuUndoButton = document.getElementById("title-submenu-undo-button");
@@ -110,11 +150,6 @@ export default function Home() {
     }, [/* 无需依赖 */]);
 
 
-    // 标记文件为修改状态
-    const markAsModified = () => {
-        setIsModified(true);
-    };
-
 
     // 读取文件的处理
     const HandleLoad = async () => {
@@ -150,13 +185,28 @@ export default function Home() {
             const rwlData = await readRwlFile(filePath); // 解析 RWL 内容并更新状态
             if (rwlData.data) {
                 rwlEditorRef.current = new RwlEditor(rwlData.data);
+                setupEditor(rwlEditorRef.current);
+                originalDataRef.current = rwlEditorRef.current.getData();
                 const options = Array.from(rwlData.data.keys());  // 获取所有键名
                 setTreeOptions(options);  // 更新树种选项
+                // 确保控件和状态都回到“全部”
+                setSelectedTree("全部");
             }
             setFileName(filePath); // 更新文件名
             setIsModified(false);
-            await runCofecha(content);
-            await readCofechaFile();
+            // 等待 cofecha 完成并获取输出文本，传入原始文件名以便 OUT 中显示该名称
+            try {
+                const baseName = (filePath as string).split(/\\|\//).pop() || "INPUT.RWL";
+                const outText = await runCofecha(content, baseName, filePath as string);
+                // 处理结果与 UI 更新
+                outFileContent.current = outText;
+                const result = parseCofechaResult(outText);
+                setCofechaResult(result);
+                setPotentialProblemsDetail(result.possibleProblemsDetail);
+                cofechaParts.current = splitReportByParts(outText);
+            } catch (err) {
+                console.error('cofecha 执行失败', err);
+            }
             emitRender();
         } catch (error) {
             console.error("读取文件时出错:", error);
@@ -173,27 +223,24 @@ export default function Home() {
             const rwlStr = formateRwlFromMapToString(rwlEditorRef.current.getData());
             await writeTextFile(filePathRef.current, rwlStr);
             console.log("文件已成功保存到:", filePathRef.current);
-            setIsModified(false); // 文件保存后标记为未修改
-            console.log(rwlStr);
+            // 更新基准数据并清除修改标志
+            originalDataRef.current = rwlEditorRef.current.getData();
+            setIsModified(false);
 
-            await runCofecha(rwlStr);
-            await readCofechaFile();
+            try {
+                const baseName = (filePathRef.current as string).split(/\\|\//).pop() || "INPUT.RWL";
+                const outText = await runCofecha(rwlStr, baseName, filePathRef.current as string);
+                outFileContent.current = outText;
+                const result = parseCofechaResult(outText);
+                setCofechaResult(result);
+                setPotentialProblemsDetail(result.possibleProblemsDetail);
+                cofechaParts.current = splitReportByParts(outText);
+            } catch (err) {
+                console.error('cofecha 执行失败', err);
+            }
         } catch (error) {
             console.error("写入文件时出错:", error);
         }
-    }
-
-    const readCofechaFile = async () => {
-        outFileContent.current = await readOutFile();
-        emitRender()
-        const result = parseCofechaResult(outFileContent.current)
-        console.log(result);
-
-        setCofechaResult(result)
-        // 左下角潜在问题内容
-        setPotentialProblemsDetail(result.possibleProblemsDetail)
-        // 分割报告内容
-        cofechaParts.current = splitReportByParts(outFileContent.current)
     }
 
     const HandleSaveAs = async () => {
@@ -218,6 +265,7 @@ export default function Home() {
             // 写入文件
             await writeTextFile(filePathToSave, rwlStr);
             console.log("文件已成功保存到:", filePathToSave);
+            originalDataRef.current = rwlEditorRef.current.getData();
             setIsModified(false); // 文件保存后标记为未修改
         } catch (error) {
             console.error("写入文件时出错:", error);
@@ -235,8 +283,7 @@ export default function Home() {
             return;
         }
         rwlEditorRef.current.insertYear(selectedTree, yearToInsert);
-        markAsModified()
-        emitRender()
+        // 编辑器自身回调会处理修改标记和渲染
     }
 
     const HandleDelete = () => {
@@ -250,51 +297,53 @@ export default function Home() {
             return;
         }
         rwlEditorRef.current.deleteYear(selectedTree, yearToDelete);
-        markAsModified()
-        emitRender()
+        // 编辑器自身回调会处理修改标记和渲染
     }
 
     const HandleUndo = () => {
         rwlEditorRef.current.undo();
-        setIsModified(true);
-        emitRender();
+        // 回调会设置 isModified 及 trigger render
     };
 
     const HandleRedo = () => {
         rwlEditorRef.current.redo();
-        setIsModified(true);
-        emitRender();
+        // 回调会设置 isModified 及 trigger render
     };
 
     const handleGridClick = (year: number) => {
         setYear(year.toString());
     };
 
+    // 包装菜单项回调，使执行后自动关闭顶级菜单
+    const closeAnd = (fn: (() => any) | undefined) => {
+        return async () => {
+            try {
+                if (fn) await fn();
+            } finally {
+                setActiveMenu(null);
+            }
+        };
+    };
+
     const menuEditItems = [
-        { label: '撤销', onClick: HandleUndo },
-        { label: '恢复', onClick: HandleRedo },
-        // {
-        //     label: '文件(F)',
-        //     children: (
-        //         <div>
-        //             <MenuItem label="新建文件" />
-        //             <MenuItem label="打开文件" />
-        //             <MenuItem label="保存" />
-        //             <MenuItem label="另存为" />
-        //         </div>
-        //     ),
-        // },
+        { label: '撤销', onClick: closeAnd(HandleUndo) },
+        { label: '恢复', onClick: closeAnd(HandleRedo) },
         { label: '查找' },
         { label: '替换' },
     ];
 
     const menuFileItems = [
-        { label: '打开文件', onClick: HandleLoad },
-        { label: '保存', onClick: HandleSave },
-        { label: '另存为', onClick: HandleSaveAs },
+        { label: '打开文件', onClick: closeAnd(HandleLoad) },
+        { label: '保存', onClick: closeAnd(HandleSave) },
+        { label: '另存为', onClick: closeAnd(HandleSaveAs) },
     ];
 
     const [activeMenu, setActiveMenu] = useState<"file" | "edit" | null>(null);
+    const activeMenuRef = useRef<"file" | "edit" | null>(null);
+    // 同步 ref
+    useEffect(() => {
+        activeMenuRef.current = activeMenu;
+    }, [activeMenu]);
 
     // 用 useRef 存储根节点，避免重复创建
     const fileMenuRoot = useRef<Root | null>(null);
@@ -313,6 +362,7 @@ export default function Home() {
             editMenuRoot.current = createRoot(menuContainerEdit);
             editMenuRoot.current.render(<Menu items={menuEditItems} />);
         }
+
 
         // **2️⃣ 监听点击事件（只绑定一次）**
         interface ClickTarget {
@@ -337,32 +387,50 @@ export default function Home() {
 
         const handleFileButtonClick = (e: MenuClickEvent) => {
             e.stopPropagation();
-            activeMenu === "file" ? setActiveMenu(null) : setActiveMenu("file")
+            activeMenuRef.current === "file" ? setActiveMenu(null) : setActiveMenu("file");
         };
-
-        titleMenuFileButton?.addEventListener("click", handleFileButtonClick);
 
         const handleEditButtonClick = (e: MenuClickEvent) => {
             e.stopPropagation();
-            activeMenu === "edit" ? setActiveMenu(null) : setActiveMenu("edit")
+            activeMenuRef.current === "edit" ? setActiveMenu(null) : setActiveMenu("edit");
         };
+
+        titleMenuFileButton?.addEventListener("click", handleFileButtonClick);
         titleMenuEditButton?.addEventListener("click", handleEditButtonClick);
+
+        // 鼠标悬停时切换菜单（仅当已有活动菜单）
+        const handleFileMouseEnter = () => {
+            if (activeMenuRef.current && activeMenuRef.current !== "file") {
+                setActiveMenu("file");
+            }
+        };
+        const handleEditMouseEnter = () => {
+            if (activeMenuRef.current && activeMenuRef.current !== "edit") {
+                setActiveMenu("edit");
+            }
+        };
+        titleMenuFileButton?.addEventListener("mouseenter", handleFileMouseEnter);
+        titleMenuEditButton?.addEventListener("mouseenter", handleEditMouseEnter);
+
 
         return () => {
             document.removeEventListener("click", handleClickOutside);
-            document.removeEventListener("click", handleFileButtonClick);
-            document.removeEventListener("click", handleEditButtonClick);
+            titleMenuFileButton?.removeEventListener("click", handleFileButtonClick);
+            titleMenuEditButton?.removeEventListener("click", handleEditButtonClick);
+            titleMenuFileButton?.removeEventListener("mouseenter", handleFileMouseEnter);
+            titleMenuEditButton?.removeEventListener("mouseenter", handleEditMouseEnter);
         };
     }, []); // ✅ `useEffect` 只执行一次，避免重复绑定事件
 
     // **3️⃣ 仅在 activeMenu 变化时更新 UI**
     useEffect(() => {
+        // 使用 class 而非 inline style 来避免覆盖 CSS
         document.querySelectorAll(".title-menu-item").forEach(button => {
-            (button as HTMLElement).style.backgroundColor = "transparent";
+            button.classList.remove("title-menu-item-active");
         });
 
         const activeButton = document.getElementById(`title-submenu-${activeMenu}-button`);
-        if (activeButton) activeButton.style.backgroundColor = "#e8e8e8";
+        if (activeButton) activeButton.classList.add("title-menu-item-active");
 
         const menuContainerFile = document.getElementById("title-submenu-file-container");
         const menuContainerEdit = document.getElementById("title-submenu-edit-container");

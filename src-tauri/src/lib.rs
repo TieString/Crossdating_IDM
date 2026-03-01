@@ -12,7 +12,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![commands::greet, commands::list_files_and_directories]) // 绑定命令
+        .invoke_handler(tauri::generate_handler![commands::greet, commands::list_files_and_directories, commands::write_out_next_to_rwl]) // 绑定命令
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+

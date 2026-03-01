@@ -19,7 +19,12 @@ const MenuItem: React.FC<MenuItemProps> = ({ label, onClick, isActive, children 
       }}
     >
       <div className={style["menu-item-label"]}>{label}</div>
-      {isActive && children && <div className={style["subMenu"]}>{children}</div>}
+      {/* 始终在 DOM 中渲染子菜单，通过 CSS 控制显示（hover 或 active） */}
+      {children && (
+        <div className={`${style["subMenu"]} ${isActive ? style["subMenuVisible"] : ""}`}>
+          {children}
+        </div>
+      )}
     </div>
   );
 };

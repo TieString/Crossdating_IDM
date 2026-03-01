@@ -124,10 +124,34 @@ export class RwlEditor {
     private rwlData: RwlSiteData; // 现在存储的是 RwlSiteData
     private undoStack: RwlSiteData[] = [];
     private redoStack: RwlSiteData[] = [];
+    /** 可选的变更回调，编辑器每次修改数据时调用 */
+    private changeCallback?: () => void;
 
     constructor(initialData: RwlSiteData) {
         this.rwlData = new Map(initialData); // 复制初始数据，避免修改原始对象
     }
+
+    /**
+     * 注册一个在数据更改时触发的回调。
+     * 这样外部可以监听编辑器状态变化，例如标记文件为已修改。
+     */
+    registerChangeCallback(cb: () => void) {
+        this.changeCallback = cb;
+    }
+
+    /**
+     * 内部便捷函数，在执行完修改操作后调用 changeCallback（如果存在）。
+     */
+    private notifyChange() {
+        if (this.changeCallback) {
+            try {
+                this.changeCallback();
+            } catch (e) {
+                console.error("RwlEditor change callback threw:", e);
+            }
+        }
+    }
+
 
     // 获取当前 RWL 数据
     getData(): RwlSiteData {
@@ -145,6 +169,7 @@ export class RwlEditor {
 
         let updatedTree = insertYearToRwl(treeData, year);
         this.rwlData.set(tree, updatedTree);
+        this.notifyChange();
     }
 
     // 删年：在 year 处删除 0
@@ -158,6 +183,7 @@ export class RwlEditor {
 
         let updatedTree = deleteYearFromRwl(treeData, year);
         this.rwlData.set(tree, updatedTree);
+        this.notifyChange();
     }
 
     changeYearWidth(tree: string, year: number, width: number | null): void {
@@ -170,6 +196,7 @@ export class RwlEditor {
 
         let updatedTree = changeYearWidth(treeData, year, width);
         this.rwlData.set(tree, updatedTree);
+        this.notifyChange();
     }
 
     // 撤销（Undo）
@@ -177,6 +204,7 @@ export class RwlEditor {
         if (this.undoStack.length === 0) return;
         this.redoStack.push(new Map(this.rwlData));
         this.rwlData = this.undoStack.pop()!;
+        this.notifyChange();
     }
 
     // 恢复（Redo）
@@ -184,6 +212,7 @@ export class RwlEditor {
         if (this.redoStack.length === 0) return;
         this.undoStack.push(new Map(this.rwlData));
         this.rwlData = this.redoStack.pop()!;
+        this.notifyChange();
     }
 
     // 记录当前状态到 Undo 栈

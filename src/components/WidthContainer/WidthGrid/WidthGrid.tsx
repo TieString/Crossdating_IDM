@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import style from './WidthGrid.module.css'
-import { callChangeYearWidth } from '@/features/rwl/rwlOperator';
+import { callChangeYearWidth } from '@/features/rwl/edit';
 
 
 export default function WidthGrid({ year, tree, gridValue, masterSeriesValue, isEditable = false, onYearClick }: {
