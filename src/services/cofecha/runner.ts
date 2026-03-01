@@ -1,8 +1,9 @@
 import { Command } from "@tauri-apps/plugin-shell";
-import { writeTextFile, readTextFile, exists, remove } from "@tauri-apps/plugin-fs";
+import { readTextFile, exists, remove } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
 import { invoke } from "@tauri-apps/api/core";
-import { getCofechaWorkDir } from "@/services/fs";
+import { clearWorkDir, getCofechaWorkDir } from "@/services/fs";
+import { saveFile } from "../fs/io";
 
 const COFECHA_SIDECAR_NAME = "bin/cofecha";
 
@@ -11,6 +12,11 @@ export async function runCofecha(
   inputFileName?: string,
   sourceRwlPath?: string
 ): Promise<string> {
+  const cleanResult = await clearWorkDir();
+  if (cleanResult.failedPaths.length > 0) {
+    console.warn("workspace cleanup had failures:", cleanResult.failedPaths);
+  }
+
   const workDir = await getCofechaWorkDir();
   const defaultInputName = "INPUT.RWL";
 
@@ -21,7 +27,7 @@ export async function runCofecha(
   const runtimeInputName = hasNonAsciiName ? defaultInputName : requestedName;
   const inputPath = await join(workDir, runtimeInputName);
 
-  await writeTextFile(inputPath, rwlText);
+  await saveFile(inputPath, rwlText);
 
   const command = Command.sidecar(COFECHA_SIDECAR_NAME, [], {
     cwd: workDir,

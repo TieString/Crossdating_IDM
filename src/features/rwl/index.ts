@@ -1,4 +1,5 @@
 export * from "./types"
+export * from "./detect"
 
 import { RwlReadOptions, RwlReadResult, RwlFormat } from "./types";
 import { detectPrecision, detectRwlFormat } from "./detect";

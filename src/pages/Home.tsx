@@ -12,7 +12,7 @@ import style from "./Home.module.css";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { readTextFile } from "@tauri-apps/plugin-fs";
 import { RwlEditor, formateRwlFromMapToString, registerChangeYearWidth } from "@/features/rwl/edit";
 import type { RwlSiteData } from "@/features/rwl/types";
 import Menu from "@/components/Menu/Menu.tsx";
@@ -22,7 +22,7 @@ import { parseCofechaResult, splitReportByParts } from "@/features/cofecha/forma
 import { ICofechaResult } from "@/features/cofecha/types.ts";
 import { TreeChartManager } from "@/components/Chart/TreeChartManager.tsx";
 import { runCofecha } from "@/services/cofecha/runner.ts";
-import { readRwlFile } from "@/features/rwl/io";
+import { readRwlFile, saveFile } from "@/services/fs/io";
 
 
 // Extend HTMLElement type
@@ -221,7 +221,7 @@ export default function Home() {
 
         try {
             const rwlStr = formateRwlFromMapToString(rwlEditorRef.current.getData());
-            await writeTextFile(filePathRef.current, rwlStr);
+            await saveFile(filePathRef.current, rwlStr);
             console.log("文件已成功保存到:", filePathRef.current);
             // 更新基准数据并清除修改标志
             originalDataRef.current = rwlEditorRef.current.getData();
@@ -263,7 +263,7 @@ export default function Home() {
             }
             const rwlStr = formateRwlFromMapToString(rwlEditorRef.current.getData())
             // 写入文件
-            await writeTextFile(filePathToSave, rwlStr);
+            await saveFile(filePathToSave, rwlStr);
             console.log("文件已成功保存到:", filePathToSave);
             originalDataRef.current = rwlEditorRef.current.getData();
             setIsModified(false); // 文件保存后标记为未修改
