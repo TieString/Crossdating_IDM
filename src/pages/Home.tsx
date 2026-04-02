@@ -183,7 +183,9 @@ export default function Home() {
             const content = await readTextFile(filePath);
             // 提取并存储数据 编号：(year:width)
             const rwlData = await readRwlFile(filePath); // 解析 RWL 内容并更新状态
-            if (rwlData.data) {
+            if (rwlData.data) { 
+                console.log(rwlData.data);
+                
                 rwlEditorRef.current = new RwlEditor(rwlData.data);
                 setupEditor(rwlEditorRef.current);
                 originalDataRef.current = rwlEditorRef.current.getData();

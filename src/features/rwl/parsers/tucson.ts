@@ -18,12 +18,22 @@ function splitFixed(line: string, widths: number[]): string[] {
   return out;
 }
 
-function detectHeaderAuto(firstDataLine: string): boolean {
+function isLikelyYear(yr: number | null): boolean {
+  return yr !== null && yr >= -10000 && yr <= 10000;
+}
+
+function detectHeaderAuto(firstDataLine: string, long: boolean): boolean {
   if (firstDataLine.length < 12) return true;
-  const yearStr = firstDataLine.slice(8, 12);
-  const yr = Number(yearStr.trim());
-  if (!Number.isFinite(yr) || !Number.isInteger(yr) || yr < -10000 || yr > 10000) return true;
-  return false;
+
+  // Tucson has both 8+4(short) and 7+5(long) variants. In auto mode,
+  // treat either valid year field as "no header" to avoid over-skipping.
+  const shortYear = toIntOrNull(firstDataLine.slice(8, 12));
+  const longYear = toIntOrNull(firstDataLine.slice(7, 12));
+
+  if (long) {
+    return !isLikelyYear(longYear);
+  }
+  return !(isLikelyYear(shortYear) || isLikelyYear(longYear));
 }
 
 export function parseTucson(text: string, opts: RwlReadOptions = {}): RwlReadResult {
@@ -37,7 +47,7 @@ export function parseTucson(text: string, opts: RwlReadOptions = {}): RwlReadRes
 
   let skip = 0;
   if (header === true) skip = 3;
-  if (header === "auto") skip = detectHeaderAuto(raw[0]) ? 3 : 0;
+  if (header === "auto") skip = detectHeaderAuto(raw[0], long) ? 3 : 0;
 
   const lines = raw.slice(skip);
   const data: RwlSiteData = new Map();
@@ -56,22 +66,29 @@ export function parseTucson(text: string, opts: RwlReadOptions = {}): RwlReadRes
     let yearRaw = "";
     let valFields: string[] = [];
 
-    if (line.includes("\t")) {
+    const padded = line.length < totalWidth ? line.padEnd(totalWidth, " ") : line;
+    const fields = splitFixed(padded, widths);
+    idRaw = fields[0];
+    yearRaw = fields[1];
+    valFields = fields.slice(2);
+
+    let id = idRaw.trim();
+    let year0 = toIntOrNull(yearRaw);
+
+    // Fallback for whitespace-separated Tucson variants: if fixed-width
+    // id/year are not reliable, retry with token parsing.
+    const fixedLooksBad = !id || /\s/.test(id) || year0 === null;
+    if (fixedLooksBad) {
       const toks = line.trim().split(/\s+/);
-      if (toks.length < 2) continue;
-      idRaw = toks[0];
-      yearRaw = toks[1];
-      valFields = toks.slice(2, 2 + 11);
-    } else {
-      const padded = line.length < totalWidth ? line.padEnd(totalWidth, " ") : line;
-      const fields = splitFixed(padded, widths);
-      idRaw = fields[0];
-      yearRaw = fields[1];
-      valFields = fields.slice(2);
+      if (toks.length >= 2) {
+        idRaw = toks[0];
+        yearRaw = toks[1];
+        valFields = toks.slice(2, 2 + 11);
+        id = idRaw.trim();
+        year0 = toIntOrNull(yearRaw);
+      }
     }
 
-    const id = idRaw.trim();
-    const year0 = toIntOrNull(yearRaw);
     if (!id || year0 === null) {
       warnings.push(`tucson: skip line ${li + 1} (bad id/year)`);
       continue;
