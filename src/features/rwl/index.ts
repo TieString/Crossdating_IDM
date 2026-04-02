@@ -1,6 +1,13 @@
 export * from "./types"
 export * from "./detect"
 
+// RWL 解析入口。
+// 这里不直接做格式处理，而是负责：
+// 1. 识别输入文本的格式；
+// 2. 推导 stop marker；
+// 3. 按优先级依次调用具体解析器。
+// 这样上层只需要调用 readRwlString，就能拿到统一的解析结果。
+
 import { RwlReadOptions, RwlReadResult, RwlFormat } from "./types";
 import { detectPrecision, detectRwlFormat } from "./detect";
 import { RwlParseError } from "./errors";
@@ -33,13 +40,13 @@ export async function readRwlString(text: string, opts: RwlReadOptions = {}): Pr
 
   const detected = detectRwlFormat(text);
 
-  // 检测命中优先，其余作为回退
+  // 先尝试命中的格式，其余格式作为回退顺序。
   const fallback: RwlFormat[] = ["tucson", "compact", "heidelberg", "csv", "tridas"];
   const order: RwlFormat[] = detected === "unknown"
     ? fallback
     : [detected, ...fallback.filter(f => f !== detected)];
 
-  // 如果没有定义opts，则调用detectPrecision来检测文本中是否包含-9999，并将结果添加到opts中
+  // stopMarker 未显式传入时，从文本中自动推导
   if (opts.stopMarker === undefined) {
     opts.stopMarker = await detectPrecision(text);
   }

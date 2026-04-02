@@ -2,6 +2,12 @@ import { exists, readTextFile } from "@tauri-apps/plugin-fs";
 import { ICofechaResult } from "./types";
 import { getCofechaWorkDir } from "@/services/fs/workspace";
 import { join } from "@tauri-apps/api/path";
+// COFECHA 输出解析模块。
+// 这里的目标不是完整理解报告全文，而是提取前端真正需要展示的部分：
+// 1. PART 1 中的统计摘要；
+// 2. PART 3 中的主序列相关数据；
+// 3. PART 6 中的潜在问题详情。
+// 解析结果会被整理成统一的 ICofechaResult，供页面层直接消费。
 /**
  * 从工作空间读取COFECHA输出文件内容的异步函数
  * @returns {Promise<string>} 返回一个Promise，解析为文件内容字符串
@@ -25,7 +31,7 @@ const readOutFile = async (): Promise<string> => {
 }
 
 const parseCofechaResult = (content: string): ICofechaResult => {
-    // 解析数据
+    // 先按 PART 拆分，再从各部分提取前端需要的摘要字段。
     const reportParts = splitReportByParts(content);
 
     const part1 = reportParts.get("PART 1") || "";
@@ -56,6 +62,7 @@ const parseCofechaResult = (content: string): ICofechaResult => {
 }
 
 function extractMasterSeriesYear(text: string): string {
+    // 提取主序列年份范围，例如 1791-2023。
     const match = text.match(/Master series\s+(\d{4})\s+(\d{4})\s+(\d+)/);
     if (match) {
         return `${match[1]}-${match[2]}`; // 返回格式为 "1791-2023"
@@ -64,6 +71,7 @@ function extractMasterSeriesYear(text: string): string {
 }
 
 function extractSeriesIntercorrelation(text: string): number {
+    // 提取序列相关系数。
     const match = text.match(/Series intercorrelation\s+([\d.]+)/);
     if (match) {
         return parseFloat(match[1]); // 转换为浮点数
@@ -72,6 +80,7 @@ function extractSeriesIntercorrelation(text: string): number {
 }
 
 function extractAverageMeanSensitivity(text: string): number {
+    // 提取平均灵敏度。
     const match = text.match(/Average mean sensitivity\s+([\d.]+)/);
     if (match) {
         return parseFloat(match[1]); // 转换为浮点数
@@ -80,6 +89,7 @@ function extractAverageMeanSensitivity(text: string): number {
 }
 
 function extractPossibleProblemsCount(text: string): number {
+    // 提取可能存在问题的段数。
     const match = text.match(/Segments, possible problems\s+(\d+)/);
 
     if (match) {
@@ -89,6 +99,7 @@ function extractPossibleProblemsCount(text: string): number {
 }
 
 function extractMeanLength(text: string): number {
+    // 提取平均序列长度。
     const match = text.match(/Mean length of series\s+([\d.]+)/);
     if (match) {
         return parseFloat(match[1]); // 转换为浮点数
@@ -100,11 +111,11 @@ function extractMeanLength(text: string): number {
 function extractMasterDatingSeries(text: string): Map<number, number> {
     const masterDatingSeries = new Map<number, number>();
 
-    // 正则匹配：年份（4位）、相关性值（可带负号和小数点）
+    // 正则匹配：年份（4位）、相关性值（可带负号和小数点）。
     const regex = /(\d{4})\s+([-+]?\d*\.\d+|\d+)/g;
     let match;
 
-    // 逐步解析每个匹配项
+    // 逐步解析每个匹配项。
     while ((match = regex.exec(text)) !== null) {
         const year = parseInt(match[1], 10); // 提取年份
         const value = parseFloat(match[2]); // 提取相关性值
@@ -119,14 +130,14 @@ function extractMasterDatingSeries(text: string): Map<number, number> {
 export function splitReportByParts(text: string): Map<string, string> {
  const parts = new Map<string, string>();
 
-    // 1. 先提取 PART 1（从文件开头到 PART 2: 之前）
+    // 先提取 PART 1（从文件开头到 PART 2: 之前）。
     const part2Index = text.indexOf("PART 2:");
     if (part2Index !== -1) {
         const part1Content = text.substring(0, part2Index).trim();
         parts.set("PART 1", part1Content);
     }
 
-    // 2. 处理 PART 2: 及后续 PART X:
+    // 再处理 PART 2 及后续 PART X 段，并把同号分页续页合并起来。
     const regex = /(PART \d+:.*?)(?=(PART \d+:|$))/gs;
     let match;
 

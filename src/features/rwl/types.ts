@@ -30,8 +30,17 @@ export interface RwlReadOptions {
   preferFormat?: Exclude<RwlFormat, "unknown">; // 强制按某格式解析
 }
 
+// RWL 解析结果。包含数据和格式元信息，用于格式透明性：
+// 打开什么格式的 RWL，保存时保持同样格式。
+// readOptions 由各解析器填充，在 RwlEditor 中保存，导出时复现格式。
+// 详见 RWL_FORMAT_SPEC.md#格式透明性原则
 export interface RwlReadResult {
   format: RwlFormat;
   data: RwlSiteData;
   warnings: string[];
+  // 记录解析时使用的关键参数，以便后续导出时复原格式
+  readOptions?: {
+    tucsonLong?: boolean;        // Tucson 格式：true 为 7 列，false 为 8 列
+    edgeZeros?: boolean;         // 是否保留边界 0
+  };
 }

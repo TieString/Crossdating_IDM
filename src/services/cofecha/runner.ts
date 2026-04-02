@@ -7,6 +7,12 @@ import { saveFile } from "../fs/io";
 
 const COFECHA_SIDECAR_NAME = "bin/cofecha";
 
+// COFECHA 执行入口。
+// 这个函数负责把 RWL 文本写到临时工作目录，启动 sidecar，读取 VERYCOF.OUT，
+// 再把结果返回给前端。它同时处理两个约束：
+// 1. 每次执行前清空 COFECHA 工作目录；
+// 2. 非 ASCII 输入名在当前集成方式下不稳定，因此会降级为默认文件名。
+
 export async function runCofecha(
   rwlText: string,
   inputFileName?: string,
@@ -23,7 +29,7 @@ export async function runCofecha(
   const requestedName =
     inputFileName && inputFileName.trim().length > 0 ? inputFileName : defaultInputName;
   const hasNonAsciiName = /[^\x00-\x7F]/.test(requestedName);
-  // COFECHA stdin is unstable with non-ASCII file names in this integration.
+  // 当前集成下，COFECHA 对非 ASCII 文件名不稳定，因此这里统一降级。
   const runtimeInputName = hasNonAsciiName ? defaultInputName : requestedName;
   const inputPath = await join(workDir, runtimeInputName);
 
@@ -48,7 +54,7 @@ export async function runCofecha(
 
         if (await exists(outPath)) {
           const outRawText = await readTextFile(outPath);
-          // If runtime name was downgraded to ASCII, patch display name back in the OUT text.
+          // 如果运行时文件名被降级成 ASCII，把展示名补回 OUT 文本中。
           const outText =
             runtimeInputName !== requestedName
               ? outRawText.split(runtimeInputName).join(requestedName)

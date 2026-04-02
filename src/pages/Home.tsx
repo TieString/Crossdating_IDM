@@ -1,12 +1,10 @@
-// TODO:
-/** 1.保存后自动使用COFECHA检验 √
- *  2.加载CHFECHA内容，并提取最重要部分，主序列系数显示（将小于-1的值高亮出来，越小越亮） √
- *  3.悬浮在宽度上提示年份 √
- *  4.编辑操作撤销重做 √
- *  5.曲线图 √
- *  6.双击更改年份内容 √
- *  7.年轮宽度示意图 
- * */
+// Home 页面是整个应用的工作流编排入口。
+// 这里负责把“打开文件 -> 解析 RWL -> 编辑 -> 保存 -> 运行 COFECHA -> 解析结果”串成一条完整链路。
+// 页面本身不负责具体格式解析或 COFECHA 细节，只负责状态管理、事件绑定和 UI 刷新。
+
+// 功能路线图：
+// 已完成：保存后自动运行 COFECHA、读取 COFECHA 输出、悬浮提示年份、撤销重做、曲线图、双击修改年份。
+// 待完善：更细的 COFECHA 结果高亮、年轮宽度示意图等视觉增强。
 
 import style from "./Home.module.css";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -40,9 +38,12 @@ const formatTitle = (fileName: string | null, isModified: boolean) => {
 
 export default function Home() {
 
+    // 主要数据状态：RWL 编辑器、原始快照、文件路径和 COFECHA 结果。
     const rwlEditorRef = useRef<RwlEditor>(new RwlEditor(new Map()));// 存储 rwl_data 的 ref 结构化的宽度数据
     // 保存加载/最后一次保存时的基准数据，用于和当前编辑器内容比较
     const originalDataRef = useRef<RwlSiteData>(new Map());
+
+    // 文件与树种选择状态。
     const [treeOptions, setTreeOptions] = useState<string[]>([])  // 存储树种选项
     const [selectedTree, setSelectedTree] = useState<string>("全部");  // 存储选中的树种编号
 
@@ -56,12 +57,15 @@ export default function Home() {
     const filePathRef = useRef<string | null>(null);
     const [fileName, setFileName] = useState<string | null>(null); // 存储文件名
     const [isModified, setIsModified] = useState(false); // 记录文件是否被修改
+
+    // COFECHA 输出与结果面板状态。
     const outFileContent = useRef<string>("")
     const [potentialProblemsDetail, setPotentialProblemsDetail] = useState<Map<string, string>>(new Map)
     const [cofechaResult, setCofechaResult] = useState<ICofechaResult>()
     const [selectedPart, setSelectedPart] = useState("全部"); // 选中的部分
     const cofechaParts = useRef<Map<string, string>>(new Map);
 
+    // 通过一个无意义的状态值强制刷新，避免直接依赖深层 Map 变化。
     const [_, setRender] = useState(0); // 只是用来触发重新渲染
     const emitRender = () => {
         setRender(prev => prev + 1); // 触发重新渲染
@@ -151,7 +155,7 @@ export default function Home() {
 
 
 
-    // 读取文件的处理
+    // 打开并读取 RWL 文件，同时触发解析、初始化编辑器和 COFECHA 运行。
     const HandleLoad = async () => {
         try {
             // 打开文件选择对话框，让用户选择要读取的文件
@@ -186,7 +190,8 @@ export default function Home() {
             if (rwlData.data) { 
                 console.log(rwlData.data);
                 
-                rwlEditorRef.current = new RwlEditor(rwlData.data);
+                // 创建编辑器时传递原始格式信息，以便保存时复现
+                rwlEditorRef.current = new RwlEditor(rwlData.data, rwlData.readOptions);
                 setupEditor(rwlEditorRef.current);
                 originalDataRef.current = rwlEditorRef.current.getData();
                 const options = Array.from(rwlData.data.keys());  // 获取所有键名
@@ -215,6 +220,7 @@ export default function Home() {
         }
     }
 
+    // 将当前编辑器状态格式化回 RWL，并保存到原文件。
     const HandleSave = async () => {
         if (!filePathRef.current) {
             console.log("请先打开一个文件");
@@ -222,7 +228,14 @@ export default function Home() {
         }
 
         try {
-            const rwlStr = formateRwlFromMapToString(rwlEditorRef.current.getData());
+            // 保存时传递原始格式信息，复现源文件的格式
+            const rwlStr = formateRwlFromMapToString(
+                rwlEditorRef.current.getData(),
+                undefined,
+                {
+                    tucsonLong: rwlEditorRef.current.getReadOptions()?.tucsonLong
+                }
+            );
             await saveFile(filePathRef.current, rwlStr);
             console.log("文件已成功保存到:", filePathRef.current);
             // 更新基准数据并清除修改标志
@@ -245,6 +258,7 @@ export default function Home() {
         }
     }
 
+    // 另存为：当前实现保留入口，但仍依赖已有文件路径。
     const HandleSaveAs = async () => {
         try {
             // 如果没有文件路径，提示用户保存文件
@@ -263,7 +277,14 @@ export default function Home() {
                 console.log("用户取消了保存操作");
                 return;
             }
-            const rwlStr = formateRwlFromMapToString(rwlEditorRef.current.getData())
+            // 保存时传递原始格式信息，复现源文件的格式
+            const rwlStr = formateRwlFromMapToString(
+                rwlEditorRef.current.getData(),
+                undefined,
+                {
+                    tucsonLong: rwlEditorRef.current.getReadOptions()?.tucsonLong
+                }
+            )
             // 写入文件
             await saveFile(filePathToSave, rwlStr);
             console.log("文件已成功保存到:", filePathToSave);

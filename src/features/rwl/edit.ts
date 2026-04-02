@@ -1,8 +1,17 @@
-import { RwlTreeData } from "./types";
-import { message } from '@tauri-apps/plugin-dialog';
+import { RwlTreeData, RwlReadResult } from "./types";
 import { RwlSiteData } from './types';
 import { stopMarker } from "@/shared/constants";
 
+// RWL 编辑模块。
+// 这里集中处理两类事情：
+// 1. 在内存里对树轮宽度数据做结构化编辑；
+// 2. 在读取与导出之间完成 RWL 文本和 Map 结构的互转。
+// 页面层只需要调用 RwlEditor，不需要关心具体的行宽格式和年份偏移规则。
+//
+// 格式透明性设计：
+// - RwlEditor 记录原始格式信息 (readOptions)
+// - formateRwlFromMapToString 支持格式参数，保存时复现原格式
+// 详见 RWL_FORMAT_SPEC.md#格式透明性原则
 
 // 插年：在year处插入0，之前的年份总体向前移动1年，最新年份不变
 function insertYearToRwl(rwlData: RwlTreeData, year: number): RwlTreeData {
@@ -36,48 +45,14 @@ function changeYearWidth(rwlData: RwlTreeData, year: number, width: number | nul
 }
 
 
-export function readRwlToMap(rwl_str: string): RwlSiteData | undefined {
-    // 使用 \r\n 将字符串按行分割
-    const lines = rwl_str.split(/\r?\n/)
-    let rwl_data: RwlSiteData = new Map()
-
-    if (!lines || lines.length < 1) {
-        message('没有数据或内容格式错误', { title: '错误', kind: 'error' })
-        return undefined
-    }
-
-    // 遍历每一行
-    lines.forEach(line => {
-        if (!line.trim()) return;
-        // 使用正则表达式将每 6 个字符分割
-        const parts = line.match(/.{6}/g)
-
-        if (!parts) return
-
-        // 获取年份和宽度
-        const tree_code: string = parts[0]
-        const year: number = parseInt(parts[1])
-        const width_array: (number | null)[] = parts.slice(2).map(s => {
-            const trimmed = s.trim()
-            return trimmed === '' ? null : Number(trimmed)
-        })
-        // 将数据存入字典
-        if (!rwl_data.has(tree_code)) {
-            rwl_data.set(tree_code, new Map())
-        }
-        width_array.forEach((width, index) => {
-            rwl_data.get(tree_code)?.set(year + index, width)
-        })
-    })
-
-    return rwl_data
-}
-
 // 将RwlTreeData类型的数据格式化为字符串，以样点名称 年份 宽度 宽度 宽度...的格式输出，每整十年换行
 export function formateRwlFromMapToString(
     rwl_data: RwlSiteData,
-    selectedTree?: string
+    selectedTree?: string,
+    options?: { tucsonLong?: boolean }
 ): string {
+    // 样点编号宽度：true 为 7 列（长格式），false 为 8 列（短格式）
+    const idWidth = options?.tucsonLong ? 7 : 8;
     // 可选：只导出选中树
     if (selectedTree && selectedTree !== '全部') {
         const treeData = rwl_data.get(selectedTree)
@@ -100,7 +75,7 @@ export function formateRwlFromMapToString(
             // 新行：首行或整十年或上一年是中断
             if (isFirst || isTenth || interrupt_flag) {
                 if (!isFirst) rwl_str += '\r\n'
-                rwl_str += treeCode.padStart(6, ' ') + year.toString().padStart(6, ' ') + widthStr
+                rwl_str += treeCode.padStart(idWidth, ' ') + year.toString().padStart(6, ' ') + widthStr
                 interrupt_flag = false
             } else {
                 rwl_str += widthStr
@@ -122,13 +97,15 @@ export function formateRwlFromMapToString(
 
 export class RwlEditor {
     private rwlData: RwlSiteData; // 现在存储的是 RwlSiteData
+    private readOptions?: RwlReadResult['readOptions']; // 记录原始格式信息
     private undoStack: RwlSiteData[] = [];
     private redoStack: RwlSiteData[] = [];
-    /** 可选的变更回调，编辑器每次修改数据时调用 */
+    /** 可选的变更回调，编辑器每次修改数据时调用。 */
     private changeCallback?: () => void;
 
-    constructor(initialData: RwlSiteData) {
+    constructor(initialData: RwlSiteData, options?: RwlReadResult['readOptions']) {
         this.rwlData = new Map(initialData); // 复制初始数据，避免修改原始对象
+        this.readOptions = options; // 保存格式信息（不可变元数据）
     }
 
     /**
@@ -156,6 +133,11 @@ export class RwlEditor {
     // 获取当前 RWL 数据
     getData(): RwlSiteData {
         return new Map(this.rwlData);
+    }
+
+    // 获取原始格式信息（用于保存时复现格式）
+    getReadOptions(): RwlReadResult['readOptions'] {
+        return this.readOptions;
     }
 
     // 插年：在 year 处插入 0

@@ -16,6 +16,13 @@ import {
 } from 'chart.js'
 import { useEffect, useState, useRef } from 'react'
 
+// 多折线图组件。
+// 输入是已经筛选好的树种年份数据，组件负责：
+// 1. 清洗和整理数据；
+// 2. 构造 Chart.js 所需的 datasets；
+// 3. 处理高亮、缩放、平移和键盘微调交互。
+// 这个组件只关注图表展示，不关心文件读取或 RWL 解析。
+
 // 注册插件
 ChartJS.register(
   LineElement,
@@ -70,7 +77,7 @@ export function MultiLineChart({ data }: Props) {
   const chartRef = useRef<ChartJSInstance<'line'> | null>(null)
   const zoomStateRef = useRef<{ min: number; max: number } | null>(null)
 
-  // 保存缩放状态
+  // 保存缩放状态。
   const saveZoomState = () => {
     const chart = chartRef.current
     if (!chart) return
@@ -78,7 +85,7 @@ export function MultiLineChart({ data }: Props) {
     zoomStateRef.current = { min: scale.min, max: scale.max }
   }
 
-  // 恢复缩放状态
+  // 恢复缩放状态。
   const restoreZoomState = () => {
     const chart = chartRef.current
     if (!chart || !zoomStateRef.current) return
@@ -89,7 +96,7 @@ export function MultiLineChart({ data }: Props) {
     chart.update()
   }
 
-  // 初始清洗数据
+  // 初始清洗数据：去掉最后一个年份，并按树种整理成适合绘图的格式。
   useEffect(() => {
     const trimmed = new Map<string, Map<number, number>>()
     data.forEach((yearMap, treeCode) => {
@@ -108,14 +115,14 @@ export function MultiLineChart({ data }: Props) {
     setChartDataMap(trimmed)
   }, [data])
 
-  // 所有年份
+  // 汇总所有年份，用作图表横轴。
   const allYearsSet = new Set<number>()
   chartDataMap.forEach(yearMap => {
     yearMap.forEach((_, year) => allYearsSet.add(year))
   })
   const allYears = Array.from(allYearsSet).sort((a, b) => a - b)
 
-  // 构造 datasets
+  // 构造 Chart.js datasets。
   const datasets: ChartData<'line'>['datasets'] = []
   let colorIndex = 0
   chartDataMap.forEach((yearMap, treeCode) => {
@@ -143,7 +150,7 @@ export function MultiLineChart({ data }: Props) {
     datasets
   }
 
-  // 键盘 ← → 移动折线
+  // 键盘左右键移动当前高亮折线。
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (highlightedIndex === null) return
@@ -171,12 +178,12 @@ export function MultiLineChart({ data }: Props) {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [highlightedIndex, chartDataMap])
 
-  // 恢复缩放状态（在数据变更后）
+  // 数据变更后恢复缩放状态。
   useEffect(() => {
     restoreZoomState()
   }, [highlightedIndex, chartDataMap])
 
-  // Y轴范围
+  // 根据当前数据计算 Y 轴范围，给曲线留出上下边距。
   let globalMin = Number.POSITIVE_INFINITY
   let globalMax = Number.NEGATIVE_INFINITY
   chartDataMap.forEach(yearMap => {
@@ -243,7 +250,7 @@ export function MultiLineChart({ data }: Props) {
     }
   }
 
-  // 点击高亮折线 + 保存缩放
+  // 点击折线时切换高亮，并保存当前缩放状态。
   const handleLineChartClick = (
     event: unknown,
     chart: ChartJS<'line'> | null,

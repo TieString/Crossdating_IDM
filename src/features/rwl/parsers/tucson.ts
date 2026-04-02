@@ -8,6 +8,18 @@ import {
 } from "../normalize";
 import { RwlParseError } from "../errors";
 
+// Tucson/ITRDB 格式解析器。
+// 支持两种变体：
+// - 短格式（8+4）：编号 8 列，年份 4 列
+// - 长格式（7+5）：编号 7 列，年份 5 列（用于负年代）
+// 
+// 关键特性：
+// 1. 自动检测 long/short 格式（当 opts.long 未指定时）
+// 2. 推导 stop marker 值
+// 3. 返回 readOptions 用于格式透明性（保存时复现原格式）
+// 
+// 详见 RWL_FORMAT_SPEC.md#Tucson 格式规范
+
 function splitFixed(line: string, widths: number[]): string[] {
   let pos = 0;
   const out: string[] = [];
@@ -37,13 +49,30 @@ function detectHeaderAuto(firstDataLine: string, long: boolean): boolean {
 }
 
 export function parseTucson(text: string, opts: RwlReadOptions = {}): RwlReadResult {
-  const long = opts.long ?? false;
   const edgeZeros = opts.edgeZeros ?? true;
   const stopMarker = opts.stopMarker ?? -9999;
   const header = opts.header ?? "auto";
 
   const raw = nonEmptyNonCommentLines(splitLines(stripBom(text)));
-  if (raw.length === 0) return { format: "tucson", data: new Map(), warnings: [] };
+  if (raw.length === 0) return { format: "tucson", data: new Map(), warnings: [], readOptions: { tucsonLong: false, edgeZeros } };
+
+  // 自动检测 long/short 格式（若未明确指定）
+  let long: boolean = opts.long ?? false; // 默认为 false（8 列短格式）
+  const autoDetectLong = opts.long === undefined;
+  if (autoDetectLong) {
+    // 尝试从第一个有效行推断格式
+    // 短格式（8+4）vs 长格式（7+5）
+    const firstLine = raw[0];
+    const shortYear = toIntOrNull(firstLine.slice(8, 12));
+    const longYear = toIntOrNull(firstLine.slice(7, 12));
+    
+    // 优先选择能解析出有效年份的格式
+    if (isLikelyYear(longYear) && !isLikelyYear(shortYear)) {
+      long = true;
+    } else {
+      long = false;
+    }
+  }
 
   let skip = 0;
   if (header === true) skip = 3;
@@ -122,5 +151,13 @@ export function parseTucson(text: string, opts: RwlReadOptions = {}): RwlReadRes
   }
 
   if (data.size === 0) throw new RwlParseError("tucson: no series parsed", "tucson");
-  return { format: "tucson", data, warnings };
+  return {
+    format: "tucson",
+    data,
+    warnings,
+    readOptions: {
+      tucsonLong: long,
+      edgeZeros,
+    },
+  };
 }
