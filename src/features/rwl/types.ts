@@ -23,6 +23,10 @@ export interface RwlReadOptions {
   stopMarker?: number;            // 默认 -9999
   header?: boolean | "auto";      // heidelberg / tucson 是否自动跳过 header
 
+  // FH/Heidelberg 特定参数
+  fhDataFormat?: "column" | "block" | "auto";  // 数据格式：列格式、块格式、自动检测
+  fhUnit?: { multiplier: number; divisor: number };  // Unit 转换参数
+
   // CSV 解析参数
   csvDelimiter?: "," | ";" | "\t";
 
@@ -42,5 +46,7 @@ export interface RwlReadResult {
   readOptions?: {
     tucsonLong?: boolean;        // Tucson 格式：true 为 7 列，false 为 8 列
     edgeZeros?: boolean;         // 是否保留边界 0
+    fhDataFormat?: "column" | "block";  // FH 数据格式
+    fhUnit?: { multiplier: number; divisor: number };  // FH Unit 参数
   };
 }

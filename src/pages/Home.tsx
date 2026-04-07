@@ -499,8 +499,11 @@ export default function Home() {
                         <button onClick={HandleDelete}>删除</button>
                     </div>
                     <div className={`${style["data-container"]} ${activeMenu ? style["z-index-1"] : ""}`}>
-                        {/* 加载图片，居中展示，加透明度，在打开文件后隐藏，检查如果treeOptions有值则隐藏 */}
-                        <img src="IDM.png" className={`${style["loading-image"]} ${treeOptions.length > 0 ? style["hidden"] : ""}`} />
+                        {/* 加载界面：图片在上，开发者信息在下，文件加载后隐藏 */}
+                        <div className={`${style["loading-container"]} ${treeOptions.length > 0 ? style["hidden"] : ""}`}>
+                            <img src="IDM.png" className={style["loading-image"]} />
+                            <p className={style["developers"]}>开发者：何志浩、张同文、张瑞波、靳春寒、喻树龙、尚华明、秦莉</p>
+                        </div>
 
                         <WidthContainer
                             siteData={rwlEditorRef.current.getData()}

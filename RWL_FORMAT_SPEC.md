@@ -262,9 +262,77 @@ const rwlStr = formateRwlFromMapToString(
 | 格式 | 解析器 | 支持程度 | 说明 |
 |------|--------|--------|------|
 | Compact/DPLR | [src/features/rwl/parsers/compact.ts](src/features/rwl/parsers/compact.ts) | ✅ 完整 | 3 列：series year value |
-| Heidelberg/FH | [src/features/rwl/parsers/heidelberg.ts](src/features/rwl/parsers/heidelberg.ts) | ✅ 完整 | Tucson 变体，头部有 `HEADER:` |
+| Heidelberg/FH | [src/features/rwl/parsers/heidelberg.ts](src/features/rwl/parsers/heidelberg.ts) | ✅ 完整 | Header 元数据 + 列/块格式数据 |
 | CSV | [src/features/rwl/parsers/csv.ts](src/features/rwl/parsers/csv.ts) | ✅ 完整 | 自动检测方言和布局 |
 | TRiDaS | [src/features/rwl/parsers/tridas.ts](src/features/rwl/parsers/tridas.ts) | ✅ 完整 | XML 树轮标准格式 |
+
+### FH/Heidelberg 格式详解
+
+FH 格式（DENDRO 标准）与 Tucson 的核心区别：
+
+**1. 文件结构**
+
+```
+HEADER:
+KeyCode=TREE001
+Length=100
+DateEnd=2020
+DateBegin=1921
+Unit=0.01mm
+...
+
+DATA:Tree
+[数据行]
+
+HEADER:
+KeyCode=TREE002
+...
+
+DATA:Tree
+[数据行]
+```
+
+**2. 必要元数据**
+
+| 字段 | 用途 | 示例 |
+|------|------|------|
+| `KeyCode` | 树/序列编号 | `TREE001` |
+| `Length` | 序列长度（年数） | `100` |
+| `DateEnd` | 结束年份 | `2020` |
+| `DateBegin` | 开始年份（可选，能从 Length 推导） | `1921` |
+| `Unit` | 单位换算因子，格式：`分子/分母` 或仅分子 | `0.01` → ÷100；`1/50` → 乘 1÷50 |
+
+**3. 数据格式的自动检测**
+
+```typescript
+// 列格式：行长 < 60 字符 或 包含注释符 ;
+// 例：
+123 456 789
+120  // 单个值每行
+
+// 块格式：行长 ≥ 60 字符，无注释符，每行 10 个 6 字符字段
+// 例：
+123456789456123456789456123456789456123456789456123456789456
+(每个数字段落 6 字符宽)
+```
+
+**4. 格式透明性**
+
+FH 读取时记录：
+- `fhDataFormat`：`"column"` 或 `"block"`
+- `fhUnit`：`{ multiplier, divisor }`
+
+导出时复现相同格式和单位。
+
+**5. 实现细节（[src/features/rwl/parsers/heidelberg.ts](src/features/rwl/parsers/heidelberg.ts)）**
+
+关键步骤：
+1. 解析 HEADER 块提取元数据（KeyCode、Length、DateEnd、DateBegin、Unit）
+2. 为每个 DATA 块匹配最近的前置 HEADER 块
+3. 检测数据格式（列 vs 块）
+4. 按格式读取数据值
+5. **应用 Unit 转换**（规约到标准单位）
+6. **验证**：读取值数 应等于 `DateEnd - DateBegin + 1`
 
 ---
 
