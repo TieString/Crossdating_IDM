@@ -6,6 +6,10 @@
     cursor: text;
     /* 让伪元素相对于它定位 */
     position: relative;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     /* z-index: -1; */
 }
 

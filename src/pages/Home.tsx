@@ -63,6 +63,7 @@ export default function Home() {
     const [potentialProblemsDetail, setPotentialProblemsDetail] = useState<Map<string, string>>(new Map)
     const [cofechaResult, setCofechaResult] = useState<ICofechaResult>()
     const [selectedPart, setSelectedPart] = useState("全部"); // 选中的部分
+    const [cofechaVersion, setCofechaVersion] = useState<"cofecha" | "cofecha12k">("cofecha"); // COFECHA 版本选择
     const cofechaParts = useRef<Map<string, string>>(new Map);
 
     // 通过一个无意义的状态值强制刷新，避免直接依赖深层 Map 变化。
@@ -204,7 +205,7 @@ export default function Home() {
             // 等待 cofecha 完成并获取输出文本，传入原始文件名以便 OUT 中显示该名称
             try {
                 const baseName = (filePath as string).split(/\\|\//).pop() || "INPUT.RWL";
-                const outText = await runCofecha(content, baseName, filePath as string);
+                const outText = await runCofecha(content, baseName, filePath as string, cofechaVersion);
                 // 处理结果与 UI 更新
                 outFileContent.current = outText;
                 const result = parseCofechaResult(outText);
@@ -244,7 +245,7 @@ export default function Home() {
 
             try {
                 const baseName = (filePathRef.current as string).split(/\\|\//).pop() || "INPUT.RWL";
-                const outText = await runCofecha(rwlStr, baseName, filePathRef.current as string);
+                const outText = await runCofecha(rwlStr, baseName, filePathRef.current as string, cofechaVersion);
                 outFileContent.current = outText;
                 const result = parseCofechaResult(outText);
                 setCofechaResult(result);
@@ -355,14 +356,31 @@ export default function Home() {
         { label: '替换' },
     ];
 
+    const menuRunItems = [
+        {
+            label: `${cofechaVersion === 'cofecha' ? '✓ ' : ''}COFECHA`,
+            onClick: () => {
+                setCofechaVersion('cofecha');
+                setActiveMenu(null);
+            }
+        },
+        {
+            label: `${cofechaVersion === 'cofecha12k' ? '✓ ' : ''}COFECHA 12K`,
+            onClick: () => {
+                setCofechaVersion('cofecha12k');
+                setActiveMenu(null);
+            }
+        },
+    ];
+
     const menuFileItems = [
         { label: '打开文件', onClick: closeAnd(HandleLoad) },
         { label: '保存', onClick: closeAnd(HandleSave) },
         { label: '另存为', onClick: closeAnd(HandleSaveAs) },
     ];
 
-    const [activeMenu, setActiveMenu] = useState<"file" | "edit" | null>(null);
-    const activeMenuRef = useRef<"file" | "edit" | null>(null);
+    const [activeMenu, setActiveMenu] = useState<"file" | "edit" | "run" | null>(null);
+    const activeMenuRef = useRef<"file" | "edit" | "run" | null>(null);
     // 同步 ref
     useEffect(() => {
         activeMenuRef.current = activeMenu;
@@ -371,10 +389,12 @@ export default function Home() {
     // 用 useRef 存储根节点，避免重复创建
     const fileMenuRoot = useRef<Root | null>(null);
     const editMenuRoot = useRef<Root | null>(null);
+    const runMenuRoot = useRef<Root | null>(null);
 
     useEffect(() => {
         const menuContainerFile = document.getElementById("title-submenu-file-container");
         const menuContainerEdit = document.getElementById("title-submenu-edit-container");
+        const menuContainerRun = document.getElementById("title-submenu-run-container");
 
         // **1️⃣ 只在第一次渲染时创建 React Root**
         if (!fileMenuRoot.current && menuContainerFile) {
@@ -384,6 +404,13 @@ export default function Home() {
         if (!editMenuRoot.current && menuContainerEdit) {
             editMenuRoot.current = createRoot(menuContainerEdit);
             editMenuRoot.current.render(<Menu items={menuEditItems} />);
+        }
+        if (!runMenuRoot.current && menuContainerRun) {
+            runMenuRoot.current = createRoot(menuContainerRun);
+            runMenuRoot.current.render(<Menu items={menuRunItems} />);
+        } else if (runMenuRoot.current && menuContainerRun) {
+            // 当选中的引擎变化时，重新渲染菜单
+            runMenuRoot.current.render(<Menu items={menuRunItems} />);
         }
 
 
@@ -395,7 +422,8 @@ export default function Home() {
         const handleClickOutside = (event: MouseEvent & ClickTarget) => {
             if (
                 !menuContainerFile?.contains(event.target as Node) &&
-                !menuContainerEdit?.contains(event.target as Node)
+                !menuContainerEdit?.contains(event.target as Node) &&
+                !menuContainerRun?.contains(event.target as Node)
             ) {
                 setActiveMenu(null);
             }
@@ -403,6 +431,7 @@ export default function Home() {
         document.addEventListener("click", handleClickOutside);
         const titleMenuFileButton = document.getElementById("title-submenu-file-button");
         const titleMenuEditButton = document.getElementById("title-submenu-edit-button");
+        const titleMenuRunButton = document.getElementById("title-submenu-run-button");
         // 添加点击事件监听器
         interface MenuClickEvent extends MouseEvent {
             target: EventTarget | null;
@@ -418,8 +447,14 @@ export default function Home() {
             activeMenuRef.current === "edit" ? setActiveMenu(null) : setActiveMenu("edit");
         };
 
+        const handleRunButtonClick = (e: MenuClickEvent) => {
+            e.stopPropagation();
+            activeMenuRef.current === "run" ? setActiveMenu(null) : setActiveMenu("run");
+        };
+
         titleMenuFileButton?.addEventListener("click", handleFileButtonClick);
         titleMenuEditButton?.addEventListener("click", handleEditButtonClick);
+        titleMenuRunButton?.addEventListener("click", handleRunButtonClick);
 
         // 鼠标悬停时切换菜单（仅当已有活动菜单）
         const handleFileMouseEnter = () => {
@@ -432,18 +467,26 @@ export default function Home() {
                 setActiveMenu("edit");
             }
         };
+        const handleRunMouseEnter = () => {
+            if (activeMenuRef.current && activeMenuRef.current !== "run") {
+                setActiveMenu("run");
+            }
+        };
         titleMenuFileButton?.addEventListener("mouseenter", handleFileMouseEnter);
         titleMenuEditButton?.addEventListener("mouseenter", handleEditMouseEnter);
+        titleMenuRunButton?.addEventListener("mouseenter", handleRunMouseEnter);
 
 
         return () => {
             document.removeEventListener("click", handleClickOutside);
             titleMenuFileButton?.removeEventListener("click", handleFileButtonClick);
             titleMenuEditButton?.removeEventListener("click", handleEditButtonClick);
+            titleMenuRunButton?.removeEventListener("click", handleRunButtonClick);
             titleMenuFileButton?.removeEventListener("mouseenter", handleFileMouseEnter);
             titleMenuEditButton?.removeEventListener("mouseenter", handleEditMouseEnter);
+            titleMenuRunButton?.removeEventListener("mouseenter", handleRunMouseEnter);
         };
-    }, []); // ✅ `useEffect` 只执行一次，避免重复绑定事件
+    }, [cofechaVersion]); // ✅ 当 cofechaVersion 变化时重新渲染菜单
 
     // **3️⃣ 仅在 activeMenu 变化时更新 UI**
     useEffect(() => {
@@ -457,16 +500,24 @@ export default function Home() {
 
         const menuContainerFile = document.getElementById("title-submenu-file-container");
         const menuContainerEdit = document.getElementById("title-submenu-edit-container");
+        const menuContainerRun = document.getElementById("title-submenu-run-container");
 
         if (activeMenu === "file") {
             if (menuContainerFile) menuContainerFile.style.display = "block";
             if (menuContainerEdit) menuContainerEdit.style.display = "none";
+            if (menuContainerRun) menuContainerRun.style.display = "none";
         } else if (activeMenu === "edit") {
             if (menuContainerEdit) menuContainerEdit.style.display = "block";
             if (menuContainerFile) menuContainerFile.style.display = "none";
+            if (menuContainerRun) menuContainerRun.style.display = "none";
+        } else if (activeMenu === "run") {
+            if (menuContainerRun) menuContainerRun.style.display = "block";
+            if (menuContainerFile) menuContainerFile.style.display = "none";
+            if (menuContainerEdit) menuContainerEdit.style.display = "none";
         } else {
             if (menuContainerFile) menuContainerFile.style.display = "none";
             if (menuContainerEdit) menuContainerEdit.style.display = "none";
+            if (menuContainerRun) menuContainerRun.style.display = "none";
         }
     }, [activeMenu]); // ✅ 仅当 `activeMenu` 变化时更新 UI
 

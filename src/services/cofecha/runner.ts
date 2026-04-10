@@ -5,24 +5,30 @@ import { invoke } from "@tauri-apps/api/core";
 import { clearWorkDir, getCofechaWorkDir } from "@/services/fs";
 import { saveFile } from "../fs/io";
 
+type CofechaVersion = "cofecha" | "cofecha12k";
+
 const COFECHA_SIDECAR_NAME = "bin/cofecha";
+const COFECHA12K_SIDECAR_NAME = "bin/cofecha12k";
 
 // COFECHA 执行入口。
 // 这个函数负责把 RWL 文本写到临时工作目录，启动 sidecar，读取 VERYCOF.OUT，
 // 再把结果返回给前端。它同时处理两个约束：
 // 1. 每次执行前清空 COFECHA 工作目录；
 // 2. 非 ASCII 输入名在当前集成方式下不稳定，因此会降级为默认文件名。
+// 参数 version 用于选择 COFECHA 或 COFECHA12K（默认为 "cofecha"）。
 
 export async function runCofecha(
   rwlText: string,
   inputFileName?: string,
-  sourceRwlPath?: string
+  sourceRwlPath?: string,
+  version: CofechaVersion = "cofecha"
 ): Promise<string> {
   const cleanResult = await clearWorkDir();
   if (cleanResult.failedPaths.length > 0) {
     console.warn("workspace cleanup had failures:", cleanResult.failedPaths);
   }
 
+  const sidecarName = version === "cofecha12k" ? COFECHA12K_SIDECAR_NAME : COFECHA_SIDECAR_NAME;
   const workDir = await getCofechaWorkDir();
   const defaultInputName = "INPUT.RWL";
 
@@ -35,7 +41,7 @@ export async function runCofecha(
 
   await saveFile(inputPath, rwlText);
 
-  const command = Command.sidecar(COFECHA_SIDECAR_NAME, [], {
+  const command = Command.sidecar(sidecarName, [], {
     cwd: workDir,
     encoding: "utf-8",
   });

@@ -12,26 +12,45 @@ interface MenuProps {
 
 const Menu: React.FC<MenuProps> = ({ items }) => {
   const [activeMenuItem, setActiveMenuItem] = useState<string | null>(null);
-  const handleMenuClick = (label: string, onClick?: () => void) => {
-    setActiveMenuItem((prev) => (prev === label ? null : label));
-    if (onClick) {
-      setActiveMenuItem(null)
+  
+  const handleMenuClick = (onClick?: () => void, hasChildren?: boolean) => {
+    // 如果有 onClick（没有子菜单的项），执行 onClick 并关闭菜单
+    if (onClick && !hasChildren) {
       onClick();
+      setActiveMenuItem(null);
+    }
+  };
+
+  const handleMenuMouseEnter = (label: string, hasChildren?: boolean) => {
+    // 只有有子菜单的项才在 hover 时打开
+    if (hasChildren) {
+      setActiveMenuItem(label);
     }
   };
 
   return (
     <div className={styles["subMenu"]}>
-      {items.map((item, index) => (
-        <MenuItem
-          isActive={activeMenuItem === item.label}
-          key={index}
-          label={item.label}
-          onClick={() => handleMenuClick(item.label, item.onClick)}
-        >
-          {item.children}
-        </MenuItem>
-      ))}
+      {items.map((item, index) => {
+        const hasChildren = !!item.children;
+        return (
+          <MenuItem
+            isActive={activeMenuItem === item.label}
+            key={index}
+            label={item.label}
+            onClick={() => handleMenuClick(item.onClick, hasChildren)}
+            onMouseEnter={() => handleMenuMouseEnter(item.label, hasChildren)}
+            onMouseLeave={() => {
+              // 只有当菜单项没有子菜单时，鼠标离开才关闭
+              // 有子菜单的项会通过鼠标进入子菜单来保持打开状态
+              if (!hasChildren) {
+                setActiveMenuItem(null);
+              }
+            }}
+          >
+            {item.children}
+          </MenuItem>
+        );
+      })}
     </div>
   );
 };

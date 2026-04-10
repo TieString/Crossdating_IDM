@@ -36,7 +36,8 @@
       }
     },
     "externalBin":[
-      "bin/cofecha"
+      "bin/cofecha",
+      "bin/cofecha12k"
     ]
   }
 }
