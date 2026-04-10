@@ -229,12 +229,12 @@ export default function Home() {
         }
 
         try {
-            // 保存时传递原始格式信息，复现源文件的格式
+            const readOpts = rwlEditorRef.current.getReadOptions();
             const rwlStr = formateRwlFromMapToString(
                 rwlEditorRef.current.getData(),
                 undefined,
                 {
-                    tucsonLong: rwlEditorRef.current.getReadOptions()?.tucsonLong
+                    tucsonLong: readOpts?.tucsonLong
                 }
             );
             await saveFile(filePathRef.current, rwlStr);
@@ -278,15 +278,14 @@ export default function Home() {
                 console.log("用户取消了保存操作");
                 return;
             }
-            // 保存时传递原始格式信息，复现源文件的格式
+            const readOpts = rwlEditorRef.current.getReadOptions();
             const rwlStr = formateRwlFromMapToString(
                 rwlEditorRef.current.getData(),
                 undefined,
                 {
-                    tucsonLong: rwlEditorRef.current.getReadOptions()?.tucsonLong
+                    tucsonLong: readOpts?.tucsonLong
                 }
-            )
-            // 写入文件
+            );
             await saveFile(filePathToSave, rwlStr);
             console.log("文件已成功保存到:", filePathToSave);
             originalDataRef.current = rwlEditorRef.current.getData();

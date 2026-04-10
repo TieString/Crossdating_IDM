@@ -42,7 +42,6 @@ export interface RwlReadResult {
   format: RwlFormat;
   data: RwlSiteData;
   warnings: string[];
-  // 记录解析时使用的关键参数，以便后续导出时复原格式
   readOptions?: {
     tucsonLong?: boolean;        // Tucson 格式：true 为 7 列，false 为 8 列
     edgeZeros?: boolean;         // 是否保留边界 0

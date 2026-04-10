@@ -51,8 +51,8 @@ export function formateRwlFromMapToString(
     selectedTree?: string,
     options?: { tucsonLong?: boolean }
 ): string {
-    // 样点编号宽度：true 为 7 列（长格式），false 为 8 列（短格式）
     const idWidth = options?.tucsonLong ? 7 : 8;
+    const yearWidth = options?.tucsonLong ? 5 : 4;
     // 可选：只导出选中树
     if (selectedTree && selectedTree !== '全部') {
         const treeData = rwl_data.get(selectedTree)
@@ -75,7 +75,8 @@ export function formateRwlFromMapToString(
             // 新行：首行或整十年或上一年是中断
             if (isFirst || isTenth || interrupt_flag) {
                 if (!isFirst) rwl_str += '\r\n'
-                rwl_str += treeCode.padStart(idWidth, ' ') + year.toString().padStart(6, ' ') + widthStr
+                // 序列编号左对齐（padEnd），年份和数据右对齐（padStart）
+                rwl_str += treeCode.padEnd(idWidth, ' ') + year.toString().padStart(yearWidth, ' ') + widthStr
                 interrupt_flag = false
             } else {
                 rwl_str += widthStr

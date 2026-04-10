@@ -151,6 +151,7 @@ export function parseTucson(text: string, opts: RwlReadOptions = {}): RwlReadRes
   }
 
   if (data.size === 0) throw new RwlParseError("tucson: no series parsed", "tucson");
+
   return {
     format: "tucson",
     data,
