@@ -4,6 +4,12 @@
     gap: 12px;
 }
 
+.series-block {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
 .series-row {
     display: grid;
     grid-template-columns: repeat(12, minmax(0, 1fr)); /* 允许列收缩，避免被长文本撑宽 */

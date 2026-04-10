@@ -1,4 +1,4 @@
-import { Fragment, ReactNode } from 'react';
+import { ReactNode } from 'react';
 import { RwlSiteData } from '@/features/rwl';
 import WidthGrid from './WidthGrid/WidthGrid';
 import style from "./WidthContainer.module.css"
@@ -10,6 +10,11 @@ interface YearCell {
     isInterruptPad?: boolean;
 }
 
+interface SeriesRow {
+    startYear: number;
+    cells: YearCell[];
+}
+
 
 export default function ({ siteData: site, masterSeries, selected, onYearClick }: {
     siteData: RwlSiteData,
@@ -17,6 +22,7 @@ export default function ({ siteData: site, masterSeries, selected, onYearClick }
     selected?: string,
     onYearClick?: (year: number) => void
 }): ReactNode {
+    // 支持按序列筛选：仅渲染选中的树木编号。
     const visibleSite = selected && selected !== '全部'
         ? (() => {
             const treeData = site.get(selected);
@@ -34,84 +40,90 @@ export default function ({ siteData: site, masterSeries, selected, onYearClick }
         <div className={style["width-grid-container"]}>
             {Array.from(visibleSite.entries()).map(([key, value]) => {
                 const entries = Array.from(value.entries());
-                const firstYear = entries[0]?.[0];
-                if (firstYear === undefined) {
+                if (entries.length === 0) {
                     return null;
                 }
 
-                const yearCells = new Map<number, YearCell>();
+                // timeline 是序列内部的线性单元流：真实值 + 中断后灰色占位。
+                const timeline: YearCell[] = [];
 
                 for (let i = 0; i < entries.length; i++) {
                     const [year, width] = entries[i];
-                    yearCells.set(year, { year, width });
+                    timeline.push({ year, width });
 
-                    // 仅在中断标记之后补齐缺失年份（灰格），并保持年份对应
                     if (width === stopMarker.value && i < entries.length - 1) {
-                        const [nextYear] = entries[i + 1];
-                        for (let missingYear = year + 1; missingYear < nextYear; missingYear++) {
-                            yearCells.set(missingYear, { year: missingYear, isInterruptPad: true });
+                        let nextValidYear: number | undefined;
+                        for (let j = i + 1; j < entries.length; j++) {
+                            const [candidateYear, candidateWidth] = entries[j];
+                            if (candidateWidth !== stopMarker.value) {
+                                nextValidYear = candidateYear;
+                                break;
+                            }
+                        }
+
+                        if (nextValidYear !== undefined) {
+                            // stopMarker 与下一个有效值之间的年份，用灰格占位但不触发额外断行。
+                            for (let missingYear = year + 1; missingYear < nextValidYear; missingYear++) {
+                                timeline.push({ year: missingYear, isInterruptPad: true });
+                            }
                         }
                     }
                 }
 
-                const allYears = Array.from(yearCells.keys());
-                const maxYear = allYears.length > 0 ? Math.max(...allYears) : firstYear;
+                // 按 10 个数据格打包成行；每行前两列固定为编号和起始年份。
+                const rows: SeriesRow[] = [];
+                for (const cell of timeline) {
+                    const lastRow = rows[rows.length - 1];
+                    if (!lastRow || lastRow.cells.length >= 10) {
+                        rows.push({
+                            startYear: cell.year,
+                            cells: [cell]
+                        });
+                        continue;
+                    }
 
-                const firstDecadeStart = Math.floor(firstYear / 10) * 10;
-                const lastDecadeStart = Math.floor(maxYear / 10) * 10;
-
-                const decadeStarts: number[] = [];
-                for (let decade = firstDecadeStart; decade <= lastDecadeStart; decade += 10) {
-                    decadeStarts.push(decade);
+                    lastRow.cells.push(cell);
                 }
 
                 return (
-                    <Fragment key={key}>
-                        {decadeStarts.map((decadeStart) => {
-                            const rowLabelYear = decadeStart === firstDecadeStart ? firstYear : decadeStart;
-
+                    // 每个序列独立成块，避免某个序列布局异常影响其他序列。
+                    <div className={style["series-block"]} key={key}>
+                        {rows.map((row, rowIndex) => {
                             return (
-                                <div className={style["series-row"]} key={`${key}-${decadeStart}`}>
+                                <div className={style["series-row"]} key={`${key}-${rowIndex}-${row.startYear}`}>
                                     <WidthGrid gridValue={key} />
-                                    <WidthGrid gridValue={rowLabelYear} />
+                                    <WidthGrid gridValue={row.startYear} />
 
-                                    {Array.from({ length: 10 }, (_, offset) => {
-                                        const year = decadeStart + offset;
-                                        const beforeFirstYear = decadeStart === firstDecadeStart && year < firstYear;
-
-                                        if (beforeFirstYear) {
-                                            return <div key={`empty-${key}-${year}`}></div>;
-                                        }
-
-                                        const cell = yearCells.get(year);
-                                        if (!cell) {
-                                            return <div key={`empty-${key}-${year}`}></div>;
-                                        }
-
+                                    {row.cells.map((cell) => {
                                         if (cell.isInterruptPad) {
-                                            return <div className={style["interrupt-year"]} key={`interrupt-${key}-${year}`}></div>;
+                                            return <div className={style["interrupt-year"]} key={`interrupt-${key}-${cell.year}`} />;
                                         }
 
                                         if (cell.width === stopMarker.value) {
-                                            return <WidthGrid gridValue={cell.width} key={`stop-${key}-${year}`} />;
+                                            return <WidthGrid gridValue={cell.width} key={`stop-${key}-${cell.year}`} />;
                                         }
 
                                         return (
                                             <WidthGrid
-                                                key={`value-${key}-${year}`}
+                                                key={`value-${key}-${cell.year}`}
                                                 gridValue={cell.width ?? null}
-                                                year={year}
+                                                year={cell.year}
                                                 tree={key}
-                                                masterSeriesValue={masterSeries?.get(year)}
+                                                masterSeriesValue={masterSeries?.get(cell.year)}
                                                 isEditable={true}
                                                 onYearClick={handleYearClick}
                                             />
                                         );
                                     })}
+
+                                    {/* 尾部补空槽，保证每行数据区固定为 10 列。 */}
+                                    {Array.from({ length: 10 - row.cells.length }, (_, i) => (
+                                        <div key={`tail-empty-${key}-${rowIndex}-${i}`}></div>
+                                    ))}
                                 </div>
                             );
                         })}
-                    </Fragment>
+                    </div>
                 );
             })}
         </div>
