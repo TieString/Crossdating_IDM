@@ -1,16 +1,20 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, forwardRef } from 'react';
 import style from './WidthGrid.module.css'
 import { callChangeYearWidth } from '@/features/rwl/edit';
 
 
-export default function WidthGrid({ year, tree, gridValue, masterSeriesValue, isEditable = false, onYearClick }: {
-    year?: number,
-    tree?: string,
-    gridValue: string | number | null,
-    masterSeriesValue?: number,
-    isEditable?: boolean,
-    onYearClick?: (year: number) => void; // ✅ 传递点击的年份
-}) {
+export default forwardRef<HTMLSpanElement, React.HTMLAttributes<HTMLSpanElement> & {
+    year?: number;
+    tree?: string;
+    gridValue: string | number | null;
+    masterSeriesValue?: number;
+    isEditable?: boolean;
+    onYearClick?: (year: number) => void;
+}>(function WidthGrid({ 
+    year, tree, gridValue, masterSeriesValue, isEditable = false, onYearClick,
+    className = '', style: customStyle = {},
+    ...rest  // ✅ 捕获其他 HTML 属性
+}, ref) {
     const handleClick = () => {
         if (year !== undefined && onYearClick) {
             onYearClick(year); // 触发父组件的回调
@@ -70,23 +74,28 @@ export default function WidthGrid({ year, tree, gridValue, masterSeriesValue, is
         return masterSeriesValue !== undefined && masterSeriesValue < -1 ? "red" : "black";
     };
 
+    const windth_title = (year? year.toString():"") +"\n" + (masterSeriesValue ? masterSeriesValue.toString() : "");
+    const finalTitle = rest.title || windth_title;
+    const {title, ...restWithoutTitle} = rest; // 从 rest 中剥离 title，优先使用 props.title
+
     return (
-        <>
-            <span ref={spanRef}
-                onClick={handleClick} // ✅ 点击时触发 `onYearClick`
-                onDoubleClick={handleDoubleClick}
-                onBlur={handleBlur}
-                onKeyDown={handleKeyDown}
-                className={`${style["width-grid"]} ${gridValue === 0 ? style["highlight-zero"] : ""} ${isEditable ? "" : style["disabled"]}`}
-                title={(year ? year.toString() : "") + "\n" + (masterSeriesValue ? masterSeriesValue.toString() : "")}
-                style={{
-                    backgroundColor: getBackgroundColor(),
-                    color: getTextColor(),
-                    fontWeight: masterSeriesValue !== undefined && masterSeriesValue < -1 ? "bold" : "normal", // 小于 -1 加粗
-                }} // 动态背景 & 文字颜色
-            >
-                {gridValue}
-            </span>
-        </>
+        <span 
+            ref={spanRef}
+            title={finalTitle}
+            onClick={isEditable ? handleClick : undefined}
+            onDoubleClick={isEditable ? handleDoubleClick : undefined}
+            onBlur={handleBlur}
+            onKeyDown={handleKeyDown}
+            className={`${style["width-grid"]} ${className} ${gridValue === 0 ? style["highlight-zero"] : ""} ${isEditable ? "" : style["disabled"]}`}
+            style={{
+                backgroundColor: getBackgroundColor(),
+                color: getTextColor(),
+                fontWeight: masterSeriesValue !== undefined && masterSeriesValue < -1 ? "bold" : "normal", // 小于 -1 加粗
+                ...customStyle
+            }}
+            {...restWithoutTitle}  // ✅ 转发其他属性
+        >
+            {gridValue}
+        </span>
     )
-}
+})

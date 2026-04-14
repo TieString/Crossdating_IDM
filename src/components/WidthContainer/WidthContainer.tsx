@@ -85,13 +85,14 @@ export default function ({ siteData: site, masterSeries, selected, onYearClick }
                     lastRow.cells.push(cell);
                 }
 
+
                 return (
                     // 每个序列独立成块，避免某个序列布局异常影响其他序列。
                     <div className={style["series-block"]} key={key}>
                         {rows.map((row, rowIndex) => {
                             return (
                                 <div className={style["series-row"]} key={`${key}-${rowIndex}-${row.startYear}`}>
-                                    <WidthGrid gridValue={key} />
+                                    <WidthGrid gridValue={key} style={{ textAlign: 'left' }} title={key} />
                                     <WidthGrid gridValue={row.startYear} />
 
                                     {row.cells.map((cell) => {

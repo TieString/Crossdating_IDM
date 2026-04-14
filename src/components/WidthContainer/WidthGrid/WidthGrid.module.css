@@ -10,6 +10,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    text-align: right;
     /* z-index: -1; */
 }
 
@@ -29,7 +30,12 @@
 }
 
 .width-grid.disabled {
-    cursor: not-allowed;
-    pointer-events: none; /* 禁止鼠标点击事件 */
+    /* 视觉上禁用交互 */
+    cursor: default;     /* 改成默认光标 */
     /* opacity: 0.6; 让它变灰，表示不可编辑 */
+}
+
+.width-grid.disabled:hover {
+    /* 禁止悬停效果 */
+    outline: none;
 }

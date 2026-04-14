@@ -2,6 +2,7 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
+    font-family: "consolas";
 }
 
 .series-block {
@@ -12,10 +13,12 @@
 
 .series-row {
     display: grid;
-    grid-template-columns: repeat(12, minmax(0, 1fr)); /* 允许列收缩，避免被长文本撑宽 */
+    grid-template-columns: 60px repeat(11, minmax(0, 1fr));
     gap: 5px;
-    text-align: right;
-    font-family: "consolas";
+}
+
+.series-code-cell {
+    text-align: left;
 }
 
 .interrupt-year{
