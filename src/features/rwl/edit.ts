@@ -1,17 +1,13 @@
 import { RwlTreeData, RwlReadResult } from "./types";
 import { RwlSiteData } from './types';
-import { stopMarker } from "@/shared/constants";
+import { formatHandlers } from "./index";
 
-// RWL 编辑模块。
-// 这里集中处理两类事情：
-// 1. 在内存里对树轮宽度数据做结构化编辑；
-// 2. 在读取与导出之间完成 RWL 文本和 Map 结构的互转。
-// 页面层只需要调用 RwlEditor，不需要关心具体的行宽格式和年份偏移规则。
-//
-// 格式透明性设计：
-// - RwlEditor 记录原始格式信息 (readOptions)
-// - formateRwlFromMapToString 支持格式参数，保存时复现原格式
-// 详见 RWL_FORMAT_SPEC.md#格式透明性原则
+// RWL 编辑器
+// ===========
+// 负责记录 RWL 数据的编辑历史（undo/redo）和导出。
+// 
+// exportAsRwlString() 通过 formatHandlers 注册表自动选择相应的 format 函数，
+// 确保导出格式与读入时一致（通过 readOptions 记录的元数据）。
 
 // 插年：在year处插入0，之前的年份总体向前移动1年，最新年份不变
 function insertYearToRwl(rwlData: RwlTreeData, year: number): RwlTreeData {
@@ -45,68 +41,18 @@ function changeYearWidth(rwlData: RwlTreeData, year: number, width: number | nul
 }
 
 
-// 将RwlTreeData类型的数据格式化为字符串，以样点名称 年份 宽度 宽度 宽度...的格式输出，每整十年换行
-export function formateRwlFromMapToString(
-    rwl_data: RwlSiteData,
-    selectedTree?: string,
-    options?: { tucsonLong?: boolean }
-): string {
-    const idWidth = options?.tucsonLong ? 7 : 8;
-    const yearWidth = options?.tucsonLong ? 5 : 4;
-    // 可选：只导出选中树
-    if (selectedTree && selectedTree !== '全部') {
-        const treeData = rwl_data.get(selectedTree)
-        if (!treeData) return ''
-        rwl_data = new Map([[selectedTree, treeData]])
-    }
-
-    let rwl_str = ''
-
-    rwl_data.forEach((treeMap, treeCode) => {
-        const entries = Array.from(treeMap.entries()).sort((a, b) => a[0] - b[0]) // 按年份排序
-        let interrupt_flag = false // 中断标志 表示上一个值是否-9999
-        entries.forEach(([year, width], index) => {
-            const isFirst = index === 0
-            const isTenth = year % 10 === 0
-            const isLast = index === entries.length - 1
-
-            const widthStr = (width === null ? '' : width).toString().padStart(6, ' ')
-
-            // 新行：首行或整十年或上一年是中断
-            if (isFirst || isTenth || interrupt_flag) {
-                if (!isFirst) rwl_str += '\r\n'
-                // 序列编号左对齐（padEnd），年份和数据右对齐（padStart）
-                rwl_str += treeCode.padEnd(idWidth, ' ') + year.toString().padStart(yearWidth, ' ') + widthStr
-                interrupt_flag = false
-            } else {
-                rwl_str += widthStr
-            }
-
-            // 中断行（-9999 且不是最后一项）
-            if ((width === stopMarker.value) && !isLast) {
-                interrupt_flag = true
-            }
-        })
-
-        rwl_str += '\r\n' // 每棵树结束后换行
-    })
-
-    return rwl_str.trimEnd() + '\r\n'
-}
-
-
-
 export class RwlEditor {
-    private rwlData: RwlSiteData; // 现在存储的是 RwlSiteData
-    private readOptions?: RwlReadResult['readOptions']; // 记录原始格式信息
+    private rwlData: RwlSiteData;
+    private readOptions?: RwlReadResult['readOptions'];
+    private format: string = 'tucson'; // 记录原始读取格式
     private undoStack: RwlSiteData[] = [];
     private redoStack: RwlSiteData[] = [];
-    /** 可选的变更回调，编辑器每次修改数据时调用。 */
     private changeCallback?: () => void;
 
-    constructor(initialData: RwlSiteData, options?: RwlReadResult['readOptions']) {
-        this.rwlData = new Map(initialData); // 复制初始数据，避免修改原始对象
-        this.readOptions = options; // 保存格式信息（不可变元数据）
+    constructor(initialData: RwlSiteData, options?: RwlReadResult['readOptions'], format?: string) {
+        this.rwlData = new Map(initialData);
+        this.readOptions = options;
+        this.format = format || 'tucson'; // 默认 tucson
     }
 
     /**
@@ -201,6 +147,18 @@ export class RwlEditor {
     // 记录当前状态到 Undo 栈
     private saveToUndoStack(): void {
         this.undoStack.push(new Map(this.rwlData));
+    }
+
+    // 导出为 RWL 字符串，使用读取时的原始格式
+    // 通过 formatHandlers 注册表路由到相应的 format 函数
+    // 例：tucson 格式使用 formatTucson，并以 readOptions.tucsonLong 复现原始字段宽度
+    exportAsRwlString(selectedTree?: string): string {
+        const handler = formatHandlers[this.format as any as keyof typeof formatHandlers];
+        if (!handler || !handler.format) {
+            console.warn(`No format handler found for: ${this.format}`);
+            return '';
+        }
+        return handler.format(this.rwlData, this.readOptions, selectedTree);
     }
 }
 

@@ -11,7 +11,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { readTextFile } from "@tauri-apps/plugin-fs";
-import { RwlEditor, formateRwlFromMapToString, registerChangeYearWidth } from "@/features/rwl/edit";
+import { RwlEditor, registerChangeYearWidth } from "@/features/rwl/edit";
 import type { RwlSiteData } from "@/features/rwl/types";
 import Menu from "@/components/Menu/Menu.tsx";
 import { createRoot, Root } from "react-dom/client";
@@ -187,12 +187,12 @@ export default function Home() {
             // 读取文件内容
             const content = await readTextFile(filePath);
             // 提取并存储数据 编号：(year:width)
-            const rwlData = await readRwlFile(filePath); // 解析 RWL 内容并更新状态
+            const rwlData = await readRwlFile(filePath);
             if (rwlData.data) { 
                 console.log(rwlData.data);
                 
-                // 创建编辑器时传递原始格式信息，以便保存时复现
-                rwlEditorRef.current = new RwlEditor(rwlData.data, rwlData.readOptions);
+                // 创建编辑器，传递格式信息
+                rwlEditorRef.current = new RwlEditor(rwlData.data, rwlData.readOptions, rwlData.format);
                 setupEditor(rwlEditorRef.current);
                 originalDataRef.current = rwlEditorRef.current.getData();
                 const options = Array.from(rwlData.data.keys());  // 获取所有键名
@@ -229,14 +229,7 @@ export default function Home() {
         }
 
         try {
-            const readOpts = rwlEditorRef.current.getReadOptions();
-            const rwlStr = formateRwlFromMapToString(
-                rwlEditorRef.current.getData(),
-                undefined,
-                {
-                    tucsonLong: readOpts?.tucsonLong
-                }
-            );
+            const rwlStr = rwlEditorRef.current.exportAsRwlString();
             await saveFile(filePathRef.current, rwlStr);
             console.log("文件已成功保存到:", filePathRef.current);
             // 更新基准数据并清除修改标志
@@ -278,14 +271,7 @@ export default function Home() {
                 console.log("用户取消了保存操作");
                 return;
             }
-            const readOpts = rwlEditorRef.current.getReadOptions();
-            const rwlStr = formateRwlFromMapToString(
-                rwlEditorRef.current.getData(),
-                undefined,
-                {
-                    tucsonLong: readOpts?.tucsonLong
-                }
-            );
+            const rwlStr = rwlEditorRef.current.exportAsRwlString();
             await saveFile(filePathToSave, rwlStr);
             console.log("文件已成功保存到:", filePathToSave);
             originalDataRef.current = rwlEditorRef.current.getData();

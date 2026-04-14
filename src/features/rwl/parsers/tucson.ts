@@ -162,3 +162,48 @@ export function parseTucson(text: string, opts: RwlReadOptions = {}): RwlReadRes
     },
   };
 }
+
+// Tucson 格式导出：与 parseTucson 对称，确保读写一致
+export function formatTucson(
+  data: RwlSiteData,
+  long: boolean,
+  selectedTree?: string
+): string {
+  const idWidth = long ? 7 : 8;
+  const yearWidth = long ? 5 : 4;
+
+  if (selectedTree && selectedTree !== '全部') {
+    const treeData = data.get(selectedTree);
+    if (!treeData) return '';
+    data = new Map([[selectedTree, treeData]]);
+  }
+
+  let result = '';
+  data.forEach((treeMap, treeCode) => {
+    const entries = Array.from(treeMap.entries()).sort((a, b) => a[0] - b[0]);
+    let interruptFlag = false;
+
+    entries.forEach(([year, width], index) => {
+      const isFirst = index === 0;
+      const isTenth = year % 10 === 0;
+      const isLast = index === entries.length - 1;
+      const widthStr = (width === null ? '' : width).toString().padStart(6, ' ');
+
+      if (isFirst || isTenth || interruptFlag) {
+        if (!isFirst) result += '\r\n';
+        result += treeCode.padEnd(idWidth, ' ') + year.toString().padStart(yearWidth, ' ') + widthStr;
+        interruptFlag = false;
+      } else {
+        result += widthStr;
+      }
+
+      if (width === -9999 && !isLast) {
+        interruptFlag = true;
+      }
+    });
+
+    result += '\r\n';
+  });
+
+  return result.trimEnd() + '\r\n';
+}

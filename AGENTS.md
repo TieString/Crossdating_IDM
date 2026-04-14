@@ -45,6 +45,13 @@
 
 **验证**：打开 8 列编号 RWL → 编辑 → 保存 → 再打开 → 确认仍为 8 列；7 列格式同理
 
+### 统一格式处理器框架（已实现，2026-04-10）
+
+**模式**：每个格式的 parse 和 format 函数必须在同一文件，并通过 [src/features/rwl/index.ts](src/features/rwl/index.ts) 的 formatHandlers 注册表统一管理。
+- 新增格式时，在格式文件中同时实现 parse/format 函数
+- 在注册表中注册一次，自动被 RwlEditor 和读取入口使用
+- 详见 [src/features/rwl/index.ts](src/features/rwl/index.ts) 的注释和 [src/features/rwl/parsers/tucson.ts](src/features/rwl/parsers/tucson.ts) 的参考实现
+
 ## 编辑规则
 
 - 解析器、运行器和桥接层优先写模块级说明。
@@ -62,8 +69,8 @@
 
 1. [README.md](README.md)
 2. [AGENTS.md](AGENTS.md)
-3. [RWL_FORMAT_SPEC.md](RWL_FORMAT_SPEC.md) — 若要理解 RWL 格式和透明性设计
+3. [RWL_FORMAT_SPEC.md](RWL_FORMAT_SPEC.md) — 若要理解 RWL 格式设计
 4. [src/pages/Home.tsx](src/pages/Home.tsx)
-5. [src/features/rwl/index.ts](src/features/rwl/index.ts)
+5. [src/features/rwl/index.ts](src/features/rwl/index.ts) — 格式处理器注册表
 6. [src/services/cofecha/runner.ts](src/services/cofecha/runner.ts)
 7. [src-tauri/src/lib.rs](src-tauri/src/lib.rs)
