@@ -59,9 +59,14 @@ export function useResizablePanels() {
     const [layout, setLayout] = useState<StoredLayout>(() => readStoredLayout());
     const [draggingKey, setDraggingKey] = useState<LayoutKey | null>(null);
     const cleanupRef = useRef<(() => void) | null>(null);
+    const layoutRef = useRef<StoredLayout>(layout);
 
     useEffect(() => {
         window.localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(layout));
+    }, [layout]);
+
+    useEffect(() => {
+        layoutRef.current = layout;
     }, [layout]);
 
     useEffect(() => {
@@ -88,14 +93,15 @@ export function useResizablePanels() {
             const effectiveSize = Math.max(size, minStart + minEnd);
             const minRatio = minStart / effectiveSize;
             const maxRatio = 1 - minEnd / effectiveSize;
-            const pointerStart = axis === "x" ? rect.left : rect.top;
+            const pointerStart = axis === "x" ? event.clientX : event.clientY;
+            const startRatio = layoutRef.current[key];
             const cursor = axis === "x" ? "col-resize" : "row-resize";
             const originalUserSelect = document.body.style.userSelect;
             const originalCursor = document.body.style.cursor;
 
             const applyRatio = (clientX: number, clientY: number) => {
-                const offset = (axis === "x" ? clientX : clientY) - pointerStart;
-                const nextRatio = clamp(offset / size, minRatio, maxRatio);
+                const delta = (axis === "x" ? clientX : clientY) - pointerStart;
+                const nextRatio = clamp(startRatio + delta / size, minRatio, maxRatio);
 
                 setLayout((previous) => {
                     if (Math.abs(previous[key] - nextRatio) < 0.0001) {
@@ -128,7 +134,6 @@ export function useResizablePanels() {
             setDraggingKey(key);
             document.body.style.userSelect = "none";
             document.body.style.cursor = cursor;
-            applyRatio(event.clientX, event.clientY);
 
             window.addEventListener("pointermove", handlePointerMove);
             window.addEventListener("pointerup", finishResize);

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { MultiLineChart } from './MultiLineChart.tsx'
 import { RwlSiteData } from '@/features/rwl'
 
@@ -12,7 +12,7 @@ type Props = {
   fullData: RwlSiteData
 }
 
-export function TreeChartManager({ fullData }: Props) {
+function TreeChartManagerBase({ fullData }: Props) {
   const [selectedTrees, setSelectedTrees] = useState<string[]>([])
 
   const toggleTree = (treeCode: string) => {
@@ -103,3 +103,5 @@ export function TreeChartManager({ fullData }: Props) {
     </div>
   )
 }
+
+export const TreeChartManager = memo(TreeChartManagerBase)

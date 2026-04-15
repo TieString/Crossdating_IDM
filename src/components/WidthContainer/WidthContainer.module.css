@@ -1,8 +1,9 @@
 .width-grid-container {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+    position: relative;
+    min-width: 0;
+    width: 100%;
     font-family: "consolas";
+    contain: layout paint;
 }
 
 .series-block {
@@ -12,9 +13,13 @@
 }
 
 .series-row {
+    position: absolute;
+    left: 0;
+    right: 0;
     display: grid;
     grid-template-columns: 60px repeat(11, minmax(0, 1fr));
     gap: 5px;
+    contain: layout paint style;
 }
 
 .series-code-cell {
@@ -24,4 +29,15 @@
 .interrupt-year{
     background-color: #eeeeee;
     /* 可根据需要调整颜色 */
+}
+
+@supports (content-visibility: auto) {
+    .series-block {
+        content-visibility: auto;
+        contain-intrinsic-size: auto 180px;
+    }
+
+    .series-row {
+        contain-intrinsic-size: auto 24px;
+    }
 }

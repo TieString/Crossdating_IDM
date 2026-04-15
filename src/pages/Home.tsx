@@ -8,7 +8,7 @@
 
 import style from "./Home.module.css";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { readTextFile } from "@tauri-apps/plugin-fs";
 import { RwlEditor, registerChangeYearWidth } from "@/features/rwl/edit";
@@ -41,6 +41,7 @@ export default function Home() {
 
     // 主要数据状态：RWL 编辑器、原始快照、文件路径和 COFECHA 结果。
     const rwlEditorRef = useRef<RwlEditor>(new RwlEditor(new Map()));// 存储 rwl_data 的 ref 结构化的宽度数据
+    const [siteDataSnapshot, setSiteDataSnapshot] = useState<RwlSiteData>(() => rwlEditorRef.current.getData());
     // 保存加载/最后一次保存时的基准数据，用于和当前编辑器内容比较
     const originalDataRef = useRef<RwlSiteData>(new Map());
 
@@ -72,10 +73,13 @@ export default function Home() {
     const emitRender = () => {
         setRender(prev => prev + 1); // 触发重新渲染
     };
+    const resizeTimerRef = useRef<number | null>(null);
     const homeContainerRef = useRef<HTMLDivElement>(null);
+    const dataContainerRef = useRef<HTMLDivElement>(null);
     const leftPanelsRef = useRef<HTMLDivElement>(null);
     const rightPanelsRef = useRef<HTMLDivElement>(null);
     const { layout, draggingKey, startResize } = useResizablePanels();
+    const [isWindowResizing, setIsWindowResizing] = useState(false);
 
 
     // 比较两个 RWL 数据是否相等
@@ -96,8 +100,10 @@ export default function Home() {
     // 辅助：当编辑器内部数据变化时自动更新 isModified 并触发渲染
     const setupEditor = (editor: RwlEditor) => {
         editor.registerChangeCallback(() => {
-            const changed = !rwlDataEquals(originalDataRef.current, editor.getData());
+            const nextData = editor.getData();
+            const changed = !rwlDataEquals(originalDataRef.current, nextData);
             setIsModified(changed);
+            setSiteDataSnapshot(nextData);
             emitRender();
         });
     };
@@ -105,6 +111,30 @@ export default function Home() {
     // 初始引用的编辑器也需要注册回调
     useEffect(() => {
         setupEditor(rwlEditorRef.current);
+    }, []);
+
+    useEffect(() => {
+        const handleWindowResize = () => {
+            setIsWindowResizing((previous) => (previous ? previous : true));
+
+            if (resizeTimerRef.current !== null) {
+                window.clearTimeout(resizeTimerRef.current);
+            }
+
+            resizeTimerRef.current = window.setTimeout(() => {
+                setIsWindowResizing(false);
+                resizeTimerRef.current = null;
+            }, 160);
+        };
+
+        window.addEventListener("resize", handleWindowResize);
+
+        return () => {
+            window.removeEventListener("resize", handleWindowResize);
+            if (resizeTimerRef.current !== null) {
+                window.clearTimeout(resizeTimerRef.current);
+            }
+        };
     }, []);
 
     useEffect(() => {
@@ -199,7 +229,9 @@ export default function Home() {
                 // 创建编辑器，传递格式信息
                 rwlEditorRef.current = new RwlEditor(rwlData.data, rwlData.readOptions, rwlData.format);
                 setupEditor(rwlEditorRef.current);
-                originalDataRef.current = rwlEditorRef.current.getData();
+                const nextData = rwlEditorRef.current.getData();
+                originalDataRef.current = nextData;
+                setSiteDataSnapshot(nextData);
                 const options = Array.from(rwlData.data.keys());  // 获取所有键名
                 setTreeOptions(options);  // 更新树种选项
                 // 确保控件和状态都回到“全部”
@@ -238,7 +270,9 @@ export default function Home() {
             await saveFile(filePathRef.current, rwlStr);
             console.log("文件已成功保存到:", filePathRef.current);
             // 更新基准数据并清除修改标志
-            originalDataRef.current = rwlEditorRef.current.getData();
+            const nextData = rwlEditorRef.current.getData();
+            originalDataRef.current = nextData;
+            setSiteDataSnapshot(nextData);
             setIsModified(false);
 
             try {
@@ -279,7 +313,9 @@ export default function Home() {
             const rwlStr = rwlEditorRef.current.exportAsRwlString();
             await saveFile(filePathToSave, rwlStr);
             console.log("文件已成功保存到:", filePathToSave);
-            originalDataRef.current = rwlEditorRef.current.getData();
+            const nextData = rwlEditorRef.current.getData();
+            originalDataRef.current = nextData;
+            setSiteDataSnapshot(nextData);
             setIsModified(false); // 文件保存后标记为未修改
         } catch (error) {
             console.error("写入文件时出错:", error);
@@ -324,9 +360,9 @@ export default function Home() {
         // 回调会设置 isModified 及 trigger render
     };
 
-    const handleGridClick = (year: number) => {
+    const handleGridClick = useCallback((year: number) => {
         setYear(year.toString());
-    };
+    }, []);
 
     // 包装菜单项回调，使执行后自动关闭顶级菜单
     const closeAnd = (fn: (() => any) | undefined) => {
@@ -516,7 +552,7 @@ export default function Home() {
         return count !== undefined && count >= 100 ? "red" : "black";
     };
 
-    const siteData = rwlEditorRef.current.getData();
+    const siteData = siteDataSnapshot;
     const selectedProblemText = potentialProblemsDetail.get(selectedTree);
     const hasProblems = Boolean(selectedProblemText);
     const hasChart = siteData.size > 0;
@@ -553,6 +589,7 @@ export default function Home() {
                         <div
                             className={`${style["data-container"]} ${activeMenu ? style["z-index-1"] : ""}`}
                             style={hasProblems ? { flex: `0 0 ${layout.leftBottomRatio * 100}%` } : undefined}
+                            ref={dataContainerRef}
                         >
                             {/* 加载界面：图片在上，开发者信息在下，文件加载后隐藏 */}
                             <div className={`${style["loading-container"]} ${treeOptions.length > 0 ? style["hidden"] : ""}`}>
@@ -564,6 +601,7 @@ export default function Home() {
                                 siteData={siteData}
                                 selected={selectedTree}
                                 masterSeries={cofechaResult?.masterDatingSeries}
+                                scrollContainerRef={dataContainerRef}
                                 onYearClick={handleGridClick} // 添加 onYearClick 事件处理函数
                             />
                         </div>
@@ -655,7 +693,13 @@ export default function Home() {
                                     })}
                                 />
                                 <div className={style["line-chart"]}>
-                                    <TreeChartManager fullData={siteData} />
+                                    {isWindowResizing ? (
+                                        <div className={style["chart-resize-placeholder"]}>
+                                            正在调整窗口，图表会在结束后刷新。
+                                        </div>
+                                    ) : (
+                                        <TreeChartManager fullData={siteData} />
+                                    )}
                                 </div>
                             </>
                         ) : null}
