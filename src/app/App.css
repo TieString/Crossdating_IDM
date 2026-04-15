@@ -1,3 +1,9 @@
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
 :root {
   font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
   font-size: 16px;
@@ -12,12 +18,28 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-text-size-adjust: 100%;
-  margin-top: 30px;
 }
 
 body {
   min-width: 680px;
-  overflow-y: hidden;
+  overflow: hidden;
+}
+
+#root {
+  min-height: 0;
+  height: calc(100% - 35px);
+  margin-top: 35px;
+  margin-left: 10px;
+  margin-right: 10px;
+  margin-bottom: 10px;
+  box-sizing: border-box;
+}
+
+.app-container {
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 
 a {
@@ -86,4 +108,33 @@ button {
   button:active {
     background-color: #0f0f0f69;
   }
+}
+
+/* 全局滚动条样式 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  border-radius: 4px;
+  background: transparent;
+  margin: 2px 0;
+}
+
+/* 针对横向滚动条的 margin */
+::-webkit-scrollbar-track:horizontal {
+  border-radius: 4px;
+  background: transparent;
+  margin: 0 2px;
+}
+
+
+::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: #888;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #7b7b7b;
 }

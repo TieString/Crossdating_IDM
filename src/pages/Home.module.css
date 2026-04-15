@@ -1,123 +1,216 @@
 .home-container {
     height: 100%;
+    width: calc(100vw - 8px);
     display: flex;
     flex-direction: row;
-    width: calc(100vw - 8px);
+    min-height: 0;
+    overflow: hidden;
 }
-
-.home-container .data-container {
-    position: relative;
-    height: 100px;
-    overflow-y: scroll;
-    flex-grow: 1;
-    padding: 10px;
-}
-
 
 .home-container p {
-    white-space: pre-wrap;
-    font-family: 'consolas';
+    /* white-space: pre-wrap; */
+    font-family: "consolas";
     margin: 0;
 }
 
 #tree_selector {
-    /*设置最小宽度*/
     min-width: 72.5714px;
-    height: 24px;
-    border-radius: 5px;
     width: 100px;
+    height: 24px;
     margin-right: 10px;
+    border-radius: 5px;
 }
 
 #year_to_edit {
-    margin-right: 10px;
     width: 51%;
+    margin-right: 10px;
 }
 
 .home-container button {
     margin-right: 5px;
 }
 
-.width-module {
+.width-module,
+.cofecha-module {
     height: 100%;
-    min-width: 670px;
     display: flex;
     flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
 }
 
-.width-module .control-bar{
-    margin: 5px 10px;
+.width-module {
+    min-width: 670px;
 }
 
 .cofecha-module {
-    flex-grow: 1;
-    display: flex;
-    flex-direction: column;
-    width: 100px;
     min-width: 580px;
+    flex: 1 1 0;
 }
 
-.cofecha-module .statics-info {
-    height: 45px;
-    margin: 3px;
+.control-bar,
+.statics-info {
+    flex: 0 0 auto;
 }
 
-.cofecha-module .graph {
-    height: 300px;
-    border: 1px solid #000;
-}
-
-.cofecha-module .full-text {
-    height: 100px;
-    overflow: auto;
-    flex-grow: 1;
-    border: 1px solid #ccc;
-    padding: 10px;
-    overflow: auto;
-}
-
-.full-text p{
-    white-space: pre;
-    margin-top: 0;
-}
-
-.width-module .problems-container {
-    max-height: 200px;
-    max-width: 100%;
-    border: 1px solid #ccc;
-    padding: 10px;
-    background-color: #f9f9f9;
-    overflow: auto;
-}
-
-.width-module .problems-container .potential-problems {
-    white-space: pre;
-    max-width: 100px;
+.control-bar {
+    margin: 5px 10px;
 }
 
 .statics-info {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     align-items: center;
+    gap: 8px;
+    margin: 3px;
 }
 
-.home-container #cofecha-selector{
-    position: fixed;
+.width-panels,
+.cofecha-panels {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+.width-panels {
+    padding: 0 10px 10px;
+}
+
+.cofecha-panels {
+    padding: 0 3px 3px;
+}
+
+.data-container,
+.problems-container,
+.full-text,
+.line-chart {
+    min-width: 0;
+    min-height: 0;
+}
+
+.data-container {
+    position: relative;
+    flex: 1 1 auto;
+    overflow: auto;
+    padding: 10px;
+    background-color: #ffffff;
+    border: 1px solid #d7d7d7;
+    border-radius: 8px;
+}
+
+.problems-container {
+    flex: 1 1 auto;
+    min-height: 96px;
+    overflow: auto;
+    padding: 10px;
+    background-color: #f9f9f9;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+}
+
+.potential-problems {
+    white-space: pre;
+    min-width: fit-content;
+}
+
+.full-text {
+    flex: 1 1 auto;
+    overflow: auto;
+    padding: 10px;
+    background-color: #ffffff;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+}
+
+.full-text p {
+    white-space: pre;
+    margin-top: 0;
+}
+
+.line-chart {
+    flex: 1 1 auto;
+    min-height: 220px;
+    overflow: hidden;
+    padding: 12px;
+    background-color: #ffffff;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+}
+
+.panel-divider {
+    position: relative;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    cursor: default;
+    touch-action: none;
+    user-select: none;
+}
+
+.panel-divider::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    background-color: #c2c2c2;
+    border-radius: 999px;
+    transition: background-color 0.2s ease;
+}
+
+.panel-divider:hover::before,
+.panel-divider-active::before {
+    background-color: #5a8ac5;
+}
+
+.panel-divider-vertical {
+    width: 6px;
+    margin: 0 4px;
+    cursor: col-resize;
+}
+
+.panel-divider-vertical::before {
+    width: 2px;
+    height: 100%;
+}
+
+.panel-divider-horizontal {
+    height: 6px;
+    margin: 6px 0;
+    cursor: row-resize;
+}
+
+.panel-divider-horizontal::before {
+    width: 100%;
+    height: 2px;
+}
+
+#cofecha-selector {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: block;
     width: 300px;
+    max-width: 100%;
     height: 24px;
+    margin-bottom: 10px;
     border-radius: 5px;
+    background-color: #ffffff;
 }
 
-#cofecha-text{
-    margin-top: 30px;
+#cofecha-text {
+    margin-top: 0;
 }
 
-.home-container option{
+.home-container option {
     display: block;
     padding: 2px 5px;
 }
 
-.z-index-1{
+.z-index-1 {
     z-index: -1;
 }
 
@@ -127,25 +220,22 @@
     align-items: center;
     justify-content: center;
     height: 100%;
-    max-width: 100%;
     width: 100%;
+    max-width: 100%;
 }
 
-.loading-container.hidden {
+.loading-container.hidden,
+.hidden {
     display: none;
 }
 
-.data-container .loading-image {
+.loading-image {
     opacity: 0.2;
     width: 300px;
     max-width: 100%;
     height: auto;
     pointer-events: none;
     filter: brightness(0.99) grayscale(30%);
-}
-
-.hidden {
-    display: none;
 }
 
 .developers {

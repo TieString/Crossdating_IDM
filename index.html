@@ -103,20 +103,16 @@
     }
 
     body {
-      display: flex;
       height: 100%;
-    }
-
-    body #root {
-      flex-grow: 1;
+      margin: 0;
     }
 
     .container {
-      display: flex;
-      flex-direction: column;
-      /* 垂直方向布局 */
       height: 100vh;
       /* 父容器占满整个视口高度 */
+      min-height: 0;
+      width: 100%;
+      overflow: hidden;
     }
     
     #title-submenu-undo-button, #title-submenu-redo-button {

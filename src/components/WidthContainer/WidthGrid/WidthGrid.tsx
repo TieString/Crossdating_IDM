@@ -1,20 +1,21 @@
-import { useEffect, useRef, useState, forwardRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import style from './WidthGrid.module.css'
 import { callChangeYearWidth } from '@/features/rwl/edit';
 
-
-export default forwardRef<HTMLSpanElement, React.HTMLAttributes<HTMLSpanElement> & {
+type WidthGridProps = React.HTMLAttributes<HTMLSpanElement> & {
     year?: number;
     tree?: string;
     gridValue: string | number | null;
     masterSeriesValue?: number;
     isEditable?: boolean;
     onYearClick?: (year: number) => void;
-}>(function WidthGrid({ 
+};
+
+export default function WidthGrid({
     year, tree, gridValue, masterSeriesValue, isEditable = false, onYearClick,
     className = '', style: customStyle = {},
     ...rest  // ✅ 捕获其他 HTML 属性
-}, ref) {
+}: WidthGridProps) {
     const handleClick = () => {
         if (year !== undefined && onYearClick) {
             onYearClick(year); // 触发父组件的回调
@@ -98,4 +99,4 @@ export default forwardRef<HTMLSpanElement, React.HTMLAttributes<HTMLSpanElement>
             {gridValue}
         </span>
     )
-})
+}

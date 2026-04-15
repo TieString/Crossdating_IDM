@@ -38,8 +38,8 @@ export function TreeChartManager({ fullData }: Props) {
   })
 
   return (
-    <div>
-      <div style={{ position: 'relative', marginBottom: '1rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%' }}>
+      <div style={{ position: 'relative', marginBottom: '1rem', flex: '0 0 auto' }}>
         {/* 顶部渐变遮罩 */}
         <div style={{
           position: 'absolute',
@@ -95,9 +95,11 @@ export function TreeChartManager({ fullData }: Props) {
       </div>
 
 
-      {filteredData.size > 0 ? (
-        <MultiLineChart data={filteredData} />
-      ) : null}
+      <div style={{ flex: '1 1 auto', minHeight: 0 }}>
+        {filteredData.size > 0 ? (
+          <MultiLineChart data={filteredData} />
+        ) : null}
+      </div>
     </div>
   )
 }

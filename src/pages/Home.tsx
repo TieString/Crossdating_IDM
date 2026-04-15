@@ -21,6 +21,7 @@ import { ICofechaResult } from "@/features/cofecha/types.ts";
 import { TreeChartManager } from "@/components/Chart/TreeChartManager.tsx";
 import { runCofecha } from "@/services/cofecha/runner.ts";
 import { readRwlFile, saveFile } from "@/services/fs/io";
+import { useResizablePanels } from "./useResizablePanels";
 
 
 // Extend HTMLElement type
@@ -71,6 +72,10 @@ export default function Home() {
     const emitRender = () => {
         setRender(prev => prev + 1); // 触发重新渲染
     };
+    const homeContainerRef = useRef<HTMLDivElement>(null);
+    const leftPanelsRef = useRef<HTMLDivElement>(null);
+    const rightPanelsRef = useRef<HTMLDivElement>(null);
+    const { layout, draggingKey, startResize } = useResizablePanels();
 
 
     // 比较两个 RWL 数据是否相等
@@ -511,11 +516,21 @@ export default function Home() {
         return count !== undefined && count >= 100 ? "red" : "black";
     };
 
+    const siteData = rwlEditorRef.current.getData();
+    const selectedProblemText = potentialProblemsDetail.get(selectedTree);
+    const hasProblems = Boolean(selectedProblemText);
+    const hasChart = siteData.size > 0;
+    const mainDividerClassName = `${style["panel-divider"]} ${style["panel-divider-vertical"]} ${draggingKey === "mainSplitRatio" ? style["panel-divider-active"] : ""}`;
+    const nestedDividerClassName = `${style["panel-divider"]} ${style["panel-divider-horizontal"]}`;
+
 
     return (
         <>
-            <div className={style["home-container"]}>
-                <div className={style["width-module"]}>
+            <div className={style["home-container"]} ref={homeContainerRef}>
+                <div
+                    className={style["width-module"]}
+                    style={{ flex: `0 0 ${layout.mainSplitRatio * 100}%` }}
+                >
                     <div className={style["control-bar"]}>
                         <select name="trees" id={style["tree_selector"]} onChange={(e) => { setSelectedTree(e.target.value) }}>
                             <option key="全部" value="全部">📜 全部</option>
@@ -534,29 +549,62 @@ export default function Home() {
                         <button onClick={HandleInsert}>插入</button>
                         <button onClick={HandleDelete}>删除</button>
                     </div>
-                    <div className={`${style["data-container"]} ${activeMenu ? style["z-index-1"] : ""}`}>
-                        {/* 加载界面：图片在上，开发者信息在下，文件加载后隐藏 */}
-                        <div className={`${style["loading-container"]} ${treeOptions.length > 0 ? style["hidden"] : ""}`}>
-                            <img src="IDM.png" className={style["loading-image"]} />
-                            <p className={style["developers"]}>开发者：何志浩、张同文、张瑞波、靳春寒、喻树龙、尚华明、秦莉</p>
+                    <div className={style["width-panels"]} ref={leftPanelsRef}>
+                        <div
+                            className={`${style["data-container"]} ${activeMenu ? style["z-index-1"] : ""}`}
+                            style={hasProblems ? { flex: `0 0 ${layout.leftBottomRatio * 100}%` } : undefined}
+                        >
+                            {/* 加载界面：图片在上，开发者信息在下，文件加载后隐藏 */}
+                            <div className={`${style["loading-container"]} ${treeOptions.length > 0 ? style["hidden"] : ""}`}>
+                                <img src="IDM.png" className={style["loading-image"]} />
+                                <p className={style["developers"]}>开发者：何志浩、张同文、张瑞波、靳春寒、喻树龙、尚华明、秦莉</p>
+                            </div>
+
+                            <WidthContainer
+                                siteData={siteData}
+                                selected={selectedTree}
+                                masterSeries={cofechaResult?.masterDatingSeries}
+                                onYearClick={handleGridClick} // 添加 onYearClick 事件处理函数
+                            />
                         </div>
 
-                        <WidthContainer
-                            siteData={rwlEditorRef.current.getData()}
-                            selected={selectedTree}
-                            masterSeries={cofechaResult?.masterDatingSeries}
-                            onYearClick={handleGridClick} // 添加 onYearClick 事件处理函数
-                        />
+                        {hasProblems ? (
+                            <>
+                                <div
+                                    role="separator"
+                                    aria-orientation="horizontal"
+                                    aria-label="调整数据区和问题区高度"
+                                    className={`${nestedDividerClassName} ${draggingKey === "leftBottomRatio" ? style["panel-divider-active"] : ""}`}
+                                    onPointerDown={startResize({
+                                        key: "leftBottomRatio",
+                                        axis: "y",
+                                        container: () => leftPanelsRef.current,
+                                        minStart: 220,
+                                        minEnd: 96,
+                                    })}
+                                />
+                                <div className={style["problems-container"]}>
+                                    <p className={style["potential-problems"]}>
+                                        {selectedProblemText}
+                                    </p>
+                                </div>
+                            </>
+                        ) : null}
                     </div>
-                    {potentialProblemsDetail.get(selectedTree) ?
-                        (<div className={style["problems-container"]}>
-                            <p className={style["potential-problems"]}>
-                                {potentialProblemsDetail.get(selectedTree)}
-                            </p>
-                        </div>)
-                        : null
-                    }
                 </div>
+                <div
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label="调整年轮数据区和 COFECHA 区宽度"
+                    className={mainDividerClassName}
+                    onPointerDown={startResize({
+                        key: "mainSplitRatio",
+                        axis: "x",
+                        container: () => homeContainerRef.current,
+                        minStart: 670,
+                        minEnd: 580,
+                    })}
+                />
                 <div className={style["cofecha-module"]}>
                     <div className={style["statics-info"]}>
                         <span style={{ color: getTextColor() }}>
@@ -569,30 +617,49 @@ export default function Home() {
                         <span>Mean length<br />{cofechaResult?.meanLength}</span>
                     </div>
 
-                    <div className={style["full-text"]}>
-                        <select name="cofecha" id={style["cofecha-selector"]} onChange={(e) => {
-                            setSelectedPart(e.target.value);
-                        }}>
-                            <option key="全部" value="全部">📜 全部内容</option>
-                            <option key="part1" value="PART 1">📌 PART 1: Summary</option>
-                            <option key="part2" value="PART 2">📈 PART 2: Time Plot of Series</option>
-                            <option key="part3" value="PART 3">📉 PART 3: Master Dating Series</option>
-                            <option key="part4" value="PART 4">📊 PART 4: Master Bar Plot</option>
-                            <option key="part5" value="PART 5">📰 PART 5: Correlation of Series by Segment</option>
-                            <option key="part6" value="PART 6">⚠️ PART 6: Potential Problems</option>
-                            <option key="part7" value="PART 7">🪧 PART 7: Descriptive Statistics</option>
-                        </select>
-                        <p id={style["cofecha-text"]}>
-                            {selectedPart === "全部" ? outFileContent.current : cofechaParts.current.get(selectedPart)}
-                        </p>
-                    </div>
-
-                    {/* 折线图 */}
-                    {rwlEditorRef.current?.getData()?.size > 0 && (
-                        <div className={style["line-chart"]}>
-                            <TreeChartManager fullData={rwlEditorRef.current.getData()} />
+                    <div className={style["cofecha-panels"]} ref={rightPanelsRef}>
+                        <div
+                            className={style["full-text"]}
+                            style={hasChart ? { flex: `0 0 ${layout.rightBottomRatio * 100}%` } : undefined}
+                        >
+                            <select name="cofecha" id={style["cofecha-selector"]} onChange={(e) => {
+                                setSelectedPart(e.target.value);
+                            }}>
+                                <option key="全部" value="全部">📜 全部内容</option>
+                                <option key="part1" value="PART 1">📌 PART 1: Summary</option>
+                                <option key="part2" value="PART 2">📈 PART 2: Time Plot of Series</option>
+                                <option key="part3" value="PART 3">📉 PART 3: Master Dating Series</option>
+                                <option key="part4" value="PART 4">📊 PART 4: Master Bar Plot</option>
+                                <option key="part5" value="PART 5">📰 PART 5: Correlation of Series by Segment</option>
+                                <option key="part6" value="PART 6">⚠️ PART 6: Potential Problems</option>
+                                <option key="part7" value="PART 7">🪧 PART 7: Descriptive Statistics</option>
+                            </select>
+                            <p id={style["cofecha-text"]}>
+                                {selectedPart === "全部" ? outFileContent.current : cofechaParts.current.get(selectedPart)}
+                            </p>
                         </div>
-                    )}
+
+                        {hasChart ? (
+                            <>
+                                <div
+                                    role="separator"
+                                    aria-orientation="horizontal"
+                                    aria-label="调整 COFECHA 文本和折线图高度"
+                                    className={`${nestedDividerClassName} ${draggingKey === "rightBottomRatio" ? style["panel-divider-active"] : ""}`}
+                                    onPointerDown={startResize({
+                                        key: "rightBottomRatio",
+                                        axis: "y",
+                                        container: () => rightPanelsRef.current,
+                                        minStart: 180,
+                                        minEnd: 220,
+                                    })}
+                                />
+                                <div className={style["line-chart"]}>
+                                    <TreeChartManager fullData={siteData} />
+                                </div>
+                            </>
+                        ) : null}
+                    </div>
                 </div>
             </div >
         </>

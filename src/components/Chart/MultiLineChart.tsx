@@ -200,6 +200,7 @@ export function MultiLineChart({ data }: Props) {
 
   const chartOptions: ChartOptions<'line'> = {
     responsive: true,
+    maintainAspectRatio: false,
     animation: false,
     interaction: {
       mode: 'index',
@@ -272,13 +273,15 @@ export function MultiLineChart({ data }: Props) {
   }
 
   return (
-    <Line
-      ref={chartRef}
-      data={chartData}
-      options={chartOptions}
-      onClick={(event) =>
-        handleLineChartClick(event, chartRef.current)
-      }
-    />
+    <div style={{ position: 'relative', height: '100%', minHeight: 0 }}>
+      <Line
+        ref={chartRef}
+        data={chartData}
+        options={chartOptions}
+        onClick={(event) =>
+          handleLineChartClick(event, chartRef.current)
+        }
+      />
+    </div>
   )
 }
