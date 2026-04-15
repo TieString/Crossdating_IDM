@@ -1,9 +1,9 @@
 .width-grid-container {
-    position: relative;
+    display: block;
     min-width: 0;
     width: 100%;
     font-family: "consolas";
-    contain: layout paint;
+    contain: layout;
 }
 
 .series-block {
@@ -13,13 +13,15 @@
 }
 
 .series-row {
-    position: absolute;
-    left: 0;
-    right: 0;
     display: grid;
     grid-template-columns: 60px repeat(11, minmax(0, 1fr));
     gap: 5px;
-    contain: layout paint style;
+    contain: layout style;
+}
+
+.virtual-spacer {
+    width: 100%;
+    pointer-events: none;
 }
 
 .series-code-cell {
@@ -35,9 +37,5 @@
     .series-block {
         content-visibility: auto;
         contain-intrinsic-size: auto 180px;
-    }
-
-    .series-row {
-        contain-intrinsic-size: auto 24px;
     }
 }

@@ -76,7 +76,7 @@
 }
 
 .width-panels {
-    padding: 0 10px 10px;
+    /* padding: 0 1px; */
 }
 
 .cofecha-panels {
@@ -95,7 +95,7 @@
     position: relative;
     flex: 1 1 auto;
     overflow: auto;
-    contain: layout paint;
+    contain: layout;
     padding: 10px;
     background-color: #ffffff;
     border: 1px solid #d7d7d7;
@@ -135,7 +135,7 @@
     flex: 1 1 auto;
     min-height: 220px;
     overflow: hidden;
-    contain: layout paint;
+    contain: layout;
     padding: 12px;
     background-color: #ffffff;
     border: 1px solid #ccc;
@@ -169,7 +169,7 @@
     position: absolute;
     inset: 0;
     margin: auto;
-    background-color: #c2c2c2;
+    /* background-color: #c2c2c2; */
     border-radius: 999px;
     transition: background-color 0.2s ease;
 }
@@ -180,8 +180,8 @@
 }
 
 .panel-divider-vertical {
-    width: 6px;
-    margin: 0 4px;
+    width: 2px;
+    padding: 0 5px;
     cursor: col-resize;
 }
 

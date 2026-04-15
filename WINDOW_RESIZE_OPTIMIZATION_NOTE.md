@@ -386,6 +386,19 @@ body {
 
 所以最后决定不再“挤牙膏式优化”，而是直接把左侧宽度表改成虚拟列表。
 
+这里还经历过一次实现方向上的修正。
+
+最初我尝试的是“按行打平 + 每行绝对定位”的虚拟化。这种做法纯粹从性能角度说是可行的，但它有几个问题：
+
+- 它破坏了原本 `series-block -> series-row` 的语义结构；
+- 一旦某一行高度估算不准，后面的 `top` 全会被连带影响；
+- 它削弱了“一个序列显示错位时不影响其他序列”的原始设计优势；
+- 逻辑层和样式层要同时维护一套“行高真相”。
+
+所以最终没有保留这条路线，而是改成了更适合这个页面语义的方案：
+
+> 按 `series-block` 级别虚拟化，块内继续使用自然文档流。
+
 ---
 
 ## 八、左侧宽度表虚拟列表是怎么做的
@@ -403,16 +416,27 @@ body {
 
 > 根本不渲染看不见的行。
 
-### 第一步：把层级数据拍平成 `VirtualRow[]`
+### 第一步：先以“序列块”为单位整理数据
 
-每一行除了原本的数据，还记录它在虚拟容器中的纵向位置：
+最终实现不是把所有行打平成一张大表，而是先得到一组可虚拟化的“序列块”：
 
 ```ts
-interface VirtualRow extends SeriesRow {
+interface VirtualSeries {
   treeCode: string;
+  rows: VirtualRow[];
   top: number;
+  height: number;
+  bottom: number;
 }
 ```
+
+其中：
+
+- `treeCode` 表示当前序列编号
+- `rows` 是这个序列内部的一行一行内容
+- `top / height / bottom` 用于判断这个序列块是否进入视口
+
+也就是说，虚拟化发生在“块”这一层，而不是“行”这一层。
 
 同时定义几组固定量：
 
@@ -455,50 +479,57 @@ const dataContainerRef = useRef<HTMLDivElement>(null)
 const [viewport, setViewport] = useState({ scrollTop: 0, height: 0 });
 ```
 
-### 第三步：只截取当前可见行
+### 第三步：只截取当前可见的序列块
 
-通过二分查找，快速找到应该显示的行区间：
+通过二分查找，快速找到应该显示的块区间：
 
 ```ts
 findVisibleStartIndex(...)
 findVisibleEndIndex(...)
 ```
 
-然后只保留：
+然后只保留当前视口附近的 `visibleSeries`。
 
-```ts
-const visibleRows = virtualRows.rows.slice(startIndex, endIndex + 1)
-```
+### 第四步：用 spacer 保持整体滚动高度，块内仍走自然文档流
 
-### 第四步：把每一行绝对定位到正确位置
-
-容器本身不再按自然文档流堆满所有行，而是：
+最终容器不会把所有序列都渲染出来，而是只渲染当前可见块，并在上下插入 spacer：
 
 ```css
 .width-grid-container {
-  position: relative;
+  display: block;
 }
 
-.series-row {
-  position: absolute;
-  left: 0;
-  right: 0;
+.virtual-spacer {
+  width: 100%;
 }
 ```
 
-对应地，在 JSX 中通过 `top` 摆放：
+对应的 JSX 结构更接近这样：
 
 ```tsx
-style={{ top: `${row.top}px` }}
+<div className="width-grid-container">
+  <div style={{ height: topSpacerHeight }} />
+  {visibleSeries.map((series) => (
+    <div className="series-block" key={series.treeCode}>
+      {series.rows.map((row) => (
+        <div className="series-row" key={...}>
+          ...
+        </div>
+      ))}
+    </div>
+  ))}
+  <div style={{ height: bottomSpacerHeight }} />
+</div>
 ```
 
-容器高度用整张虚拟表的总高度撑起来：
+它的关键点在于：
 
-```tsx
-style={{ height: `${virtualRows.totalHeight}px` }}
-```
+- `series-block` 被完整保留下来；
+- `series-row` 继续在块内部按自然文档流渲染；
+- 上下 spacer 负责维持滚动条长度；
+- 可见区之外的序列块根本不会进入 DOM。
 
-这样滚动条仍然反映整份数据的真实长度，但 DOM 里只存在当前视口附近那一小部分。
+这样既保住了原始结构的语义和隔离性，也保住了虚拟化带来的性能收益。
 
 ---
 
@@ -643,7 +674,8 @@ const [isWindowResizing, setIsWindowResizing] = useState(false)
 - `src/components/WidthContainer/WidthContainer.module.css`
 - `src/pages/Home.tsx`
 
-这部分是 resize 卡顿优化中最有决定性的结构性变化。
+这部分是 resize 卡顿优化中最有决定性的结构性变化。  
+其中最终采用的是“按序列块虚拟化”，而不是“按行绝对定位虚拟化”。
 
 ---
 
@@ -701,7 +733,7 @@ npm run build
 如果未来仍觉得卡，建议继续往这几个方向走：
 
 1. 增加性能埋点，量化 resize 时到底是布局、绘制还是脚本在吃时间
-2. 把左侧虚拟列表从固定行高升级成可测量行高
+2. 把左侧块级虚拟列表从固定高度估算升级成可测量高度
 3. 对图表区做更细粒度的 resize 降频
 4. 如果树种数量很多，可考虑对图表选择按钮区也做虚拟化
 
@@ -715,7 +747,7 @@ npm run build
 - 先重新定义页面的三组分栏
 - 再修复高度链，防止布局被内容反向撑开
 - 然后把 resize 卡顿从“感觉上在卡”拆解到真正的瓶颈
-- 最后把左侧大表格从整表渲染改成按可视区渲染
+- 最后把左侧大表格从整表渲染改成按序列块的可视区渲染
 
 所以，如果要用一句话概括这次工作，我会写成：
 

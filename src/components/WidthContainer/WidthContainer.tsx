@@ -1,4 +1,4 @@
-import { memo, ReactNode, RefObject, useEffect, useMemo, useState } from 'react';
+import { memo, ReactNode, RefObject, useCallback, useEffect, useMemo, useState } from 'react';
 import { RwlSiteData } from '@/features/rwl';
 import WidthGrid from './WidthGrid/WidthGrid';
 import style from "./WidthContainer.module.css"
@@ -17,7 +17,14 @@ interface SeriesRow {
 
 interface VirtualRow extends SeriesRow {
     treeCode: string;
+}
+
+interface VirtualSeries {
+    treeCode: string;
+    rows: VirtualRow[];
     top: number;
+    height: number;
+    bottom: number;
 }
 
 const ROW_HEIGHT = 24;
@@ -25,14 +32,14 @@ const ROW_GAP = 5;
 const SERIES_GAP = 12;
 const OVERSCAN_PX = 320;
 
-const findVisibleStartIndex = (rows: VirtualRow[], start: number) => {
+const findVisibleStartIndex = (series: VirtualSeries[], start: number) => {
     let low = 0;
-    let high = rows.length - 1;
-    let answer = rows.length;
+    let high = series.length - 1;
+    let answer = series.length;
 
     while (low <= high) {
         const mid = Math.floor((low + high) / 2);
-        if (rows[mid].top + ROW_HEIGHT >= start) {
+        if (series[mid].bottom >= start) {
             answer = mid;
             high = mid - 1;
         } else {
@@ -43,14 +50,14 @@ const findVisibleStartIndex = (rows: VirtualRow[], start: number) => {
     return Math.max(0, answer);
 };
 
-const findVisibleEndIndex = (rows: VirtualRow[], end: number) => {
+const findVisibleEndIndex = (series: VirtualSeries[], end: number) => {
     let low = 0;
-    let high = rows.length - 1;
+    let high = series.length - 1;
     let answer = -1;
 
     while (low <= high) {
         const mid = Math.floor((low + high) / 2);
-        if (rows[mid].top <= end) {
+        if (series[mid].top <= end) {
             answer = mid;
             low = mid + 1;
         } else {
@@ -81,8 +88,8 @@ function WidthContainer({ siteData: site, masterSeries, selected, onYearClick, s
     ), [selected, site]);
     const [viewport, setViewport] = useState({ scrollTop: 0, height: 0 });
 
-    const virtualRows = useMemo(() => {
-        const rows: VirtualRow[] = [];
+    const virtualSeries = useMemo(() => {
+        const seriesList: VirtualSeries[] = [];
         let currentTop = 0;
 
         for (const [key, value] of visibleSite.entries()) {
@@ -118,11 +125,12 @@ function WidthContainer({ siteData: site, masterSeries, selected, onYearClick, s
             }
 
             // 按 10 个数据格打包成行；每行前两列固定为编号和起始年份。
-            const seriesRows: SeriesRow[] = [];
+            const seriesRows: VirtualRow[] = [];
             for (const cell of timeline) {
                 const lastRow = seriesRows[seriesRows.length - 1];
                 if (!lastRow || lastRow.cells.length >= 10) {
                     seriesRows.push({
+                        treeCode: key,
                         startYear: cell.year,
                         cells: [cell]
                     });
@@ -132,29 +140,30 @@ function WidthContainer({ siteData: site, masterSeries, selected, onYearClick, s
                 lastRow.cells.push(cell);
             }
 
-            seriesRows.forEach((row, rowIndex) => {
-                rows.push({
-                    ...row,
-                    treeCode: key,
-                    top: currentTop,
-                });
+            const blockHeight = seriesRows.length * ROW_HEIGHT + Math.max(0, seriesRows.length - 1) * ROW_GAP;
 
-                currentTop += ROW_HEIGHT;
-                currentTop += rowIndex === seriesRows.length - 1 ? SERIES_GAP : ROW_GAP;
+            seriesList.push({
+                treeCode: key,
+                rows: seriesRows,
+                top: currentTop,
+                height: blockHeight,
+                bottom: currentTop + blockHeight,
             });
+
+            currentTop += blockHeight + SERIES_GAP;
         }
 
         return {
-            rows,
+            series: seriesList,
             totalHeight: Math.max(0, currentTop - SERIES_GAP),
         };
     }, [visibleSite]);
 
-    const handleYearClick = (year: number) => {
+    const handleYearClick = useCallback((year: number) => {
         if (onYearClick) {
             onYearClick(year);
         }
-    };
+    }, [onYearClick]);
 
     useEffect(() => {
         const scrollContainer = scrollContainerRef?.current;
@@ -197,60 +206,90 @@ function WidthContainer({ siteData: site, masterSeries, selected, onYearClick, s
                 window.cancelAnimationFrame(rafId);
             }
         };
-    }, [scrollContainerRef, virtualRows.totalHeight]);
+    }, [scrollContainerRef, virtualSeries.totalHeight]);
 
-    const visibleRows = useMemo(() => {
-        if (virtualRows.rows.length === 0) {
+    const visibleSeries = useMemo(() => {
+        if (virtualSeries.series.length === 0) {
             return [];
         }
 
         const start = Math.max(0, viewport.scrollTop - OVERSCAN_PX);
-        const end = viewport.scrollTop + viewport.height + OVERSCAN_PX;
-        const startIndex = findVisibleStartIndex(virtualRows.rows, start);
-        const endIndex = findVisibleEndIndex(virtualRows.rows, end);
+        const effectiveHeight = viewport.height || 800;
+        const end = viewport.scrollTop + effectiveHeight + OVERSCAN_PX;
+        const startIndex = findVisibleStartIndex(virtualSeries.series, start);
+        const endIndex = findVisibleEndIndex(virtualSeries.series, end);
 
-        return virtualRows.rows.slice(startIndex, Math.max(startIndex, endIndex + 1));
-    }, [viewport.height, viewport.scrollTop, virtualRows.rows]);
+        if (endIndex < startIndex) {
+            return [];
+        }
+
+        return virtualSeries.series.slice(startIndex, endIndex + 1);
+    }, [viewport.height, viewport.scrollTop, virtualSeries.series]);
+
+    const topSpacerHeight = visibleSeries.length > 0 ? visibleSeries[0].top : 0;
+    const bottomSpacerHeight = visibleSeries.length > 0
+        ? Math.max(0, virtualSeries.totalHeight - visibleSeries[visibleSeries.length - 1].bottom)
+        : virtualSeries.totalHeight;
 
     return (
-        <div className={style["width-grid-container"]} style={{ height: `${virtualRows.totalHeight}px` }}>
-            {visibleRows.map((row) => (
+        <div className={style["width-grid-container"]}>
+            {topSpacerHeight > 0 ? (
                 <div
-                    className={style["series-row"]}
-                    key={`${row.treeCode}-${row.startYear}-${row.top}`}
-                    style={{ top: `${row.top}px` }}
+                    aria-hidden="true"
+                    className={style["virtual-spacer"]}
+                    style={{ height: `${topSpacerHeight}px` }}
+                />
+            ) : null}
+
+            {visibleSeries.map((series, seriesIndex) => (
+                <div
+                    className={style["series-block"]}
+                    key={series.treeCode}
+                    style={seriesIndex > 0 ? { marginTop: `${SERIES_GAP}px` } : undefined}
                 >
-                    <WidthGrid gridValue={row.treeCode} style={{ textAlign: 'left' }} title={row.treeCode} />
-                    <WidthGrid gridValue={row.startYear} />
+                    {series.rows.map((row, rowIndex) => (
+                        <div className={style["series-row"]} key={`${series.treeCode}-${rowIndex}-${row.startYear}`}>
+                            <WidthGrid gridValue={series.treeCode} style={{ textAlign: 'left' }} title={series.treeCode} />
+                            <WidthGrid gridValue={row.startYear} />
 
-                    {row.cells.map((cell) => {
-                        if (cell.isInterruptPad) {
-                            return <div className={style["interrupt-year"]} key={`interrupt-${row.treeCode}-${cell.year}`} />;
-                        }
+                            {row.cells.map((cell) => {
+                                if (cell.isInterruptPad) {
+                                    return <div className={style["interrupt-year"]} key={`interrupt-${series.treeCode}-${cell.year}`} />;
+                                }
 
-                        if (cell.width === stopMarker.value) {
-                            return <WidthGrid gridValue={cell.width} key={`stop-${row.treeCode}-${cell.year}`} />;
-                        }
+                                if (cell.width === stopMarker.value) {
+                                    return <WidthGrid gridValue={cell.width} key={`stop-${series.treeCode}-${cell.year}`} />;
+                                }
 
-                        return (
-                            <WidthGrid
-                                key={`value-${row.treeCode}-${cell.year}`}
-                                gridValue={cell.width ?? null}
-                                year={cell.year}
-                                tree={row.treeCode}
-                                masterSeriesValue={masterSeries?.get(cell.year)}
-                                isEditable={true}
-                                onYearClick={handleYearClick}
-                            />
-                        );
-                    })}
+                                return (
+                                    <WidthGrid
+                                        key={`value-${series.treeCode}-${cell.year}`}
+                                        gridValue={cell.width ?? null}
+                                        year={cell.year}
+                                        tree={series.treeCode}
+                                        masterSeriesValue={masterSeries?.get(cell.year)}
+                                        isEditable={true}
+                                        onYearClick={handleYearClick}
+                                    />
+                                );
+                            })}
 
-                    {/* 尾部补空槽，保证每行数据区固定为 10 列。 */}
-                    {Array.from({ length: 10 - row.cells.length }, (_, emptyIndex) => (
-                        <div key={`tail-empty-${row.treeCode}-${row.startYear}-${emptyIndex}`}></div>
+                            {/* 尾部补空槽，保证每行数据区固定为 10 列。 */}
+                            {Array.from({ length: 10 - row.cells.length }, (_, emptyIndex) => (
+                                <div key={`tail-empty-${series.treeCode}-${rowIndex}-${emptyIndex}`}></div>
+                            ))}
+                        </div>
                     ))}
                 </div>
             ))}
+
+            {bottomSpacerHeight > 0 ? (
+                <div
+                    aria-hidden="true"
+                    className={style["virtual-spacer"]}
+                    style={{ height: `${bottomSpacerHeight}px` }}
+                />
+            ) : null}
         </div>
     );
 }
