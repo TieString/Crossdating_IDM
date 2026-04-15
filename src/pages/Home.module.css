@@ -1,6 +1,6 @@
 .home-container {
     height: 100%;
-    width: calc(100vw - 8px);
+    width: 100%;
     display: flex;
     flex-direction: row;
     min-height: 0;
