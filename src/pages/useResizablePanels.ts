@@ -3,8 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 const LAYOUT_STORAGE_KEY = "crossdating.homeLayout.v1";
 
 const DEFAULT_LAYOUT = {
-    mainSplitRatio: 0.56,
-    leftBottomRatio: 0.22,
+    mainSplitRatio: 0.5,
+    leftBottomRatio: 0.12,
     rightBottomRatio: 0.35,
 } as const;
 

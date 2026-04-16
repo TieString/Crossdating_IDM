@@ -1,9 +1,10 @@
 .width-grid-container {
     display: block;
-    min-width: 0;
+    min-width: 670px;
     width: 100%;
     font-family: "consolas";
     contain: layout;
+    overflow: scroll;
 }
 
 .series-block {
@@ -28,7 +29,7 @@
     text-align: left;
 }
 
-.interrupt-year{
+.interrupt-year {
     background-color: #eeeeee;
     /* 可根据需要调整颜色 */
 }

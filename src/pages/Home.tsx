@@ -67,6 +67,8 @@ export default function Home() {
     const [selectedPart, setSelectedPart] = useState("全部"); // 选中的部分
     const [cofechaVersion, setCofechaVersion] = useState<"cofecha" | "cofecha12k">("cofecha"); // COFECHA 版本选择
     const cofechaParts = useRef<Map<string, string>>(new Map);
+    const [isFileLoading, setIsFileLoading] = useState(false);
+    const [isCofechaRunning, setIsCofechaRunning] = useState(false);
 
     // 通过一个无意义的状态值强制刷新，避免直接依赖深层 Map 变化。
     const [_, setRender] = useState(0); // 只是用来触发重新渲染
@@ -189,6 +191,21 @@ export default function Home() {
         });
     }, [/* 无需依赖 */]);
 
+    const runCofechaAndApplyResult = async (input: string, sourcePath: string) => {
+        setIsCofechaRunning(true);
+        try {
+            const baseName = sourcePath.split(/\\|\//).pop() || "INPUT.RWL";
+            const outText = await runCofecha(input, baseName, sourcePath, cofechaVersion);
+            outFileContent.current = outText;
+            const result = parseCofechaResult(outText);
+            setCofechaResult(result);
+            setPotentialProblemsDetail(result.possibleProblemsDetail);
+            cofechaParts.current = splitReportByParts(outText);
+        } finally {
+            setIsCofechaRunning(false);
+        }
+    };
+
 
 
     // 打开并读取 RWL 文件，同时触发解析、初始化编辑器和 COFECHA 运行。
@@ -210,6 +227,7 @@ export default function Home() {
                 return;
             }
 
+            setIsFileLoading(true);
             filePathRef.current = filePath; // 更新文件路径
             const menuTitle = document.getElementById("menu-title")
             if (menuTitle) {
@@ -223,9 +241,9 @@ export default function Home() {
             const content = await readTextFile(filePath);
             // 提取并存储数据 编号：(year:width)
             const rwlData = await readRwlFile(filePath);
-            if (rwlData.data) { 
+            if (rwlData.data) {
                 console.log(rwlData.data);
-                
+
                 // 创建编辑器，传递格式信息
                 rwlEditorRef.current = new RwlEditor(rwlData.data, rwlData.readOptions, rwlData.format);
                 setupEditor(rwlEditorRef.current);
@@ -241,20 +259,15 @@ export default function Home() {
             setIsModified(false);
             // 等待 cofecha 完成并获取输出文本，传入原始文件名以便 OUT 中显示该名称
             try {
-                const baseName = (filePath as string).split(/\\|\//).pop() || "INPUT.RWL";
-                const outText = await runCofecha(content, baseName, filePath as string, cofechaVersion);
-                // 处理结果与 UI 更新
-                outFileContent.current = outText;
-                const result = parseCofechaResult(outText);
-                setCofechaResult(result);
-                setPotentialProblemsDetail(result.possibleProblemsDetail);
-                cofechaParts.current = splitReportByParts(outText);
+                await runCofechaAndApplyResult(content, filePath as string);
             } catch (err) {
                 console.error('cofecha 执行失败', err);
             }
             emitRender();
         } catch (error) {
             console.error("读取文件时出错:", error);
+        } finally {
+            setIsFileLoading(false);
         }
     }
 
@@ -276,13 +289,7 @@ export default function Home() {
             setIsModified(false);
 
             try {
-                const baseName = (filePathRef.current as string).split(/\\|\//).pop() || "INPUT.RWL";
-                const outText = await runCofecha(rwlStr, baseName, filePathRef.current as string, cofechaVersion);
-                outFileContent.current = outText;
-                const result = parseCofechaResult(outText);
-                setCofechaResult(result);
-                setPotentialProblemsDetail(result.possibleProblemsDetail);
-                cofechaParts.current = splitReportByParts(outText);
+                await runCofechaAndApplyResult(rwlStr, filePathRef.current as string);
             } catch (err) {
                 console.error('cofecha 执行失败', err);
             }
@@ -556,6 +563,9 @@ export default function Home() {
     const selectedProblemText = potentialProblemsDetail.get(selectedTree);
     const hasProblems = Boolean(selectedProblemText);
     const hasChart = siteData.size > 0;
+    const shouldShowWelcome = !fileName && !isFileLoading;
+    const shouldShowProcessing = isFileLoading || isCofechaRunning;
+    const processingText = isFileLoading ? "正在读取并解析 RWL..." : "正在运行 COFECHA...";
     const mainDividerClassName = `${style["panel-divider"]} ${style["panel-divider-vertical"]} ${draggingKey === "mainSplitRatio" ? style["panel-divider-active"] : ""}`;
     const nestedDividerClassName = `${style["panel-divider"]} ${style["panel-divider-horizontal"]}`;
 
@@ -590,20 +600,31 @@ export default function Home() {
                             className={`${style["data-container"]} ${activeMenu ? style["z-index-1"] : ""}`}
                             style={hasProblems ? { flex: `0 0 ${layout.leftBottomRatio * 100}%` } : undefined}
                             ref={dataContainerRef}
+                            aria-busy={shouldShowProcessing}
                         >
-                            {/* 加载界面：图片在上，开发者信息在下，文件加载后隐藏 */}
-                            <div className={`${style["loading-container"]} ${treeOptions.length > 0 ? style["hidden"] : ""}`}>
-                                <img src="IDM.png" className={style["loading-image"]} />
-                                <p className={style["developers"]}>开发者：何志浩、张同文、张瑞波、靳春寒、喻树龙、尚华明、秦莉</p>
-                            </div>
+                            {/* 加载界面：图片在上，开发者信息在下；成功加载文件后隐藏 */}
+                            {shouldShowWelcome ?
+                                (
+                                    <div className={style["loading-container"]}>
+                                        <img src="IDM.png" className={style["loading-image"]} alt="IDM loading" />
+                                        <p className={style["developers"]}>开发者：何志浩、张同文、张瑞波、靳春寒、喻树龙、尚华明、秦莉</p>
+                                    </div>
+                                ) : <WidthContainer
+                                    siteData={siteData}
+                                    selected={selectedTree}
+                                    masterSeries={cofechaResult?.masterDatingSeries}
+                                    scrollContainerRef={dataContainerRef}
+                                    onYearClick={handleGridClick} // 添加 onYearClick 事件处理函数
+                                />
+                            }
 
-                            <WidthContainer
-                                siteData={siteData}
-                                selected={selectedTree}
-                                masterSeries={cofechaResult?.masterDatingSeries}
-                                scrollContainerRef={dataContainerRef}
-                                onYearClick={handleGridClick} // 添加 onYearClick 事件处理函数
-                            />
+                            {shouldShowProcessing ? (
+                                <div className={style["processing-mask"]}>
+                                    <span>{processingText}</span>
+                                </div>
+                            ) : null}
+
+
                         </div>
 
                         {hasProblems ? (
@@ -639,20 +660,32 @@ export default function Home() {
                         key: "mainSplitRatio",
                         axis: "x",
                         container: () => homeContainerRef.current,
-                        minStart: 670,
-                        minEnd: 580,
+                        minStart: 0,
+                        minEnd: 0,
                     })}
                 />
                 <div className={style["cofecha-module"]}>
                     <div className={style["statics-info"]}>
-                        <span style={{ color: getTextColor() }}>
-                            *A*<br />
-                            {cofechaResult?.possibleProblemsCount}
+                        <span className={style["stat-item"]} style={{ color: getTextColor() }}>
+                            <span className={style["stat-label"]}>*A*</span>
+                            <span className={style["stat-value"]}>{cofechaResult?.possibleProblemsCount}</span>
                         </span>
-                        <span>Master series<br />{cofechaResult?.masterSeriesYear}</span>
-                        <span>Intercorrelation<br />{cofechaResult?.seriesIntercorrelation}</span>
-                        <span>Mean sensitivity<br />{cofechaResult?.averageMeanSensitivity}</span>
-                        <span>Mean length<br />{cofechaResult?.meanLength}</span>
+                        <span className={style["stat-item"]}>
+                            <span className={style["stat-label"]}>Master series</span>
+                            <span className={style["stat-value"]}>{cofechaResult?.masterSeriesYear}</span>
+                        </span>
+                        <span className={style["stat-item"]}>
+                            <span className={style["stat-label"]}>Intercorrelation</span>
+                            <span className={style["stat-value"]}>{cofechaResult?.seriesIntercorrelation}</span>
+                        </span>
+                        <span className={style["stat-item"]}>
+                            <span className={style["stat-label"]}>Mean sensitivity</span>
+                            <span className={style["stat-value"]}>{cofechaResult?.averageMeanSensitivity}</span>
+                        </span>
+                        <span className={style["stat-item"]}>
+                            <span className={style["stat-label"]}>Mean length</span>
+                            <span className={style["stat-value"]}>{cofechaResult?.meanLength}</span>
+                        </span>
                     </div>
 
                     <div className={style["cofecha-panels"]} ref={rightPanelsRef}>
@@ -660,21 +693,23 @@ export default function Home() {
                             className={style["full-text"]}
                             style={hasChart ? { flex: `0 0 ${layout.rightBottomRatio * 100}%` } : undefined}
                         >
-                            <select name="cofecha" id={style["cofecha-selector"]} onChange={(e) => {
-                                setSelectedPart(e.target.value);
-                            }}>
-                                <option key="全部" value="全部">📜 全部内容</option>
-                                <option key="part1" value="PART 1">📌 PART 1: Summary</option>
-                                <option key="part2" value="PART 2">📈 PART 2: Time Plot of Series</option>
-                                <option key="part3" value="PART 3">📉 PART 3: Master Dating Series</option>
-                                <option key="part4" value="PART 4">📊 PART 4: Master Bar Plot</option>
-                                <option key="part5" value="PART 5">📰 PART 5: Correlation of Series by Segment</option>
-                                <option key="part6" value="PART 6">⚠️ PART 6: Potential Problems</option>
-                                <option key="part7" value="PART 7">🪧 PART 7: Descriptive Statistics</option>
-                            </select>
-                            <p id={style["cofecha-text"]}>
-                                {selectedPart === "全部" ? outFileContent.current : cofechaParts.current.get(selectedPart)}
-                            </p>
+                            <div className={style["cofecha-panel-content"]}>
+                                <select name="cofecha" id={style["cofecha-selector"]} onChange={(e) => {
+                                    setSelectedPart(e.target.value);
+                                }}>
+                                    <option key="全部" value="全部">📜 全部内容</option>
+                                    <option key="part1" value="PART 1">📌 PART 1: Summary</option>
+                                    <option key="part2" value="PART 2">📈 PART 2: Time Plot of Series</option>
+                                    <option key="part3" value="PART 3">📉 PART 3: Master Dating Series</option>
+                                    <option key="part4" value="PART 4">📊 PART 4: Master Bar Plot</option>
+                                    <option key="part5" value="PART 5">📰 PART 5: Correlation of Series by Segment</option>
+                                    <option key="part6" value="PART 6">⚠️ PART 6: Potential Problems</option>
+                                    <option key="part7" value="PART 7">🪧 PART 7: Descriptive Statistics</option>
+                                </select>
+                                <p id={style["cofecha-text"]}>
+                                    {selectedPart === "全部" ? outFileContent.current : cofechaParts.current.get(selectedPart)}
+                                </p>
+                            </div>
                         </div>
 
                         {hasChart ? (
@@ -688,18 +723,20 @@ export default function Home() {
                                         key: "rightBottomRatio",
                                         axis: "y",
                                         container: () => rightPanelsRef.current,
-                                        minStart: 180,
-                                        minEnd: 220,
+                                        minStart: 0,
+                                        minEnd: 0,
                                     })}
                                 />
                                 <div className={style["line-chart"]}>
-                                    {isWindowResizing ? (
-                                        <div className={style["chart-resize-placeholder"]}>
-                                            正在调整窗口，图表会在结束后刷新。
-                                        </div>
-                                    ) : (
-                                        <TreeChartManager fullData={siteData} />
-                                    )}
+                                    <div className={`${style["cofecha-panel-content"]} ${style["line-chart-content"]}`}>
+                                        {isWindowResizing ? (
+                                            <div className={style["chart-resize-placeholder"]}>
+                                                正在调整窗口，图表会在结束后刷新。
+                                            </div>
+                                        ) : (
+                                            <TreeChartManager fullData={siteData} />
+                                        )}
+                                    </div>
                                 </div>
                             </>
                         ) : null}

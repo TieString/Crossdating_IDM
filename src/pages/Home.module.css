@@ -36,16 +36,17 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
-    overflow: hidden;
+    min-width: 0;
 }
 
 .width-module {
-    min-width: 670px;
+    overflow-x: hidden;
+    overflow-y: hidden;
 }
 
 .cofecha-module {
-    min-width: 580px;
     flex: 1 1 0;
+    overflow: hidden;
 }
 
 .control-bar,
@@ -55,14 +56,36 @@
 
 .control-bar {
     margin: 5px 10px;
+    min-width: 670px;
 }
 
 .statics-info {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    align-items: center;
+    grid-template-columns: repeat(5, minmax(110px, 1fr));
+    min-height: 39px;
+    padding: 4px 0;
     gap: 8px;
     margin: 3px;
+    min-width: 100px;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.statics-info span {
+    white-space: nowrap;
+}
+
+.stat-item {
+    display: inline-flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 30px;
+    line-height: 1.2;
+}
+
+.stat-label,
+.stat-value {
+    display: block;
 }
 
 .width-panels,
@@ -73,14 +96,6 @@
     min-height: 0;
     overflow: hidden;
     box-sizing: border-box;
-}
-
-.width-panels {
-    /* padding: 0 1px; */
-}
-
-.cofecha-panels {
-    padding: 0 3px 3px;
 }
 
 .data-container,
@@ -133,8 +148,7 @@
 
 .line-chart {
     flex: 1 1 auto;
-    min-height: 220px;
-    overflow: hidden;
+    overflow: auto;
     contain: layout;
     padding: 12px;
     background-color: #ffffff;
@@ -142,6 +156,19 @@
     border-radius: 8px;
     display: flex;
     flex-direction: column;
+}
+
+.cofecha-panel-content {
+    min-width: 580px;
+    min-height: 100%;
+    box-sizing: border-box;
+}
+
+.line-chart-content {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 320px;
 }
 
 .chart-resize-placeholder {
@@ -191,8 +218,8 @@
 }
 
 .panel-divider-horizontal {
-    height: 6px;
-    margin: 6px 0;
+    height: 2px;
+    padding: 5px 0;
     cursor: row-resize;
 }
 
@@ -237,11 +264,6 @@
     max-width: 100%;
 }
 
-.loading-container.hidden,
-.hidden {
-    display: none;
-}
-
 .loading-image {
     opacity: 0.2;
     width: 300px;
@@ -258,4 +280,17 @@
     font-size: 14px;
     margin: 0;
     white-space: normal;
+}
+
+.processing-mask {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: rgba(255, 255, 255, 0.72);
+    color: #3b4a5a;
+    font-size: 14px;
+    z-index: 2;
+    pointer-events: none;
 }
