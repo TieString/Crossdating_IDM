@@ -14,7 +14,7 @@ import {
   ChartData,
   Chart as ChartJSInstance
 } from 'chart.js'
-import { useEffect, useState, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 
 // 多折线图组件。
 // 输入是已经筛选好的树种年份数据，组件负责：
@@ -62,7 +62,17 @@ declare module 'chart.js' {
 
 type Props = {
   data: Map<string, Map<number, number>>
+  highlightedTreeCode?: string | null
+  onHighlightedTreeCodeChange?: (treeCode: string | null) => void
+  zoomWindow?: { min: number; max: number } | null
+  onZoomWindowChange?: (zoomWindow: { min: number; max: number } | null) => void
+  onShiftHighlightedTree?: (treeCode: string, direction: -1 | 1) => void
 }
+
+export type ChartZoomWindow = {
+  min: number
+  max: number
+} | null
 
 const colorPalette = [
   '#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231',
@@ -71,79 +81,68 @@ const colorPalette = [
   '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080'
 ]
 
-export function MultiLineChart({ data }: Props) {
-  const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null)
-  const [chartDataMap, setChartDataMap] = useState<Map<string, Map<number, number>>>(new Map())
+export function MultiLineChart({
+  data,
+  highlightedTreeCode = null,
+  onHighlightedTreeCodeChange,
+  zoomWindow = null,
+  onZoomWindowChange,
+  onShiftHighlightedTree
+}: Props) {
   const chartRef = useRef<ChartJSInstance<'line'> | null>(null)
-  const zoomStateRef = useRef<{ min: number; max: number } | null>(null)
+  const treeCodes = useMemo(() => Array.from(data.keys()), [data])
+  const highlightedIndex = highlightedTreeCode ? treeCodes.indexOf(highlightedTreeCode) : -1
 
-  // 保存缩放状态。
-  const saveZoomState = () => {
-    const chart = chartRef.current
-    if (!chart) return
+  const emitZoomWindow = useCallback((chart: ChartJSInstance<'line'> | ChartJS | null = chartRef.current) => {
+    if (!chart || !onZoomWindowChange) return
     const scale = chart.scales['x']
-    zoomStateRef.current = { min: scale.min, max: scale.max }
-  }
+    const min = Number(scale.min)
+    const max = Number(scale.max)
 
-  // 恢复缩放状态。
-  const restoreZoomState = () => {
-    const chart = chartRef.current
-    if (!chart || !zoomStateRef.current) return
-    const { min, max } = zoomStateRef.current
-    const scale = chart.scales['x']
-    scale.options.min = min
-    scale.options.max = max
-    chart.update()
-  }
+    if (!Number.isFinite(min) || !Number.isFinite(max)) {
+      onZoomWindowChange(null)
+      return
+    }
 
-  // 初始清洗数据：去掉最后一个年份，并按树种整理成适合绘图的格式。
-  useEffect(() => {
-    const trimmed = new Map<string, Map<number, number>>()
-    data.forEach((yearMap, treeCode) => {
-      const sortedYears = Array.from(yearMap.keys()).sort((a, b) => a - b)
-      if (sortedYears.length < 2) return
-      const trimmedYears = sortedYears.slice(0, -1)
-      const trimmedMap = new Map<number, number>()
-      trimmedYears.forEach(year => {
-        const value = yearMap.get(year)
-        if (value !== undefined) {
-          trimmedMap.set(year, value)
-        }
-      })
-      trimmed.set(treeCode, trimmedMap)
-    })
-    setChartDataMap(trimmed)
-  }, [data])
+    onZoomWindowChange({ min, max })
+  }, [onZoomWindowChange])
 
   // 汇总所有年份，用作图表横轴。
-  const allYearsSet = new Set<number>()
-  chartDataMap.forEach(yearMap => {
-    yearMap.forEach((_, year) => allYearsSet.add(year))
-  })
-  const allYears = Array.from(allYearsSet).sort((a, b) => a - b)
+  const allYears = useMemo(() => {
+    const allYearsSet = new Set<number>()
+    data.forEach(yearMap => {
+      yearMap.forEach((_, year) => allYearsSet.add(year))
+    })
+    return Array.from(allYearsSet).sort((a, b) => a - b)
+  }, [data])
 
   // 构造 Chart.js datasets。
-  const datasets: ChartData<'line'>['datasets'] = []
-  let colorIndex = 0
-  chartDataMap.forEach((yearMap, treeCode) => {
-    const yData = allYears.map(year => yearMap.get(year) ?? null)
-    const color = colorPalette[colorIndex % colorPalette.length]
-    const isHighlighted = colorIndex === highlightedIndex
-    const transparentColor = color + '66'
-    datasets.push({
-      label: treeCode,
-      data: yData,
-      borderColor: highlightedIndex === null || isHighlighted ? color : transparentColor,
-      backgroundColor: color,
-      fill: false,
-      borderWidth: 2,
-      tension: 0,     // 贝塞尔曲线张力参数，0为直线，配合 cubicInterpolationMode 使用  
-      cubicInterpolationMode: 'default', // 保持默认直线插值（配合 tension: 0）
-      pointRadius: 2,
-      pointHoverRadius: 4
+  const datasets: ChartData<'line'>['datasets'] = useMemo(() => {
+    const nextDatasets: ChartData<'line'>['datasets'] = []
+    let colorIndex = 0
+
+    data.forEach((yearMap, treeCode) => {
+      const yData = allYears.map(year => yearMap.get(year) ?? null)
+      const color = colorPalette[colorIndex % colorPalette.length]
+      const isHighlighted = colorIndex === highlightedIndex
+      const transparentColor = color + '66'
+      nextDatasets.push({
+        label: treeCode,
+        data: yData,
+        borderColor: highlightedIndex === -1 || isHighlighted ? color : transparentColor,
+        backgroundColor: color,
+        fill: false,
+        borderWidth: 2,
+        tension: 0,     // 贝塞尔曲线张力参数，0为直线，配合 cubicInterpolationMode 使用  
+        cubicInterpolationMode: 'default', // 保持默认直线插值（配合 tension: 0）
+        pointRadius: 2,
+        pointHoverRadius: 4
+      })
+      colorIndex++
     })
-    colorIndex++
-  })
+
+    return nextDatasets
+  }, [allYears, data, highlightedIndex])
 
   const chartData: ChartData<'line'> = {
     labels: allYears.map(year => year.toString()),
@@ -153,40 +152,34 @@ export function MultiLineChart({ data }: Props) {
   // 键盘左右键移动当前高亮折线。
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (highlightedIndex === null) return
-      const keys = Array.from(chartDataMap.keys())
-      if (highlightedIndex < 0 || highlightedIndex >= keys.length) return
-      const code = keys[highlightedIndex]
-      const oldMap = chartDataMap.get(code)
-      if (!oldMap) return
-
       const direction = event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0
       if (direction === 0) return
 
-      saveZoomState()
+      if (!highlightedTreeCode || !data.has(highlightedTreeCode)) return
 
-      const newMap = new Map<number, number>()
-      oldMap.forEach((value, year) => {
-        newMap.set(year + direction, value)
-      })
-      const updated = new Map(chartDataMap)
-      updated.set(code, newMap)
-      setChartDataMap(updated)
+      emitZoomWindow()
+      onShiftHighlightedTree?.(highlightedTreeCode, direction)
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [highlightedIndex, chartDataMap])
+  }, [data, emitZoomWindow, highlightedTreeCode, onShiftHighlightedTree])
 
   // 数据变更后恢复缩放状态。
   useEffect(() => {
-    restoreZoomState()
-  }, [highlightedIndex, chartDataMap])
+    const chart = chartRef.current
+    if (!chart) return
+
+    const scale = chart.scales['x']
+    scale.options.min = zoomWindow?.min
+    scale.options.max = zoomWindow?.max
+    chart.update('none')
+  }, [chartData, highlightedTreeCode, zoomWindow])
 
   // 根据当前数据计算 Y 轴范围，给曲线留出上下边距。
   let globalMin = Number.POSITIVE_INFINITY
   let globalMax = Number.NEGATIVE_INFINITY
-  chartDataMap.forEach(yearMap => {
+  data.forEach(yearMap => {
     yearMap.forEach(value => {
       if (typeof value === 'number' && !isNaN(value)) {
         if (value < globalMin) globalMin = value
@@ -213,11 +206,20 @@ export function MultiLineChart({ data }: Props) {
         zoom: { enabled: false }
       },
       zoom: {
-        pan: { enabled: true, mode: 'x' },
+        pan: {
+          enabled: true,
+          mode: 'x',
+          onPanComplete: ({ chart }) => {
+            emitZoomWindow(chart)
+          }
+        },
         zoom: {
           wheel: { enabled: true },
           pinch: { enabled: true },
-          mode: 'x'
+          mode: 'x',
+          onZoomComplete: ({ chart }) => {
+            emitZoomWindow(chart)
+          }
         }
       },
       tooltip: {
@@ -257,7 +259,7 @@ export function MultiLineChart({ data }: Props) {
     chart: ChartJS<'line'> | null,
   ) => {
     if (!chart) return
-    saveZoomState()
+    emitZoomWindow(chart)
     const elements = chart.getElementsAtEventForMode(
       event as unknown as MouseEvent,
       'dataset',
@@ -266,9 +268,9 @@ export function MultiLineChart({ data }: Props) {
     )
     if (elements.length > 0) {
       const index = elements[0].datasetIndex
-      setHighlightedIndex(index)
+      onHighlightedTreeCodeChange?.(treeCodes[index] ?? null)
     } else {
-      setHighlightedIndex(null)
+      onHighlightedTreeCodeChange?.(null)
     }
   }
 

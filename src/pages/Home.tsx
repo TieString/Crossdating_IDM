@@ -75,13 +75,11 @@ export default function Home() {
     const emitRender = () => {
         setRender(prev => prev + 1); // 触发重新渲染
     };
-    const resizeTimerRef = useRef<number | null>(null);
     const homeContainerRef = useRef<HTMLDivElement>(null);
     const dataContainerRef = useRef<HTMLDivElement>(null);
     const leftPanelsRef = useRef<HTMLDivElement>(null);
     const rightPanelsRef = useRef<HTMLDivElement>(null);
     const { layout, draggingKey, startResize } = useResizablePanels();
-    const [isWindowResizing, setIsWindowResizing] = useState(false);
 
 
     // 比较两个 RWL 数据是否相等
@@ -113,30 +111,6 @@ export default function Home() {
     // 初始引用的编辑器也需要注册回调
     useEffect(() => {
         setupEditor(rwlEditorRef.current);
-    }, []);
-
-    useEffect(() => {
-        const handleWindowResize = () => {
-            setIsWindowResizing((previous) => (previous ? previous : true));
-
-            if (resizeTimerRef.current !== null) {
-                window.clearTimeout(resizeTimerRef.current);
-            }
-
-            resizeTimerRef.current = window.setTimeout(() => {
-                setIsWindowResizing(false);
-                resizeTimerRef.current = null;
-            }, 160);
-        };
-
-        window.addEventListener("resize", handleWindowResize);
-
-        return () => {
-            window.removeEventListener("resize", handleWindowResize);
-            if (resizeTimerRef.current !== null) {
-                window.clearTimeout(resizeTimerRef.current);
-            }
-        };
     }, []);
 
     useEffect(() => {
@@ -729,13 +703,7 @@ export default function Home() {
                                 />
                                 <div className={style["line-chart"]}>
                                     <div className={`${style["cofecha-panel-content"]} ${style["line-chart-content"]}`}>
-                                        {isWindowResizing ? (
-                                            <div className={style["chart-resize-placeholder"]}>
-                                                正在调整窗口，图表会在结束后刷新。
-                                            </div>
-                                        ) : (
-                                            <TreeChartManager fullData={siteData} />
-                                        )}
+                                        <TreeChartManager fullData={siteData} />
                                     </div>
                                 </div>
                             </>
