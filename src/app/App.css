@@ -115,6 +115,11 @@ button {
   height: 6px;
 }
 
+/* 滚动条交叉角颜色，一个右下角的小方块 */
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 ::-webkit-scrollbar-track {
   border-radius: 4px;
   background: transparent;
