@@ -1,7 +1,7 @@
 import { memo, ReactNode, RefObject, useCallback, useEffect, useMemo, useState } from 'react';
 import { RwlSiteData } from '@/features/rwl';
 import WidthGrid from './WidthGrid/WidthGrid';
-import style from "./WidthContainer.module.css"
+import style from "./WidthContainer.module.css";
 import { stopMarker } from '@/shared/constants';
 
 interface YearCell {
@@ -12,7 +12,7 @@ interface YearCell {
 
 interface SeriesRow {
     startYear: number;
-    cells: YearCell[];
+    cells: Array<YearCell | null>;
 }
 
 interface VirtualRow extends SeriesRow {
@@ -31,6 +31,79 @@ const ROW_HEIGHT = 24;
 const ROW_GAP = 5;
 const SERIES_GAP = 12;
 const OVERSCAN_PX = 320;
+
+const getYearOffsetWithinDecade = (year: number) => ((year % 10) + 10) % 10;
+
+const getFirstRowBreakYear = (startYear: number) => {
+    const offset = getYearOffsetWithinDecade(startYear);
+    return offset === 0 ? startYear : startYear + (10 - offset);
+};
+
+const buildTimeline = (entries: Array<[number, number | null]>): YearCell[] => {
+    const sortedEntries = [...entries].sort((a, b) => a[0] - b[0]);
+    if (sortedEntries.length === 0) {
+        return [];
+    }
+
+    const timeline: YearCell[] = [];
+
+    for (let i = 0; i < sortedEntries.length; i++) {
+        const [year, width] = sortedEntries[i];
+        timeline.push({ year, width });
+
+        const nextYear = sortedEntries[i + 1]?.[0];
+        if (nextYear === undefined) {
+            continue;
+        }
+
+        for (let missingYear = year + 1; missingYear < nextYear; missingYear++) {
+            timeline.push({ year: missingYear, isInterruptPad: true });
+        }
+    }
+
+    const [lastYear, lastWidth] = sortedEntries[sortedEntries.length - 1];
+    if (lastWidth !== stopMarker.value) {
+        timeline.push({ year: lastYear + 1, width: stopMarker.value });
+    }
+
+    return timeline;
+};
+
+const buildSeriesRows = (treeCode: string, timeline: YearCell[]): VirtualRow[] => {
+    if (timeline.length === 0) {
+        return [];
+    }
+
+    const firstYear = timeline[0].year;
+    const firstRowBreakYear = getFirstRowBreakYear(firstYear);
+    const rows: VirtualRow[] = [];
+    const rowsByStartYear = new Map<number, VirtualRow>();
+
+    for (const cell of timeline) {
+        const inFirstRow = cell.year < firstRowBreakYear;
+        const startYear = inFirstRow ? firstYear : cell.year - getYearOffsetWithinDecade(cell.year);
+        const cellIndex = inFirstRow ? cell.year - firstYear : getYearOffsetWithinDecade(cell.year);
+        let row = rowsByStartYear.get(startYear);
+
+        if (!row) {
+            row = {
+                treeCode,
+                startYear,
+                cells: [],
+            };
+            rowsByStartYear.set(startYear, row);
+            rows.push(row);
+        }
+
+        while (row.cells.length < cellIndex) {
+            row.cells.push(null);
+        }
+
+        row.cells.push(cell);
+    }
+
+    return rows;
+};
 
 const findVisibleStartIndex = (series: VirtualSeries[], start: number) => {
     let low = 0;
@@ -77,9 +150,8 @@ type WidthContainerProps = {
 };
 
 function WidthContainer({ siteData: site, masterSeries, selected, onYearClick, scrollContainerRef }: WidthContainerProps): ReactNode {
-    // 支持按序列筛选：仅渲染选中的树木编号。
     const visibleSite = useMemo(() => (
-        selected && selected !== '全部'
+        selected && site.has(selected)
             ? (() => {
                 const treeData = site.get(selected);
                 return treeData ? new Map([[selected, treeData]]) : new Map<string, Map<number, number | null>>();
@@ -93,53 +165,12 @@ function WidthContainer({ siteData: site, masterSeries, selected, onYearClick, s
         let currentTop = 0;
 
         for (const [key, value] of visibleSite.entries()) {
-            const entries = Array.from(value.entries());
-            if (entries.length === 0) {
+            const timeline = buildTimeline(Array.from(value.entries()));
+            if (timeline.length === 0) {
                 continue;
             }
 
-            // timeline 是序列内部的线性单元流：真实值 + 中断后灰色占位。
-            const timeline: YearCell[] = [];
-
-            for (let i = 0; i < entries.length; i++) {
-                const [year, width] = entries[i];
-                timeline.push({ year, width });
-
-                if (width === stopMarker.value && i < entries.length - 1) {
-                    let nextValidYear: number | undefined;
-                    for (let j = i + 1; j < entries.length; j++) {
-                        const [candidateYear, candidateWidth] = entries[j];
-                        if (candidateWidth !== stopMarker.value) {
-                            nextValidYear = candidateYear;
-                            break;
-                        }
-                    }
-
-                    if (nextValidYear !== undefined) {
-                        // stopMarker 与下一个有效值之间的年份，用灰格占位但不触发额外断行。
-                        for (let missingYear = year + 1; missingYear < nextValidYear; missingYear++) {
-                            timeline.push({ year: missingYear, isInterruptPad: true });
-                        }
-                    }
-                }
-            }
-
-            // 按 10 个数据格打包成行；每行前两列固定为编号和起始年份。
-            const seriesRows: VirtualRow[] = [];
-            for (const cell of timeline) {
-                const lastRow = seriesRows[seriesRows.length - 1];
-                if (!lastRow || lastRow.cells.length >= 10) {
-                    seriesRows.push({
-                        treeCode: key,
-                        startYear: cell.year,
-                        cells: [cell]
-                    });
-                    continue;
-                }
-
-                lastRow.cells.push(cell);
-            }
-
+            const seriesRows = buildSeriesRows(key, timeline);
             const blockHeight = seriesRows.length * ROW_HEIGHT + Math.max(0, seriesRows.length - 1) * ROW_GAP;
 
             seriesList.push({
@@ -252,7 +283,11 @@ function WidthContainer({ siteData: site, masterSeries, selected, onYearClick, s
                             <WidthGrid gridValue={series.treeCode} style={{ textAlign: 'left' }} title={series.treeCode} />
                             <WidthGrid gridValue={row.startYear} />
 
-                            {row.cells.map((cell) => {
+                            {row.cells.map((cell, cellIndex) => {
+                                if (!cell) {
+                                    return <div key={`gap-${series.treeCode}-${row.startYear}-${cellIndex}`}></div>;
+                                }
+
                                 if (cell.isInterruptPad) {
                                     return <div className={style["interrupt-year"]} key={`interrupt-${series.treeCode}-${cell.year}`} />;
                                 }
@@ -274,7 +309,6 @@ function WidthContainer({ siteData: site, masterSeries, selected, onYearClick, s
                                 );
                             })}
 
-                            {/* 尾部补空槽，保证每行数据区固定为 10 列。 */}
                             {Array.from({ length: 10 - row.cells.length }, (_, emptyIndex) => (
                                 <div key={`tail-empty-${series.treeCode}-${rowIndex}-${emptyIndex}`}></div>
                             ))}
