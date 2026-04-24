@@ -48,14 +48,19 @@ export default function Home() {
     // 文件与树种选择状态。
     const [treeOptions, setTreeOptions] = useState<string[]>([])  // 存储树种选项
     const [selectedTree, setSelectedTree] = useState<string>("全部");  // 存储选中的树种编号
+    const [activeTreeForEdit, setActiveTreeForEdit] = useState<string | null>(null);  // “全部”视图下最近点击的目标样芯
 
     // 每当 treeOptions 变化时，若当前选中项不在新列表中则重置为全部
     useEffect(() => {
         if (selectedTree !== "全部" && !treeOptions.includes(selectedTree)) {
             setSelectedTree("全部");
         }
-    }, [treeOptions]);
+        if (activeTreeForEdit && !treeOptions.includes(activeTreeForEdit)) {
+            setActiveTreeForEdit(null);
+        }
+    }, [activeTreeForEdit, selectedTree, treeOptions]);
     const [year, setYear] = useState<string>("")
+    const [yearInputMode, setYearInputMode] = useState<"manual" | "grid">("manual");
     const filePathRef = useRef<string | null>(null);
     const [fileName, setFileName] = useState<string | null>(null); // 存储文件名
     const [isModified, setIsModified] = useState(false); // 记录文件是否被修改
@@ -228,6 +233,8 @@ export default function Home() {
                 setTreeOptions(options);  // 更新树种选项
                 // 确保控件和状态都回到“全部”
                 setSelectedTree("全部");
+                setActiveTreeForEdit(null);
+                setYearInputMode("manual");
             }
             setFileName(filePath); // 更新文件名
             setIsModified(false);
@@ -309,11 +316,14 @@ export default function Home() {
             alert('无效的数值');
             return;
         }
-        if (selectedTree === "全部") {
-            alert("请选择一个编号")
+        const targetTree = selectedTree === "全部"
+            ? (yearInputMode === "grid" ? activeTreeForEdit : null)
+            : selectedTree;
+        if (!targetTree) {
+            alert("请选择一个序列")
             return;
         }
-        rwlEditorRef.current.insertYear(selectedTree, yearToInsert);
+        rwlEditorRef.current.insertYear(targetTree, yearToInsert);
         // 编辑器自身回调会处理修改标记和渲染
     }
 
@@ -323,11 +333,14 @@ export default function Home() {
             alert('无效的数值');
             return;
         }
-        if (selectedTree === "全部") {
-            alert("请选择一个编号")
+        const targetTree = selectedTree === "全部"
+            ? (yearInputMode === "grid" ? activeTreeForEdit : null)
+            : selectedTree;
+        if (!targetTree) {
+            alert("请选择一个序列")
             return;
         }
-        rwlEditorRef.current.deleteYear(selectedTree, yearToDelete);
+        rwlEditorRef.current.deleteYear(targetTree, yearToDelete);
         // 编辑器自身回调会处理修改标记和渲染
     }
 
@@ -341,9 +354,19 @@ export default function Home() {
         // 回调会设置 isModified 及 trigger render
     };
 
-    const handleGridClick = useCallback((year: number) => {
+    const handleGridClick = useCallback((tree: string, year: number) => {
         setYear(year.toString());
-    }, []);
+        if (selectedTree === "全部") {
+            setActiveTreeForEdit(tree);
+            setYearInputMode("grid");
+        }
+    }, [selectedTree]);
+
+    const handleTreeSelectionChange = (nextTree: string) => {
+        setSelectedTree(nextTree);
+        setActiveTreeForEdit(null);
+        setYearInputMode("manual");
+    };
 
     // 包装菜单项回调，使执行后自动关闭顶级菜单
     const closeAnd = (fn: (() => any) | undefined) => {
@@ -552,7 +575,12 @@ export default function Home() {
                     style={{ flex: `0 0 ${layout.mainSplitRatio * 100}%` }}
                 >
                     <div className={style["control-bar"]}>
-                        <select name="trees" id={style["tree_selector"]} onChange={(e) => { setSelectedTree(e.target.value) }}>
+                        <select
+                            name="trees"
+                            id={style["tree_selector"]}
+                            value={selectedTree}
+                            onChange={(e) => { handleTreeSelectionChange(e.target.value) }}
+                        >
                             <option key="全部" value="全部">📜 全部</option>
                             {treeOptions.map((tree) => (
                                 <option key={tree} value={tree}>
@@ -563,8 +591,12 @@ export default function Home() {
                         <input
                             type="text"
                             id={style["year_to_edit"]}
-                            onChange={(e) => setYear(e.target.value)}
-                            value={year} placeholder="输入或点击需要操作的年份"
+                            onChange={(e) => {
+                                setYear(e.target.value);
+                                setYearInputMode("manual");
+                            }}
+                            value={year}
+                            placeholder={"输入或点击需要操作的年份"}
                         />
                         <button onClick={HandleInsert}>插入</button>
                         <button onClick={HandleDelete}>删除</button>

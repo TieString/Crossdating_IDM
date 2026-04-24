@@ -8,7 +8,7 @@ type WidthGridProps = React.HTMLAttributes<HTMLSpanElement> & {
     gridValue: string | number | null;
     masterSeriesValue?: number;
     isEditable?: boolean;
-    onYearClick?: (year: number) => void;
+    onYearClick?: (tree: string, year: number) => void;
 };
 
 export default function WidthGrid({
@@ -17,8 +17,8 @@ export default function WidthGrid({
     ...rest  // ✅ 捕获其他 HTML 属性
 }: WidthGridProps) {
     const handleClick = () => {
-        if (year !== undefined && onYearClick) {
-            onYearClick(year); // 触发父组件的回调
+        if (tree !== undefined && year !== undefined && onYearClick) {
+            onYearClick(tree, year); // 触发父组件的回调
         }
     };
 

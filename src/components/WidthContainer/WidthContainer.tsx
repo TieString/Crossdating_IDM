@@ -145,7 +145,7 @@ type WidthContainerProps = {
     siteData: RwlSiteData,
     masterSeries?: Map<number, number>,
     selected?: string,
-    onYearClick?: (year: number) => void,
+    onYearClick?: (tree: string, year: number) => void,
     scrollContainerRef?: RefObject<HTMLElement | null>
 };
 
@@ -190,9 +190,9 @@ function WidthContainer({ siteData: site, masterSeries, selected, onYearClick, s
         };
     }, [visibleSite]);
 
-    const handleYearClick = useCallback((year: number) => {
+    const handleYearClick = useCallback((tree: string, year: number) => {
         if (onYearClick) {
-            onYearClick(year);
+            onYearClick(tree, year);
         }
     }, [onYearClick]);
 
