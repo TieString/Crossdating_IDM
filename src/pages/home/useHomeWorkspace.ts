@@ -4,12 +4,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { parseCofechaResult, splitReportByParts } from "@/features/cofecha/formatter";
 import type { ICofechaResult } from "@/features/cofecha/types";
 import { RwlEditor, registerChangeYearWidth } from "@/features/rwl/edit";
+import type { RwlHistoryAnimation } from "@/features/rwl/edit";
 import type { RwlSiteData } from "@/features/rwl/types";
 import { runCofecha } from "@/services/cofecha/runner";
 import { readRwlFile, saveFile } from "@/services/fs/io";
 import { ALL_OPTION_VALUE, CofechaVersion, DEFAULT_HOME_TITLE } from "./constants";
 
 type YearInputMode = "manual" | "grid";
+export type WidthHistoryAnimation = RwlHistoryAnimation & { id: number };
 
 const formatTitle = (fileName: string | null, isModified: boolean) => (
     fileName ? `${fileName}${isModified ? " *" : ""}` : DEFAULT_HOME_TITLE
@@ -40,12 +42,14 @@ export function useHomeWorkspace() {
     const rwlEditorRef = useRef<RwlEditor>(new RwlEditor(new Map()));
     const originalDataRef = useRef<RwlSiteData>(new Map());
     const filePathRef = useRef<string | null>(null);
+    const historyAnimationIdRef = useRef(0);
 
     const [siteData, setSiteData] = useState<RwlSiteData>(() => rwlEditorRef.current.getData());
     const [treeOptions, setTreeOptions] = useState<string[]>([]);
     const [selectedTree, setSelectedTree] = useState<string>(ALL_OPTION_VALUE);
     const [activeTreeForEdit, setActiveTreeForEdit] = useState<string | null>(null);
     const [year, setYear] = useState("");
+    const [historyAnimation, setHistoryAnimation] = useState<WidthHistoryAnimation | null>(null);
     const [yearInputMode, setYearInputMode] = useState<YearInputMode>("manual");
     const [fileName, setFileName] = useState<string | null>(null);
     const [isModified, setIsModified] = useState(false);
@@ -71,6 +75,18 @@ export function useHomeWorkspace() {
         syncEditor(rwlEditorRef.current);
     }, [syncEditor]);
 
+    const triggerHistoryAnimation = useCallback((animation: RwlHistoryAnimation | null) => {
+        if (!animation) {
+            return;
+        }
+
+        historyAnimationIdRef.current += 1;
+        setHistoryAnimation({
+            ...animation,
+            id: historyAnimationIdRef.current,
+        });
+    }, []);
+
     useEffect(() => {
         registerChangeYearWidth((tree, nextYear, width) => {
             rwlEditorRef.current.changeYearWidth(tree, nextYear, width);
@@ -93,6 +109,7 @@ export function useHomeWorkspace() {
         const nextData = nextEditor.getData();
         originalDataRef.current = nextData;
         setSiteData(nextData);
+        setHistoryAnimation(null);
         setIsModified(false);
     }, [syncEditor]);
 
@@ -244,15 +261,35 @@ export function useHomeWorkspace() {
     }, [resolveTargetTree, year]);
 
     const handleUndo = useCallback(() => {
-        rwlEditorRef.current.undo();
-    }, []);
+        triggerHistoryAnimation(rwlEditorRef.current.undo());
+    }, [triggerHistoryAnimation]);
 
     const handleRedo = useCallback(() => {
-        rwlEditorRef.current.redo();
-    }, []);
+        triggerHistoryAnimation(rwlEditorRef.current.redo());
+    }, [triggerHistoryAnimation]);
 
     const handleGridClick = useCallback((tree: string, nextYear: number) => {
         setYear(nextYear.toString());
+        if (selectedTree === ALL_OPTION_VALUE) {
+            setActiveTreeForEdit(tree);
+            setYearInputMode("grid");
+        }
+    }, [selectedTree]);
+
+    const handleInsertMissingYearAtSide = useCallback((tree: string, nextYear: number, side: "left" | "right") => {
+        rwlEditorRef.current.insertMissingYearAtSide(tree, nextYear, side);
+        setYear(nextYear.toString());
+
+        if (selectedTree === ALL_OPTION_VALUE) {
+            setActiveTreeForEdit(tree);
+            setYearInputMode("grid");
+        }
+    }, [selectedTree]);
+
+    const handleMoveSeriesTailByOffset = useCallback((tree: string, selectedStartYear: number, selectedEndYear: number, yearOffset: number) => {
+        rwlEditorRef.current.moveSeriesTailByOffset(tree, selectedStartYear, selectedEndYear, yearOffset);
+        setYear(selectedStartYear.toString());
+
         if (selectedTree === ALL_OPTION_VALUE) {
             setActiveTreeForEdit(tree);
             setYearInputMode("grid");
@@ -291,7 +328,9 @@ export function useHomeWorkspace() {
         handleDelete,
         handleGridClick,
         handleInsert,
+        handleInsertMissingYearAtSide,
         handleLoad,
+        handleMoveSeriesTailByOffset,
         handleRedo,
         handleSave,
         handleSaveAs,
@@ -300,6 +339,7 @@ export function useHomeWorkspace() {
         handleYearChange,
         hasChart,
         hasProblems,
+        historyAnimation,
         isFileLoading,
         isModified,
         possibleProblemsDetail,

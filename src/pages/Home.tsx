@@ -39,7 +39,9 @@ export default function Home() {
         handleDelete,
         handleGridClick,
         handleInsert,
+        handleInsertMissingYearAtSide,
         handleLoad,
+        handleMoveSeriesTailByOffset,
         handleRedo,
         handleSave,
         handleSaveAs,
@@ -48,6 +50,7 @@ export default function Home() {
         handleYearChange,
         hasChart,
         hasProblems,
+        historyAnimation,
         possibleProblemsDetail,
         problemTextColor,
         processingText,
@@ -137,7 +140,10 @@ export default function Home() {
                                     siteData={siteData}
                                     selected={selectedTree}
                                     masterSeries={cofechaResult?.masterDatingSeries}
+                                    historyAnimation={historyAnimation}
                                     scrollContainerRef={dataContainerRef}
+                                    onInsertMissingYearAtSide={handleInsertMissingYearAtSide}
+                                    onMoveSeriesTailByOffset={handleMoveSeriesTailByOffset}
                                     onYearClick={handleGridClick}
                                 />
                             )}

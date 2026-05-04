@@ -1,6 +1,6 @@
-import { RwlTreeData, RwlReadResult } from "./types";
-import { RwlSiteData } from './types';
+import { RwlTreeData, RwlReadResult, RwlSiteData } from "./types";
 import { formatHandlers } from "./index";
+import { stopMarker } from "@/shared/constants";
 
 // RWL 编辑器
 // ===========
@@ -10,14 +10,83 @@ import { formatHandlers } from "./index";
 // 确保导出格式与读入时一致（通过 readOptions 记录的元数据）。
 
 // 插年：在year处插入0，之前的年份总体向前移动1年，最新年份不变
-function insertYearToRwl(rwlData: RwlTreeData, year: number): RwlTreeData {
-    let rwl_new: RwlTreeData = new Map()
-    rwlData.forEach((value, key) => {
-        let offset = (key <= year) ? 1 : 0
-        rwl_new.set(key - offset, value)
-        if (key === year) rwl_new.set(key, 0)
-    })
-    return rwl_new
+export type MissingInsertSide = "left" | "right";
+
+export type RwlEditOperation =
+    | { type: "insert-missing"; tree: string; year: number; side: MissingInsertSide }
+    | { type: "move-selection"; tree: string; selectedStartYear: number; selectedEndYear: number; yearOffset: number };
+
+export type RwlHistoryAnimation = RwlEditOperation & {
+    direction: "undo" | "redo";
+};
+
+type RwlHistoryEntry = {
+    data: RwlSiteData;
+    operation?: RwlEditOperation;
+};
+
+const isStopMarkerValue = (value: number | null | undefined) => value === stopMarker.value;
+
+const sortedTreeData = (entries: Array<[number, number | null]>): RwlTreeData => (
+    new Map(entries.sort((a, b) => a[0] - b[0]))
+);
+
+const editableEntries = (rwlData: RwlTreeData) => (
+    Array.from(rwlData.entries()).filter(([, value]) => !isStopMarkerValue(value))
+);
+
+export function insertMissingYearAtSide(
+    rwlData: RwlTreeData,
+    currentYear: number,
+    side: MissingInsertSide
+): RwlTreeData {
+    const nextEntries: Array<[number, number | null]> = [];
+
+    editableEntries(rwlData).forEach(([year, width]) => {
+        if (side === "left") {
+            nextEntries.push([year >= currentYear ? year + 1 : year, width]);
+        } else {
+            nextEntries.push([year <= currentYear ? year - 1 : year, width]);
+        }
+    });
+
+    nextEntries.push([currentYear, 0]);
+    return sortedTreeData(nextEntries);
+}
+
+export function moveSeriesTailByOffset(
+    rwlData: RwlTreeData,
+    selectedStartYear: number,
+    selectedEndYear: number,
+    yearOffset: number
+): RwlTreeData {
+    if (yearOffset === 0) {
+        return new Map(rwlData);
+    }
+
+    const selectedStart = Math.min(selectedStartYear, selectedEndYear);
+    const selectedEnd = Math.max(selectedStartYear, selectedEndYear);
+    const entries = editableEntries(rwlData);
+    const selectedEntries = entries.filter(([year]) => year >= selectedStart && year <= selectedEnd);
+
+    if (selectedEntries.length === 0) {
+        return new Map(rwlData);
+    }
+
+    const next = new Map<number, number | null>();
+
+    entries.forEach(([year, width]) => {
+        if (year < selectedStart || year > selectedEnd) {
+            next.set(year, width);
+        }
+    });
+
+    // Moved selected values intentionally overwrite any fixed values at target years.
+    selectedEntries.forEach(([year, width]) => {
+        next.set(year + yearOffset, width);
+    });
+
+    return sortedTreeData(Array.from(next.entries()));
 }
 
 // 删年：在year处删除0，之前的年份总体向后移动1年，最新年份不变
@@ -45,8 +114,8 @@ export class RwlEditor {
     private rwlData: RwlSiteData;
     private readOptions?: RwlReadResult['readOptions'];
     private format: string = 'tucson'; // 记录原始读取格式
-    private undoStack: RwlSiteData[] = [];
-    private redoStack: RwlSiteData[] = [];
+    private undoStack: RwlHistoryEntry[] = [];
+    private redoStack: RwlHistoryEntry[] = [];
     private changeCallback?: () => void;
 
     constructor(initialData: RwlSiteData, options?: RwlReadResult['readOptions'], format?: string) {
@@ -96,12 +165,42 @@ export class RwlEditor {
         let treeData = this.rwlData.get(tree)!;
         if (!treeData.has(year)) return;
 
-        let updatedTree = insertYearToRwl(treeData, year);
+        this.undoStack[this.undoStack.length - 1].operation = { type: "insert-missing", tree, year, side: "right" };
+
+        let updatedTree = insertMissingYearAtSide(treeData, year, "right");
         this.rwlData.set(tree, updatedTree);
         this.notifyChange();
     }
 
     // 删年：在 year 处删除 0
+    // Insert a missing placeholder from the requested side of the current year.
+    insertMissingYearAtSide(tree: string, year: number, side: MissingInsertSide): void {
+        this.saveToUndoStack({ type: "insert-missing", tree, year, side });
+        this.redoStack = [];
+
+        if (!this.rwlData.has(tree)) return;
+        let treeData = this.rwlData.get(tree)!;
+        if (!treeData.has(year)) return;
+
+        let updatedTree = insertMissingYearAtSide(treeData, year, side);
+        this.rwlData.set(tree, updatedTree);
+        this.notifyChange();
+    }
+
+    moveSeriesTailByOffset(tree: string, selectedStartYear: number, selectedEndYear: number, yearOffset: number): void {
+        if (yearOffset === 0) return;
+
+        this.saveToUndoStack({ type: "move-selection", tree, selectedStartYear, selectedEndYear, yearOffset });
+        this.redoStack = [];
+
+        if (!this.rwlData.has(tree)) return;
+        let treeData = this.rwlData.get(tree)!;
+
+        let updatedTree = moveSeriesTailByOffset(treeData, selectedStartYear, selectedEndYear, yearOffset);
+        this.rwlData.set(tree, updatedTree);
+        this.notifyChange();
+    }
+
     deleteYear(tree: string, year: number): void {
         this.saveToUndoStack();
         this.redoStack = [];
@@ -129,24 +228,37 @@ export class RwlEditor {
     }
 
     // 撤销（Undo）
-    undo(): void {
-        if (this.undoStack.length === 0) return;
-        this.redoStack.push(new Map(this.rwlData));
-        this.rwlData = this.undoStack.pop()!;
+    undo(): RwlHistoryAnimation | null {
+        if (this.undoStack.length === 0) return null;
+        const previousEntry = this.undoStack.pop()!;
+        this.redoStack.push({
+            data: new Map(this.rwlData),
+            operation: previousEntry.operation,
+        });
+        this.rwlData = previousEntry.data;
         this.notifyChange();
+        return previousEntry.operation ? { ...previousEntry.operation, direction: "undo" } : null;
     }
 
     // 恢复（Redo）
-    redo(): void {
-        if (this.redoStack.length === 0) return;
-        this.undoStack.push(new Map(this.rwlData));
-        this.rwlData = this.redoStack.pop()!;
+    redo(): RwlHistoryAnimation | null {
+        if (this.redoStack.length === 0) return null;
+        const nextEntry = this.redoStack.pop()!;
+        this.undoStack.push({
+            data: new Map(this.rwlData),
+            operation: nextEntry.operation,
+        });
+        this.rwlData = nextEntry.data;
         this.notifyChange();
+        return nextEntry.operation ? { ...nextEntry.operation, direction: "redo" } : null;
     }
 
     // 记录当前状态到 Undo 栈
-    private saveToUndoStack(): void {
-        this.undoStack.push(new Map(this.rwlData));
+    private saveToUndoStack(operation?: RwlEditOperation): void {
+        this.undoStack.push({
+            data: new Map(this.rwlData),
+            operation,
+        });
     }
 
     // 导出为 RWL 字符串，使用读取时的原始格式

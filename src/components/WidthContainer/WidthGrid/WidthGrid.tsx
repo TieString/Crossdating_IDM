@@ -1,6 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
-import style from './WidthGrid.module.css'
-import { callChangeYearWidth } from '@/features/rwl/edit';
+import { useRef, useState } from "react";
+import { callChangeYearWidth } from "@/features/rwl/edit";
+import style from "./WidthGrid.module.css";
+
+type PlusSide = "left" | "right";
+type GridAnimationKind =
+    | "insert-left"
+    | "insert-right"
+    | "insert-shift-left"
+    | "insert-shift-right"
+    | "move-target"
+    | "move-gap"
+    | "overwrite";
 
 type WidthGridProps = React.HTMLAttributes<HTMLSpanElement> & {
     year?: number;
@@ -8,95 +18,178 @@ type WidthGridProps = React.HTMLAttributes<HTMLSpanElement> & {
     gridValue: string | number | null;
     masterSeriesValue?: number;
     isEditable?: boolean;
+    isMissing?: boolean;
+    isSelected?: boolean;
+    isDragging?: boolean;
+    dragYearOffset?: number;
+    animationKind?: GridAnimationKind;
     onYearClick?: (tree: string, year: number) => void;
+    onInsertMissingYearAtSide?: (tree: string, year: number, side: PlusSide) => void;
 };
 
 export default function WidthGrid({
-    year, tree, gridValue, masterSeriesValue, isEditable = false, onYearClick,
-    className = '', style: customStyle = {},
-    ...rest  // ✅ 捕获其他 HTML 属性
+    year,
+    tree,
+    gridValue,
+    masterSeriesValue,
+    isEditable = false,
+    isMissing = false,
+    isSelected = false,
+    isDragging = false,
+    dragYearOffset = 0,
+    animationKind,
+    onYearClick,
+    onInsertMissingYearAtSide,
+    className = "",
+    style: customStyle = {},
+    ...rest
 }: WidthGridProps) {
+    const { title, onMouseMove, onMouseLeave, ...restWithoutTitle } = rest;
+    const [, setText] = useState("");
+    const [hoverPlusSide, setHoverPlusSide] = useState<PlusSide | null>(null);
+    const spanRef = useRef<HTMLSpanElement>(null);
+    const isInsertedZero = gridValue === 0;
+
     const handleClick = () => {
         if (tree !== undefined && year !== undefined && onYearClick) {
-            onYearClick(tree, year); // 触发父组件的回调
+            onYearClick(tree, year);
         }
     };
 
-    const [_text, setText] = useState("");
-    const spanRef = useRef<HTMLSpanElement>(null);
-
-    useEffect(() => {
-        // setText(gridValue.toString());
-    }, [])
-
-    // 进入编辑模式
     const handleDoubleClick = () => {
         const span = spanRef.current;
+
         if (span) {
+            setHoverPlusSide(null);
             span.contentEditable = "true";
             span.focus();
-            // document.execCommand("selectAll", false, undefined); // 自动选中文本
         }
     };
 
-    // 退出编辑模式并保存内容
     const handleBlur = () => {
         const span = spanRef.current;
+
         if (span) {
             const text = span.innerText.trim();
+            const normalizedText = text.toLowerCase();
+            const parsedWidth = text === ""
+                ? null
+                : normalizedText === "missing"
+                    ? 0
+                    : Number(text);
+            const newWidth = typeof parsedWidth === "number" && Number.isNaN(parsedWidth) ? null : parsedWidth;
+
             setText(text);
             span.contentEditable = "false";
-            // 计算并调用全局桥函数
-            const newWidth = text === '' ? null : Number(text);
+
             if (tree !== undefined && year !== undefined) {
                 callChangeYearWidth(tree, year, newWidth);
             }
         }
     };
 
-    // 监听 Enter 键保存内容
-    const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === "Enter") {
-            e.preventDefault(); // 防止换行
-            spanRef.current?.blur(); // 触发 onBlur 事件
+    const handleKeyDown = (event: React.KeyboardEvent) => {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            spanRef.current?.blur();
         }
     };
 
-    // 计算颜色深度（负值越大，颜色越深）
     const getBackgroundColor = () => {
-        if (masterSeriesValue !== undefined && masterSeriesValue < -0.5) {
-            const intensity = Math.min(1, Math.abs(masterSeriesValue) / 2); // 归一化到 0 ~ 1 范围
-            return `rgba(255, 255, 0, ${intensity})`; // 颜色为黄色 (R255, G255, B0)，透明度 0 ~ 1
+        if (isMissing) {
+            return undefined;
         }
-        return "transparent"; // 默认无背景
+
+        if (masterSeriesValue !== undefined && masterSeriesValue < -0.5) {
+            const intensity = Math.min(1, Math.abs(masterSeriesValue) / 2);
+            return `rgba(255, 255, 0, ${intensity})`;
+        }
+
+        return undefined;
     };
-    // 计算字体颜色（小于 -1 变红）
+
     const getTextColor = () => {
+        if (isMissing) {
+            return "#6b7280";
+        }
+
         return masterSeriesValue !== undefined && masterSeriesValue < -1 ? "red" : "black";
     };
 
-    const windth_title = (year? year.toString():"") +"\n" + (masterSeriesValue ? masterSeriesValue.toString() : "");
-    const finalTitle = rest.title || windth_title;
-    const {title, ...restWithoutTitle} = rest; // 从 rest 中剥离 title，优先使用 props.title
+    const handleMouseMove = (event: React.MouseEvent<HTMLSpanElement>) => {
+        onMouseMove?.(event);
+
+        if (!isEditable || tree === undefined || year === undefined || isDragging) {
+            return;
+        }
+
+        const rect = event.currentTarget.getBoundingClientRect();
+        const nextSide = event.clientX - rect.left < rect.width / 2 ? "left" : "right";
+        setHoverPlusSide((previous) => previous === nextSide ? previous : nextSide);
+    };
+
+    const handleMouseLeave = (event: React.MouseEvent<HTMLSpanElement>) => {
+        onMouseLeave?.(event);
+        setHoverPlusSide(null);
+    };
+
+    const handlePlusPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+        event.preventDefault();
+        event.stopPropagation();
+    };
+
+    const handlePlusClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (tree !== undefined && year !== undefined && hoverPlusSide && onInsertMissingYearAtSide) {
+            onInsertMissingYearAtSide(tree, year, hoverPlusSide);
+        }
+
+        setHoverPlusSide(null);
+    };
+
+    const masterText = masterSeriesValue !== undefined ? masterSeriesValue.toString() : "";
+    const widthTitle = `${year !== undefined ? year.toString() : ""}\n${masterText}`;
+    const finalTitle = title || widthTitle;
+    const displayedValue = isMissing ? "missing" : gridValue;
+    const plusButtonClassName = hoverPlusSide
+        ? `${style["insert-missing-button"]} ${style[`insert-missing-button-${hoverPlusSide}`]} ${style["insert-missing-button-visible"]}`
+        : style["insert-missing-button"];
+    const animationClassName = animationKind ? style[`animate-${animationKind}`] : "";
 
     return (
-        <span 
+        <span
+            {...restWithoutTitle}
             ref={spanRef}
             title={finalTitle}
+            data-drag-year-offset={dragYearOffset || undefined}
             onClick={isEditable ? handleClick : undefined}
             onDoubleClick={isEditable ? handleDoubleClick : undefined}
+            onMouseMove={handleMouseMove}
+            onMouseLeave={handleMouseLeave}
             onBlur={handleBlur}
             onKeyDown={handleKeyDown}
-            className={`${style["width-grid"]} ${className} ${gridValue === 0 ? style["highlight-zero"] : ""} ${isEditable ? "" : style["disabled"]}`}
+            className={`${style["width-grid"]} ${className} ${isMissing ? style["missing"] : ""} ${isInsertedZero ? style["inserted-zero"] : ""} ${isSelected ? style["selected"] : ""} ${isDragging ? style["dragging"] : ""} ${animationClassName} ${isEditable ? "" : style["disabled"]}`}
             style={{
                 backgroundColor: getBackgroundColor(),
                 color: getTextColor(),
-                fontWeight: masterSeriesValue !== undefined && masterSeriesValue < -1 ? "bold" : "normal", // 小于 -1 加粗
-                ...customStyle
+                fontWeight: !isMissing && masterSeriesValue !== undefined && masterSeriesValue < -1 ? "bold" : "normal",
+                ...customStyle,
             }}
-            {...restWithoutTitle}  // ✅ 转发其他属性
         >
-            {gridValue}
+            {displayedValue}
+            {isEditable && hoverPlusSide ? (
+                <button
+                    type="button"
+                    aria-label={`Insert missing year on ${hoverPlusSide} side`}
+                    className={plusButtonClassName}
+                    onPointerDown={handlePlusPointerDown}
+                    onClick={handlePlusClick}
+                >
+                    +
+                </button>
+            ) : null}
         </span>
-    )
+    );
 }

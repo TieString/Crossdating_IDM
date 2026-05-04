@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { ChartZoomWindow, MultiLineChart } from './MultiLineChart.tsx'
 import { RwlSiteData } from '@/features/rwl'
+import { stopMarker } from '@/shared/constants'
 
 // 树种图表管理器。
 // 这个组件负责把当前 RWL 数据拆成“可选树种列表 + 选中后的多折线图”两部分：
@@ -79,18 +80,14 @@ function TreeChartManagerBase({ fullData }: Props) {
       const treeData = fullData.get(treeCode)
       if (treeData) {
         const numericData = new Map<number, number>()
-        const sortedYears = Array.from(treeData.keys()).sort((a, b) => a - b)
-        if (sortedYears.length < 2) {
-          return
-        }
-
-        const trimmedYears = sortedYears.slice(0, -1)
         const yearOffset = treeOffsets.get(treeCode) ?? 0
-        trimmedYears.forEach((year) => {
-          const value = treeData.get(year)
-          if (value !== undefined && value !== null) {
-            numericData.set(year + yearOffset, value)
+
+        treeData.forEach((value, year) => {
+          if (typeof value !== "number" || value <= 0 || value === stopMarker.value) {
+            return
           }
+
+          numericData.set(year + yearOffset, value)
         })
 
         if (numericData.size > 0) {

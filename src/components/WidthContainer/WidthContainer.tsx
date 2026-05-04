@@ -1,5 +1,8 @@
-import { memo, ReactNode, RefObject, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, ReactNode, RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { RwlSiteData } from '@/features/rwl';
+import { moveSeriesTailByOffset as previewMoveSeriesTailByOffset } from '@/features/rwl/edit';
+import type { RwlHistoryAnimation } from '@/features/rwl/edit';
 import WidthGrid from './WidthGrid/WidthGrid';
 import style from "./WidthContainer.module.css";
 import { stopMarker } from '@/shared/constants';
@@ -31,6 +34,82 @@ const ROW_HEIGHT = 24;
 const ROW_GAP = 5;
 const SERIES_GAP = 12;
 const OVERSCAN_PX = 320;
+const VALUE_COLUMN_COUNT = 10;
+const GRID_GAP = 5;
+const DRAG_THRESHOLD_PX = 3;
+const INSERT_SHIFT_ANIMATION_MS = 1250;
+const INSERT_SHIFT_EASING = "cubic-bezier(0.16, 1, 0.3, 1)";
+
+type PlusSide = "left" | "right";
+type WidthHistoryAnimation = RwlHistoryAnimation & { id: number };
+
+interface GridSelection {
+    tree: string;
+    startYear: number;
+    endYear: number;
+}
+
+interface DragPreview extends GridSelection {
+    yearOffset: number;
+    hasMoved: boolean;
+}
+
+interface InsertFlipCell {
+    sourceYear: number;
+    targetYear: number;
+    sourceRect: DOMRect;
+    sourceText: string;
+    sourceClassName: string;
+    sourceStyleText: string;
+}
+
+interface InsertShiftTarget {
+    sourceYear: number;
+    targetYear: number;
+}
+
+interface PendingInsertFlip {
+    tree: string;
+    side: PlusSide;
+    cells: InsertFlipCell[];
+}
+
+type GridAnimationKind =
+    | "insert-left"
+    | "insert-right"
+    | "insert-shift-left"
+    | "insert-shift-right"
+    | "move-target"
+    | "move-gap"
+    | "overwrite";
+
+interface GridAnimationCue {
+    id: number;
+    tree: string;
+    insertSide?: PlusSide;
+    insertedYears: number[];
+    shiftedYears: number[];
+    movedYears: number[];
+    gapYears: number[];
+    overwrittenYears: number[];
+}
+
+type GridInteraction =
+    | { mode: "select"; tree: string; anchorYear: number; pointerId: number }
+    | {
+        mode: "move";
+        tree: string;
+        startYear: number;
+        endYear: number;
+        clickedYear: number;
+        pointerId: number;
+        startX: number;
+        startY: number;
+        columnStride: number;
+        rowStride: number;
+        yearOffset: number;
+        hasMoved: boolean;
+    };
 
 const getYearOffsetWithinDecade = (year: number) => ((year % 10) + 10) % 10;
 
@@ -39,8 +118,51 @@ const getFirstRowBreakYear = (startYear: number) => {
     return offset === 0 ? startYear : startYear + (10 - offset);
 };
 
+const normalizeSelection = (tree: string, yearA: number, yearB: number): GridSelection => ({
+    tree,
+    startYear: Math.min(yearA, yearB),
+    endYear: Math.max(yearA, yearB),
+});
+
+const isYearInSelection = (selection: GridSelection | null, tree: string, year: number) => (
+    Boolean(selection && selection.tree === tree && year >= selection.startYear && year <= selection.endYear)
+);
+
+const getYearRange = (startYear: number, endYear: number) => {
+    const start = Math.min(startYear, endYear);
+    const end = Math.max(startYear, endYear);
+    return Array.from({ length: end - start + 1 }, (_, index) => start + index);
+};
+
+const getLayoutRowStart = (firstYear: number, year: number) => {
+    if (year < firstYear) {
+        return year;
+    }
+
+    const firstRowBreakYear = getFirstRowBreakYear(firstYear);
+    return year < firstRowBreakYear ? firstYear : year - getYearOffsetWithinDecade(year);
+};
+
+const getGridCellFromPoint = (clientX: number, clientY: number) => {
+    const element = document.elementFromPoint(clientX, clientY);
+    const cell = element?.closest<HTMLElement>("[data-width-grid-cell='true']");
+    const tree = cell?.dataset.tree;
+    const rawYear = cell?.dataset.year;
+
+    if (!tree || rawYear === undefined) {
+        return null;
+    }
+
+    const year = Number(rawYear);
+    return Number.isFinite(year) ? { tree, year } : null;
+};
+
 const buildTimeline = (entries: Array<[number, number | null]>): YearCell[] => {
-    const sortedEntries = [...entries].sort((a, b) => a[0] - b[0]);
+    const sortedRawEntries = [...entries].sort((a, b) => a[0] - b[0]);
+    const sortedEntries = sortedRawEntries.filter(([, width], index) => (
+        width !== stopMarker.value || index === sortedRawEntries.length - 1
+    ));
+
     if (sortedEntries.length === 0) {
         return [];
     }
@@ -67,6 +189,84 @@ const buildTimeline = (entries: Array<[number, number | null]>): YearCell[] => {
     }
 
     return timeline;
+};
+
+const getTreeYearGridElements = (container: HTMLElement, tree: string) => {
+    const elementsByYear = new Map<number, HTMLElement>();
+    const cells = container.querySelectorAll<HTMLElement>("[data-width-grid-cell='true']");
+
+    cells.forEach((cell) => {
+        if (cell.dataset.tree !== tree) {
+            return;
+        }
+
+        const year = Number(cell.dataset.year);
+        if (Number.isFinite(year)) {
+            elementsByYear.set(year, cell);
+        }
+    });
+
+    return elementsByYear;
+};
+
+const getGridTextContent = (element: HTMLElement) => {
+    const firstTextNode = Array.from(element.childNodes).find((node) => node.nodeType === Node.TEXT_NODE);
+    return firstTextNode?.textContent ?? element.textContent ?? "";
+};
+
+const getFirstSeriesYear = (treeData: Map<number, number | null>) => {
+    let firstYear: number | undefined;
+
+    treeData.forEach((_, year) => {
+        firstYear = firstYear === undefined ? year : Math.min(firstYear, year);
+    });
+
+    return firstYear;
+};
+
+const getVisibleInsertShiftTargets = (
+    sourceElements: Map<number, HTMLElement>,
+    currentYear: number,
+    side: PlusSide,
+): InsertShiftTarget[] => {
+    const direction = side === "left" ? 1 : -1;
+
+    return Array.from(sourceElements.entries())
+        .filter(([sourceYear]) => side === "left" ? sourceYear >= currentYear : sourceYear <= currentYear)
+        .map(([sourceYear]) => ({
+            sourceYear,
+            targetYear: sourceYear + direction,
+        }));
+};
+
+const isCrossRowInsertShift = (firstYear: number, sourceYear: number, targetYear: number) => (
+    getLayoutRowStart(firstYear, sourceYear) !== getLayoutRowStart(firstYear, targetYear)
+);
+
+const getOppositeSide = (side: PlusSide): PlusSide => side === "left" ? "right" : "left";
+
+const isYearOnInsertSide = (year: number, currentYear: number, side: PlusSide) => (
+    side === "left" ? year >= currentYear : year <= currentYear
+);
+
+const getMoveAnimationYears = (
+    selectedStartYear: number,
+    selectedEndYear: number,
+    yearOffset: number,
+    direction: "undo" | "redo",
+) => {
+    const sourceStart = direction === "redo" ? selectedStartYear : selectedStartYear + yearOffset;
+    const sourceEnd = direction === "redo" ? selectedEndYear : selectedEndYear + yearOffset;
+    const targetStart = direction === "redo" ? selectedStartYear + yearOffset : selectedStartYear;
+    const targetEnd = direction === "redo" ? selectedEndYear + yearOffset : selectedEndYear;
+    const targetSelection = normalizeSelection("", targetStart, targetEnd);
+
+    return {
+        movedYears: getYearRange(targetStart, targetEnd),
+        gapYears: getYearRange(sourceStart, sourceEnd).filter((year) => (
+            year < targetSelection.startYear || year > targetSelection.endYear
+        )),
+    };
 };
 
 const buildSeriesRows = (treeCode: string, timeline: YearCell[]): VirtualRow[] => {
@@ -145,11 +345,14 @@ type WidthContainerProps = {
     siteData: RwlSiteData,
     masterSeries?: Map<number, number>,
     selected?: string,
+    historyAnimation?: WidthHistoryAnimation | null,
     onYearClick?: (tree: string, year: number) => void,
+    onInsertMissingYearAtSide?: (tree: string, year: number, side: PlusSide) => void,
+    onMoveSeriesTailByOffset?: (tree: string, selectedStartYear: number, selectedEndYear: number, yearOffset: number) => void,
     scrollContainerRef?: RefObject<HTMLElement | null>
 };
 
-function WidthContainer({ siteData: site, masterSeries, selected, onYearClick, scrollContainerRef }: WidthContainerProps): ReactNode {
+function WidthContainer({ siteData: site, masterSeries, selected, historyAnimation, onYearClick, onInsertMissingYearAtSide, onMoveSeriesTailByOffset, scrollContainerRef }: WidthContainerProps): ReactNode {
     const visibleSite = useMemo(() => (
         selected && site.has(selected)
             ? (() => {
@@ -159,12 +362,53 @@ function WidthContainer({ siteData: site, masterSeries, selected, onYearClick, s
             : site
     ), [selected, site]);
     const [viewport, setViewport] = useState({ scrollTop: 0, height: 0 });
+    const [selection, setSelection] = useState<GridSelection | null>(null);
+    const [dragYearOffset, setDragYearOffset] = useState(0);
+    const [isDraggingSelection, setIsDraggingSelection] = useState(false);
+    const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
+    const [animationCue, setAnimationCue] = useState<GridAnimationCue | null>(null);
+    const containerRef = useRef<HTMLDivElement | null>(null);
+    const interactionRef = useRef<GridInteraction | null>(null);
+    const animationCueIdRef = useRef(0);
+    const pendingInsertFlipRef = useRef<PendingInsertFlip | null>(null);
+    const insertAnimationCleanupRef = useRef<Array<() => void>>([]);
+
+    const showAnimationCue = useCallback((cue: Omit<GridAnimationCue, "id">) => {
+        animationCueIdRef.current += 1;
+        setAnimationCue({
+            id: animationCueIdRef.current,
+            ...cue,
+        });
+    }, []);
+
+    const clearInsertAnimations = useCallback(() => {
+        insertAnimationCleanupRef.current.forEach((cleanup) => cleanup());
+        insertAnimationCleanupRef.current = [];
+    }, []);
+
+    const renderSite = useMemo(() => {
+        if (!dragPreview?.hasMoved || dragPreview.yearOffset === 0) {
+            return visibleSite;
+        }
+
+        const treeData = visibleSite.get(dragPreview.tree);
+        if (!treeData) {
+            return visibleSite;
+        }
+
+        const nextSite = new Map(visibleSite);
+        nextSite.set(
+            dragPreview.tree,
+            previewMoveSeriesTailByOffset(treeData, dragPreview.startYear, dragPreview.endYear, dragPreview.yearOffset)
+        );
+        return nextSite;
+    }, [dragPreview, visibleSite]);
 
     const virtualSeries = useMemo(() => {
         const seriesList: VirtualSeries[] = [];
         let currentTop = 0;
 
-        for (const [key, value] of visibleSite.entries()) {
+        for (const [key, value] of renderSite.entries()) {
             const timeline = buildTimeline(Array.from(value.entries()));
             if (timeline.length === 0) {
                 continue;
@@ -188,13 +432,465 @@ function WidthContainer({ siteData: site, masterSeries, selected, onYearClick, s
             series: seriesList,
             totalHeight: Math.max(0, currentTop - SERIES_GAP),
         };
+    }, [renderSite]);
+
+    const renderSelection = useMemo(() => {
+        if (!dragPreview?.hasMoved || dragPreview.yearOffset === 0) {
+            return selection;
+        }
+
+        return normalizeSelection(
+            dragPreview.tree,
+            dragPreview.startYear + dragPreview.yearOffset,
+            dragPreview.endYear + dragPreview.yearOffset
+        );
+    }, [dragPreview, selection]);
+
+    const selectedYears = useMemo(() => {
+        const years = new Set<number>();
+
+        if (!renderSelection) {
+            return years;
+        }
+
+        for (let year = renderSelection.startYear; year <= renderSelection.endYear; year++) {
+            years.add(year);
+        }
+
+        return years;
+    }, [renderSelection]);
+
+    const animationLookup = useMemo(() => {
+        if (!animationCue) {
+            return null;
+        }
+
+        return {
+            tree: animationCue.tree,
+            insertSide: animationCue.insertSide,
+            insertedYears: new Set(animationCue.insertedYears),
+            shiftedYears: new Set(animationCue.shiftedYears),
+            movedYears: new Set(animationCue.movedYears),
+            gapYears: new Set(animationCue.gapYears),
+            overwrittenYears: new Set(animationCue.overwrittenYears),
+        };
+    }, [animationCue]);
+
+    const getGridAnimationKind = useCallback((tree: string, year: number): GridAnimationKind | undefined => {
+        if (!animationLookup || animationLookup.tree !== tree) {
+            return undefined;
+        }
+
+        if (animationLookup.insertedYears.has(year)) {
+            return animationLookup.insertSide === "right" ? "insert-right" : "insert-left";
+        }
+
+        if (animationLookup.shiftedYears.has(year)) {
+            return animationLookup.insertSide === "right" ? "insert-shift-left" : "insert-shift-right";
+        }
+
+        if (animationLookup.overwrittenYears.has(year)) {
+            return "overwrite";
+        }
+
+        if (animationLookup.movedYears.has(year)) {
+            return "move-target";
+        }
+
+        if (animationLookup.gapYears.has(year)) {
+            return "move-gap";
+        }
+
+        return undefined;
+    }, [animationLookup]);
+
+    useEffect(() => {
+        if (!animationCue) {
+            return;
+        }
+
+        const timerId = window.setTimeout(() => {
+            setAnimationCue((previous) => previous?.id === animationCue.id ? null : previous);
+        }, 2400);
+
+        return () => {
+            window.clearTimeout(timerId);
+        };
+    }, [animationCue]);
+
+    useEffect(() => {
+        setSelection((previous) => (
+            previous && visibleSite.has(previous.tree) ? previous : null
+        ));
     }, [visibleSite]);
+
+    useLayoutEffect(() => {
+        if (!historyAnimation) {
+            return;
+        }
+
+        if (historyAnimation.type === "insert-missing") {
+            const sourceElements = containerRef.current
+                ? getTreeYearGridElements(containerRef.current, historyAnimation.tree)
+                : new Map<number, HTMLElement>();
+            const shiftedYears = Array.from(sourceElements.keys()).filter((year) => (
+                isYearOnInsertSide(year, historyAnimation.year, historyAnimation.side)
+            ));
+            const visualSide = historyAnimation.direction === "undo"
+                ? getOppositeSide(historyAnimation.side)
+                : historyAnimation.side;
+
+            showAnimationCue({
+                tree: historyAnimation.tree,
+                insertSide: visualSide,
+                insertedYears: historyAnimation.direction === "redo" ? [historyAnimation.year] : [],
+                shiftedYears,
+                movedYears: [],
+                gapYears: [],
+                overwrittenYears: [],
+            });
+            return;
+        }
+
+        if (historyAnimation.type === "move-selection") {
+            const { movedYears, gapYears } = getMoveAnimationYears(
+                historyAnimation.selectedStartYear,
+                historyAnimation.selectedEndYear,
+                historyAnimation.yearOffset,
+                historyAnimation.direction,
+            );
+
+            showAnimationCue({
+                tree: historyAnimation.tree,
+                insertedYears: [],
+                shiftedYears: [],
+                movedYears,
+                gapYears,
+                overwrittenYears: [],
+            });
+        }
+    }, [historyAnimation, showAnimationCue]);
+
+    useLayoutEffect(() => {
+        const pendingInsertFlip = pendingInsertFlipRef.current;
+        const container = containerRef.current;
+
+        if (!pendingInsertFlip || !container) {
+            return;
+        }
+
+        pendingInsertFlipRef.current = null;
+        clearInsertAnimations();
+
+        const containerRect = container.getBoundingClientRect();
+        const cleanups: Array<() => void> = [];
+        const direction = pendingInsertFlip.side === "right" ? -1 : 1;
+
+        const createSourceExitGhost = (cell: InsertFlipCell) => {
+            const ghost = document.createElement("span");
+            ghost.className = cell.sourceClassName;
+            ghost.textContent = cell.sourceText;
+            ghost.setAttribute("style", cell.sourceStyleText);
+            ghost.style.position = "absolute";
+            ghost.style.left = `${cell.sourceRect.left - containerRect.left}px`;
+            ghost.style.top = `${cell.sourceRect.top - containerRect.top}px`;
+            ghost.style.width = `${cell.sourceRect.width}px`;
+            ghost.style.height = `${cell.sourceRect.height}px`;
+            ghost.style.lineHeight = `${cell.sourceRect.height}px`;
+            ghost.style.pointerEvents = "none";
+            ghost.style.zIndex = "5";
+            container.appendChild(ghost);
+
+            const distance = cell.sourceRect.width + GRID_GAP;
+            const animation = ghost.animate([
+                { opacity: 1, transform: "translateX(0)" },
+                { opacity: 0.42, transform: `translateX(${direction * distance * 0.42}px)`, offset: 0.46 },
+                { opacity: 0, transform: `translateX(${direction * distance * 0.72}px)` },
+            ], {
+                duration: INSERT_SHIFT_ANIMATION_MS,
+                easing: INSERT_SHIFT_EASING,
+            });
+            let isDone = false;
+            const finish = () => {
+                if (isDone) {
+                    return;
+                }
+
+                isDone = true;
+                ghost.remove();
+            };
+            const cleanup = () => {
+                if (!isDone) {
+                    animation.cancel();
+                    finish();
+                }
+            };
+
+            animation.addEventListener("finish", finish, { once: true });
+            animation.addEventListener("cancel", finish, { once: true });
+            cleanups.push(cleanup);
+        };
+
+        pendingInsertFlip.cells.forEach(createSourceExitGhost);
+
+        insertAnimationCleanupRef.current = cleanups;
+    }, [animationCue?.id, clearInsertAnimations, visibleSite]);
+
+    useEffect(() => () => {
+        clearInsertAnimations();
+    }, [clearInsertAnimations]);
 
     const handleYearClick = useCallback((tree: string, year: number) => {
         if (onYearClick) {
             onYearClick(tree, year);
         }
     }, [onYearClick]);
+
+    const handleInsertMissingYearAtSide = useCallback((tree: string, year: number, side: PlusSide) => {
+        const treeData = visibleSite.get(tree);
+        const container = containerRef.current;
+        let shiftedYears: number[] = [];
+
+        pendingInsertFlipRef.current = null;
+
+        if (container) {
+            const sourceElements = getTreeYearGridElements(container, tree);
+            const shiftTargets = getVisibleInsertShiftTargets(sourceElements, year, side);
+            const firstYear = treeData ? getFirstSeriesYear(treeData) : undefined;
+            const cells = firstYear === undefined
+                ? []
+                : shiftTargets
+                    .filter(({ sourceYear, targetYear }) => isCrossRowInsertShift(firstYear, sourceYear, targetYear))
+                    .map(({ sourceYear, targetYear }) => {
+                        const sourceElement = sourceElements.get(sourceYear);
+
+                        if (!sourceElement) {
+                            return null;
+                        }
+
+                        return {
+                            sourceYear,
+                            targetYear,
+                            sourceRect: sourceElement.getBoundingClientRect(),
+                            sourceText: getGridTextContent(sourceElement),
+                            sourceClassName: sourceElement.className,
+                            sourceStyleText: sourceElement.getAttribute("style") ?? "",
+                        };
+                    })
+                    .filter((cell): cell is InsertFlipCell => cell !== null);
+
+            shiftedYears = Array.from(new Set(shiftTargets.map(({ targetYear }) => targetYear)));
+
+            pendingInsertFlipRef.current = {
+                tree,
+                side,
+                cells,
+            };
+        }
+
+        flushSync(() => {
+            onInsertMissingYearAtSide?.(tree, year, side);
+            showAnimationCue({
+                tree,
+                insertSide: side,
+                insertedYears: [year],
+                shiftedYears,
+                movedYears: [],
+                gapYears: [],
+                overwrittenYears: [],
+            });
+        });
+    }, [onInsertMissingYearAtSide, showAnimationCue, visibleSite]);
+
+    const clearSelection = useCallback(() => {
+        interactionRef.current = null;
+        setSelection(null);
+        setDragPreview(null);
+        setDragYearOffset(0);
+        setIsDraggingSelection(false);
+    }, []);
+
+    const handleContainerPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        const target = event.target;
+
+        if (target instanceof Element && target.closest("[data-width-grid-cell='true']")) {
+            return;
+        }
+
+        clearSelection();
+    }, [clearSelection]);
+
+    const handleGridPointerDown = useCallback((event: React.PointerEvent<HTMLSpanElement>, tree: string, year: number) => {
+        if (event.button !== 0) {
+            return;
+        }
+
+        setDragPreview(null);
+        setDragYearOffset(0);
+        setIsDraggingSelection(false);
+
+        if (event.shiftKey && selection?.tree === tree) {
+            setSelection(normalizeSelection(tree, selection.startYear, year));
+            interactionRef.current = { mode: "select", tree, anchorYear: selection.startYear, pointerId: event.pointerId };
+            return;
+        }
+
+        const isSelectedCell = isYearInSelection(selection, tree, year);
+
+        const shouldMoveSelection = isSelectedCell && (selectedYears.size > 1 || event.altKey);
+
+        if (shouldMoveSelection) {
+            const rect = event.currentTarget.getBoundingClientRect();
+            interactionRef.current = {
+                mode: "move",
+                tree,
+                startYear: selection!.startYear,
+                endYear: selection!.endYear,
+                clickedYear: year,
+                pointerId: event.pointerId,
+                startX: event.clientX,
+                startY: event.clientY,
+                columnStride: rect.width + GRID_GAP,
+                rowStride: rect.height + ROW_GAP,
+                yearOffset: 0,
+                hasMoved: false,
+            };
+            return;
+        }
+
+        setSelection(normalizeSelection(tree, year, year));
+        interactionRef.current = { mode: "select", tree, anchorYear: year, pointerId: event.pointerId };
+    }, [selectedYears.size, selection]);
+
+    useEffect(() => {
+        const handlePointerMove = (event: PointerEvent) => {
+            const interaction = interactionRef.current;
+
+            if (!interaction || interaction.pointerId !== event.pointerId) {
+                return;
+            }
+
+            if (interaction.mode === "select") {
+                const cell = getGridCellFromPoint(event.clientX, event.clientY);
+
+                if (cell && cell.tree === interaction.tree) {
+                    setSelection(normalizeSelection(interaction.tree, interaction.anchorYear, cell.year));
+                }
+
+                return;
+            }
+
+            const deltaX = event.clientX - interaction.startX;
+            const deltaY = event.clientY - interaction.startY;
+            const deltaColumn = Math.round(deltaX / interaction.columnStride);
+            const deltaRow = Math.round(deltaY / interaction.rowStride);
+            const nextYearOffset = deltaColumn + deltaRow * VALUE_COLUMN_COUNT;
+            const hasMoved = interaction.hasMoved || Math.hypot(deltaX, deltaY) >= DRAG_THRESHOLD_PX;
+
+            if (hasMoved || nextYearOffset !== interaction.yearOffset || hasMoved !== interaction.hasMoved) {
+                interactionRef.current = {
+                    ...interaction,
+                    yearOffset: nextYearOffset,
+                    hasMoved,
+                };
+                setDragYearOffset(nextYearOffset);
+                setIsDraggingSelection(hasMoved);
+                setDragPreview({
+                    tree: interaction.tree,
+                    startYear: interaction.startYear,
+                    endYear: interaction.endYear,
+                    yearOffset: nextYearOffset,
+                    hasMoved,
+                });
+            }
+        };
+
+        const handlePointerUp = (event: PointerEvent) => {
+            const interaction = interactionRef.current;
+
+            if (!interaction || interaction.pointerId !== event.pointerId) {
+                return;
+            }
+
+            interactionRef.current = null;
+            setDragYearOffset(0);
+            setIsDraggingSelection(false);
+            setDragPreview(null);
+
+            if (interaction.mode !== "move") {
+                return;
+            }
+
+            if (event.type === "pointercancel") {
+                return;
+            }
+
+            if (!interaction.hasMoved) {
+                setSelection(normalizeSelection(interaction.tree, interaction.clickedYear, interaction.clickedYear));
+                return;
+            }
+
+            if (interaction.yearOffset === 0) {
+                return;
+            }
+
+            const targetSelection = normalizeSelection(
+                interaction.tree,
+                interaction.startYear + interaction.yearOffset,
+                interaction.endYear + interaction.yearOffset
+            );
+            const movedYears = getYearRange(targetSelection.startYear, targetSelection.endYear);
+            const gapYears = getYearRange(interaction.startYear, interaction.endYear).filter((year) => (
+                year < targetSelection.startYear || year > targetSelection.endYear
+            ));
+            const treeData = visibleSite.get(interaction.tree);
+            const originalSelectedYears = new Set(getYearRange(interaction.startYear, interaction.endYear));
+            const overwrittenYears = treeData
+                ? Array.from(treeData.entries())
+                    .filter(([year, width]) => (
+                        width !== stopMarker.value
+                        && year >= interaction.startYear
+                        && year <= interaction.endYear
+                    ))
+                    .map(([year]) => year + interaction.yearOffset)
+                    .filter((targetYear) => {
+                        const existingValue = treeData.get(targetYear);
+                        return existingValue !== undefined
+                            && existingValue !== stopMarker.value
+                            && !originalSelectedYears.has(targetYear);
+                    })
+                : [];
+
+            onMoveSeriesTailByOffset?.(interaction.tree, interaction.startYear, interaction.endYear, interaction.yearOffset);
+            setSelection(targetSelection);
+            showAnimationCue({
+                tree: interaction.tree,
+                insertedYears: [],
+                shiftedYears: [],
+                movedYears,
+                gapYears,
+                overwrittenYears,
+            });
+        };
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === "Escape") {
+                clearSelection();
+            }
+        };
+
+        window.addEventListener("pointermove", handlePointerMove);
+        window.addEventListener("pointerup", handlePointerUp);
+        window.addEventListener("pointercancel", handlePointerUp);
+        window.addEventListener("keydown", handleKeyDown);
+
+        return () => {
+            window.removeEventListener("pointermove", handlePointerMove);
+            window.removeEventListener("pointerup", handlePointerUp);
+            window.removeEventListener("pointercancel", handlePointerUp);
+            window.removeEventListener("keydown", handleKeyDown);
+        };
+    }, [clearSelection, onMoveSeriesTailByOffset, showAnimationCue, visibleSite]);
 
     useEffect(() => {
         const scrollContainer = scrollContainerRef?.current;
@@ -263,7 +959,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, onYearClick, s
         : virtualSeries.totalHeight;
 
     return (
-        <div className={style["width-grid-container"]}>
+        <div ref={containerRef} className={style["width-grid-container"]} onPointerDown={handleContainerPointerDown}>
             {topSpacerHeight > 0 ? (
                 <div
                     aria-hidden="true"
@@ -288,8 +984,29 @@ function WidthContainer({ siteData: site, masterSeries, selected, onYearClick, s
                                     return <div key={`gap-${series.treeCode}-${row.startYear}-${cellIndex}`}></div>;
                                 }
 
+                                const cellIsSelected = renderSelection?.tree === series.treeCode && selectedYears.has(cell.year);
+                                const cellAnimationKind = getGridAnimationKind(series.treeCode, cell.year);
+                                const cellAnimationKey = cellAnimationKind ? animationCue?.id ?? 0 : 0;
+
                                 if (cell.isInterruptPad) {
-                                    return <div className={style["interrupt-year"]} key={`interrupt-${series.treeCode}-${cell.year}`} />;
+                                    return (
+                                        <WidthGrid
+                                            key={`interrupt-${series.treeCode}-${cell.year}-${cellAnimationKey}`}
+                                            gridValue="missing"
+                                            year={cell.year}
+                                            tree={series.treeCode}
+                                            masterSeriesValue={masterSeries?.get(cell.year)}
+                                            isMissing={true}
+                                            isSelected={cellIsSelected}
+                                            isDragging={isDraggingSelection && cellIsSelected}
+                                            dragYearOffset={dragYearOffset}
+                                            animationKind={cellAnimationKind}
+                                            data-width-grid-cell="true"
+                                            data-tree={series.treeCode}
+                                            data-year={cell.year}
+                                            onPointerDown={(event) => handleGridPointerDown(event, series.treeCode, cell.year)}
+                                        />
+                                    );
                                 }
 
                                 if (cell.width === stopMarker.value) {
@@ -298,12 +1015,21 @@ function WidthContainer({ siteData: site, masterSeries, selected, onYearClick, s
 
                                 return (
                                     <WidthGrid
-                                        key={`value-${series.treeCode}-${cell.year}`}
+                                        key={`value-${series.treeCode}-${cell.year}-${cellAnimationKey}`}
                                         gridValue={cell.width ?? null}
                                         year={cell.year}
                                         tree={series.treeCode}
                                         masterSeriesValue={masterSeries?.get(cell.year)}
                                         isEditable={true}
+                                        isSelected={cellIsSelected}
+                                        isDragging={isDraggingSelection && cellIsSelected}
+                                        dragYearOffset={dragYearOffset}
+                                        animationKind={cellAnimationKind}
+                                        data-width-grid-cell="true"
+                                        data-tree={series.treeCode}
+                                        data-year={cell.year}
+                                        onPointerDown={(event) => handleGridPointerDown(event, series.treeCode, cell.year)}
+                                        onInsertMissingYearAtSide={handleInsertMissingYearAtSide}
                                         onYearClick={handleYearClick}
                                     />
                                 );

@@ -2,9 +2,10 @@
     display: block;
     min-width: 670px;
     width: 100%;
-    font-family: "consolas";
-    contain: layout;
     overflow-anchor: none;
+    contain: layout;
+    font-family: "consolas";
+    user-select: none;
 }
 
 .series-block {
@@ -15,7 +16,6 @@
 
 .series-row {
     display: grid;
-    /* 第一列至少保留 6 个字符宽度，避免编号被过早截断为省略号。 */
     grid-template-columns: minmax(6ch, 1.25fr) repeat(11, minmax(0, 1fr));
     gap: 5px;
     contain: layout style;
@@ -23,8 +23,8 @@
 
 .virtual-spacer {
     width: 100%;
-    pointer-events: none;
     overflow-anchor: none;
+    pointer-events: none;
 }
 
 .series-code-cell {
@@ -32,6 +32,7 @@
 }
 
 .interrupt-year {
+    border-radius: 3px;
     background-color: #eeeeee;
-    /* 可根据需要调整颜色 */
+    box-shadow: inset 0 0 0 1px #d8d8d8;
 }
