@@ -2,8 +2,9 @@ import { memo, ReactNode, RefObject, useCallback, useEffect, useLayoutEffect, us
 import { flushSync } from 'react-dom';
 import { RwlSiteData } from '@/features/rwl';
 import { moveSeriesTailByOffset as previewMoveSeriesTailByOffset } from '@/features/rwl/edit';
-import type { RwlHistoryAnimation } from '@/features/rwl/edit';
+import type { DeleteMode, RwlHistoryAnimation } from '@/features/rwl/edit';
 import WidthGrid from './WidthGrid/WidthGrid';
+import WidthGridContextMenu from './WidthGridContextMenu/WidthGridContextMenu';
 import style from "./WidthContainer.module.css";
 import { stopMarker } from '@/shared/constants';
 
@@ -349,10 +350,18 @@ type WidthContainerProps = {
     onYearClick?: (tree: string, year: number) => void,
     onInsertMissingYearAtSide?: (tree: string, year: number, side: PlusSide) => void,
     onMoveSeriesTailByOffset?: (tree: string, selectedStartYear: number, selectedEndYear: number, yearOffset: number) => void,
+    onDeleteYearWithMode?: (tree: string, year: number, mode: DeleteMode) => void,
     scrollContainerRef?: RefObject<HTMLElement | null>
 };
 
-function WidthContainer({ siteData: site, masterSeries, selected, historyAnimation, onYearClick, onInsertMissingYearAtSide, onMoveSeriesTailByOffset, scrollContainerRef }: WidthContainerProps): ReactNode {
+interface ContextMenuState {
+    tree: string;
+    year: number;
+    x: number;
+    y: number;
+}
+
+function WidthContainer({ siteData: site, masterSeries, selected, historyAnimation, onYearClick, onInsertMissingYearAtSide, onMoveSeriesTailByOffset, onDeleteYearWithMode, scrollContainerRef }: WidthContainerProps): ReactNode {
     const visibleSite = useMemo(() => (
         selected && site.has(selected)
             ? (() => {
@@ -367,6 +376,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
     const [isDraggingSelection, setIsDraggingSelection] = useState(false);
     const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
     const [animationCue, setAnimationCue] = useState<GridAnimationCue | null>(null);
+    const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
     const interactionRef = useRef<GridInteraction | null>(null);
     const animationCueIdRef = useRef(0);
@@ -568,6 +578,40 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                 gapYears,
                 overwrittenYears: [],
             });
+            return;
+        }
+
+        if (historyAnimation.type === "delete-year") {
+            const sourceElements = containerRef.current
+                ? getTreeYearGridElements(containerRef.current, historyAnimation.tree)
+                : new Map<number, HTMLElement>();
+            const currentYears = Array.from(sourceElements.keys());
+
+            if (historyAnimation.direction === "undo") {
+                // Undo restores the deleted year; cells slide back left.
+                const shiftedYears = currentYears.filter((y) => y < historyAnimation.year);
+                showAnimationCue({
+                    tree: historyAnimation.tree,
+                    insertSide: "right",
+                    insertedYears: [historyAnimation.year],
+                    shiftedYears,
+                    movedYears: [],
+                    gapYears: [],
+                    overwrittenYears: [],
+                });
+            } else {
+                // Redo re-applies the delete; cells slide right to fill the gap.
+                const shiftedYears = currentYears.filter((y) => y <= historyAnimation.year);
+                showAnimationCue({
+                    tree: historyAnimation.tree,
+                    insertSide: "left",
+                    insertedYears: [],
+                    shiftedYears,
+                    movedYears: [],
+                    gapYears: [],
+                    overwrittenYears: [],
+                });
+            }
         }
     }, [historyAnimation, showAnimationCue]);
 
@@ -719,6 +763,111 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
 
         clearSelection();
     }, [clearSelection]);
+
+    const handleContainerContextMenu = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+        const target = event.target;
+        if (!(target instanceof Element)) {
+            return;
+        }
+
+        const cell = target.closest<HTMLElement>("[data-width-grid-cell='true']");
+        if (!cell) {
+            return;
+        }
+
+        const tree = cell.dataset.tree;
+        const rawYear = cell.dataset.year;
+        if (!tree || rawYear === undefined) {
+            return;
+        }
+
+        const year = Number(rawYear);
+        if (!Number.isFinite(year)) {
+            return;
+        }
+
+        event.preventDefault();
+
+        interactionRef.current = null;
+        setDragPreview(null);
+        setDragYearOffset(0);
+        setIsDraggingSelection(false);
+        setSelection(normalizeSelection(tree, year, year));
+        onYearClick?.(tree, year);
+
+        const cellRect = cell.getBoundingClientRect();
+        setContextMenu({ tree, year, x: cellRect.right, y: cellRect.bottom });
+    }, [onYearClick]);
+
+    const handleContextMenuClose = useCallback(() => {
+        setContextMenu(null);
+    }, []);
+
+    const handleContextMenuInsert = useCallback((tree: string, year: number, side: PlusSide) => {
+        handleInsertMissingYearAtSide(tree, year, side);
+    }, [handleInsertMissingYearAtSide]);
+
+    const handleContextMenuDelete = useCallback((tree: string, year: number, mode: DeleteMode) => {
+        const treeData = visibleSite.get(tree);
+        const container = containerRef.current;
+        let shiftedYears: number[] = [];
+
+        pendingInsertFlipRef.current = null;
+
+        if (container) {
+            const sourceElements = getTreeYearGridElements(container, tree);
+            const shiftTargets = Array.from(sourceElements.entries())
+                .filter(([sourceYear]) => sourceYear < year)
+                .map(([sourceYear]) => ({
+                    sourceYear,
+                    targetYear: sourceYear + 1,
+                }));
+            const firstYear = treeData ? getFirstSeriesYear(treeData) : undefined;
+            const cells = firstYear === undefined
+                ? []
+                : shiftTargets
+                    .filter(({ sourceYear, targetYear }) => isCrossRowInsertShift(firstYear, sourceYear, targetYear))
+                    .map(({ sourceYear, targetYear }) => {
+                        const sourceElement = sourceElements.get(sourceYear);
+
+                        if (!sourceElement) {
+                            return null;
+                        }
+
+                        return {
+                            sourceYear,
+                            targetYear,
+                            sourceRect: sourceElement.getBoundingClientRect(),
+                            sourceText: getGridTextContent(sourceElement),
+                            sourceClassName: sourceElement.className,
+                            sourceStyleText: sourceElement.getAttribute("style") ?? "",
+                        };
+                    })
+                    .filter((cell): cell is InsertFlipCell => cell !== null);
+
+            shiftedYears = Array.from(new Set(shiftTargets.map(({ targetYear }) => targetYear)));
+
+            // Reuse insert flip mechanism: delete shifts earlier years right, same direction as insert side="left".
+            pendingInsertFlipRef.current = {
+                tree,
+                side: "left",
+                cells,
+            };
+        }
+
+        flushSync(() => {
+            onDeleteYearWithMode?.(tree, year, mode);
+            showAnimationCue({
+                tree,
+                insertSide: "left",
+                insertedYears: [],
+                shiftedYears,
+                movedYears: [],
+                gapYears: [],
+                overwrittenYears: [],
+            });
+        });
+    }, [onDeleteYearWithMode, showAnimationCue, visibleSite]);
 
     const handleGridPointerDown = useCallback((event: React.PointerEvent<HTMLSpanElement>, tree: string, year: number) => {
         if (event.button !== 0) {
@@ -959,7 +1108,12 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
         : virtualSeries.totalHeight;
 
     return (
-        <div ref={containerRef} className={style["width-grid-container"]} onPointerDown={handleContainerPointerDown}>
+        <div
+            ref={containerRef}
+            className={style["width-grid-container"]}
+            onPointerDown={handleContainerPointerDown}
+            onContextMenu={handleContainerContextMenu}
+        >
             {topSpacerHeight > 0 ? (
                 <div
                     aria-hidden="true"
@@ -1050,6 +1204,17 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                     style={{ height: `${bottomSpacerHeight}px` }}
                 />
             ) : null}
+
+            <WidthGridContextMenu
+                open={contextMenu !== null}
+                x={contextMenu?.x ?? 0}
+                y={contextMenu?.y ?? 0}
+                tree={contextMenu?.tree ?? ""}
+                defaultYear={contextMenu?.year ?? 0}
+                onInsert={handleContextMenuInsert}
+                onDelete={handleContextMenuDelete}
+                onClose={handleContextMenuClose}
+            />
         </div>
     );
 }

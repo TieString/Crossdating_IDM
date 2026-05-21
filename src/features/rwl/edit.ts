@@ -11,10 +11,12 @@ import { stopMarker } from "@/shared/constants";
 
 // 插年：在year处插入0，之前的年份总体向前移动1年，最新年份不变
 export type MissingInsertSide = "left" | "right";
+export type DeleteMode = "direct" | "left" | "right" | "both";
 
 export type RwlEditOperation =
     | { type: "insert-missing"; tree: string; year: number; side: MissingInsertSide }
-    | { type: "move-selection"; tree: string; selectedStartYear: number; selectedEndYear: number; yearOffset: number };
+    | { type: "move-selection"; tree: string; selectedStartYear: number; selectedEndYear: number; yearOffset: number }
+    | { type: "delete-year"; tree: string; year: number; mode: DeleteMode };
 
 export type RwlHistoryAnimation = RwlEditOperation & {
     direction: "undo" | "redo";
@@ -98,6 +100,49 @@ function deleteYearFromRwl(rwlData: RwlTreeData, year: number): RwlTreeData {
         rwl_new.set(key + offset, value)
     })
     return rwl_new
+}
+
+const addWidthToNeighbor = (
+    rwlData: RwlTreeData,
+    neighborYear: number,
+    extraWidth: number,
+): void => {
+    const existing = rwlData.get(neighborYear);
+    if (existing === undefined || existing === null || isStopMarkerValue(existing)) {
+        return;
+    }
+    rwlData.set(neighborYear, existing + extraWidth);
+};
+
+// 按模式删年：在 year 处删除，并可选择将其宽度并入左/右/两侧邻居
+export function deleteYearWithMode(
+    rwlData: RwlTreeData,
+    year: number,
+    mode: DeleteMode,
+): RwlTreeData {
+    const currentValue = rwlData.get(year);
+    if (currentValue === undefined) {
+        return new Map(rwlData);
+    }
+
+    const distributable = currentValue !== null && !isStopMarkerValue(currentValue);
+    const working = new Map(rwlData);
+
+    if (distributable) {
+        const width = currentValue as number;
+        if (mode === "left") {
+            addWidthToNeighbor(working, year - 1, width);
+        } else if (mode === "right") {
+            addWidthToNeighbor(working, year + 1, width);
+        } else if (mode === "both") {
+            // 向两侧分配时取整
+            const half = Math.round(width / 2);
+            addWidthToNeighbor(working, year - 1, half);
+            addWidthToNeighbor(working, year + 1, half);
+        }
+    }
+
+    return deleteYearFromRwl(working, year);
 }
 
 // 更改年：在year处更改为width，其他年份不变
@@ -210,6 +255,19 @@ export class RwlEditor {
         if (!treeData.has(year)) return;
 
         let updatedTree = deleteYearFromRwl(treeData, year);
+        this.rwlData.set(tree, updatedTree);
+        this.notifyChange();
+    }
+
+    deleteYearWithMode(tree: string, year: number, mode: DeleteMode): void {
+        this.saveToUndoStack({ type: "delete-year", tree, year, mode });
+        this.redoStack = [];
+
+        if (!this.rwlData.has(tree)) return;
+        let treeData = this.rwlData.get(tree)!;
+        if (!treeData.has(year)) return;
+
+        let updatedTree = deleteYearWithMode(treeData, year, mode);
         this.rwlData.set(tree, updatedTree);
         this.notifyChange();
     }

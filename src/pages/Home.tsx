@@ -10,9 +10,6 @@ import { useResizablePanels } from "./useResizablePanels";
 const TREE_ALL_OPTION_LABEL = "📜 全部";
 const TREE_WARNING_MARK = "⚠️";
 const TREE_NORMAL_MARK = "🪵";
-const YEAR_PLACEHOLDER = "\u8f93\u5165\u6216\u70b9\u51fb\u9700\u8981\u64cd\u4f5c\u7684\u5e74\u4efd";
-const INSERT_LABEL = "\u63d2\u5165";
-const DELETE_LABEL = "\u5220\u9664";
 const WELCOME_TEXT = "开发者：何志浩、张同文、张瑞波、靳春寒、喻树龙、尚华明、秦莉";
 
 const COFECHA_PART_OPTIONS = [
@@ -36,9 +33,7 @@ export default function Home() {
     const {
         cofechaResult,
         cofechaVersion,
-        handleDelete,
-        handleGridClick,
-        handleInsert,
+        handleDeleteYearWithMode,
         handleInsertMissingYearAtSide,
         handleLoad,
         handleMoveSeriesTailByOffset,
@@ -47,7 +42,6 @@ export default function Home() {
         handleSaveAs,
         handleTreeSelectionChange,
         handleUndo,
-        handleYearChange,
         hasChart,
         hasProblems,
         historyAnimation,
@@ -65,7 +59,6 @@ export default function Home() {
         siteData,
         treeOptions,
         windowTitle,
-        year,
     } = useHomeWorkspace();
 
     const mainDividerClassName = `${style["panel-divider"]} ${style["panel-divider-vertical"]} ${draggingKey === "mainSplitRatio" ? style["panel-divider-active"] : ""}`;
@@ -90,7 +83,7 @@ export default function Home() {
                     className={style["width-module"]}
                     style={{ flex: `0 0 ${layout.mainSplitRatio * 100}%` }}
                 >
-                    <div className={style["control-bar"]}>
+                    {!shouldShowWelcome ? (
                         <select
                             name="trees"
                             id={style["tree_selector"]}
@@ -104,24 +97,12 @@ export default function Home() {
                             </option>
                             {treeOptions.map((tree) => (
                                 <option key={tree} value={tree}>
-                                    -{possibleProblemsDetail.has(tree) ? TREE_WARNING_MARK : TREE_NORMAL_MARK}{tree}
+                                    {possibleProblemsDetail.has(tree) ? TREE_WARNING_MARK : TREE_NORMAL_MARK}{tree}
                                 </option>
                             ))}
                         </select>
-
-                        <input
-                            type="text"
-                            id={style["year_to_edit"]}
-                            onChange={(event) => {
-                                handleYearChange(event.target.value);
-                            }}
-                            value={year}
-                            placeholder={YEAR_PLACEHOLDER}
-                        />
-
-                        <button onClick={handleInsert}>{INSERT_LABEL}</button>
-                        <button onClick={handleDelete}>{DELETE_LABEL}</button>
-                    </div>
+                    )
+                        : null}
 
                     <div className={style["width-panels"]} ref={leftPanelsRef}>
                         <div
@@ -144,7 +125,7 @@ export default function Home() {
                                     scrollContainerRef={dataContainerRef}
                                     onInsertMissingYearAtSide={handleInsertMissingYearAtSide}
                                     onMoveSeriesTailByOffset={handleMoveSeriesTailByOffset}
-                                    onYearClick={handleGridClick}
+                                    onDeleteYearWithMode={handleDeleteYearWithMode}
                                 />
                             )}
 
@@ -225,20 +206,23 @@ export default function Home() {
                             style={hasChart ? { flex: `0 0 ${layout.rightBottomRatio * 100}%` } : undefined}
                         >
                             <div className={style["cofecha-panel-content"]}>
-                                <select
-                                    name="cofecha"
-                                    id={style["cofecha-selector"]}
-                                    value={selectedPart}
-                                    onChange={(event) => {
-                                        setSelectedPart(event.target.value);
-                                    }}
-                                >
-                                    {COFECHA_PART_OPTIONS.map((option) => (
-                                        <option key={option.value} value={option.value}>
-                                            {option.label}
-                                        </option>
-                                    ))}
-                                </select>
+                                {!shouldShowWelcome ? (
+                                    <select
+                                        name="cofecha"
+                                        id={style["cofecha-selector"]}
+                                        value={selectedPart}
+                                        onChange={(event) => {
+                                            setSelectedPart(event.target.value);
+                                        }}
+                                    >
+                                        {COFECHA_PART_OPTIONS.map((option) => (
+                                            <option key={option.value} value={option.value}>
+                                                {option.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                ) : null
+                                }
 
                                 <p id={style["cofecha-text"]}>{reportText}</p>
                             </div>

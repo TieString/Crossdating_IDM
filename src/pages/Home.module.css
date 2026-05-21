@@ -14,20 +14,18 @@
 }
 
 #tree_selector {
+    position: absolute;
+    top: 12px;
+    left: 5px;
+    z-index: 10;
     min-width: 72.5714px;
-    width: 100px;
-    height: 24px;
-    margin-right: 10px;
-    border-radius: 5px;
-}
-
-#year_to_edit {
-    width: 51%;
-    margin-right: 10px;
-}
-
-.home-container button {
-    margin-right: 5px;
+    width: 90px;
+    height: 26px;
+    padding: 0 6px;
+    border-radius: 6px;
+    border: 1px solid rgba(15, 23, 42, 0.18);
+    background: #ffffff;
+    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.12), 0 1px 3px rgba(15, 23, 42, 0.06);
 }
 
 .width-module,
@@ -40,6 +38,7 @@
 }
 
 .width-module {
+    position:relative;
     overflow-x: hidden;
     overflow-y: hidden;
 }
@@ -49,17 +48,8 @@
     overflow: hidden;
 }
 
-.control-bar,
 .statics-info {
     flex: 0 0 auto;
-}
-
-.control-bar {
-    margin: 5px 10px;
-    min-width: 670px;
-}
-
-.statics-info {
     display: grid;
     grid-template-columns: repeat(5, minmax(110px, 1fr));
     min-height: 39px;
@@ -113,6 +103,7 @@
     overflow-anchor: none;
     contain: layout;
     padding: 10px;
+    padding-left: 20px;
     background-color: #ffffff;
     border: 1px solid #d7d7d7;
     border-radius: 8px;
@@ -230,6 +221,7 @@
 }
 
 #cofecha-selector {
+    font-weight: bold;
     position: sticky;
     top: 0;
     z-index: 1;

@@ -4,13 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { parseCofechaResult, splitReportByParts } from "@/features/cofecha/formatter";
 import type { ICofechaResult } from "@/features/cofecha/types";
 import { RwlEditor, registerChangeYearWidth } from "@/features/rwl/edit";
-import type { RwlHistoryAnimation } from "@/features/rwl/edit";
+import type { DeleteMode, RwlHistoryAnimation } from "@/features/rwl/edit";
 import type { RwlSiteData } from "@/features/rwl/types";
 import { runCofecha } from "@/services/cofecha/runner";
 import { readRwlFile, saveFile } from "@/services/fs/io";
 import { ALL_OPTION_VALUE, CofechaVersion, DEFAULT_HOME_TITLE } from "./constants";
 
-type YearInputMode = "manual" | "grid";
 export type WidthHistoryAnimation = RwlHistoryAnimation & { id: number };
 
 const formatTitle = (fileName: string | null, isModified: boolean) => (
@@ -47,10 +46,7 @@ export function useHomeWorkspace() {
     const [siteData, setSiteData] = useState<RwlSiteData>(() => rwlEditorRef.current.getData());
     const [treeOptions, setTreeOptions] = useState<string[]>([]);
     const [selectedTree, setSelectedTree] = useState<string>(ALL_OPTION_VALUE);
-    const [activeTreeForEdit, setActiveTreeForEdit] = useState<string | null>(null);
-    const [year, setYear] = useState("");
     const [historyAnimation, setHistoryAnimation] = useState<WidthHistoryAnimation | null>(null);
-    const [yearInputMode, setYearInputMode] = useState<YearInputMode>("manual");
     const [fileName, setFileName] = useState<string | null>(null);
     const [isModified, setIsModified] = useState(false);
 
@@ -97,11 +93,7 @@ export function useHomeWorkspace() {
         if (selectedTree !== ALL_OPTION_VALUE && !treeOptions.includes(selectedTree)) {
             setSelectedTree(ALL_OPTION_VALUE);
         }
-
-        if (activeTreeForEdit && !treeOptions.includes(activeTreeForEdit)) {
-            setActiveTreeForEdit(null);
-        }
-    }, [activeTreeForEdit, selectedTree, treeOptions]);
+    }, [selectedTree, treeOptions]);
 
     const replaceEditor = useCallback((nextEditor: RwlEditor) => {
         rwlEditorRef.current = nextEditor;
@@ -153,9 +145,6 @@ export function useHomeWorkspace() {
             replaceEditor(new RwlEditor(rwlData.data, rwlData.readOptions, rwlData.format));
             setTreeOptions(Array.from(rwlData.data.keys()));
             setSelectedTree(ALL_OPTION_VALUE);
-            setActiveTreeForEdit(null);
-            setYear("");
-            setYearInputMode("manual");
             setSelectedPart(ALL_OPTION_VALUE);
             setFileName(filePath);
 
@@ -222,44 +211,6 @@ export function useHomeWorkspace() {
         }
     }, [markCurrentDataAsSaved]);
 
-    const resolveTargetTree = useCallback(() => (
-        selectedTree === ALL_OPTION_VALUE
-            ? (yearInputMode === "grid" ? activeTreeForEdit : null)
-            : selectedTree
-    ), [activeTreeForEdit, selectedTree, yearInputMode]);
-
-    const handleInsert = useCallback(() => {
-        const nextYear = Number.parseInt(year, 10);
-        if (Number.isNaN(nextYear)) {
-            alert("无效的数值");
-            return;
-        }
-
-        const targetTree = resolveTargetTree();
-        if (!targetTree) {
-            alert("请选择一个序列");
-            return;
-        }
-
-        rwlEditorRef.current.insertYear(targetTree, nextYear);
-    }, [resolveTargetTree, year]);
-
-    const handleDelete = useCallback(() => {
-        const nextYear = Number.parseInt(year, 10);
-        if (Number.isNaN(nextYear)) {
-            alert("无效的数值");
-            return;
-        }
-
-        const targetTree = resolveTargetTree();
-        if (!targetTree) {
-            alert("请选择一个序列");
-            return;
-        }
-
-        rwlEditorRef.current.deleteYear(targetTree, nextYear);
-    }, [resolveTargetTree, year]);
-
     const handleUndo = useCallback(() => {
         triggerHistoryAnimation(rwlEditorRef.current.undo());
     }, [triggerHistoryAnimation]);
@@ -268,43 +219,20 @@ export function useHomeWorkspace() {
         triggerHistoryAnimation(rwlEditorRef.current.redo());
     }, [triggerHistoryAnimation]);
 
-    const handleGridClick = useCallback((tree: string, nextYear: number) => {
-        setYear(nextYear.toString());
-        if (selectedTree === ALL_OPTION_VALUE) {
-            setActiveTreeForEdit(tree);
-            setYearInputMode("grid");
-        }
-    }, [selectedTree]);
-
     const handleInsertMissingYearAtSide = useCallback((tree: string, nextYear: number, side: "left" | "right") => {
         rwlEditorRef.current.insertMissingYearAtSide(tree, nextYear, side);
-        setYear(nextYear.toString());
-
-        if (selectedTree === ALL_OPTION_VALUE) {
-            setActiveTreeForEdit(tree);
-            setYearInputMode("grid");
-        }
-    }, [selectedTree]);
+    }, []);
 
     const handleMoveSeriesTailByOffset = useCallback((tree: string, selectedStartYear: number, selectedEndYear: number, yearOffset: number) => {
         rwlEditorRef.current.moveSeriesTailByOffset(tree, selectedStartYear, selectedEndYear, yearOffset);
-        setYear(selectedStartYear.toString());
+    }, []);
 
-        if (selectedTree === ALL_OPTION_VALUE) {
-            setActiveTreeForEdit(tree);
-            setYearInputMode("grid");
-        }
-    }, [selectedTree]);
+    const handleDeleteYearWithMode = useCallback((tree: string, nextYear: number, mode: DeleteMode) => {
+        rwlEditorRef.current.deleteYearWithMode(tree, nextYear, mode);
+    }, []);
 
     const handleTreeSelectionChange = useCallback((nextTree: string) => {
         setSelectedTree(nextTree);
-        setActiveTreeForEdit(null);
-        setYearInputMode("manual");
-    }, []);
-
-    const handleYearChange = useCallback((nextYear: string) => {
-        setYear(nextYear);
-        setYearInputMode("manual");
     }, []);
 
     const selectedProblemText = possibleProblemsDetail.get(selectedTree);
@@ -325,9 +253,7 @@ export function useHomeWorkspace() {
         cofechaResult,
         cofechaVersion,
         fileName,
-        handleDelete,
-        handleGridClick,
-        handleInsert,
+        handleDeleteYearWithMode,
         handleInsertMissingYearAtSide,
         handleLoad,
         handleMoveSeriesTailByOffset,
@@ -336,7 +262,6 @@ export function useHomeWorkspace() {
         handleSaveAs,
         handleTreeSelectionChange,
         handleUndo,
-        handleYearChange,
         hasChart,
         hasProblems,
         historyAnimation,
@@ -356,6 +281,5 @@ export function useHomeWorkspace() {
         siteData,
         treeOptions,
         windowTitle,
-        year,
     };
 }
