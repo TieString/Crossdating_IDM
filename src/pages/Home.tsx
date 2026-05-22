@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { TreeChartManager } from "@/components/Chart/TreeChartManager";
 import { RollingNumber } from "@/components/RollingNumber/RollingNumber";
 import WidthContainer from "@/components/WidthContainer/WidthContainer";
@@ -31,6 +31,7 @@ export default function Home() {
     const rightPanelsRef = useRef<HTMLDivElement>(null);
     const { layout, draggingKey, startResize } = useResizablePanels();
     const [activeMenu, setActiveMenu] = useState<TitleMenuKind | null>(null);
+    const [isTreeSelectorOpaque, setIsTreeSelectorOpaque] = useState(false);
     const {
         cofechaResult,
         cofechaVersion,
@@ -40,6 +41,7 @@ export default function Home() {
         handleLoad,
         handleMoveSeriesTailByOffset,
         handleRedo,
+        handleRestoreDeletion,
         handleSave,
         handleSaveAs,
         handleTreeSelectionChange,
@@ -66,6 +68,26 @@ export default function Home() {
     const mainDividerClassName = `${style["panel-divider"]} ${style["panel-divider-vertical"]} ${draggingKey === "mainSplitRatio" ? style["panel-divider-active"] : ""}`;
     const nestedDividerClassName = `${style["panel-divider"]} ${style["panel-divider-horizontal"]}`;
 
+    useEffect(() => {
+        const scrollContainer = dataContainerRef.current;
+
+        if (!scrollContainer || shouldShowWelcome) {
+            setIsTreeSelectorOpaque(false);
+            return;
+        }
+
+        const syncTreeSelectorState = () => {
+            setIsTreeSelectorOpaque(scrollContainer.scrollTop > 0);
+        };
+
+        syncTreeSelectorState();
+        scrollContainer.addEventListener("scroll", syncTreeSelectorState, { passive: true });
+
+        return () => {
+            scrollContainer.removeEventListener("scroll", syncTreeSelectorState);
+        };
+    }, [shouldShowWelcome]);
+
     return (
         <>
             <HomeTitleBarBridge
@@ -89,6 +111,7 @@ export default function Home() {
                         <select
                             name="trees"
                             id={style["tree_selector"]}
+                            className={isTreeSelectorOpaque ? style["tree-selector-opaque"] : undefined}
                             value={selectedTree}
                             onChange={(event) => {
                                 handleTreeSelectionChange(event.target.value);
@@ -129,6 +152,7 @@ export default function Home() {
                                     onInsertMissingYearAtSide={handleInsertMissingYearAtSide}
                                     onMoveSeriesTailByOffset={handleMoveSeriesTailByOffset}
                                     onDeleteYearWithMode={handleDeleteYearWithMode}
+                                    onRestoreDeletion={handleRestoreDeletion}
                                 />
                             )}
 

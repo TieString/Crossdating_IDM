@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { callChangeYearWidth } from "@/features/rwl/edit";
 import { RollingNumber } from "@/components/RollingNumber/RollingNumber";
 import style from "./WidthGrid.module.css";
@@ -30,6 +30,7 @@ type WidthGridProps = React.HTMLAttributes<HTMLSpanElement> & {
     onYearClick?: (tree: string, year: number) => void;
     onInsertMissingYearAtSide?: (tree: string, year: number, side: PlusSide) => void;
     onDeletionMarkHoverChange?: (tree: string, year: number, hovered: boolean, element: HTMLElement | null) => void;
+    onDeletionMarkDoubleClick?: (tree: string, year: number) => void;
 };
 
 export default function WidthGrid({
@@ -49,15 +50,28 @@ export default function WidthGrid({
     onYearClick,
     onInsertMissingYearAtSide,
     onDeletionMarkHoverChange,
+    onDeletionMarkDoubleClick,
     className = "",
     style: customStyle = {},
     ...rest
 }: WidthGridProps) {
     const { title, onMouseMove, onMouseLeave, ...restWithoutTitle } = rest;
-    const [, setText] = useState("");
+    const [isEditing, setIsEditing] = useState(false);
+    const [editText, setEditText] = useState("");
     const [hoverPlusSide, setHoverPlusSide] = useState<PlusSide | null>(null);
     const spanRef = useRef<HTMLSpanElement>(null);
+    const inputRef = useRef<HTMLInputElement>(null);
     const isInsertedZero = gridValue === 0;
+
+    useLayoutEffect(() => {
+        if (!isEditing) {
+            return;
+        }
+
+        const input = inputRef.current;
+        input?.focus();
+        input?.select();
+    }, [isEditing]);
 
     const handleClick = () => {
         if (tree !== undefined && year !== undefined && onYearClick) {
@@ -66,41 +80,42 @@ export default function WidthGrid({
     };
 
     const handleDoubleClick = () => {
-        const span = spanRef.current;
+        if (!isEditable) {
+            return;
+        }
 
-        if (span) {
-            setHoverPlusSide(null);
-            span.contentEditable = "true";
-            span.focus();
+        setHoverPlusSide(null);
+        setEditText(displayedValue === null || displayedValue === undefined ? "" : String(displayedValue));
+        setIsEditing(true);
+    };
+
+    const commitEdit = () => {
+        const text = editText.trim();
+        const normalizedText = text.toLowerCase();
+        const parsedWidth = text === ""
+            ? null
+            : normalizedText === "missing"
+                ? 0
+                : Number(text);
+        const newWidth = typeof parsedWidth === "number" && Number.isNaN(parsedWidth) ? null : parsedWidth;
+
+        setIsEditing(false);
+
+        if (tree !== undefined && year !== undefined) {
+            callChangeYearWidth(tree, year, newWidth);
         }
     };
 
-    const handleBlur = () => {
-        const span = spanRef.current;
-
-        if (span) {
-            const text = span.innerText.trim();
-            const normalizedText = text.toLowerCase();
-            const parsedWidth = text === ""
-                ? null
-                : normalizedText === "missing"
-                    ? 0
-                    : Number(text);
-            const newWidth = typeof parsedWidth === "number" && Number.isNaN(parsedWidth) ? null : parsedWidth;
-
-            setText(text);
-            span.contentEditable = "false";
-
-            if (tree !== undefined && year !== undefined) {
-                callChangeYearWidth(tree, year, newWidth);
-            }
-        }
-    };
-
-    const handleKeyDown = (event: React.KeyboardEvent) => {
+    const handleEditKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
         if (event.key === "Enter") {
             event.preventDefault();
-            spanRef.current?.blur();
+            commitEdit();
+            return;
+        }
+
+        if (event.key === "Escape") {
+            event.preventDefault();
+            setIsEditing(false);
         }
     };
 
@@ -128,7 +143,7 @@ export default function WidthGrid({
     const handleMouseMove = (event: React.MouseEvent<HTMLSpanElement>) => {
         onMouseMove?.(event);
 
-        if (!isEditable || tree === undefined || year === undefined || isDragging) {
+        if (!isEditable || isEditing || tree === undefined || year === undefined || isDragging) {
             return;
         }
 
@@ -186,9 +201,30 @@ export default function WidthGrid({
         event.stopPropagation();
     };
 
-    const valueContent = rollingDigits && typeof displayedValue === "number"
-        ? <RollingNumber value={displayedValue} />
-        : displayedValue;
+    const handleDeletionMarkDoubleClick = (event: React.MouseEvent<HTMLSpanElement>) => {
+        event.stopPropagation();
+        event.preventDefault();
+        if (tree !== undefined && year !== undefined) {
+            onDeletionMarkDoubleClick?.(tree, year);
+        }
+    };
+
+    const valueContent = isEditing
+        ? (
+            <input
+                ref={inputRef}
+                className={style["width-editor"]}
+                value={editText}
+                onChange={(event) => setEditText(event.target.value)}
+                onBlur={commitEdit}
+                onKeyDown={handleEditKeyDown}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+            />
+        )
+        : rollingDigits && typeof displayedValue === "number"
+            ? <RollingNumber value={displayedValue} />
+            : displayedValue;
 
     return (
         <span
@@ -196,12 +232,10 @@ export default function WidthGrid({
             ref={spanRef}
             title={finalTitle}
             data-drag-year-offset={dragYearOffset || undefined}
-            onClick={isEditable ? handleClick : undefined}
-            onDoubleClick={isEditable ? handleDoubleClick : undefined}
+            onClick={isEditable && !isEditing ? handleClick : undefined}
+            onDoubleClick={isEditable && !isEditing ? handleDoubleClick : undefined}
             onMouseMove={handleMouseMove}
             onMouseLeave={handleMouseLeave}
-            onBlur={handleBlur}
-            onKeyDown={handleKeyDown}
             className={`${style["width-grid"]} ${className} ${isMissing ? style["missing"] : ""} ${isInsertedZero ? style["inserted-zero"] : ""} ${isSelected ? style["selected"] : ""} ${isDragging ? style["dragging"] : ""} ${hasLeftDeletionMark ? style["has-left-deletion-mark"] : ""} ${animationClassName} ${isEditable ? "" : style["disabled"]}`}
             style={{
                 backgroundColor: getBackgroundColor(),
@@ -211,16 +245,17 @@ export default function WidthGrid({
             }}
         >
             {valueContent}
-            {hasLeftDeletionMark ? (
+            {!isEditing && hasLeftDeletionMark ? (
                 <span
                     aria-hidden="true"
                     className={`${style["deletion-mark"]} ${isDeletionMarkActive ? style["deletion-mark-active"] : ""}`}
                     onMouseEnter={handleDeletionMarkEnter}
                     onMouseLeave={handleDeletionMarkLeave}
                     onMouseMove={handleDeletionMarkMove}
+                    onDoubleClick={handleDeletionMarkDoubleClick}
                 />
             ) : null}
-            {isEditable && hoverPlusSide ? (
+            {!isEditing && isEditable && hoverPlusSide ? (
                 <button
                     type="button"
                     aria-label={`Insert missing year on ${hoverPlusSide} side`}

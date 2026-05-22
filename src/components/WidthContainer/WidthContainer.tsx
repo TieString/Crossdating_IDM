@@ -2,7 +2,7 @@ import { memo, ReactNode, RefObject, useCallback, useEffect, useLayoutEffect, us
 import { flushSync } from 'react-dom';
 import { RwlSiteData } from '@/features/rwl';
 import { moveSeriesTailByOffset as previewMoveSeriesTailByOffset } from '@/features/rwl/edit';
-import type { DeleteMode, RwlDeletionMarkers, RwlHistoryAnimation } from '@/features/rwl/edit';
+import type { DeleteMode, DeletionMarkerInfo, RwlDeletionMarkers, RwlHistoryAnimation } from '@/features/rwl/edit';
 import { RollingNumber } from '@/components/RollingNumber/RollingNumber';
 import WidthGrid from './WidthGrid/WidthGrid';
 import WidthGridContextMenu from './WidthGridContextMenu/WidthGridContextMenu';
@@ -98,13 +98,18 @@ interface GridAnimationCue {
     overwrittenYears: number[];
 }
 
-interface DeletionHoverState {
-    tree: string;
+interface DeletionHoverItem {
     year: number;
     anchorLeft: number;  // x of the right-neighbor cell's left edge, relative to container
     anchorTop: number;   // y of the right-neighbor cell's top, relative to container
     anchorHeight: number;
     cellWidth: number;
+}
+
+interface DeletionHoverState {
+    tree: string;
+    hoveredYear: number;
+    items: DeletionHoverItem[]; // all consecutive markers in the run (sorted by year)
 }
 
 type GridInteraction =
@@ -518,6 +523,7 @@ type WidthContainerProps = {
     onInsertMissingYearAtSide?: (tree: string, year: number, side: PlusSide) => void,
     onMoveSeriesTailByOffset?: (tree: string, selectedStartYear: number, selectedEndYear: number, yearOffset: number) => void,
     onDeleteYearWithMode?: (tree: string, year: number, mode: DeleteMode) => void,
+    onRestoreDeletion?: (tree: string, markerYear: number, index: number) => void,
     scrollContainerRef?: RefObject<HTMLElement | null>
 };
 
@@ -528,7 +534,7 @@ interface ContextMenuState {
     y: number;
 }
 
-function WidthContainer({ siteData: site, masterSeries, selected, historyAnimation, deletionMarkers, onYearClick, onInsertMissingYearAtSide, onMoveSeriesTailByOffset, onDeleteYearWithMode, scrollContainerRef }: WidthContainerProps): ReactNode {
+function WidthContainer({ siteData: site, masterSeries, selected, historyAnimation, deletionMarkers, onYearClick, onInsertMissingYearAtSide, onMoveSeriesTailByOffset, onDeleteYearWithMode, onRestoreDeletion, scrollContainerRef }: WidthContainerProps): ReactNode {
     const visibleSite = useMemo(() => (
         selected && site.has(selected)
             ? (() => {
@@ -865,44 +871,150 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
         }
     }, [onYearClick]);
 
+    // 红线和 ghost 是兄弟元素而非父子，鼠标在它们之间移动时会先触发红线 mouseLeave，
+    // 用一个小延迟保证 ghost mouseEnter 能在 hovered 被清掉之前把它取消。
+    const hoverClearTimerRef = useRef<number | null>(null);
+    const cancelHoverClear = useCallback(() => {
+        if (hoverClearTimerRef.current !== null) {
+            window.clearTimeout(hoverClearTimerRef.current);
+            hoverClearTimerRef.current = null;
+        }
+    }, []);
+    const scheduleHoverClear = useCallback(() => {
+        cancelHoverClear();
+        hoverClearTimerRef.current = window.setTimeout(() => {
+            setHoveredMarker(null);
+            hoverClearTimerRef.current = null;
+        }, 80);
+    }, [cancelHoverClear]);
+
     const handleDeletionMarkHoverChange = useCallback((tree: string, year: number, hovered: boolean, element: HTMLElement | null) => {
         if (!hovered) {
-            setHoveredMarker((prev) => (prev && prev.tree === tree && prev.year === year ? null : prev));
+            scheduleHoverClear();
             return;
         }
+        cancelHoverClear();
 
         const container = containerRef.current;
         const markEl = element;
         if (!container || !markEl) return;
 
-        // The mark element's parent <span> is the right-neighbor cell.
-        const rightCell = markEl.parentElement;
-        if (!rightCell) return;
+        const treeMarkers = deletionMarkers?.get(tree);
+        if (!treeMarkers || !treeMarkers.has(year)) return;
 
+        // 找连续 marker 的整个区间。
+        let runStart = year;
+        while (treeMarkers.has(runStart - 1)) runStart -= 1;
+        let runEnd = year;
+        while (treeMarkers.has(runEnd + 1)) runEnd += 1;
+
+        // 查询区间内每个 marker 对应的右邻 cell DOM 位置。
+        const cells = getTreeYearGridElements(container, tree);
         const containerRect = container.getBoundingClientRect();
-        const rightRect = rightCell.getBoundingClientRect();
+        const items: DeletionHoverItem[] = [];
+        for (let y = runStart; y <= runEnd; y++) {
+            const cell = cells.get(y);
+            if (!cell) continue;
+            const rect = cell.getBoundingClientRect();
+            items.push({
+                year: y,
+                anchorLeft: rect.left - containerRect.left,
+                anchorTop: rect.top - containerRect.top,
+                anchorHeight: rect.height,
+                cellWidth: rect.width,
+            });
+        }
+        if (items.length === 0) return;
 
         setHoveredMarker({
             tree,
-            year,
-            anchorLeft: rightRect.left - containerRect.left,
-            anchorTop: rightRect.top - containerRect.top,
-            anchorHeight: rightRect.height,
-            cellWidth: rightRect.width,
+            hoveredYear: year,
+            items,
         });
-    }, []);
+    }, [deletionMarkers, cancelHoverClear, scheduleHoverClear]);
 
-    const hoveredMarkerInfo = useMemo(() => {
+    // 把 hover run 内每一个 marker 的整个 stack 都展平：一个被删除的 cell 对应一个 ghost。
+    // 同一年份多次连续删除会形成多个 stack 条目，越靠数组末端表示越晚被删除。
+    const hoveredMarkerRun = useMemo(() => {
         if (!hoveredMarker || !deletionMarkers) return null;
-        return deletionMarkers.get(hoveredMarker.tree)?.get(hoveredMarker.year) ?? null;
+        const treeMarkers = deletionMarkers.get(hoveredMarker.tree);
+        if (!treeMarkers) return null;
+        type Entry = { item: DeletionHoverItem; info: DeletionMarkerInfo; index: number; stackSize: number };
+        const result: Entry[] = [];
+        hoveredMarker.items.forEach((item) => {
+            const stack = treeMarkers.get(item.year);
+            if (!stack || stack.length === 0) return;
+            stack.forEach((info, index) => {
+                result.push({ item, info, index, stackSize: stack.length });
+            });
+        });
+        return result;
     }, [hoveredMarker, deletionMarkers]);
 
-    // 一个 cell 是否“贴着”任意删除标记（左侧或右侧），用于决定是否启用 RollingNumber。
-    const markerAdjacencyFor = useCallback((tree: string, year: number) => {
-        const entries = deletionMarkers?.get(tree);
-        if (!entries) return false;
-        return entries.has(year) || entries.has(year + 1);
-    }, [deletionMarkers]);
+    // 删除时被强制留在原位（不进 shiftedYears）的格子需要 z-index 提升，避免在 slide-in 动画期间
+    // 被周围滑入的格子覆盖。这里记一组 cell 让它们短暂处于"被提升"的状态，
+    // 等 CSS 滑入动画结束后再恢复正常 z-index。
+    const [pendingRollingCells, setPendingRollingCells] = useState<Map<string, Set<number>> | null>(null);
+    const pendingRollingTimerRef = useRef<number | null>(null);
+
+    const flagPendingRolling = useCallback((tree: string, years: number[]) => {
+        if (years.length === 0) return;
+        setPendingRollingCells((prev) => {
+            const next = new Map(prev ?? []);
+            const existing = next.get(tree);
+            if (existing) {
+                years.forEach((y) => existing.add(y));
+            } else {
+                next.set(tree, new Set(years));
+            }
+            return next;
+        });
+        if (pendingRollingTimerRef.current !== null) {
+            window.clearTimeout(pendingRollingTimerRef.current);
+        }
+        pendingRollingTimerRef.current = window.setTimeout(() => {
+            setPendingRollingCells(null);
+            pendingRollingTimerRef.current = null;
+        }, 2400);
+    }, []);
+
+    // 恢复完成后通过 animationCue 让"被恢复的那一格"作为 insertedYears，
+    // 让它因 cellAnimationKey 变化而重新挂载——这样 RollingNumber 也会 reset，
+    // 不会出现"恢复格"自己跳动；两侧邻居仍然保持原 React 实例，由 RollingNumber 自然滚动。
+    const triggerRestoreAnimation = useCallback((tree: string, markerYear: number) => {
+        showAnimationCue({
+            tree,
+            insertSide: "right",
+            insertedYears: [markerYear - 1],
+            shiftedYears: [],
+            movedYears: [],
+            gapYears: [],
+            overwrittenYears: [],
+        });
+    }, [showAnimationCue]);
+
+    // 双击红线：默认恢复该格子最新的一次删除（栈顶，index = stack.length - 1）。
+    const handleRedLineDoubleClick = useCallback((tree: string, markerYear: number) => {
+        const stack = deletionMarkers?.get(tree)?.get(markerYear);
+        if (!stack || stack.length === 0) return;
+        setHoveredMarker(null);
+        flushSync(() => {
+            onRestoreDeletion?.(tree, markerYear, stack.length - 1);
+            triggerRestoreAnimation(tree, markerYear);
+        });
+    }, [onRestoreDeletion, deletionMarkers, triggerRestoreAnimation]);
+
+    // 双击具体 ghost：恢复栈中指定那条删除。
+    const handleGhostDoubleClick = useCallback((tree: string, markerYear: number, index: number) => {
+        setHoveredMarker(null);
+        flushSync(() => {
+            onRestoreDeletion?.(tree, markerYear, index);
+            triggerRestoreAnimation(tree, markerYear);
+        });
+    }, [onRestoreDeletion, triggerRestoreAnimation]);
+
+    // 所有 value 格子默认开启 RollingNumber，因此不再需要按邻接关系判断；
+    // pendingRollingCells 现在只用来给原地保留的格子提升 z-index，避免被滑入格子盖住。
 
     const handleInsertMissingYearAtSide = useCallback((tree: string, year: number, side: PlusSide) => {
         const treeData = visibleSite.get(tree);
@@ -1062,6 +1174,13 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
 
             shiftedYears = Array.from(new Set(shiftTargets.map(({ targetYear }) => targetYear)));
 
+            // 对于 left / both 模式，年份 M（被删格子那个 slot）在删除后会装入
+            // 经过修改的左邻值。要让它在原地以 RollingNumber 跳动到新值，必须
+            // 不让它进入 shiftedYears（否则会因 cellAnimationKey 变化而重挂载）。
+            if (mode === "left" || mode === "both") {
+                shiftedYears = shiftedYears.filter((y) => y !== year);
+            }
+
             // Reuse insert flip mechanism: delete shifts earlier years right, same direction as insert side="left".
             pendingInsertFlipRef.current = {
                 tree,
@@ -1078,6 +1197,15 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
             }
         }
 
+        // RollingNumber 默认开启，所以邻居跳动不再需要预先 flag。
+        // 这里仅给"原地保留"的 slot M（left/both 模式下不进 shiftedYears 的那一格）
+        // 加 z-index 提升，避免被周围的 slide-in 格子覆盖到看不见。
+        if (mode === "left" || mode === "both") {
+            flushSync(() => {
+                flagPendingRolling(tree, [year]);
+            });
+        }
+
         flushSync(() => {
             onDeleteYearWithMode?.(tree, year, mode);
             showAnimationCue({
@@ -1090,7 +1218,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                 overwrittenYears: [],
             });
         });
-    }, [clearDeleteBurstAnimations, onDeleteYearWithMode, showAnimationCue, visibleSite]);
+    }, [clearDeleteBurstAnimations, onDeleteYearWithMode, showAnimationCue, visibleSite, flagPendingRolling]);
 
     const handleGridPointerDown = useCallback((event: React.PointerEvent<HTMLSpanElement>, tree: string, year: number) => {
         if (event.button !== 0) {
@@ -1365,19 +1493,22 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                                 const cellAnimationKind = getGridAnimationKind(series.treeCode, cell.year);
                                 const cellAnimationKey = cellAnimationKind ? animationCue?.id ?? 0 : 0;
                                 const hasLeftDeletionMark = Boolean(deletionMarkers?.get(series.treeCode)?.has(cell.year));
-                                const rollingDigits = markerAdjacencyFor(series.treeCode, cell.year);
+                                // 所有 value 格子默认启用 RollingNumber：
+                                // - 自动变动（删除/恢复/移动/撤销/重做等）会让 React 复用同一个挂载实例，
+                                //   RollingNumber 的 value prop 变化自然触发数字跳动。
+                                // - 用户双击编辑时，<input> 替换掉 RollingNumber 的渲染输出，
+                                //   提交后 RollingNumber 重新挂载，初始化在输入值上，没有"跳动"动画。
+                                // - 进入动画 cue（insertedYears / shiftedYears）的格子因 key 变化而重挂载，
+                                //   也不会跳动，呈现 CSS 滑入效果。
+                                const rollingDigits = true;
 
-                                // 计算悬停预览时该 cell 应该展示的原始值（如果它正好是被悬停 marker 的左/右邻）
-                                let previewValue: number | null | undefined = undefined;
-                                let isDeletionMarkActive = false;
-                                if (hoveredMarker && hoveredMarkerInfo && hoveredMarker.tree === series.treeCode) {
-                                    if (cell.year === hoveredMarker.year) {
-                                        previewValue = hoveredMarkerInfo.rightOriginalWidth;
-                                        isDeletionMarkActive = true;
-                                    } else if (cell.year === hoveredMarker.year - 1) {
-                                        previewValue = hoveredMarkerInfo.leftOriginalWidth;
-                                    }
-                                }
+                                // 仅高亮当前悬停的红线本身；hover 时不改变左右邻 cell 的值，
+                                // 让 RollingNumber 只在数据真的因为撤销/恢复改动时才跳动。
+                                const isDeletionMarkActive = Boolean(
+                                    hoveredMarker
+                                    && hoveredMarker.tree === series.treeCode
+                                    && cell.year === hoveredMarker.hoveredYear
+                                );
 
                                 if (cell.isInterruptPad) {
                                     return (
@@ -1399,6 +1530,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                                             data-year={cell.year}
                                             onPointerDown={(event) => handleGridPointerDown(event, series.treeCode, cell.year)}
                                             onDeletionMarkHoverChange={handleDeletionMarkHoverChange}
+                                            onDeletionMarkDoubleClick={handleRedLineDoubleClick}
                                         />
                                     );
                                 }
@@ -1407,11 +1539,11 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                                     return <WidthGrid gridValue={cell.width} key={`stop-${series.treeCode}-${cell.year}`} />;
                                 }
 
-                                // 悬停时若 previewValue !== undefined（即此 cell 是被悬停 marker 的邻居），
-                                // 用原始值覆盖；RollingNumber 会从当前值滚动到原始值。
-                                const effectiveValue = previewValue !== undefined
-                                    ? previewValue
-                                    : (cell.width ?? null);
+                                const effectiveValue = cell.width ?? null;
+                                // 被 pendingRolling 标记的格子（典型为 left/both 删除时的 year M），
+                                // 因为我们故意让它留在原位 RollingNumber 跳动，需要盖在滑入的格子之上，
+                                // 避免在 slide 过程中被覆盖看不见。
+                                const isRollingFocused = pendingRollingCells?.get(series.treeCode)?.has(cell.year);
 
                                 return (
                                     <WidthGrid
@@ -1428,6 +1560,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                                         hasLeftDeletionMark={hasLeftDeletionMark}
                                         isDeletionMarkActive={isDeletionMarkActive}
                                         rollingDigits={rollingDigits}
+                                        style={isRollingFocused ? { zIndex: 4, backgroundColor: '#ffffff' } : undefined}
                                         data-width-grid-cell="true"
                                         data-tree={series.treeCode}
                                         data-year={cell.year}
@@ -1435,6 +1568,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                                         onInsertMissingYearAtSide={handleInsertMissingYearAtSide}
                                         onYearClick={handleYearClick}
                                         onDeletionMarkHoverChange={handleDeletionMarkHoverChange}
+                                        onDeletionMarkDoubleClick={handleRedLineDoubleClick}
                                     />
                                 );
                             })}
@@ -1455,22 +1589,38 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                 />
             ) : null}
 
-            {hoveredMarker && hoveredMarkerInfo ? (
-                <div
-                    className={style["deletion-preview-ghost"]}
-                    style={{
-                        left: `${hoveredMarker.anchorLeft - hoveredMarker.cellWidth / 2 - 2.5}px`,
-                        top: `${hoveredMarker.anchorTop}px`,
-                        width: `${hoveredMarker.cellWidth}px`,
-                        height: `${hoveredMarker.anchorHeight}px`,
-                    }}
-                    aria-hidden="true"
-                >
-                    {hoveredMarkerInfo.deletedWidth === null
-                        ? <span>missing</span>
-                        : <RollingNumber value={hoveredMarkerInfo.deletedWidth} />}
-                </div>
-            ) : null}
+            {hoveredMarkerRun?.map(({ item, info, index, stackSize }) => {
+                // 同一年份多次堆叠：最晚一次（index = stackSize-1）紧贴格子，
+                // 越早被删除的越往左排开。
+                const offset = stackSize - 1 - index;
+                const left = item.anchorLeft - item.cellWidth / 2 - 2.5 - offset * (item.cellWidth + GRID_GAP);
+                return (
+                    <div
+                        key={`${item.year}-${index}`}
+                        className={style["deletion-preview-ghost"]}
+                        style={{
+                            left: `${left}px`,
+                            top: `${item.anchorTop}px`,
+                            width: `${item.cellWidth}px`,
+                            height: `${item.anchorHeight}px`,
+                        }}
+                        title="双击恢复"
+                        onMouseEnter={cancelHoverClear}
+                        onMouseLeave={scheduleHoverClear}
+                        onDoubleClick={(event) => {
+                            event.stopPropagation();
+                            event.preventDefault();
+                            if (hoveredMarker) {
+                                handleGhostDoubleClick(hoveredMarker.tree, item.year, index);
+                            }
+                        }}
+                    >
+                        {info.deletedWidth === null
+                            ? <span>missing</span>
+                            : <RollingNumber value={info.deletedWidth} />}
+                    </div>
+                );
+            }) ?? null}
 
             <WidthGridContextMenu
                 open={contextMenu !== null}

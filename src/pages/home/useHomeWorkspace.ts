@@ -234,6 +234,10 @@ export function useHomeWorkspace() {
         rwlEditorRef.current.deleteYearWithMode(tree, nextYear, mode);
     }, []);
 
+    const handleRestoreDeletion = useCallback((tree: string, markerYear: number, index: number) => {
+        rwlEditorRef.current.restoreDeletion(tree, markerYear, index);
+    }, []);
+
     const handleTreeSelectionChange = useCallback((nextTree: string) => {
         setSelectedTree(nextTree);
     }, []);
@@ -262,6 +266,7 @@ export function useHomeWorkspace() {
         handleLoad,
         handleMoveSeriesTailByOffset,
         handleRedo,
+        handleRestoreDeletion,
         handleSave,
         handleSaveAs,
         handleTreeSelectionChange,
