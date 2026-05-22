@@ -66,6 +66,10 @@
     cursor: default;
 }
 
+.width-grid.has-left-deletion-mark {
+    overflow: visible;
+}
+
 .width-grid.disabled:hover {
     outline: none;
 }

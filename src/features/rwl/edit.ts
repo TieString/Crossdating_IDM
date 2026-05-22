@@ -142,17 +142,14 @@ const addWidthToNeighbor = (
 };
 
 // 按模式删年：在 year 处删除，并可选择将其宽度并入左/右/两侧邻居
+// year 不在数据中（gap/missing 年份）也允许：此时无宽度可分配，仍会平移更早的年份以收紧时间轴。
 export function deleteYearWithMode(
     rwlData: RwlTreeData,
     year: number,
     mode: DeleteMode,
 ): RwlTreeData {
     const currentValue = rwlData.get(year);
-    if (currentValue === undefined) {
-        return new Map(rwlData);
-    }
-
-    const distributable = currentValue !== null && !isStopMarkerValue(currentValue);
+    const distributable = currentValue !== undefined && currentValue !== null && !isStopMarkerValue(currentValue);
     const working = new Map(rwlData);
 
     if (distributable) {
@@ -360,7 +357,7 @@ export class RwlEditor {
 
         if (!this.rwlData.has(tree)) return;
         let treeData = this.rwlData.get(tree)!;
-        if (!treeData.has(year)) return;
+        // 允许删除 gap/missing 年份（年份不在 treeData 中）：仍会平移更早年份以收紧 gap。
 
         const info = this.captureDeletionInfo(treeData, year);
         this.shiftDeletionMarkersForDelete(tree, year);
