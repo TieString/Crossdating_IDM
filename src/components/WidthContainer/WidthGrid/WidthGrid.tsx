@@ -169,6 +169,7 @@ export default function WidthGrid({
 
     const handleDeletionMarkEnter = (event: React.MouseEvent<HTMLSpanElement>) => {
         event.stopPropagation();
+        setHoverPlusSide(null);
         if (tree !== undefined && year !== undefined) {
             onDeletionMarkHoverChange?.(tree, year, true, event.currentTarget);
         }
@@ -179,6 +180,10 @@ export default function WidthGrid({
         if (tree !== undefined && year !== undefined) {
             onDeletionMarkHoverChange?.(tree, year, false, event.currentTarget);
         }
+    };
+
+    const handleDeletionMarkMove = (event: React.MouseEvent<HTMLSpanElement>) => {
+        event.stopPropagation();
     };
 
     const valueContent = rollingDigits && typeof displayedValue === "number"
@@ -212,6 +217,7 @@ export default function WidthGrid({
                     className={`${style["deletion-mark"]} ${isDeletionMarkActive ? style["deletion-mark-active"] : ""}`}
                     onMouseEnter={handleDeletionMarkEnter}
                     onMouseLeave={handleDeletionMarkLeave}
+                    onMouseMove={handleDeletionMarkMove}
                 />
             ) : null}
             {isEditable && hoverPlusSide ? (

@@ -41,6 +41,8 @@ const GRID_GAP = 5;
 const DRAG_THRESHOLD_PX = 3;
 const INSERT_SHIFT_ANIMATION_MS = 1250;
 const INSERT_SHIFT_EASING = "cubic-bezier(0.16, 1, 0.3, 1)";
+const DELETE_BURST_ANIMATION_MS = 820;
+const DELETE_BURST_SWEEP_MS = 420;
 
 type PlusSide = "left" | "right";
 type WidthHistoryAnimation = RwlHistoryAnimation & { id: number };
@@ -225,6 +227,160 @@ const getGridTextContent = (element: HTMLElement) => {
     return firstTextNode?.textContent ?? element.textContent ?? "";
 };
 
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const isTransparentColor = (color: string) => (
+    color === ""
+    || color === "transparent"
+    || /^rgba?\(\s*0\s*,\s*0\s*,\s*0\s*(?:,\s*0\s*)?\)$/i.test(color)
+    || /,\s*0\s*\)$/i.test(color)
+);
+
+const getUsableCssColor = (color: string, fallback: string) => (
+    isTransparentColor(color.trim()) ? fallback : color
+);
+
+const createDeletePixelBurst = (container: HTMLElement, sourceElement: HTMLElement) => {
+    const containerRect = container.getBoundingClientRect();
+    const sourceRect = sourceElement.getBoundingClientRect();
+
+    if (sourceRect.width <= 0 || sourceRect.height <= 0) {
+        return null;
+    }
+
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const computedStyle = window.getComputedStyle(sourceElement);
+    const baseColor = getUsableCssColor(computedStyle.backgroundColor, "#f3f4f6");
+    const textColor = getUsableCssColor(computedStyle.color, "#111827");
+    const particleColors = [baseColor, textColor, "#f97316", "#facc15", "#38bdf8"];
+    const root = document.createElement("span");
+    root.className = style["delete-pixel-burst"];
+    root.style.left = `${sourceRect.left - containerRect.left}px`;
+    root.style.top = `${sourceRect.top - containerRect.top}px`;
+    root.style.width = `${sourceRect.width}px`;
+    root.style.height = `${sourceRect.height}px`;
+    root.style.setProperty("--delete-burst-height", `${sourceRect.height}px`);
+
+    const sourceGhost = sourceElement.cloneNode(true) as HTMLElement;
+    sourceGhost.classList.add(style["delete-pixel-burst-source"]);
+    sourceGhost.removeAttribute("data-width-grid-cell");
+    sourceGhost.removeAttribute("data-tree");
+    sourceGhost.removeAttribute("data-year");
+    sourceGhost.removeAttribute("title");
+    sourceGhost.setAttribute("aria-hidden", "true");
+    root.appendChild(sourceGhost);
+
+    container.appendChild(root);
+
+    const animations: Animation[] = [];
+    let timerId: number | null = null;
+    let isDone = false;
+
+    const finish = () => {
+        if (isDone) {
+            return;
+        }
+
+        isDone = true;
+        if (timerId !== null) {
+            window.clearTimeout(timerId);
+            timerId = null;
+        }
+        root.remove();
+    };
+
+    if (reducedMotion) {
+        animations.push(root.animate([
+            { opacity: 1 },
+            { opacity: 0 },
+        ], {
+            duration: 180,
+            easing: "ease-out",
+            fill: "forwards",
+        }));
+        timerId = window.setTimeout(finish, 220);
+    } else {
+        animations.push(sourceGhost.animate([
+            { clipPath: "inset(0 0 0 0)", opacity: 1, transform: "scale(1)" },
+            { clipPath: "inset(0 0 0 58%)", opacity: 0.74, transform: "scale(0.98)", offset: 0.46 },
+            { clipPath: "inset(0 0 0 100%)", opacity: 0.08, transform: "scale(0.92)" },
+        ], {
+            duration: DELETE_BURST_SWEEP_MS,
+            easing: "cubic-bezier(0.3, 0, 0.2, 1)",
+            fill: "forwards",
+        }));
+
+        const mouth = document.createElement("span");
+        mouth.className = style["delete-pixel-burst-mouth"];
+        mouth.style.width = `${Math.max(13, sourceRect.height * 0.72)}px`;
+        mouth.style.height = `${Math.max(13, sourceRect.height * 0.72)}px`;
+        root.appendChild(mouth);
+        animations.push(mouth.animate([
+            { opacity: 0, transform: `translate(-${sourceRect.height * 0.7}px, -50%) scale(0.8)` },
+            { opacity: 1, transform: "translate(0, -50%) scale(1)", offset: 0.18 },
+            { opacity: 1, transform: `translate(${sourceRect.width * 0.62}px, -50%) scale(1.04)`, offset: 0.7 },
+            { opacity: 0, transform: `translate(${sourceRect.width + sourceRect.height * 0.62}px, -50%) scale(0.82)` },
+        ], {
+            duration: DELETE_BURST_SWEEP_MS + 80,
+            easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+            fill: "forwards",
+        }));
+
+        const columns = clamp(Math.round(sourceRect.width / 6), 6, 11);
+        const rows = clamp(Math.round(sourceRect.height / 6), 3, 5);
+        const particleWidth = sourceRect.width / columns;
+        const particleHeight = sourceRect.height / rows;
+        let maxParticleEnd = 0;
+
+        for (let row = 0; row < rows; row += 1) {
+            for (let column = 0; column < columns; column += 1) {
+                const particle = document.createElement("span");
+                const left = column * particleWidth;
+                const top = row * particleHeight;
+                const rowDrift = row - (rows - 1) / 2;
+                const columnDrift = column - (columns - 1) / 2;
+                const delay = column * 34 + row * 12 + Math.random() * 38;
+                const duration = 430 + Math.random() * 260;
+                const dx = 14 + column * 2.2 + Math.random() * 38;
+                const dy = rowDrift * (13 + Math.random() * 9) + (Math.random() - 0.5) * 14;
+                const rotate = columnDrift * 18 + (Math.random() - 0.5) * 110;
+
+                particle.className = style["delete-pixel-burst-pixel"];
+                particle.style.left = `${left}px`;
+                particle.style.top = `${top}px`;
+                particle.style.width = `${Math.max(2, particleWidth - 1)}px`;
+                particle.style.height = `${Math.max(2, particleHeight - 1)}px`;
+                particle.style.backgroundColor = particleColors[(row + column) % particleColors.length];
+                root.appendChild(particle);
+
+                animations.push(particle.animate([
+                    { opacity: 0, transform: "translate(0, 0) scale(0.9) rotate(0deg)" },
+                    { opacity: 1, transform: "translate(0, 0) scale(1) rotate(0deg)", offset: 0.16 },
+                    { opacity: 0.74, transform: `translate(${dx * 0.46}px, ${dy * 0.46}px) scale(0.92) rotate(${rotate * 0.4}deg)`, offset: 0.58 },
+                    { opacity: 0, transform: `translate(${dx}px, ${dy}px) scale(0.22) rotate(${rotate}deg)` },
+                ], {
+                    duration,
+                    delay,
+                    easing: "cubic-bezier(0.16, 1, 0.3, 1)",
+                    fill: "forwards",
+                }));
+                maxParticleEnd = Math.max(maxParticleEnd, delay + duration);
+            }
+        }
+
+        timerId = window.setTimeout(finish, Math.max(DELETE_BURST_ANIMATION_MS, maxParticleEnd) + 80);
+    }
+
+    return () => {
+        if (isDone) {
+            return;
+        }
+
+        animations.forEach((animation) => animation.cancel());
+        finish();
+    };
+};
+
 const getFirstSeriesYear = (treeData: Map<number, number | null>) => {
     let firstYear: number | undefined;
 
@@ -394,6 +550,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
     const animationCueIdRef = useRef(0);
     const pendingInsertFlipRef = useRef<PendingInsertFlip | null>(null);
     const insertAnimationCleanupRef = useRef<Array<() => void>>([]);
+    const deleteBurstCleanupRef = useRef<Array<() => void>>([]);
 
     const showAnimationCue = useCallback((cue: Omit<GridAnimationCue, "id">) => {
         animationCueIdRef.current += 1;
@@ -406,6 +563,11 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
     const clearInsertAnimations = useCallback(() => {
         insertAnimationCleanupRef.current.forEach((cleanup) => cleanup());
         insertAnimationCleanupRef.current = [];
+    }, []);
+
+    const clearDeleteBurstAnimations = useCallback(() => {
+        deleteBurstCleanupRef.current.forEach((cleanup) => cleanup());
+        deleteBurstCleanupRef.current = [];
     }, []);
 
     const renderSite = useMemo(() => {
@@ -694,7 +856,8 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
 
     useEffect(() => () => {
         clearInsertAnimations();
-    }, [clearInsertAnimations]);
+        clearDeleteBurstAnimations();
+    }, [clearDeleteBurstAnimations, clearInsertAnimations]);
 
     const handleYearClick = useCallback((tree: string, year: number) => {
         if (onYearClick) {
@@ -867,6 +1030,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
 
         if (container) {
             const sourceElements = getTreeYearGridElements(container, tree);
+            const deletedElement = sourceElements.get(year);
             const shiftTargets = Array.from(sourceElements.entries())
                 .filter(([sourceYear]) => sourceYear < year)
                 .map(([sourceYear]) => ({
@@ -904,6 +1068,14 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                 side: "left",
                 cells,
             };
+
+            if (deletedElement) {
+                clearDeleteBurstAnimations();
+                const cleanup = createDeletePixelBurst(container, deletedElement);
+                if (cleanup) {
+                    deleteBurstCleanupRef.current = [cleanup];
+                }
+            }
         }
 
         flushSync(() => {
@@ -918,7 +1090,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                 overwrittenYears: [],
             });
         });
-    }, [onDeleteYearWithMode, showAnimationCue, visibleSite]);
+    }, [clearDeleteBurstAnimations, onDeleteYearWithMode, showAnimationCue, visibleSite]);
 
     const handleGridPointerDown = useCallback((event: React.PointerEvent<HTMLSpanElement>, tree: string, year: number) => {
         if (event.button !== 0) {
