@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { parseCofechaResult, splitReportByParts } from "@/features/cofecha/formatter";
 import type { ICofechaResult } from "@/features/cofecha/types";
 import { RwlEditor, registerChangeYearWidth } from "@/features/rwl/edit";
-import type { DeleteMode, RwlHistoryAnimation } from "@/features/rwl/edit";
+import type { DeleteMode, RwlDeletionMarkers, RwlHistoryAnimation } from "@/features/rwl/edit";
 import type { RwlSiteData } from "@/features/rwl/types";
 import { runCofecha } from "@/services/cofecha/runner";
 import { readRwlFile, saveFile } from "@/services/fs/io";
@@ -44,6 +44,7 @@ export function useHomeWorkspace() {
     const historyAnimationIdRef = useRef(0);
 
     const [siteData, setSiteData] = useState<RwlSiteData>(() => rwlEditorRef.current.getData());
+    const [deletionMarkers, setDeletionMarkers] = useState<RwlDeletionMarkers>(() => rwlEditorRef.current.getDeletionMarkers());
     const [treeOptions, setTreeOptions] = useState<string[]>([]);
     const [selectedTree, setSelectedTree] = useState<string>(ALL_OPTION_VALUE);
     const [historyAnimation, setHistoryAnimation] = useState<WidthHistoryAnimation | null>(null);
@@ -64,6 +65,7 @@ export function useHomeWorkspace() {
             const nextData = editor.getData();
             setIsModified(!rwlDataEquals(originalDataRef.current, nextData));
             setSiteData(nextData);
+            setDeletionMarkers(editor.getDeletionMarkers());
         });
     }, []);
 
@@ -101,6 +103,7 @@ export function useHomeWorkspace() {
         const nextData = nextEditor.getData();
         originalDataRef.current = nextData;
         setSiteData(nextData);
+        setDeletionMarkers(nextEditor.getDeletionMarkers());
         setHistoryAnimation(null);
         setIsModified(false);
     }, [syncEditor]);
@@ -252,6 +255,7 @@ export function useHomeWorkspace() {
     return {
         cofechaResult,
         cofechaVersion,
+        deletionMarkers,
         fileName,
         handleDeleteYearWithMode,
         handleInsertMissingYearAtSide,

@@ -31,6 +31,36 @@
     background-color: #57b357;
 }
 
+.deletion-mark {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -7px;
+    width: 9px;
+    cursor: pointer;
+    pointer-events: auto;
+    z-index: 5;
+}
+
+.deletion-mark::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 3px;
+    width: 3px;
+    background-color: #ff0000;
+    transition: width 140ms ease, left 140ms ease, background-color 140ms ease;
+    pointer-events: none;
+}
+
+.deletion-mark:hover::before,
+.deletion-mark.deletion-mark-active::before {
+    left: 2px;
+    width: 5px;
+    background-color: #b91c1c;
+}
+
 .width-grid.disabled {
     overflow: hidden;
     cursor: default;

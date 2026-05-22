@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { TreeChartManager } from "@/components/Chart/TreeChartManager";
+import { RollingNumber } from "@/components/RollingNumber/RollingNumber";
 import WidthContainer from "@/components/WidthContainer/WidthContainer";
 import style from "./Home.module.css";
 import { ALL_OPTION_VALUE, TitleMenuKind } from "./home/constants";
@@ -16,9 +17,9 @@ const COFECHA_PART_OPTIONS = [
     { value: ALL_OPTION_VALUE, label: "📜 全部内容" },
     { value: "PART 1", label: "📌 PART 1: Summary" },
     { value: "PART 2", label: "📈 PART 2: Time Plot of Series" },
-    { value: "PART 3", label: "📉 PART 3: Master Dating Series" },
+    { value: "PART 3", label: "⭐ PART 3: Master Dating Series" },
     { value: "PART 4", label: "📊 PART 4: Master Bar Plot" },
-    { value: "PART 5", label: "📰 PART 5: Correlation of Series by Segment" },
+    { value: "PART 5", label: "🔗 PART 5: Correlation of Series by Segment" },
     { value: "PART 6", label: "⚠️ PART 6: Potential Problems" },
     { value: "PART 7", label: "🪧 PART 7: Descriptive Statistics" },
 ];
@@ -33,6 +34,7 @@ export default function Home() {
     const {
         cofechaResult,
         cofechaVersion,
+        deletionMarkers,
         handleDeleteYearWithMode,
         handleInsertMissingYearAtSide,
         handleLoad,
@@ -122,6 +124,7 @@ export default function Home() {
                                     selected={selectedTree}
                                     masterSeries={cofechaResult?.masterDatingSeries}
                                     historyAnimation={historyAnimation}
+                                    deletionMarkers={deletionMarkers}
                                     scrollContainerRef={dataContainerRef}
                                     onInsertMissingYearAtSide={handleInsertMissingYearAtSide}
                                     onMoveSeriesTailByOffset={handleMoveSeriesTailByOffset}
@@ -180,23 +183,33 @@ export default function Home() {
                     <div className={style["statics-info"]}>
                         <span className={style["stat-item"]} style={{ color: problemTextColor }}>
                             <span className={style["stat-label"]}>*A*</span>
-                            <span className={style["stat-value"]}>{cofechaResult?.possibleProblemsCount}</span>
+                            <span className={style["stat-value"]}>
+                                <RollingNumber value={cofechaResult?.possibleProblemsCount} />
+                            </span>
                         </span>
                         <span className={style["stat-item"]}>
                             <span className={style["stat-label"]}>Master series</span>
-                            <span className={style["stat-value"]}>{cofechaResult?.masterSeriesYear}</span>
+                            <span className={style["stat-value"]}>
+                                <RollingNumber value={cofechaResult?.masterSeriesYear} />
+                            </span>
                         </span>
                         <span className={style["stat-item"]}>
                             <span className={style["stat-label"]}>Intercorrelation</span>
-                            <span className={style["stat-value"]}>{cofechaResult?.seriesIntercorrelation}</span>
+                            <span className={style["stat-value"]}>
+                                <RollingNumber value={cofechaResult?.seriesIntercorrelation} />
+                            </span>
                         </span>
                         <span className={style["stat-item"]}>
                             <span className={style["stat-label"]}>Mean sensitivity</span>
-                            <span className={style["stat-value"]}>{cofechaResult?.averageMeanSensitivity}</span>
+                            <span className={style["stat-value"]}>
+                                <RollingNumber value={cofechaResult?.averageMeanSensitivity} />
+                            </span>
                         </span>
                         <span className={style["stat-item"]}>
                             <span className={style["stat-label"]}>Mean length</span>
-                            <span className={style["stat-value"]}>{cofechaResult?.meanLength}</span>
+                            <span className={style["stat-value"]}>
+                                <RollingNumber value={cofechaResult?.meanLength} />
+                            </span>
                         </span>
                     </div>
 

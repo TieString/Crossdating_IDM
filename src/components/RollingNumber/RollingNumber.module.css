@@ -1,0 +1,40 @@
+.rolling {
+    display: inline-flex;
+    align-items: baseline;
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
+}
+
+.digit {
+    position: relative;
+    display: inline-block;
+    height: 1.2em;
+    width: 1ch;
+    overflow: hidden;
+    vertical-align: baseline;
+    text-align: center;
+}
+
+.digit-reel {
+    display: flex;
+    flex-direction: column;
+    will-change: transform;
+    transition: transform 2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.digit-reel > span {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 1.2em;
+    line-height: 1.2;
+}
+
+.static-char {
+    display: inline-block;
+}
+
+.placeholder {
+    display: inline-block;
+    color: #b5b5b5;
+}

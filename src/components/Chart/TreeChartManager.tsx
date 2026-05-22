@@ -117,7 +117,7 @@ function TreeChartManagerBase({ fullData }: Props) {
         {/* 滚动区域 */}
         <div style={{
           height: 70,
-          overflowY: 'scroll',
+          overflowY: 'auto',
           overflowX: 'hidden',
           paddingTop: 8,
           paddingBottom: 8

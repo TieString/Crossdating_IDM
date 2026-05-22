@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { callChangeYearWidth } from "@/features/rwl/edit";
+import { RollingNumber } from "@/components/RollingNumber/RollingNumber";
 import style from "./WidthGrid.module.css";
 
 type PlusSide = "left" | "right";
@@ -23,8 +24,12 @@ type WidthGridProps = React.HTMLAttributes<HTMLSpanElement> & {
     isDragging?: boolean;
     dragYearOffset?: number;
     animationKind?: GridAnimationKind;
+    hasLeftDeletionMark?: boolean;
+    isDeletionMarkActive?: boolean;
+    rollingDigits?: boolean;
     onYearClick?: (tree: string, year: number) => void;
     onInsertMissingYearAtSide?: (tree: string, year: number, side: PlusSide) => void;
+    onDeletionMarkHoverChange?: (tree: string, year: number, hovered: boolean, element: HTMLElement | null) => void;
 };
 
 export default function WidthGrid({
@@ -38,8 +43,12 @@ export default function WidthGrid({
     isDragging = false,
     dragYearOffset = 0,
     animationKind,
+    hasLeftDeletionMark = false,
+    isDeletionMarkActive = false,
+    rollingDigits = false,
     onYearClick,
     onInsertMissingYearAtSide,
+    onDeletionMarkHoverChange,
     className = "",
     style: customStyle = {},
     ...rest
@@ -158,6 +167,24 @@ export default function WidthGrid({
         : style["insert-missing-button"];
     const animationClassName = animationKind ? style[`animate-${animationKind}`] : "";
 
+    const handleDeletionMarkEnter = (event: React.MouseEvent<HTMLSpanElement>) => {
+        event.stopPropagation();
+        if (tree !== undefined && year !== undefined) {
+            onDeletionMarkHoverChange?.(tree, year, true, event.currentTarget);
+        }
+    };
+
+    const handleDeletionMarkLeave = (event: React.MouseEvent<HTMLSpanElement>) => {
+        event.stopPropagation();
+        if (tree !== undefined && year !== undefined) {
+            onDeletionMarkHoverChange?.(tree, year, false, event.currentTarget);
+        }
+    };
+
+    const valueContent = rollingDigits && typeof displayedValue === "number"
+        ? <RollingNumber value={displayedValue} />
+        : displayedValue;
+
     return (
         <span
             {...restWithoutTitle}
@@ -170,7 +197,7 @@ export default function WidthGrid({
             onMouseLeave={handleMouseLeave}
             onBlur={handleBlur}
             onKeyDown={handleKeyDown}
-            className={`${style["width-grid"]} ${className} ${isMissing ? style["missing"] : ""} ${isInsertedZero ? style["inserted-zero"] : ""} ${isSelected ? style["selected"] : ""} ${isDragging ? style["dragging"] : ""} ${animationClassName} ${isEditable ? "" : style["disabled"]}`}
+            className={`${style["width-grid"]} ${className} ${isMissing ? style["missing"] : ""} ${isInsertedZero ? style["inserted-zero"] : ""} ${isSelected ? style["selected"] : ""} ${isDragging ? style["dragging"] : ""} ${hasLeftDeletionMark ? style["has-left-deletion-mark"] : ""} ${animationClassName} ${isEditable ? "" : style["disabled"]}`}
             style={{
                 backgroundColor: getBackgroundColor(),
                 color: getTextColor(),
@@ -178,7 +205,15 @@ export default function WidthGrid({
                 ...customStyle,
             }}
         >
-            {displayedValue}
+            {valueContent}
+            {hasLeftDeletionMark ? (
+                <span
+                    aria-hidden="true"
+                    className={`${style["deletion-mark"]} ${isDeletionMarkActive ? style["deletion-mark-active"] : ""}`}
+                    onMouseEnter={handleDeletionMarkEnter}
+                    onMouseLeave={handleDeletionMarkLeave}
+                />
+            ) : null}
             {isEditable && hoverPlusSide ? (
                 <button
                     type="button"

@@ -1,7 +1,7 @@
 .menu-root {
     position: fixed;
     z-index: 1000;
-    min-width: 200px;
+    width: 160px;
     padding: 6px;
     border-radius: 10px;
     background: #ffffff;
@@ -16,10 +16,11 @@
 }
 
 .menu-row {
+    background:#b9b9b91c;
     position: relative;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 5px;
     padding: 3px 5px;
     border-radius: 6px;
     cursor: pointer;
@@ -39,17 +40,17 @@
 }
 
 .menu-row-input {
-    width: 40px;
-    padding: 2px 4px 3px;
+    width: 30px;
+    padding: 2px;
     border: 0;
-    border-bottom: 1px solid rgba(15, 23, 42, 0.32);
+    border-bottom: 2px solid rgba(97, 97, 97, 0.62);
     border-radius: 0;
     background: transparent;
     color: #0f172a;
     font: inherit;
     font-variant-numeric: tabular-nums;
-    text-align: center;
     outline: none;
+    box-shadow: none;
     transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
@@ -108,9 +109,9 @@
 }
 
 .menu-separator {
-    margin: 4px 6px;
+    margin: 4px 2px;
     height: 1px;
-    background: linear-gradient(to right, transparent, rgba(15, 23, 42, 0.08), transparent);
+    background: linear-gradient(to right, transparent, rgba(15, 23, 42, 0.8), transparent);
 }
 
 .dropdown {

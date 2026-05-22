@@ -2,7 +2,8 @@ import { memo, ReactNode, RefObject, useCallback, useEffect, useLayoutEffect, us
 import { flushSync } from 'react-dom';
 import { RwlSiteData } from '@/features/rwl';
 import { moveSeriesTailByOffset as previewMoveSeriesTailByOffset } from '@/features/rwl/edit';
-import type { DeleteMode, RwlHistoryAnimation } from '@/features/rwl/edit';
+import type { DeleteMode, RwlDeletionMarkers, RwlHistoryAnimation } from '@/features/rwl/edit';
+import { RollingNumber } from '@/components/RollingNumber/RollingNumber';
 import WidthGrid from './WidthGrid/WidthGrid';
 import WidthGridContextMenu from './WidthGridContextMenu/WidthGridContextMenu';
 import style from "./WidthContainer.module.css";
@@ -93,6 +94,15 @@ interface GridAnimationCue {
     movedYears: number[];
     gapYears: number[];
     overwrittenYears: number[];
+}
+
+interface DeletionHoverState {
+    tree: string;
+    year: number;
+    anchorLeft: number;  // x of the right-neighbor cell's left edge, relative to container
+    anchorTop: number;   // y of the right-neighbor cell's top, relative to container
+    anchorHeight: number;
+    cellWidth: number;
 }
 
 type GridInteraction =
@@ -347,6 +357,7 @@ type WidthContainerProps = {
     masterSeries?: Map<number, number>,
     selected?: string,
     historyAnimation?: WidthHistoryAnimation | null,
+    deletionMarkers?: RwlDeletionMarkers,
     onYearClick?: (tree: string, year: number) => void,
     onInsertMissingYearAtSide?: (tree: string, year: number, side: PlusSide) => void,
     onMoveSeriesTailByOffset?: (tree: string, selectedStartYear: number, selectedEndYear: number, yearOffset: number) => void,
@@ -361,7 +372,7 @@ interface ContextMenuState {
     y: number;
 }
 
-function WidthContainer({ siteData: site, masterSeries, selected, historyAnimation, onYearClick, onInsertMissingYearAtSide, onMoveSeriesTailByOffset, onDeleteYearWithMode, scrollContainerRef }: WidthContainerProps): ReactNode {
+function WidthContainer({ siteData: site, masterSeries, selected, historyAnimation, deletionMarkers, onYearClick, onInsertMissingYearAtSide, onMoveSeriesTailByOffset, onDeleteYearWithMode, scrollContainerRef }: WidthContainerProps): ReactNode {
     const visibleSite = useMemo(() => (
         selected && site.has(selected)
             ? (() => {
@@ -377,6 +388,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
     const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
     const [animationCue, setAnimationCue] = useState<GridAnimationCue | null>(null);
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+    const [hoveredMarker, setHoveredMarker] = useState<DeletionHoverState | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
     const interactionRef = useRef<GridInteraction | null>(null);
     const animationCueIdRef = useRef(0);
@@ -689,6 +701,45 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
             onYearClick(tree, year);
         }
     }, [onYearClick]);
+
+    const handleDeletionMarkHoverChange = useCallback((tree: string, year: number, hovered: boolean, element: HTMLElement | null) => {
+        if (!hovered) {
+            setHoveredMarker((prev) => (prev && prev.tree === tree && prev.year === year ? null : prev));
+            return;
+        }
+
+        const container = containerRef.current;
+        const markEl = element;
+        if (!container || !markEl) return;
+
+        // The mark element's parent <span> is the right-neighbor cell.
+        const rightCell = markEl.parentElement;
+        if (!rightCell) return;
+
+        const containerRect = container.getBoundingClientRect();
+        const rightRect = rightCell.getBoundingClientRect();
+
+        setHoveredMarker({
+            tree,
+            year,
+            anchorLeft: rightRect.left - containerRect.left,
+            anchorTop: rightRect.top - containerRect.top,
+            anchorHeight: rightRect.height,
+            cellWidth: rightRect.width,
+        });
+    }, []);
+
+    const hoveredMarkerInfo = useMemo(() => {
+        if (!hoveredMarker || !deletionMarkers) return null;
+        return deletionMarkers.get(hoveredMarker.tree)?.get(hoveredMarker.year) ?? null;
+    }, [hoveredMarker, deletionMarkers]);
+
+    // 一个 cell 是否“贴着”任意删除标记（左侧或右侧），用于决定是否启用 RollingNumber。
+    const markerAdjacencyFor = useCallback((tree: string, year: number) => {
+        const entries = deletionMarkers?.get(tree);
+        if (!entries) return false;
+        return entries.has(year) || entries.has(year + 1);
+    }, [deletionMarkers]);
 
     const handleInsertMissingYearAtSide = useCallback((tree: string, year: number, side: PlusSide) => {
         const treeData = visibleSite.get(tree);
@@ -1141,6 +1192,20 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                                 const cellIsSelected = renderSelection?.tree === series.treeCode && selectedYears.has(cell.year);
                                 const cellAnimationKind = getGridAnimationKind(series.treeCode, cell.year);
                                 const cellAnimationKey = cellAnimationKind ? animationCue?.id ?? 0 : 0;
+                                const hasLeftDeletionMark = Boolean(deletionMarkers?.get(series.treeCode)?.has(cell.year));
+                                const rollingDigits = markerAdjacencyFor(series.treeCode, cell.year);
+
+                                // 计算悬停预览时该 cell 应该展示的原始值（如果它正好是被悬停 marker 的左/右邻）
+                                let previewValue: number | null | undefined = undefined;
+                                let isDeletionMarkActive = false;
+                                if (hoveredMarker && hoveredMarkerInfo && hoveredMarker.tree === series.treeCode) {
+                                    if (cell.year === hoveredMarker.year) {
+                                        previewValue = hoveredMarkerInfo.rightOriginalWidth;
+                                        isDeletionMarkActive = true;
+                                    } else if (cell.year === hoveredMarker.year - 1) {
+                                        previewValue = hoveredMarkerInfo.leftOriginalWidth;
+                                    }
+                                }
 
                                 if (cell.isInterruptPad) {
                                     return (
@@ -1155,10 +1220,13 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                                             isDragging={isDraggingSelection && cellIsSelected}
                                             dragYearOffset={dragYearOffset}
                                             animationKind={cellAnimationKind}
+                                            hasLeftDeletionMark={hasLeftDeletionMark}
+                                            isDeletionMarkActive={isDeletionMarkActive}
                                             data-width-grid-cell="true"
                                             data-tree={series.treeCode}
                                             data-year={cell.year}
                                             onPointerDown={(event) => handleGridPointerDown(event, series.treeCode, cell.year)}
+                                            onDeletionMarkHoverChange={handleDeletionMarkHoverChange}
                                         />
                                     );
                                 }
@@ -1167,10 +1235,16 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                                     return <WidthGrid gridValue={cell.width} key={`stop-${series.treeCode}-${cell.year}`} />;
                                 }
 
+                                // 悬停时若 previewValue !== undefined（即此 cell 是被悬停 marker 的邻居），
+                                // 用原始值覆盖；RollingNumber 会从当前值滚动到原始值。
+                                const effectiveValue = previewValue !== undefined
+                                    ? previewValue
+                                    : (cell.width ?? null);
+
                                 return (
                                     <WidthGrid
                                         key={`value-${series.treeCode}-${cell.year}-${cellAnimationKey}`}
-                                        gridValue={cell.width ?? null}
+                                        gridValue={effectiveValue}
                                         year={cell.year}
                                         tree={series.treeCode}
                                         masterSeriesValue={masterSeries?.get(cell.year)}
@@ -1179,12 +1253,16 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                                         isDragging={isDraggingSelection && cellIsSelected}
                                         dragYearOffset={dragYearOffset}
                                         animationKind={cellAnimationKind}
+                                        hasLeftDeletionMark={hasLeftDeletionMark}
+                                        isDeletionMarkActive={isDeletionMarkActive}
+                                        rollingDigits={rollingDigits}
                                         data-width-grid-cell="true"
                                         data-tree={series.treeCode}
                                         data-year={cell.year}
                                         onPointerDown={(event) => handleGridPointerDown(event, series.treeCode, cell.year)}
                                         onInsertMissingYearAtSide={handleInsertMissingYearAtSide}
                                         onYearClick={handleYearClick}
+                                        onDeletionMarkHoverChange={handleDeletionMarkHoverChange}
                                     />
                                 );
                             })}
@@ -1203,6 +1281,23 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                     className={style["virtual-spacer"]}
                     style={{ height: `${bottomSpacerHeight}px` }}
                 />
+            ) : null}
+
+            {hoveredMarker && hoveredMarkerInfo ? (
+                <div
+                    className={style["deletion-preview-ghost"]}
+                    style={{
+                        left: `${hoveredMarker.anchorLeft - hoveredMarker.cellWidth / 2 - 2.5}px`,
+                        top: `${hoveredMarker.anchorTop}px`,
+                        width: `${hoveredMarker.cellWidth}px`,
+                        height: `${hoveredMarker.anchorHeight}px`,
+                    }}
+                    aria-hidden="true"
+                >
+                    {hoveredMarkerInfo.deletedWidth === null
+                        ? <span>missing</span>
+                        : <RollingNumber value={hoveredMarkerInfo.deletedWidth} />}
+                </div>
             ) : null}
 
             <WidthGridContextMenu

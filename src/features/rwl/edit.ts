@@ -22,9 +22,36 @@ export type RwlHistoryAnimation = RwlEditOperation & {
     direction: "undo" | "redo";
 };
 
+// 每个 tree 的删除标记：年份 M 表示 "在当前年份 M 的左边沿画一条红色竖线"。
+// 仅在内存中维护，与 undo/redo 联动；不写入 RWL 文件。
+// 同时记录删除发生时的原始数据，以便悬停预览时还原被删格子和两侧值。
+export type DeletionMarkerInfo = {
+    // 被删除年份的宽度（删除前）
+    deletedWidth: number | null;
+    // 删除前左邻 (year - 1) 的宽度；undefined 表示当时左侧无格子
+    leftOriginalWidth?: number | null;
+    // 删除前右邻 (year + 1) 的宽度；undefined 表示当时右侧无格子
+    rightOriginalWidth?: number | null;
+};
+
+export type RwlDeletionMarkers = Map<string, Map<number, DeletionMarkerInfo>>;
+
 type RwlHistoryEntry = {
     data: RwlSiteData;
+    deletionMarkers: RwlDeletionMarkers;
     operation?: RwlEditOperation;
+};
+
+const cloneDeletionMarkers = (markers: RwlDeletionMarkers): RwlDeletionMarkers => {
+    const result: RwlDeletionMarkers = new Map();
+    markers.forEach((years, tree) => {
+        const inner = new Map<number, DeletionMarkerInfo>();
+        years.forEach((info, year) => {
+            inner.set(year, { ...info });
+        });
+        result.set(tree, inner);
+    });
+    return result;
 };
 
 const isStopMarkerValue = (value: number | null | undefined) => value === stopMarker.value;
@@ -161,12 +188,74 @@ export class RwlEditor {
     private format: string = 'tucson'; // 记录原始读取格式
     private undoStack: RwlHistoryEntry[] = [];
     private redoStack: RwlHistoryEntry[] = [];
+    private deletionMarkers: RwlDeletionMarkers = new Map();
     private changeCallback?: () => void;
 
     constructor(initialData: RwlSiteData, options?: RwlReadResult['readOptions'], format?: string) {
         this.rwlData = new Map(initialData);
         this.readOptions = options;
         this.format = format || 'tucson'; // 默认 tucson
+    }
+
+    // 获取当前所有删除标记（深拷贝，避免外部修改影响内部状态）
+    getDeletionMarkers(): RwlDeletionMarkers {
+        return cloneDeletionMarkers(this.deletionMarkers);
+    }
+
+    private addDeletionMarker(tree: string, year: number, info: DeletionMarkerInfo): void {
+        let entries = this.deletionMarkers.get(tree);
+        if (!entries) {
+            entries = new Map();
+            this.deletionMarkers.set(tree, entries);
+        }
+        entries.set(year, info);
+    }
+
+    // 删除年份后，将原标记的年份映射到新坐标。
+    // deleteYearFromRwl: key < year → key+1; key === year → 删除; key > year → 不变。
+    // 标记跟随其右邻 cell，所以采用同样的映射。M === year 的标记意味着右邻被删，丢弃。
+    private shiftDeletionMarkersForDelete(tree: string, year: number): void {
+        const entries = this.deletionMarkers.get(tree);
+        if (!entries || entries.size === 0) return;
+        const next = new Map<number, DeletionMarkerInfo>();
+        entries.forEach((info, m) => {
+            if (m < year) next.set(m + 1, info);
+            else if (m > year) next.set(m, info);
+        });
+        if (next.size === 0) {
+            this.deletionMarkers.delete(tree);
+        } else {
+            this.deletionMarkers.set(tree, next);
+        }
+    }
+
+    // 插入年份时同步偏移：side="left" → years >= year 向右平移；side="right" → years <= year 向左平移。
+    private shiftDeletionMarkersForInsert(tree: string, year: number, side: MissingInsertSide): void {
+        const entries = this.deletionMarkers.get(tree);
+        if (!entries || entries.size === 0) return;
+        const next = new Map<number, DeletionMarkerInfo>();
+        entries.forEach((info, m) => {
+            if (side === "left") {
+                next.set(m >= year ? m + 1 : m, info);
+            } else {
+                next.set(m <= year ? m - 1 : m, info);
+            }
+        });
+        this.deletionMarkers.set(tree, next);
+    }
+
+    // 移动选区时，处于选区范围内的标记跟随偏移。
+    private shiftDeletionMarkersForMove(tree: string, startYear: number, endYear: number, yearOffset: number): void {
+        const entries = this.deletionMarkers.get(tree);
+        if (!entries || entries.size === 0 || yearOffset === 0) return;
+        const start = Math.min(startYear, endYear);
+        const end = Math.max(startYear, endYear);
+        const next = new Map<number, DeletionMarkerInfo>();
+        entries.forEach((info, m) => {
+            if (m >= start && m <= end) next.set(m + yearOffset, info);
+            else next.set(m, info);
+        });
+        this.deletionMarkers.set(tree, next);
     }
 
     /**
@@ -212,6 +301,7 @@ export class RwlEditor {
 
         this.undoStack[this.undoStack.length - 1].operation = { type: "insert-missing", tree, year, side: "right" };
 
+        this.shiftDeletionMarkersForInsert(tree, year, "right");
         let updatedTree = insertMissingYearAtSide(treeData, year, "right");
         this.rwlData.set(tree, updatedTree);
         this.notifyChange();
@@ -227,6 +317,7 @@ export class RwlEditor {
         let treeData = this.rwlData.get(tree)!;
         if (!treeData.has(year)) return;
 
+        this.shiftDeletionMarkersForInsert(tree, year, side);
         let updatedTree = insertMissingYearAtSide(treeData, year, side);
         this.rwlData.set(tree, updatedTree);
         this.notifyChange();
@@ -241,6 +332,7 @@ export class RwlEditor {
         if (!this.rwlData.has(tree)) return;
         let treeData = this.rwlData.get(tree)!;
 
+        this.shiftDeletionMarkersForMove(tree, selectedStartYear, selectedEndYear, yearOffset);
         let updatedTree = moveSeriesTailByOffset(treeData, selectedStartYear, selectedEndYear, yearOffset);
         this.rwlData.set(tree, updatedTree);
         this.notifyChange();
@@ -254,6 +346,9 @@ export class RwlEditor {
         let treeData = this.rwlData.get(tree)!;
         if (!treeData.has(year)) return;
 
+        const info = this.captureDeletionInfo(treeData, year);
+        this.shiftDeletionMarkersForDelete(tree, year);
+        this.addDeletionMarker(tree, year + 1, info);
         let updatedTree = deleteYearFromRwl(treeData, year);
         this.rwlData.set(tree, updatedTree);
         this.notifyChange();
@@ -267,9 +362,30 @@ export class RwlEditor {
         let treeData = this.rwlData.get(tree)!;
         if (!treeData.has(year)) return;
 
+        const info = this.captureDeletionInfo(treeData, year);
+        this.shiftDeletionMarkersForDelete(tree, year);
+        this.addDeletionMarker(tree, year + 1, info);
         let updatedTree = deleteYearWithMode(treeData, year, mode);
         this.rwlData.set(tree, updatedTree);
         this.notifyChange();
+    }
+
+    // 在执行删除前快照被删年份及其相邻年份的原始宽度，用于悬停预览。
+    // 跳过 stopMarker 邻居（不应作为原值还原）。
+    private captureDeletionInfo(treeData: RwlTreeData, year: number): DeletionMarkerInfo {
+        const deletedRaw = treeData.get(year);
+        const leftRaw = treeData.get(year - 1);
+        const rightRaw = treeData.get(year + 1);
+        const sanitize = (value: number | null | undefined): number | null | undefined => {
+            if (value === undefined) return undefined;
+            if (isStopMarkerValue(value)) return undefined;
+            return value;
+        };
+        return {
+            deletedWidth: (deletedRaw === undefined || isStopMarkerValue(deletedRaw)) ? null : deletedRaw,
+            leftOriginalWidth: sanitize(leftRaw),
+            rightOriginalWidth: sanitize(rightRaw),
+        };
     }
 
     changeYearWidth(tree: string, year: number, width: number | null): void {
@@ -291,9 +407,11 @@ export class RwlEditor {
         const previousEntry = this.undoStack.pop()!;
         this.redoStack.push({
             data: new Map(this.rwlData),
+            deletionMarkers: cloneDeletionMarkers(this.deletionMarkers),
             operation: previousEntry.operation,
         });
         this.rwlData = previousEntry.data;
+        this.deletionMarkers = previousEntry.deletionMarkers;
         this.notifyChange();
         return previousEntry.operation ? { ...previousEntry.operation, direction: "undo" } : null;
     }
@@ -304,9 +422,11 @@ export class RwlEditor {
         const nextEntry = this.redoStack.pop()!;
         this.undoStack.push({
             data: new Map(this.rwlData),
+            deletionMarkers: cloneDeletionMarkers(this.deletionMarkers),
             operation: nextEntry.operation,
         });
         this.rwlData = nextEntry.data;
+        this.deletionMarkers = nextEntry.deletionMarkers;
         this.notifyChange();
         return nextEntry.operation ? { ...nextEntry.operation, direction: "redo" } : null;
     }
@@ -315,6 +435,7 @@ export class RwlEditor {
     private saveToUndoStack(operation?: RwlEditOperation): void {
         this.undoStack.push({
             data: new Map(this.rwlData),
+            deletionMarkers: cloneDeletionMarkers(this.deletionMarkers),
             operation,
         });
     }
