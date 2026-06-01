@@ -17,13 +17,13 @@ export interface WidthGridContextMenuProps {
 }
 
 const INSERT_OPTIONS: Array<{ side: MissingInsertSide; label: string; chip: string }> = [
-    { side: "left", label: "在左侧插入", chip: "左侧" },
     { side: "right", label: "在右侧插入", chip: "右侧" },
+    { side: "left", label: "在左侧插入", chip: "左侧" },
 ];
 
 const DELETE_OPTIONS: Array<{ mode: DeleteMode; label: string; chip: string }> = [
-    { mode: "direct", label: "直接删除", chip: "丢弃" },
-    { mode: "both", label: "分配到两侧", chip: "平均" },
+    { mode: "direct", label: "直接删除", chip: "无" },
+    { mode: "both", label: "平均到两侧", chip: "平均" },
     { mode: "left", label: "分配到左侧", chip: "左侧" },
     { mode: "right", label: "分配到右侧", chip: "右侧" },
 ];

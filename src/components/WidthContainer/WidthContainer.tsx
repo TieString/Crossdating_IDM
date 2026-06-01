@@ -951,12 +951,9 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
         return result;
     }, [hoveredMarker, deletionMarkers]);
 
-    // 删除时被强制留在原位（不进 shiftedYears）的格子需要 z-index 提升，避免在 slide-in 动画期间
-    // 被周围滑入的格子覆盖。这里记一组 cell 让它们短暂处于"被提升"的状态，
-    // 等 CSS 滑入动画结束后再恢复正常 z-index。
+    // 一旦某个格子因为某次自动操作进入 RollingNumber 状态，就让它永久保持。
+    // 不再切回纯文本可以彻底避免 rollingDigits true→false 切换造成的数字位置抖动 / flicker。
     const [pendingRollingCells, setPendingRollingCells] = useState<Map<string, Set<number>> | null>(null);
-    const pendingRollingTimerRef = useRef<number | null>(null);
-
     const flagPendingRolling = useCallback((tree: string, years: number[]) => {
         if (years.length === 0) return;
         setPendingRollingCells((prev) => {
@@ -969,18 +966,36 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
             }
             return next;
         });
-        if (pendingRollingTimerRef.current !== null) {
-            window.clearTimeout(pendingRollingTimerRef.current);
+    }, []);
+
+    // 滑入动画期间被原地保留的格子需要 z-index 提升，避免被周围 slide-in 格子盖住；
+    // 这是临时状态，动画结束后要恢复，否则会留着白底永远覆盖 master series 黄色高亮。
+    const [elevatedCells, setElevatedCells] = useState<Map<string, Set<number>> | null>(null);
+    const elevatedTimerRef = useRef<number | null>(null);
+    const flagElevated = useCallback((tree: string, years: number[]) => {
+        if (years.length === 0) return;
+        setElevatedCells((prev) => {
+            const next = new Map(prev ?? []);
+            const existing = next.get(tree);
+            if (existing) {
+                years.forEach((y) => existing.add(y));
+            } else {
+                next.set(tree, new Set(years));
+            }
+            return next;
+        });
+        if (elevatedTimerRef.current !== null) {
+            window.clearTimeout(elevatedTimerRef.current);
         }
-        pendingRollingTimerRef.current = window.setTimeout(() => {
-            setPendingRollingCells(null);
-            pendingRollingTimerRef.current = null;
+        elevatedTimerRef.current = window.setTimeout(() => {
+            setElevatedCells(null);
+            elevatedTimerRef.current = null;
         }, 2400);
     }, []);
 
-    // 恢复完成后通过 animationCue 让"被恢复的那一格"作为 insertedYears，
-    // 让它因 cellAnimationKey 变化而重新挂载——这样 RollingNumber 也会 reset，
-    // 不会出现"恢复格"自己跳动；两侧邻居仍然保持原 React 实例，由 RollingNumber 自然滚动。
+    // 恢复完成后通过 animationCue 让"被恢复的那一格"作为 insertedYears：
+    // 它会因 cellAnimationKey 变化而重新挂载，内部 RollingNumber 重新初始化在 restoredValue 上，
+    // 不会跳动；同时呈现 insert-year-right 的 pop-in 动画作为视觉反馈。
     const triggerRestoreAnimation = useCallback((tree: string, markerYear: number) => {
         showAnimationCue({
             tree,
@@ -993,28 +1008,41 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
         });
     }, [showAnimationCue]);
 
+    // 只让两侧邻居跳动到原值——不要把"被恢复格"（markerYear-1）放进 pendingRolling，
+    // 否则即使 cue 触发了重挂载，它在 cue 清除后又会以 RollingNumber 状态接收 value 变化。
+    const flagRestoreRollingNeighbors = useCallback((tree: string, markerYear: number) => {
+        flushSync(() => {
+            flagPendingRolling(tree, [markerYear - 2, markerYear]);
+        });
+    }, [flagPendingRolling]);
+
     // 双击红线：默认恢复该格子最新的一次删除（栈顶，index = stack.length - 1）。
     const handleRedLineDoubleClick = useCallback((tree: string, markerYear: number) => {
         const stack = deletionMarkers?.get(tree)?.get(markerYear);
         if (!stack || stack.length === 0) return;
         setHoveredMarker(null);
+        flagRestoreRollingNeighbors(tree, markerYear);
         flushSync(() => {
             onRestoreDeletion?.(tree, markerYear, stack.length - 1);
             triggerRestoreAnimation(tree, markerYear);
         });
-    }, [onRestoreDeletion, deletionMarkers, triggerRestoreAnimation]);
+    }, [onRestoreDeletion, deletionMarkers, flagRestoreRollingNeighbors, triggerRestoreAnimation]);
 
     // 双击具体 ghost：恢复栈中指定那条删除。
     const handleGhostDoubleClick = useCallback((tree: string, markerYear: number, index: number) => {
         setHoveredMarker(null);
+        flagRestoreRollingNeighbors(tree, markerYear);
         flushSync(() => {
             onRestoreDeletion?.(tree, markerYear, index);
             triggerRestoreAnimation(tree, markerYear);
         });
-    }, [onRestoreDeletion, triggerRestoreAnimation]);
+    }, [onRestoreDeletion, flagRestoreRollingNeighbors, triggerRestoreAnimation]);
 
-    // 所有 value 格子默认开启 RollingNumber，因此不再需要按邻接关系判断；
-    // pendingRollingCells 现在只用来给原地保留的格子提升 z-index，避免被滑入格子盖住。
+    // 纯 opt-in：只有被 handler 明确标记过的格子才使用 RollingNumber。
+    // 不再基于 marker 邻接自动启用，避免拖动预览时不相关的格子跟着跳动。
+    const isRollingCell = useCallback((tree: string, year: number) => (
+        Boolean(pendingRollingCells?.get(tree)?.has(year))
+    ), [pendingRollingCells]);
 
     const handleInsertMissingYearAtSide = useCallback((tree: string, year: number, side: PlusSide) => {
         const treeData = visibleSite.get(tree);
@@ -1174,12 +1202,15 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
 
             shiftedYears = Array.from(new Set(shiftTargets.map(({ targetYear }) => targetYear)));
 
-            // 对于 left / both 模式，年份 M（被删格子那个 slot）在删除后会装入
-            // 经过修改的左邻值。要让它在原地以 RollingNumber 跳动到新值，必须
-            // 不让它进入 shiftedYears（否则会因 cellAnimationKey 变化而重挂载）。
-            if (mode === "left" || mode === "both") {
-                shiftedYears = shiftedYears.filter((y) => y !== year);
-            }
+            // 所有"该原地 roll"的格子都要排除出 shiftedYears：
+            // - 本次 mode 命中的邻居（year for left/both、year+1 for right/both）。
+            // - 之前操作残留在 pendingRollingCells 中的格子——它们已经是 RollingNumber，
+            //   如果再次走 shiftedYears 会让 cellAnimationKey 变化重挂载，
+            //   既打断它正在进行的滚动，也让新的滑入动画"叠加抢戏"，看上去像是动画消失了。
+            const rollingSet = new Set<number>(pendingRollingCells?.get(tree) ?? []);
+            if (mode === "right" || mode === "both") rollingSet.add(year + 1);
+            if (mode === "left" || mode === "both") rollingSet.add(year);
+            shiftedYears = shiftedYears.filter((y) => !rollingSet.has(y));
 
             // Reuse insert flip mechanism: delete shifts earlier years right, same direction as insert side="left".
             pendingInsertFlipRef.current = {
@@ -1197,13 +1228,23 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
             }
         }
 
-        // RollingNumber 默认开启，所以邻居跳动不再需要预先 flag。
-        // 这里仅给"原地保留"的 slot M（left/both 模式下不进 shiftedYears 的那一格）
-        // 加 z-index 提升，避免被周围的 slide-in 格子覆盖到看不见。
-        if (mode === "left" || mode === "both") {
+        // 先把 mode 会改变值的邻居登记为 rolling，
+        // 让它们在数据更新前先以 RollingNumber 状态呈现；下一帧数据改变时
+        // RollingNumber 的 value prop 变化就能触发数字跳动。
+        // - right / both: 右邻 year+1 留在原位接收 +B 或 +B/2。
+        // - left / both: 删除位 year（slot M）接收来自左邻的 A+B 或 A+B/2。
+        const rollingTargets: number[] = [];
+        if (mode === "right" || mode === "both") rollingTargets.push(year + 1);
+        if (mode === "left" || mode === "both") rollingTargets.push(year);
+        if (rollingTargets.length > 0) {
             flushSync(() => {
-                flagPendingRolling(tree, [year]);
+                flagPendingRolling(tree, rollingTargets);
             });
+        }
+        // year M（mode left/both 时被排除出 shiftedYears 的那一格）需要短暂的 z-index 提升，
+        // 让它在 slide-in 动画期间盖在滑入格子之上。这个 flag 会在 2.4s 后自动清掉。
+        if (mode === "left" || mode === "both") {
+            flagElevated(tree, [year]);
         }
 
         flushSync(() => {
@@ -1218,7 +1259,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                 overwrittenYears: [],
             });
         });
-    }, [clearDeleteBurstAnimations, onDeleteYearWithMode, showAnimationCue, visibleSite, flagPendingRolling]);
+    }, [clearDeleteBurstAnimations, onDeleteYearWithMode, showAnimationCue, visibleSite, flagPendingRolling, flagElevated]);
 
     const handleGridPointerDown = useCallback((event: React.PointerEvent<HTMLSpanElement>, tree: string, year: number) => {
         if (event.button !== 0) {
@@ -1493,14 +1534,10 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                                 const cellAnimationKind = getGridAnimationKind(series.treeCode, cell.year);
                                 const cellAnimationKey = cellAnimationKind ? animationCue?.id ?? 0 : 0;
                                 const hasLeftDeletionMark = Boolean(deletionMarkers?.get(series.treeCode)?.has(cell.year));
-                                // 所有 value 格子默认启用 RollingNumber：
-                                // - 自动变动（删除/恢复/移动/撤销/重做等）会让 React 复用同一个挂载实例，
-                                //   RollingNumber 的 value prop 变化自然触发数字跳动。
-                                // - 用户双击编辑时，<input> 替换掉 RollingNumber 的渲染输出，
-                                //   提交后 RollingNumber 重新挂载，初始化在输入值上，没有"跳动"动画。
-                                // - 进入动画 cue（insertedYears / shiftedYears）的格子因 key 变化而重挂载，
-                                //   也不会跳动，呈现 CSS 滑入效果。
-                                const rollingDigits = true;
+                                // 拖动预览期间值会跟着鼠标频繁变动，这种"非操作"变更不应触发滚动；
+                                // 一旦真正提交（pointerup 时调用 onMoveSeriesTailByOffset），数据写回，
+                                // RollingNumber 会重新挂载，亦不滚动，与其它非 flagged 操作保持一致。
+                                const rollingDigits = !isDraggingSelection && isRollingCell(series.treeCode, cell.year);
 
                                 // 仅高亮当前悬停的红线本身；hover 时不改变左右邻 cell 的值，
                                 // 让 RollingNumber 只在数据真的因为撤销/恢复改动时才跳动。
@@ -1540,10 +1577,10 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                                 }
 
                                 const effectiveValue = cell.width ?? null;
-                                // 被 pendingRolling 标记的格子（典型为 left/both 删除时的 year M），
-                                // 因为我们故意让它留在原位 RollingNumber 跳动，需要盖在滑入的格子之上，
-                                // 避免在 slide 过程中被覆盖看不见。
-                                const isRollingFocused = pendingRollingCells?.get(series.treeCode)?.has(cell.year);
+                                // 滑入动画期间被原地保留的格子（典型为 left/both 删除时的 year M），
+                                // 需要 z-index 提升，避免被其它 slide-in 格子盖住；这是临时状态，
+                                // CSS 动画结束后 elevatedCells 自动清空。
+                                const isRollingFocused = elevatedCells?.get(series.treeCode)?.has(cell.year);
 
                                 return (
                                     <WidthGrid
