@@ -11,8 +11,13 @@ export interface WidthGridContextMenuProps {
     y: number;
     tree: string;
     defaultYear: number;
+    defaultDeleteStartYear?: number;
+    defaultDeleteEndYear?: number;
     onInsert: (tree: string, year: number, side: MissingInsertSide) => void;
     onDelete: (tree: string, year: number, mode: DeleteMode) => void;
+    onDeleteRange?: (tree: string, startYear: number, endYear: number) => void;
+    onPreviewYearChange?: (tree: string, year: number) => void;
+    onPreviewYearRangeChange?: (tree: string, startYear: number, endYear: number) => void;
     onClose: () => void;
 }
 
@@ -46,12 +51,22 @@ export default function WidthGridContextMenu({
     y,
     tree,
     defaultYear,
+    defaultDeleteStartYear,
+    defaultDeleteEndYear,
     onInsert,
     onDelete,
+    onDeleteRange,
+    onPreviewYearChange,
+    onPreviewYearRangeChange,
     onClose,
 }: WidthGridContextMenuProps) {
+    const resolvedDefaultDeleteStartYear = defaultDeleteStartYear ?? defaultYear;
+    const resolvedDefaultDeleteEndYear = defaultDeleteEndYear ?? defaultYear;
+    const isRangeDelete = resolvedDefaultDeleteStartYear !== resolvedDefaultDeleteEndYear;
     const [insertYear, setInsertYear] = useState<string>(defaultYear.toString());
     const [deleteYear, setDeleteYear] = useState<string>(defaultYear.toString());
+    const [deleteStartYear, setDeleteStartYear] = useState<string>(resolvedDefaultDeleteStartYear.toString());
+    const [deleteEndYear, setDeleteEndYear] = useState<string>(resolvedDefaultDeleteEndYear.toString());
     const [insertSide, setInsertSide] = useState<MissingInsertSide>("right");
     const [deleteMode, setDeleteMode] = useState<DeleteMode>("direct");
     const [dropdown, setDropdown] = useState<DropdownKind>(null);
@@ -79,8 +94,21 @@ export default function WidthGridContextMenu({
         }
         setInsertYear(defaultYear.toString());
         setDeleteYear(defaultYear.toString());
+        setDeleteStartYear(resolvedDefaultDeleteStartYear.toString());
+        setDeleteEndYear(resolvedDefaultDeleteEndYear.toString());
+        if (isRangeDelete) {
+            setDeleteMode("direct");
+        }
         setDropdown(null);
-    }, [open, defaultYear, tree, x, y]);
+    }, [open, defaultYear, resolvedDefaultDeleteStartYear, resolvedDefaultDeleteEndYear, isRangeDelete, tree, x, y]);
+
+    useEffect(() => {
+        if (!open || !isRangeDelete) {
+            return;
+        }
+        setDeleteMode("direct");
+        setDropdown((previous) => (previous === "delete" ? null : previous));
+    }, [open, isRangeDelete]);
 
     useLayoutEffect(() => {
         if (!open) {
@@ -224,9 +252,66 @@ export default function WidthGridContextMenu({
 
     const parsedInsertYear = useMemo(() => parseYear(insertYear), [insertYear]);
     const parsedDeleteYear = useMemo(() => parseYear(deleteYear), [deleteYear]);
+    const parsedDeleteStartYear = useMemo(() => parseYear(deleteStartYear), [deleteStartYear]);
+    const parsedDeleteEndYear = useMemo(() => parseYear(deleteEndYear), [deleteEndYear]);
+    const parsedDeleteRange = useMemo(() => {
+        if (parsedDeleteStartYear === null || parsedDeleteEndYear === null) {
+            return null;
+        }
+
+        return {
+            startYear: Math.min(parsedDeleteStartYear, parsedDeleteEndYear),
+            endYear: Math.max(parsedDeleteStartYear, parsedDeleteEndYear),
+        };
+    }, [parsedDeleteStartYear, parsedDeleteEndYear]);
 
     const insertChipLabel = useMemo(() => INSERT_OPTIONS.find((option) => option.side === insertSide)?.chip ?? "", [insertSide]);
-    const deleteChipLabel = useMemo(() => DELETE_OPTIONS.find((option) => option.mode === deleteMode)?.chip ?? "", [deleteMode]);
+    const directDeleteChipLabel = useMemo(() => DELETE_OPTIONS.find((option) => option.mode === "direct")?.chip ?? "", []);
+    const deleteChipLabel = useMemo(() => (
+        isRangeDelete
+            ? directDeleteChipLabel
+            : DELETE_OPTIONS.find((option) => option.mode === deleteMode)?.chip ?? ""
+    ), [deleteMode, directDeleteChipLabel, isRangeDelete]);
+
+    const previewYear = useCallback((nextYear: number | null) => {
+        if (nextYear !== null) {
+            onPreviewYearChange?.(tree, nextYear);
+        }
+    }, [onPreviewYearChange, tree]);
+
+    const previewYearRange = useCallback((nextStartYear: number | null, nextEndYear: number | null) => {
+        if (nextStartYear !== null && nextEndYear !== null) {
+            onPreviewYearRangeChange?.(
+                tree,
+                Math.min(nextStartYear, nextEndYear),
+                Math.max(nextStartYear, nextEndYear),
+            );
+        }
+    }, [onPreviewYearRangeChange, tree]);
+
+    const handleInsertYearChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        const nextValue = event.target.value;
+        setInsertYear(nextValue);
+        previewYear(parseYear(nextValue));
+    }, [previewYear]);
+
+    const handleDeleteYearChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        const nextValue = event.target.value;
+        setDeleteYear(nextValue);
+        previewYear(parseYear(nextValue));
+    }, [previewYear]);
+
+    const handleDeleteStartYearChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        const nextValue = event.target.value;
+        setDeleteStartYear(nextValue);
+        previewYearRange(parseYear(nextValue), parsedDeleteEndYear);
+    }, [parsedDeleteEndYear, previewYearRange]);
+
+    const handleDeleteEndYearChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        const nextValue = event.target.value;
+        setDeleteEndYear(nextValue);
+        previewYearRange(parsedDeleteStartYear, parseYear(nextValue));
+    }, [parsedDeleteStartYear, previewYearRange]);
 
     const handleInsertActivate = useCallback(() => {
         if (parsedInsertYear === null) {
@@ -237,12 +322,21 @@ export default function WidthGridContextMenu({
     }, [parsedInsertYear, tree, insertSide, onInsert, onClose]);
 
     const handleDeleteActivate = useCallback(() => {
+        if (isRangeDelete) {
+            if (parsedDeleteRange === null || !onDeleteRange) {
+                return;
+            }
+            onDeleteRange(tree, parsedDeleteRange.startYear, parsedDeleteRange.endYear);
+            onClose();
+            return;
+        }
+
         if (parsedDeleteYear === null) {
             return;
         }
         onDelete(tree, parsedDeleteYear, deleteMode);
         onClose();
-    }, [parsedDeleteYear, tree, deleteMode, onDelete, onClose]);
+    }, [deleteMode, isRangeDelete, onClose, onDelete, onDeleteRange, parsedDeleteRange, parsedDeleteYear, tree]);
 
     const handleInsertKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
         if (event.key === "Enter") {
@@ -313,7 +407,8 @@ export default function WidthGridContextMenu({
                         className={`${style["menu-row-input"]} ${parsedInsertYear === null ? style["menu-row-input-invalid"] : ""}`}
                         type="text"
                         value={insertYear}
-                        onChange={(event) => setInsertYear(event.target.value)}
+                        onChange={handleInsertYearChange}
+                        onFocus={() => previewYear(parsedInsertYear)}
                         onKeyDown={handleInsertKeyDown}
                         onClick={(event) => event.stopPropagation()}
                         onPointerDown={(event) => event.stopPropagation()}
@@ -351,32 +446,73 @@ export default function WidthGridContextMenu({
                     }}
                 >
                     <span className={style["menu-row-label"]}>删除</span>
-                    <input
-                        className={`${style["menu-row-input"]} ${parsedDeleteYear === null ? style["menu-row-input-invalid"] : ""}`}
-                        type="text"
-                        value={deleteYear}
-                        onChange={(event) => setDeleteYear(event.target.value)}
-                        onKeyDown={handleDeleteKeyDown}
-                        onClick={(event) => event.stopPropagation()}
-                        onPointerDown={(event) => event.stopPropagation()}
-                        spellCheck={false}
-                        inputMode="numeric"
-                        aria-label="删除年份"
-                    />
-                    <span className={style["menu-row-label"]}>后</span>
+                    {isRangeDelete ? (
+                        <span className={style["menu-row-range"]}>
+                            <input
+                                className={`${style["menu-row-input"]} ${parsedDeleteStartYear === null ? style["menu-row-input-invalid"] : ""}`}
+                                type="text"
+                                value={deleteStartYear}
+                                onChange={handleDeleteStartYearChange}
+                                onFocus={() => previewYearRange(parsedDeleteStartYear, parsedDeleteEndYear)}
+                                onKeyDown={handleDeleteKeyDown}
+                                onClick={(event) => event.stopPropagation()}
+                                onPointerDown={(event) => event.stopPropagation()}
+                                spellCheck={false}
+                                inputMode="numeric"
+                                aria-label="删除起始年份"
+                            />
+                            <span className={style["menu-row-range-separator"]}>-</span>
+                            <input
+                                className={`${style["menu-row-input"]} ${parsedDeleteEndYear === null ? style["menu-row-input-invalid"] : ""}`}
+                                type="text"
+                                value={deleteEndYear}
+                                onChange={handleDeleteEndYearChange}
+                                onFocus={() => previewYearRange(parsedDeleteStartYear, parsedDeleteEndYear)}
+                                onKeyDown={handleDeleteKeyDown}
+                                onClick={(event) => event.stopPropagation()}
+                                onPointerDown={(event) => event.stopPropagation()}
+                                spellCheck={false}
+                                inputMode="numeric"
+                                aria-label="删除结束年份"
+                            />
+                        </span>
+                    ) : (
+                        <>
+                            <input
+                                className={`${style["menu-row-input"]} ${parsedDeleteYear === null ? style["menu-row-input-invalid"] : ""}`}
+                                type="text"
+                                value={deleteYear}
+                                onChange={handleDeleteYearChange}
+                                onFocus={() => previewYear(parsedDeleteYear)}
+                                onKeyDown={handleDeleteKeyDown}
+                                onClick={(event) => event.stopPropagation()}
+                                onPointerDown={(event) => event.stopPropagation()}
+                                spellCheck={false}
+                                inputMode="numeric"
+                                aria-label="删除年份"
+                            />
+                            <span className={style["menu-row-label"]}>后</span>
+                        </>
+                    )}
                     <button
                         ref={deleteChipRef}
                         type="button"
-                        className={`${style["menu-row-mode-chip"]} ${dropdown === "delete" ? style["menu-row-mode-chip-open"] : ""}`}
-                        aria-haspopup="menu"
-                        aria-expanded={dropdown === "delete"}
+                        className={`${style["menu-row-mode-chip"]} ${dropdown === "delete" && !isRangeDelete ? style["menu-row-mode-chip-open"] : ""} ${isRangeDelete ? style["menu-row-mode-chip-disabled"] : ""}`}
+                        aria-haspopup={isRangeDelete ? undefined : "menu"}
+                        aria-expanded={isRangeDelete ? undefined : dropdown === "delete"}
+                        disabled={isRangeDelete}
                         onClick={(event) => {
                             event.stopPropagation();
+                            if (isRangeDelete) {
+                                return;
+                            }
                             toggleDropdown("delete");
                         }}
                     >
                         <span>{deleteChipLabel}</span>
-                        <span className={style["menu-row-mode-chip-arrow"]} aria-hidden="true">▾</span>
+                        {isRangeDelete ? null : (
+                            <span className={style["menu-row-mode-chip-arrow"]} aria-hidden="true">▾</span>
+                        )}
                     </button>
                 </div>
 
@@ -409,7 +545,7 @@ export default function WidthGridContextMenu({
                 </div>
             ) : null}
 
-            {dropdown === "delete" ? (
+            {dropdown === "delete" && !isRangeDelete ? (
                 <div
                     ref={dropdownRef}
                     className={style["dropdown"]}

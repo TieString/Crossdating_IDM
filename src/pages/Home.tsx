@@ -39,6 +39,7 @@ export default function Home() {
         handleDeleteYearWithMode,
         handleInsertMissingYearAtSide,
         handleLoad,
+        handleMarkYearRangeAsMissing,
         handleMoveSeriesTailByOffset,
         handleRedo,
         handleRestoreDeletion,
@@ -152,6 +153,7 @@ export default function Home() {
                                     onInsertMissingYearAtSide={handleInsertMissingYearAtSide}
                                     onMoveSeriesTailByOffset={handleMoveSeriesTailByOffset}
                                     onDeleteYearWithMode={handleDeleteYearWithMode}
+                                    onMarkYearRangeAsMissing={handleMarkYearRangeAsMissing}
                                     onRestoreDeletion={handleRestoreDeletion}
                                 />
                             )}

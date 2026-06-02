@@ -1,7 +1,7 @@
 .menu-root {
     position: fixed;
     z-index: 1000;
-    width: 160px;
+    width: 188px;
     padding: 6px;
     border-radius: 10px;
     background: #ffffff;
@@ -40,7 +40,7 @@
 }
 
 .menu-row-input {
-    width: 30px;
+    width: 38px;
     padding: 2px;
     border: 0;
     border-bottom: 2px solid rgba(97, 97, 97, 0.62);
@@ -71,6 +71,18 @@
     border-bottom-color: #dc2626;
 }
 
+.menu-row-range {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.menu-row-range-separator {
+    color: #64748b;
+    font-weight: 600;
+    line-height: 1;
+}
+
 .menu-row-mode-chip {
     margin-left: auto;
     display: inline-flex;
@@ -95,6 +107,12 @@
     background: #4c8eda;
     color: #ffffff;
     box-shadow: 0 0 0 1px rgba(76, 142, 218, 0.52);
+}
+
+.menu-row-mode-chip-disabled {
+    cursor: default;
+    background: rgba(148, 163, 184, 0.18);
+    color: #475569;
 }
 
 .menu-row-mode-chip-arrow {

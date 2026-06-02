@@ -234,6 +234,10 @@ export function useHomeWorkspace() {
         rwlEditorRef.current.deleteYearWithMode(tree, nextYear, mode);
     }, []);
 
+    const handleMarkYearRangeAsMissing = useCallback((tree: string, startYear: number, endYear: number) => {
+        rwlEditorRef.current.markYearRangeAsMissing(tree, startYear, endYear);
+    }, []);
+
     const handleRestoreDeletion = useCallback((tree: string, markerYear: number, index: number) => {
         rwlEditorRef.current.restoreDeletion(tree, markerYear, index);
     }, []);
@@ -264,6 +268,7 @@ export function useHomeWorkspace() {
         handleDeleteYearWithMode,
         handleInsertMissingYearAtSide,
         handleLoad,
+        handleMarkYearRangeAsMissing,
         handleMoveSeriesTailByOffset,
         handleRedo,
         handleRestoreDeletion,

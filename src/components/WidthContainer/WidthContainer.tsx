@@ -713,6 +713,7 @@ type WidthContainerProps = {
     onInsertMissingYearAtSide?: (tree: string, year: number, side: PlusSide) => void,
     onMoveSeriesTailByOffset?: (tree: string, selectedStartYear: number, selectedEndYear: number, yearOffset: number) => void,
     onDeleteYearWithMode?: (tree: string, year: number, mode: DeleteMode) => void,
+    onMarkYearRangeAsMissing?: (tree: string, startYear: number, endYear: number) => void,
     onRestoreDeletion?: (tree: string, markerYear: number, index: number) => void,
     scrollContainerRef?: RefObject<HTMLElement | null>
 };
@@ -720,11 +721,13 @@ type WidthContainerProps = {
 interface ContextMenuState {
     tree: string;
     year: number;
+    startYear: number;
+    endYear: number;
     x: number;
     y: number;
 }
 
-function WidthContainer({ siteData: site, masterSeries, selected, historyAnimation, deletionMarkers, onYearClick, onInsertMissingYearAtSide, onMoveSeriesTailByOffset, onDeleteYearWithMode, onRestoreDeletion, scrollContainerRef }: WidthContainerProps): ReactNode {
+function WidthContainer({ siteData: site, masterSeries, selected, historyAnimation, deletionMarkers, onYearClick, onInsertMissingYearAtSide, onMoveSeriesTailByOffset, onDeleteYearWithMode, onMarkYearRangeAsMissing, onRestoreDeletion, scrollContainerRef }: WidthContainerProps): ReactNode {
     const visibleSite = useMemo(() => (
         selected && site.has(selected)
             ? (() => {
@@ -1403,12 +1406,30 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
         setDragPreview(null);
         setDragYearOffset(0);
         setIsDraggingSelection(false);
-        setSelection(normalizeSelection(tree, year, year));
+        const shouldKeepRangeSelection = Boolean(
+            selection
+            && selection.tree === tree
+            && selection.startYear !== selection.endYear
+            && year >= selection.startYear
+            && year <= selection.endYear
+        );
+        const nextSelection = shouldKeepRangeSelection
+            ? selection!
+            : normalizeSelection(tree, year, year);
+
+        setSelection(nextSelection);
         onYearClick?.(tree, year);
 
         const cellRect = cell.getBoundingClientRect();
-        setContextMenu({ tree, year, x: cellRect.right, y: cellRect.bottom });
-    }, [onYearClick]);
+        setContextMenu({
+            tree,
+            year,
+            startYear: nextSelection.startYear,
+            endYear: nextSelection.endYear,
+            x: cellRect.right,
+            y: cellRect.bottom,
+        });
+    }, [onYearClick, selection]);
 
     const handleContextMenuClose = useCallback(() => {
         setContextMenu(null);
@@ -1500,6 +1521,28 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
             });
         });
     }, [clearDeleteBurstAnimations, onDeleteYearWithMode, showAnimationPlan, visibleSite]);
+
+    const handleContextMenuDeleteRange = useCallback((tree: string, startYear: number, endYear: number) => {
+        const nextSelection = normalizeSelection(tree, startYear, endYear);
+
+        pendingInsertFlipRef.current = null;
+        clearInsertAnimations();
+        clearDeleteBurstAnimations();
+        setAnimationPlan(null);
+        setSelection(nextSelection);
+        onMarkYearRangeAsMissing?.(tree, nextSelection.startYear, nextSelection.endYear);
+    }, [clearDeleteBurstAnimations, clearInsertAnimations, onMarkYearRangeAsMissing]);
+
+    const handleContextMenuPreviewYearChange = useCallback((tree: string, year: number) => {
+        setSelection(normalizeSelection(tree, year, year));
+        onYearClick?.(tree, year);
+    }, [onYearClick]);
+
+    const handleContextMenuPreviewYearRangeChange = useCallback((tree: string, startYear: number, endYear: number) => {
+        const nextSelection = normalizeSelection(tree, startYear, endYear);
+        setSelection(nextSelection);
+        onYearClick?.(tree, nextSelection.startYear);
+    }, [onYearClick]);
 
     const handleGridPointerDown = useCallback((event: React.PointerEvent<HTMLSpanElement>, tree: string, year: number) => {
         if (event.button !== 0) {
@@ -1918,8 +1961,13 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                 y={contextMenu?.y ?? 0}
                 tree={contextMenu?.tree ?? ""}
                 defaultYear={contextMenu?.year ?? 0}
+                defaultDeleteStartYear={contextMenu?.startYear ?? contextMenu?.year ?? 0}
+                defaultDeleteEndYear={contextMenu?.endYear ?? contextMenu?.year ?? 0}
                 onInsert={handleContextMenuInsert}
                 onDelete={handleContextMenuDelete}
+                onDeleteRange={handleContextMenuDeleteRange}
+                onPreviewYearChange={handleContextMenuPreviewYearChange}
+                onPreviewYearRangeChange={handleContextMenuPreviewYearRangeChange}
                 onClose={handleContextMenuClose}
             />
         </div>

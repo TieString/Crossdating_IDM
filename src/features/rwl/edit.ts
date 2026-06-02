@@ -17,6 +17,7 @@ export type RwlEditOperation =
     | { type: "insert-missing"; tree: string; year: number; side: MissingInsertSide }
     | { type: "move-selection"; tree: string; selectedStartYear: number; selectedEndYear: number; yearOffset: number }
     | { type: "delete-year"; tree: string; year: number; mode: DeleteMode }
+    | { type: "mark-missing-range"; tree: string; startYear: number; endYear: number }
     | { type: "restore-deletion"; tree: string; markerYear: number; index: number };
 
 export type RwlHistoryAnimation = RwlEditOperation & {
@@ -170,6 +171,19 @@ export function deleteYearWithMode(
     }
 
     return deleteYearFromRwl(working, year);
+}
+
+export function markYearRangeAsMissing(
+    rwlData: RwlTreeData,
+    selectedStartYear: number,
+    selectedEndYear: number,
+): RwlTreeData {
+    const startYear = Math.min(selectedStartYear, selectedEndYear);
+    const endYear = Math.max(selectedStartYear, selectedEndYear);
+
+    return sortedTreeData(
+        editableEntries(rwlData).filter(([year]) => year < startYear || year > endYear)
+    );
 }
 
 // 更改年：在year处更改为width，其他年份不变
@@ -371,6 +385,28 @@ export class RwlEditor {
         this.shiftDeletionMarkersForDelete(tree, year);
         this.addDeletionMarker(tree, year + 1, info);
         let updatedTree = deleteYearWithMode(treeData, year, mode);
+        this.rwlData.set(tree, updatedTree);
+        this.notifyChange();
+    }
+
+    markYearRangeAsMissing(tree: string, selectedStartYear: number, selectedEndYear: number): void {
+        if (!this.rwlData.has(tree)) return;
+
+        const startYear = Math.min(selectedStartYear, selectedEndYear);
+        const endYear = Math.max(selectedStartYear, selectedEndYear);
+        const treeData = this.rwlData.get(tree)!;
+        const hasEditableEntryInRange = editableEntries(treeData).some(([year]) => (
+            year >= startYear && year <= endYear
+        ));
+
+        if (!hasEditableEntryInRange) {
+            return;
+        }
+
+        this.saveToUndoStack({ type: "mark-missing-range", tree, startYear, endYear });
+        this.redoStack = [];
+
+        const updatedTree = markYearRangeAsMissing(treeData, startYear, endYear);
         this.rwlData.set(tree, updatedTree);
         this.notifyChange();
     }
