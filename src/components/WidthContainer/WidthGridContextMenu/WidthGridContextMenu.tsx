@@ -264,6 +264,10 @@ export default function WidthGridContextMenu({
         setDropdown((previous) => (previous === kind ? null : kind));
     }, []);
 
+    const stopPortalPropagation = useCallback((event: React.SyntheticEvent) => {
+        event.stopPropagation();
+    }, []);
+
     if (!open) {
         return null;
     }
@@ -289,6 +293,8 @@ export default function WidthGridContextMenu({
                 className={style["menu-root"]}
                 style={menuStyle}
                 role="menu"
+                onPointerDown={stopPortalPropagation}
+                onClick={stopPortalPropagation}
                 onContextMenu={(event) => event.preventDefault()}
             >
                 <div
@@ -382,6 +388,8 @@ export default function WidthGridContextMenu({
                     className={style["dropdown"]}
                     style={dropdownStyle}
                     role="menu"
+                    onPointerDown={stopPortalPropagation}
+                    onClick={stopPortalPropagation}
                     onContextMenu={(event) => event.preventDefault()}
                 >
                     {INSERT_OPTIONS.map((option) => (
@@ -407,6 +415,8 @@ export default function WidthGridContextMenu({
                     className={style["dropdown"]}
                     style={dropdownStyle}
                     role="menu"
+                    onPointerDown={stopPortalPropagation}
+                    onClick={stopPortalPropagation}
                     onContextMenu={(event) => event.preventDefault()}
                 >
                     {DELETE_OPTIONS.map((option) => (

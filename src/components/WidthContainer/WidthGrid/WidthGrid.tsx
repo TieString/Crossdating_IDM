@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { motion, useReducedMotion, type TargetAndTransition, type Transition } from "motion/react";
 import { callChangeYearWidth } from "@/features/rwl/edit";
 import { RollingNumber } from "@/components/RollingNumber/RollingNumber";
 import style from "./WidthGrid.module.css";
@@ -9,11 +10,162 @@ type GridAnimationKind =
     | "insert-right"
     | "insert-shift-left"
     | "insert-shift-right"
+    | "insert-cross-row-shift-left"
+    | "insert-cross-row-shift-right"
     | "move-target"
     | "move-gap"
     | "overwrite";
 
-type WidthGridProps = React.HTMLAttributes<HTMLSpanElement> & {
+type MotionReservedHtmlProps =
+    | "onDrag"
+    | "onDragStart"
+    | "onDragEnd"
+    | "onAnimationStart";
+
+type WidthGridMotionConfig = {
+    initial?: TargetAndTransition;
+    animate?: TargetAndTransition;
+    transition?: Transition;
+    transitionEnd?: TargetAndTransition["transitionEnd"];
+};
+
+const withDelay = (transition: Transition, delaySeconds: number): Transition => (
+    delaySeconds > 0 ? { ...transition, delay: delaySeconds } : transition
+);
+
+const getMotionConfig = (animationKind: GridAnimationKind | undefined, delaySeconds = 0): WidthGridMotionConfig => {
+    switch (animationKind) {
+        case "insert-left":
+            return {
+                initial: {
+                    x: -5,
+                    scale: 0.96,
+                    boxShadow: "inset 0 0 0 2px #22c55e, 0 0 0 0 rgba(34, 197, 94, 0.22)",
+                },
+                animate: {
+                    x: 0,
+                    scale: [1.04, 1],
+                    boxShadow: [
+                        "inset 0 0 0 2px #16a34a, 0 0 0 4px rgba(34, 197, 94, 0.16)",
+                        "inset 0 0 0 0 rgba(34, 197, 94, 0), 0 0 0 0 rgba(34, 197, 94, 0)",
+                    ],
+                },
+                transition: withDelay({ duration: 0.68, ease: "easeOut", times: [0.45, 1] }, delaySeconds),
+                transitionEnd: { boxShadow: "" },
+            };
+        case "insert-right":
+            return {
+                initial: {
+                    x: 5,
+                    scale: 0.96,
+                    boxShadow: "inset 0 0 0 2px #22c55e, 0 0 0 0 rgba(34, 197, 94, 0.22)",
+                },
+                animate: {
+                    x: 0,
+                    scale: [1.04, 1],
+                    boxShadow: [
+                        "inset 0 0 0 2px #16a34a, 0 0 0 4px rgba(34, 197, 94, 0.16)",
+                        "inset 0 0 0 0 rgba(34, 197, 94, 0), 0 0 0 0 rgba(34, 197, 94, 0)",
+                    ],
+                },
+                transition: withDelay({ duration: 0.68, ease: "easeOut", times: [0.45, 1] }, delaySeconds),
+                transitionEnd: { boxShadow: "" },
+            };
+        case "insert-shift-left":
+            return {
+                initial: { x: "calc(100% + 5px)" },
+                animate: { x: 0 },
+                transition: withDelay({ duration: 0.95, ease: [0.16, 1, 0.3, 1] }, delaySeconds),
+            };
+        case "insert-shift-right":
+            return {
+                initial: { x: "calc(-100% - 5px)" },
+                animate: { x: 0 },
+                transition: withDelay({ duration: 0.95, ease: [0.16, 1, 0.3, 1] }, delaySeconds),
+            };
+        case "insert-cross-row-shift-left":
+            return {
+                initial: { x: "calc(50% + 2.5px)", opacity: 0 },
+                animate: { x: 0, opacity: 1 },
+                transition: withDelay({ duration: 0.95, ease: [0.16, 1, 0.3, 1] }, delaySeconds),
+                transitionEnd: { opacity: 1 },
+            };
+        case "insert-cross-row-shift-right":
+            return {
+                initial: { x: "calc(-50% - 2.5px)", opacity: 0 },
+                animate: { x: 0, opacity: 1 },
+                transition: withDelay({ duration: 0.95, ease: [0.16, 1, 0.3, 1] }, delaySeconds),
+                transitionEnd: { opacity: 1 },
+            };
+        case "move-target":
+            return {
+                initial: {
+                    y: -4,
+                    scale: 1.02,
+                    boxShadow: "inset 0 0 0 2px #2563eb, 0 4px 12px rgba(37, 99, 235, 0.28)",
+                },
+                animate: {
+                    y: 0,
+                    scale: 1,
+                    boxShadow: [
+                        "inset 0 0 0 2px #3b82f6, 0 0 0 4px rgba(59, 130, 246, 0.14)",
+                        "inset 0 0 0 0 rgba(59, 130, 246, 0), 0 0 0 0 rgba(59, 130, 246, 0)",
+                    ],
+                },
+                transition: withDelay({ duration: 0.72, ease: [0.2, 0.8, 0.2, 1], times: [0.62, 1] }, delaySeconds),
+                transitionEnd: { boxShadow: "" },
+            };
+        case "move-gap":
+            return {
+                initial: {
+                    scaleX: 0.86,
+                    backgroundColor: "#e5edf8",
+                    boxShadow: "inset 0 0 0 1px #8fb3df",
+                },
+                animate: {
+                    scaleX: [1.03, 1],
+                    backgroundColor: ["#eef4fb", "#ffffff"],
+                    boxShadow: [
+                        "inset 0 0 0 1px #76a2d6, 0 0 0 3px rgba(118, 162, 214, 0.12)",
+                        "inset 0 0 0 0 rgba(118, 162, 214, 0), 0 0 0 0 rgba(118, 162, 214, 0)",
+                    ],
+                },
+                transition: withDelay({ duration: 0.72, ease: "easeOut", times: [0.55, 1] }, delaySeconds),
+                transitionEnd: { backgroundColor: "", boxShadow: "" },
+            };
+        case "overwrite":
+            return {
+                initial: {
+                    x: 0,
+                    boxShadow: "inset 0 0 0 2px #dc2626, 0 0 0 0 rgba(220, 38, 38, 0.28)",
+                    textShadow: "none",
+                },
+                animate: {
+                    x: [0, -2, 2, -1, 0],
+                    boxShadow: [
+                        "inset 0 0 0 2px #dc2626, 0 0 0 0 rgba(220, 38, 38, 0.28)",
+                        "inset 0 0 0 2px #dc2626, 0 0 0 4px rgba(220, 38, 38, 0.2)",
+                        "inset 0 0 0 2px #b91c1c, 0 0 0 5px rgba(220, 38, 38, 0.18)",
+                        "inset 0 0 0 2px #dc2626, 0 0 0 3px rgba(220, 38, 38, 0.14)",
+                        "inset 0 0 0 0 rgba(220, 38, 38, 0), 0 0 0 0 rgba(220, 38, 38, 0)",
+                    ],
+                    textShadow: [
+                        "none",
+                        "0 0 4px rgba(220, 38, 38, 0.35)",
+                        "0 0 4px rgba(220, 38, 38, 0.28)",
+                        "0 0 2px rgba(220, 38, 38, 0.18)",
+                        "none",
+                    ],
+                },
+                transition: withDelay({ duration: 1.18, ease: "easeInOut", times: [0, 0.18, 0.36, 0.54, 1] }, delaySeconds),
+                transitionEnd: { boxShadow: "", textShadow: "" },
+            };
+        default:
+            return {};
+    }
+};
+
+type WidthGridProps = Omit<React.HTMLAttributes<HTMLSpanElement>, MotionReservedHtmlProps> & {
     year?: number;
     tree?: string;
     gridValue: string | number | null;
@@ -24,9 +176,11 @@ type WidthGridProps = React.HTMLAttributes<HTMLSpanElement> & {
     isDragging?: boolean;
     dragYearOffset?: number;
     animationKind?: GridAnimationKind;
+    animationDelay?: number;
     hasLeftDeletionMark?: boolean;
     isDeletionMarkActive?: boolean;
     rollingDigits?: boolean;
+    rollingFromValue?: number;
     onYearClick?: (tree: string, year: number) => void;
     onInsertMissingYearAtSide?: (tree: string, year: number, side: PlusSide) => void;
     onDeletionMarkHoverChange?: (tree: string, year: number, hovered: boolean, element: HTMLElement | null) => void;
@@ -44,9 +198,11 @@ export default function WidthGrid({
     isDragging = false,
     dragYearOffset = 0,
     animationKind,
+    animationDelay = 0,
     hasLeftDeletionMark = false,
     isDeletionMarkActive = false,
     rollingDigits = false,
+    rollingFromValue,
     onYearClick,
     onInsertMissingYearAtSide,
     onDeletionMarkHoverChange,
@@ -62,6 +218,7 @@ export default function WidthGrid({
     const spanRef = useRef<HTMLSpanElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
     const isInsertedZero = gridValue === 0;
+    const shouldReduceMotion = useReducedMotion();
 
     useLayoutEffect(() => {
         if (!isEditing) {
@@ -180,7 +337,10 @@ export default function WidthGrid({
     const plusButtonClassName = hoverPlusSide
         ? `${style["insert-missing-button"]} ${style[`insert-missing-button-${hoverPlusSide}`]} ${style["insert-missing-button-visible"]}`
         : style["insert-missing-button"];
-    const animationClassName = animationKind ? style[`animate-${animationKind}`] : "";
+    const motionConfig = shouldReduceMotion ? {} : getMotionConfig(animationKind, animationDelay);
+    const motionAnimate = motionConfig.animate && motionConfig.transitionEnd
+        ? { ...motionConfig.animate, transitionEnd: motionConfig.transitionEnd }
+        : motionConfig.animate;
 
     const handleDeletionMarkEnter = (event: React.MouseEvent<HTMLSpanElement>) => {
         event.stopPropagation();
@@ -223,20 +383,23 @@ export default function WidthGrid({
             />
         )
         : rollingDigits && typeof displayedValue === "number"
-            ? <RollingNumber value={displayedValue} />
+            ? <RollingNumber value={displayedValue} fromValue={rollingFromValue} />
             : displayedValue;
 
     return (
-        <span
+        <motion.span
             {...restWithoutTitle}
             ref={spanRef}
             title={finalTitle}
+            initial={motionConfig.initial}
+            animate={motionAnimate}
+            transition={motionConfig.transition}
             data-drag-year-offset={dragYearOffset || undefined}
             onClick={isEditable && !isEditing ? handleClick : undefined}
             onDoubleClick={isEditable && !isEditing ? handleDoubleClick : undefined}
             onMouseMove={handleMouseMove}
             onMouseLeave={handleMouseLeave}
-            className={`${style["width-grid"]} ${className} ${isMissing ? style["missing"] : ""} ${isInsertedZero ? style["inserted-zero"] : ""} ${isSelected ? style["selected"] : ""} ${isDragging ? style["dragging"] : ""} ${hasLeftDeletionMark ? style["has-left-deletion-mark"] : ""} ${animationClassName} ${isEditable ? "" : style["disabled"]}`}
+            className={`${style["width-grid"]} ${className} ${isMissing ? style["missing"] : ""} ${isInsertedZero ? style["inserted-zero"] : ""} ${isSelected ? style["selected"] : ""} ${isDragging ? style["dragging"] : ""} ${hasLeftDeletionMark ? style["has-left-deletion-mark"] : ""} ${animationKind ? style["motion-animated"] : ""} ${isEditable ? "" : style["disabled"]}`}
             style={{
                 backgroundColor: getBackgroundColor(),
                 color: getTextColor(),
@@ -266,6 +429,6 @@ export default function WidthGrid({
                     +
                 </button>
             ) : null}
-        </span>
+        </motion.span>
     );
 }
