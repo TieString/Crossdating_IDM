@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(findstr /R /S /N \"lucide-react @icons\" \"d:\\\\Code\\\\Crossdating_Tauri\\\\package.json\" 2>nul; type \"d:\\\\Code\\\\Crossdating_Tauri\\\\package.json\")",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "Bash(curl -s http://localhost:1421)",
+      "Bash(curl -s http://localhost:1420)"
     ],
     "additionalDirectories": [
       "d:\\Code\\Crossdating_Tauri"
