@@ -178,12 +178,15 @@ type WidthGridProps = Omit<React.HTMLAttributes<HTMLSpanElement>, MotionReserved
     animationKind?: GridAnimationKind;
     animationDelay?: number;
     hasLeftDeletionMark?: boolean;
+    hasRightDeletionMark?: boolean;
+    rightDeletionMarkerYear?: number;
     isDeletionMarkActive?: boolean;
+    isRightDeletionMarkActive?: boolean;
     rollingDigits?: boolean;
     rollingFromValue?: number;
     onYearClick?: (tree: string, year: number) => void;
     onInsertMissingYearAtSide?: (tree: string, year: number, side: PlusSide) => void;
-    onDeletionMarkHoverChange?: (tree: string, year: number, hovered: boolean, element: HTMLElement | null) => void;
+    onDeletionMarkHoverChange?: (tree: string, year: number, hovered: boolean, element: HTMLElement | null, side?: "left" | "right") => void;
     onDeletionMarkDoubleClick?: (tree: string, year: number) => void;
 };
 
@@ -200,7 +203,10 @@ export default function WidthGrid({
     animationKind,
     animationDelay = 0,
     hasLeftDeletionMark = false,
+    hasRightDeletionMark = false,
+    rightDeletionMarkerYear,
     isDeletionMarkActive = false,
+    isRightDeletionMarkActive = false,
     rollingDigits = false,
     rollingFromValue,
     onYearClick,
@@ -342,18 +348,18 @@ export default function WidthGrid({
         ? { ...motionConfig.animate, transitionEnd: motionConfig.transitionEnd }
         : motionConfig.animate;
 
-    const handleDeletionMarkEnter = (event: React.MouseEvent<HTMLSpanElement>) => {
+    const handleDeletionMarkEnter = (event: React.MouseEvent<HTMLSpanElement>, markerYear: number | undefined, side: "left" | "right") => {
         event.stopPropagation();
         setHoverPlusSide(null);
-        if (tree !== undefined && year !== undefined) {
-            onDeletionMarkHoverChange?.(tree, year, true, event.currentTarget);
+        if (tree !== undefined && markerYear !== undefined) {
+            onDeletionMarkHoverChange?.(tree, markerYear, true, event.currentTarget, side);
         }
     };
 
-    const handleDeletionMarkLeave = (event: React.MouseEvent<HTMLSpanElement>) => {
+    const handleDeletionMarkLeave = (event: React.MouseEvent<HTMLSpanElement>, markerYear: number | undefined, side: "left" | "right") => {
         event.stopPropagation();
-        if (tree !== undefined && year !== undefined) {
-            onDeletionMarkHoverChange?.(tree, year, false, event.currentTarget);
+        if (tree !== undefined && markerYear !== undefined) {
+            onDeletionMarkHoverChange?.(tree, markerYear, false, event.currentTarget, side);
         }
     };
 
@@ -361,11 +367,11 @@ export default function WidthGrid({
         event.stopPropagation();
     };
 
-    const handleDeletionMarkDoubleClick = (event: React.MouseEvent<HTMLSpanElement>) => {
+    const handleDeletionMarkDoubleClick = (event: React.MouseEvent<HTMLSpanElement>, markerYear: number | undefined) => {
         event.stopPropagation();
         event.preventDefault();
-        if (tree !== undefined && year !== undefined) {
-            onDeletionMarkDoubleClick?.(tree, year);
+        if (tree !== undefined && markerYear !== undefined) {
+            onDeletionMarkDoubleClick?.(tree, markerYear);
         }
     };
 
@@ -399,7 +405,7 @@ export default function WidthGrid({
             onDoubleClick={isEditable && !isEditing ? handleDoubleClick : undefined}
             onMouseMove={handleMouseMove}
             onMouseLeave={handleMouseLeave}
-            className={`${style["width-grid"]} ${className} ${isMissing ? style["missing"] : ""} ${isInsertedZero ? style["inserted-zero"] : ""} ${isSelected ? style["selected"] : ""} ${isDragging ? style["dragging"] : ""} ${hasLeftDeletionMark ? style["has-left-deletion-mark"] : ""} ${animationKind ? style["motion-animated"] : ""} ${isEditable ? "" : style["disabled"]}`}
+            className={`${style["width-grid"]} ${className} ${isMissing ? style["missing"] : ""} ${isInsertedZero ? style["inserted-zero"] : ""} ${isSelected ? style["selected"] : ""} ${isDragging ? style["dragging"] : ""} ${hasLeftDeletionMark ? style["has-left-deletion-mark"] : ""} ${hasRightDeletionMark ? style["has-right-deletion-mark"] : ""} ${animationKind ? style["motion-animated"] : ""} ${isEditable ? "" : style["disabled"]}`}
             style={{
                 backgroundColor: getBackgroundColor(),
                 color: getTextColor(),
@@ -411,11 +417,21 @@ export default function WidthGrid({
             {!isEditing && hasLeftDeletionMark ? (
                 <span
                     aria-hidden="true"
-                    className={`${style["deletion-mark"]} ${isDeletionMarkActive ? style["deletion-mark-active"] : ""}`}
-                    onMouseEnter={handleDeletionMarkEnter}
-                    onMouseLeave={handleDeletionMarkLeave}
+                    className={`${style["deletion-mark"]} ${style["deletion-mark-left"]} ${isDeletionMarkActive ? style["deletion-mark-active"] : ""}`}
+                    onMouseEnter={(event) => handleDeletionMarkEnter(event, year, "left")}
+                    onMouseLeave={(event) => handleDeletionMarkLeave(event, year, "left")}
                     onMouseMove={handleDeletionMarkMove}
-                    onDoubleClick={handleDeletionMarkDoubleClick}
+                    onDoubleClick={(event) => handleDeletionMarkDoubleClick(event, year)}
+                />
+            ) : null}
+            {!isEditing && hasRightDeletionMark ? (
+                <span
+                    aria-hidden="true"
+                    className={`${style["deletion-mark"]} ${style["deletion-mark-right"]} ${isRightDeletionMarkActive ? style["deletion-mark-active"] : ""}`}
+                    onMouseEnter={(event) => handleDeletionMarkEnter(event, rightDeletionMarkerYear, "right")}
+                    onMouseLeave={(event) => handleDeletionMarkLeave(event, rightDeletionMarkerYear, "right")}
+                    onMouseMove={handleDeletionMarkMove}
+                    onDoubleClick={(event) => handleDeletionMarkDoubleClick(event, rightDeletionMarkerYear)}
                 />
             ) : null}
             {!isEditing && isEditable && hoverPlusSide ? (

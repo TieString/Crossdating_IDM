@@ -30,6 +30,16 @@ export type RwlHistoryAnimation = RwlEditOperation & {
 export type DeletionMarkerInfo = {
     // 被删除年份的宽度（删除前）
     deletedWidth: number | null;
+    // 恢复时写回的源宽度；连续分配删除时会去掉相邻 ghost 已注入的宽度。
+    restoreWidth?: number | null;
+    // 删除模式；direct 恢复时不应修改任何邻居。
+    mode?: DeleteMode;
+    sourceYear?: number;
+    sourceRunStartYear?: number;
+    sourceRunEndYear?: number;
+    deleteOrder?: number;
+    leftContribution?: number;
+    rightContribution?: number;
     // 删除前左邻 (year - 1) 的宽度；undefined 表示当时左侧无格子
     leftOriginalWidth?: number | null;
     // 删除前右邻 (year + 1) 的宽度；undefined 表示当时右侧无格子
@@ -37,7 +47,7 @@ export type DeletionMarkerInfo = {
 };
 
 // 同一格子位置可以堆叠多个删除标记（连续在同一处删除时）。
-// 数组顺序：0 = 最早删除，length-1 = 最新删除。
+// 数组顺序按空间排列：0 = 远离红线，length - 1 = 贴近红线。
 export type RwlDeletionMarkers = Map<string, Map<number, DeletionMarkerInfo[]>>;
 
 type RwlHistoryEntry = {
@@ -145,6 +155,73 @@ const addWidthToNeighbor = (
     rwlData.set(neighborYear, existing + extraWidth);
 };
 
+const getLeftContribution = (info: DeletionMarkerInfo | undefined): number => {
+    if (!info || info.deletedWidth === null) return 0;
+    if (info.leftContribution !== undefined) return info.leftContribution;
+    const mode = info.mode ?? "direct";
+    if (mode === "left") return info.deletedWidth;
+    if (mode === "both") return Math.round(info.deletedWidth / 2);
+    return 0;
+};
+
+const getRightContribution = (info: DeletionMarkerInfo | undefined): number => {
+    if (!info || info.deletedWidth === null) return 0;
+    if (info.rightContribution !== undefined) return info.rightContribution;
+    const mode = info.mode ?? "direct";
+    if (mode === "right") return info.deletedWidth;
+    if (mode === "both") return Math.round(info.deletedWidth / 2);
+    return 0;
+};
+
+const getStackRunStartYear = (stack: DeletionMarkerInfo[] | undefined): number | undefined => {
+    if (!stack || stack.length === 0) return undefined;
+    const years = stack
+        .map((info) => info.sourceRunStartYear ?? info.sourceYear)
+        .filter((year): year is number => year !== undefined);
+    if (years.length === 0) return undefined;
+    return Math.min(...years);
+};
+
+const getStackRunEndYear = (stack: DeletionMarkerInfo[] | undefined): number | undefined => {
+    if (!stack || stack.length === 0) return undefined;
+    const years = stack
+        .map((info) => info.sourceRunEndYear ?? info.sourceYear)
+        .filter((year): year is number => year !== undefined);
+    if (years.length === 0) return undefined;
+    return Math.max(...years);
+};
+
+export const getDeletionStackBoundaryContributions = (stack: DeletionMarkerInfo[]): { left: number; right: number } => {
+    if (stack.length === 0) return { left: 0, right: 0 };
+
+    const ordered = stack
+        .map((info, index) => ({ info, index }))
+        .sort((a, b) => (
+            (a.info.deleteOrder ?? a.index) - (b.info.deleteOrder ?? b.index)
+        ));
+    const alive = Array.from({ length: stack.length + 2 }, () => true);
+    const contributions = Array.from({ length: stack.length + 2 }, () => 0);
+
+    ordered.forEach(({ info, index }) => {
+        const cellIndex = index + 1;
+        if (!alive[cellIndex]) return;
+
+        let leftIndex = cellIndex - 1;
+        while (leftIndex >= 0 && !alive[leftIndex]) leftIndex -= 1;
+        let rightIndex = cellIndex + 1;
+        while (rightIndex < alive.length && !alive[rightIndex]) rightIndex += 1;
+
+        if (leftIndex >= 0) contributions[leftIndex] += getLeftContribution(info);
+        if (rightIndex < alive.length) contributions[rightIndex] += getRightContribution(info);
+        alive[cellIndex] = false;
+    });
+
+    return {
+        left: contributions[0],
+        right: contributions[contributions.length - 1],
+    };
+};
+
 // 按模式删年：在 year 处删除，并可选择将其宽度并入左/右/两侧邻居
 // year 不在数据中（gap/missing 年份）也允许：此时无宽度可分配，仍会平移更早的年份以收紧时间轴。
 export function deleteYearWithMode(
@@ -203,6 +280,7 @@ export class RwlEditor {
     private undoStack: RwlHistoryEntry[] = [];
     private redoStack: RwlHistoryEntry[] = [];
     private deletionMarkers: RwlDeletionMarkers = new Map();
+    private deletionOrderCounter = 0;
     private changeCallback?: () => void;
 
     constructor(initialData: RwlSiteData, options?: RwlReadResult['readOptions'], format?: string) {
@@ -216,36 +294,48 @@ export class RwlEditor {
         return cloneDeletionMarkers(this.deletionMarkers);
     }
 
-    private addDeletionMarker(tree: string, year: number, info: DeletionMarkerInfo): void {
-        let entries = this.deletionMarkers.get(tree);
-        if (!entries) {
-            entries = new Map();
-            this.deletionMarkers.set(tree, entries);
-        }
-        const stack = entries.get(year);
-        if (stack) {
-            stack.push(info);
-        } else {
-            entries.set(year, [info]);
-        }
-    }
-
-    // 删除年份后，将原标记的年份映射到新坐标。
-    // deleteYearFromRwl: key < year → key+1; key === year → 删除; key > year → 不变。
-    // 标记跟随其右邻 cell，所以采用同样的映射。M === year 的标记意味着右邻被删，丢弃。
-    private shiftDeletionMarkersForDelete(tree: string, year: number): void {
+    // 删除年份后，将原标记的年份映射到新坐标，并把本次删除插入到空间顺序中。
+    // 同一个 marker 的 stack 按从左到右排列：0 = 远离红线，length - 1 = 贴近红线。
+    private recordDeletionMarkerForDelete(tree: string, year: number, info: DeletionMarkerInfo): void {
+        const insertMarkerYear = year + 1;
+        const sourceRunStartYear = info.sourceRunStartYear ?? info.sourceYear ?? year;
+        const sourceRunEndYear = info.sourceRunEndYear ?? info.sourceYear ?? year;
+        const withRunBounds = (stack: DeletionMarkerInfo[]) => stack.map((item) => ({
+            ...item,
+            sourceRunStartYear,
+            sourceRunEndYear,
+        }));
         const entries = this.deletionMarkers.get(tree);
-        if (!entries || entries.size === 0) return;
-        const next = new Map<number, DeletionMarkerInfo[]>();
-        entries.forEach((stack, m) => {
-            if (m < year) next.set(m + 1, stack);
-            else if (m > year) next.set(m, stack);
-        });
-        if (next.size === 0) {
-            this.deletionMarkers.delete(tree);
-        } else {
-            this.deletionMarkers.set(tree, next);
+        if (!entries || entries.size === 0) {
+            this.deletionMarkers.set(tree, new Map([[insertMarkerYear, [info]]]));
+            return;
         }
+
+        const next = new Map<number, DeletionMarkerInfo[]>();
+
+        const addStack = (markerYear: number, stack: DeletionMarkerInfo[]) => {
+            const existing = next.get(markerYear);
+            next.set(markerYear, existing ? [...existing, ...stack] : stack);
+        };
+
+        Array.from(entries.entries()).sort(([yearA], [yearB]) => yearA - yearB).forEach(([m, stack]) => {
+            if (m < year) {
+                addStack(m + 1, stack);
+            } else if (m === year) {
+                addStack(insertMarkerYear, withRunBounds(stack));
+            } else if (m !== insertMarkerYear) {
+                addStack(m, stack);
+            }
+        });
+
+        addStack(insertMarkerYear, [info]);
+
+        const rightStack = entries.get(insertMarkerYear);
+        if (rightStack) {
+            addStack(insertMarkerYear, withRunBounds(rightStack));
+        }
+
+        this.deletionMarkers.set(tree, next);
     }
 
     // 插入年份时同步偏移：side="left" → years >= year 向右平移；side="right" → years <= year 向左平移。
@@ -365,9 +455,8 @@ export class RwlEditor {
         let treeData = this.rwlData.get(tree)!;
         if (!treeData.has(year)) return;
 
-        const info = this.captureDeletionInfo(treeData, year);
-        this.shiftDeletionMarkersForDelete(tree, year);
-        this.addDeletionMarker(tree, year + 1, info);
+        const info = this.captureDeletionInfo(tree, treeData, year, "direct");
+        this.recordDeletionMarkerForDelete(tree, year, info);
         let updatedTree = deleteYearFromRwl(treeData, year);
         this.rwlData.set(tree, updatedTree);
         this.notifyChange();
@@ -381,9 +470,8 @@ export class RwlEditor {
         let treeData = this.rwlData.get(tree)!;
         // 允许删除 gap/missing 年份（年份不在 treeData 中）：仍会平移更早年份以收紧 gap。
 
-        const info = this.captureDeletionInfo(treeData, year);
-        this.shiftDeletionMarkersForDelete(tree, year);
-        this.addDeletionMarker(tree, year + 1, info);
+        const info = this.captureDeletionInfo(tree, treeData, year, mode);
+        this.recordDeletionMarkerForDelete(tree, year, info);
         let updatedTree = deleteYearWithMode(treeData, year, mode);
         this.rwlData.set(tree, updatedTree);
         this.notifyChange();
@@ -412,18 +500,22 @@ export class RwlEditor {
     }
 
     // 撤销某一个具体的删除标记（双击对应 ghost 时调用）。
-    // markerYear 即标记当前所处的年份；index 指定栈中第几个被删除条目（0 = 最早）。
-    // 还原后：在 markerYear - 1 处插回 deletedWidth，
+    // markerYear 即标记当前所处的年份；index 指定栈中第几个被删除条目。
+    // 还原后：在 markerYear - 1 处插回 restoreWidth + 剩余 ghost 的边界贡献，
     // 同时把 key < markerYear 的年份整体向前回退 1 年；
-    // 邻居左右两格则恢复成 leftOriginalWidth / rightOriginalWidth，
-    // 撤回删除时对邻居施加的"平均/左/右"加成；其他删除标记同步左移。
+    // 左右边界只按恢复前后的贡献差额调整；其他删除标记同步左移。
     restoreDeletion(tree: string, markerYear: number, index: number = -1): void {
         if (!this.rwlData.has(tree)) return;
         const treeMarkers = this.deletionMarkers.get(tree);
         const stack = treeMarkers?.get(markerYear);
         if (!treeMarkers || !stack || stack.length === 0) return;
 
-        const resolvedIndex = index < 0 ? stack.length - 1 : index;
+        const latestIndex = stack.reduce((bestIndex, item, itemIndex) => {
+            const bestOrder = stack[bestIndex]?.deleteOrder ?? bestIndex;
+            const order = item.deleteOrder ?? itemIndex;
+            return order > bestOrder ? itemIndex : bestIndex;
+        }, 0);
+        const resolvedIndex = index < 0 ? latestIndex : index;
         if (resolvedIndex < 0 || resolvedIndex >= stack.length) return;
         const info = stack[resolvedIndex];
 
@@ -432,7 +524,7 @@ export class RwlEditor {
 
         const treeData = this.rwlData.get(tree)!;
         const restoredYear = markerYear - 1;
-        const restoredValue = info.deletedWidth;
+        const restoredValue = info.restoreWidth ?? info.deletedWidth;
 
         const newTreeData: RwlTreeData = new Map();
         treeData.forEach((value, key) => {
@@ -442,31 +534,48 @@ export class RwlEditor {
                 newTreeData.set(key, value);
             }
         });
+        // 仅从该年的栈中拿掉指定那条；恢复后，原来位于它左侧的 ghost 需要跟随
+        // 新插回的格子，移动到 markerYear - 1；右侧 ghost 继续留在 markerYear。
+        const leftRemainingStack = stack.slice(0, resolvedIndex);
+        const rightRemainingStack = stack.slice(resolvedIndex + 1);
+        const oldContributions = getDeletionStackBoundaryContributions(stack);
+        const leftContributions = getDeletionStackBoundaryContributions(leftRemainingStack);
+        const rightContributions = getDeletionStackBoundaryContributions(rightRemainingStack);
+
+        const applyContributionDelta = (targetYear: number, from: number, to: number) => {
+            if (from === to) return;
+            const value = newTreeData.get(targetYear);
+            if (value === undefined || value === null || isStopMarkerValue(value)) return;
+            newTreeData.set(targetYear, value - from + to);
+        };
+
+        applyContributionDelta(markerYear - 2, oldContributions.left, leftContributions.left);
+        applyContributionDelta(markerYear, oldContributions.right, rightContributions.right);
+
         // deletedWidth 为 null 表示原本就是 gap/stopMarker，不写入数据即可（保留缺口）。
         if (restoredValue !== null) {
-            newTreeData.set(restoredYear, restoredValue);
-        }
-        // 邻居加成撤销：若删除时记录了原始宽度，则强制还原到那个值。
-        if (info.leftOriginalWidth !== undefined && info.leftOriginalWidth !== null) {
-            newTreeData.set(markerYear - 2, info.leftOriginalWidth);
-        }
-        if (info.rightOriginalWidth !== undefined && info.rightOriginalWidth !== null) {
-            newTreeData.set(markerYear, info.rightOriginalWidth);
+            newTreeData.set(
+                restoredYear,
+                restoredValue + leftContributions.right + rightContributions.left,
+            );
         }
         this.rwlData.set(tree, newTreeData);
 
-        // 仅从该年的栈中拿掉指定那条；其余条目仍堆在 markerYear 上。
-        const remainingStack = stack.slice();
-        remainingStack.splice(resolvedIndex, 1);
-
         const newMarkers = new Map<number, DeletionMarkerInfo[]>();
+        const addMarkerStack = (nextMarkerYear: number, markerStack: DeletionMarkerInfo[]) => {
+            if (markerStack.length === 0) return;
+            const existing = newMarkers.get(nextMarkerYear);
+            newMarkers.set(nextMarkerYear, existing ? [...existing, ...markerStack] : markerStack);
+        };
+
         treeMarkers.forEach((markerStack, m) => {
             if (m === markerYear) {
-                if (remainingStack.length > 0) newMarkers.set(m, remainingStack);
+                addMarkerStack(markerYear - 1, leftRemainingStack);
+                addMarkerStack(markerYear, rightRemainingStack);
                 return;
             }
-            if (m < markerYear) newMarkers.set(m - 1, markerStack);
-            else newMarkers.set(m, markerStack);
+            if (m < markerYear) addMarkerStack(m - 1, markerStack);
+            else addMarkerStack(m, markerStack);
         });
         if (newMarkers.size === 0) {
             this.deletionMarkers.delete(tree);
@@ -479,19 +588,67 @@ export class RwlEditor {
 
     // 在执行删除前快照被删年份及其相邻年份的原始宽度，用于悬停预览。
     // 跳过 stopMarker 邻居（不应作为原值还原）。
-    private captureDeletionInfo(treeData: RwlTreeData, year: number): DeletionMarkerInfo {
+    private captureDeletionInfo(tree: string, treeData: RwlTreeData, year: number, mode: DeleteMode): DeletionMarkerInfo {
         const deletedRaw = treeData.get(year);
         const leftRaw = treeData.get(year - 1);
         const rightRaw = treeData.get(year + 1);
+        const treeMarkers = this.deletionMarkers.get(tree);
+        const leftStack = treeMarkers?.get(year);
+        const rightStack = treeMarkers?.get(year + 1);
+        const leftRunStart = getStackRunStartYear(leftStack);
+        const leftRunEnd = getStackRunEndYear(leftStack);
+        const rightRunStart = getStackRunStartYear(rightStack);
+        const rightRunEnd = getStackRunEndYear(rightStack);
+        const sourceYear = rightRunStart !== undefined
+            ? rightRunStart - 1
+            : leftRunEnd !== undefined
+                ? leftRunEnd + 1
+                : year;
+        const sourceRunStartYear = Math.min(
+            sourceYear,
+            leftRunStart ?? sourceYear,
+            rightRunStart ?? sourceYear,
+        );
+        const sourceRunEndYear = Math.max(
+            sourceYear,
+            leftRunEnd ?? sourceYear,
+            rightRunEnd ?? sourceYear,
+        );
+        const leftBoundaryContribution = getDeletionStackBoundaryContributions(leftStack ?? []).right;
+        const rightBoundaryContribution = getDeletionStackBoundaryContributions(rightStack ?? []).left;
+        const deletedWidth = (deletedRaw === undefined || isStopMarkerValue(deletedRaw)) ? null : deletedRaw;
+        const restoreWidth = (() => {
+            if (deletedRaw === undefined || deletedRaw === null || isStopMarkerValue(deletedRaw)) return null;
+            return deletedRaw - leftBoundaryContribution - rightBoundaryContribution;
+        })();
         const sanitize = (value: number | null | undefined): number | null | undefined => {
             if (value === undefined) return undefined;
             if (isStopMarkerValue(value)) return undefined;
             return value;
         };
+        const leftOriginalWidth = mode === "left" || mode === "both" ? sanitize(leftRaw) : undefined;
+        const rightOriginalWidth = mode === "right" || mode === "both" ? sanitize(rightRaw) : undefined;
+        const getContributionAmount = (side: "left" | "right") => {
+            if (deletedWidth === null) return 0;
+            if (side === "left" && typeof leftOriginalWidth !== "number") return 0;
+            if (side === "right" && typeof rightOriginalWidth !== "number") return 0;
+            if (mode === side) return deletedWidth;
+            if (mode === "both") return Math.round(deletedWidth / 2);
+            return 0;
+        };
+
         return {
-            deletedWidth: (deletedRaw === undefined || isStopMarkerValue(deletedRaw)) ? null : deletedRaw,
-            leftOriginalWidth: sanitize(leftRaw),
-            rightOriginalWidth: sanitize(rightRaw),
+            deletedWidth,
+            restoreWidth,
+            mode,
+            sourceYear,
+            sourceRunStartYear,
+            sourceRunEndYear,
+            deleteOrder: this.deletionOrderCounter++,
+            leftContribution: getContributionAmount("left"),
+            rightContribution: getContributionAmount("right"),
+            leftOriginalWidth,
+            rightOriginalWidth,
         };
     }
 

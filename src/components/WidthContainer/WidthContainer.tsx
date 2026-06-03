@@ -1,7 +1,7 @@
 import { memo, ReactNode, RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { flushSync } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import { RwlSiteData } from '@/features/rwl';
-import { moveSeriesTailByOffset as previewMoveSeriesTailByOffset } from '@/features/rwl/edit';
+import { getDeletionStackBoundaryContributions, moveSeriesTailByOffset as previewMoveSeriesTailByOffset } from '@/features/rwl/edit';
 import type { DeleteMode, DeletionMarkerInfo, RwlDeletionMarkers, RwlHistoryAnimation } from '@/features/rwl/edit';
 import { RollingNumber } from '@/components/RollingNumber/RollingNumber';
 import WidthGrid from './WidthGrid/WidthGrid';
@@ -127,6 +127,7 @@ interface DeletionHoverItem {
     anchorTop: number;   // y of the right-neighbor cell's top, relative to container
     anchorHeight: number;
     cellWidth: number;
+    side: "left" | "right";
 }
 
 interface DeletionHoverState {
@@ -1164,7 +1165,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
         }, 80);
     }, [cancelHoverClear]);
 
-    const handleDeletionMarkHoverChange = useCallback((tree: string, year: number, hovered: boolean, element: HTMLElement | null) => {
+    const handleDeletionMarkHoverChange = useCallback((tree: string, year: number, hovered: boolean, element: HTMLElement | null, side: "left" | "right" = "left") => {
         if (!hovered) {
             scheduleHoverClear();
             return;
@@ -1189,6 +1190,21 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
         const containerRect = container.getBoundingClientRect();
         const items: DeletionHoverItem[] = [];
         for (let y = runStart; y <= runEnd; y++) {
+            if (y === year && side === "right") {
+                const anchorCell = markEl.closest<HTMLElement>("[data-width-grid-cell='true']");
+                const rect = anchorCell?.getBoundingClientRect();
+                if (!rect) continue;
+                items.push({
+                    year: y,
+                    anchorLeft: rect.right - containerRect.left,
+                    anchorTop: rect.top - containerRect.top,
+                    anchorHeight: rect.height,
+                    cellWidth: rect.width,
+                    side: "right",
+                });
+                continue;
+            }
+
             const cell = cells.get(y);
             if (!cell) continue;
             const rect = cell.getBoundingClientRect();
@@ -1198,6 +1214,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                 anchorTop: rect.top - containerRect.top,
                 anchorHeight: rect.height,
                 cellWidth: rect.width,
+                side: "left",
             });
         }
         if (items.length === 0) return;
@@ -1210,18 +1227,29 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
     }, [deletionMarkers, cancelHoverClear, scheduleHoverClear]);
 
     // 把 hover run 内每一个 marker 的整个 stack 都展平：一个被删除的 cell 对应一个 ghost。
-    // 同一年份多次连续删除会形成多个 stack 条目，越靠数组末端表示越晚被删除。
+    // stack 自身保持空间顺序；displayIndex 只用于显示，deleteOrder 最大的 ghost 贴近红线。
     const hoveredMarkerRun = useMemo(() => {
         if (!hoveredMarker || !deletionMarkers) return null;
         const treeMarkers = deletionMarkers.get(hoveredMarker.tree);
         if (!treeMarkers) return null;
-        type Entry = { item: DeletionHoverItem; info: DeletionMarkerInfo; index: number; stackSize: number };
+        type Entry = {
+            item: DeletionHoverItem;
+            info: DeletionMarkerInfo;
+            index: number;
+            displayIndex: number;
+            stackSize: number;
+        };
         const result: Entry[] = [];
         hoveredMarker.items.forEach((item) => {
             const stack = treeMarkers.get(item.year);
             if (!stack || stack.length === 0) return;
-            stack.forEach((info, index) => {
-                result.push({ item, info, index, stackSize: stack.length });
+            stack
+                .map((info, index) => ({ info, index }))
+                .sort((a, b) => (
+                    (a.info.deleteOrder ?? a.index) - (b.info.deleteOrder ?? b.index)
+                ))
+                .forEach(({ info, index }, displayIndex) => {
+                    result.push({ item, info, index, displayIndex, stackSize: stack.length });
             });
         });
         return result;
@@ -1256,37 +1284,56 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
         });
     }, [showAnimationPlan]);
 
-    // 只让两侧邻居跳动到原值；不要把"被恢复格"（markerYear-1）放进 rollingCells。
-    const buildRestoreRollingCells = useCallback((tree: string, markerYear: number, info: DeletionMarkerInfo) => {
+    // 只让恢复前后边界贡献发生变化的格子跳动；不要把"被恢复格"放进 rollingCells。
+    const buildRestoreRollingCells = useCallback((tree: string, markerYear: number, index: number) => {
         const treeData = visibleSite.get(tree);
         const rollingCells: RollingCellAnimation[] = [];
+        const stack = deletionMarkers?.get(tree)?.get(markerYear);
+        if (!treeData || !stack || index < 0 || index >= stack.length) return rollingCells;
 
-        addRollingTargetIfChanged(
-            rollingCells,
-            markerYear - 2,
-            treeData?.get(markerYear - 1),
-            info.leftOriginalWidth,
-        );
-        addRollingTargetIfChanged(
-            rollingCells,
-            markerYear,
-            treeData?.get(markerYear),
-            info.rightOriginalWidth,
-        );
+        const leftRemainingStack = stack.slice(0, index);
+        const rightRemainingStack = stack.slice(index + 1);
+        const oldContributions = getDeletionStackBoundaryContributions(stack);
+        const leftContributions = getDeletionStackBoundaryContributions(leftRemainingStack);
+        const rightContributions = getDeletionStackBoundaryContributions(rightRemainingStack);
+
+        const addBoundaryRollingTarget = (
+            targetYear: number,
+            fromYear: number,
+            oldContribution: number,
+            nextContribution: number,
+        ) => {
+            const fromValue = treeData.get(fromYear);
+            const numericFromValue = getRollingWidthValue(fromValue);
+            if (numericFromValue === undefined) return;
+            addRollingTargetIfChanged(
+                rollingCells,
+                targetYear,
+                fromValue,
+                numericFromValue - oldContribution + nextContribution,
+            );
+        };
+
+        addBoundaryRollingTarget(markerYear - 2, markerYear - 1, oldContributions.left, leftContributions.left);
+        addBoundaryRollingTarget(markerYear, markerYear, oldContributions.right, rightContributions.right);
 
         return rollingCells;
-    }, [visibleSite]);
+    }, [deletionMarkers, visibleSite]);
 
-    // 双击红线：默认恢复该格子最新的一次删除（栈顶，index = stack.length - 1）。
+    // 双击红线：默认恢复离红线最近的 ghost，也就是 deleteOrder 最大的那条。
     const handleRedLineDoubleClick = useCallback((tree: string, markerYear: number) => {
         const stack = deletionMarkers?.get(tree)?.get(markerYear);
         if (!stack || stack.length === 0) return;
-        const info = stack[stack.length - 1];
+        const latestIndex = stack.reduce((bestIndex, info, index) => {
+            const bestOrder = stack[bestIndex]?.deleteOrder ?? bestIndex;
+            const order = info.deleteOrder ?? index;
+            return order > bestOrder ? index : bestIndex;
+        }, 0);
         const shiftedYears = getRestoreShiftedYears(tree, markerYear);
-        const rollingCells = buildRestoreRollingCells(tree, markerYear, info);
+        const rollingCells = buildRestoreRollingCells(tree, markerYear, latestIndex);
         setHoveredMarker(null);
         flushSync(() => {
-            onRestoreDeletion?.(tree, markerYear, stack.length - 1);
+            onRestoreDeletion?.(tree, markerYear, latestIndex);
             triggerRestoreAnimation(tree, markerYear, shiftedYears, rollingCells);
         });
     }, [onRestoreDeletion, deletionMarkers, getRestoreShiftedYears, buildRestoreRollingCells, triggerRestoreAnimation]);
@@ -1296,7 +1343,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
         const info = deletionMarkers?.get(tree)?.get(markerYear)?.[index];
         if (!info) return;
         const shiftedYears = getRestoreShiftedYears(tree, markerYear);
-        const rollingCells = buildRestoreRollingCells(tree, markerYear, info);
+        const rollingCells = buildRestoreRollingCells(tree, markerYear, index);
         setHoveredMarker(null);
         flushSync(() => {
             onRestoreDeletion?.(tree, markerYear, index);
@@ -1819,7 +1866,18 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                                 const cellAnimationKind = getGridAnimationKind(series.treeCode, cell.year);
                                 const cellAnimationDelay = getGridAnimationDelay(series.treeCode, cell.year);
                                 const cellAnimationKey = cellAnimationKind ? animationPlan?.id ?? 0 : 0;
-                                const hasLeftDeletionMark = Boolean(deletionMarkers?.get(series.treeCode)?.has(cell.year));
+                                const treeDeletionMarkers = deletionMarkers?.get(series.treeCode);
+                                const rightDeletionMarkerYear = cell.year + 1;
+                                const isRowFirstCell = cellIndex === 0;
+                                const isRowLastCell = rowIndex < series.rows.length - 1 && cellIndex === row.cells.length - 1;
+                                const hasLeftDeletionMark = Boolean(
+                                    treeDeletionMarkers?.has(cell.year)
+                                    && !(rowIndex > 0 && isRowFirstCell)
+                                );
+                                const hasRightDeletionMark = Boolean(
+                                    treeDeletionMarkers?.has(rightDeletionMarkerYear)
+                                    && isRowLastCell
+                                );
                                 // 拖动预览期间值会跟着鼠标频繁变动，这种"非操作"变更不应触发滚动；
                                 // 一旦真正提交（pointerup 时调用 onMoveSeriesTailByOffset），数据写回，
                                 // RollingNumber 只在 animationPlan.rollingCells 明确命中时启用。
@@ -1834,6 +1892,11 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                                     hoveredMarker
                                     && hoveredMarker.tree === series.treeCode
                                     && cell.year === hoveredMarker.hoveredYear
+                                );
+                                const isRightDeletionMarkActive = Boolean(
+                                    hoveredMarker
+                                    && hoveredMarker.tree === series.treeCode
+                                    && rightDeletionMarkerYear === hoveredMarker.hoveredYear
                                 );
 
                                 if (cell.isInterruptPad) {
@@ -1851,7 +1914,10 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                                             animationKind={cellAnimationKind}
                                             animationDelay={cellAnimationDelay}
                                             hasLeftDeletionMark={hasLeftDeletionMark}
+                                            hasRightDeletionMark={hasRightDeletionMark}
+                                            rightDeletionMarkerYear={rightDeletionMarkerYear}
                                             isDeletionMarkActive={isDeletionMarkActive}
+                                            isRightDeletionMarkActive={isRightDeletionMarkActive}
                                             data-width-grid-cell="true"
                                             data-tree={series.treeCode}
                                             data-year={cell.year}
@@ -1890,7 +1956,10 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                                         animationKind={cellAnimationKind}
                                         animationDelay={cellAnimationDelay}
                                         hasLeftDeletionMark={hasLeftDeletionMark}
+                                        hasRightDeletionMark={hasRightDeletionMark}
+                                        rightDeletionMarkerYear={rightDeletionMarkerYear}
                                         isDeletionMarkActive={isDeletionMarkActive}
+                                        isRightDeletionMarkActive={isRightDeletionMarkActive}
                                         rollingDigits={rollingDigits}
                                         rollingFromValue={rollingFromValue}
                                         style={isRollingFocused ? { zIndex: 4, backgroundColor: '#ffffff' } : undefined}
@@ -1922,38 +1991,50 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                 />
             ) : null}
 
-            {hoveredMarkerRun?.map(({ item, info, index, stackSize }) => {
-                // 同一年份多次堆叠：最晚一次（index = stackSize-1）紧贴格子，
-                // 越早被删除的越往左排开。
-                const offset = stackSize - 1 - index;
-                const left = item.anchorLeft - item.cellWidth / 2 - 2.5 - offset * (item.cellWidth + GRID_GAP);
-                return (
-                    <div
-                        key={`${item.year}-${index}`}
-                        className={style["deletion-preview-ghost"]}
-                        style={{
-                            left: `${left}px`,
-                            top: `${item.anchorTop}px`,
-                            width: `${item.cellWidth}px`,
-                            height: `${item.anchorHeight}px`,
-                        }}
-                        title="双击恢复"
-                        onMouseEnter={cancelHoverClear}
-                        onMouseLeave={scheduleHoverClear}
-                        onDoubleClick={(event) => {
-                            event.stopPropagation();
-                            event.preventDefault();
-                            if (hoveredMarker) {
-                                handleGhostDoubleClick(hoveredMarker.tree, item.year, index);
-                            }
-                        }}
-                    >
-                        {info.deletedWidth === null
-                            ? <span>missing</span>
-                            : <RollingNumber value={info.deletedWidth} />}
-                    </div>
-                );
-            }) ?? null}
+            {hoveredMarkerRun && typeof document !== "undefined" ? createPortal(
+                hoveredMarkerRun.map(({ item, info, index, displayIndex, stackSize }) => {
+                    // 同一年份多次堆叠：displayIndex = stackSize - 1 紧贴红线，
+                    // 最后删除的 ghost 会排在最右侧。
+                    const offset = stackSize - 1 - displayIndex;
+                    const containerRect = containerRef.current?.getBoundingClientRect();
+                    const left = (containerRect?.left ?? 0)
+                        + item.anchorLeft
+                        - item.cellWidth / 2
+                        - 2.5
+                        - offset * (item.cellWidth + GRID_GAP);
+                    const top = (containerRect?.top ?? 0) + item.anchorTop;
+
+                    return (
+                        <div
+                            key={`${item.year}-${index}`}
+                            className={style["deletion-preview-ghost"]}
+                            style={{
+                                position: "fixed",
+                                zIndex: 2147483647,
+                                left: `${left}px`,
+                                top: `${top}px`,
+                                width: `${item.cellWidth}px`,
+                                height: `${item.anchorHeight}px`,
+                            }}
+                            title="双击恢复"
+                            onMouseEnter={cancelHoverClear}
+                            onMouseLeave={scheduleHoverClear}
+                            onDoubleClick={(event) => {
+                                event.stopPropagation();
+                                event.preventDefault();
+                                if (hoveredMarker) {
+                                    handleGhostDoubleClick(hoveredMarker.tree, item.year, index);
+                                }
+                            }}
+                        >
+                            {info.deletedWidth === null
+                                ? <span>missing</span>
+                                : <RollingNumber value={info.deletedWidth} />}
+                        </div>
+                    );
+                }),
+                document.body,
+            ) : null}
 
             <WidthGridContextMenu
                 open={contextMenu !== null}
