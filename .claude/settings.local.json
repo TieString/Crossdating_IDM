@@ -5,7 +5,8 @@
       "Bash(npx tsc *)",
       "Bash(npm run *)",
       "Bash(curl -s http://localhost:1421)",
-      "Bash(curl -s http://localhost:1420)"
+      "Bash(curl -s http://localhost:1420)",
+      "Bash(git checkout *)"
     ],
     "additionalDirectories": [
       "d:\\Code\\Crossdating_Tauri"

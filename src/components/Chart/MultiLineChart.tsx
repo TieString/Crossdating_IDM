@@ -61,8 +61,8 @@ const SWATCH_W = 20
 const SWATCH_H = 2
 const SWATCH_GAP = 6
 const COL_GAP = 16
-const MAX_ROWS_SINGLE_COL = 8
 const MAX_LABEL_CHARS = 12
+const TOOLTIP_MAX_SERIES = 15
 const Y_AXIS_WIDTH = 72
 const X_AXIS_HEIGHT = 58
 const CHART_AREA_RIGHT_PADDING = 2
@@ -356,6 +356,7 @@ function makePersistentTooltipPlugin(): Plugin<'line'> & { activeIndex: number |
     afterDraw(chart) {
       const idx = this.activeIndex
       if (idx == null) return
+      if (chart.data.datasets.length > TOOLTIP_MAX_SERIES) return
 
       const { ctx, data, chartArea } = chart
       const label = data.labels?.[idx] as string | undefined
@@ -374,9 +375,12 @@ function makePersistentTooltipPlugin(): Plugin<'line'> & { activeIndex: number |
       })
       if (rows.length === 0) return
 
-      const useTwoCols = rows.length > MAX_ROWS_SINGLE_COL
-      const colCount = useTwoCols ? 2 : 1
-      const rowsPerCol = useTwoCols ? Math.ceil(rows.length / 2) : rows.length
+      const preferredY = chartArea.top + 8
+      const availableRowH = Math.max(LINE_H, chartArea.bottom - preferredY - 4 - PAD - LINE_H - 4 - PAD)
+      const maxRowsPerCol = Math.floor(availableRowH / LINE_H)
+      // 基于总序列数计算列数，避免悬停不同年份时列数变化导致宽度跳动
+      const colCount = Math.max(1, Math.ceil(chart.data.datasets.length / maxRowsPerCol))
+      const rowsPerCol = Math.ceil(rows.length / colCount)
 
       // 测量每列最宽的 label + value
       ctx.save()
@@ -401,14 +405,14 @@ function makePersistentTooltipPlugin(): Plugin<'line'> & { activeIndex: number |
       const boxH = PAD + LINE_H + 4 + rowsPerCol * LINE_H + PAD
 
       const x = chartArea.right - boxW - 8
-      const y = chartArea.top + 8
+      const tooltipY = Math.max(chartArea.top + 4, Math.min(preferredY, chartArea.bottom - boxH - 4))
 
       // 白色背景框
       ctx.fillStyle = 'rgba(255,255,255,0.95)'
       ctx.strokeStyle = '#aaaaaa'
       ctx.lineWidth = 1
       ctx.beginPath()
-      ctx.roundRect(x, y, boxW, boxH, 3)
+      ctx.roundRect(x, tooltipY, boxW, boxH, 3)
       ctx.fill()
       ctx.stroke()
 
@@ -416,10 +420,10 @@ function makePersistentTooltipPlugin(): Plugin<'line'> & { activeIndex: number |
       ctx.fillStyle = '#111111'
       ctx.font = FONT_BOLD
       ctx.textBaseline = 'top'
-      ctx.fillText(label, x + PAD, y + PAD)
+      ctx.fillText(label, x + PAD, tooltipY + PAD)
 
       // 分隔线
-      const divY = y + PAD + LINE_H + 2
+      const divY = tooltipY + PAD + LINE_H + 2
       ctx.strokeStyle = '#dddddd'
       ctx.lineWidth = 1
       ctx.beginPath()
@@ -430,8 +434,8 @@ function makePersistentTooltipPlugin(): Plugin<'line'> & { activeIndex: number |
       // 数据行
       ctx.font = FONT
       rows.forEach((row, i) => {
-        const col = useTwoCols ? Math.floor(i / rowsPerCol) : 0
-        const rowInCol = useTwoCols ? i % rowsPerCol : i
+        const col = colCount > 1 ? Math.floor(i / rowsPerCol) : 0
+        const rowInCol = colCount > 1 ? i % rowsPerCol : i
         const rx = x + PAD + col * (contentW + COL_GAP)
         const ry = divY + 4 + rowInCol * LINE_H
 
@@ -473,7 +477,7 @@ export type ChartZoomWindow = {
   max: number
 } | null
 
-const colorPalette = [
+export const colorPalette = [
   '#c0392b', '#2e6da4', '#27825a', '#7d3c98', '#b9621e',
   '#1a7a7a', '#7a4a1e', '#4a3a8a', '#6a7a2a', '#a03050',
   '#2a5a7a', '#7a2a5a', '#3a6a2a', '#8a3a2a', '#2a4a8a',
@@ -641,6 +645,7 @@ export function MultiLineChart({
       },
       tooltip: { enabled: false },
       legend: {
+        display: false,
         position: 'top',
         align: 'start',
         labels: {

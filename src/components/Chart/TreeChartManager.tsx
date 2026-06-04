@@ -1,5 +1,5 @@
 import React, { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { ChartZoomWindow, MultiLineChart } from './MultiLineChart.tsx'
+import { ChartZoomWindow, MultiLineChart, colorPalette } from './MultiLineChart.tsx'
 import { RwlSiteData } from '@/features/rwl'
 import { stopMarker } from '@/shared/constants'
 
@@ -107,6 +107,16 @@ function TreeChartManagerBase({ fullData }: Props) {
   )
   const allSelected = selectedTrees.length === allTreeCodes.length
 
+  const seriesColorMap = useMemo(() => {
+    const map = new Map<string, string>()
+    let idx = 0
+    filteredData.forEach((_, treeCode) => {
+      map.set(treeCode, colorPalette[idx % colorPalette.length])
+      idx++
+    })
+    return map
+  }, [filteredData])
+
   const btnBase: React.CSSProperties = {
     fontSize: 12, padding: '4px 12px', borderRadius: 5, cursor: 'pointer',
     border: '1px solid #d0d0d0', background: '#fff', color: '#444',
@@ -168,6 +178,7 @@ function TreeChartManagerBase({ fullData }: Props) {
             ? <span style={{ fontSize: 12, color: '#bbb', padding: '4px 6px', fontStyle: 'italic' }}>无匹配结果</span>
             : filteredTreeCodes.map(treeCode => {
               const checked = selectedTrees.includes(treeCode)
+              const seriesColor = seriesColorMap.get(treeCode)
               return (
                 <button
                   key={treeCode}
@@ -175,16 +186,20 @@ function TreeChartManagerBase({ fullData }: Props) {
                   style={{
                     fontSize: 11, padding: '2px 9px', borderRadius: 6,
                     border: checked ? '1px solid #2e6da4' : '1px solid #d8d8d8',
-                    background: checked ? '#2e6da4' : '#fff',
-                    color: checked ? '#fff' : '#555',
+                    background: '#fff',
+                    color: checked ? '#2e6da4' : '#555',
                     cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap',
-                    fontWeight: checked ? 600 : 400,
-                    boxShadow: checked ? '0 1px 3px rgba(46,109,164,0.25)' : '0 1px 2px rgba(0,0,0,0.04)',
+                    // fontWeight: checked ? 600 : 400,
+                    boxShadow: checked ? '0 1px 3px rgba(46,109,164,0.15)' : '0 1px 2px rgba(0,0,0,0.04)',
                     transition: 'all 0.12s',
                     lineHeight: 1.6,
+                    position: 'relative',
                   }}
                 >
                   {treeCode}
+                  {checked && seriesColor && (
+                    <span style={{ position: 'absolute', bottom: 2, left: 5, right: 5, height: 2, borderRadius: 1, background: seriesColor }} />
+                  )}
                 </button>
               )
             })
