@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import React, { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { ChartZoomWindow, MultiLineChart } from './MultiLineChart.tsx'
 import { RwlSiteData } from '@/features/rwl'
 import { stopMarker } from '@/shared/constants'
@@ -18,6 +18,7 @@ function TreeChartManagerBase({ fullData }: Props) {
   const [highlightedTreeCode, setHighlightedTreeCode] = useState<string | null>(null)
   const [treeOffsets, setTreeOffsets] = useState<Map<string, number>>(new Map())
   const [zoomWindow, setZoomWindow] = useState<ChartZoomWindow>(null)
+  const [search, setSearch] = useState('')
 
   useEffect(() => {
     setSelectedTrees((previous) => previous.filter((treeCode) => fullData.has(treeCode)))
@@ -99,63 +100,99 @@ function TreeChartManagerBase({ fullData }: Props) {
     return nextData
   }, [fullData, selectedTrees, treeOffsets])
 
+  const allTreeCodes = useMemo(() => Array.from(fullData.keys()), [fullData])
+  const filteredTreeCodes = useMemo(() =>
+    search.trim() === '' ? allTreeCodes : allTreeCodes.filter(c => c.toLowerCase().includes(search.toLowerCase())),
+    [allTreeCodes, search]
+  )
+  const allSelected = selectedTrees.length === allTreeCodes.length
+
+  const btnBase: React.CSSProperties = {
+    fontSize: 12, padding: '4px 12px', borderRadius: 5, cursor: 'pointer',
+    border: '1px solid #d0d0d0', background: '#fff', color: '#444',
+    fontWeight: 500, letterSpacing: 0.2, transition: 'background 0.12s, color 0.12s',
+    lineHeight: 1.4,
+  }
+  const btnDisabled: React.CSSProperties = {
+    ...btnBase, background: '#f4f4f4', color: '#c0c0c0', cursor: 'default', border: '1px solid #e4e4e4',
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%' }}>
-      <div style={{ position: 'relative', marginBottom: '1rem', flex: '0 0 auto' }}>
-        {/* 顶部渐变遮罩 */}
-        <div style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          height: 20,
-          background: 'linear-gradient(to bottom, white, rgba(255,255,255,0))',
-          zIndex: 1,
-          pointerEvents: 'none'
-        }} />
+      {/* 顶部选择面板 */}
+      <div style={{ flex: '0 0 auto', marginBottom: 10 }}>
+        {/* 工具栏 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+          <button onClick={() => setSelectedTrees(allTreeCodes)} disabled={allSelected}
+            style={allSelected ? btnDisabled : btnBase}>全选</button>
+          <button onClick={() => setSelectedTrees([])} disabled={selectedTrees.length === 0}
+            style={selectedTrees.length === 0 ? btnDisabled : btnBase}>全不选</button>
 
-        {/* 滚动区域 */}
-        <div style={{
-          height: 70,
-          overflowY: 'auto',
-          overflowX: 'hidden',
-          paddingTop: 8,
-          paddingBottom: 8
-        }}>
-          {Array.from(fullData.keys()).map(treeCode => (
-            <button
-              key={treeCode}
-              onClick={() => toggleTree(treeCode)}
+          {/* 搜索框 */}
+          <div style={{ flex: 1, minWidth: 0, position: 'relative', display: 'flex', alignItems: 'center' }}>
+            <svg style={{ position: 'absolute', left: 8, pointerEvents: 'none', color: '#aaa' }}
+              width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <circle cx="11" cy="11" r="7" /><line x1="16.5" y1="16.5" x2="22" y2="22" />
+            </svg>
+            <input
+              type="search"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="搜索序列"
               style={{
-                marginRight: 4,
-                backgroundColor: selectedTrees.includes(treeCode) ? '#90caf9' : '#eee',
-                border: '1px solid #ccc',
-                padding: '4px 8px',
-                borderRadius: 4,
-                cursor: 'pointer',
-                marginLeft: 4,
-                marginTop: 2,
-                marginBottom: 2,
+                width: '100%', fontSize: 12, padding: '4px 8px 4px 26px',
+                border: '1px solid #d0d0d0', borderRadius: 5, outline: 'none',
+                background: '#fff', color: '#333', lineHeight: 1.4,
+                boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.05)',
               }}
-            >
-              {treeCode}
-            </button>
-          ))}
+            />
+          </div>
+
+          <span style={{
+            fontSize: 11, color: '#fff', background: '#2e6da4',
+            borderRadius: 10, padding: '1px 8px', fontWeight: 600, whiteSpace: 'nowrap',
+          }}>
+            {selectedTrees.length} / {allTreeCodes.length}
+          </span>
         </div>
 
-        {/* 底部渐变遮罩 */}
+        {/* pill 标签列表 */}
         <div style={{
-          position: 'absolute',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          height: 20,
-          background: 'linear-gradient(to top, white, rgba(255,255,255,0))',
-          zIndex: 1,
-          pointerEvents: 'none'
-        }} />
+          maxHeight: 76, overflowY: 'auto',
+          border: '1px solid #e8e8e8', borderRadius: 6,
+          background: '#f8f9fa',
+          display: 'flex', flexWrap: 'wrap', alignContent: 'flex-start',
+          padding: '4px 5px', gap: 4,
+        }}>
+          {filteredTreeCodes.length === 0
+            ? <span style={{ fontSize: 12, color: '#bbb', padding: '4px 6px', fontStyle: 'italic' }}>无匹配结果</span>
+            : filteredTreeCodes.map(treeCode => {
+              const checked = selectedTrees.includes(treeCode)
+              return (
+                <button
+                  key={treeCode}
+                  onClick={() => toggleTree(treeCode)}
+                  style={{
+                    fontSize: 11, padding: '2px 9px', borderRadius: 6,
+                    border: checked ? '1px solid #2e6da4' : '1px solid #d8d8d8',
+                    background: checked ? '#2e6da4' : '#fff',
+                    color: checked ? '#fff' : '#555',
+                    cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap',
+                    fontWeight: checked ? 600 : 400,
+                    boxShadow: checked ? '0 1px 3px rgba(46,109,164,0.25)' : '0 1px 2px rgba(0,0,0,0.04)',
+                    transition: 'all 0.12s',
+                    lineHeight: 1.6,
+                  }}
+                >
+                  {treeCode}
+                </button>
+              )
+            })
+          }
+        </div>
       </div>
 
+      {/* 图表区 */}
       <div style={{ flex: '1 1 auto', minHeight: 0 }}>
         {filteredData.size > 0 ? (
           <MultiLineChart

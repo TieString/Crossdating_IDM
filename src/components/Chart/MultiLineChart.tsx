@@ -303,12 +303,11 @@ const xAxisLabelsPlugin: Plugin<'line'> = {
     ctx.save()
     ctx.strokeStyle = '#111'
     ctx.fillStyle = '#333'
-    ctx.lineWidth = 2
+    ctx.lineWidth = 1.5
     ctx.font = `13px ${CHART_FONT_FAMILY}`
     ctx.textBaseline = 'top'
 
     labels.forEach((label) => {
-      drawGridLine(ctx, label.tickX, chartArea.top, label.tickX, chartArea.top + X_AXIS_TICK_LENGTH, '#111', 2)
       drawGridLine(ctx, label.tickX, chartArea.bottom, label.tickX, chartArea.bottom - X_AXIS_TICK_LENGTH, '#111', 2)
 
       ctx.textAlign = label.align
@@ -329,7 +328,7 @@ const chartBoxBorderPlugin: Plugin<'line'> = {
     const { ctx, chartArea } = chart
     ctx.save()
     ctx.strokeStyle = '#111111'
-    ctx.lineWidth = 2
+    ctx.lineWidth = 1.5
     ctx.strokeRect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top)
     ctx.restore()
   }
@@ -658,7 +657,7 @@ export function MultiLineChart({
       x: {
         display: true,
         afterFit(scale) { scale.height = X_AXIS_HEIGHT },
-        border: { display: true, color: '#111', width: 2 },
+        border: { display: true, color: '#111', width: 1.5 },
         grid: {
           drawOnChartArea: false,
           drawTicks: false,
@@ -687,10 +686,10 @@ export function MultiLineChart({
         min: yMin,
         max: yMax,
         afterFit(scale) { scale.width = Y_AXIS_WIDTH },
-        border: { display: true, color: '#111', width: 2 },
+        border: { display: true, color: '#111', width: 1.5 },
         grid: {
           drawOnChartArea: false,
-          drawTicks: true,
+          drawTicks: false,
           tickColor: '#111',
           tickLength: 7,
           color: GRID_MAJOR_COLOR,
