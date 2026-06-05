@@ -716,6 +716,7 @@ type WidthContainerProps = {
     onDeleteYearWithMode?: (tree: string, year: number, mode: DeleteMode) => void,
     onMarkYearRangeAsMissing?: (tree: string, startYear: number, endYear: number) => void,
     onRestoreDeletion?: (tree: string, markerYear: number, index: number) => void,
+    onDeleteSeries?: (tree: string) => void,
     scrollContainerRef?: RefObject<HTMLElement | null>
 };
 
@@ -728,7 +729,7 @@ interface ContextMenuState {
     y: number;
 }
 
-function WidthContainer({ siteData: site, masterSeries, selected, historyAnimation, deletionMarkers, onYearClick, onInsertMissingYearAtSide, onMoveSeriesTailByOffset, onDeleteYearWithMode, onMarkYearRangeAsMissing, onRestoreDeletion, scrollContainerRef }: WidthContainerProps): ReactNode {
+function WidthContainer({ siteData: site, masterSeries, selected, historyAnimation, deletionMarkers, onYearClick, onInsertMissingYearAtSide, onMoveSeriesTailByOffset, onDeleteYearWithMode, onMarkYearRangeAsMissing, onRestoreDeletion, onDeleteSeries, scrollContainerRef }: WidthContainerProps): ReactNode {
     const visibleSite = useMemo(() => (
         selected && site.has(selected)
             ? (() => {
@@ -1580,6 +1581,11 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
         onMarkYearRangeAsMissing?.(tree, nextSelection.startYear, nextSelection.endYear);
     }, [clearDeleteBurstAnimations, clearInsertAnimations, onMarkYearRangeAsMissing]);
 
+    const handleContextMenuDeleteSeries = useCallback((tree: string) => {
+        onDeleteSeries?.(tree);
+        setContextMenu(null);
+    }, [onDeleteSeries]);
+
     const handleContextMenuPreviewYearChange = useCallback((tree: string, year: number) => {
         setSelection(normalizeSelection(tree, year, year));
         onYearClick?.(tree, year);
@@ -2047,6 +2053,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                 onInsert={handleContextMenuInsert}
                 onDelete={handleContextMenuDelete}
                 onDeleteRange={handleContextMenuDeleteRange}
+                onDeleteSeries={handleContextMenuDeleteSeries}
                 onPreviewYearChange={handleContextMenuPreviewYearChange}
                 onPreviewYearRangeChange={handleContextMenuPreviewYearRangeChange}
                 onClose={handleContextMenuClose}

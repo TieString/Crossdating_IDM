@@ -2,11 +2,11 @@
     position: fixed;
     z-index: 1000;
     width: 188px;
-    padding: 6px;
-    border-radius: 10px;
+    padding: 3px;
+    border-radius: 6px;
     background: #ffffff;
     box-shadow: 0 16px 36px rgba(15, 23, 42, 0.18), 0 2px 8px rgba(15, 23, 42, 0.08);
-    border: 1px solid rgb(93, 93, 94);
+    border: 1px solid rgb(186, 186, 186);
     font-family: "Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
     font-size: 13px;
     color: #1f2937;
@@ -16,11 +16,10 @@
 }
 
 .menu-row {
-    background:#b9b9b91c;
     position: relative;
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 3px;
     padding: 3px 5px;
     border-radius: 6px;
     cursor: pointer;
@@ -33,6 +32,19 @@
     color: #1d4ed8;
 }
 
+.menu-row-icon {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    opacity: 0.75;
+}
+
+.menu-row:hover .menu-row-icon,
+.menu-row-active .menu-row-icon,
+.menu-row-danger .menu-row-icon {
+    opacity: 1;
+}
+
 .menu-row-label {
     flex: 0 0 auto;
     font-weight: 600;
@@ -40,27 +52,18 @@
 }
 
 .menu-row-input {
+    background:#f9f9f9;
     width: 38px;
     padding: 2px;
     border: 0;
-    border-bottom: 2px solid rgba(97, 97, 97, 0.62);
-    border-radius: 0;
-    background: transparent;
+    border-radius: 5px;
     color: #0f172a;
     font: inherit;
     font-variant-numeric: tabular-nums;
+    text-align: center;
     outline: none;
     box-shadow: none;
     transition: border-color 120ms ease, box-shadow 120ms ease;
-}
-
-.menu-row-input:hover {
-    border-bottom-color: rgba(76, 142, 218, 0.7);
-}
-
-.menu-row-input:focus {
-    border-bottom: 2px solid #4c8eda;
-    padding-bottom: 2px;
 }
 
 .menu-row-input-invalid {
@@ -129,7 +132,16 @@
 .menu-separator {
     margin: 4px 2px;
     height: 1px;
-    background: linear-gradient(to right, transparent, rgba(15, 23, 42, 0.8), transparent);
+    background: linear-gradient(to right, transparent, rgba(15, 23, 42, 0.12), transparent);
+}
+
+.menu-row-danger {
+    color: #dc2626;
+}
+
+.menu-row-danger:hover {
+    background-color: #fef2f2;
+    color: #b91c1c;
 }
 
 .dropdown {
@@ -140,7 +152,7 @@
     border-radius: 8px;
     background: #ffffff;
     box-shadow: 0 12px 32px rgba(15, 23, 42, 0.2), 0 2px 6px rgba(15, 23, 42, 0.08);
-    border: 1px solid rgb(93, 93, 94);
+    border: 1px solid rgb(186, 186, 186);
     animation: dropdown-pop 140ms cubic-bezier(0.16, 1, 0.3, 1);
     transform-origin: var(--dropdown-origin-x, right) var(--dropdown-origin-y, top);
 }

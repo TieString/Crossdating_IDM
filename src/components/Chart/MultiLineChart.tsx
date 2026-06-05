@@ -580,6 +580,7 @@ type Props = {
   onShiftHighlightedTree?: (treeCode: string, direction: -1 | 1) => void
   onInsertMissingYearAtSide?: (tree: string, year: number, side: MissingInsertSide) => void
   onDeleteYearWithMode?: (tree: string, year: number, mode: DeleteMode) => void
+  onDeleteSeries?: (tree: string) => void
 }
 
 export type ChartZoomWindow = {
@@ -605,6 +606,7 @@ export function MultiLineChart({
   onShiftHighlightedTree,
   onInsertMissingYearAtSide,
   onDeleteYearWithMode,
+  onDeleteSeries,
 }: Props) {
   const chartRef = useRef<ChartJSInstance<'line'> | null>(null)
   const isDragged = useRef(false)
@@ -966,6 +968,10 @@ export function MultiLineChart({
           }}
           onDelete={(tree, year, mode) => {
             onDeleteYearWithMode?.(tree, year, mode)
+            setContextMenu(null)
+          }}
+          onDeleteSeries={(tree) => {
+            onDeleteSeries?.(tree)
             setContextMenu(null)
           }}
           onClose={() => setContextMenu(null)}

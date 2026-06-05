@@ -16,6 +16,7 @@ export interface WidthGridContextMenuProps {
     onInsert: (tree: string, year: number, side: MissingInsertSide) => void;
     onDelete: (tree: string, year: number, mode: DeleteMode) => void;
     onDeleteRange?: (tree: string, startYear: number, endYear: number) => void;
+    onDeleteSeries?: (tree: string) => void;
     onPreviewYearChange?: (tree: string, year: number) => void;
     onPreviewYearRangeChange?: (tree: string, startYear: number, endYear: number) => void;
     onClose: () => void;
@@ -56,6 +57,7 @@ export default function WidthGridContextMenu({
     onInsert,
     onDelete,
     onDeleteRange,
+    onDeleteSeries,
     onPreviewYearChange,
     onPreviewYearRangeChange,
     onClose,
@@ -402,6 +404,13 @@ export default function WidthGridContextMenu({
                         handleInsertActivate();
                     }}
                 >
+                    <span className={style["menu-row-icon"]} aria-hidden="true">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M16 19h6"/><path d="M16 2v4"/><path d="M19 16v6"/>
+                            <path d="M21 12.598V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8.5"/>
+                            <path d="M3 10h18"/><path d="M8 2v4"/>
+                        </svg>
+                    </span>
                     <span className={style["menu-row-label"]}>插入</span>
                     <input
                         className={`${style["menu-row-input"]} ${parsedInsertYear === null ? style["menu-row-input-invalid"] : ""}`}
@@ -431,8 +440,9 @@ export default function WidthGridContextMenu({
                         <span className={style["menu-row-mode-chip-arrow"]} aria-hidden="true">▾</span>
                     </button>
                 </div>
-
-                <div className={style["menu-separator"]} role="separator" />
+                
+                {/* 分割线 */}
+                {/* <div className={style["menu-separator"]} role="separator" /> */}
 
                 <div
                     className={`${style["menu-row"]} ${dropdown === "delete" ? style["menu-row-active"] : ""}`}
@@ -445,6 +455,13 @@ export default function WidthGridContextMenu({
                         handleDeleteActivate();
                     }}
                 >
+                    <span className={style["menu-row-icon"]} aria-hidden="true">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M16 19h6"/><path d="M16 2v4"/>
+                            <path d="M21 15V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8.5"/>
+                            <path d="M3 10h18"/><path d="M8 2v4"/>
+                        </svg>
+                    </span>
                     <span className={style["menu-row-label"]}>删除</span>
                     {isRangeDelete ? (
                         <span className={style["menu-row-range"]}>
@@ -514,6 +531,27 @@ export default function WidthGridContextMenu({
                             <span className={style["menu-row-mode-chip-arrow"]} aria-hidden="true">▾</span>
                         )}
                     </button>
+                </div>
+
+                <div className={style["menu-separator"]} role="separator" />
+
+                <div
+                    className={`${style["menu-row"]} ${style["menu-row-danger"]}`}
+                    role="menuitem"
+                    onClick={() => {
+                        onDeleteSeries?.(tree);
+                        onClose();
+                    }}
+                >
+                    <span className={style["menu-row-icon"]} aria-hidden="true">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M10 11v6"/><path d="M14 11v6"/>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
+                            <path d="M3 6h18"/>
+                            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                        </svg>
+                    </span>
+                    <span className={style["menu-row-label"]}>删除此序列</span>
                 </div>
 
             </div>

@@ -6,7 +6,9 @@
       "Bash(npm run *)",
       "Bash(curl -s http://localhost:1421)",
       "Bash(curl -s http://localhost:1420)",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "WebFetch(domain:lucide.dev)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ],
     "additionalDirectories": [
       "d:\\Code\\Crossdating_Tauri"

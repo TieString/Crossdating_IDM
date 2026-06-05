@@ -14,9 +14,10 @@ type Props = {
   fullData: RwlSiteData
   onInsertMissingYearAtSide?: (tree: string, year: number, side: MissingInsertSide) => void
   onDeleteYearWithMode?: (tree: string, year: number, mode: DeleteMode) => void
+  onDeleteSeries?: (tree: string) => void
 }
 
-function TreeChartManagerBase({ fullData, onInsertMissingYearAtSide, onDeleteYearWithMode }: Props) {
+function TreeChartManagerBase({ fullData, onInsertMissingYearAtSide, onDeleteYearWithMode, onDeleteSeries }: Props) {
   const [selectedTrees, setSelectedTrees] = useState<string[]>([])
   const [highlightedTreeCode, setHighlightedTreeCode] = useState<string | null>(null)
   const [treeOffsets, setTreeOffsets] = useState<Map<string, number>>(new Map())
@@ -222,6 +223,7 @@ function TreeChartManagerBase({ fullData, onInsertMissingYearAtSide, onDeleteYea
             onShiftHighlightedTree={shiftHighlightedTree}
             onInsertMissingYearAtSide={onInsertMissingYearAtSide}
             onDeleteYearWithMode={onDeleteYearWithMode}
+            onDeleteSeries={onDeleteSeries}
           />
         ) : null}
       </div>

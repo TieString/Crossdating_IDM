@@ -242,6 +242,10 @@ export function useHomeWorkspace() {
         rwlEditorRef.current.restoreDeletion(tree, markerYear, index);
     }, []);
 
+    const handleDeleteSeries = useCallback((tree: string) => {
+        rwlEditorRef.current.deleteSeries(tree);
+    }, []);
+
     const handleInsertMissingYearAtSideFromChart = useCallback((tree: string, nextYear: number, side: "left" | "right") => {
         rwlEditorRef.current.insertMissingYearAtSide(tree, nextYear, side);
         triggerHistoryAnimation({ type: "insert-missing", tree, year: nextYear, side, direction: "redo" });
@@ -275,6 +279,7 @@ export function useHomeWorkspace() {
         cofechaVersion,
         deletionMarkers,
         fileName,
+        handleDeleteSeries,
         handleDeleteYearWithMode,
         handleDeleteYearWithModeFromChart,
         handleInsertMissingYearAtSide,

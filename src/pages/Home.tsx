@@ -36,6 +36,7 @@ export default function Home() {
         cofechaResult,
         cofechaVersion,
         deletionMarkers,
+        handleDeleteSeries,
         handleDeleteYearWithMode,
         handleDeleteYearWithModeFromChart,
         handleInsertMissingYearAtSide,
@@ -157,6 +158,7 @@ export default function Home() {
                                     onDeleteYearWithMode={handleDeleteYearWithMode}
                                     onMarkYearRangeAsMissing={handleMarkYearRangeAsMissing}
                                     onRestoreDeletion={handleRestoreDeletion}
+                                    onDeleteSeries={handleDeleteSeries}
                                 />
                             )}
 
@@ -291,6 +293,7 @@ export default function Home() {
                                           fullData={siteData}
                                           onInsertMissingYearAtSide={handleInsertMissingYearAtSideFromChart}
                                           onDeleteYearWithMode={handleDeleteYearWithModeFromChart}
+                                          onDeleteSeries={handleDeleteSeries}
                                         />
                                     </div>
                                 </div>

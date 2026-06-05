@@ -18,7 +18,8 @@ export type RwlEditOperation =
     | { type: "move-selection"; tree: string; selectedStartYear: number; selectedEndYear: number; yearOffset: number }
     | { type: "delete-year"; tree: string; year: number; mode: DeleteMode }
     | { type: "mark-missing-range"; tree: string; startYear: number; endYear: number }
-    | { type: "restore-deletion"; tree: string; markerYear: number; index: number };
+    | { type: "restore-deletion"; tree: string; markerYear: number; index: number }
+    | { type: "delete-series"; tree: string };
 
 export type RwlHistoryAnimation = RwlEditOperation & {
     direction: "undo" | "redo";
@@ -650,6 +651,19 @@ export class RwlEditor {
             leftOriginalWidth,
             rightOriginalWidth,
         };
+    }
+
+    deleteSeries(tree: string): void {
+        if (!this.rwlData.has(tree)) return;
+
+        this.saveToUndoStack({ type: "delete-series", tree });
+        this.redoStack = [];
+
+        const updatedData = new Map(this.rwlData);
+        updatedData.delete(tree);
+        this.rwlData = updatedData;
+        this.deletionMarkers.delete(tree);
+        this.notifyChange();
     }
 
     changeYearWidth(tree: string, year: number, width: number | null): void {
