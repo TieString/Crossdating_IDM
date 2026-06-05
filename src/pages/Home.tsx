@@ -37,7 +37,9 @@ export default function Home() {
         cofechaVersion,
         deletionMarkers,
         handleDeleteYearWithMode,
+        handleDeleteYearWithModeFromChart,
         handleInsertMissingYearAtSide,
+        handleInsertMissingYearAtSideFromChart,
         handleLoad,
         handleMarkYearRangeAsMissing,
         handleMoveSeriesTailByOffset,
@@ -285,7 +287,11 @@ export default function Home() {
 
                                 <div className={style["line-chart"]}>
                                     <div className={`${style["cofecha-panel-content"]} ${style["line-chart-content"]}`}>
-                                        <TreeChartManager fullData={siteData} />
+                                        <TreeChartManager
+                                          fullData={siteData}
+                                          onInsertMissingYearAtSide={handleInsertMissingYearAtSideFromChart}
+                                          onDeleteYearWithMode={handleDeleteYearWithModeFromChart}
+                                        />
                                     </div>
                                 </div>
                             </>

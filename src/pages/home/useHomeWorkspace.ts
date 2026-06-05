@@ -242,6 +242,16 @@ export function useHomeWorkspace() {
         rwlEditorRef.current.restoreDeletion(tree, markerYear, index);
     }, []);
 
+    const handleInsertMissingYearAtSideFromChart = useCallback((tree: string, nextYear: number, side: "left" | "right") => {
+        rwlEditorRef.current.insertMissingYearAtSide(tree, nextYear, side);
+        triggerHistoryAnimation({ type: "insert-missing", tree, year: nextYear, side, direction: "redo" });
+    }, [triggerHistoryAnimation]);
+
+    const handleDeleteYearWithModeFromChart = useCallback((tree: string, nextYear: number, mode: DeleteMode) => {
+        rwlEditorRef.current.deleteYearWithMode(tree, nextYear, mode);
+        triggerHistoryAnimation({ type: "delete-year", tree, year: nextYear, mode, direction: "redo" });
+    }, [triggerHistoryAnimation]);
+
     const handleTreeSelectionChange = useCallback((nextTree: string) => {
         setSelectedTree(nextTree);
     }, []);
@@ -266,7 +276,9 @@ export function useHomeWorkspace() {
         deletionMarkers,
         fileName,
         handleDeleteYearWithMode,
+        handleDeleteYearWithModeFromChart,
         handleInsertMissingYearAtSide,
+        handleInsertMissingYearAtSideFromChart,
         handleLoad,
         handleMarkYearRangeAsMissing,
         handleMoveSeriesTailByOffset,

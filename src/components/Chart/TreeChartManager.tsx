@@ -1,19 +1,22 @@
 import React, { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { ChartZoomWindow, MultiLineChart, colorPalette } from './MultiLineChart.tsx'
 import { RwlSiteData } from '@/features/rwl'
+import type { DeleteMode, MissingInsertSide } from '@/features/rwl/edit'
 import { stopMarker } from '@/shared/constants'
 
 // 树种图表管理器。
-// 这个组件负责把当前 RWL 数据拆成“可选树种列表 + 选中后的多折线图”两部分：
+// 这个组件负责把当前 RWL 数据拆成”可选树种列表 + 选中后的多折线图”两部分：
 // 1. 上方按钮区负责树种选择；
 // 2. 下方交给 MultiLineChart 渲染具体曲线。
 // 它本身不改写原始数据，只做筛选和展示。
 
 type Props = {
   fullData: RwlSiteData
+  onInsertMissingYearAtSide?: (tree: string, year: number, side: MissingInsertSide) => void
+  onDeleteYearWithMode?: (tree: string, year: number, mode: DeleteMode) => void
 }
 
-function TreeChartManagerBase({ fullData }: Props) {
+function TreeChartManagerBase({ fullData, onInsertMissingYearAtSide, onDeleteYearWithMode }: Props) {
   const [selectedTrees, setSelectedTrees] = useState<string[]>([])
   const [highlightedTreeCode, setHighlightedTreeCode] = useState<string | null>(null)
   const [treeOffsets, setTreeOffsets] = useState<Map<string, number>>(new Map())
@@ -217,6 +220,8 @@ function TreeChartManagerBase({ fullData }: Props) {
             zoomWindow={zoomWindow}
             onZoomWindowChange={setZoomWindow}
             onShiftHighlightedTree={shiftHighlightedTree}
+            onInsertMissingYearAtSide={onInsertMissingYearAtSide}
+            onDeleteYearWithMode={onDeleteYearWithMode}
           />
         ) : null}
       </div>

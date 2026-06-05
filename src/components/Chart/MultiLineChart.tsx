@@ -15,7 +15,9 @@ import {
   Chart as ChartJSInstance,
   Plugin,
 } from 'chart.js'
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import WidthGridContextMenu from '@/components/WidthContainer/WidthGridContextMenu/WidthGridContextMenu'
+import type { DeleteMode, MissingInsertSide } from '@/features/rwl/edit'
 
 ChartJS.register(
   LineElement,
@@ -63,8 +65,8 @@ const SWATCH_GAP = 6
 const COL_GAP = 16
 const MAX_LABEL_CHARS = 12
 const TOOLTIP_MAX_SERIES = 15
-const Y_AXIS_WIDTH = 72
-const X_AXIS_HEIGHT = 58
+const Y_AXIS_WIDTH = 60
+const X_AXIS_HEIGHT = 38    //底部x轴区域
 const CHART_AREA_RIGHT_PADDING = 2
 const MIN_CHART_AREA_WIDTH = 120
 const GRID_MAJOR_COLOR = '#d9d9d9'
@@ -77,9 +79,9 @@ const X_TICK_LABEL_GAP_PX = 14
 const X_TICK_TARGET_SPACING_PX = 58
 const X_AXIS_TICK_LENGTH = 7
 const X_AXIS_LABEL_Y_OFFSET = 10
-const X_AXIS_TITLE_Y_OFFSET = 36
+const X_AXIS_TITLE_Y_OFFSET = 25    // x轴标题相对于x轴底部的垂直偏移
 const NICE_YEAR_STEPS = [1, 2, 5, 10, 15, 20, 25, 50, 100, 200]
-const LINE_HIT_THRESHOLD_PX = 20
+const LINE_HIT_THRESHOLD_PX = 5   // 鼠标距离折线小于5px时点击选择该折线
 
 type XAxisLabel = {
   index: number
@@ -93,6 +95,15 @@ type XAxisLabel = {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max)
+}
+
+function distToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number) {
+  const dx = bx - ax
+  const dy = by - ay
+  const lenSq = dx * dx + dy * dy
+  if (lenSq === 0) return Math.hypot(px - ax, py - ay)
+  const t = clamp(((px - ax) * dx + (py - ay) * dy) / lenSq, 0, 1)
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
 }
 
 function getNiceYearStep(rawStep: number) {
@@ -336,7 +347,7 @@ const chartBoxBorderPlugin: Plugin<'line'> = {
 
 // 持久化 tooltip 插件：在 canvas 上手绘，鼠标离开后保持显示。
 // 超过 MAX_ROWS_SINGLE_COL 行时自动切换为双列布局。
-function makePersistentTooltipPlugin(): Plugin<'line'> & { activeIndex: number | null } {
+export function makePersistentTooltipPlugin(): Plugin<'line'> & { activeIndex: number | null } {
   return {
     id: 'persistentTooltip',
     activeIndex: null,
@@ -463,6 +474,103 @@ function makePersistentTooltipPlugin(): Plugin<'line'> & { activeIndex: number |
   }
 }
 
+function makeMarkerLinesPlugin(): Plugin<'line'> & { markerIndex: number | null } {
+  return {
+    id: 'markerLines',
+    markerIndex: null,
+
+    afterDatasetsDraw(chart) {
+      if (this.markerIndex == null) return
+      const { ctx, chartArea, scales } = chart
+      const xScale = scales.x
+      if (!xScale) return
+
+      const x = xScale.getPixelForValue(this.markerIndex)
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top)
+      ctx.clip()
+      ctx.strokeStyle = '#444444'
+      ctx.lineWidth = 1.5
+      ctx.setLineDash([])
+      ctx.beginPath()
+      ctx.moveTo(x, chartArea.top)
+      ctx.lineTo(x, chartArea.bottom)
+      ctx.stroke()
+      ctx.restore()
+    },
+
+    afterDraw(chart) {
+      if (this.markerIndex == null) return
+      const { ctx, chartArea, scales, data } = chart
+      const xScale = scales.x
+      if (!xScale) return
+
+      const label = data.labels?.[this.markerIndex] as string | undefined
+      if (!label) return
+
+      const x = xScale.getPixelForValue(this.markerIndex)
+      ctx.save()
+      ctx.font = `bold 13px ${CHART_FONT_FAMILY}`
+      const metrics = ctx.measureText(label)
+      const padX = 6
+      const padY = 3
+      const pillW = metrics.width + padX * 2
+      const pillH = 13 + padY * 2
+      const pillX = clamp(x - pillW / 2, chartArea.left, chartArea.right - pillW)
+      const pillY = chartArea.top - pillH - 4
+
+      ctx.fillStyle = '#444444'
+      ctx.beginPath()
+      ctx.roundRect(pillX, pillY, pillW, pillH, 3)
+      ctx.fill()
+
+      ctx.fillStyle = '#ffffff'
+      ctx.textBaseline = 'alphabetic'
+      ctx.textAlign = 'center'
+      ctx.fillText(label, pillX + pillW / 2, pillY + (pillH + metrics.actualBoundingBoxAscent - metrics.actualBoundingBoxDescent) / 2)
+      ctx.restore()
+    }
+  }
+}
+
+// 左上角年份指示插件：鼠标悬停时在图表左上角显示当前年份，样式与 tooltip 年份一致。
+function makeYearIndicatorPlugin(): Plugin<'line'> & { activeIndex: number | null } {
+  return {
+    id: 'yearIndicator',
+    activeIndex: null,
+
+    afterEvent(chart, args) {
+      const e = args.event
+      if (e.type === 'mousemove' && e.x != null) {
+        const xScale = chart.scales['x']
+        const idx = xScale.getValueForPixel(e.x)
+        if (idx != null && idx >= 0 && idx < chart.data.labels!.length) {
+          this.activeIndex = Math.round(idx)
+          chart.draw()
+        }
+      }
+    },
+
+    afterDraw(chart) {
+      const idx = this.activeIndex
+      if (idx == null) return
+
+      const { ctx, data, chartArea } = chart
+      const label = data.labels?.[idx] as string | undefined
+      if (!label) return
+
+      ctx.save()
+      ctx.font = FONT_BOLD
+      ctx.fillStyle = '#111111'
+      ctx.textBaseline = 'top'
+      ctx.textAlign = 'left'
+      ctx.fillText(label, chartArea.left + 6, chartArea.top + 6)
+      ctx.restore()
+    }
+  }
+}
+
 type Props = {
   data: Map<string, Map<number, number>>
   highlightedTreeCode?: string | null
@@ -470,6 +578,8 @@ type Props = {
   zoomWindow?: { min: number; max: number } | null
   onZoomWindowChange?: (zoomWindow: { min: number; max: number } | null) => void
   onShiftHighlightedTree?: (treeCode: string, direction: -1 | 1) => void
+  onInsertMissingYearAtSide?: (tree: string, year: number, side: MissingInsertSide) => void
+  onDeleteYearWithMode?: (tree: string, year: number, mode: DeleteMode) => void
 }
 
 export type ChartZoomWindow = {
@@ -492,11 +602,16 @@ export function MultiLineChart({
   onHighlightedTreeCodeChange,
   zoomWindow = null,
   onZoomWindowChange,
-  onShiftHighlightedTree
+  onShiftHighlightedTree,
+  onInsertMissingYearAtSide,
+  onDeleteYearWithMode,
 }: Props) {
   const chartRef = useRef<ChartJSInstance<'line'> | null>(null)
   const isDragged = useRef(false)
-  const tooltipPlugin = useMemo(() => makePersistentTooltipPlugin(), [])
+  // const tooltipPlugin = useMemo(() => makePersistentTooltipPlugin(), []) // 暂时屏蔽，恢复时加回 plugins 数组
+  const yearIndicatorPlugin = useMemo(() => makeYearIndicatorPlugin(), [])
+  const markerLinesPlugin = useMemo(() => makeMarkerLinesPlugin(), [])
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tree: string; year: number } | null>(null)
   const treeCodes = useMemo(() => Array.from(data.keys()), [data])
   const highlightedIndex = highlightedTreeCode ? treeCodes.indexOf(highlightedTreeCode) : -1
 
@@ -516,11 +631,18 @@ export function MultiLineChart({
 
   // 汇总所有年份，用作图表横轴。
   const allYears = useMemo(() => {
-    const allYearsSet = new Set<number>()
+    let minYear = Infinity
+    let maxYear = -Infinity
     data.forEach(yearMap => {
-      yearMap.forEach((_, year) => allYearsSet.add(year))
+      yearMap.forEach((_, year) => {
+        if (year < minYear) minYear = year
+        if (year > maxYear) maxYear = year
+      })
     })
-    return Array.from(allYearsSet).sort((a, b) => a - b)
+    if (!Number.isFinite(minYear)) return []
+    const years: number[] = []
+    for (let y = minYear; y <= maxYear; y++) years.push(y)
+    return years
   }, [data])
 
   // 构造 Chart.js datasets。
@@ -610,7 +732,7 @@ export function MultiLineChart({
     layout: {
       // 固定 chartArea 四边距，防止轴尺寸重算时边框抖动
       autoPadding: false,
-      padding: { top: 2, right: 2, bottom: 0, left: 0 },
+      padding: { top: 25, right: 2, bottom: 0, left: 0 },
     },
     interaction: {
       mode: 'index',
@@ -704,6 +826,7 @@ export function MultiLineChart({
           font: { family: CHART_FONT_FAMILY, size: 12 },
           color: '#333',
           padding: 6,
+          callback: (value) => Math.round(Number(value)).toLocaleString(),
         },
         title: {
           display: true,
@@ -730,12 +853,15 @@ export function MultiLineChart({
     emitZoomWindow(chart)
 
     const rect = chart.canvas.getBoundingClientRect()
+    const clickX = (event as React.MouseEvent).clientX - rect.left
     const clickY = (event as React.MouseEvent).clientY - rect.top
+
     if (!Number.isFinite(clickY)) {
       onHighlightedTreeCodeChange?.(null)
       return
     }
 
+    // 先判断是否命中折线
     const elements = chart.getElementsAtEventForMode(
       event as unknown as MouseEvent,
       'index',
@@ -751,36 +877,100 @@ export function MultiLineChart({
     const yScale = chart.scales['y']
     let closestIndex = -1
     let closestDist = LINE_HIT_THRESHOLD_PX
+    const xScale = chart.scales['x']
 
     chart.data.datasets.forEach((ds, i) => {
-      const value = ds.data[dataIndex]
-      if (value == null) return
-      const yPixel = yScale.getPixelForValue(value as number)
-      const dist = Math.abs(yPixel - clickY)
-      if (dist < closestDist) {
-        closestDist = dist
-        closestIndex = i
+      for (const [idxA, idxB] of [[dataIndex - 1, dataIndex], [dataIndex, dataIndex + 1]] as [number, number][]) {
+        const valA = ds.data[idxA]
+        const valB = ds.data[idxB]
+        if (valA == null || valB == null) continue
+        const ax = xScale.getPixelForValue(idxA)
+        const ay = yScale.getPixelForValue(valA as number)
+        const bx = xScale.getPixelForValue(idxB)
+        const by = yScale.getPixelForValue(valB as number)
+        const dist = distToSegment(clickX, clickY, ax, ay, bx, by)
+        if (dist < closestDist) {
+          closestDist = dist
+          closestIndex = i
+        }
       }
     })
 
     if (closestIndex >= 0) {
+      // 命中折线：只高亮，不动标记线
       onHighlightedTreeCodeChange?.(treeCodes[closestIndex] ?? null)
     } else {
+      // 未命中折线：切换标记线，清除高亮
       onHighlightedTreeCodeChange?.(null)
+      const { chartArea } = chart
+      if (clickX >= chartArea.left && clickX <= chartArea.right) {
+        const xScale = chart.scales['x']
+        const rawIdx = xScale.getValueForPixel(clickX)
+        if (rawIdx != null && Number.isFinite(rawIdx)) {
+          const idx = Math.round(clamp(rawIdx, 0, (chart.data.labels?.length ?? 1) - 1))
+          markerLinesPlugin.markerIndex = markerLinesPlugin.markerIndex === idx ? null : idx
+          chart.draw()
+        }
+      }
     }
   }
 
+  const handleContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    if (!highlightedTreeCode || !chartRef.current) return
+
+    const chart = chartRef.current
+    const rect = chart.canvas.getBoundingClientRect()
+    const mouseX = e.clientX - rect.left
+    const mouseY = e.clientY - rect.top
+
+    const { chartArea } = chart
+    if (mouseX < chartArea.left || mouseX > chartArea.right ||
+        mouseY < chartArea.top || mouseY > chartArea.bottom) return
+
+    const xScale = chart.scales['x']
+    const rawIdx = xScale.getValueForPixel(mouseX)
+    if (rawIdx == null || !Number.isFinite(rawIdx)) return
+
+    const yearIndex = Math.round(clamp(rawIdx, 0, allYears.length - 1))
+    const year = allYears[yearIndex]
+    if (year == null) return
+
+    setContextMenu({ x: e.clientX, y: e.clientY, tree: highlightedTreeCode, year })
+  }
+
   return (
-    <div style={{ position: 'relative', height: '100%', minHeight: 0, background: '#fff' }}>
+    <div
+      style={{ position: 'relative', height: '100%', minHeight: 0, background: '#fff' }}
+      onContextMenu={handleContextMenu}
+    >
       <Line
         ref={chartRef}
         data={chartData}
         options={chartOptions}
-        plugins={[fixedChartAreaPlugin, referenceGridPlugin, chartBoxBorderPlugin, xAxisLabelsPlugin, tooltipPlugin]}
+        plugins={[fixedChartAreaPlugin, referenceGridPlugin, markerLinesPlugin, chartBoxBorderPlugin, xAxisLabelsPlugin, /* tooltipPlugin, */ yearIndicatorPlugin]}
         onClick={(event) =>
           handleLineChartClick(event, chartRef.current)
         }
       />
+      {contextMenu && (
+        <WidthGridContextMenu
+          open={true}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          tree={contextMenu.tree}
+          defaultYear={contextMenu.year}
+          onInsert={(tree, year, side) => {
+            onInsertMissingYearAtSide?.(tree, year, side)
+            setContextMenu(null)
+          }}
+          onDelete={(tree, year, mode) => {
+            onDeleteYearWithMode?.(tree, year, mode)
+            setContextMenu(null)
+          }}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   )
 }
