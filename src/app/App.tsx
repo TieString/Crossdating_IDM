@@ -1,6 +1,7 @@
 import "./App.css";
 import { useEffect } from "react";
 import Home from "@/pages/Home";
+import { SettingsProvider } from "@/features/settings/SettingsContext";
 
 const SCROLLBAR_VISIBLE_CLASS = "scrollbar-visible"; 
 const SCROLLBAR_HIDE_DELAY_MS = 3000;
@@ -170,9 +171,11 @@ function App() {
   useAutoHideScrollbars();
 
   return (
-    <main className="app-container">
-      <Home />
-    </main>
+    <SettingsProvider>
+      <main className="app-container">
+        <Home />
+      </main>
+    </SettingsProvider>
   );
 }
 

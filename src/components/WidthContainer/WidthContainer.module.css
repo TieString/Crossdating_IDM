@@ -33,6 +33,10 @@
     color: #b91c1c;
 }
 
+.deletion-preview-ghost-static {
+    animation: none;
+}
+
 .delete-pixel-burst {
     position: absolute;
     z-index: 12;
@@ -98,12 +102,26 @@
     }
 }
 
+/* ── 序列粉碎动画 ─────────────────────────────────────── */
+
+.series-block-annihilating {
+    animation: series-annihilate 900ms ease-out forwards;
+    pointer-events: none;
+}
+
+@keyframes series-annihilate {
+    0%   { opacity: 1; filter: none; }
+    10%  { opacity: 1; filter: saturate(0) brightness(1.05); }
+    100% { opacity: 0; filter: saturate(0) brightness(0.15); }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .deletion-preview-ghost,
     .delete-pixel-burst,
     .delete-pixel-burst-source,
     .delete-pixel-burst-pixel,
-    .delete-pixel-burst-mouth {
+    .delete-pixel-burst-mouth,
+    .series-block-annihilating {
         animation: none;
         transition: none;
     }

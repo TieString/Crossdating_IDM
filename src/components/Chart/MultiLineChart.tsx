@@ -757,7 +757,10 @@ export function MultiLineChart({
         pan: {
           enabled: true,
           mode: 'x',
-          onPanStart: () => { isDragged.current = true },
+          onPanStart: () => {
+            isDragged.current = true;
+            return undefined;
+          },
           onPanComplete: ({ chart }) => { emitZoomWindowRef.current(chart) }
         },
         zoom: {

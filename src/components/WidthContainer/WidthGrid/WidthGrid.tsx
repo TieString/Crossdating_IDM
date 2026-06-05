@@ -29,11 +29,31 @@ type WidthGridMotionConfig = {
     transitionEnd?: TargetAndTransition["transitionEnd"];
 };
 
-const withDelay = (transition: Transition, delaySeconds: number): Transition => (
-    delaySeconds > 0 ? { ...transition, delay: delaySeconds } : transition
+const getAnimationDurationScale = (animationSpeed: number) => (
+    Number.isFinite(animationSpeed) && animationSpeed > 0 ? 1 / animationSpeed : 1
 );
 
-const getMotionConfig = (animationKind: GridAnimationKind | undefined, delaySeconds = 0): WidthGridMotionConfig => {
+const scaleTransitionTiming = (transition: Transition, animationSpeed: number): Transition => {
+    const scale = getAnimationDurationScale(animationSpeed);
+    const next: Transition = { ...transition };
+
+    if (typeof next.duration === "number") {
+        next.duration *= scale;
+    }
+
+    if (typeof next.delay === "number") {
+        next.delay *= scale;
+    }
+
+    return next;
+};
+
+const withDelay = (transition: Transition, delaySeconds: number, animationSpeed: number): Transition => {
+    const delayed = delaySeconds > 0 ? { ...transition, delay: delaySeconds } : transition;
+    return scaleTransitionTiming(delayed, animationSpeed);
+};
+
+const getMotionConfig = (animationKind: GridAnimationKind | undefined, delaySeconds = 0, animationSpeed = 1): WidthGridMotionConfig => {
     switch (animationKind) {
         case "insert-left":
             return {
@@ -50,7 +70,7 @@ const getMotionConfig = (animationKind: GridAnimationKind | undefined, delaySeco
                         "inset 0 0 0 0 rgba(34, 197, 94, 0), 0 0 0 0 rgba(34, 197, 94, 0)",
                     ],
                 },
-                transition: withDelay({ duration: 0.68, ease: "easeOut", times: [0.45, 1] }, delaySeconds),
+                transition: withDelay({ duration: 0.68, ease: "easeOut", times: [0.45, 1] }, delaySeconds, animationSpeed),
                 transitionEnd: { boxShadow: "" },
             };
         case "insert-right":
@@ -68,33 +88,33 @@ const getMotionConfig = (animationKind: GridAnimationKind | undefined, delaySeco
                         "inset 0 0 0 0 rgba(34, 197, 94, 0), 0 0 0 0 rgba(34, 197, 94, 0)",
                     ],
                 },
-                transition: withDelay({ duration: 0.68, ease: "easeOut", times: [0.45, 1] }, delaySeconds),
+                transition: withDelay({ duration: 0.68, ease: "easeOut", times: [0.45, 1] }, delaySeconds, animationSpeed),
                 transitionEnd: { boxShadow: "" },
             };
         case "insert-shift-left":
             return {
                 initial: { x: "calc(100% + 5px)" },
                 animate: { x: 0 },
-                transition: withDelay({ duration: 0.95, ease: [0.16, 1, 0.3, 1] }, delaySeconds),
+                transition: withDelay({ duration: 0.95, ease: [0.16, 1, 0.3, 1] }, delaySeconds, animationSpeed),
             };
         case "insert-shift-right":
             return {
                 initial: { x: "calc(-100% - 5px)" },
                 animate: { x: 0 },
-                transition: withDelay({ duration: 0.95, ease: [0.16, 1, 0.3, 1] }, delaySeconds),
+                transition: withDelay({ duration: 0.95, ease: [0.16, 1, 0.3, 1] }, delaySeconds, animationSpeed),
             };
         case "insert-cross-row-shift-left":
             return {
                 initial: { x: "calc(50% + 2.5px)", opacity: 0 },
                 animate: { x: 0, opacity: 1 },
-                transition: withDelay({ duration: 0.95, ease: [0.16, 1, 0.3, 1] }, delaySeconds),
+                transition: withDelay({ duration: 0.95, ease: [0.16, 1, 0.3, 1] }, delaySeconds, animationSpeed),
                 transitionEnd: { opacity: 1 },
             };
         case "insert-cross-row-shift-right":
             return {
                 initial: { x: "calc(-50% - 2.5px)", opacity: 0 },
                 animate: { x: 0, opacity: 1 },
-                transition: withDelay({ duration: 0.95, ease: [0.16, 1, 0.3, 1] }, delaySeconds),
+                transition: withDelay({ duration: 0.95, ease: [0.16, 1, 0.3, 1] }, delaySeconds, animationSpeed),
                 transitionEnd: { opacity: 1 },
             };
         case "move-target":
@@ -112,7 +132,7 @@ const getMotionConfig = (animationKind: GridAnimationKind | undefined, delaySeco
                         "inset 0 0 0 0 rgba(59, 130, 246, 0), 0 0 0 0 rgba(59, 130, 246, 0)",
                     ],
                 },
-                transition: withDelay({ duration: 0.72, ease: [0.2, 0.8, 0.2, 1], times: [0.62, 1] }, delaySeconds),
+                transition: withDelay({ duration: 0.72, ease: [0.2, 0.8, 0.2, 1], times: [0.62, 1] }, delaySeconds, animationSpeed),
                 transitionEnd: { boxShadow: "" },
             };
         case "move-gap":
@@ -130,7 +150,7 @@ const getMotionConfig = (animationKind: GridAnimationKind | undefined, delaySeco
                         "inset 0 0 0 0 rgba(118, 162, 214, 0), 0 0 0 0 rgba(118, 162, 214, 0)",
                     ],
                 },
-                transition: withDelay({ duration: 0.72, ease: "easeOut", times: [0.55, 1] }, delaySeconds),
+                transition: withDelay({ duration: 0.72, ease: "easeOut", times: [0.55, 1] }, delaySeconds, animationSpeed),
                 transitionEnd: { backgroundColor: "", boxShadow: "" },
             };
         case "overwrite":
@@ -157,7 +177,7 @@ const getMotionConfig = (animationKind: GridAnimationKind | undefined, delaySeco
                         "none",
                     ],
                 },
-                transition: withDelay({ duration: 1.18, ease: "easeInOut", times: [0, 0.18, 0.36, 0.54, 1] }, delaySeconds),
+                transition: withDelay({ duration: 1.18, ease: "easeInOut", times: [0, 0.18, 0.36, 0.54, 1] }, delaySeconds, animationSpeed),
                 transitionEnd: { boxShadow: "", textShadow: "" },
             };
         default:
@@ -177,6 +197,7 @@ type WidthGridProps = Omit<React.HTMLAttributes<HTMLSpanElement>, MotionReserved
     dragYearOffset?: number;
     animationKind?: GridAnimationKind;
     animationDelay?: number;
+    animationSpeed?: number;
     hasLeftDeletionMark?: boolean;
     hasRightDeletionMark?: boolean;
     rightDeletionMarkerYear?: number;
@@ -202,6 +223,7 @@ export default function WidthGrid({
     dragYearOffset = 0,
     animationKind,
     animationDelay = 0,
+    animationSpeed = 1,
     hasLeftDeletionMark = false,
     hasRightDeletionMark = false,
     rightDeletionMarkerYear,
@@ -343,7 +365,7 @@ export default function WidthGrid({
     const plusButtonClassName = hoverPlusSide
         ? `${style["insert-missing-button"]} ${style[`insert-missing-button-${hoverPlusSide}`]} ${style["insert-missing-button-visible"]}`
         : style["insert-missing-button"];
-    const motionConfig = shouldReduceMotion ? {} : getMotionConfig(animationKind, animationDelay);
+    const motionConfig = shouldReduceMotion ? {} : getMotionConfig(animationKind, animationDelay, animationSpeed);
     const motionAnimate = motionConfig.animate && motionConfig.transitionEnd
         ? { ...motionConfig.animate, transitionEnd: motionConfig.transitionEnd }
         : motionConfig.animate;
@@ -389,7 +411,7 @@ export default function WidthGrid({
             />
         )
         : rollingDigits && typeof displayedValue === "number"
-            ? <RollingNumber value={displayedValue} fromValue={rollingFromValue} />
+            ? <RollingNumber value={displayedValue} fromValue={rollingFromValue} speed={animationSpeed} />
             : displayedValue;
 
     return (

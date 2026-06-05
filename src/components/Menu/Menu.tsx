@@ -7,16 +7,18 @@ import styles from './Menu.module.css';
 // 菜单本身不处理业务逻辑，只负责显示、展开和点击协调。
 
 interface MenuProps {
-  items: { label: string; onClick?: () => void; children?: React.ReactNode }[];
+  items: { label: string; onClick?: () => void | Promise<void>; children?: React.ReactNode }[];
 }
 
 const Menu: React.FC<MenuProps> = ({ items }) => {
   const [activeMenuItem, setActiveMenuItem] = useState<string | null>(null);
   
-  const handleMenuClick = (onClick?: () => void, hasChildren?: boolean) => {
+  const handleMenuClick = (onClick?: () => void | Promise<void>, hasChildren?: boolean) => {
     // 如果有 onClick（没有子菜单的项），执行 onClick 并关闭菜单
     if (onClick && !hasChildren) {
-      onClick();
+      void Promise.resolve(onClick()).catch((error) => {
+        console.error("Menu action failed:", error);
+      });
       setActiveMenuItem(null);
     }
   };

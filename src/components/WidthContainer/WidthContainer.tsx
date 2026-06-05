@@ -8,6 +8,8 @@ import WidthGrid from './WidthGrid/WidthGrid';
 import WidthGridContextMenu from './WidthGridContextMenu/WidthGridContextMenu';
 import style from "./WidthContainer.module.css";
 import { stopMarker } from '@/shared/constants';
+import { useSettings } from "@/features/settings/SettingsContext";
+import { normalizeAnimationSpeed } from "@/features/settings/settings";
 
 interface YearCell {
     year: number;
@@ -45,6 +47,11 @@ const SHIFT_STAGGER_SECONDS = 0.008;
 const ANIMATION_PLAN_CLEAR_PADDING_MS = 360;
 const DELETE_BURST_ANIMATION_MS = 820;
 const DELETE_BURST_SWEEP_MS = 420;
+const SERIES_DELETE_ANIMATION_MS = 900;
+
+const scaleAnimationMs = (durationMs: number, animationSpeed: number) => (
+    Math.max(1, Math.round(durationMs / animationSpeed))
+);
 
 type PlusSide = "left" | "right";
 type WidthHistoryAnimation = RwlHistoryAnimation & { id: number };
@@ -244,15 +251,15 @@ const buildCrossRowGhostCells = (
         .filter((cell): cell is InsertFlipCell => cell !== null)
 );
 
-const getAnimationPlanTimeoutMs = (plan: GridAnimationPlan) => {
+const getAnimationPlanTimeoutMs = (plan: GridAnimationPlan, animationSpeed: number) => {
     const maxShiftDelaySeconds = plan.shiftedCells.reduce(
         (maxDelay, cell) => Math.max(maxDelay, cell.delaySeconds),
         0
     );
 
     return Math.max(
-        2400,
-        Math.ceil(maxShiftDelaySeconds * 1000) + INSERT_SHIFT_ANIMATION_MS + ANIMATION_PLAN_CLEAR_PADDING_MS
+        scaleAnimationMs(2400, animationSpeed),
+        scaleAnimationMs(Math.ceil(maxShiftDelaySeconds * 1000) + INSERT_SHIFT_ANIMATION_MS + ANIMATION_PLAN_CLEAR_PADDING_MS, animationSpeed)
     );
 };
 
@@ -413,7 +420,7 @@ const getUsableCssColor = (color: string, fallback: string) => (
     isTransparentColor(color.trim()) ? fallback : color
 );
 
-const createDeletePixelBurst = (container: HTMLElement, sourceElement: HTMLElement) => {
+const createDeletePixelBurst = (container: HTMLElement, sourceElement: HTMLElement, animationSpeed = 1) => {
     const containerRect = container.getBoundingClientRect();
     const sourceRect = sourceElement.getBoundingClientRect();
 
@@ -467,18 +474,18 @@ const createDeletePixelBurst = (container: HTMLElement, sourceElement: HTMLEleme
             { opacity: 1 },
             { opacity: 0 },
         ], {
-            duration: 180,
+            duration: scaleAnimationMs(180, animationSpeed),
             easing: "ease-out",
             fill: "forwards",
         }));
-        timerId = window.setTimeout(finish, 220);
+        timerId = window.setTimeout(finish, scaleAnimationMs(220, animationSpeed));
     } else {
         animations.push(sourceGhost.animate([
             { clipPath: "inset(0 0 0 0)", opacity: 1, transform: "scale(1)" },
             { clipPath: "inset(0 0 0 58%)", opacity: 0.74, transform: "scale(0.98)", offset: 0.46 },
             { clipPath: "inset(0 0 0 100%)", opacity: 0.08, transform: "scale(0.92)" },
         ], {
-            duration: DELETE_BURST_SWEEP_MS,
+            duration: scaleAnimationMs(DELETE_BURST_SWEEP_MS, animationSpeed),
             easing: "cubic-bezier(0.3, 0, 0.2, 1)",
             fill: "forwards",
         }));
@@ -494,7 +501,7 @@ const createDeletePixelBurst = (container: HTMLElement, sourceElement: HTMLEleme
             { opacity: 1, transform: `translate(${sourceRect.width * 0.62}px, -50%) scale(1.04)`, offset: 0.7 },
             { opacity: 0, transform: `translate(${sourceRect.width + sourceRect.height * 0.62}px, -50%) scale(0.82)` },
         ], {
-            duration: DELETE_BURST_SWEEP_MS + 80,
+            duration: scaleAnimationMs(DELETE_BURST_SWEEP_MS + 80, animationSpeed),
             easing: "cubic-bezier(0.22, 1, 0.36, 1)",
             fill: "forwards",
         }));
@@ -512,8 +519,8 @@ const createDeletePixelBurst = (container: HTMLElement, sourceElement: HTMLEleme
                 const top = row * particleHeight;
                 const rowDrift = row - (rows - 1) / 2;
                 const columnDrift = column - (columns - 1) / 2;
-                const delay = column * 34 + row * 12 + Math.random() * 38;
-                const duration = 430 + Math.random() * 260;
+                const delay = scaleAnimationMs(column * 34 + row * 12 + Math.random() * 38, animationSpeed);
+                const duration = scaleAnimationMs(430 + Math.random() * 260, animationSpeed);
                 const dx = 14 + column * 2.2 + Math.random() * 38;
                 const dy = rowDrift * (13 + Math.random() * 9) + (Math.random() - 0.5) * 14;
                 const rotate = columnDrift * 18 + (Math.random() - 0.5) * 110;
@@ -541,7 +548,7 @@ const createDeletePixelBurst = (container: HTMLElement, sourceElement: HTMLEleme
             }
         }
 
-        timerId = window.setTimeout(finish, Math.max(DELETE_BURST_ANIMATION_MS, maxParticleEnd) + 80);
+        timerId = window.setTimeout(finish, Math.max(scaleAnimationMs(DELETE_BURST_ANIMATION_MS, animationSpeed), maxParticleEnd) + scaleAnimationMs(80, animationSpeed));
     }
 
     return () => {
@@ -709,6 +716,7 @@ type WidthContainerProps = {
     masterSeries?: Map<number, number>,
     selected?: string,
     historyAnimation?: WidthHistoryAnimation | null,
+    deleteSeriesRequest?: { id: number; tree: string } | null,
     deletionMarkers?: RwlDeletionMarkers,
     onYearClick?: (tree: string, year: number) => void,
     onInsertMissingYearAtSide?: (tree: string, year: number, side: PlusSide) => void,
@@ -717,6 +725,7 @@ type WidthContainerProps = {
     onMarkYearRangeAsMissing?: (tree: string, startYear: number, endYear: number) => void,
     onRestoreDeletion?: (tree: string, markerYear: number, index: number) => void,
     onDeleteSeries?: (tree: string) => void,
+    onDeleteSeriesRequestHandled?: (id: number) => void,
     scrollContainerRef?: RefObject<HTMLElement | null>
 };
 
@@ -729,7 +738,116 @@ interface ContextMenuState {
     y: number;
 }
 
-function WidthContainer({ siteData: site, masterSeries, selected, historyAnimation, deletionMarkers, onYearClick, onInsertMissingYearAtSide, onMoveSeriesTailByOffset, onDeleteYearWithMode, onMarkYearRangeAsMissing, onRestoreDeletion, onDeleteSeries, scrollContainerRef }: WidthContainerProps): ReactNode {
+function createSeriesShatterAnimation(rect: { left: number; top: number; width: number; height: number }, animationSpeed = 1): () => void {
+    const COLS = 24;
+    const ROWS = Math.max(3, Math.round((rect.height / rect.width) * COLS * 2.4));
+    const tileW = rect.width / COLS;
+    const tileH = rect.height / ROWS;
+
+    // overflow:hidden 让向上飞出容器顶部的碎片被裁切，形成"顶部压碎"视觉
+    const container = document.createElement("div");
+    Object.assign(container.style, {
+        position: "fixed",
+        left: `${rect.left}px`,
+        top: `${rect.top}px`,
+        width: `${rect.width}px`,
+        height: `${rect.height}px`,
+        pointerEvents: "none",
+        zIndex: "50",
+        overflow: "hidden",
+    });
+    document.body.appendChild(container);
+
+    const animations: Animation[] = [];
+
+    // 所有碎片向上飞，汇聚压碎于容器顶部内侧
+    const crushCenterY = tileH * 0.5;
+
+    for (let row = 0; row < ROWS; row++) {
+        for (let col = 0; col < COLS; col++) {
+            const tile = document.createElement("div");
+
+            const rowT = row / Math.max(1, ROWS - 1); // 0=顶部, 1=底部
+            const colT = col / Math.max(1, COLS - 1);
+
+            // 每块碎片中心的起始 Y，向上运动到 crushCenterY（负值 = 向上）
+            const startCenterY = row * tileH + tileH / 2;
+            const riseY = crushCenterY - startCenterY; // 负数，向上
+
+            // 水平轻微抖动
+            const jitterX = (Math.random() - 0.5) * 10;
+
+            // 延迟：底部行最先响应（下方力量最先到达），从下到上依次激活
+            // rowT=1(底部) delay≈85ms，rowT=0(顶部) delay≈140ms
+            const delay = scaleAnimationMs(85 + (1 - rowT) * 15 + colT * 18 + Math.random() * 30, animationSpeed);
+
+            // 上升时长：底部行上升距离最长，时长最长
+            const riseDuration = scaleAnimationMs(140 + rowT * 220, animationSpeed); // 底部360ms，顶部140ms
+            const squishDuration = scaleAnimationMs(60, animationSpeed);
+            const fadeDuration = scaleAnimationMs(100, animationSpeed);
+            const totalDuration = riseDuration + squishDuration + fadeDuration;
+
+            const riseEnd = riseDuration / totalDuration;
+            const squishEnd = (riseDuration + squishDuration) / totalDuration;
+
+            const gray = Math.floor(90 + Math.random() * 130);
+            const alpha = 0.7 + Math.random() * 0.25;
+
+            Object.assign(tile.style, {
+                position: "absolute",
+                left: `${col * tileW}px`,
+                top: `${row * tileH}px`,
+                width: `${tileW + 0.5}px`,
+                height: `${tileH + 0.5}px`,
+                background: `rgba(${gray}, ${gray}, ${gray}, ${alpha})`,
+                borderRadius: "1px",
+                transformOrigin: "center center",
+            });
+            container.appendChild(tile);
+
+            const anim = tile.animate(
+                [
+                    // 起始：原位，下方力量开始上推
+                    {
+                        transform: "translate(0, 0) scaleX(1) scaleY(1)",
+                        opacity: alpha,
+                        offset: 0,
+                        easing: "cubic-bezier(0.4, 0, 1, 1)", // 加速上冲
+                    },
+                    // 撞上顶部压碎区
+                    {
+                        transform: `translate(${jitterX}px, ${riseY}px) scaleX(1) scaleY(1)`,
+                        opacity: alpha,
+                        offset: riseEnd,
+                        easing: "linear",
+                    },
+                    // 被顶部压扁：横向扩散，纵向消失
+                    {
+                        transform: `translate(${jitterX}px, ${riseY}px) scaleX(2.4) scaleY(0.06)`,
+                        opacity: alpha * 0.4,
+                        offset: squishEnd,
+                        easing: "ease-out",
+                    },
+                    // 消散
+                    {
+                        transform: `translate(${jitterX}px, ${riseY}px) scaleX(2.8) scaleY(0)`,
+                        opacity: 0,
+                        offset: 1,
+                    },
+                ],
+                { duration: totalDuration, delay, fill: "both" },
+            );
+            animations.push(anim);
+        }
+    }
+
+    return () => {
+        animations.forEach((a) => { try { a.cancel(); } catch { /* ignore */ } });
+        container.remove();
+    };
+}
+
+function WidthContainer({ siteData: site, masterSeries, selected, historyAnimation, deleteSeriesRequest, deletionMarkers, onYearClick, onInsertMissingYearAtSide, onMoveSeriesTailByOffset, onDeleteYearWithMode, onMarkYearRangeAsMissing, onRestoreDeletion, onDeleteSeries, onDeleteSeriesRequestHandled, scrollContainerRef }: WidthContainerProps): ReactNode {
     const visibleSite = useMemo(() => (
         selected && site.has(selected)
             ? (() => {
@@ -746,6 +864,9 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
     const [animationPlan, setAnimationPlan] = useState<GridAnimationPlan | null>(null);
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
     const [hoveredMarker, setHoveredMarker] = useState<DeletionHoverState | null>(null);
+    const [deletingTree, setDeletingTree] = useState<string | null>(null);
+    const seriesBlockRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+    const seriesDeleteCleanupRef = useRef<(() => void) | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
     const interactionRef = useRef<GridInteraction | null>(null);
     const animationPlanIdRef = useRef(0);
@@ -754,6 +875,23 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
     const insertAnimationCleanupRef = useRef<Array<() => void>>([]);
     const deleteBurstCleanupRef = useRef<Array<() => void>>([]);
     const previousVisibleSiteRef = useRef<RwlSiteData | null>(null);
+
+    const { settings } = useSettings();
+    const {
+        enabled: animationSwitch,
+        deleteSeries: deleteSeriesAnim,
+        deleteYear: deleteYearAnim,
+        insertYear: insertYearAnim,
+        historyAnim: historyAnimSetting,
+        speed: rawAnimationSpeed,
+    } = settings.animation;
+    const animationSpeed = normalizeAnimationSpeed(rawAnimationSpeed);
+    const seriesDeleteAnimationMs = scaleAnimationMs(SERIES_DELETE_ANIMATION_MS, animationSpeed);
+    const animationsEnabled = animationSwitch === "enabled";
+    const shouldAnimateHistory = animationsEnabled && historyAnimSetting === "enabled";
+    const shouldAnimateInsertYear = animationsEnabled && insertYearAnim !== "none";
+    const shouldAnimateDeleteYear = animationsEnabled && deleteYearAnim !== "none";
+    const shouldAnimateDeleteSeries = animationsEnabled && deleteSeriesAnim !== "none";
 
     const showAnimationPlan = useCallback((plan: GridAnimationPlanInput) => {
         animationPlanIdRef.current += 1;
@@ -775,6 +913,20 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
         deleteBurstCleanupRef.current.forEach((cleanup) => cleanup());
         deleteBurstCleanupRef.current = [];
     }, []);
+
+    useEffect(() => {
+        if (animationsEnabled) {
+            return;
+        }
+
+        pendingInsertFlipRef.current = null;
+        clearInsertAnimations();
+        clearDeleteBurstAnimations();
+        seriesDeleteCleanupRef.current?.();
+        seriesDeleteCleanupRef.current = null;
+        setAnimationPlan(null);
+        setDeletingTree(null);
+    }, [animationsEnabled, clearDeleteBurstAnimations, clearInsertAnimations]);
 
     const renderSite = useMemo(() => {
         if (!dragPreview?.hasMoved || dragPreview.yearOffset === 0) {
@@ -851,7 +1003,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
     }, [renderSelection]);
 
     const animationLookup = useMemo(() => {
-        if (!animationPlan) {
+        if (!animationsEnabled || !animationPlan) {
             return null;
         }
 
@@ -872,7 +1024,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
             rollingCells: new Map(animationPlan.rollingCells.map((cell) => [cell.year, cell.fromValue])),
             elevatedYears: new Set(animationPlan.elevatedYears),
         };
-    }, [animationPlan]);
+    }, [animationsEnabled, animationPlan]);
 
     const getGridAnimationKind = useCallback((tree: string, year: number): GridAnimationKind | undefined => {
         if (!animationLookup || animationLookup.tree !== tree) {
@@ -948,12 +1100,12 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
 
         const timerId = window.setTimeout(() => {
             setAnimationPlan((previous) => previous?.id === animationPlan.id ? null : previous);
-        }, getAnimationPlanTimeoutMs(animationPlan));
+        }, getAnimationPlanTimeoutMs(animationPlan, animationSpeed));
 
         return () => {
             window.clearTimeout(timerId);
         };
-    }, [animationPlan]);
+    }, [animationPlan, animationSpeed]);
 
     useEffect(() => {
         setSelection((previous) => (
@@ -973,6 +1125,8 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
         handledHistoryAnimationIdRef.current = historyAnimation.id;
         pendingInsertFlipRef.current = null;
         clearInsertAnimations();
+
+        if (!shouldAnimateHistory) return;
 
         if (historyAnimation.type === "insert-missing") {
             const sourceElements = containerRef.current
@@ -1065,7 +1219,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                 });
             }
         }
-    }, [buildDeleteHistoryRollingTargets, clearInsertAnimations, historyAnimation, showAnimationPlan]);
+    }, [buildDeleteHistoryRollingTargets, clearInsertAnimations, historyAnimation, showAnimationPlan, shouldAnimateHistory]);
 
     useLayoutEffect(() => {
         previousVisibleSiteRef.current = visibleSite;
@@ -1108,9 +1262,9 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                 { opacity: 0.42, transform: `translateX(${exitDistance * 0.6}px)`, offset: 0.46 },
                 { opacity: 0, transform: `translateX(${exitDistance}px)` },
             ], {
-                duration: INSERT_SHIFT_ANIMATION_MS,
+                duration: scaleAnimationMs(INSERT_SHIFT_ANIMATION_MS, animationSpeed),
                 easing: INSERT_SHIFT_EASING,
-                delay: cell.delaySeconds * 1000,
+                delay: scaleAnimationMs(cell.delaySeconds * 1000, animationSpeed),
             });
             let isDone = false;
             const finish = () => {
@@ -1136,7 +1290,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
         pendingInsertFlip.cells.forEach(createSourceExitGhost);
 
         insertAnimationCleanupRef.current = cleanups;
-    }, [animationPlan?.id, clearInsertAnimations, visibleSite]);
+    }, [animationPlan?.id, animationSpeed, clearInsertAnimations, visibleSite]);
 
     useEffect(() => () => {
         clearInsertAnimations();
@@ -1330,27 +1484,39 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
             const order = info.deleteOrder ?? index;
             return order > bestOrder ? index : bestIndex;
         }, 0);
+        setHoveredMarker(null);
+
+        if (!shouldAnimateHistory) {
+            onRestoreDeletion?.(tree, markerYear, latestIndex);
+            return;
+        }
+
         const shiftedYears = getRestoreShiftedYears(tree, markerYear);
         const rollingCells = buildRestoreRollingCells(tree, markerYear, latestIndex);
-        setHoveredMarker(null);
         flushSync(() => {
             onRestoreDeletion?.(tree, markerYear, latestIndex);
             triggerRestoreAnimation(tree, markerYear, shiftedYears, rollingCells);
         });
-    }, [onRestoreDeletion, deletionMarkers, getRestoreShiftedYears, buildRestoreRollingCells, triggerRestoreAnimation]);
+    }, [onRestoreDeletion, deletionMarkers, shouldAnimateHistory, getRestoreShiftedYears, buildRestoreRollingCells, triggerRestoreAnimation]);
 
     // 双击具体 ghost：恢复栈中指定那条删除。
     const handleGhostDoubleClick = useCallback((tree: string, markerYear: number, index: number) => {
         const info = deletionMarkers?.get(tree)?.get(markerYear)?.[index];
         if (!info) return;
+        setHoveredMarker(null);
+
+        if (!shouldAnimateHistory) {
+            onRestoreDeletion?.(tree, markerYear, index);
+            return;
+        }
+
         const shiftedYears = getRestoreShiftedYears(tree, markerYear);
         const rollingCells = buildRestoreRollingCells(tree, markerYear, index);
-        setHoveredMarker(null);
         flushSync(() => {
             onRestoreDeletion?.(tree, markerYear, index);
             triggerRestoreAnimation(tree, markerYear, shiftedYears, rollingCells);
         });
-    }, [onRestoreDeletion, deletionMarkers, getRestoreShiftedYears, buildRestoreRollingCells, triggerRestoreAnimation]);
+    }, [onRestoreDeletion, deletionMarkers, shouldAnimateHistory, getRestoreShiftedYears, buildRestoreRollingCells, triggerRestoreAnimation]);
 
     // 纯 opt-in：只有被 handler 明确标记过的格子才使用 RollingNumber。
     // 不再基于 marker 邻接自动启用，避免拖动预览时不相关的格子跟着跳动。
@@ -1363,6 +1529,11 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
     ), [animationLookup]);
 
     const handleInsertMissingYearAtSide = useCallback((tree: string, year: number, side: PlusSide) => {
+        if (!shouldAnimateInsertYear) {
+            onInsertMissingYearAtSide?.(tree, year, side);
+            return;
+        }
+
         const treeData = visibleSite.get(tree);
         const container = containerRef.current;
         let shiftedYears: number[] = [];
@@ -1406,7 +1577,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                 overwrittenYears: [],
             });
         });
-    }, [onInsertMissingYearAtSide, showAnimationPlan, visibleSite]);
+    }, [onInsertMissingYearAtSide, showAnimationPlan, visibleSite, shouldAnimateInsertYear]);
 
     const clearSelection = useCallback(() => {
         interactionRef.current = null;
@@ -1488,6 +1659,11 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
     }, [handleInsertMissingYearAtSide]);
 
     const handleContextMenuDelete = useCallback((tree: string, year: number, mode: DeleteMode) => {
+        if (!shouldAnimateDeleteYear) {
+            onDeleteYearWithMode?.(tree, year, mode);
+            return;
+        }
+
         const treeData = visibleSite.get(tree);
         const container = containerRef.current;
         let shiftedYears: number[] = [];
@@ -1537,7 +1713,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
 
             if (deletedElement) {
                 clearDeleteBurstAnimations();
-                const cleanup = createDeletePixelBurst(container, deletedElement);
+                const cleanup = createDeletePixelBurst(container, deletedElement, animationSpeed);
                 if (cleanup) {
                     deleteBurstCleanupRef.current = [cleanup];
                 }
@@ -1568,7 +1744,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                 elevatedYears,
             });
         });
-    }, [clearDeleteBurstAnimations, onDeleteYearWithMode, showAnimationPlan, visibleSite]);
+    }, [animationSpeed, clearDeleteBurstAnimations, onDeleteYearWithMode, showAnimationPlan, visibleSite, shouldAnimateDeleteYear]);
 
     const handleContextMenuDeleteRange = useCallback((tree: string, startYear: number, endYear: number) => {
         const nextSelection = normalizeSelection(tree, startYear, endYear);
@@ -1582,9 +1758,80 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
     }, [clearDeleteBurstAnimations, clearInsertAnimations, onMarkYearRangeAsMissing]);
 
     const handleContextMenuDeleteSeries = useCallback((tree: string) => {
-        onDeleteSeries?.(tree);
         setContextMenu(null);
-    }, [onDeleteSeries]);
+        if (!shouldAnimateDeleteSeries) {
+            onDeleteSeries?.(tree);
+            return;
+        }
+        const el = seriesBlockRefs.current.get(tree);
+        if (!el) {
+            onDeleteSeries?.(tree);
+            return;
+        }
+        if (deleteSeriesAnim === "shatter-rise") {
+            const rect = el.getBoundingClientRect();
+            seriesDeleteCleanupRef.current?.();
+            seriesDeleteCleanupRef.current = createSeriesShatterAnimation(
+                { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+                animationSpeed,
+            );
+        }
+        setDeletingTree(tree);
+    }, [animationSpeed, onDeleteSeries, deleteSeriesAnim, shouldAnimateDeleteSeries]);
+
+    useEffect(() => {
+        if (!deleteSeriesRequest) {
+            return;
+        }
+
+        handleContextMenuDeleteSeries(deleteSeriesRequest.tree);
+        onDeleteSeriesRequestHandled?.(deleteSeriesRequest.id);
+    }, [deleteSeriesRequest, handleContextMenuDeleteSeries, onDeleteSeriesRequestHandled]);
+
+    useEffect(() => {
+        if (!deletingTree) return;
+        const timer = setTimeout(() => {
+            seriesDeleteCleanupRef.current?.();
+            seriesDeleteCleanupRef.current = null;
+            onDeleteSeries?.(deletingTree);
+            setDeletingTree(null);
+        }, seriesDeleteAnimationMs);
+        return () => {
+            clearTimeout(timer);
+            seriesDeleteCleanupRef.current?.();
+            seriesDeleteCleanupRef.current = null;
+        };
+    }, [deletingTree, onDeleteSeries, seriesDeleteAnimationMs]);
+
+    // 同步压缩序列块的高度，让布局跟随动画收缩（下方序列平滑上移）
+    useLayoutEffect(() => {
+        if (!deletingTree) return;
+        const el = seriesBlockRefs.current.get(deletingTree);
+        if (!el) return;
+
+        const currentHeight = el.getBoundingClientRect().height;
+        el.style.height = `${currentHeight}px`;
+        el.style.overflow = "hidden";
+
+        let raf1: number;
+        let raf2: number;
+        raf1 = requestAnimationFrame(() => {
+            raf2 = requestAnimationFrame(() => {
+                el.style.transition = `height ${seriesDeleteAnimationMs}ms cubic-bezier(0.6, 0, 1, 1), margin-top ${seriesDeleteAnimationMs}ms cubic-bezier(0.6, 0, 1, 1)`;
+                el.style.height = "0";
+                el.style.marginTop = "0";
+            });
+        });
+
+        return () => {
+            cancelAnimationFrame(raf1);
+            cancelAnimationFrame(raf2);
+            el.style.height = "";
+            el.style.overflow = "";
+            el.style.transition = "";
+            el.style.marginTop = "";
+        };
+    }, [deletingTree, seriesDeleteAnimationMs]);
 
     const handleContextMenuPreviewYearChange = useCallback((tree: string, year: number) => {
         setSelection(normalizeSelection(tree, year, year));
@@ -1741,14 +1988,16 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
             flushSync(() => {
                 onMoveSeriesTailByOffset?.(interaction.tree, interaction.startYear, interaction.endYear, interaction.yearOffset);
                 setSelection(targetSelection);
-                showAnimationPlan({
-                    tree: interaction.tree,
-                    insertedYears: [],
-                    shiftedYears: [],
-                    movedYears,
-                    gapYears,
-                    overwrittenYears,
-                });
+                if (animationsEnabled) {
+                    showAnimationPlan({
+                        tree: interaction.tree,
+                        insertedYears: [],
+                        shiftedYears: [],
+                        movedYears,
+                        gapYears,
+                        overwrittenYears,
+                    });
+                }
             });
         };
 
@@ -1769,7 +2018,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
             window.removeEventListener("pointercancel", handlePointerUp);
             window.removeEventListener("keydown", handleKeyDown);
         };
-    }, [clearSelection, onMoveSeriesTailByOffset, showAnimationPlan, visibleSite]);
+    }, [animationsEnabled, clearSelection, onMoveSeriesTailByOffset, showAnimationPlan, visibleSite]);
 
     useEffect(() => {
         const scrollContainer = scrollContainerRef?.current;
@@ -1854,7 +2103,11 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
 
             {visibleSeries.map((series, seriesIndex) => (
                 <div
-                    className={style["series-block"]}
+                    ref={(el) => {
+                        if (el) seriesBlockRefs.current.set(series.treeCode, el);
+                        else seriesBlockRefs.current.delete(series.treeCode);
+                    }}
+                    className={`${style["series-block"]}${deletingTree === series.treeCode ? ` ${style["series-block-annihilating"]}` : ""}`}
                     key={series.treeCode}
                     style={seriesIndex > 0 ? { marginTop: `${SERIES_GAP}px` } : undefined}
                 >
@@ -1919,6 +2172,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                                             dragYearOffset={dragYearOffset}
                                             animationKind={cellAnimationKind}
                                             animationDelay={cellAnimationDelay}
+                                            animationSpeed={animationSpeed}
                                             hasLeftDeletionMark={hasLeftDeletionMark}
                                             hasRightDeletionMark={hasRightDeletionMark}
                                             rightDeletionMarkerYear={rightDeletionMarkerYear}
@@ -1961,6 +2215,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                                         dragYearOffset={dragYearOffset}
                                         animationKind={cellAnimationKind}
                                         animationDelay={cellAnimationDelay}
+                                        animationSpeed={animationSpeed}
                                         hasLeftDeletionMark={hasLeftDeletionMark}
                                         hasRightDeletionMark={hasRightDeletionMark}
                                         rightDeletionMarkerYear={rightDeletionMarkerYear}
@@ -2013,7 +2268,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                     return (
                         <div
                             key={`${item.year}-${index}`}
-                            className={style["deletion-preview-ghost"]}
+                            className={`${style["deletion-preview-ghost"]} ${animationsEnabled ? "" : style["deletion-preview-ghost-static"]}`}
                             style={{
                                 position: "fixed",
                                 zIndex: 2147483647,
@@ -2035,12 +2290,13 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                         >
                             {info.deletedWidth === null
                                 ? <span>missing</span>
-                                : <RollingNumber value={info.deletedWidth} />}
+                                : <RollingNumber value={info.deletedWidth} speed={animationSpeed} />}
                         </div>
                     );
                 }),
                 document.body,
             ) : null}
+
 
             <WidthGridContextMenu
                 open={contextMenu !== null}

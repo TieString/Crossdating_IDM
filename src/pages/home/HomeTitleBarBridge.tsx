@@ -19,6 +19,7 @@ type HomeTitleBarBridgeProps = {
     onRedo: () => void | Promise<void>;
     onCofechaVersionChange: (version: CofechaVersion) => void;
     onActiveMenuChange?: (menu: TitleMenuKind | null) => void;
+    onOpenSettings?: () => void | Promise<void>;
 };
 
 type MenuElements = {
@@ -43,6 +44,7 @@ export function HomeTitleBarBridge({
     onRedo,
     onCofechaVersionChange,
     onActiveMenuChange,
+    onOpenSettings,
 }: HomeTitleBarBridgeProps) {
     const [activeMenu, setActiveMenu] = useState<TitleMenuKind | null>(null);
     const [menuElements, setMenuElements] = useState<MenuElements>(EMPTY_MENU_ELEMENTS);
@@ -81,7 +83,8 @@ export function HomeTitleBarBridge({
         { label: "\u6253\u5f00\u6587\u4ef6", onClick: closeAnd(onLoad) },
         { label: "\u4fdd\u5b58", onClick: closeAnd(onSave) },
         { label: "\u53e6\u5b58\u4e3a", onClick: closeAnd(onSaveAs) },
-    ]), [closeAnd, onLoad, onSave, onSaveAs]);
+        { label: "\u8bbe\u7f6e", onClick: closeAnd(onOpenSettings) },
+    ]), [closeAnd, onLoad, onSave, onSaveAs, onOpenSettings]);
 
     const editItems = useMemo<MenuItem[]>(() => ([
         { label: "\u64a4\u9500", onClick: closeAnd(onUndo) },

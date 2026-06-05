@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import style from "./RollingNumber.module.css";
 
 interface RollingNumberProps {
@@ -6,17 +6,24 @@ interface RollingNumberProps {
     fromValue?: string | number | null;
     placeholder?: string;
     stagger?: number;
+    speed?: number;
 }
 
 interface RollingDigitProps {
     digit: number;
     delay: number;
     initialDigit?: number;
+    durationMs: number;
 }
 
 const DIGITS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+const DEFAULT_ROLL_DURATION_MS = 2000;
 
-function RollingDigit({ digit, delay, initialDigit }: RollingDigitProps) {
+const normalizeAnimationSpeed = (speed: number) => (
+    Number.isFinite(speed) && speed > 0 ? speed : 1
+);
+
+function RollingDigit({ digit, delay, initialDigit, durationMs }: RollingDigitProps) {
     const [display, setDisplay] = useState(initialDigit ?? digit);
     const isFirst = useRef(true);
 
@@ -45,7 +52,10 @@ function RollingDigit({ digit, delay, initialDigit }: RollingDigitProps) {
         <span className={style.digit}>
             <span
                 className={style["digit-reel"]}
-                style={{ transform: `translateY(-${display * 1.2}em)` }}
+                style={{
+                    transform: `translateY(-${display * 1.2}em)`,
+                    "--rolling-duration": `${durationMs}ms`,
+                } as CSSProperties}
             >
                 {DIGITS.map((d) => (
                     <span key={d}>{d}</span>
@@ -55,11 +65,14 @@ function RollingDigit({ digit, delay, initialDigit }: RollingDigitProps) {
     );
 }
 
-export function RollingNumber({ value, fromValue, placeholder = "-", stagger = 60 }: RollingNumberProps) {
+export function RollingNumber({ value, fromValue, placeholder = "-", stagger = 60, speed = 1 }: RollingNumberProps) {
     if (value === null || value === undefined || value === "") {
         return <span className={`${style.rolling} ${style.placeholder}`}>{placeholder}</span>;
     }
 
+    const animationSpeed = normalizeAnimationSpeed(speed);
+    const durationMs = Math.max(1, Math.round(DEFAULT_ROLL_DURATION_MS / animationSpeed));
+    const staggerMs = Math.max(0, stagger / animationSpeed);
     const text = String(value);
     const initialText = fromValue === null || fromValue === undefined || fromValue === "" ? "" : String(fromValue);
     const alignedInitialText = initialText.length > text.length
@@ -85,8 +98,9 @@ export function RollingNumber({ value, fromValue, placeholder = "-", stagger = 6
                         <RollingDigit
                             key={`d-${index}`}
                             digit={Number.parseInt(ch, 10)}
-                            delay={order * stagger}
+                            delay={order * staggerMs}
                             initialDigit={initialDigit}
+                            durationMs={durationMs}
                         />
                     );
                 }

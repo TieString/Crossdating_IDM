@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { TreeChartManager } from "@/components/Chart/TreeChartManager";
 import { RollingNumber } from "@/components/RollingNumber/RollingNumber";
 import WidthContainer from "@/components/WidthContainer/WidthContainer";
+import { openSettingsWindow } from "@/pages/settings/openSettingsWindow";
 import style from "./Home.module.css";
 import { ALL_OPTION_VALUE, TitleMenuKind } from "./home/constants";
 import { HomeTitleBarBridge } from "./home/HomeTitleBarBridge";
@@ -24,14 +25,21 @@ const COFECHA_PART_OPTIONS = [
     { value: "PART 7", label: "🪧 PART 7: Descriptive Statistics" },
 ];
 
+type DeleteSeriesRequest = {
+    id: number;
+    tree: string;
+};
+
 export default function Home() {
     const homeContainerRef = useRef<HTMLDivElement>(null);
     const dataContainerRef = useRef<HTMLDivElement>(null);
     const leftPanelsRef = useRef<HTMLDivElement>(null);
     const rightPanelsRef = useRef<HTMLDivElement>(null);
+    const deleteSeriesRequestIdRef = useRef(0);
     const { layout, draggingKey, startResize } = useResizablePanels();
     const [activeMenu, setActiveMenu] = useState<TitleMenuKind | null>(null);
     const [isTreeSelectorOpaque, setIsTreeSelectorOpaque] = useState(false);
+    const [deleteSeriesRequest, setDeleteSeriesRequest] = useState<DeleteSeriesRequest | null>(null);
     const {
         cofechaResult,
         cofechaVersion,
@@ -72,6 +80,15 @@ export default function Home() {
     const mainDividerClassName = `${style["panel-divider"]} ${style["panel-divider-vertical"]} ${draggingKey === "mainSplitRatio" ? style["panel-divider-active"] : ""}`;
     const nestedDividerClassName = `${style["panel-divider"]} ${style["panel-divider-horizontal"]}`;
 
+    const handleDeleteSeriesFromChart = useCallback((tree: string) => {
+        deleteSeriesRequestIdRef.current += 1;
+        setDeleteSeriesRequest({ id: deleteSeriesRequestIdRef.current, tree });
+    }, []);
+
+    const handleDeleteSeriesRequestHandled = useCallback((id: number) => {
+        setDeleteSeriesRequest((request) => request?.id === id ? null : request);
+    }, []);
+
     useEffect(() => {
         const scrollContainer = dataContainerRef.current;
 
@@ -104,6 +121,7 @@ export default function Home() {
                 onRedo={handleRedo}
                 onCofechaVersionChange={setCofechaVersion}
                 onActiveMenuChange={setActiveMenu}
+                onOpenSettings={openSettingsWindow}
             />
 
             <div className={style["home-container"]} ref={homeContainerRef}>
@@ -151,6 +169,7 @@ export default function Home() {
                                     selected={selectedTree}
                                     masterSeries={cofechaResult?.masterDatingSeries}
                                     historyAnimation={historyAnimation}
+                                    deleteSeriesRequest={deleteSeriesRequest}
                                     deletionMarkers={deletionMarkers}
                                     scrollContainerRef={dataContainerRef}
                                     onInsertMissingYearAtSide={handleInsertMissingYearAtSide}
@@ -159,6 +178,7 @@ export default function Home() {
                                     onMarkYearRangeAsMissing={handleMarkYearRangeAsMissing}
                                     onRestoreDeletion={handleRestoreDeletion}
                                     onDeleteSeries={handleDeleteSeries}
+                                    onDeleteSeriesRequestHandled={handleDeleteSeriesRequestHandled}
                                 />
                             )}
 
@@ -293,7 +313,7 @@ export default function Home() {
                                           fullData={siteData}
                                           onInsertMissingYearAtSide={handleInsertMissingYearAtSideFromChart}
                                           onDeleteYearWithMode={handleDeleteYearWithModeFromChart}
-                                          onDeleteSeries={handleDeleteSeries}
+                                          onDeleteSeries={handleDeleteSeriesFromChart}
                                         />
                                     </div>
                                 </div>

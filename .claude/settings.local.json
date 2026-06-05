@@ -8,7 +8,12 @@
       "Bash(curl -s http://localhost:1420)",
       "Bash(git checkout *)",
       "WebFetch(domain:lucide.dev)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(move \"d:\\\\Code\\\\Crossdating_Tauri\\\\src\\\\components\\\\Settings\\\\SettingsModal.tsx\" \"d:\\\\Code\\\\Crossdating_Tauri\\\\src\\\\pages\\\\settings\\\\SettingsModal.tsx\")",
+      "Bash(move \"d:\\\\Code\\\\Crossdating_Tauri\\\\src\\\\components\\\\Settings\\\\SettingsModal.module.css\" \"d:\\\\Code\\\\Crossdating_Tauri\\\\src\\\\pages\\\\settings\\\\SettingsModal.module.css\")",
+      "PowerShell(New-Item -ItemType Directory -Force \"d:\\\\Code\\\\Crossdating_Tauri\\\\src\\\\pages\\\\settings\")",
+      "PowerShell(Move-Item \"d:\\\\Code\\\\Crossdating_Tauri\\\\src\\\\components\\\\Settings\\\\SettingsModal.tsx\" \"d:\\\\Code\\\\Crossdating_Tauri\\\\src\\\\pages\\\\settings\\\\SettingsModal.tsx\")",
+      "PowerShell(Move-Item \"d:\\\\Code\\\\Crossdating_Tauri\\\\src\\\\components\\\\Settings\\\\SettingsModal.module.css\" \"d:\\\\Code\\\\Crossdating_Tauri\\\\src\\\\pages\\\\settings\\\\SettingsModal.module.css\")"
     ],
     "additionalDirectories": [
       "d:\\Code\\Crossdating_Tauri"
