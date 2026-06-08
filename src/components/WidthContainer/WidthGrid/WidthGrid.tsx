@@ -193,6 +193,8 @@ type WidthGridProps = Omit<React.HTMLAttributes<HTMLSpanElement>, MotionReserved
     isEditable?: boolean;
     isMissing?: boolean;
     isSelected?: boolean;
+    isJumpHighlighted?: boolean;
+    jumpHighlightId?: number;
     isDragging?: boolean;
     dragYearOffset?: number;
     animationKind?: GridAnimationKind;
@@ -219,6 +221,8 @@ export default function WidthGrid({
     isEditable = false,
     isMissing = false,
     isSelected = false,
+    isJumpHighlighted = false,
+    jumpHighlightId,
     isDragging = false,
     dragYearOffset = 0,
     animationKind,
@@ -257,6 +261,21 @@ export default function WidthGrid({
         input?.focus();
         input?.select();
     }, [isEditing]);
+
+    useLayoutEffect(() => {
+        if (!isJumpHighlighted || jumpHighlightId === undefined || shouldReduceMotion) {
+            return;
+        }
+
+        const span = spanRef.current;
+        if (!span) {
+            return;
+        }
+
+        span.style.animation = "none";
+        void span.offsetWidth;
+        span.style.animation = "";
+    }, [isJumpHighlighted, jumpHighlightId, shouldReduceMotion]);
 
     const handleClick = () => {
         if (tree !== undefined && year !== undefined && onYearClick) {
@@ -427,7 +446,7 @@ export default function WidthGrid({
             onDoubleClick={isEditable && !isEditing ? handleDoubleClick : undefined}
             onMouseMove={handleMouseMove}
             onMouseLeave={handleMouseLeave}
-            className={`${style["width-grid"]} ${className} ${isMissing ? style["missing"] : ""} ${isInsertedZero ? style["inserted-zero"] : ""} ${isSelected ? style["selected"] : ""} ${isDragging ? style["dragging"] : ""} ${hasLeftDeletionMark ? style["has-left-deletion-mark"] : ""} ${hasRightDeletionMark ? style["has-right-deletion-mark"] : ""} ${animationKind ? style["motion-animated"] : ""} ${isEditable ? "" : style["disabled"]}`}
+            className={`${style["width-grid"]} ${className} ${isMissing ? style["missing"] : ""} ${isInsertedZero ? style["inserted-zero"] : ""} ${isSelected ? style["selected"] : ""} ${isJumpHighlighted ? style["cofecha-jump-target"] : ""} ${isDragging ? style["dragging"] : ""} ${hasLeftDeletionMark ? style["has-left-deletion-mark"] : ""} ${hasRightDeletionMark ? style["has-right-deletion-mark"] : ""} ${animationKind ? style["motion-animated"] : ""} ${isEditable ? "" : style["disabled"]}`}
             style={{
                 backgroundColor: getBackgroundColor(),
                 color: getTextColor(),

@@ -65,7 +65,7 @@
 
 .width-legend {
     position: absolute;
-    top: 10px;
+    top: 41px;
     right: 14px;
     z-index: 10;
     display: flex;
@@ -76,6 +76,10 @@
     color: #5a6675;
     pointer-events: none;
     user-select: none;
+    background: #F7F9FC;
+    padding: 2px 10px;
+    border-radius: 5px;
+    border: 1px solid #d6d6d6;
 }
 
 .legend-item {
@@ -105,7 +109,7 @@
     position: absolute;
     top: 0;
     bottom: 0;
-    left: 3px;
+    left: 6.5px;
     width: 2.5px;
     background-color: #ff0000;
     border-radius: 1px;
@@ -137,7 +141,7 @@
 }
 
 .width-module {
-    position:relative;
+    position: relative;
     overflow-x: hidden;
     overflow-y: hidden;
 }
@@ -359,18 +363,39 @@
     height: 2px;
 }
 
-#cofecha-selector {
+.cofecha-toolbar {
     position: sticky;
     top: 0;
     z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    background-color: #ffffff;
+}
+
+#cofecha-selector {
     display: block;
     width: 300px;
     max-width: 100%;
     height: 24px;
-    margin-bottom: 10px;
     border-radius: 5px;
     background-color: #ffffff;
     font-family: Consolas, sans-serif;
+}
+
+.cofecha-link-count {
+    display: inline-flex;
+    align-items: center;
+    height: 20px;
+    padding: 0 7px;
+    border-radius: 999px;
+    background-color: rgba(47, 95, 147, 0.08);
+    color: #2f5f93;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
 }
 
 
@@ -380,6 +405,30 @@
 
 #cofecha-text {
     margin-top: 0;
+}
+
+.cofecha-year-link {
+    display: inline;
+    padding: 0 2px;
+    border-radius: 3px;
+    background-color: rgba(47, 95, 147, 0.08);
+    color: #0f5f9e;
+    font: inherit;
+    line-height: inherit;
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+
+.cofecha-year-link:hover {
+    color: #0f3f70;
+    background-color: rgba(47, 95, 147, 0.08);
+}
+
+.cofecha-year-link:focus-visible {
+    outline: 2px solid rgba(47, 95, 147, 0.38);
+    outline-offset: 1px;
 }
 
 .home-container option {
@@ -554,7 +603,7 @@
         width: 100%;
     }
 
-    .home-container > .panel-divider-vertical,
+    .home-container>.panel-divider-vertical,
     .cofecha-module {
         display: none;
     }

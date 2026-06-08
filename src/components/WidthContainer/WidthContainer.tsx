@@ -50,6 +50,7 @@ const ANIMATION_PLAN_CLEAR_PADDING_MS = 360;
 const DELETE_BURST_ANIMATION_MS = 820;
 const DELETE_BURST_SWEEP_MS = 420;
 const SERIES_DELETE_ANIMATION_MS = 900;
+const COFECHA_JUMP_HIGHLIGHT_MS = 3200;
 
 const scaleAnimationMs = (durationMs: number, animationSpeed: number) => (
     Math.max(1, Math.round(durationMs / animationSpeed))
@@ -67,6 +68,12 @@ interface GridSelection {
 interface DragPreview extends GridSelection {
     yearOffset: number;
     hasMoved: boolean;
+}
+
+interface GridJumpTarget {
+    id: number;
+    tree: string;
+    year?: number;
 }
 
 interface InsertFlipCell {
@@ -732,6 +739,7 @@ type WidthContainerProps = {
     masterSeries?: Map<number, number>,
     selected?: string,
     historyAnimation?: WidthHistoryAnimation | null,
+    jumpTarget?: GridJumpTarget | null,
     deleteSeriesRequest?: { id: number; tree: string } | null,
     deletionMarkers?: RwlDeletionMarkers,
     onYearClick?: (tree: string, year: number) => void,
@@ -867,7 +875,7 @@ function createSeriesShatterAnimation(rect: { left: number; top: number; width: 
     };
 }
 
-function WidthContainer({ siteData: site, masterSeries, selected, historyAnimation, deleteSeriesRequest, deletionMarkers, onYearClick, onInsertMissingYearAtSide, onMoveSeriesTailByOffset, onDeleteYearWithMode, onMarkYearRangeAsMissing, onRestoreDeletion, onDeleteSeries, onEditAsText, onDeleteSeriesRequestHandled, onReplaceTreeData, scrollContainerRef, scrollElement }: WidthContainerProps): ReactNode {
+function WidthContainer({ siteData: site, masterSeries, selected, historyAnimation, jumpTarget, deleteSeriesRequest, deletionMarkers, onYearClick, onInsertMissingYearAtSide, onMoveSeriesTailByOffset, onDeleteYearWithMode, onMarkYearRangeAsMissing, onRestoreDeletion, onDeleteSeries, onEditAsText, onDeleteSeriesRequestHandled, onReplaceTreeData, scrollContainerRef, scrollElement }: WidthContainerProps): ReactNode {
     const visibleSite = useMemo(() => (
         selected && site.has(selected)
             ? (() => {
@@ -886,8 +894,10 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
     const [hoveredMarker, setHoveredMarker] = useState<DeletionHoverState | null>(null);
     const [deletingTree, setDeletingTree] = useState<string | null>(null);
     const [textEditTree, setTextEditTree] = useState<string | null>(null);
+    const [jumpHighlight, setJumpHighlight] = useState<GridJumpTarget | null>(null);
     const seriesBlockRefs = useRef<Map<string, HTMLDivElement>>(new Map());
     const seriesDeleteCleanupRef = useRef<(() => void) | null>(null);
+    const jumpHighlightTimerRef = useRef<number | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
     const interactionRef = useRef<GridInteraction | null>(null);
     const animationPlanIdRef = useRef(0);
@@ -1136,11 +1146,89 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
         };
     }, [animationPlan, animationSpeed]);
 
+    useLayoutEffect(() => {
+        if (!jumpTarget) {
+            return;
+        }
+
+        const targetSeries = virtualSeries.series.find((series) => series.treeCode === jumpTarget.tree);
+        const scrollContainer = scrollElement ?? scrollContainerRef?.current;
+
+        if (!targetSeries || !scrollContainer) {
+            return;
+        }
+
+        const isSeriesJump = jumpTarget.year === undefined;
+        const rowIndex = isSeriesJump
+            ? 0
+            : targetSeries.rows.findIndex((row) => (
+                row.cells.some((cell) => cell?.year === jumpTarget.year)
+            ));
+
+        if (rowIndex < 0) {
+            return;
+        }
+
+        const rowTop = isSeriesJump
+            ? targetSeries.top
+            : targetSeries.top + SERIES_HEADER_HEIGHT + ROW_GAP + rowIndex * (ROW_HEIGHT + ROW_GAP);
+        const viewportLead = Math.max(56, Math.floor(scrollContainer.clientHeight * 0.35));
+        const maxScrollTop = Math.max(
+            0,
+            Math.max(scrollContainer.scrollHeight, virtualSeries.totalHeight) - scrollContainer.clientHeight,
+        );
+        const nextScrollTop = Math.min(Math.max(rowTop - viewportLead, 0), maxScrollTop);
+
+        interactionRef.current = null;
+        setDragPreview(null);
+        setDragYearOffset(0);
+        setIsDraggingSelection(false);
+        setContextMenu(null);
+        const targetYear = jumpTarget.year;
+
+        if (targetYear === undefined) {
+            const yearRange = seriesYearRanges.get(jumpTarget.tree);
+            setSelection(yearRange ? normalizeSelection(jumpTarget.tree, yearRange[0], yearRange[1]) : null);
+        } else {
+            setSelection(normalizeSelection(jumpTarget.tree, targetYear, targetYear));
+        }
+        setJumpHighlight(jumpTarget);
+
+        const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        const scrollBehavior: ScrollBehavior = prefersReducedMotion ? "auto" : "smooth";
+
+        scrollContainer.scrollTo({ top: nextScrollTop, behavior: scrollBehavior });
+
+        if (scrollBehavior === "auto") {
+            setViewport({
+                scrollTop: nextScrollTop,
+                height: scrollContainer.clientHeight,
+            });
+        }
+
+        if (jumpHighlightTimerRef.current !== null) {
+            window.clearTimeout(jumpHighlightTimerRef.current);
+        }
+
+        jumpHighlightTimerRef.current = window.setTimeout(() => {
+            setJumpHighlight((previous) => (
+                previous?.id === jumpTarget.id ? null : previous
+            ));
+            jumpHighlightTimerRef.current = null;
+        }, COFECHA_JUMP_HIGHLIGHT_MS);
+    }, [jumpTarget, scrollElement, scrollContainerRef, seriesYearRanges, virtualSeries.series, virtualSeries.totalHeight]);
+
     useEffect(() => {
         setSelection((previous) => (
             previous && visibleSite.has(previous.tree) ? previous : null
         ));
     }, [visibleSite]);
+
+    useEffect(() => () => {
+        if (jumpHighlightTimerRef.current !== null) {
+            window.clearTimeout(jumpHighlightTimerRef.current);
+        }
+    }, []);
 
     useLayoutEffect(() => {
         if (!historyAnimation) {
@@ -2199,6 +2287,12 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                                 }
 
                                 const cellIsSelected = renderSelection?.tree === series.treeCode && selectedYears.has(cell.year);
+                                const cellIsJumpHighlighted = Boolean(
+                                    jumpHighlight
+                                    && jumpHighlight.tree === series.treeCode
+                                    && (jumpHighlight.year === undefined || jumpHighlight.year === cell.year)
+                                );
+                                const cellJumpHighlightId = cellIsJumpHighlighted ? jumpHighlight?.id : undefined;
                                 const cellAnimationKind = getGridAnimationKind(series.treeCode, cell.year);
                                 const cellAnimationDelay = getGridAnimationDelay(series.treeCode, cell.year);
                                 const cellAnimationKey = cellAnimationKind ? animationPlan?.id ?? 0 : 0;
@@ -2245,6 +2339,8 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                                             masterSeriesValue={masterSeries?.get(cell.year)}
                                             isMissing={true}
                                             isSelected={cellIsSelected}
+                                            isJumpHighlighted={cellIsJumpHighlighted}
+                                            jumpHighlightId={cellJumpHighlightId}
                                             isDragging={isDraggingSelection && cellIsSelected}
                                             dragYearOffset={dragYearOffset}
                                             animationKind={cellAnimationKind}
@@ -2288,6 +2384,8 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                                         masterSeriesValue={masterSeries?.get(cell.year)}
                                         isEditable={true}
                                         isSelected={cellIsSelected}
+                                        isJumpHighlighted={cellIsJumpHighlighted}
+                                        jumpHighlightId={cellJumpHighlightId}
                                         isDragging={isDraggingSelection && cellIsSelected}
                                         dragYearOffset={dragYearOffset}
                                         animationKind={cellAnimationKind}

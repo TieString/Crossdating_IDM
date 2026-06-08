@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ClipboardEvent, type FocusEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ClipboardEvent, type FocusEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { TreeChartManager } from "@/components/Chart/TreeChartManager";
 import { RollingNumber } from "@/components/RollingNumber/RollingNumber";
 import WidthContainer from "@/components/WidthContainer/WidthContainer";
@@ -34,6 +34,24 @@ type DeleteSeriesRequest = {
     tree: string;
 };
 
+type CofechaCellJumpTarget = {
+    id: number;
+    tree: string;
+    year?: number;
+};
+
+type CofechaCellReference = {
+    tree: string;
+    year?: number;
+};
+
+const COFECHA_PROBLEM_REFERENCE_RE = /^(.*?[>＞]{2}\s+)(\S+)(\s+)(-?\d{4})(.*)$/;
+const COFECHA_PART6_SERIES_HEADER_RE = /^(\s*)(\S+)(\s+)(-?\d{4})(\s+to\s+)(-?\d{4})(.*\bSeries\b.*)$/i;
+const COFECHA_ABSENT_RING_SUMMARY_RE = /^(\s*)(\S+)(\s+\d+\s+absent\s+rings?:\s*)(.*)$/i;
+const COFECHA_ABSENT_RING_CONTINUATION_RE = /^(\s{8,})(-?\d{4}(?:\s+-?\d{4})*)(\s*)$/;
+const COFECHA_YEAR_TOKEN_RE = /\b(-?\d{4})\b/g;
+const COFECHA_PART_SEPARATOR_RE = /^\s*=+\s*$/;
+
 const getErrorMessage = (error: unknown) => (
     error instanceof Error ? error.message : String(error)
 );
@@ -42,6 +60,224 @@ const isPanelRatioCollapsed = (ratio: number) => (
     ratio <= 1 - COLLAPSED_PANEL_RATIO || ratio >= COLLAPSED_PANEL_RATIO
 );
 
+const resolveCofechaTreeCode = (tree: string, siteData: ReadonlyMap<string, unknown>) => {
+    if (siteData.has(tree)) {
+        return tree;
+    }
+
+    const normalizedTree = tree.toLowerCase();
+    return Array.from(siteData.keys()).find((siteTree) => siteTree.toLowerCase() === normalizedTree) ?? tree;
+};
+
+const escapeHtml = (value: string) => (
+    value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;")
+);
+
+const isTreeBoundary = (value: string | undefined) => (
+    value === undefined || !/[A-Za-z0-9_]/.test(value)
+);
+
+const makeCofechaCellLinkHtml = (tree: string, rawYear: string, label = rawYear) => (
+    `<span class="${style["cofecha-year-link"]}" data-cofecha-link="true" data-tree="${escapeHtml(tree)}" data-year="${escapeHtml(rawYear)}" role="button" tabindex="0" title="跳转到 ${escapeHtml(tree)} ${escapeHtml(rawYear)}" style="color:#0f5f9e;background-color:rgba(47,95,147,0.08);font-weight:700;text-decoration:underline;text-underline-offset:2px;cursor:pointer;border-radius:3px;padding:0 2px;">${escapeHtml(label)}</span>`
+);
+
+const makeCofechaSeriesLinkHtml = (tree: string) => (
+    `<span class="${style["cofecha-year-link"]}" data-cofecha-link="true" data-tree="${escapeHtml(tree)}" role="button" tabindex="0" title="跳转到 ${escapeHtml(tree)}" style="color:#0f5f9e;background-color:rgba(47,95,147,0.08);font-weight:700;text-decoration:underline;text-underline-offset:2px;cursor:pointer;border-radius:3px;padding:0 2px;">${escapeHtml(tree)}</span>`
+);
+
+const linkCofechaTreesInText = (text: string, knownTrees: readonly string[]) => {
+    let html = "";
+    let count = 0;
+    let cursor = 0;
+
+    while (cursor < text.length) {
+        const matchedTree = knownTrees.find((tree) => (
+            text.startsWith(tree, cursor)
+            && isTreeBoundary(text[cursor - 1])
+            && isTreeBoundary(text[cursor + tree.length])
+        ));
+
+        if (!matchedTree) {
+            html += escapeHtml(text[cursor]);
+            cursor += 1;
+            continue;
+        }
+
+        html += makeCofechaSeriesLinkHtml(matchedTree);
+        cursor += matchedTree.length;
+        count += 1;
+    }
+
+    return { html, count };
+};
+
+const linkCofechaYearsInText = (text: string, tree: string, knownTrees: readonly string[]) => {
+    let html = "";
+    let count = 0;
+    let cursor = 0;
+
+    COFECHA_YEAR_TOKEN_RE.lastIndex = 0;
+
+    for (const match of text.matchAll(COFECHA_YEAR_TOKEN_RE)) {
+        const rawYear = match[1];
+        const index = match.index ?? 0;
+        const plainText = linkCofechaTreesInText(text.slice(cursor, index), knownTrees);
+        html += plainText.html;
+        html += makeCofechaCellLinkHtml(tree, rawYear);
+        cursor = index + rawYear.length;
+        count += plainText.count + 1;
+    }
+
+    const rest = linkCofechaTreesInText(text.slice(cursor), knownTrees);
+    html += rest.html;
+    count += rest.count;
+    return { html, count };
+};
+
+const renderCofechaLineWithLinks = (
+    line: string,
+    lineBreak: string,
+    knownTrees: readonly string[],
+    currentSeriesTree: string | null,
+    absentRingTree: string | null,
+) => {
+    if (COFECHA_PART_SEPARATOR_RE.test(line)) {
+        const plainText = linkCofechaTreesInText(line + lineBreak, knownTrees);
+        return {
+            html: plainText.html,
+            count: plainText.count,
+            currentSeriesTree: null,
+            absentRingTree: null,
+        };
+    }
+
+    const problemMatch = line.match(COFECHA_PROBLEM_REFERENCE_RE);
+
+    if (problemMatch) {
+        const [, prefix, tree, gap, rawYear, suffix] = problemMatch;
+        return {
+            html: [
+                linkCofechaTreesInText(prefix, knownTrees).html,
+                makeCofechaSeriesLinkHtml(tree),
+                linkCofechaTreesInText(gap, knownTrees).html,
+                makeCofechaCellLinkHtml(tree, rawYear),
+                linkCofechaTreesInText(suffix + lineBreak, knownTrees).html,
+            ].join(""),
+            count: 2,
+            currentSeriesTree,
+            absentRingTree: null,
+        };
+    }
+
+    const seriesHeaderMatch = line.match(COFECHA_PART6_SERIES_HEADER_RE);
+
+    if (seriesHeaderMatch) {
+        const [, prefix, tree, gap, rawStartYear, toLabel, rawEndYear, suffix] = seriesHeaderMatch;
+
+        return {
+            html: [
+                linkCofechaTreesInText(prefix, knownTrees).html,
+                makeCofechaSeriesLinkHtml(tree),
+                linkCofechaTreesInText(gap, knownTrees).html,
+                makeCofechaCellLinkHtml(tree, rawStartYear),
+                linkCofechaTreesInText(toLabel, knownTrees).html,
+                makeCofechaCellLinkHtml(tree, rawEndYear),
+                linkCofechaTreesInText(suffix + lineBreak, knownTrees).html,
+            ].join(""),
+            count: 3,
+            currentSeriesTree: tree,
+            absentRingTree: null,
+        };
+    }
+
+    const absentRingMatch = line.match(COFECHA_ABSENT_RING_SUMMARY_RE);
+
+    if (absentRingMatch) {
+        const [, prefix, tree, label, yearsText] = absentRingMatch;
+        const linkedYears = linkCofechaYearsInText(yearsText, tree, knownTrees);
+
+        return {
+            html: [
+                linkCofechaTreesInText(prefix, knownTrees).html,
+                makeCofechaSeriesLinkHtml(tree),
+                linkCofechaTreesInText(label, knownTrees).html,
+                linkedYears.html,
+                linkCofechaTreesInText(lineBreak, knownTrees).html,
+            ].join(""),
+            count: linkedYears.count + 1,
+            currentSeriesTree,
+            absentRingTree: tree,
+        };
+    }
+
+    const continuationMatch = absentRingTree
+        ? line.match(COFECHA_ABSENT_RING_CONTINUATION_RE)
+        : null;
+
+    if (continuationMatch && absentRingTree) {
+        const [, prefix, yearsText, suffix] = continuationMatch;
+        const linkedYears = linkCofechaYearsInText(yearsText, absentRingTree, knownTrees);
+
+        return {
+            html: [
+                linkCofechaTreesInText(prefix, knownTrees).html,
+                linkedYears.html,
+                linkCofechaTreesInText(suffix + lineBreak, knownTrees).html,
+            ].join(""),
+            count: linkedYears.count,
+            currentSeriesTree,
+            absentRingTree,
+        };
+    }
+
+    if (currentSeriesTree) {
+        const linkedYears = linkCofechaYearsInText(line, currentSeriesTree, knownTrees);
+
+        if (linkedYears.count > 0) {
+            return {
+                html: linkedYears.html + linkCofechaTreesInText(lineBreak, knownTrees).html,
+                count: linkedYears.count,
+                currentSeriesTree,
+                absentRingTree: null,
+            };
+        }
+    }
+
+    const plainText = linkCofechaTreesInText(line + lineBreak, knownTrees);
+
+    return {
+        html: plainText.html,
+        count: plainText.count,
+        currentSeriesTree,
+        absentRingTree: null,
+    };
+};
+
+const renderCofechaHtmlWithLinks = (text: string | undefined, trees: readonly string[]) => {
+    const lines = (text ?? "").split(/\r\n|\n|\r/);
+    const knownTrees = [...trees].sort((a, b) => b.length - a.length);
+    let currentSeriesTree: string | null = null;
+    let absentRingTree: string | null = null;
+    let count = 0;
+
+    const html = lines.map((line, index) => {
+        const lineBreak = index < lines.length - 1 ? "\n" : "";
+        const result = renderCofechaLineWithLinks(line, lineBreak, knownTrees, currentSeriesTree, absentRingTree);
+
+        currentSeriesTree = result.currentSeriesTree;
+        absentRingTree = result.absentRingTree;
+        count += result.count;
+        return result.html;
+    }).join("");
+
+    return { html, count };
+};
+
 export default function Home() {
     const homeContainerRef = useRef<HTMLDivElement>(null);
     const dataContainerRef = useRef<HTMLDivElement>(null);
@@ -49,9 +285,11 @@ export default function Home() {
     const leftPanelsRef = useRef<HTMLDivElement>(null);
     const rightPanelsRef = useRef<HTMLDivElement>(null);
     const deleteSeriesRequestIdRef = useRef(0);
+    const cofechaCellJumpIdRef = useRef(0);
     const { layout, draggingKey, startResize } = useResizablePanels();
     const [activeMenu, setActiveMenu] = useState<TitleMenuKind | null>(null);
     const [deleteSeriesRequest, setDeleteSeriesRequest] = useState<DeleteSeriesRequest | null>(null);
+    const [cofechaCellJumpTarget, setCofechaCellJumpTarget] = useState<CofechaCellJumpTarget | null>(null);
     const [isRawEditing, setIsRawEditing] = useState(false);
     const [rawEditorInitialText, setRawEditorInitialText] = useState("");
     const [rawEditorRevision, setRawEditorRevision] = useState(0);
@@ -128,6 +366,78 @@ export default function Home() {
     const handleDeleteSeriesRequestHandled = useCallback((id: number) => {
         setDeleteSeriesRequest((request) => request?.id === id ? null : request);
     }, []);
+
+    const handleCofechaCellReferenceClick = useCallback(({ tree, year }: CofechaCellReference) => {
+        const resolvedTree = resolveCofechaTreeCode(tree, siteData);
+
+        if (!siteData.has(resolvedTree)) {
+            return;
+        }
+
+        cofechaCellJumpIdRef.current += 1;
+        setIsRawEditing(false);
+
+        if (selectedTree !== ALL_OPTION_VALUE && selectedTree !== resolvedTree) {
+            handleTreeSelectionChange(resolvedTree);
+        }
+
+        setCofechaCellJumpTarget({
+            id: cofechaCellJumpIdRef.current,
+            tree: resolvedTree,
+            year,
+        });
+    }, [handleTreeSelectionChange, selectedTree, siteData]);
+
+    const linkedReport = useMemo(() => (
+        renderCofechaHtmlWithLinks(reportText, treeOptions)
+    ), [reportText, treeOptions]);
+
+    const handleCofechaTextClick = useCallback((event: MouseEvent<HTMLParagraphElement>) => {
+        const target = event.target;
+        if (!(target instanceof Element)) {
+            return;
+        }
+
+        const link = target.closest<HTMLElement>("[data-cofecha-link='true']");
+        if (!link) {
+            return;
+        }
+
+        const tree = link.dataset.tree;
+        const rawYear = link.dataset.year;
+        const year = rawYear === undefined ? undefined : Number(rawYear);
+        if (!tree || (rawYear !== undefined && !Number.isInteger(year))) {
+            return;
+        }
+
+        handleCofechaCellReferenceClick({ tree, year });
+    }, [handleCofechaCellReferenceClick]);
+
+    const handleCofechaTextKeyDown = useCallback((event: KeyboardEvent<HTMLParagraphElement>) => {
+        if (event.key !== "Enter" && event.key !== " ") {
+            return;
+        }
+
+        const target = event.target;
+        if (!(target instanceof Element)) {
+            return;
+        }
+
+        const link = target.closest<HTMLElement>("[data-cofecha-link='true']");
+        if (!link) {
+            return;
+        }
+
+        const tree = link.dataset.tree;
+        const rawYear = link.dataset.year;
+        const year = rawYear === undefined ? undefined : Number(rawYear);
+        if (!tree || (rawYear !== undefined && !Number.isInteger(year))) {
+            return;
+        }
+
+        event.preventDefault();
+        handleCofechaCellReferenceClick({ tree, year });
+    }, [handleCofechaCellReferenceClick]);
 
     const getRawEditorText = useCallback(() => (
         rawEditorRef.current?.innerText ?? rawEditorInitialText
@@ -385,6 +695,7 @@ export default function Home() {
                                                 selected={selectedTree}
                                                 masterSeries={cofechaResult?.masterDatingSeries}
                                                 historyAnimation={historyAnimation}
+                                                jumpTarget={cofechaCellJumpTarget}
                                                 deleteSeriesRequest={deleteSeriesRequest}
                                                 deletionMarkers={deletionMarkers}
                                                 scrollContainerRef={dataContainerRef}
@@ -496,24 +807,36 @@ export default function Home() {
                         >
                             <div className={style["cofecha-panel-content"]}>
                                 {!shouldShowWelcome ? (
-                                    <select
-                                        name="cofecha"
-                                        id={style["cofecha-selector"]}
-                                        value={selectedPart}
-                                        onChange={(event) => {
-                                            setSelectedPart(event.target.value);
-                                        }}
-                                    >
-                                        {COFECHA_PART_OPTIONS.map((option) => (
-                                            <option key={option.value} value={option.value}>
-                                                {option.label}
-                                            </option>
-                                        ))}
-                                    </select>
+                                    <div className={style["cofecha-toolbar"]}>
+                                        <select
+                                            name="cofecha"
+                                            id={style["cofecha-selector"]}
+                                            value={selectedPart}
+                                            onChange={(event) => {
+                                                setSelectedPart(event.target.value);
+                                            }}
+                                        >
+                                            {COFECHA_PART_OPTIONS.map((option) => (
+                                                <option key={option.value} value={option.value}>
+                                                    {option.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        {linkedReport.count > 0 ? (
+                                            <span className={style["cofecha-link-count"]}>
+                                                跳转链接 {linkedReport.count}
+                                            </span>
+                                        ) : null}
+                                    </div>
                                 ) : null
                                 }
 
-                                <p id={style["cofecha-text"]}>{reportText}</p>
+                                <p
+                                    id={style["cofecha-text"]}
+                                    onClick={handleCofechaTextClick}
+                                    onKeyDown={handleCofechaTextKeyDown}
+                                    dangerouslySetInnerHTML={{ __html: linkedReport.html }}
+                                />
                             </div>
                         </OverlayScroll>
 
