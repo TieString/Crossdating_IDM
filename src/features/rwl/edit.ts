@@ -1,4 +1,4 @@
-import { RwlTreeData, RwlReadResult, RwlSiteData } from "./types";
+import { RwlFormat, RwlTreeData, RwlReadResult, RwlSiteData } from "./types";
 import { formatHandlers } from "./index";
 import { stopMarker } from "@/shared/constants";
 
@@ -54,8 +54,18 @@ export type RwlDeletionMarkers = Map<string, Map<number, DeletionMarkerInfo[]>>;
 type RwlHistoryEntry = {
     data: RwlSiteData;
     deletionMarkers: RwlDeletionMarkers;
+    readOptions?: RwlReadResult['readOptions'];
+    format: string;
     operation?: RwlEditOperation;
 };
+
+function cloneReadOptions(options: RwlReadResult['readOptions']): RwlReadResult['readOptions'] {
+    if (!options) return undefined;
+    return {
+        ...options,
+        fhUnit: options.fhUnit ? { ...options.fhUnit } : undefined,
+    };
+}
 
 const cloneDeletionMarkers = (markers: RwlDeletionMarkers): RwlDeletionMarkers => {
     const result: RwlDeletionMarkers = new Map();
@@ -400,6 +410,10 @@ export class RwlEditor {
         return this.readOptions;
     }
 
+    getFormat(): string {
+        return this.format;
+    }
+
     // 插年：在 year 处插入 0
     insertYear(tree: string, year: number): void {
         this.saveToUndoStack(); // 记录操作前状态
@@ -653,6 +667,33 @@ export class RwlEditor {
         };
     }
 
+    replaceTreeData(tree: string, newData: RwlTreeData): void {
+        if (!this.rwlData.has(tree)) return;
+
+        this.saveToUndoStack();
+        this.redoStack = [];
+
+        const next = new Map(this.rwlData);
+        next.set(tree, newData);
+        this.rwlData = next;
+
+        const nextMarkers = cloneDeletionMarkers(this.deletionMarkers);
+        nextMarkers.delete(tree);
+        this.deletionMarkers = nextMarkers;
+
+        this.notifyChange();
+    }
+
+    replaceAllData(data: RwlSiteData, options?: RwlReadResult['readOptions'], format?: RwlFormat): void {
+        this.saveToUndoStack();
+        this.redoStack = [];
+        this.rwlData = new Map(data);
+        this.readOptions = cloneReadOptions(options);
+        this.format = format || this.format;
+        this.deletionMarkers = new Map();
+        this.notifyChange();
+    }
+
     deleteSeries(tree: string): void {
         if (!this.rwlData.has(tree)) return;
 
@@ -686,10 +727,14 @@ export class RwlEditor {
         this.redoStack.push({
             data: new Map(this.rwlData),
             deletionMarkers: cloneDeletionMarkers(this.deletionMarkers),
+            readOptions: cloneReadOptions(this.readOptions),
+            format: this.format,
             operation: previousEntry.operation,
         });
         this.rwlData = previousEntry.data;
         this.deletionMarkers = previousEntry.deletionMarkers;
+        this.readOptions = cloneReadOptions(previousEntry.readOptions);
+        this.format = previousEntry.format;
         this.notifyChange();
         return previousEntry.operation ? { ...previousEntry.operation, direction: "undo" } : null;
     }
@@ -701,10 +746,14 @@ export class RwlEditor {
         this.undoStack.push({
             data: new Map(this.rwlData),
             deletionMarkers: cloneDeletionMarkers(this.deletionMarkers),
+            readOptions: cloneReadOptions(this.readOptions),
+            format: this.format,
             operation: nextEntry.operation,
         });
         this.rwlData = nextEntry.data;
         this.deletionMarkers = nextEntry.deletionMarkers;
+        this.readOptions = cloneReadOptions(nextEntry.readOptions);
+        this.format = nextEntry.format;
         this.notifyChange();
         return nextEntry.operation ? { ...nextEntry.operation, direction: "redo" } : null;
     }
@@ -714,6 +763,8 @@ export class RwlEditor {
         this.undoStack.push({
             data: new Map(this.rwlData),
             deletionMarkers: cloneDeletionMarkers(this.deletionMarkers),
+            readOptions: cloneReadOptions(this.readOptions),
+            format: this.format,
             operation,
         });
     }

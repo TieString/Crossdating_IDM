@@ -1,0 +1,33 @@
+/*
+ * Compositor-driven thumb position via scroll-driven animations.
+ *
+ * This is global (not a CSS module) on purpose: it references the named scroll
+ * timelines `--ftScrollY` / `--ftScrollX` that FloatingScrollbar sets imperatively
+ * (`scroll-timeline-*` on the scroll element, `timeline-scope` on its wrapper).
+ * CSS-module scoping would rename those dashed-idents and break the link.
+ *
+ * The keyframes always exist; the binding only applies where supported and after
+ * the component marks the root with `data-ft-composited`. Otherwise the component
+ * falls back to writing `transform` from the scroll event.
+ */
+@keyframes ft-thumb-y {
+    from { transform: translateY(0); }
+    to { transform: translateY(var(--ft-vmax, 0px)); }
+}
+
+@keyframes ft-thumb-x {
+    from { transform: translateX(0); }
+    to { transform: translateX(var(--ft-hmax, 0px)); }
+}
+
+@supports (animation-timeline: scroll()) {
+    [data-ft-composited] [data-ft-thumb="v"] {
+        animation: ft-thumb-y linear both;
+        animation-timeline: --ftScrollY;
+    }
+
+    [data-ft-composited] [data-ft-thumb="h"] {
+        animation: ft-thumb-x linear both;
+        animation-timeline: --ftScrollX;
+    }
+}

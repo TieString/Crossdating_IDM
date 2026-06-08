@@ -6,6 +6,7 @@ import type { DeleteMode, DeletionMarkerInfo, RwlDeletionMarkers, RwlHistoryAnim
 import { RollingNumber } from '@/components/RollingNumber/RollingNumber';
 import WidthGrid from './WidthGrid/WidthGrid';
 import WidthGridContextMenu from './WidthGridContextMenu/WidthGridContextMenu';
+import SeriesTextEditor, { seriesDataToText, textToSeriesData } from './SeriesTextEditor/SeriesTextEditor';
 import style from "./WidthContainer.module.css";
 import { stopMarker } from '@/shared/constants';
 import { useSettings } from "@/features/settings/SettingsContext";
@@ -36,6 +37,7 @@ interface VirtualSeries {
 
 const ROW_HEIGHT = 24;
 const ROW_GAP = 5;
+const SERIES_HEADER_HEIGHT = 36;
 const SERIES_GAP = 12;
 const OVERSCAN_PX = 320;
 const VALUE_COLUMN_COUNT = 10;
@@ -561,6 +563,20 @@ const createDeletePixelBurst = (container: HTMLElement, sourceElement: HTMLEleme
     };
 };
 
+const getTreeYearRange = (treeData: Map<number, number | null> | undefined): [number, number] | null => {
+    if (!treeData) return null;
+    let start: number | undefined;
+    let end: number | undefined;
+
+    for (const [year, width] of treeData.entries()) {
+        if (width === stopMarker.value) continue;
+        if (start === undefined || year < start) start = year;
+        if (end === undefined || year > end) end = year;
+    }
+
+    return start !== undefined && end !== undefined ? [start, end] : null;
+};
+
 const getFirstSeriesYear = (treeData: Map<number, number | null>) => {
     let firstYear: number | undefined;
 
@@ -725,8 +741,12 @@ type WidthContainerProps = {
     onMarkYearRangeAsMissing?: (tree: string, startYear: number, endYear: number) => void,
     onRestoreDeletion?: (tree: string, markerYear: number, index: number) => void,
     onDeleteSeries?: (tree: string) => void,
+    onEditAsText?: () => void,
     onDeleteSeriesRequestHandled?: (id: number) => void,
-    scrollContainerRef?: RefObject<HTMLElement | null>
+    onReplaceTreeData?: (tree: string, data: Map<number, number | null>) => void,
+    scrollContainerRef?: RefObject<HTMLElement | null>,
+    /** Actual scrolling element (e.g. the OverlayScrollbars viewport). Preferred over scrollContainerRef when provided. */
+    scrollElement?: HTMLElement | null
 };
 
 interface ContextMenuState {
@@ -847,7 +867,7 @@ function createSeriesShatterAnimation(rect: { left: number; top: number; width: 
     };
 }
 
-function WidthContainer({ siteData: site, masterSeries, selected, historyAnimation, deleteSeriesRequest, deletionMarkers, onYearClick, onInsertMissingYearAtSide, onMoveSeriesTailByOffset, onDeleteYearWithMode, onMarkYearRangeAsMissing, onRestoreDeletion, onDeleteSeries, onDeleteSeriesRequestHandled, scrollContainerRef }: WidthContainerProps): ReactNode {
+function WidthContainer({ siteData: site, masterSeries, selected, historyAnimation, deleteSeriesRequest, deletionMarkers, onYearClick, onInsertMissingYearAtSide, onMoveSeriesTailByOffset, onDeleteYearWithMode, onMarkYearRangeAsMissing, onRestoreDeletion, onDeleteSeries, onEditAsText, onDeleteSeriesRequestHandled, onReplaceTreeData, scrollContainerRef, scrollElement }: WidthContainerProps): ReactNode {
     const visibleSite = useMemo(() => (
         selected && site.has(selected)
             ? (() => {
@@ -865,6 +885,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
     const [hoveredMarker, setHoveredMarker] = useState<DeletionHoverState | null>(null);
     const [deletingTree, setDeletingTree] = useState<string | null>(null);
+    const [textEditTree, setTextEditTree] = useState<string | null>(null);
     const seriesBlockRefs = useRef<Map<string, HTMLDivElement>>(new Map());
     const seriesDeleteCleanupRef = useRef<(() => void) | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
@@ -957,7 +978,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
             }
 
             const seriesRows = buildSeriesRows(key, timeline);
-            const blockHeight = seriesRows.length * ROW_HEIGHT + Math.max(0, seriesRows.length - 1) * ROW_GAP;
+            const blockHeight = SERIES_HEADER_HEIGHT + ROW_GAP + seriesRows.length * ROW_HEIGHT + Math.max(0, seriesRows.length - 1) * ROW_GAP;
 
             seriesList.push({
                 treeCode: key,
@@ -974,6 +995,14 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
             series: seriesList,
             totalHeight: Math.max(0, currentTop - SERIES_GAP),
         };
+    }, [renderSite]);
+
+    const seriesYearRanges = useMemo(() => {
+        const result = new Map<string, [number, number] | null>();
+        for (const [treeCode, treeData] of renderSite.entries()) {
+            result.set(treeCode, getTreeYearRange(treeData));
+        }
+        return result;
     }, [renderSite]);
 
     const renderSelection = useMemo(() => {
@@ -1757,6 +1786,25 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
         onMarkYearRangeAsMissing?.(tree, nextSelection.startYear, nextSelection.endYear);
     }, [clearDeleteBurstAnimations, clearInsertAnimations, onMarkYearRangeAsMissing]);
 
+    const handleContextMenuEditAsText = useCallback((tree: string) => {
+        setContextMenu(null);
+        if (onEditAsText) {
+            onEditAsText();
+            return;
+        }
+        setTextEditTree(tree);
+    }, [onEditAsText]);
+
+    const handleTextEditorClose = useCallback((tree: string, newText?: string) => {
+        setTextEditTree(null);
+        if (newText === undefined) return;
+        const treeData = visibleSite.get(tree);
+        if (!treeData) return;
+        const parsed = textToSeriesData(newText, stopMarker.value);
+        if (!parsed) return;
+        onReplaceTreeData?.(tree, parsed);
+    }, [visibleSite, onReplaceTreeData]);
+
     const handleContextMenuDeleteSeries = useCallback((tree: string) => {
         setContextMenu(null);
         if (!shouldAnimateDeleteSeries) {
@@ -2021,7 +2069,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
     }, [animationsEnabled, clearSelection, onMoveSeriesTailByOffset, showAnimationPlan, visibleSite]);
 
     useEffect(() => {
-        const scrollContainer = scrollContainerRef?.current;
+        const scrollContainer = scrollElement ?? scrollContainerRef?.current;
         if (!scrollContainer) {
             return;
         }
@@ -2061,7 +2109,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                 window.cancelAnimationFrame(rafId);
             }
         };
-    }, [scrollContainerRef, virtualSeries.totalHeight]);
+    }, [scrollElement, scrollContainerRef, virtualSeries.totalHeight]);
 
     const visibleSeries = useMemo(() => {
         if (virtualSeries.series.length === 0) {
@@ -2093,6 +2141,16 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
             onPointerDown={handleContainerPointerDown}
             onContextMenu={handleContainerContextMenu}
         >
+            <div className={style["grid-header"]} data-grid-header aria-hidden="true">
+                <div className={`${style["grid-header-cell"]} ${style["grid-header-sid"]}`}>序列</div>
+                <div className={`${style["grid-header-cell"]} ${style["grid-header-yr"]}`}>年份</div>
+                {Array.from({ length: 10 }, (_, i) => (
+                    <div key={i} className={`${style["grid-header-cell"]} ${style["grid-header-val"]}`}>
+                        <span>{i}</span>
+                    </div>
+                ))}
+            </div>
+
             {topSpacerHeight > 0 ? (
                 <div
                     aria-hidden="true"
@@ -2101,7 +2159,9 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                 />
             ) : null}
 
-            {visibleSeries.map((series, seriesIndex) => (
+            {visibleSeries.map((series, seriesIndex) => {
+                const yearRange = seriesYearRanges.get(series.treeCode);
+                return (
                 <div
                     ref={(el) => {
                         if (el) seriesBlockRefs.current.set(series.treeCode, el);
@@ -2111,9 +2171,26 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                     key={series.treeCode}
                     style={seriesIndex > 0 ? { marginTop: `${SERIES_GAP}px` } : undefined}
                 >
-                    {series.rows.map((row, rowIndex) => (
+                    {textEditTree === series.treeCode ? (
+                        <SeriesTextEditor
+                            treeCode={series.treeCode}
+                            initialText={seriesDataToText(visibleSite.get(series.treeCode) ?? new Map(), stopMarker.value)}
+                            stopMarkerValue={stopMarker.value}
+                            onClose={(newText) => handleTextEditorClose(series.treeCode, newText)}
+                        />
+                    ) : (
+                        <>
+                            <div className={style["series-header"]}>
+                                <span className={style["series-header-name"]}>{series.treeCode}</span>
+                                {yearRange && (
+                                    <span className={style["series-header-range"]}>
+                                        {yearRange[0]}–{yearRange[1]} · {yearRange[1] - yearRange[0] + 1} 年
+                                    </span>
+                                )}
+                            </div>
+                            {series.rows.map((row, rowIndex) => (
                         <div className={style["series-row"]} key={`${series.treeCode}-${rowIndex}-${row.startYear}`}>
-                            <WidthGrid gridValue={series.treeCode} style={{ textAlign: 'left' }} title={series.treeCode} />
+                            <WidthGrid gridValue={series.treeCode} style={{ textAlign: 'left', letterSpacing: '0.02em' }} title={series.treeCode} />
                             <WidthGrid gridValue={row.startYear} />
 
                             {row.cells.map((cell, cellIndex) => {
@@ -2241,8 +2318,11 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                             ))}
                         </div>
                     ))}
+                        </>
+                    )}
                 </div>
-            ))}
+                );
+            })}
 
             {bottomSpacerHeight > 0 ? (
                 <div
@@ -2310,6 +2390,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                 onDelete={handleContextMenuDelete}
                 onDeleteRange={handleContextMenuDeleteRange}
                 onDeleteSeries={handleContextMenuDeleteSeries}
+                onEditAsText={handleContextMenuEditAsText}
                 onPreviewYearChange={handleContextMenuPreviewYearChange}
                 onPreviewYearRangeChange={handleContextMenuPreviewYearRangeChange}
                 onClose={handleContextMenuClose}

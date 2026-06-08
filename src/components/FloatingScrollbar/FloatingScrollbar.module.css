@@ -1,0 +1,46 @@
+.root {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 240ms ease;
+}
+
+.root.visible {
+    opacity: 1;
+}
+
+.vThumb,
+.hThumb {
+    position: absolute;
+    display: none;
+    border-radius: 999px;
+    background-color: rgba(99, 99, 99, 0.55);
+    pointer-events: auto;
+    will-change: transform;
+    transition: background-color 160ms ease;
+}
+
+.vThumb {
+    top: 0;
+    right: 3px;
+    width: 6px;
+}
+
+.hThumb {
+    left: 0;
+    bottom: 3px;
+    height: 6px;
+}
+
+.vThumb:hover,
+.hThumb:hover {
+    background-color: rgba(80, 80, 80, 0.75);
+}
+
+/* Don't let invisible thumbs swallow clicks when hidden. */
+.root:not(.visible) .vThumb,
+.root:not(.visible) .hThumb {
+    pointer-events: none;
+}

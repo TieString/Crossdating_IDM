@@ -15,8 +15,8 @@
 
 #tree_selector {
     position: absolute;
-    top: 10px;
-    left: 10px;
+    top: 8px;
+    left: 8px;
     z-index: 10;
     width: 85px;
     height: 24px;
@@ -63,6 +63,70 @@
     background-color: #ffffff;
 }
 
+.width-legend {
+    position: absolute;
+    top: 10px;
+    right: 14px;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    font-size: 12px;
+    color: #5a6675;
+    pointer-events: none;
+    user-select: none;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+}
+
+.legend-swatch {
+    width: 15px;
+    height: 15px;
+    border-radius: 3px;
+    flex-shrink: 0;
+    position: relative;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    background-color: #ffffff;
+}
+
+.legend-swatch-narrow {
+    background-color: rgba(255, 255, 0, 0.72);
+    border-color: rgba(200, 180, 0, 0.28);
+}
+
+.legend-swatch-false-ring::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 3px;
+    width: 2.5px;
+    background-color: #ff0000;
+    border-radius: 1px;
+}
+
+.legend-swatch-absent::after {
+    content: "";
+    position: absolute;
+    left: 2px;
+    right: 2px;
+    bottom: 2px;
+    height: 2.5px;
+    background-color: #57b357;
+    border-radius: 1px;
+}
+
+.legend-swatch-missing {
+    background-color: #f7f7f7;
+    border: 1px dashed #cfcfcf;
+}
+
 .width-module,
 .cofecha-module {
     height: 100%;
@@ -76,6 +140,17 @@
     position:relative;
     overflow-x: hidden;
     overflow-y: hidden;
+}
+
+.structured-width-container,
+.raw-width-container {
+    position: relative;
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
 }
 
 .cofecha-module {
@@ -130,6 +205,7 @@
 .line-chart {
     min-width: 0;
     min-height: 0;
+    box-sizing: border-box;
 }
 
 .data-container {
@@ -137,6 +213,7 @@
     flex: 1 1 auto;
     overflow: auto;
     overflow-anchor: none;
+    scrollbar-width: none;
     contain: layout;
     padding: 10px;
     padding-left: 20px;
@@ -145,9 +222,23 @@
     border-radius: 8px;
 }
 
+/* Native scrollbar hidden; FloatingScrollbar draws the overlay thumbs instead. */
+.data-container::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+}
+
+.data-viewport {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    box-sizing: border-box;
+}
+
 .problems-container {
     flex: 1 1 auto;
-    min-height: 96px;
     overflow: auto;
     padding: 10px;
     background-color: #f9f9f9;
@@ -217,6 +308,7 @@
     cursor: default;
     touch-action: none;
     user-select: none;
+    z-index: 2;
 }
 
 .panel-divider::before {
@@ -224,9 +316,14 @@
     position: absolute;
     inset: 0;
     margin: auto;
-    /* background-color: #c2c2c2; */
     border-radius: 999px;
     transition: background-color 0.2s ease;
+}
+
+.panel-divider::after {
+    content: "";
+    position: absolute;
+    inset: -2px;
 }
 
 .panel-divider:hover::before,
@@ -235,9 +332,12 @@
 }
 
 .panel-divider-vertical {
-    width: 2px;
-    padding: 0 5px;
+    width: 8px;
     cursor: col-resize;
+}
+
+.panel-divider-collapsed.panel-divider-vertical {
+    margin: 0 -4px;
 }
 
 .panel-divider-vertical::before {
@@ -246,9 +346,12 @@
 }
 
 .panel-divider-horizontal {
-    height: 2px;
-    padding: 5px 0;
+    height: 8px;
     cursor: row-resize;
+}
+
+.panel-divider-collapsed.panel-divider-horizontal {
+    margin: -4px 0;
 }
 
 .panel-divider-horizontal::before {
@@ -327,4 +430,132 @@
     font-size: 14px;
     z-index: 2;
     pointer-events: none;
+}
+
+.raw-width-container {
+    overflow: hidden;
+    overflow-anchor: none;
+    contain: layout;
+    box-sizing: border-box;
+    background-color: #ffffff;
+    border: 1px solid #d7d7d7;
+    border-radius: 8px;
+}
+
+.raw-width-container .width-text {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 10px 20px;
+    box-sizing: border-box;
+    overflow: auto;
+    border: 0;
+    border-radius: 0;
+    outline: none;
+    background-color: transparent;
+    color: #111827;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 18px;
+    line-height: 1.45;
+    white-space: pre;
+    tab-size: 4;
+    user-select: text;
+    cursor: text;
+}
+
+.raw-width-container .width-text:focus {
+    box-shadow: none;
+}
+
+.raw-editor-actions {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 3;
+    display: flex;
+    gap: 3px;
+    padding: 3px;
+    border: 1px solid rgba(199, 205, 214, 0.62);
+    border-radius: 5px;
+    background-color: rgba(255, 255, 255, 0.7);
+    box-shadow: 0 1px 5px rgba(15, 23, 42, 0.07);
+    opacity: 0.12;
+    pointer-events: none;
+    transform: translateY(-3px);
+    transition: opacity 160ms ease, transform 160ms ease, background-color 160ms ease;
+}
+
+.raw-width-container:hover .raw-editor-actions,
+.raw-width-container:focus-within .raw-editor-actions {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+}
+
+.raw-editor-actions:hover,
+.raw-editor-actions:focus-within {
+    background-color: rgba(255, 255, 255, 0.96);
+}
+
+.raw-editor-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 24px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background-color: transparent;
+    color: #40566d;
+    font-family: inherit;
+    font-size: 17px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.raw-editor-button:hover {
+    background-color: #edf3f8;
+    color: #1f4f78;
+}
+
+.raw-editor-button:focus-visible {
+    outline: 2px solid rgba(67, 116, 166, 0.35);
+    outline-offset: 1px;
+}
+
+.raw-editor-invalid {
+    box-shadow: inset 0 0 0 2px rgba(220, 38, 38, 0.35) !important;
+}
+
+.raw-editor-error {
+    position: absolute;
+    left: 18px;
+    right: 18px;
+    bottom: 18px;
+    z-index: 3;
+    max-height: 30%;
+    overflow: auto;
+    padding: 8px 10px;
+    border: 1px solid #f0a7a7;
+    border-radius: 3px;
+    background-color: #fff7f7;
+    color: #991b1b;
+    font-size: 16px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+}
+
+@media (max-width: 1100px) {
+    .width-module {
+        flex: 1 1 auto !important;
+        width: 100%;
+    }
+
+    .home-container > .panel-divider-vertical,
+    .cofecha-module {
+        display: none;
+    }
 }

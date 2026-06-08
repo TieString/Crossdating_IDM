@@ -127,6 +127,71 @@
     }
 }
 
+.grid-header {
+    position: sticky;
+    top: -10px;
+    z-index: 8;
+    display: grid;
+    grid-template-columns: minmax(6ch, 1.25fr) repeat(11, minmax(0, 1fr));
+    gap: 5px;
+    margin: -10px -10px 0 -20px;
+    padding: 0 10px 0 20px;
+    background-color: #f3f6fb;
+    border-bottom: 1px solid #c7cfdb;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: #5a6675;
+    user-select: none;
+    font-variant-numeric: tabular-nums;
+}
+
+.grid-header-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 6px 2px;
+    text-align: center;
+}
+
+.grid-header-sid {
+    align-items: flex-start;
+    text-align: left;
+}
+
+.grid-header-yr {
+    align-items: center;
+    text-align: center;
+}
+
+.series-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 36px;
+    box-sizing: border-box;
+    margin: 0 -10px 0 -20px;
+    padding: 0 10px 0 20px;
+    background-color: #f7f9fc;
+    border-top: 1px solid #dde3ec;
+    border-bottom: 1px solid #dde3ec;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    user-select: none;
+}
+
+.series-header-name {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: #1c2530;
+}
+
+.series-header-range {
+    font-size: 12px;
+    color: #8a94a3;
+}
+
 .series-block {
     display: flex;
     flex-direction: column;

@@ -3,11 +3,13 @@ import { readTextFile } from "@tauri-apps/plugin-fs";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { parseCofechaResult, splitReportByParts } from "@/features/cofecha/formatter";
 import type { ICofechaResult } from "@/features/cofecha/types";
+import { detectPrecision, readRwlString } from "@/features/rwl";
 import { RwlEditor, registerChangeYearWidth } from "@/features/rwl/edit";
 import type { DeleteMode, RwlDeletionMarkers, RwlHistoryAnimation } from "@/features/rwl/edit";
 import type { RwlSiteData } from "@/features/rwl/types";
 import { runCofecha } from "@/services/cofecha/runner";
 import { readRwlFile, saveFile } from "@/services/fs/io";
+import { stopMarker } from "@/shared/constants";
 import { ALL_OPTION_VALUE, CofechaVersion, DEFAULT_HOME_TITLE } from "./constants";
 
 export type WidthHistoryAnimation = RwlHistoryAnimation & { id: number };
@@ -170,6 +172,30 @@ export function useHomeWorkspace() {
         setIsModified(false);
     }, []);
 
+    const getCurrentRwlText = useCallback(() => (
+        rwlEditorRef.current.exportAsRwlString()
+    ), []);
+
+    const applyParsedRwlText = useCallback(async (rawText: string) => {
+        stopMarker.value = await detectPrecision(rawText);
+        const rwlData = await readRwlString(rawText);
+        const nextTreeOptions = Array.from(rwlData.data.keys());
+
+        rwlEditorRef.current.replaceAllData(rwlData.data, rwlData.readOptions, rwlData.format);
+        setTreeOptions(nextTreeOptions);
+        setSelectedTree((previous) => (
+            previous !== ALL_OPTION_VALUE && !nextTreeOptions.includes(previous)
+                ? ALL_OPTION_VALUE
+                : previous
+        ));
+
+        return rwlData;
+    }, []);
+
+    const applyRawRwlText = useCallback(async (rawText: string) => {
+        await applyParsedRwlText(rawText);
+    }, [applyParsedRwlText]);
+
     const handleSave = useCallback(async () => {
         if (!filePathRef.current) {
             console.log("请先打开一个文件");
@@ -190,6 +216,28 @@ export function useHomeWorkspace() {
             console.error("写入文件时出错:", error);
         }
     }, [markCurrentDataAsSaved, runCofechaAndApplyResult]);
+
+    const handleSaveRawText = useCallback(async (rawText: string) => {
+        if (!filePathRef.current) {
+            console.log("请先打开一个文件");
+            return;
+        }
+
+        try {
+            await applyParsedRwlText(rawText);
+            await saveFile(filePathRef.current, rawText);
+            markCurrentDataAsSaved();
+
+            try {
+                await runCofechaAndApplyResult(rawText, filePathRef.current);
+            } catch (error) {
+                console.error("cofecha 执行失败", error);
+            }
+        } catch (error) {
+            console.error("写入文本编辑内容时出错:", error);
+            throw error;
+        }
+    }, [applyParsedRwlText, markCurrentDataAsSaved, runCofechaAndApplyResult]);
 
     const handleSaveAs = useCallback(async () => {
         if (!filePathRef.current) {
@@ -213,6 +261,30 @@ export function useHomeWorkspace() {
             console.error("写入文件时出错:", error);
         }
     }, [markCurrentDataAsSaved]);
+
+    const handleSaveRawTextAs = useCallback(async (rawText: string) => {
+        if (!filePathRef.current) {
+            console.log("请先打开一个文件");
+            return;
+        }
+
+        try {
+            const filePathToSave = await save({
+                filters: [{ name: "Tucson Files", extensions: ["rwl"] }],
+            });
+
+            if (!filePathToSave) {
+                return;
+            }
+
+            await applyParsedRwlText(rawText);
+            await saveFile(filePathToSave, rawText);
+            markCurrentDataAsSaved();
+        } catch (error) {
+            console.error("写入文本编辑内容时出错:", error);
+            throw error;
+        }
+    }, [applyParsedRwlText, markCurrentDataAsSaved]);
 
     const handleUndo = useCallback(() => {
         triggerHistoryAnimation(rwlEditorRef.current.undo());
@@ -244,6 +316,10 @@ export function useHomeWorkspace() {
 
     const handleDeleteSeries = useCallback((tree: string) => {
         rwlEditorRef.current.deleteSeries(tree);
+    }, []);
+
+    const handleReplaceTreeData = useCallback((tree: string, data: Map<number, number | null>) => {
+        rwlEditorRef.current.replaceTreeData(tree, data);
     }, []);
 
     const handleInsertMissingYearAtSideFromChart = useCallback((tree: string, nextYear: number, side: "left" | "right") => {
@@ -288,11 +364,16 @@ export function useHomeWorkspace() {
         handleMarkYearRangeAsMissing,
         handleMoveSeriesTailByOffset,
         handleRedo,
+        handleReplaceTreeData,
         handleRestoreDeletion,
+        handleSaveRawText,
+        handleSaveRawTextAs,
         handleSave,
         handleSaveAs,
         handleTreeSelectionChange,
         handleUndo,
+        applyRawRwlText,
+        getCurrentRwlText,
         hasChart,
         hasProblems,
         historyAnimation,

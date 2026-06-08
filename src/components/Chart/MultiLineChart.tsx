@@ -18,6 +18,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import WidthGridContextMenu from '@/components/WidthContainer/WidthGridContextMenu/WidthGridContextMenu'
 import type { DeleteMode, MissingInsertSide } from '@/features/rwl/edit'
+import { stopMarker } from '@/shared/constants'
 
 ChartJS.register(
   LineElement,
@@ -82,6 +83,9 @@ const X_AXIS_LABEL_Y_OFFSET = 10
 const X_AXIS_TITLE_Y_OFFSET = 25    // x轴标题相对于x轴底部的垂直偏移
 const NICE_YEAR_STEPS = [1, 2, 5, 10, 15, 20, 25, 50, 100, 200]
 const LINE_HIT_THRESHOLD_PX = 5   // 鼠标距离折线小于5px时点击选择该折线
+const SAMPLE_SIZE_AXIS_ID = 'sampleSize'
+const SAMPLE_SIZE_LABEL = '样本量'
+const SAMPLE_SIZE_COLOR = 'rgba(104, 110, 120, 0.62)'
 
 type XAxisLabel = {
   index: number
@@ -238,6 +242,17 @@ const fixedChartAreaPlugin: Plugin<'line'> = {
       yScale.height = chartArea.bottom - chartArea.top
       yScale.configure()
     }
+
+    const sampleSizeScale = scales[SAMPLE_SIZE_AXIS_ID]
+    if (sampleSizeScale) {
+      sampleSizeScale.left = right
+      sampleSizeScale.right = right
+      sampleSizeScale.width = 0
+      sampleSizeScale.top = chartArea.top
+      sampleSizeScale.bottom = chartArea.bottom
+      sampleSizeScale.height = chartArea.bottom - chartArea.top
+      sampleSizeScale.configure()
+    }
   }
 }
 
@@ -377,6 +392,7 @@ export function makePersistentTooltipPlugin(): Plugin<'line'> & { activeIndex: n
       type Row = { color: string; name: string; value: string }
       const rows: Row[] = []
       data.datasets.forEach((ds) => {
+        if (ds.yAxisID === SAMPLE_SIZE_AXIS_ID) return
         const raw = ds.data[idx]
         if (raw == null) return
         const value = typeof raw === 'number' ? Math.round(raw).toString() : String(raw)
@@ -573,6 +589,7 @@ function makeYearIndicatorPlugin(): Plugin<'line'> & { activeIndex: number | nul
 
 type Props = {
   data: Map<string, Map<number, number>>
+  sampleSizeData?: ReadonlyMap<string, ReadonlyMap<number, number | null>>
   highlightedTreeCode?: string | null
   onHighlightedTreeCodeChange?: (treeCode: string | null) => void
   zoomWindow?: { min: number; max: number } | null
@@ -599,6 +616,7 @@ const CHART_FONT_FAMILY = "'Arial', 'Helvetica', sans-serif"
 
 export function MultiLineChart({
   data,
+  sampleSizeData,
   highlightedTreeCode = null,
   onHighlightedTreeCodeChange,
   zoomWindow = null,
@@ -614,6 +632,7 @@ export function MultiLineChart({
   const yearIndicatorPlugin = useMemo(() => makeYearIndicatorPlugin(), [])
   const markerLinesPlugin = useMemo(() => makeMarkerLinesPlugin(), [])
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tree: string; year: number } | null>(null)
+  const [showSampleSize, setShowSampleSize] = useState(true)
   const treeCodes = useMemo(() => Array.from(data.keys()), [data])
   const highlightedIndex = highlightedTreeCode ? treeCodes.indexOf(highlightedTreeCode) : -1
 
@@ -647,6 +666,29 @@ export function MultiLineChart({
     return years
   }, [data])
 
+  const sampleSize = useMemo(() => {
+    let max = 0
+    const coverageData = sampleSizeData ?? data
+    const counts = allYears.map((year) => {
+      let count = 0
+      coverageData.forEach((yearMap) => {
+        const value = yearMap.get(year)
+        if (
+          typeof value === 'number'
+          && Number.isFinite(value)
+          && value > 0
+          && value !== stopMarker.value
+        ) {
+          count += 1
+        }
+      })
+      if (count > max) max = count
+      return count
+    })
+
+    return { counts, max }
+  }, [allYears, data, sampleSizeData])
+
   // 构造 Chart.js datasets。
   const datasets: ChartData<'line'>['datasets'] = useMemo(() => {
     const nextDatasets: ChartData<'line'>['datasets'] = []
@@ -663,7 +705,7 @@ export function MultiLineChart({
         borderColor: highlightedIndex === -1 || isHighlighted ? color : transparentColor,
         backgroundColor: color,
         fill: false,
-        borderWidth: highlightedIndex === -1 || isHighlighted ? 2.5 : 1.5,
+        borderWidth: highlightedIndex === -1 || isHighlighted ? 2 : 1,
         tension: 0.008,
         cubicInterpolationMode: 'default',
         pointRadius: 0,
@@ -673,8 +715,26 @@ export function MultiLineChart({
       colorIndex++
     })
 
+    if (showSampleSize && sampleSize.counts.length > 0) {
+      nextDatasets.push({
+        label: SAMPLE_SIZE_LABEL,
+        data: sampleSize.counts,
+        yAxisID: SAMPLE_SIZE_AXIS_ID,
+        borderColor: SAMPLE_SIZE_COLOR,
+        backgroundColor: SAMPLE_SIZE_COLOR,
+        fill: false,
+        borderWidth: 1.25,
+        borderDash: [6, 5],
+        tension: 0,
+        pointRadius: 0,
+        pointHoverRadius: 0,
+        pointHitRadius: 0,
+        order: 10,
+      })
+    }
+
     return nextDatasets
-  }, [allYears, data, highlightedIndex])
+  }, [allYears, data, highlightedIndex, sampleSize, showSampleSize])
 
   const chartData: ChartData<'line'> = {
     labels: allYears.map(year => year.toString()),
@@ -840,10 +900,25 @@ export function MultiLineChart({
           color: '#222',
           padding: { bottom: 6 },
         },
+      },
+      [SAMPLE_SIZE_AXIS_ID]: {
+        type: 'linear',
+        axis: 'y',
+        display: false,
+        position: 'right',
+        min: 0,
+        max: Math.max(2, sampleSize.max + 1),
+        grid: {
+          drawOnChartArea: false,
+          drawTicks: false,
+        },
+        ticks: {
+          display: false,
+        },
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [allYears.length, yMin, yMax])
+  }), [allYears.length, sampleSize.max, yMin, yMax])
 
   // 点击折线时切换高亮，并保存当前缩放状态。
   const handleLineChartClick = (
@@ -885,6 +960,8 @@ export function MultiLineChart({
     const xScale = chart.scales['x']
 
     chart.data.datasets.forEach((ds, i) => {
+      if (ds.yAxisID === SAMPLE_SIZE_AXIS_ID) return
+
       for (const [idxA, idxB] of [[dataIndex - 1, dataIndex], [dataIndex, dataIndex + 1]] as [number, number][]) {
         const valA = ds.data[idxA]
         const valB = ds.data[idxB]
@@ -949,6 +1026,52 @@ export function MultiLineChart({
       style={{ position: 'relative', height: '100%', minHeight: 0, background: '#fff' }}
       onContextMenu={handleContextMenu}
     >
+      <label
+        title="显示/隐藏样本量曲线"
+        style={{
+          position: 'absolute',
+          top: 2,
+          right: 8,
+          zIndex: 2,
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '2px 7px',
+          border: '1px solid rgba(210,210,210,0.85)',
+          borderRadius: 4,
+          background: 'rgba(255,255,255,0.88)',
+          color: '#555',
+          fontFamily: CHART_FONT_FAMILY,
+          fontSize: 11,
+          lineHeight: 1.4,
+          cursor: 'pointer',
+          userSelect: 'none',
+        }}
+        onContextMenu={(event) => event.stopPropagation()}
+      >
+        <input
+          type="checkbox"
+          checked={showSampleSize}
+          aria-label="显示样本量曲线"
+          onChange={(event) => setShowSampleSize(event.target.checked)}
+          style={{
+            width: 12,
+            height: 12,
+            margin: 0,
+            accentColor: '#777',
+            cursor: 'pointer',
+          }}
+        />
+        <span
+          aria-hidden="true"
+          style={{
+            width: 24,
+            height: 0,
+            borderTop: `2px dashed ${SAMPLE_SIZE_COLOR}`,
+          }}
+        />
+        <span>{SAMPLE_SIZE_LABEL}</span>
+      </label>
       <Line
         ref={chartRef}
         data={chartData}

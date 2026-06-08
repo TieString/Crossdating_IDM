@@ -55,6 +55,51 @@ const clamp = (value: number, min: number, max: number) => {
     return Math.min(Math.max(value, min), max);
 };
 
+const readCssPixelValue = (value: string) => {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const getDividerLayoutSize = (divider: HTMLElement, axis: ResizeAxis) => {
+    const rect = divider.getBoundingClientRect();
+    const styles = window.getComputedStyle(divider);
+    const dividerSize = axis === "x" ? rect.width : rect.height;
+    const marginStart = axis === "x"
+        ? readCssPixelValue(styles.marginLeft)
+        : readCssPixelValue(styles.marginTop);
+    const marginEnd = axis === "x"
+        ? readCssPixelValue(styles.marginRight)
+        : readCssPixelValue(styles.marginBottom);
+
+    return Math.max(0, dividerSize + marginStart + marginEnd);
+};
+
+const getResizeBounds = (size: number, dividerSize: number, minStart: number, minEnd: number) => {
+    const reservedDividerSize = clamp(dividerSize, 0, size);
+    const availablePanelSize = Math.max(0, size - reservedDividerSize);
+    const requestedMinStart = Math.max(0, minStart);
+    const requestedMinEnd = Math.max(0, minEnd);
+    const requestedMinimum = requestedMinStart + requestedMinEnd;
+    const scale = requestedMinimum > availablePanelSize && requestedMinimum > 0
+        ? availablePanelSize / requestedMinimum
+        : 1;
+    const effectiveMinStart = requestedMinStart * scale;
+    const effectiveMinEnd = requestedMinEnd * scale;
+
+    return {
+        minRatio: size > 0 ? effectiveMinStart / size : 0,
+        maxRatio: size > 0
+            ? clamp(
+                requestedMinEnd > 0
+                    ? (size - reservedDividerSize - effectiveMinEnd) / size
+                    : 1,
+                effectiveMinStart / size,
+                1,
+            )
+            : 0,
+    };
+};
+
 export function useResizablePanels() {
     const [layout, setLayout] = useState<StoredLayout>(() => readStoredLayout());
     const [draggingKey, setDraggingKey] = useState<LayoutKey | null>(null);
@@ -90,11 +135,10 @@ export function useResizablePanels() {
                 return;
             }
 
-            const effectiveSize = Math.max(size, minStart + minEnd);
-            const minRatio = minStart / effectiveSize;
-            const maxRatio = 1 - minEnd / effectiveSize;
+            const dividerSize = getDividerLayoutSize(event.currentTarget, axis);
+            const { minRatio, maxRatio } = getResizeBounds(size, dividerSize, minStart, minEnd);
             const pointerStart = axis === "x" ? event.clientX : event.clientY;
-            const startRatio = layoutRef.current[key];
+            const startRatio = clamp(layoutRef.current[key], minRatio, maxRatio);
             const cursor = axis === "x" ? "col-resize" : "row-resize";
             const originalUserSelect = document.body.style.userSelect;
             const originalCursor = document.body.style.cursor;

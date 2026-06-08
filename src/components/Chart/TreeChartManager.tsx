@@ -125,7 +125,7 @@ function TreeChartManagerBase({ fullData, onInsertMissingYearAtSide, onDeleteYea
     fontSize: 12, padding: '4px 12px', borderRadius: 5, cursor: 'pointer',
     border: '1px solid #d0d0d0', background: '#fff', color: '#444',
     fontWeight: 500, letterSpacing: 0.2, transition: 'background 0.12s, color 0.12s',
-    lineHeight: 1.4,
+    lineHeight: 1.4,boxShadow: 'none',
   }
   const btnDisabled: React.CSSProperties = {
     ...btnBase, background: '#f4f4f4', color: '#c0c0c0', cursor: 'default', border: '1px solid #e4e4e4',
@@ -216,6 +216,7 @@ function TreeChartManagerBase({ fullData, onInsertMissingYearAtSide, onDeleteYea
         {filteredData.size > 0 ? (
           <MultiLineChart
             data={filteredData}
+            sampleSizeData={fullData}
             highlightedTreeCode={highlightedTreeCode}
             onHighlightedTreeCodeChange={setHighlightedTreeCode}
             zoomWindow={zoomWindow}
