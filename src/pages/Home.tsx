@@ -4,7 +4,7 @@ import { AnimatePresence } from "motion/react";
 import { TreeChartManager } from "@/components/Chart/TreeChartManager";
 import { RollingNumber } from "@/components/RollingNumber/RollingNumber";
 import WidthContainer from "@/components/WidthContainer/WidthContainer";
-import { OverlayScroll } from "@/components/OverlayScroll/OverlayScroll";
+import { FloatingScrollArea } from "@/components/FloatingScrollArea/FloatingScrollArea";
 import { FloatingScrollbar } from "@/components/FloatingScrollbar/FloatingScrollbar";
 import { FindReplaceBar, type FindReplaceMode } from "@/components/FindReplace/FindReplaceBar";
 import { openSettingsWindow } from "@/pages/settings/openSettingsWindow";
@@ -318,7 +318,6 @@ const renderCofechaHtmlWithLinks = (text: string | undefined, trees: readonly st
 
 export default function Home() {
     const homeContainerRef = useRef<HTMLDivElement>(null);
-    const dataContainerRef = useRef<HTMLDivElement>(null);
     const rawEditorRef = useRef<HTMLParagraphElement>(null);
     const leftPanelsRef = useRef<HTMLDivElement>(null);
     const rightPanelsRef = useRef<HTMLDivElement>(null);
@@ -546,7 +545,7 @@ export default function Home() {
                 if (command.type === "insert-missing") {
                     handleInsertMissingYearAtSideFromChart(command.tree, command.year, command.side);
                 } else if (command.type === "delete-year") {
-                    handleDeleteYearWithModeFromChart(command.tree, command.year, command.mode);
+                    handleDeleteYearWithModeFromChart(command.tree, command.year, command.mode, command.shift);
                 } else {
                     handleDeleteSeriesFromChart(command.tree);
                 }
@@ -968,6 +967,10 @@ export default function Home() {
                             >
                                 {rawEditorInitialText}
                             </p>
+                            <FloatingScrollbar
+                                targetRef={rawEditorRef}
+                                revision={rawEditorRevision}
+                            />
 
                             {rawEditorError ? (
                                 <div className={style["raw-editor-error"]}>
@@ -1018,15 +1021,16 @@ export default function Home() {
                             ) : null}
 
                             <div className={style["width-panels"]} ref={leftPanelsRef}>
-                                <div
-                                    className={`${style["data-viewport"]} ${activeMenu ? style["z-index-1"] : ""}`}
-                                    style={dataContainerStyle}
+                                <FloatingScrollArea
+                                    viewportClassName={`${style["data-viewport"]} ${activeMenu ? style["z-index-1"] : ""}`}
+                                    viewportStyle={dataContainerStyle}
+                                    className={style["data-container"]}
+                                    aria-busy={shouldShowProcessing}
+                                    topClearanceSelector="[data-grid-header]"
+                                    scrollbarRevision={`${shouldShowWelcome}:${selectedTree ?? ""}`}
                                 >
-                                    <div
-                                        className={style["data-container"]}
-                                        ref={dataContainerRef}
-                                        aria-busy={shouldShowProcessing}
-                                    >
+                                    {(dataContainerRef) => (
+                                        <>
                                         {shouldShowWelcome ? (
                                             <div className={style["loading-container"]}>
                                                 <img src="IDM.png" className={style["loading-image"]} alt="IDM loading" />
@@ -1060,13 +1064,9 @@ export default function Home() {
                                                 <span>{processingText}</span>
                                             </div>
                                         ) : null}
-                                    </div>
-                                    <FloatingScrollbar
-                                        targetRef={dataContainerRef}
-                                        topClearanceSelector="[data-grid-header]"
-                                        revision={`${shouldShowWelcome}:${selectedTree ?? ""}`}
-                                    />
-                                </div>
+                                        </>
+                                    )}
+                                </FloatingScrollArea>
 
                                 {hasProblems ? (
                                     <>
@@ -1084,11 +1084,11 @@ export default function Home() {
                                             })}
                                         />
 
-                                        <OverlayScroll className={style["problems-container"]}>
+                                        <FloatingScrollArea className={style["problems-container"]}>
                                             <p className={style["potential-problems"]}>
                                                 {selectedProblemText}
                                             </p>
-                                        </OverlayScroll>
+                                        </FloatingScrollArea>
                                     </>
                                 ) : null}
                             </div>
@@ -1111,7 +1111,10 @@ export default function Home() {
                 />
 
                 <div className={style["cofecha-module"]}>
-                    <div className={style["statics-info"]}>
+                    <FloatingScrollArea
+                        className={style["statics-info"]}
+                        viewportClassName={style["statics-info-viewport"]}
+                    >
                         <span className={style["stat-item"]} style={{ color: problemTextColor }}>
                             <span className={style["stat-label"]}>*A*</span>
                             <span className={style["stat-value"]}>
@@ -1142,12 +1145,12 @@ export default function Home() {
                                 <RollingNumber value={cofechaResult?.meanLength} />
                             </span>
                         </span>
-                    </div>
+                    </FloatingScrollArea>
 
                     <div className={style["cofecha-panels"]} ref={rightPanelsRef}>
-                        <OverlayScroll
+                        <FloatingScrollArea
                             className={style["full-text"]}
-                            style={cofechaTextStyle}
+                            viewportStyle={cofechaTextStyle}
                         >
                             <div className={style["cofecha-panel-content"]}>
                                 {externalWorkspaceWindows.cofecha ? (
@@ -1205,7 +1208,7 @@ export default function Home() {
                                     </>
                                 )}
                             </div>
-                        </OverlayScroll>
+                        </FloatingScrollArea>
 
                         {hasChart ? (
                             <>
@@ -1223,7 +1226,7 @@ export default function Home() {
                                     })}
                                 />
 
-                                <div className={style["line-chart"]}>
+                                <FloatingScrollArea className={style["line-chart"]}>
                                     <div className={style["line-chart-toolbar"]}>
                                         <button
                                             type="button"
@@ -1258,7 +1261,7 @@ export default function Home() {
                                             />
                                         </div>
                                     )}
-                                </div>
+                                </FloatingScrollArea>
                             </>
                         ) : null}
                     </div>

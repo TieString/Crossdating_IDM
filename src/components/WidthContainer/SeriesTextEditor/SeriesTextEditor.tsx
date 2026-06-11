@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { FloatingScrollbar } from '@/components/FloatingScrollbar/FloatingScrollbar';
 import style from './SeriesTextEditor.module.css';
 
 // ── Data conversion ────────────────────────────────────────────────────────
@@ -556,6 +557,7 @@ export default function SeriesTextEditor({ treeCode, initialText, stopMarkerValu
                         {overlayItems}
                     </div>
                 </div>
+                <FloatingScrollbar targetRef={textareaRef} />
             </div>
 
             {parseError && (

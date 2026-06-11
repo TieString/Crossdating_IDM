@@ -37,6 +37,28 @@
     animation: none;
 }
 
+/* 叠删层数角标：提示这条红线还可继续按后进先出逐层恢复 */
+.deletion-preview-ghost-count {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    min-width: 14px;
+    height: 14px;
+    padding: 0 3px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 7px;
+    background-color: #ef4444;
+    color: #ffffff;
+    font-size: 9px;
+    font-style: normal;
+    font-weight: 700;
+    line-height: 1;
+    pointer-events: none;
+}
+
 .delete-pixel-burst {
     position: absolute;
     z-index: 12;

@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { FloatingScrollArea } from "@/components/FloatingScrollArea/FloatingScrollArea";
 import { useSettings } from "@/features/settings/SettingsContext";
 import {
     ANIMATION_SPEED_MAX,
@@ -265,7 +266,11 @@ export default function SettingsPage() {
     return (
         <div className={styles["page"]}>
             <div className={styles["body"]}>
-                <nav className={styles["sidebar"]}>
+                <FloatingScrollArea
+                    className={styles["sidebar"]}
+                    viewportClassName={styles["sidebar-viewport"]}
+                    role="navigation"
+                >
                     {SECTIONS.map((section) => (
                         <button
                             key={section.id}
@@ -275,12 +280,12 @@ export default function SettingsPage() {
                             {section.label}
                         </button>
                     ))}
-                </nav>
+                </FloatingScrollArea>
 
-                <div className={styles["content"]}>
+                <FloatingScrollArea className={styles["content"]}>
                     {activeSection === "animation" && <AnimationSection />}
                     {activeSection === "about" && <AboutSection />}
-                </div>
+                </FloatingScrollArea>
             </div>
         </div>
     );

@@ -1,6 +1,6 @@
 import { Window } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import type { DeleteMode, MissingInsertSide, RwlOperationLogEntry, SerializedRwlTreeData } from "@/features/rwl/edit";
+import type { DeleteMode, DeleteShift, MissingInsertSide, RwlOperationLogEntry, SerializedRwlTreeData } from "@/features/rwl/edit";
 import type { ICofechaResult } from "@/features/cofecha/types";
 import type { RwlSiteData } from "@/features/rwl/types";
 
@@ -84,7 +84,7 @@ export type WorkspaceWindowCommand =
     | { kind: "cofecha"; type: "select-part"; part: string }
     | { kind: "cofecha"; type: "jump"; tree: string; year?: number }
     | { kind: "line-chart"; type: "insert-missing"; tree: string; year: number; side: MissingInsertSide }
-    | { kind: "line-chart"; type: "delete-year"; tree: string; year: number; mode: DeleteMode }
+    | { kind: "line-chart"; type: "delete-year"; tree: string; year: number; mode: DeleteMode; shift?: DeleteShift }
     | { kind: "line-chart"; type: "delete-series"; tree: string };
 
 export function serializeRwlSiteData(siteData: RwlSiteData): SerializedRwlSiteData {

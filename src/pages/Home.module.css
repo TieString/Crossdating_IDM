@@ -165,16 +165,20 @@
 
 .statics-info {
     font-family: "consolas";
-    flex: 0 0 auto;
+    flex: 1 1 auto;
     display: grid;
     grid-template-columns: repeat(5, minmax(max-content, 1fr));
     min-height: 39px;
     padding: 4px 0;
     gap: 20px;
-    margin: 3px;
     min-width: 100px;
-    overflow-x: auto;
-    overflow-y: hidden;
+}
+
+.statics-info-viewport {
+    flex: 0 0 auto;
+    width: calc(100% - 6px);
+    min-width: 100px;
+    margin: 3px;
 }
 
 .statics-info span {
@@ -216,21 +220,12 @@
 .data-container {
     position: relative;
     flex: 1 1 auto;
-    overflow: auto;
-    overflow-anchor: none;
-    scrollbar-width: none;
     contain: layout;
     padding: 10px;
     padding-left: 20px;
     background-color: #ffffff;
     border: 1px solid #d7d7d7;
     border-radius: 8px;
-}
-
-/* Native scrollbar hidden; FloatingScrollbar draws the overlay thumbs instead. */
-.data-container::-webkit-scrollbar {
-    width: 0;
-    height: 0;
 }
 
 .data-viewport {
@@ -244,7 +239,6 @@
 
 .problems-container {
     flex: 1 1 auto;
-    overflow: auto;
     padding: 10px;
     background-color: #f9f9f9;
     border: 1px solid #ccc;
@@ -258,7 +252,6 @@
 
 .full-text {
     flex: 1 1 auto;
-    overflow: auto;
     padding: 10px;
     background-color: #ffffff;
     border: 1px solid #ccc;
@@ -272,7 +265,6 @@
 
 .line-chart {
     flex: 1 1 auto;
-    overflow: auto;
     contain: layout;
     padding: 12px;
     background-color: #ffffff;
@@ -572,6 +564,7 @@
     padding: 10px 20px;
     box-sizing: border-box;
     overflow: auto;
+    scrollbar-width: none;
     border: 0;
     border-radius: 0;
     outline: none;
@@ -584,6 +577,11 @@
     tab-size: 4;
     user-select: text;
     cursor: text;
+}
+
+.raw-width-container .width-text::-webkit-scrollbar {
+    width: 0;
+    height: 0;
 }
 
 .raw-width-container .width-text:focus {

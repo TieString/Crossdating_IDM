@@ -1,10 +1,10 @@
 import { useMemo, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { motion } from "motion/react";
 import { TreeChartManager } from "@/components/Chart/TreeChartManager";
-import { OverlayScroll } from "@/components/OverlayScroll/OverlayScroll";
+import { FloatingScrollArea } from "@/components/FloatingScrollArea/FloatingScrollArea";
 import { RollingNumber } from "@/components/RollingNumber/RollingNumber";
 import type { ICofechaResult } from "@/features/cofecha/types";
-import type { DeleteMode, MissingInsertSide, RwlOperationLogEntry } from "@/features/rwl/edit";
+import type { DeleteMode, DeleteShift, MissingInsertSide, RwlOperationLogEntry } from "@/features/rwl/edit";
 import type { RwlSiteData } from "@/features/rwl/types";
 import styles from "./WorkspacePages.module.css";
 
@@ -113,17 +113,17 @@ export function OperationLogPage({
                         <span>可撤销</span><strong>{undoableCount}</strong>
                         <span>可重做</span><strong>{redoableCount}</strong>
                     </div>
-                    <div className={styles["sequence-list"]}>
+                    <FloatingScrollArea className={styles["sequence-list"]}>
                         {sequenceGroups.map((group) => (
                             <a key={group.tree} href={`#log-tree-${encodeURIComponent(group.tree)}`}>
                                 <span>{group.tree}</span>
                                 <strong>{group.entries.length}</strong>
                             </a>
                         ))}
-                    </div>
+                    </FloatingScrollArea>
                 </aside>
 
-                <OverlayScroll className={styles["log-scroll"]}>
+                <FloatingScrollArea className={styles["log-scroll"]}>
                     {operationLog.length === 0 ? (
                         <motion.div
                             className={styles["empty-state"]}
@@ -187,7 +187,7 @@ export function OperationLogPage({
                             ))}
                         </div>
                     )}
-                </OverlayScroll>
+                </FloatingScrollArea>
             </div>
         </PageShell>
     );
@@ -250,14 +250,14 @@ export function CofechaReportPage({
                     <span>{linkedReport.count} 跳转链接</span>
                 </div>
 
-                <OverlayScroll className={styles["report-scroll"]}>
+                <FloatingScrollArea className={styles["report-scroll"]}>
                     <p
                         className={styles["report-text"]}
                         onClick={onTextClick}
                         onKeyDown={onTextKeyDown}
                         dangerouslySetInnerHTML={{ __html: linkedReport.html }}
                     />
-                </OverlayScroll>
+                </FloatingScrollArea>
             </div>
         </PageShell>
     );
@@ -266,7 +266,7 @@ export function CofechaReportPage({
 type ExpandedChartPageProps = {
     siteData: RwlSiteData;
     onInsertMissingYearAtSide: (tree: string, year: number, side: MissingInsertSide) => void;
-    onDeleteYearWithMode: (tree: string, year: number, mode: DeleteMode) => void;
+    onDeleteYearWithMode: (tree: string, year: number, mode: DeleteMode, shift?: DeleteShift) => void;
     onDeleteSeries: (tree: string) => void;
     onClose: () => void;
 };

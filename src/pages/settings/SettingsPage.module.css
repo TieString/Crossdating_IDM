@@ -18,6 +18,10 @@
 
 /* ── Left sidebar ────────────────────────────────── */
 
+.sidebar-viewport {
+    flex: 0 0 168px;
+}
+
 .sidebar {
     flex: 0 0 168px;
     display: flex;
@@ -26,7 +30,6 @@
     background: #ebebeb;
     border-right: 1px solid #d8d8d8;
     gap: 2px;
-    overflow-y: auto;
 }
 
 .sidebar-item {
@@ -72,7 +75,6 @@
 .content {
     flex: 1 1 0;
     padding: 24px 28px;
-    overflow-y: auto;
     background: #fff;
 }
 

@@ -1,8 +1,8 @@
 import { memo, ReactNode, RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { RwlSiteData } from '@/features/rwl';
-import { getDeletionStackBoundaryContributions, moveSeriesTailByOffset as previewMoveSeriesTailByOffset } from '@/features/rwl/edit';
-import type { DeleteMode, DeletionMarkerInfo, RwlDeletionMarkers, RwlHistoryAnimation } from '@/features/rwl/edit';
+import { moveSeriesTailByOffset as previewMoveSeriesTailByOffset } from '@/features/rwl/edit';
+import type { DeleteMode, DeleteShift, DeletionMarkerInfo, RwlDeletionMarkers, RwlHistoryAnimation } from '@/features/rwl/edit';
 import { RollingNumber } from '@/components/RollingNumber/RollingNumber';
 import WidthGrid from './WidthGrid/WidthGrid';
 import WidthGridContextMenu from './WidthGridContextMenu/WidthGridContextMenu';
@@ -291,6 +291,7 @@ const buildDeleteRollingCells = (
     treeData: Map<number, number | null> | undefined,
     year: number,
     mode: DeleteMode,
+    shift: DeleteShift = "right",
 ): RollingCellAnimation[] => {
     const deletedWidth = getRollingWidthValue(treeData?.get(year));
 
@@ -309,14 +310,20 @@ const buildDeleteRollingCells = (
         );
     };
 
+    // 邻居在删除收紧后所处的位置取决于填补方向：
+    // - shift="right"：左侧格子右移，左邻 (year-1) 落到 year，右邻 (year+1) 不动。
+    // - shift="left"：右侧格子左移，左邻 (year-1) 不动，右邻 (year+1) 落到 year。
+    const leftNeighborTargetYear = shift === "left" ? year - 1 : year;
+    const rightNeighborTargetYear = shift === "left" ? year : year + 1;
+
     if (mode === "left") {
-        addNeighbor(year, year - 1, deletedWidth);
+        addNeighbor(leftNeighborTargetYear, year - 1, deletedWidth);
     } else if (mode === "right") {
-        addNeighbor(year + 1, year + 1, deletedWidth);
+        addNeighbor(rightNeighborTargetYear, year + 1, deletedWidth);
     } else if (mode === "both") {
         const halfWidth = Math.round(deletedWidth / 2);
-        addNeighbor(year, year - 1, halfWidth);
-        addNeighbor(year + 1, year + 1, halfWidth);
+        addNeighbor(leftNeighborTargetYear, year - 1, halfWidth);
+        addNeighbor(rightNeighborTargetYear, year + 1, halfWidth);
     }
 
     return rollingCells;
@@ -753,7 +760,7 @@ type WidthContainerProps = {
     onYearClick?: (tree: string, year: number) => void,
     onInsertMissingYearAtSide?: (tree: string, year: number, side: PlusSide) => void,
     onMoveSeriesTailByOffset?: (tree: string, selectedStartYear: number, selectedEndYear: number, yearOffset: number) => void,
-    onDeleteYearWithMode?: (tree: string, year: number, mode: DeleteMode) => void,
+    onDeleteYearWithMode?: (tree: string, year: number, mode: DeleteMode, shift?: DeleteShift) => void,
     onMarkYearRangeAsMissing?: (tree: string, startYear: number, endYear: number) => void,
     onRestoreDeletion?: (tree: string, markerYear: number, index: number) => void,
     onDeleteSeries?: (tree: string) => void,
@@ -761,7 +768,7 @@ type WidthContainerProps = {
     onDeleteSeriesRequestHandled?: (id: number) => void,
     onReplaceTreeData?: (tree: string, data: Map<number, number | null>) => void,
     scrollContainerRef?: RefObject<HTMLElement | null>,
-    /** Actual scrolling element (e.g. the OverlayScrollbars viewport). Preferred over scrollContainerRef when provided. */
+    /** Actual scrolling element. Preferred over scrollContainerRef when provided. */
     scrollElement?: HTMLElement | null
 };
 
@@ -1120,6 +1127,7 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
         year: number,
         mode: DeleteMode,
         direction: RwlHistoryAnimation["direction"],
+        shift: DeleteShift = "right",
     ) => {
         const previousTreeData = previousVisibleSiteRef.current?.get(tree);
         const currentTreeData = visibleSite.get(tree);
@@ -1133,7 +1141,16 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
             );
         };
 
-        if (direction === "undo") {
+        if (shift === "left") {
+            // 右侧向左靠：左邻 (year-1) 位置不变；右邻 (year+1) 收紧后落到 year。
+            if (direction === "undo") {
+                if (mode === "left" || mode === "both") addTarget(year - 1, year - 1);
+                if (mode === "right" || mode === "both") addTarget(year + 1, year);
+            } else {
+                if (mode === "left" || mode === "both") addTarget(year - 1, year - 1);
+                if (mode === "right" || mode === "both") addTarget(year, year + 1);
+            }
+        } else if (direction === "undo") {
             if (mode === "left" || mode === "both") addTarget(year - 1, year);
             if (mode === "right" || mode === "both") addTarget(year + 1, year + 1);
         } else {
@@ -1392,21 +1409,54 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                 ? getTreeYearGridElements(containerRef.current, historyAnimation.tree)
                 : new Map<number, HTMLElement>();
             const currentYears = Array.from(sourceElements.keys());
+            const deleteShift: DeleteShift = historyAnimation.shift ?? "right";
             const rollingCells = buildDeleteHistoryRollingTargets(
                 historyAnimation.tree,
                 historyAnimation.year,
                 historyAnimation.mode,
                 historyAnimation.direction,
+                deleteShift,
             );
 
             if (historyAnimation.direction === "undo") {
-                // Undo restores the deleted year; cells slide back left.
-                const shiftedYears = currentYears.filter((y) => y < historyAnimation.year);
-                const shiftedCells = buildShiftedCells(shiftedYears, getRestoreShiftAnchorTargetYear(historyAnimation.year));
+                // Undo 还原被删年份；其余格子滑回去。shift="left" 时是 "right" 的镜像。
+                if (deleteShift === "left") {
+                    const shiftedYears = currentYears.filter((y) => y >= historyAnimation.year).map((y) => y + 1);
+                    const shiftedCells = buildShiftedCells(shiftedYears, historyAnimation.year + 1);
+                    showAnimationPlan({
+                        tree: historyAnimation.tree,
+                        insertSide: "left",
+                        insertedYears: [historyAnimation.year],
+                        shiftedYears,
+                        shiftedCells,
+                        movedYears: [],
+                        gapYears: [],
+                        overwrittenYears: [],
+                        rollingCells,
+                    });
+                } else {
+                    const shiftedYears = currentYears.filter((y) => y < historyAnimation.year);
+                    const shiftedCells = buildShiftedCells(shiftedYears, getRestoreShiftAnchorTargetYear(historyAnimation.year));
+                    showAnimationPlan({
+                        tree: historyAnimation.tree,
+                        insertSide: "right",
+                        insertedYears: [historyAnimation.year],
+                        shiftedYears,
+                        shiftedCells,
+                        movedYears: [],
+                        gapYears: [],
+                        overwrittenYears: [],
+                        rollingCells,
+                    });
+                }
+            } else if (deleteShift === "left") {
+                // Redo 重新应用 "左靠" 删除；右侧格子向左滑入缺口。
+                const shiftedYears = currentYears.filter((y) => y >= historyAnimation.year);
+                const shiftedCells = buildShiftedCells(shiftedYears, getDeleteShiftAnchorTargetYear(historyAnimation.year));
                 showAnimationPlan({
                     tree: historyAnimation.tree,
                     insertSide: "right",
-                    insertedYears: [historyAnimation.year],
+                    insertedYears: [],
                     shiftedYears,
                     shiftedCells,
                     movedYears: [],
@@ -1593,8 +1643,8 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
         });
     }, [deletionMarkers, cancelHoverClear, scheduleHoverClear]);
 
-    // 把 hover run 内每一个 marker 的整个 stack 都展平：一个被删除的 cell 对应一个 ghost。
-    // stack 自身保持空间顺序；displayIndex 只用于显示，deleteOrder 最大的 ghost 贴近红线。
+    // 每条红线只预览「最近一次删除」那一个 ghost（双击即恢复它）；stackSize 用于显示 ×N 角标，
+    // 提示这条缝隙还叠了几层、可继续按后进先出逐层恢复。
     const hoveredMarkerRun = useMemo(() => {
         if (!hoveredMarker || !deletionMarkers) return null;
         const treeMarkers = deletionMarkers.get(hoveredMarker.tree);
@@ -1602,45 +1652,50 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
         type Entry = {
             item: DeletionHoverItem;
             info: DeletionMarkerInfo;
-            index: number;
-            displayIndex: number;
             stackSize: number;
         };
         const result: Entry[] = [];
         hoveredMarker.items.forEach((item) => {
             const stack = treeMarkers.get(item.year);
             if (!stack || stack.length === 0) return;
-            stack
-                .map((info, index) => ({ info, index }))
-                .sort((a, b) => (
-                    (a.info.deleteOrder ?? a.index) - (b.info.deleteOrder ?? b.index)
-                ))
-                .forEach(({ info, index }, displayIndex) => {
-                    result.push({ item, info, index, displayIndex, stackSize: stack.length });
-            });
+            const topInfo = stack.reduce((best, info, index) => (
+                (info.deleteOrder ?? index) > (best.deleteOrder ?? -Infinity) ? info : best
+            ), stack[0]);
+            result.push({ item, info: topInfo, stackSize: stack.length });
         });
         return result;
     }, [hoveredMarker, deletionMarkers]);
 
     // 恢复完成后用同一个 animationPlan 描述插入格、滑动格和邻居数字回滚。
     // 被恢复的格子只做插入反馈，不进入 rollingCells，避免恢复值本身跳动。
-    const getRestoreShiftedYears = useCallback((tree: string, markerYear: number) => {
+    const getRestoreShiftedYears = useCallback((tree: string, markerYear: number, shiftSide: DeleteShift = "right") => {
         const sourceElements = containerRef.current
             ? getTreeYearGridElements(containerRef.current, tree)
             : new Map<number, HTMLElement>();
+
+        // 恢复会镜像还原删除：shift="right" 时把 year < markerYear 的格子整体 -1；
+        // shift="left" 时把 year >= markerYear 的格子整体 +1。返回的是它们恢复后的新坐标。
+        if (shiftSide === "left") {
+            return Array.from(sourceElements.keys())
+                .filter((year) => year >= markerYear)
+                .map((year) => year + 1);
+        }
 
         return Array.from(sourceElements.keys())
             .filter((year) => year < markerYear)
             .map((year) => year - 1);
     }, []);
 
-    const triggerRestoreAnimation = useCallback((tree: string, markerYear: number, shiftedYears: number[] = [], rollingCells: RollingCellAnimation[] = []) => {
-        const restoredYear = markerYear - 1;
-        const shiftedCells = buildShiftedCells(shiftedYears, getRestoreShiftAnchorTargetYear(restoredYear));
+    const triggerRestoreAnimation = useCallback((tree: string, markerYear: number, shiftedYears: number[] = [], rollingCells: RollingCellAnimation[] = [], shiftSide: DeleteShift = "right") => {
+        // shift="right"：插回 markerYear-1，其余格子向左滑（insert side="right"）。
+        // shift="left"：插回 markerYear，其余格子向右滑（insert side="left"）。
+        const restoredYear = shiftSide === "left" ? markerYear : markerYear - 1;
+        const shiftAnchorTargetYear = shiftSide === "left" ? restoredYear + 1 : restoredYear - 1;
+        const shiftedCells = buildShiftedCells(shiftedYears, shiftAnchorTargetYear);
 
         showAnimationPlan({
             tree,
-            insertSide: "right",
+            insertSide: shiftSide === "left" ? "left" : "right",
             insertedYears: [restoredYear],
             shiftedYears,
             shiftedCells,
@@ -1651,82 +1706,59 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
         });
     }, [showAnimationPlan]);
 
-    // 只让恢复前后边界贡献发生变化的格子跳动；不要把"被恢复格"放进 rollingCells。
-    const buildRestoreRollingCells = useCallback((tree: string, markerYear: number, index: number) => {
+    // 恢复顶层删除时，让被减回注入宽度的那个邻居跳动；被恢复格本身不进 rollingCells。
+    const buildRestoreRollingCells = useCallback((tree: string, markerYear: number, info: DeletionMarkerInfo | undefined, shiftSide: DeleteShift = "right") => {
         const treeData = visibleSite.get(tree);
         const rollingCells: RollingCellAnimation[] = [];
-        const stack = deletionMarkers?.get(tree)?.get(markerYear);
-        if (!treeData || !stack || index < 0 || index >= stack.length) return rollingCells;
+        if (!treeData || !info) return rollingCells;
 
-        const leftRemainingStack = stack.slice(0, index);
-        const rightRemainingStack = stack.slice(index + 1);
-        const oldContributions = getDeletionStackBoundaryContributions(stack);
-        const leftContributions = getDeletionStackBoundaryContributions(leftRemainingStack);
-        const rightContributions = getDeletionStackBoundaryContributions(rightRemainingStack);
-
-        const addBoundaryRollingTarget = (
-            targetYear: number,
-            fromYear: number,
-            oldContribution: number,
-            nextContribution: number,
-        ) => {
+        const addNeighborRollingTarget = (targetYear: number, fromYear: number, injected: number) => {
+            if (!injected) return;
             const fromValue = treeData.get(fromYear);
             const numericFromValue = getRollingWidthValue(fromValue);
             if (numericFromValue === undefined) return;
-            addRollingTargetIfChanged(
-                rollingCells,
-                targetYear,
-                fromValue,
-                numericFromValue - oldContribution + nextContribution,
-            );
+            addRollingTargetIfChanged(rollingCells, targetYear, fromValue, numericFromValue - injected);
         };
 
-        addBoundaryRollingTarget(markerYear - 2, markerYear - 1, oldContributions.left, leftContributions.left);
-        addBoundaryRollingTarget(markerYear, markerYear, oldContributions.right, rightContributions.right);
+        // 恢复后左右邻所在坐标随填补方向镜像（与 edit.ts 的 restoreDeletion 一致）：
+        // - shift="right"：左邻 markerYear-1 → markerYear-2，右邻留在 markerYear。
+        // - shift="left"：左邻留在 markerYear-1，右邻 markerYear → markerYear+1。
+        const leftInjected = info.leftContribution ?? 0;
+        const rightInjected = info.rightContribution ?? 0;
+        if (shiftSide === "left") {
+            addNeighborRollingTarget(markerYear - 1, markerYear - 1, leftInjected);
+            addNeighborRollingTarget(markerYear + 1, markerYear, rightInjected);
+        } else {
+            addNeighborRollingTarget(markerYear - 2, markerYear - 1, leftInjected);
+            addNeighborRollingTarget(markerYear, markerYear, rightInjected);
+        }
 
         return rollingCells;
-    }, [deletionMarkers, visibleSite]);
+    }, [visibleSite]);
 
-    // 双击红线：默认恢复离红线最近的 ghost，也就是 deleteOrder 最大的那条。
+    // 双击红线（或其顶层 ghost）：严格后进先出，恢复该缝隙最近一次删除（deleteOrder 最大的那层）。
     const handleRedLineDoubleClick = useCallback((tree: string, markerYear: number) => {
         const stack = deletionMarkers?.get(tree)?.get(markerYear);
         if (!stack || stack.length === 0) return;
-        const latestIndex = stack.reduce((bestIndex, info, index) => {
+        const topIndex = stack.reduce((bestIndex, info, index) => {
             const bestOrder = stack[bestIndex]?.deleteOrder ?? bestIndex;
             const order = info.deleteOrder ?? index;
             return order > bestOrder ? index : bestIndex;
         }, 0);
+        const topInfo = stack[topIndex];
+        const shiftSide: DeleteShift = topInfo?.shiftSide ?? "right";
         setHoveredMarker(null);
 
         if (!shouldAnimateHistory) {
-            onRestoreDeletion?.(tree, markerYear, latestIndex);
+            onRestoreDeletion?.(tree, markerYear, topIndex);
             return;
         }
 
-        const shiftedYears = getRestoreShiftedYears(tree, markerYear);
-        const rollingCells = buildRestoreRollingCells(tree, markerYear, latestIndex);
+        const shiftedYears = getRestoreShiftedYears(tree, markerYear, shiftSide);
+        const rollingCells = buildRestoreRollingCells(tree, markerYear, topInfo, shiftSide);
         flushSync(() => {
-            onRestoreDeletion?.(tree, markerYear, latestIndex);
-            triggerRestoreAnimation(tree, markerYear, shiftedYears, rollingCells);
-        });
-    }, [onRestoreDeletion, deletionMarkers, shouldAnimateHistory, getRestoreShiftedYears, buildRestoreRollingCells, triggerRestoreAnimation]);
-
-    // 双击具体 ghost：恢复栈中指定那条删除。
-    const handleGhostDoubleClick = useCallback((tree: string, markerYear: number, index: number) => {
-        const info = deletionMarkers?.get(tree)?.get(markerYear)?.[index];
-        if (!info) return;
-        setHoveredMarker(null);
-
-        if (!shouldAnimateHistory) {
-            onRestoreDeletion?.(tree, markerYear, index);
-            return;
-        }
-
-        const shiftedYears = getRestoreShiftedYears(tree, markerYear);
-        const rollingCells = buildRestoreRollingCells(tree, markerYear, index);
-        flushSync(() => {
-            onRestoreDeletion?.(tree, markerYear, index);
-            triggerRestoreAnimation(tree, markerYear, shiftedYears, rollingCells);
+            onRestoreDeletion?.(tree, markerYear, topIndex);
+            triggerRestoreAnimation(tree, markerYear, shiftedYears, rollingCells, shiftSide);
         });
     }, [onRestoreDeletion, deletionMarkers, shouldAnimateHistory, getRestoreShiftedYears, buildRestoreRollingCells, triggerRestoreAnimation]);
 
@@ -1870,9 +1902,9 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
         handleInsertMissingYearAtSide(tree, year, side);
     }, [handleInsertMissingYearAtSide]);
 
-    const handleContextMenuDelete = useCallback((tree: string, year: number, mode: DeleteMode) => {
+    const handleContextMenuDelete = useCallback((tree: string, year: number, mode: DeleteMode, shift: DeleteShift = "right") => {
         if (!shouldAnimateDeleteYear) {
-            onDeleteYearWithMode?.(tree, year, mode);
+            onDeleteYearWithMode?.(tree, year, mode, shift);
             return;
         }
 
@@ -1881,9 +1913,12 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
         let shiftedYears: number[] = [];
         let shiftedCells: ShiftedCellAnimation[] = [];
         const shiftAnchorTargetYear = getDeleteShiftAnchorTargetYear(year);
-        const rollingCells = buildDeleteRollingCells(treeData, year, mode);
+        const rollingCells = buildDeleteRollingCells(treeData, year, mode, shift);
         const rollingYears = rollingCells.map((cell) => cell.year);
         const rollingTargetSet = new Set(rollingYears);
+        // shift="right"（默认）：左侧格子向右靠 → 复用 insert side="left" 的右移动画；
+        // shift="left"：右侧格子向左靠 → 复用 insert side="right" 的左移动画。
+        const animationInsertSide: PlusSide = shift === "left" ? "right" : "left";
 
         pendingInsertFlipRef.current = null;
 
@@ -1891,10 +1926,10 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
             const sourceElements = getTreeYearGridElements(container, tree);
             const deletedElement = sourceElements.get(year);
             const shiftTargets = Array.from(sourceElements.entries())
-                .filter(([sourceYear]) => sourceYear < year)
+                .filter(([sourceYear]) => shift === "left" ? sourceYear > year : sourceYear < year)
                 .map(([sourceYear]) => ({
                     sourceYear,
-                    targetYear: sourceYear + 1,
+                    targetYear: shift === "left" ? sourceYear - 1 : sourceYear + 1,
                 }));
             const firstYear = treeData ? getFirstSeriesYear(treeData) : undefined;
             const crossRowTargetYears = getCrossRowTargetYears(shiftTargets, firstYear);
@@ -1916,10 +1951,9 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                 shiftQueue.shiftDelayByYear,
             );
 
-            // Reuse insert flip mechanism: delete shifts earlier years right, same direction as insert side="left".
             pendingInsertFlipRef.current = {
                 tree,
-                side: "left",
+                side: animationInsertSide,
                 cells,
             };
 
@@ -1935,17 +1969,19 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
         // 先把 mode 会改变值的邻居登记为 rolling，
         // 让它们在数据更新前先以 RollingNumber 状态呈现；下一帧数据改变时
         // RollingNumber 的 value prop 变化就能触发数字跳动。
-        // - right / both: 右邻 year+1 留在原位接收 +B 或 +B/2。
-        // - left / both: 删除位 year（slot M）接收来自左邻的 A+B 或 A+B/2。
-        // year M（mode left/both 时被排除出 shiftedYears 的那一格）需要短暂的 z-index 提升，
-        // 让它在 slide-in 动画期间盖在滑入格子之上，随 animationPlan 一起清掉。
-        const elevatedYears = mode === "left" || mode === "both" ? [year] : [];
+        // 收紧后接收分配宽度的那一格需要短暂的 z-index 提升，
+        // 让它在 slide-in 动画期间盖在滑入格子之上，随 animationPlan 一起清掉：
+        // - shift="right"：left/both 时 year 处接收左邻的值。
+        // - shift="left"：right/both 时 year 处接收右邻的值。
+        const elevatedYears = shift === "left"
+            ? (mode === "right" || mode === "both" ? [year] : [])
+            : (mode === "left" || mode === "both" ? [year] : []);
 
         flushSync(() => {
-            onDeleteYearWithMode?.(tree, year, mode);
+            onDeleteYearWithMode?.(tree, year, mode, shift);
             showAnimationPlan({
                 tree,
-                insertSide: "left",
+                insertSide: animationInsertSide,
                 insertedYears: [],
                 shiftedYears,
                 shiftedCells,
@@ -2530,21 +2566,18 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
             ) : null}
 
             {hoveredMarkerRun && typeof document !== "undefined" ? createPortal(
-                hoveredMarkerRun.map(({ item, info, index, displayIndex, stackSize }) => {
-                    // 同一年份多次堆叠：displayIndex = stackSize - 1 紧贴红线，
-                    // 最后删除的 ghost 会排在最右侧。
-                    const offset = stackSize - 1 - displayIndex;
+                hoveredMarkerRun.map(({ item, info, stackSize }) => {
+                    // 每条红线只预览最近一次删除的那一个 ghost，居中贴在红线上。
                     const containerRect = containerRef.current?.getBoundingClientRect();
                     const left = (containerRect?.left ?? 0)
                         + item.anchorLeft
                         - item.cellWidth / 2
-                        - 2.5
-                        - offset * (item.cellWidth + GRID_GAP);
+                        - 2.5;
                     const top = (containerRect?.top ?? 0) + item.anchorTop;
 
                     return (
                         <div
-                            key={`${item.year}-${index}`}
+                            key={`${item.year}`}
                             className={`${style["deletion-preview-ghost"]} ${animationsEnabled ? "" : style["deletion-preview-ghost-static"]}`}
                             style={{
                                 position: "fixed",
@@ -2554,20 +2587,23 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                                 width: `${item.cellWidth}px`,
                                 height: `${item.anchorHeight}px`,
                             }}
-                            title="双击恢复"
+                            title={stackSize > 1 ? `双击恢复最近一次删除（此处共 ${stackSize} 层）` : "双击恢复"}
                             onMouseEnter={cancelHoverClear}
                             onMouseLeave={scheduleHoverClear}
                             onDoubleClick={(event) => {
                                 event.stopPropagation();
                                 event.preventDefault();
                                 if (hoveredMarker) {
-                                    handleGhostDoubleClick(hoveredMarker.tree, item.year, index);
+                                    handleRedLineDoubleClick(hoveredMarker.tree, item.year);
                                 }
                             }}
                         >
                             {info.deletedWidth === null
                                 ? <span>missing</span>
                                 : <RollingNumber value={info.deletedWidth} speed={animationSpeed} />}
+                            {stackSize > 1 ? (
+                                <span className={style["deletion-preview-ghost-count"]}>×{stackSize}</span>
+                            ) : null}
                         </div>
                     );
                 }),

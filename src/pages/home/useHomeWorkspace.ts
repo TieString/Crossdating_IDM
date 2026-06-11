@@ -5,7 +5,7 @@ import { parseCofechaResult, splitReportByParts } from "@/features/cofecha/forma
 import type { ICofechaResult } from "@/features/cofecha/types";
 import { detectPrecision, readRwlString } from "@/features/rwl";
 import { RwlEditor, registerChangeYearWidth } from "@/features/rwl/edit";
-import type { DeleteMode, RwlDeletionMarkers, RwlHistoryAnimation, RwlHistoryStatus, RwlOperationLogEntry, RwlPersistedHistorySnapshot } from "@/features/rwl/edit";
+import type { DeleteMode, DeleteShift, RwlDeletionMarkers, RwlHistoryAnimation, RwlHistoryStatus, RwlOperationLogEntry, RwlPersistedHistorySnapshot } from "@/features/rwl/edit";
 import type { RwlSiteData } from "@/features/rwl/types";
 import { runCofecha } from "@/services/cofecha/runner";
 import { readRwlFile, saveFile } from "@/services/fs/io";
@@ -367,8 +367,8 @@ export function useHomeWorkspace() {
         rwlEditorRef.current.moveSeriesTailByOffset(tree, selectedStartYear, selectedEndYear, yearOffset);
     }, []);
 
-    const handleDeleteYearWithMode = useCallback((tree: string, nextYear: number, mode: DeleteMode) => {
-        rwlEditorRef.current.deleteYearWithMode(tree, nextYear, mode);
+    const handleDeleteYearWithMode = useCallback((tree: string, nextYear: number, mode: DeleteMode, shift: DeleteShift = "right") => {
+        rwlEditorRef.current.deleteYearWithMode(tree, nextYear, mode, shift);
     }, []);
 
     const handleMarkYearRangeAsMissing = useCallback((tree: string, startYear: number, endYear: number) => {
@@ -392,9 +392,9 @@ export function useHomeWorkspace() {
         triggerHistoryAnimation({ type: "insert-missing", tree, year: nextYear, side, direction: "redo" });
     }, [triggerHistoryAnimation]);
 
-    const handleDeleteYearWithModeFromChart = useCallback((tree: string, nextYear: number, mode: DeleteMode) => {
-        rwlEditorRef.current.deleteYearWithMode(tree, nextYear, mode);
-        triggerHistoryAnimation({ type: "delete-year", tree, year: nextYear, mode, direction: "redo" });
+    const handleDeleteYearWithModeFromChart = useCallback((tree: string, nextYear: number, mode: DeleteMode, shift: DeleteShift = "right") => {
+        rwlEditorRef.current.deleteYearWithMode(tree, nextYear, mode, shift);
+        triggerHistoryAnimation({ type: "delete-year", tree, year: nextYear, mode, shift, direction: "redo" });
     }, [triggerHistoryAnimation]);
 
     const handleTreeSelectionChange = useCallback((nextTree: string) => {

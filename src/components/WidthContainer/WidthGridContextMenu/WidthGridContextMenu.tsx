@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { DeleteMode, MissingInsertSide } from "@/features/rwl/edit";
+import type { DeleteMode, DeleteShift, MissingInsertSide } from "@/features/rwl/edit";
 import style from "./WidthGridContextMenu.module.css";
 
-type DropdownKind = "insert" | "delete" | null;
+type DropdownKind = "insert" | "delete" | "shift" | null;
 
 export interface WidthGridContextMenuProps {
     open: boolean;
@@ -14,7 +14,7 @@ export interface WidthGridContextMenuProps {
     defaultDeleteStartYear?: number;
     defaultDeleteEndYear?: number;
     onInsert: (tree: string, year: number, side: MissingInsertSide) => void;
-    onDelete: (tree: string, year: number, mode: DeleteMode) => void;
+    onDelete: (tree: string, year: number, mode: DeleteMode, shift: DeleteShift) => void;
     onDeleteRange?: (tree: string, startYear: number, endYear: number) => void;
     onDeleteSeries?: (tree: string) => void;
     onEditAsText?: (tree: string) => void;
@@ -33,6 +33,12 @@ const DELETE_OPTIONS: Array<{ mode: DeleteMode; label: string; chip: string }> =
     { mode: "both", label: "平均到两侧", chip: "平均" },
     { mode: "left", label: "分配到左侧", chip: "左侧" },
     { mode: "right", label: "分配到右侧", chip: "右侧" },
+];
+
+// 删除后用哪一侧的格子填补缺口（"形式同删除后的分配"，独立的下拉选择器）。
+const SHIFT_OPTIONS: Array<{ shift: DeleteShift; label: string; chip: string }> = [
+    { shift: "right", label: "左侧向右补位", chip: "左侧" },
+    { shift: "left", label: "右侧向左补位", chip: "右侧" },
 ];
 
 const DROPDOWN_GAP = 4;
@@ -73,6 +79,7 @@ export default function WidthGridContextMenu({
     const [deleteEndYear, setDeleteEndYear] = useState<string>(resolvedDefaultDeleteEndYear.toString());
     const [insertSide, setInsertSide] = useState<MissingInsertSide>("right");
     const [deleteMode, setDeleteMode] = useState<DeleteMode>("direct");
+    const [deleteShift, setDeleteShift] = useState<DeleteShift>("right");
     const [dropdown, setDropdown] = useState<DropdownKind>(null);
     const [dropdownPosition, setDropdownPosition] = useState<{ left: number; top: number; alignRight: boolean; flipY: boolean }>({
         left: 0,
@@ -90,6 +97,7 @@ export default function WidthGridContextMenu({
     const menuRef = useRef<HTMLDivElement | null>(null);
     const insertChipRef = useRef<HTMLButtonElement | null>(null);
     const deleteChipRef = useRef<HTMLButtonElement | null>(null);
+    const shiftChipRef = useRef<HTMLButtonElement | null>(null);
     const dropdownRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
@@ -111,7 +119,7 @@ export default function WidthGridContextMenu({
             return;
         }
         setDeleteMode("direct");
-        setDropdown((previous) => (previous === "delete" ? null : previous));
+        setDropdown((previous) => (previous === "delete" || previous === "shift" ? null : previous));
     }, [open, isRangeDelete]);
 
     useLayoutEffect(() => {
@@ -154,7 +162,11 @@ export default function WidthGridContextMenu({
             return;
         }
 
-        const triggerChip = dropdown === "insert" ? insertChipRef.current : deleteChipRef.current;
+        const triggerChip = dropdown === "insert"
+            ? insertChipRef.current
+            : dropdown === "shift"
+                ? shiftChipRef.current
+                : deleteChipRef.current;
         const dropdownNode = dropdownRef.current;
         if (!triggerChip || !dropdownNode) {
             return;
@@ -192,7 +204,7 @@ export default function WidthGridContextMenu({
                 ? previous
                 : { left, top, alignRight, flipY }
         ));
-    }, [open, dropdown, menuPosition.left, menuPosition.top, insertSide, deleteMode]);
+    }, [open, dropdown, menuPosition.left, menuPosition.top, insertSide, deleteMode, deleteShift]);
 
     useEffect(() => {
         if (!open) {
@@ -212,7 +224,11 @@ export default function WidthGridContextMenu({
             }
             if (menuRef.current?.contains(target)) {
                 if (dropdown) {
-                    const triggerChip = dropdown === "insert" ? insertChipRef.current : deleteChipRef.current;
+                    const triggerChip = dropdown === "insert"
+                        ? insertChipRef.current
+                        : dropdown === "shift"
+                            ? shiftChipRef.current
+                            : deleteChipRef.current;
                     if (!triggerChip?.contains(target)) {
                         setDropdown(null);
                     }
@@ -276,6 +292,7 @@ export default function WidthGridContextMenu({
             ? directDeleteChipLabel
             : DELETE_OPTIONS.find((option) => option.mode === deleteMode)?.chip ?? ""
     ), [deleteMode, directDeleteChipLabel, isRangeDelete]);
+    const shiftChipLabel = useMemo(() => SHIFT_OPTIONS.find((option) => option.shift === deleteShift)?.chip ?? "", [deleteShift]);
 
     const previewYear = useCallback((nextYear: number | null) => {
         if (nextYear !== null) {
@@ -338,9 +355,9 @@ export default function WidthGridContextMenu({
         if (parsedDeleteYear === null) {
             return;
         }
-        onDelete(tree, parsedDeleteYear, deleteMode);
+        onDelete(tree, parsedDeleteYear, deleteMode, deleteShift);
         onClose();
-    }, [deleteMode, isRangeDelete, onClose, onDelete, onDeleteRange, parsedDeleteRange, parsedDeleteYear, tree]);
+    }, [deleteMode, deleteShift, isRangeDelete, onClose, onDelete, onDeleteRange, parsedDeleteRange, parsedDeleteYear, tree]);
 
     const handleInsertKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
         if (event.key === "Enter") {
@@ -513,26 +530,50 @@ export default function WidthGridContextMenu({
                             <span className={style["menu-row-label"]}>后</span>
                         </>
                     )}
-                    <button
-                        ref={deleteChipRef}
-                        type="button"
-                        className={`${style["menu-row-mode-chip"]} ${dropdown === "delete" && !isRangeDelete ? style["menu-row-mode-chip-open"] : ""} ${isRangeDelete ? style["menu-row-mode-chip-disabled"] : ""}`}
-                        aria-haspopup={isRangeDelete ? undefined : "menu"}
-                        aria-expanded={isRangeDelete ? undefined : dropdown === "delete"}
-                        disabled={isRangeDelete}
-                        onClick={(event) => {
-                            event.stopPropagation();
-                            if (isRangeDelete) {
-                                return;
-                            }
-                            toggleDropdown("delete");
-                        }}
-                    >
-                        <span>{deleteChipLabel}</span>
-                        {isRangeDelete ? null : (
-                            <span className={style["menu-row-mode-chip-arrow"]} aria-hidden="true">▾</span>
-                        )}
-                    </button>
+                    <span className={style["menu-row-chip-group"]}>
+                        <button
+                            ref={deleteChipRef}
+                            type="button"
+                            className={`${style["menu-row-mode-chip"]} ${dropdown === "delete" && !isRangeDelete ? style["menu-row-mode-chip-open"] : ""} ${isRangeDelete ? style["menu-row-mode-chip-disabled"] : ""}`}
+                            aria-haspopup={isRangeDelete ? undefined : "menu"}
+                            aria-expanded={isRangeDelete ? undefined : dropdown === "delete"}
+                            disabled={isRangeDelete}
+                            title="删除后的分配"
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                if (isRangeDelete) {
+                                    return;
+                                }
+                                toggleDropdown("delete");
+                            }}
+                        >
+                            <span>{deleteChipLabel}</span>
+                            {isRangeDelete ? null : (
+                                <span className={style["menu-row-mode-chip-arrow"]} aria-hidden="true">▾</span>
+                            )}
+                        </button>
+                        <button
+                            ref={shiftChipRef}
+                            type="button"
+                            className={`${style["menu-row-mode-chip"]} ${dropdown === "shift" && !isRangeDelete ? style["menu-row-mode-chip-open"] : ""} ${isRangeDelete ? style["menu-row-mode-chip-disabled"] : ""}`}
+                            aria-haspopup={isRangeDelete ? undefined : "menu"}
+                            aria-expanded={isRangeDelete ? undefined : dropdown === "shift"}
+                            disabled={isRangeDelete}
+                            title="删除后的填补方向"
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                if (isRangeDelete) {
+                                    return;
+                                }
+                                toggleDropdown("shift");
+                            }}
+                        >
+                            <span>{shiftChipLabel}</span>
+                            {isRangeDelete ? null : (
+                                <span className={style["menu-row-mode-chip-arrow"]} aria-hidden="true">▾</span>
+                            )}
+                        </button>
+                    </span>
                 </div>
 
                 <div className={style["menu-separator"]} role="separator" />
@@ -622,6 +663,33 @@ export default function WidthGridContextMenu({
                             aria-checked={deleteMode === option.mode}
                             onClick={() => {
                                 setDeleteMode(option.mode);
+                                setDropdown(null);
+                            }}
+                        >
+                            <span className={style["dropdown-item-label"]}>{option.label}</span>
+                        </div>
+                    ))}
+                </div>
+            ) : null}
+
+            {dropdown === "shift" && !isRangeDelete ? (
+                <div
+                    ref={dropdownRef}
+                    className={style["dropdown"]}
+                    style={dropdownStyle}
+                    role="menu"
+                    onPointerDown={stopPortalPropagation}
+                    onClick={stopPortalPropagation}
+                    onContextMenu={(event) => event.preventDefault()}
+                >
+                    {SHIFT_OPTIONS.map((option) => (
+                        <div
+                            key={option.shift}
+                            className={`${style["dropdown-item"]} ${deleteShift === option.shift ? style["dropdown-item-checked"] : ""}`}
+                            role="menuitemradio"
+                            aria-checked={deleteShift === option.shift}
+                            onClick={() => {
+                                setDeleteShift(option.shift);
                                 setDropdown(null);
                             }}
                         >

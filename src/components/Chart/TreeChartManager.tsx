@@ -1,7 +1,8 @@
 import React, { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { ChartZoomWindow, MultiLineChart, colorPalette } from './MultiLineChart.tsx'
+import { FloatingScrollArea } from '@/components/FloatingScrollArea/FloatingScrollArea'
 import { RwlSiteData } from '@/features/rwl'
-import type { DeleteMode, MissingInsertSide } from '@/features/rwl/edit'
+import type { DeleteMode, DeleteShift, MissingInsertSide } from '@/features/rwl/edit'
 import { stopMarker } from '@/shared/constants'
 
 // 树种图表管理器。
@@ -14,7 +15,7 @@ type Props = {
   fullData: RwlSiteData
   variant?: 'panel' | 'expanded'
   onInsertMissingYearAtSide?: (tree: string, year: number, side: MissingInsertSide) => void
-  onDeleteYearWithMode?: (tree: string, year: number, mode: DeleteMode) => void
+  onDeleteYearWithMode?: (tree: string, year: number, mode: DeleteMode, shift?: DeleteShift) => void
   onDeleteSeries?: (tree: string) => void
 }
 
@@ -276,14 +277,16 @@ function TreeChartManagerBase({ fullData, variant = 'panel', onInsertMissingYear
         </div>
       ) : null}
 
-      <div style={{
+      <FloatingScrollArea
+        viewportStyle={{
         flex: isExpanded ? '1 1 auto' : '0 0 auto',
         maxHeight: isExpanded ? 'none' : 76,
         minHeight: isExpanded ? 0 : undefined,
-        overflowY: 'auto',
         border: '1px solid #e8e8e8',
         borderRadius: 6,
         background: '#f8f9fa',
+      }}
+        style={{
         display: 'flex',
         flexWrap: 'wrap',
         alignContent: 'flex-start',
@@ -319,7 +322,7 @@ function TreeChartManagerBase({ fullData, variant = 'panel', onInsertMissingYear
             )
           })
         }
-      </div>
+      </FloatingScrollArea>
     </>
   )
 

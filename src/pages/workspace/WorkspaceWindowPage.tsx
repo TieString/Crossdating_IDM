@@ -18,7 +18,7 @@ import {
     type WorkspaceWindowState,
     type WorkspaceWindowStatePayload,
 } from "@/pages/home/workspaceWindowBridge";
-import type { DeleteMode, MissingInsertSide } from "@/features/rwl/edit";
+import type { DeleteMode, DeleteShift, MissingInsertSide } from "@/features/rwl/edit";
 import styles from "./WorkspaceWindowPage.module.css";
 
 const MAIN_WINDOW_LABEL = "main";
@@ -153,8 +153,8 @@ export default function WorkspaceWindowPage() {
             onInsertMissingYearAtSide={(tree: string, year: number, side: MissingInsertSide) => {
                 void sendCommand({ kind: "line-chart", type: "insert-missing", tree, year, side });
             }}
-            onDeleteYearWithMode={(tree: string, year: number, mode: DeleteMode) => {
-                void sendCommand({ kind: "line-chart", type: "delete-year", tree, year, mode });
+            onDeleteYearWithMode={(tree: string, year: number, mode: DeleteMode, shift?: DeleteShift) => {
+                void sendCommand({ kind: "line-chart", type: "delete-year", tree, year, mode, shift });
             }}
             onDeleteSeries={(tree: string) => {
                 void sendCommand({ kind: "line-chart", type: "delete-series", tree });

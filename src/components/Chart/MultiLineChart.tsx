@@ -17,7 +17,7 @@ import {
 } from 'chart.js'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import WidthGridContextMenu from '@/components/WidthContainer/WidthGridContextMenu/WidthGridContextMenu'
-import type { DeleteMode, MissingInsertSide } from '@/features/rwl/edit'
+import type { DeleteMode, DeleteShift, MissingInsertSide } from '@/features/rwl/edit'
 import { stopMarker } from '@/shared/constants'
 
 ChartJS.register(
@@ -596,7 +596,7 @@ type Props = {
   onZoomWindowChange?: (zoomWindow: { min: number; max: number } | null) => void
   onShiftHighlightedTree?: (treeCode: string, direction: -1 | 1) => void
   onInsertMissingYearAtSide?: (tree: string, year: number, side: MissingInsertSide) => void
-  onDeleteYearWithMode?: (tree: string, year: number, mode: DeleteMode) => void
+  onDeleteYearWithMode?: (tree: string, year: number, mode: DeleteMode, shift?: DeleteShift) => void
   onDeleteSeries?: (tree: string) => void
 }
 
@@ -1092,8 +1092,8 @@ export function MultiLineChart({
             onInsertMissingYearAtSide?.(tree, year, side)
             setContextMenu(null)
           }}
-          onDelete={(tree, year, mode) => {
-            onDeleteYearWithMode?.(tree, year, mode)
+          onDelete={(tree, year, mode, shift) => {
+            onDeleteYearWithMode?.(tree, year, mode, shift)
             setContextMenu(null)
           }}
           onDeleteSeries={(tree) => {
