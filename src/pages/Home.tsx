@@ -1,14 +1,32 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ClipboardEvent, type FocusEvent, type KeyboardEvent, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ClipboardEvent, type KeyboardEvent, type MouseEvent } from "react";
+import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { AnimatePresence } from "motion/react";
 import { TreeChartManager } from "@/components/Chart/TreeChartManager";
 import { RollingNumber } from "@/components/RollingNumber/RollingNumber";
 import WidthContainer from "@/components/WidthContainer/WidthContainer";
 import { OverlayScroll } from "@/components/OverlayScroll/OverlayScroll";
 import { FloatingScrollbar } from "@/components/FloatingScrollbar/FloatingScrollbar";
+import { FindReplaceBar, type FindReplaceMode } from "@/components/FindReplace/FindReplaceBar";
 import { openSettingsWindow } from "@/pages/settings/openSettingsWindow";
+import { stopMarker } from "@/shared/constants";
 import style from "./Home.module.css";
 import { ALL_OPTION_VALUE, TitleMenuKind } from "./home/constants";
 import { HomeTitleBarBridge } from "./home/HomeTitleBarBridge";
 import { useHomeWorkspace } from "./home/useHomeWorkspace";
+import {
+    openWorkspaceWindow,
+    serializeRwlSiteData,
+    workspaceWindowLabels,
+    WORKSPACE_WINDOW_CLOSED_EVENT,
+    WORKSPACE_WINDOW_COMMAND_EVENT,
+    WORKSPACE_WINDOW_REQUEST_EVENT,
+    WORKSPACE_WINDOW_STATE_EVENT,
+    type WorkspaceWindowClosedPayload,
+    type WorkspaceWindowCommand,
+    type WorkspaceWindowKind,
+    type WorkspaceWindowRequestPayload,
+    type WorkspaceWindowState,
+} from "./home/workspaceWindowBridge";
 import { useResizablePanels } from "./useResizablePanels";
 
 const TREE_ALL_OPTION_LABEL = "📜 全部";
@@ -43,6 +61,21 @@ type CofechaCellJumpTarget = {
 type CofechaCellReference = {
     tree: string;
     year?: number;
+};
+
+type EditHighlightTarget = {
+    id: number;
+    cells: { tree: string; year: number }[];
+    scrollTree: string;
+    scrollYear?: number;
+};
+
+type ExternalWorkspaceWindows = Record<WorkspaceWindowKind, boolean>;
+
+const EMPTY_EXTERNAL_WORKSPACE_WINDOWS: ExternalWorkspaceWindows = {
+    "operation-log": false,
+    cofecha: false,
+    "line-chart": false,
 };
 
 const COFECHA_PROBLEM_REFERENCE_RE = /^(.*?[>＞]{2}\s+)(\S+)(\s+)(-?\d{4})(.*)$/;
@@ -198,20 +231,25 @@ const renderCofechaLineWithLinks = (
     const absentRingMatch = line.match(COFECHA_ABSENT_RING_SUMMARY_RE);
 
     if (absentRingMatch) {
-        const [, prefix, tree, label, yearsText] = absentRingMatch;
-        const linkedYears = linkCofechaYearsInText(yearsText, tree, knownTrees);
+        const [, prefix, marker, label, yearsText] = absentRingMatch;
+        // marker 可能是序列名（PART 3 "ABSENT RINGS listed by SERIES" 行首即序列名），
+        // 也可能是 PART 6 的 [D] 等小节标记。行首是已知序列时缺失年份归属于它；
+        // 否则回退到 currentSeriesTree（PART 6 由前面的序列标题行设定）。
+        const ownerTree = knownTrees.includes(marker) ? marker : currentSeriesTree;
+        const head = linkCofechaTreesInText(prefix + marker + label, knownTrees);
+        const linkedYears = ownerTree
+            ? linkCofechaYearsInText(yearsText, ownerTree, knownTrees)
+            : linkCofechaTreesInText(yearsText, knownTrees);
 
         return {
             html: [
-                linkCofechaTreesInText(prefix, knownTrees).html,
-                makeCofechaSeriesLinkHtml(tree),
-                linkCofechaTreesInText(label, knownTrees).html,
+                head.html,
                 linkedYears.html,
                 linkCofechaTreesInText(lineBreak, knownTrees).html,
             ].join(""),
-            count: linkedYears.count + 1,
+            count: head.count + linkedYears.count,
             currentSeriesTree,
-            absentRingTree: tree,
+            absentRingTree: ownerTree,
         };
     }
 
@@ -286,19 +324,30 @@ export default function Home() {
     const rightPanelsRef = useRef<HTMLDivElement>(null);
     const deleteSeriesRequestIdRef = useRef(0);
     const cofechaCellJumpIdRef = useRef(0);
+    const editHighlightIdRef = useRef(0);
     const { layout, draggingKey, startResize } = useResizablePanels();
     const [activeMenu, setActiveMenu] = useState<TitleMenuKind | null>(null);
     const [deleteSeriesRequest, setDeleteSeriesRequest] = useState<DeleteSeriesRequest | null>(null);
     const [cofechaCellJumpTarget, setCofechaCellJumpTarget] = useState<CofechaCellJumpTarget | null>(null);
+    const [editHighlightTarget, setEditHighlightTarget] = useState<EditHighlightTarget | null>(null);
     const [isRawEditing, setIsRawEditing] = useState(false);
+    const [rawEditorTree, setRawEditorTree] = useState<string | null>(null);
     const [rawEditorInitialText, setRawEditorInitialText] = useState("");
     const [rawEditorRevision, setRawEditorRevision] = useState(0);
     const [rawEditorError, setRawEditorError] = useState("");
+    const [externalWorkspaceWindows, setExternalWorkspaceWindows] = useState<ExternalWorkspaceWindows>(EMPTY_EXTERNAL_WORKSPACE_WINDOWS);
+    const [findReplaceOpen, setFindReplaceOpen] = useState(false);
+    const [findReplaceMode, setFindReplaceMode] = useState<FindReplaceMode>("find");
+    const [findQuery, setFindQuery] = useState("");
+    const [replaceValue, setReplaceValue] = useState("");
+    const [findMatchIndex, setFindMatchIndex] = useState(0);
     const {
         applyRawRwlText,
+        applyRawRwlTextForTree,
         cofechaResult,
         cofechaVersion,
         deletionMarkers,
+        fileName,
         getCurrentRwlText,
         handleDeleteSeries,
         handleDeleteYearWithMode,
@@ -313,13 +362,14 @@ export default function Home() {
         handleRestoreDeletion,
         handleSave: handleStructuredSave,
         handleSaveAs: handleStructuredSaveAs,
-        handleSaveRawText,
-        handleSaveRawTextAs,
         handleTreeSelectionChange,
         handleUndo,
+        handleUndoOperationLogEntry,
+        handleRedoOperationLogEntry,
         hasChart,
         hasProblems,
         historyAnimation,
+        operationLog,
         possibleProblemsDetail,
         problemTextColor,
         processingText,
@@ -363,6 +413,11 @@ export default function Home() {
         setDeleteSeriesRequest({ id: deleteSeriesRequestIdRef.current, tree });
     }, []);
 
+    const handleOpenWorkspaceWindow = useCallback((kind: WorkspaceWindowKind) => {
+        setExternalWorkspaceWindows((previous) => ({ ...previous, [kind]: true }));
+        void openWorkspaceWindow(kind);
+    }, []);
+
     const handleDeleteSeriesRequestHandled = useCallback((id: number) => {
         setDeleteSeriesRequest((request) => request?.id === id ? null : request);
     }, []);
@@ -391,6 +446,31 @@ export default function Home() {
     const linkedReport = useMemo(() => (
         renderCofechaHtmlWithLinks(reportText, treeOptions)
     ), [reportText, treeOptions]);
+
+    const workspaceWindowState = useMemo<Record<WorkspaceWindowKind, WorkspaceWindowState>>(() => ({
+        "operation-log": {
+            kind: "operation-log",
+            fileName,
+            operationLog,
+        },
+        cofecha: {
+            kind: "cofecha",
+            cofechaResult: cofechaResult ? {
+                possibleProblemsCount: cofechaResult.possibleProblemsCount,
+                masterSeriesYear: cofechaResult.masterSeriesYear,
+                seriesIntercorrelation: cofechaResult.seriesIntercorrelation,
+                averageMeanSensitivity: cofechaResult.averageMeanSensitivity,
+                meanLength: cofechaResult.meanLength,
+            } : undefined,
+            linkedReport,
+            partOptions: COFECHA_PART_OPTIONS,
+            selectedPart,
+        },
+        "line-chart": {
+            kind: "line-chart",
+            siteData: serializeRwlSiteData(siteData),
+        },
+    }), [cofechaResult, fileName, linkedReport, operationLog, selectedPart, siteData]);
 
     const handleCofechaTextClick = useCallback((event: MouseEvent<HTMLParagraphElement>) => {
         const target = event.target;
@@ -439,16 +519,229 @@ export default function Home() {
         handleCofechaCellReferenceClick({ tree, year });
     }, [handleCofechaCellReferenceClick]);
 
+    const emitWorkspaceState = useCallback((kind: WorkspaceWindowKind, targetLabel = workspaceWindowLabels[kind]) => {
+        void emitTo(targetLabel, WORKSPACE_WINDOW_STATE_EVENT, {
+            kind,
+            state: workspaceWindowState[kind],
+        });
+    }, [workspaceWindowState]);
+
+    const handleWorkspaceWindowCommand = useCallback((command: WorkspaceWindowCommand) => {
+        switch (command.kind) {
+            case "operation-log":
+                if (command.type === "undo-log-entry") {
+                    handleUndoOperationLogEntry(command.entryId);
+                } else {
+                    handleRedoOperationLogEntry(command.entryId);
+                }
+                break;
+            case "cofecha":
+                if (command.type === "select-part") {
+                    setSelectedPart(command.part);
+                } else {
+                    handleCofechaCellReferenceClick({ tree: command.tree, year: command.year });
+                }
+                break;
+            case "line-chart":
+                if (command.type === "insert-missing") {
+                    handleInsertMissingYearAtSideFromChart(command.tree, command.year, command.side);
+                } else if (command.type === "delete-year") {
+                    handleDeleteYearWithModeFromChart(command.tree, command.year, command.mode);
+                } else {
+                    handleDeleteSeriesFromChart(command.tree);
+                }
+                break;
+        }
+    }, [
+        handleCofechaCellReferenceClick,
+        handleDeleteSeriesFromChart,
+        handleDeleteYearWithModeFromChart,
+        handleInsertMissingYearAtSideFromChart,
+        handleRedoOperationLogEntry,
+        handleUndoOperationLogEntry,
+        setSelectedPart,
+    ]);
+
+    useEffect(() => {
+        let isMounted = true;
+        const unlisteners: UnlistenFn[] = [];
+
+        const setup = async () => {
+            unlisteners.push(await listen<WorkspaceWindowRequestPayload>(
+                WORKSPACE_WINDOW_REQUEST_EVENT,
+                (event) => {
+                    if (!isMounted) return;
+                    emitWorkspaceState(event.payload.kind, event.payload.requesterLabel);
+                },
+            ));
+            unlisteners.push(await listen<WorkspaceWindowCommand>(
+                WORKSPACE_WINDOW_COMMAND_EVENT,
+                (event) => {
+                    if (!isMounted) return;
+                    handleWorkspaceWindowCommand(event.payload);
+                },
+            ));
+            unlisteners.push(await listen<WorkspaceWindowClosedPayload>(
+                WORKSPACE_WINDOW_CLOSED_EVENT,
+                (event) => {
+                    if (!isMounted) return;
+                    setExternalWorkspaceWindows((previous) => ({
+                        ...previous,
+                        [event.payload.kind]: false,
+                    }));
+                },
+            ));
+        };
+
+        void setup();
+
+        return () => {
+            isMounted = false;
+            unlisteners.forEach((unlisten) => unlisten());
+        };
+    }, [emitWorkspaceState, handleWorkspaceWindowCommand]);
+
+    useEffect(() => {
+        (Object.keys(externalWorkspaceWindows) as WorkspaceWindowKind[]).forEach((kind) => {
+            if (externalWorkspaceWindows[kind]) {
+                emitWorkspaceState(kind);
+            }
+        });
+    }, [emitWorkspaceState, externalWorkspaceWindows]);
+
+    const jumpToCellRef = useRef(handleCofechaCellReferenceClick);
+    useEffect(() => {
+        jumpToCellRef.current = handleCofechaCellReferenceClick;
+    }, [handleCofechaCellReferenceClick]);
+
+    // 左侧宽度模块：把查找词解析为宽度值，命中所有等于该值的年轮单元格。
+    const widthMatches = useMemo(() => {
+        const queryValue = Number(findQuery.trim());
+        if (findQuery.trim() === "" || !Number.isFinite(queryValue) || queryValue === stopMarker.value) {
+            return [] as { tree: string; year: number }[];
+        }
+
+        const matches: { tree: string; year: number }[] = [];
+        siteData.forEach((treeData, tree) => {
+            treeData.forEach((width, year) => {
+                if (width === queryValue) {
+                    matches.push({ tree, year });
+                }
+            });
+        });
+        return matches;
+    }, [findQuery, siteData]);
+
+    const matchCount = widthMatches.length;
+    const effectiveMatchIndex = matchCount > 0 ? ((findMatchIndex % matchCount) + matchCount) % matchCount : 0;
+
+    const currentWidthMatch = findReplaceOpen && matchCount > 0
+        ? widthMatches[effectiveMatchIndex]
+        : undefined;
+    const currentWidthMatchTree = currentWidthMatch?.tree;
+    const currentWidthMatchYear = currentWidthMatch?.year;
+
+    // 查找：当前命中变化时滚动并高亮对应单元格（复用 COFECHA 跳转逻辑）。
+    useEffect(() => {
+        if (currentWidthMatchTree === undefined || currentWidthMatchYear === undefined) {
+            return;
+        }
+        jumpToCellRef.current({ tree: currentWidthMatchTree, year: currentWidthMatchYear });
+    }, [currentWidthMatchTree, currentWidthMatchYear]);
+
+    const handleOpenFind = useCallback(() => {
+        setFindReplaceMode("find");
+        setFindReplaceOpen(true);
+    }, []);
+
+    const handleOpenReplace = useCallback(() => {
+        setFindReplaceMode("replace");
+        setFindReplaceOpen(true);
+    }, []);
+
+    const handleCloseFindReplace = useCallback(() => {
+        setFindReplaceOpen(false);
+    }, []);
+
+    const handleFindModeChange = useCallback((mode: FindReplaceMode) => {
+        setFindReplaceMode(mode);
+    }, []);
+
+    const handleFindQueryChange = useCallback((query: string) => {
+        setFindQuery(query);
+        setFindMatchIndex(0);
+    }, []);
+
+    const handleFindNext = useCallback(() => {
+        setFindMatchIndex((previous) => matchCount > 0 ? (previous + 1) % matchCount : 0);
+    }, [matchCount]);
+
+    const handleFindPrev = useCallback(() => {
+        setFindMatchIndex((previous) => matchCount > 0 ? (previous - 1 + matchCount) % matchCount : 0);
+    }, [matchCount]);
+
+    const handleReplaceOne = useCallback(() => {
+        const replaceNumber = Number(replaceValue.trim());
+        if (replaceValue.trim() === "" || !Number.isFinite(replaceNumber) || replaceNumber === Number(findQuery.trim())) {
+            return;
+        }
+        const match = widthMatches[effectiveMatchIndex];
+        const treeData = match ? siteData.get(match.tree) : undefined;
+        if (!match || !treeData) {
+            return;
+        }
+        const nextData = new Map(treeData);
+        nextData.set(match.year, replaceNumber);
+        handleReplaceTreeData(match.tree, nextData);
+    }, [findQuery, replaceValue, widthMatches, effectiveMatchIndex, siteData, handleReplaceTreeData]);
+
+    const handleReplaceAll = useCallback(() => {
+        if (widthMatches.length === 0) {
+            return;
+        }
+        const replaceNumber = Number(replaceValue.trim());
+        if (replaceValue.trim() === "" || !Number.isFinite(replaceNumber) || replaceNumber === Number(findQuery.trim())) {
+            return;
+        }
+
+        const yearsByTree = new Map<string, number[]>();
+        widthMatches.forEach(({ tree, year }) => {
+            const years = yearsByTree.get(tree) ?? [];
+            years.push(year);
+            yearsByTree.set(tree, years);
+        });
+
+        yearsByTree.forEach((years, tree) => {
+            const treeData = siteData.get(tree);
+            if (!treeData) {
+                return;
+            }
+            const nextData = new Map(treeData);
+            years.forEach((year) => nextData.set(year, replaceNumber));
+            handleReplaceTreeData(tree, nextData);
+        });
+
+        setFindMatchIndex(0);
+    }, [findQuery, replaceValue, widthMatches, siteData, handleReplaceTreeData]);
+
     const getRawEditorText = useCallback(() => (
         rawEditorRef.current?.innerText ?? rawEditorInitialText
     ), [rawEditorInitialText]);
 
     const handleOpenRawEditor = useCallback(() => {
-        setRawEditorInitialText(getCurrentRwlText());
+        // 进入文本编辑前清掉查找跳转/编辑高亮：退出时 WidthContainer 会重新挂载，
+        // 否则会重放上一次的查找跳转、高亮和选择（用户反馈的多余动画）。
+        setFindReplaceOpen(false);
+        setCofechaCellJumpTarget(null);
+        setEditHighlightTarget(null);
+        // 选中了某条序列时，只编辑这一条序列的文本；否则编辑整个文件。
+        const editTree = selectedTree !== ALL_OPTION_VALUE && siteData.has(selectedTree) ? selectedTree : null;
+        setRawEditorTree(editTree);
+        setRawEditorInitialText(getCurrentRwlText(editTree ?? undefined));
         setRawEditorError("");
         setIsRawEditing(true);
         setRawEditorRevision((revision) => revision + 1);
-    }, [getCurrentRwlText]);
+    }, [getCurrentRwlText, selectedTree, siteData]);
 
     const handleCancelRawEditor = useCallback(() => {
         setIsRawEditing(false);
@@ -457,9 +750,48 @@ export default function Home() {
 
     const applyRawEditor = useCallback(async (refocusOnError = false) => {
         try {
-            await applyRawRwlText(getRawEditorText());
+            const before = siteData;
+            const after = rawEditorTree
+                ? await applyRawRwlTextForTree(getRawEditorText(), rawEditorTree)
+                : await applyRawRwlText(getRawEditorText());
             setIsRawEditing(false);
             setRawEditorError("");
+
+            // 对比编辑前后的数据，找出被改动的格子；按显示顺序的第一条被改序列作为滚动目标。
+            const changed: { tree: string; year: number }[] = [];
+            after.forEach((treeData, tree) => {
+                const beforeTree = before.get(tree);
+                treeData.forEach((width, year) => {
+                    if (typeof width === "number" && width !== stopMarker.value && beforeTree?.get(year) !== width) {
+                        changed.push({ tree, year });
+                    }
+                });
+            });
+
+            if (changed.length > 0) {
+                const scrollTree = changed[0].tree;
+                const scrollYear = changed
+                    .filter((cell) => cell.tree === scrollTree)
+                    .reduce((min, cell) => Math.min(min, cell.year), Number.POSITIVE_INFINITY);
+
+                // 若当前只显示某一条序列、而改动不止落在它上面，切回"全部"以便看到/滚动到被改序列。
+                const changedTrees = new Set(changed.map((cell) => cell.tree));
+                const confinedToSelected = changedTrees.size === 1 && changedTrees.has(selectedTree);
+                if (selectedTree !== ALL_OPTION_VALUE && !confinedToSelected) {
+                    handleTreeSelectionChange(ALL_OPTION_VALUE);
+                }
+
+                editHighlightIdRef.current += 1;
+                setEditHighlightTarget({
+                    id: editHighlightIdRef.current,
+                    cells: changed,
+                    scrollTree,
+                    scrollYear: Number.isFinite(scrollYear) ? scrollYear : undefined,
+                });
+            } else {
+                setEditHighlightTarget(null);
+            }
+            return true;
         } catch (error) {
             setRawEditorError(getErrorMessage(error));
             if (refocusOnError) {
@@ -467,8 +799,9 @@ export default function Home() {
                     rawEditorRef.current?.focus();
                 });
             }
+            return false;
         }
-    }, [applyRawRwlText, getRawEditorText]);
+    }, [applyRawRwlText, applyRawRwlTextForTree, rawEditorTree, getRawEditorText, siteData, selectedTree, handleTreeSelectionChange]);
 
     const handleApplyRawEditor = useCallback(async () => {
         await applyRawEditor();
@@ -477,36 +810,33 @@ export default function Home() {
     const handleLoad = useCallback(async () => {
         setIsRawEditing(false);
         setRawEditorError("");
+        setCofechaCellJumpTarget(null);
+        setEditHighlightTarget(null);
         await handleWorkspaceLoad();
     }, [handleWorkspaceLoad]);
 
     const handleSave = useCallback(async () => {
-        if (!isRawEditing) {
-            await handleStructuredSave();
+        // 文本编辑视图下：保存即"应用更改 + 退出编辑 + 写入文件"。
+        if (isRawEditing) {
+            const applied = await applyRawEditor();
+            if (applied) {
+                await handleStructuredSave();
+            }
             return;
         }
-
-        try {
-            await handleSaveRawText(getRawEditorText());
-            setRawEditorError("");
-        } catch (error) {
-            setRawEditorError(getErrorMessage(error));
-        }
-    }, [getRawEditorText, handleSaveRawText, handleStructuredSave, isRawEditing]);
+        await handleStructuredSave();
+    }, [applyRawEditor, handleStructuredSave, isRawEditing]);
 
     const handleSaveAs = useCallback(async () => {
-        if (!isRawEditing) {
-            await handleStructuredSaveAs();
+        if (isRawEditing) {
+            const applied = await applyRawEditor();
+            if (applied) {
+                await handleStructuredSaveAs();
+            }
             return;
         }
-
-        try {
-            await handleSaveRawTextAs(getRawEditorText());
-            setRawEditorError("");
-        } catch (error) {
-            setRawEditorError(getErrorMessage(error));
-        }
-    }, [getRawEditorText, handleSaveRawTextAs, handleStructuredSaveAs, isRawEditing]);
+        await handleStructuredSaveAs();
+    }, [applyRawEditor, handleStructuredSaveAs, isRawEditing]);
 
     const handleRawEditorInput = useCallback(() => {
         if (rawEditorError) {
@@ -542,16 +872,6 @@ export default function Home() {
         }
     }, [applyRawEditor, handleCancelRawEditor, handleSave]);
 
-    const handleRawEditorBlur = useCallback((event: FocusEvent<HTMLDivElement>) => {
-        const nextTarget = event.relatedTarget;
-        if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
-            return;
-        }
-
-        void applyRawEditor(true);
-    }, [applyRawEditor]);
-
-
     useEffect(() => {
         if (!isRawEditing) {
             return;
@@ -578,16 +898,39 @@ export default function Home() {
                 onRedo={handleRedo}
                 onCofechaVersionChange={setCofechaVersion}
                 onActiveMenuChange={setActiveMenu}
+                onOpenOperationLog={() => handleOpenWorkspaceWindow("operation-log")}
                 onOpenSettings={openSettingsWindow}
+                onOpenFind={handleOpenFind}
+                onOpenReplace={handleOpenReplace}
             />
 
             <div className={style["home-container"]} ref={homeContainerRef}>
+                <AnimatePresence>
+                    {findReplaceOpen ? (
+                        <FindReplaceBar
+                            key="find-replace"
+                            mode={findReplaceMode}
+                            query={findQuery}
+                            replaceValue={replaceValue}
+                            matchIndex={effectiveMatchIndex}
+                            matchCount={matchCount}
+                            onModeChange={handleFindModeChange}
+                            onQueryChange={handleFindQueryChange}
+                            onReplaceValueChange={setReplaceValue}
+                            onNext={handleFindNext}
+                            onPrev={handleFindPrev}
+                            onReplaceOne={handleReplaceOne}
+                            onReplaceAll={handleReplaceAll}
+                            onClose={handleCloseFindReplace}
+                        />
+                    ) : null}
+                </AnimatePresence>
                 <div
                     className={style["width-module"]}
                     style={widthModuleStyle}
                 >
                     {isRawEditing ? (
-                        <div className={style["raw-width-container"]} onBlur={handleRawEditorBlur}>
+                        <div className={style["raw-width-container"]}>
                             <div className={style["raw-editor-actions"]}>
                                 <button
                                     type="button"
@@ -696,6 +1039,7 @@ export default function Home() {
                                                 masterSeries={cofechaResult?.masterDatingSeries}
                                                 historyAnimation={historyAnimation}
                                                 jumpTarget={cofechaCellJumpTarget}
+                                                editHighlightTarget={editHighlightTarget}
                                                 deleteSeriesRequest={deleteSeriesRequest}
                                                 deletionMarkers={deletionMarkers}
                                                 scrollContainerRef={dataContainerRef}
@@ -806,37 +1150,60 @@ export default function Home() {
                             style={cofechaTextStyle}
                         >
                             <div className={style["cofecha-panel-content"]}>
-                                {!shouldShowWelcome ? (
-                                    <div className={style["cofecha-toolbar"]}>
-                                        <select
-                                            name="cofecha"
-                                            id={style["cofecha-selector"]}
-                                            value={selectedPart}
-                                            onChange={(event) => {
-                                                setSelectedPart(event.target.value);
-                                            }}
+                                {externalWorkspaceWindows.cofecha ? (
+                                    <div className={style["external-window-placeholder"]}>
+                                        <span>COFECHA 已在独立窗口打开</span>
+                                        <button
+                                            type="button"
+                                            className={style["placeholder-button"]}
+                                            onClick={() => handleOpenWorkspaceWindow("cofecha")}
                                         >
-                                            {COFECHA_PART_OPTIONS.map((option) => (
-                                                <option key={option.value} value={option.value}>
-                                                    {option.label}
-                                                </option>
-                                            ))}
-                                        </select>
-                                        {linkedReport.count > 0 ? (
-                                            <span className={style["cofecha-link-count"]}>
-                                                跳转链接 {linkedReport.count}
-                                            </span>
-                                        ) : null}
+                                            聚焦窗口
+                                        </button>
                                     </div>
-                                ) : null
-                                }
+                                ) : (
+                                    <>
+                                        {!shouldShowWelcome ? (
+                                            <div className={style["cofecha-toolbar"]}>
+                                                <select
+                                                    name="cofecha"
+                                                    id={style["cofecha-selector"]}
+                                                    value={selectedPart}
+                                                    onChange={(event) => {
+                                                        setSelectedPart(event.target.value);
+                                                    }}
+                                                >
+                                                    {COFECHA_PART_OPTIONS.map((option) => (
+                                                        <option key={option.value} value={option.value}>
+                                                            {option.label}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                {linkedReport.count > 0 ? (
+                                                    <span className={style["cofecha-link-count"]}>
+                                                        跳转链接 {linkedReport.count}
+                                                    </span>
+                                                ) : null}
+                                                <button
+                                                    type="button"
+                                                    className={style["panel-open-button"]}
+                                                    title="打开 COFECHA 独立页面"
+                                                    aria-label="打开 COFECHA 独立页面"
+                                                    onClick={() => handleOpenWorkspaceWindow("cofecha")}
+                                                >
+                                                    ↗
+                                                </button>
+                                            </div>
+                                        ) : null}
 
-                                <p
-                                    id={style["cofecha-text"]}
-                                    onClick={handleCofechaTextClick}
-                                    onKeyDown={handleCofechaTextKeyDown}
-                                    dangerouslySetInnerHTML={{ __html: linkedReport.html }}
-                                />
+                                        <p
+                                            id={style["cofecha-text"]}
+                                            onClick={handleCofechaTextClick}
+                                            onKeyDown={handleCofechaTextKeyDown}
+                                            dangerouslySetInnerHTML={{ __html: linkedReport.html }}
+                                        />
+                                    </>
+                                )}
                             </div>
                         </OverlayScroll>
 
@@ -857,14 +1224,40 @@ export default function Home() {
                                 />
 
                                 <div className={style["line-chart"]}>
-                                    <div className={`${style["cofecha-panel-content"]} ${style["line-chart-content"]}`}>
-                                        <TreeChartManager
-                                            fullData={siteData}
-                                            onInsertMissingYearAtSide={handleInsertMissingYearAtSideFromChart}
-                                            onDeleteYearWithMode={handleDeleteYearWithModeFromChart}
-                                            onDeleteSeries={handleDeleteSeriesFromChart}
-                                        />
+                                    <div className={style["line-chart-toolbar"]}>
+                                        <button
+                                            type="button"
+                                            className={style["panel-open-button"]}
+                                            title="打开折线图独立页面"
+                                            aria-label="打开折线图独立页面"
+                                            onClick={() => handleOpenWorkspaceWindow("line-chart")}
+                                        >
+                                            ↗
+                                        </button>
                                     </div>
+                                    {externalWorkspaceWindows["line-chart"] ? (
+                                        <div className={`${style["cofecha-panel-content"]} ${style["line-chart-content"]}`}>
+                                            <div className={style["external-window-placeholder"]}>
+                                                <span>Line Chart 已在独立窗口打开</span>
+                                                <button
+                                                    type="button"
+                                                    className={style["placeholder-button"]}
+                                                    onClick={() => handleOpenWorkspaceWindow("line-chart")}
+                                                >
+                                                    聚焦窗口
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className={`${style["cofecha-panel-content"]} ${style["line-chart-content"]}`}>
+                                            <TreeChartManager
+                                                fullData={siteData}
+                                                onInsertMissingYearAtSide={handleInsertMissingYearAtSideFromChart}
+                                                onDeleteYearWithMode={handleDeleteYearWithModeFromChart}
+                                                onDeleteSeries={handleDeleteSeriesFromChart}
+                                            />
+                                        </div>
+                                    )}
                                 </div>
                             </>
                         ) : null}

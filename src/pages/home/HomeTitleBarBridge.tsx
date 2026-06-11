@@ -19,7 +19,10 @@ type HomeTitleBarBridgeProps = {
     onRedo: () => void | Promise<void>;
     onCofechaVersionChange: (version: CofechaVersion) => void;
     onActiveMenuChange?: (menu: TitleMenuKind | null) => void;
+    onOpenOperationLog?: () => void | Promise<void>;
     onOpenSettings?: () => void | Promise<void>;
+    onOpenFind?: () => void | Promise<void>;
+    onOpenReplace?: () => void | Promise<void>;
 };
 
 type MenuElements = {
@@ -44,7 +47,10 @@ export function HomeTitleBarBridge({
     onRedo,
     onCofechaVersionChange,
     onActiveMenuChange,
+    onOpenOperationLog,
     onOpenSettings,
+    onOpenFind,
+    onOpenReplace,
 }: HomeTitleBarBridgeProps) {
     const [activeMenu, setActiveMenu] = useState<TitleMenuKind | null>(null);
     const [menuElements, setMenuElements] = useState<MenuElements>(EMPTY_MENU_ELEMENTS);
@@ -89,9 +95,10 @@ export function HomeTitleBarBridge({
     const editItems = useMemo<MenuItem[]>(() => ([
         { label: "\u64a4\u9500", onClick: closeAnd(onUndo) },
         { label: "\u6062\u590d", onClick: closeAnd(onRedo) },
-        { label: "\u67e5\u627e" },
-        { label: "\u66ff\u6362" },
-    ]), [closeAnd, onRedo, onUndo]);
+        { label: "\u64cd\u4f5c\u65e5\u5fd7", onClick: closeAnd(onOpenOperationLog) },
+        { label: "\u67e5\u627e", onClick: closeAnd(onOpenFind) },
+        { label: "\u66ff\u6362", onClick: closeAnd(onOpenReplace) },
+    ]), [closeAnd, onOpenFind, onOpenOperationLog, onOpenReplace, onRedo, onUndo]);
 
     const runItems = useMemo<MenuItem[]>(() => ([
         {
@@ -132,6 +139,18 @@ export function HomeTitleBarBridge({
             if (key === "y") {
                 event.preventDefault();
                 void onRedo();
+                return;
+            }
+
+            if (key === "f") {
+                event.preventDefault();
+                void onOpenFind?.();
+                return;
+            }
+
+            if (key === "h") {
+                event.preventDefault();
+                void onOpenReplace?.();
             }
         };
 
@@ -139,7 +158,7 @@ export function HomeTitleBarBridge({
         return () => {
             document.body.removeEventListener("keydown", handleKeyDown);
         };
-    }, [onRedo, onSave, onUndo]);
+    }, [onOpenFind, onOpenReplace, onRedo, onSave, onUndo]);
 
     useEffect(() => {
         const undoButton = document.getElementById("title-submenu-undo-button");

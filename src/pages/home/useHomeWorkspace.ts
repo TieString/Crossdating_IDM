@@ -5,7 +5,7 @@ import { parseCofechaResult, splitReportByParts } from "@/features/cofecha/forma
 import type { ICofechaResult } from "@/features/cofecha/types";
 import { detectPrecision, readRwlString } from "@/features/rwl";
 import { RwlEditor, registerChangeYearWidth } from "@/features/rwl/edit";
-import type { DeleteMode, RwlDeletionMarkers, RwlHistoryAnimation } from "@/features/rwl/edit";
+import type { DeleteMode, RwlDeletionMarkers, RwlHistoryAnimation, RwlHistoryStatus, RwlOperationLogEntry, RwlPersistedHistorySnapshot } from "@/features/rwl/edit";
 import type { RwlSiteData } from "@/features/rwl/types";
 import { runCofecha } from "@/services/cofecha/runner";
 import { readRwlFile, saveFile } from "@/services/fs/io";
@@ -13,6 +13,8 @@ import { stopMarker } from "@/shared/constants";
 import { ALL_OPTION_VALUE, CofechaVersion, DEFAULT_HOME_TITLE } from "./constants";
 
 export type WidthHistoryAnimation = RwlHistoryAnimation & { id: number };
+
+const HISTORY_STORAGE_PREFIX = "crossdating:rwl-operation-journal:v1:";
 
 const formatTitle = (fileName: string | null, isModified: boolean) => (
     fileName ? `${fileName}${isModified ? " *" : ""}` : DEFAULT_HOME_TITLE
@@ -39,6 +41,38 @@ const rwlDataEquals = (a: RwlSiteData, b: RwlSiteData) => {
     return true;
 };
 
+const getHistoryStorageKey = (filePath: string) => `${HISTORY_STORAGE_PREFIX}${filePath}`;
+
+const loadPersistedHistorySnapshot = (filePath: string): RwlPersistedHistorySnapshot | null => {
+    try {
+        const raw = window.localStorage.getItem(getHistoryStorageKey(filePath));
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as unknown;
+        return RwlEditor.isPersistedHistorySnapshot(parsed) ? parsed : null;
+    } catch (error) {
+        console.warn("读取操作日志失败:", error);
+        return null;
+    }
+};
+
+const persistHistorySnapshot = (filePath: string, editor: RwlEditor) => {
+    try {
+        window.localStorage.setItem(
+            getHistoryStorageKey(filePath),
+            JSON.stringify(editor.toHistorySnapshot()),
+        );
+    } catch (error) {
+        console.warn("保存操作日志失败:", error);
+    }
+};
+
+const hydratePersistedHistory = (editor: RwlEditor, filePath: string) => {
+    const snapshot = loadPersistedHistorySnapshot(filePath);
+    if (!snapshot) return;
+
+    editor.restoreOperationLog(snapshot.operationLog);
+};
+
 export function useHomeWorkspace() {
     const rwlEditorRef = useRef<RwlEditor>(new RwlEditor(new Map()));
     const originalDataRef = useRef<RwlSiteData>(new Map());
@@ -47,6 +81,8 @@ export function useHomeWorkspace() {
 
     const [siteData, setSiteData] = useState<RwlSiteData>(() => rwlEditorRef.current.getData());
     const [deletionMarkers, setDeletionMarkers] = useState<RwlDeletionMarkers>(() => rwlEditorRef.current.getDeletionMarkers());
+    const [operationLog, setOperationLog] = useState<RwlOperationLogEntry[]>(() => rwlEditorRef.current.getOperationLog());
+    const [historyStatus, setHistoryStatus] = useState<RwlHistoryStatus>(() => rwlEditorRef.current.getHistoryStatus());
     const [treeOptions, setTreeOptions] = useState<string[]>([]);
     const [selectedTree, setSelectedTree] = useState<string>(ALL_OPTION_VALUE);
     const [historyAnimation, setHistoryAnimation] = useState<WidthHistoryAnimation | null>(null);
@@ -67,7 +103,13 @@ export function useHomeWorkspace() {
             const nextData = editor.getData();
             setIsModified(!rwlDataEquals(originalDataRef.current, nextData));
             setSiteData(nextData);
+            setTreeOptions(Array.from(nextData.keys()));
             setDeletionMarkers(editor.getDeletionMarkers());
+            setOperationLog(editor.getOperationLog());
+            setHistoryStatus(editor.getHistoryStatus());
+            if (filePathRef.current) {
+                persistHistorySnapshot(filePathRef.current, editor);
+            }
         });
     }, []);
 
@@ -106,6 +148,8 @@ export function useHomeWorkspace() {
         originalDataRef.current = nextData;
         setSiteData(nextData);
         setDeletionMarkers(nextEditor.getDeletionMarkers());
+        setOperationLog(nextEditor.getOperationLog());
+        setHistoryStatus(nextEditor.getHistoryStatus());
         setHistoryAnimation(null);
         setIsModified(false);
     }, [syncEditor]);
@@ -146,9 +190,11 @@ export function useHomeWorkspace() {
 
             const content = await readTextFile(filePath);
             const rwlData = await readRwlFile(filePath);
+            const nextEditor = new RwlEditor(rwlData.data, rwlData.readOptions, rwlData.format);
 
-            replaceEditor(new RwlEditor(rwlData.data, rwlData.readOptions, rwlData.format));
-            setTreeOptions(Array.from(rwlData.data.keys()));
+            hydratePersistedHistory(nextEditor, filePath);
+            replaceEditor(nextEditor);
+            setTreeOptions(Array.from(nextEditor.getData().keys()));
             setSelectedTree(ALL_OPTION_VALUE);
             setSelectedPart(ALL_OPTION_VALUE);
             setFileName(filePath);
@@ -172,8 +218,8 @@ export function useHomeWorkspace() {
         setIsModified(false);
     }, []);
 
-    const getCurrentRwlText = useCallback(() => (
-        rwlEditorRef.current.exportAsRwlString()
+    const getCurrentRwlText = useCallback((tree?: string) => (
+        rwlEditorRef.current.exportAsRwlString(tree)
     ), []);
 
     const applyParsedRwlText = useCallback(async (rawText: string) => {
@@ -192,9 +238,20 @@ export function useHomeWorkspace() {
         return rwlData;
     }, []);
 
-    const applyRawRwlText = useCallback(async (rawText: string) => {
-        await applyParsedRwlText(rawText);
+    const applyRawRwlText = useCallback(async (rawText: string): Promise<RwlSiteData> => {
+        const rwlData = await applyParsedRwlText(rawText);
+        return rwlData.data;
     }, [applyParsedRwlText]);
+
+    // 单序列文本编辑：只解析这段文本并把结果合并回指定序列，其余序列保持不变。
+    const applyRawRwlTextForTree = useCallback(async (rawText: string, tree: string): Promise<RwlSiteData> => {
+        const rwlData = await readRwlString(rawText);
+        const parsedTreeData = rwlData.data.get(tree) ?? rwlData.data.values().next().value;
+        if (parsedTreeData) {
+            rwlEditorRef.current.replaceTreeData(tree, parsedTreeData);
+        }
+        return rwlEditorRef.current.getData();
+    }, []);
 
     const handleSave = useCallback(async () => {
         if (!filePathRef.current) {
@@ -294,6 +351,14 @@ export function useHomeWorkspace() {
         triggerHistoryAnimation(rwlEditorRef.current.redo());
     }, [triggerHistoryAnimation]);
 
+    const handleUndoOperationLogEntry = useCallback((entryId: string) => {
+        triggerHistoryAnimation(rwlEditorRef.current.undoOperationLogEntry(entryId));
+    }, [triggerHistoryAnimation]);
+
+    const handleRedoOperationLogEntry = useCallback((entryId: string) => {
+        triggerHistoryAnimation(rwlEditorRef.current.redoOperationLogEntry(entryId));
+    }, [triggerHistoryAnimation]);
+
     const handleInsertMissingYearAtSide = useCallback((tree: string, nextYear: number, side: "left" | "right") => {
         rwlEditorRef.current.insertMissingYearAtSide(tree, nextYear, side);
     }, []);
@@ -355,6 +420,7 @@ export function useHomeWorkspace() {
         cofechaVersion,
         deletionMarkers,
         fileName,
+        historyStatus,
         handleDeleteSeries,
         handleDeleteYearWithMode,
         handleDeleteYearWithModeFromChart,
@@ -365,6 +431,7 @@ export function useHomeWorkspace() {
         handleMoveSeriesTailByOffset,
         handleRedo,
         handleReplaceTreeData,
+        handleRedoOperationLogEntry,
         handleRestoreDeletion,
         handleSaveRawText,
         handleSaveRawTextAs,
@@ -372,13 +439,16 @@ export function useHomeWorkspace() {
         handleSaveAs,
         handleTreeSelectionChange,
         handleUndo,
+        handleUndoOperationLogEntry,
         applyRawRwlText,
+        applyRawRwlTextForTree,
         getCurrentRwlText,
         hasChart,
         hasProblems,
         historyAnimation,
         isFileLoading,
         isModified,
+        operationLog,
         possibleProblemsDetail,
         problemTextColor,
         processingText,

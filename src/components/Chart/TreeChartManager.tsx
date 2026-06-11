@@ -12,12 +12,13 @@ import { stopMarker } from '@/shared/constants'
 
 type Props = {
   fullData: RwlSiteData
+  variant?: 'panel' | 'expanded'
   onInsertMissingYearAtSide?: (tree: string, year: number, side: MissingInsertSide) => void
   onDeleteYearWithMode?: (tree: string, year: number, mode: DeleteMode) => void
   onDeleteSeries?: (tree: string) => void
 }
 
-function TreeChartManagerBase({ fullData, onInsertMissingYearAtSide, onDeleteYearWithMode, onDeleteSeries }: Props) {
+function TreeChartManagerBase({ fullData, variant = 'panel', onInsertMissingYearAtSide, onDeleteYearWithMode, onDeleteSeries }: Props) {
   const [selectedTrees, setSelectedTrees] = useState<string[]>([])
   const [highlightedTreeCode, setHighlightedTreeCode] = useState<string | null>(null)
   const [treeOffsets, setTreeOffsets] = useState<Map<string, number>>(new Map())
@@ -110,6 +111,55 @@ function TreeChartManagerBase({ fullData, onInsertMissingYearAtSide, onDeleteYea
     [allTreeCodes, search]
   )
   const allSelected = selectedTrees.length === allTreeCodes.length
+  const isExpanded = variant === 'expanded'
+
+  const selectedStats = useMemo(() => {
+    let pointCount = 0
+    let minYear = Number.POSITIVE_INFINITY
+    let maxYear = Number.NEGATIVE_INFINITY
+
+    selectedTrees.forEach(treeCode => {
+      const treeData = fullData.get(treeCode)
+      treeData?.forEach((value, year) => {
+        if (typeof value !== 'number' || value <= 0 || value === stopMarker.value) return
+        pointCount += 1
+        minYear = Math.min(minYear, year)
+        maxYear = Math.max(maxYear, year)
+      })
+    })
+
+    return {
+      pointCount,
+      yearSpan: Number.isFinite(minYear) && Number.isFinite(maxYear) ? `${minYear}-${maxYear}` : '-',
+    }
+  }, [fullData, selectedTrees])
+
+  const selectLongestTrees = useCallback(() => {
+    const longest = allTreeCodes
+      .map(treeCode => {
+        let pointCount = 0
+        fullData.get(treeCode)?.forEach((value) => {
+          if (typeof value === 'number' && value > 0 && value !== stopMarker.value) {
+            pointCount += 1
+          }
+        })
+        return { treeCode, pointCount }
+      })
+      .sort((a, b) => b.pointCount - a.pointCount)
+      .slice(0, Math.min(10, allTreeCodes.length))
+      .map(({ treeCode }) => treeCode)
+
+    setSelectedTrees(longest)
+  }, [allTreeCodes, fullData])
+
+  const invertSelection = useCallback(() => {
+    setSelectedTrees(allTreeCodes.filter(treeCode => !selectedTrees.includes(treeCode)))
+  }, [allTreeCodes, selectedTrees])
+
+  const resetChartView = useCallback(() => {
+    setTreeOffsets(new Map())
+    setZoomWindow(null)
+  }, [])
 
   const seriesColorMap = useMemo(() => {
     const map = new Map<string, string>()
@@ -124,109 +174,230 @@ function TreeChartManagerBase({ fullData, onInsertMissingYearAtSide, onDeleteYea
   const btnBase: React.CSSProperties = {
     fontSize: 12, padding: '4px 12px', borderRadius: 5, cursor: 'pointer',
     border: '1px solid #d0d0d0', background: '#fff', color: '#444',
-    fontWeight: 500, letterSpacing: 0.2, transition: 'background 0.12s, color 0.12s',
+    fontWeight: 500, letterSpacing: 0, transition: 'background 0.12s, color 0.12s',
     lineHeight: 1.4,boxShadow: 'none',
   }
   const btnDisabled: React.CSSProperties = {
     ...btnBase, background: '#f4f4f4', color: '#c0c0c0', cursor: 'default', border: '1px solid #e4e4e4',
   }
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%' }}>
-      {/* 顶部选择面板 */}
-      <div style={{ flex: '0 0 auto', marginBottom: 10 }}>
-        {/* 工具栏 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-          <button onClick={() => setSelectedTrees(allTreeCodes)} disabled={allSelected}
-            style={allSelected ? btnDisabled : btnBase}>全选</button>
-          <button onClick={() => setSelectedTrees([])} disabled={selectedTrees.length === 0}
-            style={selectedTrees.length === 0 ? btnDisabled : btnBase}>全不选</button>
+  const chartNode = filteredData.size > 0 ? (
+    <MultiLineChart
+      data={filteredData}
+      sampleSizeData={fullData}
+      highlightedTreeCode={highlightedTreeCode}
+      onHighlightedTreeCodeChange={setHighlightedTreeCode}
+      zoomWindow={zoomWindow}
+      onZoomWindowChange={setZoomWindow}
+      onShiftHighlightedTree={shiftHighlightedTree}
+      onInsertMissingYearAtSide={onInsertMissingYearAtSide}
+      onDeleteYearWithMode={onDeleteYearWithMode}
+      onDeleteSeries={onDeleteSeries}
+    />
+  ) : (
+    <div style={{
+      height: '100%',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      color: '#8a94a3',
+      fontFamily: 'Segoe UI, system-ui, sans-serif',
+      fontSize: 13,
+    }}>
+      未选择序列
+    </div>
+  )
 
-          {/* 搜索框 */}
-          <div style={{ flex: 1, minWidth: 0, position: 'relative', display: 'flex', alignItems: 'center' }}>
-            <svg style={{ position: 'absolute', left: 8, pointerEvents: 'none', color: '#aaa' }}
-              width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-              <circle cx="11" cy="11" r="7" /><line x1="16.5" y1="16.5" x2="22" y2="22" />
-            </svg>
-            <input
-              type="search"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="搜索序列"
-              style={{
-                width: '100%', fontSize: 12, padding: '4px 8px 4px 26px',
-                border: '1px solid #d0d0d0', borderRadius: 5, outline: 'none',
-                background: '#fff', color: '#333', lineHeight: 1.4,
-                boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.05)',
-              }}
-            />
-          </div>
+  const picker = (
+    <>
+      <div style={{
+        display: 'flex',
+        flexWrap: isExpanded ? 'wrap' : 'nowrap',
+        alignItems: 'center',
+        gap: 6,
+        marginBottom: 6,
+      }}>
+        <button onClick={() => setSelectedTrees(allTreeCodes)} disabled={allSelected}
+          style={allSelected ? btnDisabled : btnBase}>全选</button>
+        <button onClick={() => setSelectedTrees([])} disabled={selectedTrees.length === 0}
+          style={selectedTrees.length === 0 ? btnDisabled : btnBase}>全不选</button>
+        {isExpanded ? (
+          <>
+            <button onClick={invertSelection} disabled={allTreeCodes.length === 0}
+              style={allTreeCodes.length === 0 ? btnDisabled : btnBase}>反选</button>
+            <button onClick={selectLongestTrees} disabled={allTreeCodes.length === 0}
+              style={allTreeCodes.length === 0 ? btnDisabled : btnBase}>最长10条</button>
+          </>
+        ) : null}
 
-          <span style={{
-            fontSize: 11, color: '#fff', background: '#2e6da4',
-            borderRadius: 10, padding: '1px 8px', fontWeight: 600, whiteSpace: 'nowrap',
-          }}>
-            {selectedTrees.length} / {allTreeCodes.length}
-          </span>
+        <div style={{ flex: 1, minWidth: isExpanded ? 180 : 0, position: 'relative', display: 'flex', alignItems: 'center' }}>
+          <svg style={{ position: 'absolute', left: 8, pointerEvents: 'none', color: '#aaa' }}
+            width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+            <circle cx="11" cy="11" r="7" /><line x1="16.5" y1="16.5" x2="22" y2="22" />
+          </svg>
+          <input
+            type="search"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="搜索序列"
+            style={{
+              width: '100%', fontSize: 12, padding: '4px 8px 4px 26px',
+              border: '1px solid #d0d0d0', borderRadius: 5, outline: 'none',
+              background: '#fff', color: '#333', lineHeight: 1.4,
+              boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.05)',
+            }}
+          />
         </div>
-
-        {/* pill 标签列表 */}
-        <div style={{
-          maxHeight: 76, overflowY: 'auto',
-          border: '1px solid #e8e8e8', borderRadius: 6,
-          background: '#f8f9fa',
-          display: 'flex', flexWrap: 'wrap', alignContent: 'flex-start',
-          padding: '4px 5px', gap: 4,
+         <button onClick={() => setSelectedTrees([])} disabled={selectedTrees.length === 0}
+          style={selectedTrees.length === 0 ? btnDisabled : btnBase}>参考</button>
+        <span style={{
+          fontSize: 11, color: '#fff', background: '#2e6da4',
+          borderRadius: 10, padding: '1px 8px', fontWeight: 600, whiteSpace: 'nowrap',
         }}>
-          {filteredTreeCodes.length === 0
-            ? <span style={{ fontSize: 12, color: '#bbb', padding: '4px 6px', fontStyle: 'italic' }}>无匹配结果</span>
-            : filteredTreeCodes.map(treeCode => {
-              const checked = selectedTrees.includes(treeCode)
-              const seriesColor = seriesColorMap.get(treeCode)
-              return (
-                <button
-                  key={treeCode}
-                  onClick={() => toggleTree(treeCode)}
-                  style={{
-                    fontSize: 11, padding: '2px 9px', borderRadius: 6,
-                    border: checked ? '1px solid #2e6da4' : '1px solid #d8d8d8',
-                    background: '#fff',
-                    color: checked ? '#2e6da4' : '#555',
-                    cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap',
-                    // fontWeight: checked ? 600 : 400,
-                    boxShadow: checked ? '0 1px 3px rgba(46,109,164,0.15)' : '0 1px 2px rgba(0,0,0,0.04)',
-                    transition: 'all 0.12s',
-                    lineHeight: 1.6,
-                    position: 'relative',
-                  }}
-                >
-                  {treeCode}
-                  {checked && seriesColor && (
-                    <span style={{ position: 'absolute', bottom: 2, left: 5, right: 5, height: 2, borderRadius: 1, background: seriesColor }} />
-                  )}
-                </button>
-              )
-            })
-          }
-        </div>
+          {selectedTrees.length} / {allTreeCodes.length}
+        </span>
       </div>
 
-      {/* 图表区 */}
+      {isExpanded ? (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: 6,
+          marginBottom: 8,
+          color: '#5f6d7c',
+          fontFamily: 'Segoe UI, system-ui, sans-serif',
+          fontSize: 12,
+          lineHeight: 1.25,
+        }}>
+          <span>观测 {selectedStats.pointCount}</span>
+          <span>跨度 {selectedStats.yearSpan}</span>
+          <span>匹配 {filteredTreeCodes.length}</span>
+          <span>偏移 {treeOffsets.size}</span>
+        </div>
+      ) : null}
+
+      <div style={{
+        flex: isExpanded ? '1 1 auto' : '0 0 auto',
+        maxHeight: isExpanded ? 'none' : 76,
+        minHeight: isExpanded ? 0 : undefined,
+        overflowY: 'auto',
+        border: '1px solid #e8e8e8',
+        borderRadius: 6,
+        background: '#f8f9fa',
+        display: 'flex',
+        flexWrap: 'wrap',
+        alignContent: 'flex-start',
+        padding: '4px 5px',
+        gap: 4,
+      }}>
+        {filteredTreeCodes.length === 0
+          ? <span style={{ fontSize: 12, color: '#bbb', padding: '4px 6px', fontStyle: 'italic' }}>无匹配结果</span>
+          : filteredTreeCodes.map(treeCode => {
+            const checked = selectedTrees.includes(treeCode)
+            const seriesColor = seriesColorMap.get(treeCode)
+            return (
+              <button
+                key={treeCode}
+                onClick={() => toggleTree(treeCode)}
+                style={{
+                  fontSize: 11, padding: '2px 9px', borderRadius: 6,
+                  border: checked ? '1px solid #2e6da4' : '1px solid #d8d8d8',
+                  background: '#fff',
+                  color: checked ? '#2e6da4' : '#555',
+                  cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap',
+                  boxShadow: checked ? '0 1px 3px rgba(46,109,164,0.15)' : '0 1px 2px rgba(0,0,0,0.04)',
+                  transition: 'all 0.12s',
+                  lineHeight: 1.6,
+                  position: 'relative',
+                }}
+              >
+                {treeCode}
+                {checked && seriesColor && (
+                  <span style={{ position: 'absolute', bottom: 2, left: 5, right: 5, height: 2, borderRadius: 1, background: seriesColor }} />
+                )}
+              </button>
+            )
+          })
+        }
+      </div>
+    </>
+  )
+
+  if (isExpanded) {
+    return (
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'minmax(260px, 330px) minmax(0, 1fr)',
+        gap: 12,
+        minHeight: 0,
+        height: '100%',
+        padding: 12,
+        boxSizing: 'border-box',
+      }}>
+        <aside style={{
+          display: 'flex',
+          flexDirection: 'column',
+          minWidth: 0,
+          minHeight: 0,
+          padding: 10,
+          border: '1px solid #d9e0ea',
+          borderRadius: 6,
+          background: '#fff',
+          boxSizing: 'border-box',
+        }}>
+          {picker}
+        </aside>
+
+        <section style={{
+          display: 'flex',
+          flexDirection: 'column',
+          minWidth: 0,
+          minHeight: 0,
+          border: '1px solid #d9e0ea',
+          borderRadius: 6,
+          background: '#fff',
+          boxSizing: 'border-box',
+          overflow: 'hidden',
+        }}>
+          <div style={{
+            flex: '0 0 auto',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+            padding: '8px 10px',
+            borderBottom: '1px solid #e3e8ef',
+            fontFamily: 'Segoe UI, system-ui, sans-serif',
+            fontSize: 12,
+            color: '#5f6d7c',
+          }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {highlightedTreeCode ? `高亮 ${highlightedTreeCode}` : '未高亮'}
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '0 0 auto' }}>
+              <button onClick={() => highlightedTreeCode && shiftHighlightedTree(highlightedTreeCode, -1)}
+                disabled={!highlightedTreeCode} style={!highlightedTreeCode ? btnDisabled : btnBase}>←</button>
+              <button onClick={() => highlightedTreeCode && shiftHighlightedTree(highlightedTreeCode, 1)}
+                disabled={!highlightedTreeCode} style={!highlightedTreeCode ? btnDisabled : btnBase}>→</button>
+              <button onClick={resetChartView} style={btnBase}>重置视图</button>
+            </div>
+          </div>
+          <div style={{ flex: '1 1 auto', minHeight: 0, padding: 10, boxSizing: 'border-box' }}>
+            {chartNode}
+          </div>
+        </section>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%' }}>
+      <div style={{ flex: '0 0 auto', marginBottom: 10 }}>
+        {picker}
+      </div>
+
       <div style={{ flex: '1 1 auto', minHeight: 0 }}>
-        {filteredData.size > 0 ? (
-          <MultiLineChart
-            data={filteredData}
-            sampleSizeData={fullData}
-            highlightedTreeCode={highlightedTreeCode}
-            onHighlightedTreeCodeChange={setHighlightedTreeCode}
-            zoomWindow={zoomWindow}
-            onZoomWindowChange={setZoomWindow}
-            onShiftHighlightedTree={shiftHighlightedTree}
-            onInsertMissingYearAtSide={onInsertMissingYearAtSide}
-            onDeleteYearWithMode={onDeleteYearWithMode}
-            onDeleteSeries={onDeleteSeries}
-          />
-        ) : null}
+        {chartNode}
       </div>
     </div>
   )

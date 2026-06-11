@@ -1,0 +1,11 @@
+.workspace-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    background: #f6f8fb;
+    color: #667084;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    font-size: 14px;
+}

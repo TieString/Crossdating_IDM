@@ -3,10 +3,13 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import { SettingsProvider } from "@/features/settings/SettingsContext";
 import SettingsPage from "@/pages/settings/SettingsPage";
+import WorkspaceWindowPage from "@/pages/workspace/WorkspaceWindowPage";
 
-const isSettingsPage = new URLSearchParams(window.location.search).get("page") === "settings";
+const page = new URLSearchParams(window.location.search).get("page");
+const isSettingsPage = page === "settings";
+const isWorkspaceWindowPage = page === "operation-log" || page === "cofecha" || page === "line-chart";
 
-if (isSettingsPage) {
+if (isSettingsPage || isWorkspaceWindowPage) {
     // 设置窗口使用系统原生标题栏，隐藏页面内嵌的自定义标题栏
     const titlebar = document.querySelector<HTMLElement>(".titlebar");
     if (titlebar) titlebar.style.display = "none";
@@ -27,6 +30,10 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
         {isSettingsPage ? (
             <SettingsProvider>
                 <SettingsPage />
+            </SettingsProvider>
+        ) : isWorkspaceWindowPage ? (
+            <SettingsProvider>
+                <WorkspaceWindowPage />
             </SettingsProvider>
         ) : (
             <App />

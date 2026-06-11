@@ -19,10 +19,44 @@ export type RwlEditOperation =
     | { type: "delete-year"; tree: string; year: number; mode: DeleteMode }
     | { type: "mark-missing-range"; tree: string; startYear: number; endYear: number }
     | { type: "restore-deletion"; tree: string; markerYear: number; index: number }
-    | { type: "delete-series"; tree: string };
+    | { type: "delete-series"; tree: string }
+    | { type: "change-width"; tree: string; year: number; width: number | null }
+    | { type: "replace-tree-data"; tree: string }
+    | { type: "replace-all-data"; treeCount: number; format?: RwlFormat };
 
 export type RwlHistoryAnimation = RwlEditOperation & {
     direction: "undo" | "redo";
+};
+
+export type RwlOperationLogAction = "apply";
+
+export type SerializedRwlTreeData = Array<[number, number | null]>;
+export type SerializedTreeDeletionMarkers = Array<[number, DeletionMarkerInfo[]]>;
+
+export type RwlOperationLogEntry = {
+    id: string;
+    sequence: number;
+    timestamp: string;
+    action: RwlOperationLogAction;
+    operation?: RwlEditOperation;
+    summary: string;
+    detail: string;
+    tree?: string;
+    beforeTreeData?: SerializedRwlTreeData | null;
+    afterTreeData?: SerializedRwlTreeData | null;
+    beforeDeletionMarkers?: SerializedTreeDeletionMarkers;
+    afterDeletionMarkers?: SerializedTreeDeletionMarkers;
+    undone?: boolean;
+    canUndo?: boolean;
+    canRedo?: boolean;
+    undoDepth: number;
+    redoDepth: number;
+};
+
+export type RwlHistoryStatus = {
+    undoCount: number;
+    redoCount: number;
+    logCount: number;
 };
 
 // 每个 tree 的删除标记：年份 M 表示 "在当前年份 M 的左边沿画一条红色竖线"。
@@ -58,6 +92,192 @@ type RwlHistoryEntry = {
     format: string;
     operation?: RwlEditOperation;
 };
+
+type RwlTreeLogState = {
+    data: SerializedRwlTreeData | null;
+    deletionMarkers: SerializedTreeDeletionMarkers;
+};
+
+export type RwlPersistedHistorySnapshot = {
+    version: 1;
+    savedAt: string;
+    operationLog: RwlOperationLogEntry[];
+    operationLogCounter: number;
+    deletionOrderCounter: number;
+};
+
+const MAX_OPERATION_LOG_ENTRIES = 500;
+
+const cloneTreeData = (treeData: RwlTreeData): RwlTreeData => new Map(treeData);
+
+const cloneSiteData = (siteData: RwlSiteData): RwlSiteData => {
+    const result: RwlSiteData = new Map();
+    siteData.forEach((treeData, tree) => {
+        result.set(tree, cloneTreeData(treeData));
+    });
+    return result;
+};
+
+const cloneOperation = (operation: RwlEditOperation | undefined): RwlEditOperation | undefined => (
+    operation ? { ...operation } : undefined
+);
+
+const cloneSerializedTreeData = (
+    treeData: SerializedRwlTreeData | null | undefined
+): SerializedRwlTreeData | null | undefined => (
+    treeData ? treeData.map(([year, width]) => [year, width]) : treeData
+);
+
+const cloneSerializedTreeDeletionMarkers = (
+    markers: SerializedTreeDeletionMarkers | undefined
+): SerializedTreeDeletionMarkers | undefined => (
+    markers?.map(([year, stack]) => [year, stack.map((info) => ({ ...info }))])
+);
+
+const cloneOperationLogEntry = (entry: RwlOperationLogEntry): RwlOperationLogEntry => ({
+    ...entry,
+    operation: cloneOperation(entry.operation),
+    beforeTreeData: cloneSerializedTreeData(entry.beforeTreeData),
+    afterTreeData: cloneSerializedTreeData(entry.afterTreeData),
+    beforeDeletionMarkers: cloneSerializedTreeDeletionMarkers(entry.beforeDeletionMarkers),
+    afterDeletionMarkers: cloneSerializedTreeDeletionMarkers(entry.afterDeletionMarkers),
+});
+
+const serializeTreeData = (treeData: RwlTreeData): SerializedRwlTreeData => (
+    Array.from(treeData.entries())
+);
+
+const deserializeTreeData = (treeData: SerializedRwlTreeData): RwlTreeData => (
+    new Map(treeData)
+);
+
+const serializeTreeDeletionMarkers = (
+    markers: Map<number, DeletionMarkerInfo[]> | undefined
+): SerializedTreeDeletionMarkers => (
+    Array.from(markers?.entries() ?? []).map(([year, stack]) => [
+        year,
+        stack.map((info) => ({ ...info })),
+    ])
+);
+
+const deserializeTreeDeletionMarkers = (
+    markers: SerializedTreeDeletionMarkers | undefined
+): Map<number, DeletionMarkerInfo[]> => (
+    new Map((markers ?? []).map(([year, stack]) => [
+        year,
+        stack.map((info) => ({ ...info })),
+    ]))
+);
+
+const treeDataEquals = (
+    treeData: RwlTreeData | undefined,
+    serialized: SerializedRwlTreeData | null | undefined
+) => {
+    if (serialized === undefined) return false;
+    if (serialized === null) return treeData === undefined;
+    if (!treeData || treeData.size !== serialized.length) return false;
+
+    return serialized.every(([year, width]) => treeData.get(year) === width);
+};
+
+const treeDeletionMarkersEquals = (
+    markers: Map<number, DeletionMarkerInfo[]> | undefined,
+    serialized: SerializedTreeDeletionMarkers | undefined
+) => {
+    const normalized = serializeTreeDeletionMarkers(markers);
+    const expected = serialized ?? [];
+    if (normalized.length !== expected.length) return false;
+
+    return normalized.every(([year, stack], index) => {
+        const expectedEntry = expected[index];
+        if (!expectedEntry) return false;
+        const [expectedYear, expectedStack] = expectedEntry;
+        if (year !== expectedYear || stack.length !== expectedStack.length) return false;
+        return stack.every((info, infoIndex) => (
+            JSON.stringify(info) === JSON.stringify(expectedStack[infoIndex])
+        ));
+    });
+};
+
+const getOperationTree = (operation: RwlEditOperation | undefined): string | undefined => {
+    if (!operation || !("tree" in operation)) return undefined;
+    return operation.tree;
+};
+
+const getDeleteModeLabel = (mode: DeleteMode) => {
+    switch (mode) {
+        case "left": return "并入左侧";
+        case "right": return "并入右侧";
+        case "both": return "两侧均分";
+        case "direct":
+        default:
+            return "直接删除";
+    }
+};
+
+export function describeRwlEditOperation(operation: RwlEditOperation | undefined): { summary: string; detail: string; tree?: string } {
+    if (!operation) {
+        return { summary: "数据变更", detail: "未标记的编辑操作" };
+    }
+
+    switch (operation.type) {
+        case "insert-missing":
+            return {
+                summary: "插入缺轮",
+                detail: `${operation.tree} · ${operation.year} · ${operation.side === "left" ? "左侧" : "右侧"}`,
+                tree: operation.tree,
+            };
+        case "move-selection":
+            return {
+                summary: "移动选区",
+                detail: `${operation.tree} · ${operation.selectedStartYear}-${operation.selectedEndYear} · ${operation.yearOffset > 0 ? "+" : ""}${operation.yearOffset} 年`,
+                tree: operation.tree,
+            };
+        case "delete-year":
+            return {
+                summary: "删除年份",
+                detail: `${operation.tree} · ${operation.year} · ${getDeleteModeLabel(operation.mode)}`,
+                tree: operation.tree,
+            };
+        case "mark-missing-range":
+            return {
+                summary: "标记缺测区间",
+                detail: `${operation.tree} · ${operation.startYear}-${operation.endYear}`,
+                tree: operation.tree,
+            };
+        case "restore-deletion":
+            return {
+                summary: "恢复删除标记",
+                detail: `${operation.tree} · 标记 ${operation.markerYear} · #${operation.index + 1}`,
+                tree: operation.tree,
+            };
+        case "delete-series":
+            return {
+                summary: "删除序列",
+                detail: operation.tree,
+                tree: operation.tree,
+            };
+        case "change-width":
+            return {
+                summary: "修改宽度",
+                detail: `${operation.tree} · ${operation.year} → ${operation.width ?? "缺测"}`,
+                tree: operation.tree,
+            };
+        case "replace-tree-data":
+            return {
+                summary: "替换序列文本",
+                detail: operation.tree,
+                tree: operation.tree,
+            };
+        case "replace-all-data":
+            return {
+                summary: "替换全部数据",
+                detail: `${operation.treeCount} 条序列${operation.format ? ` · ${operation.format}` : ""}`,
+            };
+        default:
+            return { summary: "数据变更", detail: "未知编辑操作", tree: getOperationTree(operation) };
+    }
+}
 
 function cloneReadOptions(options: RwlReadResult['readOptions']): RwlReadResult['readOptions'] {
     if (!options) return undefined;
@@ -290,14 +510,23 @@ export class RwlEditor {
     private format: string = 'tucson'; // 记录原始读取格式
     private undoStack: RwlHistoryEntry[] = [];
     private redoStack: RwlHistoryEntry[] = [];
+    private operationLog: RwlOperationLogEntry[] = [];
+    private operationLogCounter = 0;
     private deletionMarkers: RwlDeletionMarkers = new Map();
     private deletionOrderCounter = 0;
     private changeCallback?: () => void;
 
     constructor(initialData: RwlSiteData, options?: RwlReadResult['readOptions'], format?: string) {
-        this.rwlData = new Map(initialData);
+        this.rwlData = cloneSiteData(initialData);
         this.readOptions = options;
         this.format = format || 'tucson'; // 默认 tucson
+    }
+
+    static isPersistedHistorySnapshot(value: unknown): value is RwlPersistedHistorySnapshot {
+        if (!value || typeof value !== "object") return false;
+        const candidate = value as Partial<RwlPersistedHistorySnapshot>;
+        return candidate.version === 1
+            && Array.isArray(candidate.operationLog);
     }
 
     // 获取当前所有删除标记（深拷贝，避免外部修改影响内部状态）
@@ -399,10 +628,159 @@ export class RwlEditor {
         }
     }
 
+    private captureTreeLogState(tree: string): RwlTreeLogState {
+        return {
+            data: this.rwlData.has(tree) ? serializeTreeData(this.rwlData.get(tree)!) : null,
+            deletionMarkers: serializeTreeDeletionMarkers(this.deletionMarkers.get(tree)),
+        };
+    }
+
+    private isLogEntryUndoable(entry: RwlOperationLogEntry): boolean {
+        if (!entry.tree || entry.undone || entry.afterTreeData === undefined) return false;
+        return treeDataEquals(this.rwlData.get(entry.tree), entry.afterTreeData)
+            && treeDeletionMarkersEquals(this.deletionMarkers.get(entry.tree), entry.afterDeletionMarkers);
+    }
+
+    private isLogEntryRedoable(entry: RwlOperationLogEntry): boolean {
+        if (!entry.tree || !entry.undone || entry.beforeTreeData === undefined) return false;
+        return treeDataEquals(this.rwlData.get(entry.tree), entry.beforeTreeData)
+            && treeDeletionMarkersEquals(this.deletionMarkers.get(entry.tree), entry.beforeDeletionMarkers);
+    }
+
+    private cloneOperationLogEntryWithAvailability(entry: RwlOperationLogEntry): RwlOperationLogEntry {
+        return {
+            ...cloneOperationLogEntry(entry),
+            canUndo: this.isLogEntryUndoable(entry),
+            canRedo: this.isLogEntryRedoable(entry),
+        };
+    }
+
+    private applyTreeLogState(
+        tree: string,
+        data: SerializedRwlTreeData | null | undefined,
+        deletionMarkers: SerializedTreeDeletionMarkers | undefined,
+    ): void {
+        if (data === undefined) return;
+
+        const nextData = new Map(this.rwlData);
+        if (data === null) {
+            nextData.delete(tree);
+        } else {
+            nextData.set(tree, deserializeTreeData(data));
+        }
+        this.rwlData = nextData;
+
+        const nextMarkers = cloneDeletionMarkers(this.deletionMarkers);
+        const treeMarkers = deserializeTreeDeletionMarkers(deletionMarkers);
+        if (treeMarkers.size === 0) {
+            nextMarkers.delete(tree);
+        } else {
+            nextMarkers.set(tree, treeMarkers);
+        }
+        this.deletionMarkers = nextMarkers;
+    }
+
+    private appendOperationLog(operation: RwlEditOperation, tree: string, beforeState: RwlTreeLogState): void {
+        const afterState = this.captureTreeLogState(tree);
+        if (
+            treeDataEquals(beforeState.data === null ? undefined : deserializeTreeData(beforeState.data), afterState.data)
+            && treeDeletionMarkersEquals(deserializeTreeDeletionMarkers(beforeState.deletionMarkers), afterState.deletionMarkers)
+        ) {
+            return;
+        }
+
+        const nextSequence = this.operationLogCounter + 1;
+        const description = describeRwlEditOperation(operation);
+
+        this.operationLogCounter = nextSequence;
+        this.operationLog = [
+            ...this.operationLog,
+            {
+                id: `${Date.now()}-${nextSequence}`,
+                sequence: nextSequence,
+                timestamp: new Date().toISOString(),
+                action: "apply" as const,
+                operation: cloneOperation(operation),
+                summary: description.summary,
+                detail: description.detail,
+                tree,
+                beforeTreeData: cloneSerializedTreeData(beforeState.data),
+                afterTreeData: cloneSerializedTreeData(afterState.data),
+                beforeDeletionMarkers: cloneSerializedTreeDeletionMarkers(beforeState.deletionMarkers),
+                afterDeletionMarkers: cloneSerializedTreeDeletionMarkers(afterState.deletionMarkers),
+                undone: false,
+                undoDepth: this.undoStack.length,
+                redoDepth: this.redoStack.length,
+            },
+        ].slice(-MAX_OPERATION_LOG_ENTRIES);
+    }
+
 
     // 获取当前 RWL 数据
     getData(): RwlSiteData {
-        return new Map(this.rwlData);
+        return cloneSiteData(this.rwlData);
+    }
+
+    getOperationLog(): RwlOperationLogEntry[] {
+        return this.operationLog.map((entry) => this.cloneOperationLogEntryWithAvailability(entry));
+    }
+
+    getHistoryStatus(): RwlHistoryStatus {
+        return {
+            undoCount: this.undoStack.length,
+            redoCount: this.redoStack.length,
+            logCount: this.operationLog.length,
+        };
+    }
+
+    toHistorySnapshot(): RwlPersistedHistorySnapshot {
+        return {
+            version: 1,
+            savedAt: new Date().toISOString(),
+            operationLog: this.operationLog.map(cloneOperationLogEntry),
+            operationLogCounter: this.operationLogCounter,
+            deletionOrderCounter: this.deletionOrderCounter,
+        };
+    }
+
+    restoreOperationLog(operationLog: RwlOperationLogEntry[]): void {
+        this.undoStack = [];
+        this.redoStack = [];
+        this.operationLog = operationLog.map(cloneOperationLogEntry).slice(-MAX_OPERATION_LOG_ENTRIES);
+        this.operationLogCounter = Math.max(
+            ...this.operationLog.map((entry) => entry.sequence),
+            0,
+        );
+    }
+
+    undoOperationLogEntry(entryId: string): RwlHistoryAnimation | null {
+        const entryIndex = this.operationLog.findIndex((entry) => entry.id === entryId);
+        const entry = this.operationLog[entryIndex];
+        if (entryIndex < 0 || !entry || !entry.tree || !this.isLogEntryUndoable(entry)) {
+            return null;
+        }
+
+        this.applyTreeLogState(entry.tree, entry.beforeTreeData, entry.beforeDeletionMarkers);
+        this.operationLog = this.operationLog.map((item, index) => (
+            index === entryIndex ? { ...item, undone: true } : item
+        ));
+        this.notifyChange();
+        return entry.operation ? { ...entry.operation, direction: "undo" } : null;
+    }
+
+    redoOperationLogEntry(entryId: string): RwlHistoryAnimation | null {
+        const entryIndex = this.operationLog.findIndex((entry) => entry.id === entryId);
+        const entry = this.operationLog[entryIndex];
+        if (entryIndex < 0 || !entry || !entry.tree || !this.isLogEntryRedoable(entry)) {
+            return null;
+        }
+
+        this.applyTreeLogState(entry.tree, entry.afterTreeData, entry.afterDeletionMarkers);
+        this.operationLog = this.operationLog.map((item, index) => (
+            index === entryIndex ? { ...item, undone: false } : item
+        ));
+        this.notifyChange();
+        return entry.operation ? { ...entry.operation, direction: "redo" } : null;
     }
 
     // 获取原始格式信息（用于保存时复现格式）
@@ -416,79 +794,92 @@ export class RwlEditor {
 
     // 插年：在 year 处插入 0
     insertYear(tree: string, year: number): void {
-        this.saveToUndoStack(); // 记录操作前状态
-        this.redoStack = []; // 清空 redo 记录
-
         if (!this.rwlData.has(tree)) return;
         let treeData = this.rwlData.get(tree)!;
         if (!treeData.has(year)) return;
 
-        this.undoStack[this.undoStack.length - 1].operation = { type: "insert-missing", tree, year, side: "right" };
+        const operation: RwlEditOperation = { type: "insert-missing", tree, year, side: "right" };
+        const beforeState = this.captureTreeLogState(tree);
+        this.saveToUndoStack(operation); // 记录操作前状态
+        this.redoStack = []; // 清空 redo 记录
 
         this.shiftDeletionMarkersForInsert(tree, year, "right");
         let updatedTree = insertMissingYearAtSide(treeData, year, "right");
         this.rwlData.set(tree, updatedTree);
+        this.appendOperationLog(operation, tree, beforeState);
         this.notifyChange();
     }
 
     // 删年：在 year 处删除 0
     // Insert a missing placeholder from the requested side of the current year.
     insertMissingYearAtSide(tree: string, year: number, side: MissingInsertSide): void {
-        this.saveToUndoStack({ type: "insert-missing", tree, year, side });
-        this.redoStack = [];
-
         if (!this.rwlData.has(tree)) return;
         let treeData = this.rwlData.get(tree)!;
         if (!treeData.has(year)) return;
 
+        const operation: RwlEditOperation = { type: "insert-missing", tree, year, side };
+        const beforeState = this.captureTreeLogState(tree);
+        this.saveToUndoStack(operation);
+        this.redoStack = [];
+
         this.shiftDeletionMarkersForInsert(tree, year, side);
         let updatedTree = insertMissingYearAtSide(treeData, year, side);
         this.rwlData.set(tree, updatedTree);
+        this.appendOperationLog(operation, tree, beforeState);
         this.notifyChange();
     }
 
     moveSeriesTailByOffset(tree: string, selectedStartYear: number, selectedEndYear: number, yearOffset: number): void {
         if (yearOffset === 0) return;
+        if (!this.rwlData.has(tree)) return;
 
-        this.saveToUndoStack({ type: "move-selection", tree, selectedStartYear, selectedEndYear, yearOffset });
+        const operation: RwlEditOperation = { type: "move-selection", tree, selectedStartYear, selectedEndYear, yearOffset };
+        const beforeState = this.captureTreeLogState(tree);
+        this.saveToUndoStack(operation);
         this.redoStack = [];
 
-        if (!this.rwlData.has(tree)) return;
         let treeData = this.rwlData.get(tree)!;
 
         this.shiftDeletionMarkersForMove(tree, selectedStartYear, selectedEndYear, yearOffset);
         let updatedTree = moveSeriesTailByOffset(treeData, selectedStartYear, selectedEndYear, yearOffset);
         this.rwlData.set(tree, updatedTree);
+        this.appendOperationLog(operation, tree, beforeState);
         this.notifyChange();
     }
 
     deleteYear(tree: string, year: number): void {
-        this.saveToUndoStack();
-        this.redoStack = [];
-
         if (!this.rwlData.has(tree)) return;
         let treeData = this.rwlData.get(tree)!;
         if (!treeData.has(year)) return;
+
+        const operation: RwlEditOperation = { type: "delete-year", tree, year, mode: "direct" };
+        const beforeState = this.captureTreeLogState(tree);
+        this.saveToUndoStack(operation);
+        this.redoStack = [];
 
         const info = this.captureDeletionInfo(tree, treeData, year, "direct");
         this.recordDeletionMarkerForDelete(tree, year, info);
         let updatedTree = deleteYearFromRwl(treeData, year);
         this.rwlData.set(tree, updatedTree);
+        this.appendOperationLog(operation, tree, beforeState);
         this.notifyChange();
     }
 
     deleteYearWithMode(tree: string, year: number, mode: DeleteMode): void {
-        this.saveToUndoStack({ type: "delete-year", tree, year, mode });
-        this.redoStack = [];
-
         if (!this.rwlData.has(tree)) return;
         let treeData = this.rwlData.get(tree)!;
         // 允许删除 gap/missing 年份（年份不在 treeData 中）：仍会平移更早年份以收紧 gap。
+
+        const operation: RwlEditOperation = { type: "delete-year", tree, year, mode };
+        const beforeState = this.captureTreeLogState(tree);
+        this.saveToUndoStack(operation);
+        this.redoStack = [];
 
         const info = this.captureDeletionInfo(tree, treeData, year, mode);
         this.recordDeletionMarkerForDelete(tree, year, info);
         let updatedTree = deleteYearWithMode(treeData, year, mode);
         this.rwlData.set(tree, updatedTree);
+        this.appendOperationLog(operation, tree, beforeState);
         this.notifyChange();
     }
 
@@ -506,11 +897,14 @@ export class RwlEditor {
             return;
         }
 
-        this.saveToUndoStack({ type: "mark-missing-range", tree, startYear, endYear });
+        const operation: RwlEditOperation = { type: "mark-missing-range", tree, startYear, endYear };
+        const beforeState = this.captureTreeLogState(tree);
+        this.saveToUndoStack(operation);
         this.redoStack = [];
 
         const updatedTree = markYearRangeAsMissing(treeData, startYear, endYear);
         this.rwlData.set(tree, updatedTree);
+        this.appendOperationLog(operation, tree, beforeState);
         this.notifyChange();
     }
 
@@ -534,7 +928,9 @@ export class RwlEditor {
         if (resolvedIndex < 0 || resolvedIndex >= stack.length) return;
         const info = stack[resolvedIndex];
 
-        this.saveToUndoStack({ type: "restore-deletion", tree, markerYear, index: resolvedIndex });
+        const operation: RwlEditOperation = { type: "restore-deletion", tree, markerYear, index: resolvedIndex };
+        const beforeState = this.captureTreeLogState(tree);
+        this.saveToUndoStack(operation);
         this.redoStack = [];
 
         const treeData = this.rwlData.get(tree)!;
@@ -598,6 +994,7 @@ export class RwlEditor {
             this.deletionMarkers.set(tree, newMarkers);
         }
 
+        this.appendOperationLog(operation, tree, beforeState);
         this.notifyChange();
     }
 
@@ -670,53 +1067,74 @@ export class RwlEditor {
     replaceTreeData(tree: string, newData: RwlTreeData): void {
         if (!this.rwlData.has(tree)) return;
 
-        this.saveToUndoStack();
+        const operation: RwlEditOperation = { type: "replace-tree-data", tree };
+        const beforeState = this.captureTreeLogState(tree);
+        this.saveToUndoStack(operation);
         this.redoStack = [];
 
         const next = new Map(this.rwlData);
-        next.set(tree, newData);
+        next.set(tree, cloneTreeData(newData));
         this.rwlData = next;
 
         const nextMarkers = cloneDeletionMarkers(this.deletionMarkers);
         nextMarkers.delete(tree);
         this.deletionMarkers = nextMarkers;
 
+        this.appendOperationLog(operation, tree, beforeState);
         this.notifyChange();
     }
 
     replaceAllData(data: RwlSiteData, options?: RwlReadResult['readOptions'], format?: RwlFormat): void {
-        this.saveToUndoStack();
+        const operation: RwlEditOperation = { type: "replace-all-data", treeCount: data.size, format };
+        const previousData = cloneSiteData(this.rwlData);
+        const previousMarkers = cloneDeletionMarkers(this.deletionMarkers);
+        this.saveToUndoStack(operation);
         this.redoStack = [];
-        this.rwlData = new Map(data);
+        this.rwlData = cloneSiteData(data);
         this.readOptions = cloneReadOptions(options);
         this.format = format || this.format;
         this.deletionMarkers = new Map();
+
+        const changedTrees = new Set([...previousData.keys(), ...this.rwlData.keys()]);
+        changedTrees.forEach((tree) => {
+            const beforeState = {
+                data: previousData.has(tree) ? serializeTreeData(previousData.get(tree)!) : null,
+                deletionMarkers: serializeTreeDeletionMarkers(previousMarkers.get(tree)),
+            };
+            this.appendOperationLog(operation, tree, beforeState);
+        });
         this.notifyChange();
     }
 
     deleteSeries(tree: string): void {
         if (!this.rwlData.has(tree)) return;
 
-        this.saveToUndoStack({ type: "delete-series", tree });
+        const operation: RwlEditOperation = { type: "delete-series", tree };
+        const beforeState = this.captureTreeLogState(tree);
+        this.saveToUndoStack(operation);
         this.redoStack = [];
 
         const updatedData = new Map(this.rwlData);
         updatedData.delete(tree);
         this.rwlData = updatedData;
         this.deletionMarkers.delete(tree);
+        this.appendOperationLog(operation, tree, beforeState);
         this.notifyChange();
     }
 
     changeYearWidth(tree: string, year: number, width: number | null): void {
-        this.saveToUndoStack();
-        this.redoStack = [];
-
         if (!this.rwlData.has(tree)) return;
         let treeData = this.rwlData.get(tree)!;
         if (!treeData.has(year)) return;
 
+        const operation: RwlEditOperation = { type: "change-width", tree, year, width };
+        const beforeState = this.captureTreeLogState(tree);
+        this.saveToUndoStack(operation);
+        this.redoStack = [];
+
         let updatedTree = changeYearWidth(treeData, year, width);
         this.rwlData.set(tree, updatedTree);
+        this.appendOperationLog(operation, tree, beforeState);
         this.notifyChange();
     }
 
@@ -725,7 +1143,7 @@ export class RwlEditor {
         if (this.undoStack.length === 0) return null;
         const previousEntry = this.undoStack.pop()!;
         this.redoStack.push({
-            data: new Map(this.rwlData),
+            data: cloneSiteData(this.rwlData),
             deletionMarkers: cloneDeletionMarkers(this.deletionMarkers),
             readOptions: cloneReadOptions(this.readOptions),
             format: this.format,
@@ -744,7 +1162,7 @@ export class RwlEditor {
         if (this.redoStack.length === 0) return null;
         const nextEntry = this.redoStack.pop()!;
         this.undoStack.push({
-            data: new Map(this.rwlData),
+            data: cloneSiteData(this.rwlData),
             deletionMarkers: cloneDeletionMarkers(this.deletionMarkers),
             readOptions: cloneReadOptions(this.readOptions),
             format: this.format,
@@ -761,7 +1179,7 @@ export class RwlEditor {
     // 记录当前状态到 Undo 栈
     private saveToUndoStack(operation?: RwlEditOperation): void {
         this.undoStack.push({
-            data: new Map(this.rwlData),
+            data: cloneSiteData(this.rwlData),
             deletionMarkers: cloneDeletionMarkers(this.deletionMarkers),
             readOptions: cloneReadOptions(this.readOptions),
             format: this.format,

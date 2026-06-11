@@ -76,6 +76,13 @@ interface GridJumpTarget {
     year?: number;
 }
 
+interface GridEditHighlightTarget {
+    id: number;
+    cells: { tree: string; year: number }[];
+    scrollTree: string;
+    scrollYear?: number;
+}
+
 interface InsertFlipCell {
     sourceYear: number;
     targetYear: number;
@@ -740,6 +747,7 @@ type WidthContainerProps = {
     selected?: string,
     historyAnimation?: WidthHistoryAnimation | null,
     jumpTarget?: GridJumpTarget | null,
+    editHighlightTarget?: GridEditHighlightTarget | null,
     deleteSeriesRequest?: { id: number; tree: string } | null,
     deletionMarkers?: RwlDeletionMarkers,
     onYearClick?: (tree: string, year: number) => void,
@@ -875,7 +883,7 @@ function createSeriesShatterAnimation(rect: { left: number; top: number; width: 
     };
 }
 
-function WidthContainer({ siteData: site, masterSeries, selected, historyAnimation, jumpTarget, deleteSeriesRequest, deletionMarkers, onYearClick, onInsertMissingYearAtSide, onMoveSeriesTailByOffset, onDeleteYearWithMode, onMarkYearRangeAsMissing, onRestoreDeletion, onDeleteSeries, onEditAsText, onDeleteSeriesRequestHandled, onReplaceTreeData, scrollContainerRef, scrollElement }: WidthContainerProps): ReactNode {
+function WidthContainer({ siteData: site, masterSeries, selected, historyAnimation, jumpTarget, editHighlightTarget, deleteSeriesRequest, deletionMarkers, onYearClick, onInsertMissingYearAtSide, onMoveSeriesTailByOffset, onDeleteYearWithMode, onMarkYearRangeAsMissing, onRestoreDeletion, onDeleteSeries, onEditAsText, onDeleteSeriesRequestHandled, onReplaceTreeData, scrollContainerRef, scrollElement }: WidthContainerProps): ReactNode {
     const visibleSite = useMemo(() => (
         selected && site.has(selected)
             ? (() => {
@@ -895,9 +903,13 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
     const [deletingTree, setDeletingTree] = useState<string | null>(null);
     const [textEditTree, setTextEditTree] = useState<string | null>(null);
     const [jumpHighlight, setJumpHighlight] = useState<GridJumpTarget | null>(null);
+    const [editHighlight, setEditHighlight] = useState<{ id: number; keys: Set<string> } | null>(null);
     const seriesBlockRefs = useRef<Map<string, HTMLDivElement>>(new Map());
     const seriesDeleteCleanupRef = useRef<(() => void) | null>(null);
     const jumpHighlightTimerRef = useRef<number | null>(null);
+    const handledJumpIdRef = useRef<number | null>(null);
+    const editHighlightTimerRef = useRef<number | null>(null);
+    const handledEditIdRef = useRef<number | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
     const interactionRef = useRef<GridInteraction | null>(null);
     const animationPlanIdRef = useRef(0);
@@ -1151,6 +1163,12 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
             return;
         }
 
+        // 同一次跳转只处理一次：后续因数据/虚拟列表变化导致的重渲染（如进出文本编辑）
+        // 不应再次滚动并高亮，否则会出现多余的跳转动画。
+        if (handledJumpIdRef.current === jumpTarget.id) {
+            return;
+        }
+
         const targetSeries = virtualSeries.series.find((series) => series.treeCode === jumpTarget.tree);
         const scrollContainer = scrollElement ?? scrollContainerRef?.current;
 
@@ -1169,10 +1187,16 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
             return;
         }
 
+        handledJumpIdRef.current = jumpTarget.id;
+
         const rowTop = isSeriesJump
             ? targetSeries.top
             : targetSeries.top + SERIES_HEADER_HEIGHT + ROW_GAP + rowIndex * (ROW_HEIGHT + ROW_GAP);
-        const viewportLead = Math.max(56, Math.floor(scrollContainer.clientHeight * 0.35));
+        // 序列跳转时让序列顶部贴近模块上缘（仅留少量留白），避免整段序列落在视图中部偏下；
+        // 单元格跳转仍保留约 35% 的前导空间，便于看到目标年份上方的上下文。
+        const viewportLead = isSeriesJump
+            ? 100
+            : Math.max(56, Math.floor(scrollContainer.clientHeight * 0.35));
         const maxScrollTop = Math.max(
             0,
             Math.max(scrollContainer.scrollHeight, virtualSeries.totalHeight) - scrollContainer.clientHeight,
@@ -1218,6 +1242,74 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
         }, COFECHA_JUMP_HIGHLIGHT_MS);
     }, [jumpTarget, scrollElement, scrollContainerRef, seriesYearRanges, virtualSeries.series, virtualSeries.totalHeight]);
 
+    // 文本编辑提交后：高亮被改动的格子，并滚动到最上面那条被改动的序列。
+    // 与跳转一样按 id 去重，避免数据/虚拟列表变化引发的重渲染重复触发。
+    useLayoutEffect(() => {
+        if (!editHighlightTarget) {
+            return;
+        }
+        if (handledEditIdRef.current === editHighlightTarget.id) {
+            return;
+        }
+
+        const targetSeries = virtualSeries.series.find((series) => series.treeCode === editHighlightTarget.scrollTree);
+        const scrollContainer = scrollElement ?? scrollContainerRef?.current;
+        if (!targetSeries || !scrollContainer) {
+            return;
+        }
+
+        const scrollYear = editHighlightTarget.scrollYear;
+        const rowIndex = scrollYear === undefined
+            ? 0
+            : targetSeries.rows.findIndex((row) => row.cells.some((cell) => cell?.year === scrollYear));
+        if (rowIndex < 0) {
+            return;
+        }
+
+        handledEditIdRef.current = editHighlightTarget.id;
+
+        const rowTop = targetSeries.top + SERIES_HEADER_HEIGHT + ROW_GAP + rowIndex * (ROW_HEIGHT + ROW_GAP);
+        const viewportLead = Math.max(56, Math.floor(scrollContainer.clientHeight * 0.35));
+        const maxScrollTop = Math.max(
+            0,
+            Math.max(scrollContainer.scrollHeight, virtualSeries.totalHeight) - scrollContainer.clientHeight,
+        );
+        const nextScrollTop = Math.min(Math.max(rowTop - viewportLead, 0), maxScrollTop);
+
+        interactionRef.current = null;
+        setDragPreview(null);
+        setDragYearOffset(0);
+        setIsDraggingSelection(false);
+        setContextMenu(null);
+        setSelection(null);
+        setEditHighlight({
+            id: editHighlightTarget.id,
+            keys: new Set(editHighlightTarget.cells.map((cell) => `${cell.tree} ${cell.year}`)),
+        });
+
+        const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        const scrollBehavior: ScrollBehavior = prefersReducedMotion ? "auto" : "smooth";
+        scrollContainer.scrollTo({ top: nextScrollTop, behavior: scrollBehavior });
+
+        if (scrollBehavior === "auto") {
+            setViewport({
+                scrollTop: nextScrollTop,
+                height: scrollContainer.clientHeight,
+            });
+        }
+
+        if (editHighlightTimerRef.current !== null) {
+            window.clearTimeout(editHighlightTimerRef.current);
+        }
+
+        editHighlightTimerRef.current = window.setTimeout(() => {
+            setEditHighlight((previous) => (
+                previous?.id === editHighlightTarget.id ? null : previous
+            ));
+            editHighlightTimerRef.current = null;
+        }, COFECHA_JUMP_HIGHLIGHT_MS);
+    }, [editHighlightTarget, scrollElement, scrollContainerRef, virtualSeries.series, virtualSeries.totalHeight]);
+
     useEffect(() => {
         setSelection((previous) => (
             previous && visibleSite.has(previous.tree) ? previous : null
@@ -1227,6 +1319,9 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
     useEffect(() => () => {
         if (jumpHighlightTimerRef.current !== null) {
             window.clearTimeout(jumpHighlightTimerRef.current);
+        }
+        if (editHighlightTimerRef.current !== null) {
+            window.clearTimeout(editHighlightTimerRef.current);
         }
     }, []);
 
@@ -2287,12 +2382,16 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                                 }
 
                                 const cellIsSelected = renderSelection?.tree === series.treeCode && selectedYears.has(cell.year);
-                                const cellIsJumpHighlighted = Boolean(
+                                const cellIsJumpMatch = Boolean(
                                     jumpHighlight
                                     && jumpHighlight.tree === series.treeCode
                                     && (jumpHighlight.year === undefined || jumpHighlight.year === cell.year)
                                 );
-                                const cellJumpHighlightId = cellIsJumpHighlighted ? jumpHighlight?.id : undefined;
+                                const cellIsEditHighlighted = editHighlight?.keys.has(`${series.treeCode} ${cell.year}`) ?? false;
+                                const cellIsJumpHighlighted = cellIsJumpMatch || cellIsEditHighlighted;
+                                const cellJumpHighlightId = cellIsEditHighlighted
+                                    ? editHighlight?.id
+                                    : (cellIsJumpMatch ? jumpHighlight?.id : undefined);
                                 const cellAnimationKind = getGridAnimationKind(series.treeCode, cell.year);
                                 const cellAnimationDelay = getGridAnimationDelay(series.treeCode, cell.year);
                                 const cellAnimationKey = cellAnimationKind ? animationPlan?.id ?? 0 : 0;
