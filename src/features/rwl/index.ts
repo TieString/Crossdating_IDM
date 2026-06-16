@@ -71,7 +71,6 @@ export async function readRwlString(text: string, opts: RwlReadOptions = {}): Pr
   }
 
   const detected = detectRwlFormat(text);
-  console.log(detected);
 
   // 先尝试命中的格式，其余格式作为回退顺序。
   const fallback: RwlFormat[] = ["tucson", "compact", "heidelberg", "csv", "tridas"];

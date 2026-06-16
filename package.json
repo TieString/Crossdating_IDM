@@ -7,6 +7,11 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "validate:samples": "node scripts/validate-samples.mjs",
+    "validate:samples:strict": "node scripts/validate-samples.mjs --strict-internal",
+    "validate:cofecha:samples": "node scripts/validate-cofecha-samples.mjs",
+    "validate:workspace-windows": "node scripts/validate-workspace-windows.mjs",
+    "trial:auto-crossdating": "node scripts/trial-auto-crossdating.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

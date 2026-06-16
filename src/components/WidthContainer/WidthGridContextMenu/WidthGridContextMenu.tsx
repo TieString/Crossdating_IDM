@@ -18,6 +18,9 @@ export interface WidthGridContextMenuProps {
     onDeleteRange?: (tree: string, startYear: number, endYear: number) => void;
     onDeleteSeries?: (tree: string) => void;
     onEditAsText?: (tree: string) => void;
+    onJumpToCofecha?: (tree: string) => void;
+    /** 该序列在 COFECHA PART 6 里有对应问题块，才显示“在 COFECHA 中定位”。 */
+    canJumpToCofecha?: boolean;
     onPreviewYearChange?: (tree: string, year: number) => void;
     onPreviewYearRangeChange?: (tree: string, startYear: number, endYear: number) => void;
     onClose: () => void;
@@ -29,7 +32,7 @@ const INSERT_OPTIONS: Array<{ side: MissingInsertSide; label: string; chip: stri
 ];
 
 const DELETE_OPTIONS: Array<{ mode: DeleteMode; label: string; chip: string }> = [
-    { mode: "direct", label: "直接删除", chip: "无" },
+    { mode: "direct", label: "直接删除", chip: "舍弃" },
     { mode: "both", label: "平均到两侧", chip: "平均" },
     { mode: "left", label: "分配到左侧", chip: "左侧" },
     { mode: "right", label: "分配到右侧", chip: "右侧" },
@@ -66,6 +69,8 @@ export default function WidthGridContextMenu({
     onDeleteRange,
     onDeleteSeries,
     onEditAsText,
+    onJumpToCofecha,
+    canJumpToCofecha,
     onPreviewYearChange,
     onPreviewYearRangeChange,
     onClose,
@@ -577,6 +582,27 @@ export default function WidthGridContextMenu({
                 </div>
 
                 <div className={style["menu-separator"]} role="separator" />
+
+                {canJumpToCofecha && onJumpToCofecha ? (
+                    <div
+                        className={style["menu-row"]}
+                        role="menuitem"
+                        title="跳转到 COFECHA 报告 PART 6 的对应序列"
+                        onClick={() => {
+                            onJumpToCofecha(tree);
+                            onClose();
+                        }}
+                    >
+                        <span className={style["menu-row-icon"]} aria-hidden="true">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="12" cy="12" r="7"/>
+                                <path d="M12 2v3"/><path d="M12 19v3"/><path d="M2 12h3"/><path d="M19 12h3"/>
+                                <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/>
+                            </svg>
+                        </span>
+                        <span className={style["menu-row-label"]}>在 COFECHA 中定位</span>
+                    </div>
+                ) : null}
 
                 <div
                     className={style["menu-row"]}

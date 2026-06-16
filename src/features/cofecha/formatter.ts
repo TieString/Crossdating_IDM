@@ -37,12 +37,14 @@ const parseCofechaResult = (content: string): ICofechaResult => {
     const part1 = reportParts.get("PART 1") || "";
     const part3 = reportParts.get("PART 3") || "";
     const part6 = reportParts.get("PART 6") || "";
+    const part7 = reportParts.get("PART 7") || "";
 
     const masterSeriesYear = extractMasterSeriesYear(part1);
     const interCorrelation = extractSeriesIntercorrelation(part1);
     const meanSensitivity = extractAverageMeanSensitivity(part1);
     const meanLength = extractMeanLength(part1);
     const masterDatingSeries = extractMasterDatingSeries(part3);
+    const { correlations: masterCorrelations, problemCounts: seriesProblemCounts } = extractPart7SeriesStats(part7);
 
     const possibleProblemsCount = extractPossibleProblemsCount(part1);
 
@@ -55,6 +57,8 @@ const parseCofechaResult = (content: string): ICofechaResult => {
         meanLength,
         absentRings: "",
         masterDatingSeries,
+        masterCorrelations,
+        seriesProblemCounts,
         possibleProblemsCount,
         possibleProblemsDetail
     }
@@ -126,6 +130,38 @@ function extractMasterDatingSeries(text: string): Map<number, number> {
 }
 
 
+type Part7SeriesStats = {
+    /** 各序列与主序列的整体相关性 Map<序列号(大写), r>。 */
+    correlations: Map<string, number>;
+    /** 各序列被标记为潜在问题（A/B）的分段数 Map<序列号(大写), Flags>，逐序列的 possible problems。 */
+    problemCounts: Map<string, number>;
+};
+
+function extractPart7SeriesStats(text: string): Part7SeriesStats {
+    // 解析 PART 7「DESCRIPTIVE STATISTICS」逐序列统计。
+    // 行格式示例：  1 EBD011   1850 2024    175      6      1    .454  ...
+    // 列依次为：Seq、Series、Interval(起 止)、Years、Segmt、Flags、Corr with Master、...
+    const correlations = new Map<string, number>();
+    const problemCounts = new Map<string, number>();
+    const regex = /^\s*\d+\s+(\S+)\s+-?\d+\s+-?\d+\s+\d+\s+\d+\s+(\d+)\s+(-?\d*\.\d+)/gm;
+    let match;
+
+    while ((match = regex.exec(text)) !== null) {
+        const seriesId = match[1].toUpperCase();
+        const flags = parseInt(match[2], 10);
+        const correlation = parseFloat(match[3]);
+        if (Number.isFinite(correlation)) {
+            correlations.set(seriesId, correlation);
+        }
+        if (Number.isFinite(flags)) {
+            problemCounts.set(seriesId, flags);
+        }
+    }
+
+    return { correlations, problemCounts };
+}
+
+
 //DONE: 处理同号 PART 时，合并其内容而非覆盖（例如两个 PART 3）[v1.1.3]
 export function splitReportByParts(text: string): Map<string, string> {
  const parts = new Map<string, string>();
@@ -161,17 +197,23 @@ function extractPossibleProblemsDetail(text: string): Map<string, string> {
     const sections = text.split(/=+/);
 
     for (const section of sections) {
-        const lines = section.trim().split("\n").map(line => line.trim()).filter(line => line);
+        const rawBlock = section.trim();
+        const lines = rawBlock.split("\n").map(line => line.trim()).filter(line => line);
 
         if (lines.length === 0) continue; // 跳过空块
 
-        // 取第一行的第一个字符串作为 key
-        const seriesID = lines[0].split(/\s+/)[0]; // 按空格分割，取第一个单词
+        const headerIndex = lines.findIndex((line) => /^(\S+)\s+-?\d{3,4}\s+to\s+-?\d{3,4}\b/i.test(line));
+        if (headerIndex < 0) continue;
 
-        // 查找 `[A] Segment` 部分
-        const aMatch = section.match(/\[A\] Segment[\s\S]*?(?=\[[B-E]\]|\={10,}|$)/);
-        if (aMatch) {
-            possibleProblems.set(seriesID, aMatch[0].trim());
+        const block = lines.slice(headerIndex).join("\n");
+        const headerMatch = lines[headerIndex].match(/^(\S+)\s+-?\d{3,4}\s+to\s+-?\d{3,4}\b/i);
+        if (!headerMatch) continue;
+
+        const seriesID = headerMatch[1].toUpperCase();
+        // PART 6 的同一序列块里，[B]/[C]/[D]/[E] 往往是解释 [A] 低相关的关键证据。
+        // 保留完整块，序列列表仍以出现 [A] flagged segment 的序列作为 COFECHA problem。
+        if (/\[A\]\s+Segment\b/.test(block)) {
+            possibleProblems.set(seriesID, block);
         }
     }
 

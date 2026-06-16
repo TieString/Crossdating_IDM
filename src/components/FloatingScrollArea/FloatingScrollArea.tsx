@@ -1,5 +1,6 @@
 import {
     forwardRef,
+    useCallback,
     useRef,
     type CSSProperties,
     type HTMLAttributes,
@@ -55,14 +56,21 @@ export const FloatingScrollArea = forwardRef<HTMLDivElement, FloatingScrollAreaP
         const scrollClassName = className ? `${styles.scroller} ${className}` : styles.scroller;
         const rootClassName = viewportClassName ? `${styles.viewport} ${viewportClassName}` : styles.viewport;
 
+        // Stable callback ref: an inline ref function changes identity every render,
+        // which makes React detach (set null) then re-attach the node on *every* update.
+        // A child's useLayoutEffect runs before an ancestor's ref re-attaches, so any
+        // consumer reading scrollRef.current in a layout effect (e.g. the grid's jump-to
+        // scroll) would observe null. Keeping the ref stable avoids that detach/attach churn.
+        const setScrollNode = useCallback((node: HTMLDivElement | null) => {
+            scrollRef.current = node;
+            setRef(forwardedRef, node);
+        }, [forwardedRef]);
+
         return (
             <div className={rootClassName} style={viewportStyle}>
                 <div
                     {...scrollProps}
-                    ref={(node) => {
-                        scrollRef.current = node;
-                        setRef(forwardedRef, node);
-                    }}
+                    ref={setScrollNode}
                     className={scrollClassName}
                 >
                     {typeof children === "function" ? children(scrollRef) : children}

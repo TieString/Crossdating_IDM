@@ -751,6 +751,10 @@ const findVisibleEndIndex = (series: VirtualSeries[], end: number) => {
 type WidthContainerProps = {
     siteData: RwlSiteData,
     masterSeries?: Map<number, number>,
+    /** COFECHA PART 7 各序列与主序列的整体相关性，键为大写序列号。 */
+    masterCorrelations?: Map<string, number>,
+    /** COFECHA PART 7 各序列的潜在问题分段数（Flags），键为大写序列号。 */
+    seriesProblemCounts?: Map<string, number>,
     selected?: string,
     historyAnimation?: WidthHistoryAnimation | null,
     jumpTarget?: GridJumpTarget | null,
@@ -765,6 +769,9 @@ type WidthContainerProps = {
     onRestoreDeletion?: (tree: string, markerYear: number, index: number) => void,
     onDeleteSeries?: (tree: string) => void,
     onEditAsText?: () => void,
+    onJumpToCofecha?: (tree: string) => void,
+    /** 拥有 PART 6 潜在问题块的序列集合（小写），决定是否显示“在 COFECHA 中定位”。 */
+    cofechaPart6Trees?: ReadonlySet<string>,
     onDeleteSeriesRequestHandled?: (id: number) => void,
     onReplaceTreeData?: (tree: string, data: Map<number, number | null>) => void,
     scrollContainerRef?: RefObject<HTMLElement | null>,
@@ -890,7 +897,32 @@ function createSeriesShatterAnimation(rect: { left: number; top: number; width: 
     };
 }
 
-function WidthContainer({ siteData: site, masterSeries, selected, historyAnimation, jumpTarget, editHighlightTarget, deleteSeriesRequest, deletionMarkers, onYearClick, onInsertMissingYearAtSide, onMoveSeriesTailByOffset, onDeleteYearWithMode, onMarkYearRangeAsMissing, onRestoreDeletion, onDeleteSeries, onEditAsText, onDeleteSeriesRequestHandled, onReplaceTreeData, scrollContainerRef, scrollElement }: WidthContainerProps): ReactNode {
+function WidthContainer({
+    siteData: site,
+    masterSeries,
+    masterCorrelations,
+    seriesProblemCounts,
+    selected,
+    historyAnimation,
+    jumpTarget,
+    editHighlightTarget,
+    deleteSeriesRequest,
+    deletionMarkers,
+    onYearClick,
+    onInsertMissingYearAtSide,
+    onMoveSeriesTailByOffset,
+    onDeleteYearWithMode,
+    onMarkYearRangeAsMissing,
+    onRestoreDeletion,
+    onDeleteSeries,
+    onEditAsText,
+    onJumpToCofecha,
+    cofechaPart6Trees,
+    onDeleteSeriesRequestHandled,
+    onReplaceTreeData,
+    scrollContainerRef,
+    scrollElement
+}: WidthContainerProps): ReactNode {
     const visibleSite = useMemo(() => (
         selected && site.has(selected)
             ? (() => {
@@ -2014,6 +2046,11 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
         setTextEditTree(tree);
     }, [onEditAsText]);
 
+    const handleContextMenuJumpToCofecha = useCallback((tree: string) => {
+        setContextMenu(null);
+        onJumpToCofecha?.(tree);
+    }, [onJumpToCofecha]);
+
     const handleTextEditorClose = useCallback((tree: string, newText?: string) => {
         setTextEditTree(null);
         if (newText === undefined) return;
@@ -2380,6 +2417,8 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
 
             {visibleSeries.map((series, seriesIndex) => {
                 const yearRange = seriesYearRanges.get(series.treeCode);
+                const masterCorrelation = masterCorrelations?.get(series.treeCode.toUpperCase());
+                const problemCount = seriesProblemCounts?.get(series.treeCode.toUpperCase());
                 return (
                 <div
                     ref={(el) => {
@@ -2404,6 +2443,26 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                                 {yearRange && (
                                     <span className={style["series-header-range"]}>
                                         {yearRange[0]}–{yearRange[1]} · {yearRange[1] - yearRange[0] + 1} 年
+                                    </span>
+                                )}
+                                {(typeof masterCorrelation === "number" || typeof problemCount === "number") && (
+                                    <span className={style["series-header-stats"]}>
+                                        {typeof problemCount === "number" && (
+                                            <span
+                                                className={`${style["series-header-problems"]}${problemCount > 0 ? ` ${style["series-header-problems-flagged"]}` : ""}`}
+                                                title="该样芯被标记为潜在问题（A/B）的分段数"
+                                            >
+                                                problem count：{problemCount}
+                                            </span>
+                                        )}
+                                        {typeof masterCorrelation === "number" && (
+                                            <span
+                                                className={style["series-header-corr"]}
+                                                title="该序列与主序列的整体相关性"
+                                            >
+                                                r={masterCorrelation.toFixed(3)}
+                                            </span>
+                                        )}
                                     </span>
                                 )}
                             </div>
@@ -2624,6 +2683,8 @@ function WidthContainer({ siteData: site, masterSeries, selected, historyAnimati
                 onDeleteRange={handleContextMenuDeleteRange}
                 onDeleteSeries={handleContextMenuDeleteSeries}
                 onEditAsText={handleContextMenuEditAsText}
+                onJumpToCofecha={onJumpToCofecha ? handleContextMenuJumpToCofecha : undefined}
+                canJumpToCofecha={Boolean(contextMenu && cofechaPart6Trees?.has(contextMenu.tree.toLowerCase()))}
                 onPreviewYearChange={handleContextMenuPreviewYearChange}
                 onPreviewYearRangeChange={handleContextMenuPreviewYearRangeChange}
                 onClose={handleContextMenuClose}

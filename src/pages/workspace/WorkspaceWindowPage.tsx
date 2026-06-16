@@ -7,6 +7,7 @@ import {
     OperationLogPage,
 } from "@/pages/home/WorkspacePages";
 import {
+    createWorkspaceWindowClosedPayload,
     deserializeRwlSiteData,
     WORKSPACE_WINDOW_CLOSED_EVENT,
     WORKSPACE_WINDOW_COMMAND_EVENT,
@@ -40,11 +41,25 @@ export default function WorkspaceWindowPage() {
         if (!kind) return;
 
         let isMounted = true;
+        let hasState = false;
+        let retryTimer: number | undefined;
         const unlisteners: UnlistenFn[] = [];
         const currentWindow = getCurrentWindow();
         const requestPayload: WorkspaceWindowRequestPayload = {
             kind,
             requesterLabel: currentWindow.label,
+        };
+        const closedPayload = createWorkspaceWindowClosedPayload(kind, currentWindow.label);
+
+        const requestState = () => {
+            void emitTo(MAIN_WINDOW_LABEL, WORKSPACE_WINDOW_REQUEST_EVENT, requestPayload);
+        };
+
+        const stopRetry = () => {
+            if (retryTimer !== undefined) {
+                window.clearInterval(retryTimer);
+                retryTimer = undefined;
+            }
         };
 
         const setup = async () => {
@@ -52,27 +67,47 @@ export default function WorkspaceWindowPage() {
                 WORKSPACE_WINDOW_STATE_EVENT,
                 (event) => {
                     if (!isMounted || event.payload.kind !== kind) return;
+                    hasState = true;
+                    stopRetry();
                     setState(event.payload.state);
                 },
             ));
             unlisteners.push(await currentWindow.onCloseRequested(async () => {
-                await emitTo(MAIN_WINDOW_LABEL, WORKSPACE_WINDOW_CLOSED_EVENT, { kind });
+                await emitTo(MAIN_WINDOW_LABEL, WORKSPACE_WINDOW_CLOSED_EVENT, closedPayload);
             }));
-            await emitTo(MAIN_WINDOW_LABEL, WORKSPACE_WINDOW_REQUEST_EVENT, requestPayload);
+            if (!isMounted) return;
+            requestState();
+            // 首个 STATE 到达前每 500ms 重发一次 REQUEST，兜住「子窗口先于主窗口
+            // 注册监听就发了请求」的竞态，避免独立窗口卡在「正在连接主窗口...」。
+            retryTimer = window.setInterval(() => {
+                if (hasState) {
+                    stopRetry();
+                    return;
+                }
+                requestState();
+            }, 500);
         };
 
         void setup();
 
         return () => {
             isMounted = false;
+            stopRetry();
             unlisteners.forEach((unlisten) => unlisten());
-            void emitTo(MAIN_WINDOW_LABEL, WORKSPACE_WINDOW_CLOSED_EVENT, { kind });
+            // 真正的关闭由窗口的 onCloseRequested 通知主窗口；
+            // 这里不再发送 CLOSED，避免 StrictMode 的 mount→cleanup→mount
+            // 误判窗口已关闭，导致主窗口停止向本窗口同步状态。
         };
     }, [kind]);
 
     const closeWindow = useCallback(() => {
         if (!kind) return;
-        void emitTo(MAIN_WINDOW_LABEL, WORKSPACE_WINDOW_CLOSED_EVENT, { kind }).finally(() => {
+        const requesterLabel = getCurrentWindow().label;
+        void emitTo(
+            MAIN_WINDOW_LABEL,
+            WORKSPACE_WINDOW_CLOSED_EVENT,
+            createWorkspaceWindowClosedPayload(kind, requesterLabel),
+        ).finally(() => {
             void getCurrentWindow().close();
         });
     }, [kind]);
@@ -125,8 +160,12 @@ export default function WorkspaceWindowPage() {
             <OperationLogPage
                 fileName={state.fileName}
                 operationLog={state.operationLog}
+                canResetToRawData={state.canResetToRawData}
                 onUndoEntry={(entryId) => sendCommand({ kind: "operation-log", type: "undo-log-entry", entryId })}
+                onUndoBatch={(batchId) => sendCommand({ kind: "operation-log", type: "undo-log-batch", batchId })}
                 onRedoEntry={(entryId) => sendCommand({ kind: "operation-log", type: "redo-log-entry", entryId })}
+                onJumpEntry={(tree, year) => sendCommand({ kind: "operation-log", type: "jump", tree, year })}
+                onResetToRawData={() => sendCommand({ kind: "operation-log", type: "reset-to-raw" })}
                 onClose={closeWindow}
             />
         );
@@ -136,10 +175,16 @@ export default function WorkspaceWindowPage() {
         return (
             <CofechaReportPage
                 cofechaResult={state.cofechaResult}
+                isCofechaOutdated={state.isCofechaOutdated}
+                isCofechaRunning={state.isCofechaRunning}
+                canRunValidation={state.canRunValidation}
+                validationSummary={state.validationSummary}
                 linkedReport={state.linkedReport}
                 partOptions={state.partOptions}
                 selectedPart={state.selectedPart}
+                jumpTarget={state.jumpTarget}
                 onSelectedPartChange={(part) => sendCommand({ kind: "cofecha", type: "select-part", part })}
+                onRunValidation={() => sendCommand({ kind: "cofecha", type: "run-validation" })}
                 onTextClick={handleCofechaTextClick}
                 onTextKeyDown={handleCofechaTextKeyDown}
                 onClose={closeWindow}
@@ -150,6 +195,21 @@ export default function WorkspaceWindowPage() {
     return (
         <ExpandedChartPage
             siteData={chartData}
+            referenceConfig={state.referenceConfig}
+            diagnosis={state.diagnosis}
+            diagnosisBatchResult={state.diagnosisBatchResult}
+            onReferenceConfigChange={(config) => {
+                void sendCommand({ kind: "line-chart", type: "set-reference", config });
+            }}
+            onApplyDiagnosisCandidate={(candidate) => {
+                void sendCommand({ kind: "line-chart", type: "apply-diagnosis-candidate", candidate });
+            }}
+            onApplyDiagnosisCandidateBatch={(candidates) => {
+                void sendCommand({ kind: "line-chart", type: "apply-diagnosis-candidates", candidates });
+            }}
+            onApplyLocalSimulation={(request) => {
+                void sendCommand({ kind: "line-chart", type: "apply-local-simulation", request });
+            }}
             onInsertMissingYearAtSide={(tree: string, year: number, side: MissingInsertSide) => {
                 void sendCommand({ kind: "line-chart", type: "insert-missing", tree, year, side });
             }}

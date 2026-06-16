@@ -33,16 +33,68 @@ export type RwlHistoryAnimation = RwlEditOperation & {
 };
 
 export type RwlOperationLogAction = "apply";
+export type RwlOperationSource =
+    | "manual"
+    | "reference-assisted"
+    | "cofecha-assisted"
+    | "auto-suggested"
+    | "imported"
+    | "system";
+export type RwlOperationLogCreator = "user" | "system" | "imported";
+
+type RwlOperationMetricMap = Record<string, number | string | null>;
+
+export type RwlOperationLogMetadata = {
+    operationType?: string;
+    source?: RwlOperationSource;
+    projectId?: string;
+    createdBy?: RwlOperationLogCreator;
+    reason?: string;
+    targetIndex?: number;
+    oldValue?: number | null;
+    newValue?: number | null;
+    oldYear?: number;
+    newYear?: number;
+    metricsBefore?: RwlOperationMetricMap;
+    metricsAfter?: RwlOperationMetricMap;
+    cofechaBefore?: RwlOperationMetricMap;
+    cofechaAfter?: RwlOperationMetricMap;
+    parentOperationId?: string;
+    batchId?: string;
+};
 
 export type SerializedRwlTreeData = Array<[number, number | null]>;
 export type SerializedTreeDeletionMarkers = Array<[number, DeletionMarkerInfo[]]>;
 
 export type RwlOperationLogEntry = {
     id: string;
+    operationId?: string;
+    projectId?: string;
+    seriesId?: string;
     sequence: number;
     timestamp: string;
+    createdAt?: string;
+    createdBy?: RwlOperationLogCreator;
     action: RwlOperationLogAction;
     operation?: RwlEditOperation;
+    operationType?: string;
+    source?: RwlOperationSource;
+    targetYear?: number;
+    targetIndex?: number;
+    oldValue?: number | null;
+    newValue?: number | null;
+    oldYear?: number;
+    newYear?: number;
+    affectedRange?: { startYear: number; endYear: number };
+    reason?: string;
+    metricsBefore?: RwlOperationMetricMap;
+    metricsAfter?: RwlOperationMetricMap;
+    cofechaBefore?: RwlOperationMetricMap;
+    cofechaAfter?: RwlOperationMetricMap;
+    isApplied?: boolean;
+    isReverted?: boolean;
+    parentOperationId?: string;
+    batchId?: string;
     summary: string;
     detail: string;
     tree?: string;
@@ -52,6 +104,7 @@ export type RwlOperationLogEntry = {
     afterDeletionMarkers?: SerializedTreeDeletionMarkers;
     undone?: boolean;
     canUndo?: boolean;
+    canUndoBatch?: boolean;
     canRedo?: boolean;
     undoDepth: number;
     redoDepth: number;
@@ -62,6 +115,9 @@ export type RwlHistoryStatus = {
     redoCount: number;
     logCount: number;
 };
+
+export type SerializedRwlSiteData = Array<[string, SerializedRwlTreeData]>;
+export type SerializedRwlDeletionMarkers = Array<[string, SerializedTreeDeletionMarkers]>;
 
 // 每个 tree 的删除标记：年份 M 表示 "在当前年份 M 的左边沿画一条红色竖线"。
 // 仅在内存中维护，与 undo/redo 联动；不写入 RWL 文件。
@@ -93,6 +149,7 @@ type RwlHistoryEntry = {
     readOptions?: RwlReadResult['readOptions'];
     format: string;
     operation?: RwlEditOperation;
+    operationLogUndoneState?: RwlOperationLogUndoneState;
 };
 
 type RwlTreeLogState = {
@@ -100,9 +157,18 @@ type RwlTreeLogState = {
     deletionMarkers: SerializedTreeDeletionMarkers;
 };
 
+type RwlOperationLogUndoneState = Array<{ id: string; undone?: boolean }>;
+
 export type RwlPersistedHistorySnapshot = {
     version: 1;
     savedAt: string;
+    rawData?: SerializedRwlSiteData;
+    workingData?: SerializedRwlSiteData;
+    deletionMarkers?: SerializedRwlDeletionMarkers;
+    readOptions?: RwlReadResult['readOptions'];
+    format?: string;
+    rawReadOptions?: RwlReadResult['readOptions'];
+    rawFormat?: string;
     operationLog: RwlOperationLogEntry[];
     operationLogCounter: number;
     deletionOrderCounter: number;
@@ -124,6 +190,11 @@ const cloneOperation = (operation: RwlEditOperation | undefined): RwlEditOperati
     operation ? { ...operation } : undefined
 );
 
+const operationsEqual = (a: RwlEditOperation | undefined, b: RwlEditOperation | undefined): boolean => {
+    if (!a || !b) return a === b;
+    return JSON.stringify(a) === JSON.stringify(b);
+};
+
 const cloneSerializedTreeData = (
     treeData: SerializedRwlTreeData | null | undefined
 ): SerializedRwlTreeData | null | undefined => (
@@ -136,13 +207,45 @@ const cloneSerializedTreeDeletionMarkers = (
     markers?.map(([year, stack]) => [year, stack.map((info) => ({ ...info }))])
 );
 
+const getSerializedTreeYearValue = (
+    treeData: SerializedRwlTreeData | null | undefined,
+    year: number | undefined,
+): number | null | undefined => {
+    if (!treeData || year === undefined) return undefined;
+    return treeData.find(([candidateYear]) => candidateYear === year)?.[1];
+};
+
+const normalizeOperationLogEntry = (entry: RwlOperationLogEntry): RwlOperationLogEntry => {
+    const isReverted = entry.isReverted ?? Boolean(entry.undone);
+    const isApplied = entry.isApplied ?? !isReverted;
+    return {
+        ...entry,
+        operationId: entry.operationId ?? entry.id,
+        seriesId: entry.seriesId ?? entry.tree,
+        createdAt: entry.createdAt ?? entry.timestamp,
+        createdBy: entry.createdBy ?? (entry.source === "system" || entry.source === "cofecha-assisted" ? "system" : "user"),
+        isApplied,
+        isReverted,
+    };
+};
+
 const cloneOperationLogEntry = (entry: RwlOperationLogEntry): RwlOperationLogEntry => ({
-    ...entry,
+    ...normalizeOperationLogEntry(entry),
     operation: cloneOperation(entry.operation),
     beforeTreeData: cloneSerializedTreeData(entry.beforeTreeData),
     afterTreeData: cloneSerializedTreeData(entry.afterTreeData),
     beforeDeletionMarkers: cloneSerializedTreeDeletionMarkers(entry.beforeDeletionMarkers),
     afterDeletionMarkers: cloneSerializedTreeDeletionMarkers(entry.afterDeletionMarkers),
+});
+
+const setOperationLogEntryReverted = (
+    entry: RwlOperationLogEntry,
+    isReverted: boolean,
+): RwlOperationLogEntry => ({
+    ...entry,
+    undone: isReverted,
+    isApplied: !isReverted,
+    isReverted,
 });
 
 const serializeTreeData = (treeData: RwlTreeData): SerializedRwlTreeData => (
@@ -151,6 +254,14 @@ const serializeTreeData = (treeData: RwlTreeData): SerializedRwlTreeData => (
 
 const deserializeTreeData = (treeData: SerializedRwlTreeData): RwlTreeData => (
     new Map(treeData)
+);
+
+const serializeSiteData = (siteData: RwlSiteData): SerializedRwlSiteData => (
+    Array.from(siteData.entries()).map(([tree, treeData]) => [tree, serializeTreeData(treeData)])
+);
+
+const deserializeSiteData = (siteData: SerializedRwlSiteData): RwlSiteData => (
+    new Map(siteData.map(([tree, treeData]) => [tree, deserializeTreeData(treeData)]))
 );
 
 const serializeTreeDeletionMarkers = (
@@ -169,6 +280,30 @@ const deserializeTreeDeletionMarkers = (
         year,
         stack.map((info) => ({ ...info })),
     ]))
+);
+
+const serializeDeletionMarkers = (markers: RwlDeletionMarkers): SerializedRwlDeletionMarkers => (
+    Array.from(markers.entries()).map(([tree, treeMarkers]) => [tree, serializeTreeDeletionMarkers(treeMarkers)])
+);
+
+const deserializeDeletionMarkers = (markers: SerializedRwlDeletionMarkers | undefined): RwlDeletionMarkers => (
+    new Map((markers ?? []).map(([tree, treeMarkers]) => [tree, deserializeTreeDeletionMarkers(treeMarkers)]))
+);
+
+const siteDataEquals = (a: RwlSiteData, b: RwlSiteData): boolean => {
+    if (a.size !== b.size) return false;
+    for (const [tree, treeData] of a) {
+        const otherTree = b.get(tree);
+        if (!otherTree || otherTree.size !== treeData.size) return false;
+        for (const [year, width] of treeData) {
+            if (otherTree.get(year) !== width) return false;
+        }
+    }
+    return true;
+};
+
+const deletionMarkersEmpty = (markers: RwlDeletionMarkers): boolean => (
+    Array.from(markers.values()).every((treeMarkers) => treeMarkers.size === 0)
 );
 
 const treeDataEquals = (
@@ -220,6 +355,64 @@ const getDeleteModeLabel = (mode: DeleteMode) => {
 const getDeleteShiftLabel = (shift: DeleteShift | undefined) => (
     shift === "left" ? "右侧左靠" : "左侧右靠"
 );
+
+const getOperationType = (operation: RwlEditOperation | undefined): string | undefined => {
+    switch (operation?.type) {
+        case "insert-missing": return "INSERT_MISSING_RING";
+        case "move-selection": return "SHIFT_RANGE";
+        case "delete-year": return "DELETE_FALSE_RING";
+        case "mark-missing-range": return "MARK_SUSPICIOUS";
+        case "restore-deletion": return "REVERT_OPERATION";
+        case "delete-series": return "DELETE_SERIES";
+        case "change-width": return "UPDATE_WIDTH_VALUE";
+        case "replace-tree-data": return "REPLACE_TREE_DATA";
+        case "replace-all-data": return "REPLACE_ALL_DATA";
+        default: return undefined;
+    }
+};
+
+const getOperationTargetYear = (operation: RwlEditOperation | undefined): number | undefined => {
+    if (!operation) return undefined;
+    if ("year" in operation) return operation.year;
+    if (operation.type === "move-selection") return operation.selectedStartYear;
+    if (operation.type === "mark-missing-range") return operation.startYear;
+    if (operation.type === "restore-deletion") return operation.markerYear;
+    return undefined;
+};
+
+const getOperationNewYear = (operation: RwlEditOperation | undefined): number | undefined => {
+    if (!operation) return undefined;
+    if (operation.type === "move-selection") return operation.selectedStartYear + operation.yearOffset;
+    if ("year" in operation) return operation.year;
+    if (operation.type === "mark-missing-range") return operation.startYear;
+    if (operation.type === "restore-deletion") return operation.markerYear;
+    return undefined;
+};
+
+const getOperationAffectedRange = (
+    operation: RwlEditOperation | undefined
+): { startYear: number; endYear: number } | undefined => {
+    if (!operation) return undefined;
+    if (operation.type === "move-selection") {
+        return {
+            startYear: Math.min(operation.selectedStartYear, operation.selectedEndYear),
+            endYear: Math.max(operation.selectedStartYear, operation.selectedEndYear),
+        };
+    }
+    if (operation.type === "mark-missing-range") {
+        return {
+            startYear: Math.min(operation.startYear, operation.endYear),
+            endYear: Math.max(operation.startYear, operation.endYear),
+        };
+    }
+    if ("year" in operation) {
+        return { startYear: operation.year, endYear: operation.year };
+    }
+    if (operation.type === "restore-deletion") {
+        return { startYear: operation.markerYear, endYear: operation.markerYear };
+    }
+    return undefined;
+};
 
 export function describeRwlEditOperation(operation: RwlEditOperation | undefined): { summary: string; detail: string; tree?: string } {
     if (!operation) {
@@ -450,20 +643,27 @@ function changeYearWidth(rwlData: RwlTreeData, year: number, width: number | nul
 
 export class RwlEditor {
     private rwlData: RwlSiteData;
+    private rawData: RwlSiteData;
     private readOptions?: RwlReadResult['readOptions'];
+    private rawReadOptions?: RwlReadResult['readOptions'];
     private format: string = 'tucson'; // 记录原始读取格式
+    private rawFormat: string = 'tucson';
     private undoStack: RwlHistoryEntry[] = [];
     private redoStack: RwlHistoryEntry[] = [];
     private operationLog: RwlOperationLogEntry[] = [];
     private operationLogCounter = 0;
     private deletionMarkers: RwlDeletionMarkers = new Map();
     private deletionOrderCounter = 0;
+    private projectId?: string;
     private changeCallback?: () => void;
 
     constructor(initialData: RwlSiteData, options?: RwlReadResult['readOptions'], format?: string) {
         this.rwlData = cloneSiteData(initialData);
+        this.rawData = cloneSiteData(initialData);
         this.readOptions = options;
+        this.rawReadOptions = cloneReadOptions(options);
         this.format = format || 'tucson'; // 默认 tucson
+        this.rawFormat = this.format;
     }
 
     static isPersistedHistorySnapshot(value: unknown): value is RwlPersistedHistorySnapshot {
@@ -597,12 +797,93 @@ export class RwlEditor {
             && treeDeletionMarkersEquals(this.deletionMarkers.get(entry.tree), entry.beforeDeletionMarkers);
     }
 
+    private applySerializedTreeStateToCopies(
+        data: RwlSiteData,
+        markers: RwlDeletionMarkers,
+        tree: string,
+        treeData: SerializedRwlTreeData | null | undefined,
+        treeMarkers: SerializedTreeDeletionMarkers | undefined,
+    ): boolean {
+        if (treeData === undefined) return false;
+
+        if (treeData === null) {
+            data.delete(tree);
+        } else {
+            data.set(tree, deserializeTreeData(treeData));
+        }
+
+        const nextTreeMarkers = deserializeTreeDeletionMarkers(treeMarkers);
+        if (nextTreeMarkers.size === 0) {
+            markers.delete(tree);
+        } else {
+            markers.set(tree, nextTreeMarkers);
+        }
+
+        return true;
+    }
+
+    private isLogBatchUndoable(batchId: string | undefined): boolean {
+        if (!batchId) return false;
+
+        const batchEntries = this.operationLog
+            .filter((entry) => entry.batchId === batchId && !entry.undone)
+            .sort((a, b) => b.sequence - a.sequence);
+
+        if (batchEntries.length === 0) return false;
+
+        const simulatedData = cloneSiteData(this.rwlData);
+        const simulatedMarkers = cloneDeletionMarkers(this.deletionMarkers);
+
+        for (const entry of batchEntries) {
+            if (
+                !entry.tree
+                || entry.afterTreeData === undefined
+                || entry.beforeTreeData === undefined
+                || !treeDataEquals(simulatedData.get(entry.tree), entry.afterTreeData)
+                || !treeDeletionMarkersEquals(simulatedMarkers.get(entry.tree), entry.afterDeletionMarkers)
+            ) {
+                return false;
+            }
+
+            if (!this.applySerializedTreeStateToCopies(
+                simulatedData,
+                simulatedMarkers,
+                entry.tree,
+                entry.beforeTreeData,
+                entry.beforeDeletionMarkers,
+            )) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private cloneOperationLogEntryWithAvailability(entry: RwlOperationLogEntry): RwlOperationLogEntry {
         return {
             ...cloneOperationLogEntry(entry),
             canUndo: this.isLogEntryUndoable(entry),
+            canUndoBatch: this.isLogBatchUndoable(entry.batchId),
             canRedo: this.isLogEntryRedoable(entry),
         };
+    }
+
+    private captureOperationLogUndoneState(): RwlOperationLogUndoneState {
+        return this.operationLog.map((entry) => ({
+            id: entry.id,
+            undone: entry.undone,
+        }));
+    }
+
+    private restoreOperationLogUndoneState(state: RwlOperationLogUndoneState | undefined): void {
+        if (!state) return;
+
+        const undoneById = new Map(state.map((entry) => [entry.id, entry.undone]));
+        this.operationLog = this.operationLog.map((entry) => (
+            undoneById.has(entry.id)
+                ? setOperationLogEntryReverted(entry, Boolean(undoneById.get(entry.id)))
+                : entry
+        ));
     }
 
     private applyTreeLogState(
@@ -630,7 +911,38 @@ export class RwlEditor {
         this.deletionMarkers = nextMarkers;
     }
 
-    private appendOperationLog(operation: RwlEditOperation, tree: string, beforeState: RwlTreeLogState): void {
+    private markOperationLogTransition(
+        operation: RwlEditOperation | undefined,
+        fromData: RwlSiteData,
+        fromMarkers: RwlDeletionMarkers,
+        toData: RwlSiteData,
+        toMarkers: RwlDeletionMarkers,
+        undone: boolean,
+    ): void {
+        if (!operation) return;
+
+        this.operationLog = this.operationLog.map((entry) => {
+            if (
+                !entry.tree
+                || !operationsEqual(entry.operation, operation)
+                || !treeDataEquals(fromData.get(entry.tree), entry.afterTreeData)
+                || !treeDeletionMarkersEquals(fromMarkers.get(entry.tree), entry.afterDeletionMarkers)
+                || !treeDataEquals(toData.get(entry.tree), entry.beforeTreeData)
+                || !treeDeletionMarkersEquals(toMarkers.get(entry.tree), entry.beforeDeletionMarkers)
+            ) {
+                return entry;
+            }
+
+            return setOperationLogEntryReverted(entry, undone);
+        });
+    }
+
+    private appendOperationLog(
+        operation: RwlEditOperation,
+        tree: string,
+        beforeState: RwlTreeLogState,
+        metadata: RwlOperationLogMetadata = {},
+    ): void {
         const afterState = this.captureTreeLogState(tree);
         if (
             treeDataEquals(beforeState.data === null ? undefined : deserializeTreeData(beforeState.data), afterState.data)
@@ -641,16 +953,44 @@ export class RwlEditor {
 
         const nextSequence = this.operationLogCounter + 1;
         const description = describeRwlEditOperation(operation);
+        const operationId = `${Date.now()}-${nextSequence}`;
+        const timestamp = new Date().toISOString();
+        const targetYear = getOperationTargetYear(operation);
+        const targetValueBefore = metadata.oldValue ?? getSerializedTreeYearValue(beforeState.data, targetYear);
+        const targetValueAfter = metadata.newValue ?? getSerializedTreeYearValue(afterState.data, targetYear);
 
         this.operationLogCounter = nextSequence;
         this.operationLog = [
             ...this.operationLog,
             {
-                id: `${Date.now()}-${nextSequence}`,
+                id: operationId,
+                operationId,
+                projectId: metadata.projectId ?? this.projectId,
+                seriesId: tree,
                 sequence: nextSequence,
-                timestamp: new Date().toISOString(),
+                timestamp,
+                createdAt: timestamp,
+                createdBy: metadata.createdBy ?? (metadata.source === "system" ? "system" : "user"),
                 action: "apply" as const,
                 operation: cloneOperation(operation),
+                operationType: metadata.operationType ?? getOperationType(operation),
+                source: metadata.source ?? "manual",
+                targetYear,
+                targetIndex: metadata.targetIndex,
+                oldValue: targetValueBefore,
+                newValue: targetValueAfter,
+                oldYear: metadata.oldYear ?? targetYear,
+                newYear: metadata.newYear ?? getOperationNewYear(operation),
+                affectedRange: getOperationAffectedRange(operation),
+                reason: metadata.reason,
+                metricsBefore: metadata.metricsBefore,
+                metricsAfter: metadata.metricsAfter,
+                cofechaBefore: metadata.cofechaBefore,
+                cofechaAfter: metadata.cofechaAfter,
+                isApplied: true,
+                isReverted: false,
+                parentOperationId: metadata.parentOperationId,
+                batchId: metadata.batchId,
                 summary: description.summary,
                 detail: description.detail,
                 tree,
@@ -671,6 +1011,30 @@ export class RwlEditor {
         return cloneSiteData(this.rwlData);
     }
 
+    getRawData(): RwlSiteData {
+        return cloneSiteData(this.rawData);
+    }
+
+    hasRawDataChanges(): boolean {
+        return !siteDataEquals(this.rwlData, this.rawData) || !deletionMarkersEmpty(this.deletionMarkers);
+    }
+
+    commitCurrentDataAsRawBaseline(): void {
+        this.rawData = cloneSiteData(this.rwlData);
+        this.rawReadOptions = cloneReadOptions(this.readOptions);
+        this.rawFormat = this.format;
+    }
+
+    setProjectId(projectId: string | null | undefined): void {
+        const normalizedProjectId = projectId || undefined;
+        this.projectId = normalizedProjectId;
+        if (!normalizedProjectId) return;
+
+        this.operationLog = this.operationLog.map((entry) => (
+            entry.projectId ? entry : { ...entry, projectId: normalizedProjectId }
+        ));
+    }
+
     getOperationLog(): RwlOperationLogEntry[] {
         return this.operationLog.map((entry) => this.cloneOperationLogEntryWithAvailability(entry));
     }
@@ -687,10 +1051,48 @@ export class RwlEditor {
         return {
             version: 1,
             savedAt: new Date().toISOString(),
+            rawData: serializeSiteData(this.rawData),
+            workingData: serializeSiteData(this.rwlData),
+            deletionMarkers: serializeDeletionMarkers(this.deletionMarkers),
+            readOptions: cloneReadOptions(this.readOptions),
+            format: this.format,
+            rawReadOptions: cloneReadOptions(this.rawReadOptions),
+            rawFormat: this.rawFormat,
             operationLog: this.operationLog.map(cloneOperationLogEntry),
             operationLogCounter: this.operationLogCounter,
             deletionOrderCounter: this.deletionOrderCounter,
         };
+    }
+
+    restorePersistedHistory(snapshot: RwlPersistedHistorySnapshot): void {
+        this.undoStack = [];
+        this.redoStack = [];
+        this.operationLog = snapshot.operationLog.map(cloneOperationLogEntry).slice(-MAX_OPERATION_LOG_ENTRIES);
+        this.operationLogCounter = snapshot.operationLogCounter
+            ?? Math.max(...this.operationLog.map((entry) => entry.sequence), 0);
+        this.deletionOrderCounter = snapshot.deletionOrderCounter ?? 0;
+
+        if (snapshot.rawData) {
+            this.rawData = deserializeSiteData(snapshot.rawData);
+        }
+        if (snapshot.workingData) {
+            this.rwlData = deserializeSiteData(snapshot.workingData);
+        }
+        if (snapshot.deletionMarkers) {
+            this.deletionMarkers = deserializeDeletionMarkers(snapshot.deletionMarkers);
+        }
+        if (snapshot.readOptions !== undefined) {
+            this.readOptions = cloneReadOptions(snapshot.readOptions);
+        }
+        if (snapshot.format) {
+            this.format = snapshot.format;
+        }
+        if (snapshot.rawReadOptions !== undefined) {
+            this.rawReadOptions = cloneReadOptions(snapshot.rawReadOptions);
+        }
+        if (snapshot.rawFormat) {
+            this.rawFormat = snapshot.rawFormat;
+        }
     }
 
     restoreOperationLog(operationLog: RwlOperationLogEntry[]): void {
@@ -703,6 +1105,45 @@ export class RwlEditor {
         );
     }
 
+    resetToRawData(): RwlHistoryAnimation | null {
+        if (!this.hasRawDataChanges()) return null;
+
+        const operation: RwlEditOperation = {
+            type: "replace-all-data",
+            treeCount: this.rawData.size,
+            format: this.rawFormat as RwlFormat,
+        };
+        const previousData = cloneSiteData(this.rwlData);
+        const previousMarkers = cloneDeletionMarkers(this.deletionMarkers);
+        const revertedEntryIds = new Set(this.operationLog.map((entry) => entry.id));
+
+        this.saveToUndoStack(operation);
+        this.redoStack = [];
+        this.rwlData = cloneSiteData(this.rawData);
+        this.readOptions = cloneReadOptions(this.rawReadOptions);
+        this.format = this.rawFormat;
+        this.deletionMarkers = new Map();
+
+        const changedTrees = new Set([...previousData.keys(), ...this.rwlData.keys()]);
+        changedTrees.forEach((tree) => {
+            const beforeState = {
+                data: previousData.has(tree) ? serializeTreeData(previousData.get(tree)!) : null,
+                deletionMarkers: serializeTreeDeletionMarkers(previousMarkers.get(tree)),
+            };
+            this.appendOperationLog(operation, tree, beforeState, {
+                operationType: "REVERT_OPERATION",
+                source: "system",
+                reason: "一键恢复到首次加载的原始序列",
+            });
+        });
+
+        this.operationLog = this.operationLog.map((entry) => (
+            revertedEntryIds.has(entry.id) ? setOperationLogEntryReverted(entry, true) : entry
+        ));
+        this.notifyChange();
+        return { ...operation, direction: "redo" };
+    }
+
     undoOperationLogEntry(entryId: string): RwlHistoryAnimation | null {
         const entryIndex = this.operationLog.findIndex((entry) => entry.id === entryId);
         const entry = this.operationLog[entryIndex];
@@ -712,10 +1153,37 @@ export class RwlEditor {
 
         this.applyTreeLogState(entry.tree, entry.beforeTreeData, entry.beforeDeletionMarkers);
         this.operationLog = this.operationLog.map((item, index) => (
-            index === entryIndex ? { ...item, undone: true } : item
+            index === entryIndex ? setOperationLogEntryReverted(item, true) : item
         ));
         this.notifyChange();
         return entry.operation ? { ...entry.operation, direction: "undo" } : null;
+    }
+
+    undoOperationLogBatch(batchId: string): RwlHistoryAnimation | null {
+        const batchEntries = this.operationLog
+            .filter((entry) => entry.batchId === batchId && !entry.undone)
+            .sort((a, b) => b.sequence - a.sequence);
+
+        if (batchEntries.length === 0 || !this.isLogBatchUndoable(batchId)) {
+            return null;
+        }
+
+        let lastAnimation: RwlHistoryAnimation | null = null;
+        batchEntries.forEach((entry) => {
+            const entryIndex = this.operationLog.findIndex((item) => item.id === entry.id);
+            if (entryIndex < 0 || !entry.tree) return;
+
+            this.applyTreeLogState(entry.tree, entry.beforeTreeData, entry.beforeDeletionMarkers);
+            this.operationLog = this.operationLog.map((item, index) => (
+                index === entryIndex ? setOperationLogEntryReverted(item, true) : item
+            ));
+            if (entry.operation) {
+                lastAnimation = { ...entry.operation, direction: "undo" };
+            }
+        });
+
+        this.notifyChange();
+        return lastAnimation;
     }
 
     redoOperationLogEntry(entryId: string): RwlHistoryAnimation | null {
@@ -727,7 +1195,7 @@ export class RwlEditor {
 
         this.applyTreeLogState(entry.tree, entry.afterTreeData, entry.afterDeletionMarkers);
         this.operationLog = this.operationLog.map((item, index) => (
-            index === entryIndex ? { ...item, undone: false } : item
+            index === entryIndex ? setOperationLogEntryReverted(item, false) : item
         ));
         this.notifyChange();
         return entry.operation ? { ...entry.operation, direction: "redo" } : null;
@@ -762,7 +1230,12 @@ export class RwlEditor {
 
     // 删年：在 year 处删除 0
     // Insert a missing placeholder from the requested side of the current year.
-    insertMissingYearAtSide(tree: string, year: number, side: MissingInsertSide): void {
+    insertMissingYearAtSide(
+        tree: string,
+        year: number,
+        side: MissingInsertSide,
+        logMetadata?: RwlOperationLogMetadata,
+    ): void {
         if (!this.rwlData.has(tree)) return;
         let treeData = this.rwlData.get(tree)!;
         if (!treeData.has(year)) return;
@@ -775,11 +1248,17 @@ export class RwlEditor {
         this.shiftDeletionMarkersForInsert(tree, year, side);
         let updatedTree = insertMissingYearAtSide(treeData, year, side);
         this.rwlData.set(tree, updatedTree);
-        this.appendOperationLog(operation, tree, beforeState);
+        this.appendOperationLog(operation, tree, beforeState, logMetadata);
         this.notifyChange();
     }
 
-    moveSeriesTailByOffset(tree: string, selectedStartYear: number, selectedEndYear: number, yearOffset: number): void {
+    moveSeriesTailByOffset(
+        tree: string,
+        selectedStartYear: number,
+        selectedEndYear: number,
+        yearOffset: number,
+        logMetadata?: RwlOperationLogMetadata,
+    ): void {
         if (yearOffset === 0) return;
         if (!this.rwlData.has(tree)) return;
 
@@ -793,7 +1272,7 @@ export class RwlEditor {
         this.shiftDeletionMarkersForMove(tree, selectedStartYear, selectedEndYear, yearOffset);
         let updatedTree = moveSeriesTailByOffset(treeData, selectedStartYear, selectedEndYear, yearOffset);
         this.rwlData.set(tree, updatedTree);
-        this.appendOperationLog(operation, tree, beforeState);
+        this.appendOperationLog(operation, tree, beforeState, logMetadata);
         this.notifyChange();
     }
 
@@ -815,7 +1294,13 @@ export class RwlEditor {
         this.notifyChange();
     }
 
-    deleteYearWithMode(tree: string, year: number, mode: DeleteMode, shift: DeleteShift = "right"): void {
+    deleteYearWithMode(
+        tree: string,
+        year: number,
+        mode: DeleteMode,
+        shift: DeleteShift = "right",
+        logMetadata?: RwlOperationLogMetadata,
+    ): void {
         if (!this.rwlData.has(tree)) return;
         let treeData = this.rwlData.get(tree)!;
         // 允许删除 gap/missing 年份（年份不在 treeData 中）：仍会平移更早年份以收紧 gap。
@@ -829,7 +1314,7 @@ export class RwlEditor {
         this.recordDeletionMarkerForDelete(tree, year, info, shift);
         let updatedTree = deleteYearWithMode(treeData, year, mode, shift);
         this.rwlData.set(tree, updatedTree);
-        this.appendOperationLog(operation, tree, beforeState);
+        this.appendOperationLog(operation, tree, beforeState, logMetadata);
         this.notifyChange();
     }
 
@@ -1066,17 +1551,30 @@ export class RwlEditor {
     undo(): RwlHistoryAnimation | null {
         if (this.undoStack.length === 0) return null;
         const previousEntry = this.undoStack.pop()!;
+        const currentData = cloneSiteData(this.rwlData);
+        const currentMarkers = cloneDeletionMarkers(this.deletionMarkers);
+        const currentOperationLogUndoneState = this.captureOperationLogUndoneState();
         this.redoStack.push({
-            data: cloneSiteData(this.rwlData),
-            deletionMarkers: cloneDeletionMarkers(this.deletionMarkers),
+            data: currentData,
+            deletionMarkers: currentMarkers,
             readOptions: cloneReadOptions(this.readOptions),
             format: this.format,
             operation: previousEntry.operation,
+            operationLogUndoneState: currentOperationLogUndoneState,
         });
         this.rwlData = previousEntry.data;
         this.deletionMarkers = previousEntry.deletionMarkers;
         this.readOptions = cloneReadOptions(previousEntry.readOptions);
         this.format = previousEntry.format;
+        this.markOperationLogTransition(
+            previousEntry.operation,
+            currentData,
+            currentMarkers,
+            this.rwlData,
+            this.deletionMarkers,
+            true,
+        );
+        this.restoreOperationLogUndoneState(previousEntry.operationLogUndoneState);
         this.notifyChange();
         return previousEntry.operation ? { ...previousEntry.operation, direction: "undo" } : null;
     }
@@ -1085,17 +1583,30 @@ export class RwlEditor {
     redo(): RwlHistoryAnimation | null {
         if (this.redoStack.length === 0) return null;
         const nextEntry = this.redoStack.pop()!;
+        const currentData = cloneSiteData(this.rwlData);
+        const currentMarkers = cloneDeletionMarkers(this.deletionMarkers);
+        const currentOperationLogUndoneState = this.captureOperationLogUndoneState();
         this.undoStack.push({
-            data: cloneSiteData(this.rwlData),
-            deletionMarkers: cloneDeletionMarkers(this.deletionMarkers),
+            data: currentData,
+            deletionMarkers: currentMarkers,
             readOptions: cloneReadOptions(this.readOptions),
             format: this.format,
             operation: nextEntry.operation,
+            operationLogUndoneState: currentOperationLogUndoneState,
         });
         this.rwlData = nextEntry.data;
         this.deletionMarkers = nextEntry.deletionMarkers;
         this.readOptions = cloneReadOptions(nextEntry.readOptions);
         this.format = nextEntry.format;
+        this.markOperationLogTransition(
+            nextEntry.operation,
+            this.rwlData,
+            this.deletionMarkers,
+            currentData,
+            currentMarkers,
+            false,
+        );
+        this.restoreOperationLogUndoneState(nextEntry.operationLogUndoneState);
         this.notifyChange();
         return nextEntry.operation ? { ...nextEntry.operation, direction: "redo" } : null;
     }
@@ -1108,6 +1619,7 @@ export class RwlEditor {
             readOptions: cloneReadOptions(this.readOptions),
             format: this.format,
             operation,
+            operationLogUndoneState: this.captureOperationLogUndoneState(),
         });
     }
 

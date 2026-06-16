@@ -198,6 +198,71 @@
     display: block;
 }
 
+.validation-summary {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(160px, 0.8fr);
+    gap: 10px;
+    align-items: start;
+    min-width: 0;
+    margin: 8px 3px 10px;
+    padding: 9px 11px;
+    border: 1px solid #d8e0e8;
+    border-radius: 6px;
+    background: #ffffff;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    box-sizing: border-box;
+}
+
+.validation-summary > div {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.validation-summary strong {
+    color: #172033;
+    font-size: 14px;
+    line-height: 1.25;
+}
+
+.validation-summary span,
+.validation-summary li {
+    color: #58687c;
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.validation-summary ul {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    margin: 0;
+    padding-left: 18px;
+}
+
+.validation-success {
+    border-color: #b7dec7;
+    background: #f3faf6;
+}
+
+.validation-warning {
+    border-color: #ead0a8;
+    background: #fffaf0;
+}
+
+.validation-danger {
+    border-color: #e7b7aa;
+    background: #fff6f3;
+}
+
+.validation-neutral {
+    border-color: #d8e0e8;
+    background: #fbfcfe;
+}
+
 .width-panels,
 .cofecha-panels {
     flex: 1 1 auto;
@@ -250,12 +315,21 @@
     min-width: fit-content;
 }
 
-.full-text {
+.cofecha-pane {
+    display: flex;
     flex: 1 1 auto;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
     padding: 10px;
     background-color: #ffffff;
     border: 1px solid #ccc;
     border-radius: 8px;
+    box-sizing: border-box;
+}
+
+.full-text {
+    flex: 1 1 auto;
 }
 
 .full-text p {
@@ -272,14 +346,6 @@
     border-radius: 8px;
     display: flex;
     flex-direction: column;
-}
-
-.line-chart-toolbar {
-    flex: 0 0 auto;
-    display: flex;
-    justify-content: flex-end;
-    min-height: 28px;
-    margin-bottom: 6px;
 }
 
 .cofecha-panel-content {
@@ -366,43 +432,11 @@
 }
 
 .cofecha-toolbar {
-    position: sticky;
-    top: 0;
-    z-index: 1;
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     gap: 8px;
     margin-bottom: 10px;
-    background-color: #ffffff;
-}
-
-.panel-open-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 24px;
-    margin-left: auto;
-    padding: 0;
-    border: 1px solid rgba(47, 95, 147, 0.22);
-    border-radius: 5px;
-    background-color: #ffffff;
-    color: #2f5f93;
-    font-family: "Segoe UI", system-ui, sans-serif;
-    font-size: 16px;
-    line-height: 1;
-    cursor: pointer;
-    box-sizing: border-box;
-}
-
-.panel-open-button:hover {
-    background-color: rgba(47, 95, 147, 0.07);
-    border-color: rgba(47, 95, 147, 0.34);
-}
-
-.panel-open-button:focus-visible {
-    outline: 2px solid rgba(47, 95, 147, 0.34);
-    outline-offset: 1px;
 }
 
 .external-window-placeholder {
@@ -446,6 +480,7 @@
     border-radius: 5px;
     background-color: #ffffff;
     font-family: Consolas, sans-serif;
+    border:1px solid rgb(208, 208, 208);
 }
 
 .cofecha-link-count {
@@ -460,6 +495,48 @@
     font-size: 11px;
     font-weight: 600;
     white-space: nowrap;
+}
+
+.cofecha-outdated-badge {
+    display: inline-flex;
+    align-items: center;
+    height: 20px;
+    padding: 0 7px;
+    border-radius: 999px;
+    background-color: rgba(138, 75, 15, 0.1);
+    color: #8a4b0f;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.cofecha-validation-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 24px;
+    padding: 0 9px;
+    border: 1px solid rgba(47, 95, 147, 0.24);
+    border-radius: 5px;
+    background-color: #ffffff;
+    color: #2f5f93;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.cofecha-validation-button:hover:not(:disabled) {
+    background-color: rgba(47, 95, 147, 0.07);
+}
+
+.cofecha-validation-button:disabled {
+    color: #a4afbd;
+    background-color: #f5f7f9;
+    cursor: default;
 }
 
 
@@ -493,6 +570,25 @@
 .cofecha-year-link:focus-visible {
     outline: 2px solid rgba(47, 95, 147, 0.38);
     outline-offset: 1px;
+}
+
+/* 从年轮网格右键“在 COFECHA 中定位”跳转命中的 PART 6 序列标题：短暂高亮。
+   行内样式带有背景色，这里用 !important 覆盖，动画只作用于阴影，避免与之冲突。 */
+.cofecha-part6-active {
+    background-color: rgba(250, 204, 21, 0.5) !important;
+    color: #7c4a03 !important;
+    border-radius: 3px;
+    box-shadow: 0 0 0 2px rgba(202, 138, 4, 0.5);
+    animation: cofecha-part6-pulse 1.6s ease-out;
+}
+
+@keyframes cofecha-part6-pulse {
+    0% {
+        box-shadow: 0 0 0 5px rgba(250, 204, 21, 0.85);
+    }
+    100% {
+        box-shadow: 0 0 0 2px rgba(202, 138, 4, 0.2);
+    }
 }
 
 .home-container option {

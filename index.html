@@ -125,12 +125,30 @@
     #title-submenu-undo-button:active, #title-submenu-redo-button:active {
       color: rgb(255, 255, 255);
     }
+
+    .titlebar .titlebar-logo {
+      align-items: center;
+      padding: 0 6px 0 12px;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .titlebar .titlebar-logo img {
+      width: 22px;
+      height: 22px;
+      -webkit-user-drag: none;
+    }
   </style>
 </head>
 
 <body>
   <div class="container">
     <div class="titlebar">
+      <!-- Logo（默认隐藏，工作区独立窗口由 main.tsx 显示在左上角） -->
+      <div class="titlebar-logo" id="titlebar-logo" data-tauri-drag-region style="display: none;">
+        <img src="/src-tauri/icons/icon.png" alt="logo" data-tauri-drag-region />
+      </div>
+
       <!-- Menu Section -->
       <div class="menu">
         <div class="title-menu-item-container">

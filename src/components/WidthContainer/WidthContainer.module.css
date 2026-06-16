@@ -214,6 +214,43 @@
     color: #8a94a3;
 }
 
+.series-header-stats {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.series-header-corr {
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    color: #2f6f4f;
+    background-color: #e8f3ec;
+    border: 1px solid #cfe6d9;
+    border-radius: 4px;
+    padding: 1px 6px;
+}
+
+.series-header-problems {
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    color: #5a6472;
+    background-color: #eef1f5;
+    border: 1px solid #dde3ec;
+    border-radius: 4px;
+    padding: 1px 6px;
+}
+
+.series-header-problems-flagged {
+    color: #a4332a;
+    background-color: #fbeae8;
+    border-color: #f0c8c2;
+}
+
 .series-block {
     display: flex;
     flex-direction: column;

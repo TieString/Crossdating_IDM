@@ -17,6 +17,9 @@ import {
 } from 'chart.js'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import WidthGridContextMenu from '@/components/WidthContainer/WidthGridContextMenu/WidthGridContextMenu'
+import type { LocalCrossdatingSimulation, SegmentDiagnosis } from '@/features/crossdating/diagnosis'
+import type { ReferenceSeries } from '@/features/crossdating/reference'
+import { REFERENCE_SERIES_LABEL } from '@/features/crossdating/reference'
 import type { DeleteMode, DeleteShift, MissingInsertSide } from '@/features/rwl/edit'
 import { stopMarker } from '@/shared/constants'
 
@@ -65,7 +68,7 @@ const SWATCH_H = 2
 const SWATCH_GAP = 6
 const COL_GAP = 16
 const MAX_LABEL_CHARS = 12
-const TOOLTIP_MAX_SERIES = 15
+const TOOLTIP_MAX_SERIES = 35
 const Y_AXIS_WIDTH = 60
 const X_AXIS_HEIGHT = 38    //底部x轴区域
 const CHART_AREA_RIGHT_PADDING = 2
@@ -83,9 +86,12 @@ const X_AXIS_LABEL_Y_OFFSET = 10
 const X_AXIS_TITLE_Y_OFFSET = 25    // x轴标题相对于x轴底部的垂直偏移
 const NICE_YEAR_STEPS = [1, 2, 5, 10, 15, 20, 25, 50, 100, 200]
 const LINE_HIT_THRESHOLD_PX = 5   // 鼠标距离折线小于5px时点击选择该折线
+const HOVER_LINE_HIT_THRESHOLD_PX = 10
 const SAMPLE_SIZE_AXIS_ID = 'sampleSize'
 const SAMPLE_SIZE_LABEL = '样本量'
 const SAMPLE_SIZE_COLOR = 'rgba(104, 110, 120, 0.62)'
+const MAX_FLAGGED_SEGMENT_BANDS = 36
+const FLAGGED_SEGMENT_TEXT_MIN_WIDTH = 56
 
 type XAxisLabel = {
   index: number
@@ -395,7 +401,10 @@ export function makePersistentTooltipPlugin(): Plugin<'line'> & { activeIndex: n
         if (ds.yAxisID === SAMPLE_SIZE_AXIS_ID) return
         const raw = ds.data[idx]
         if (raw == null) return
-        const value = typeof raw === 'number' ? Math.round(raw).toString() : String(raw)
+        const referenceDepth = (ds as { referenceDepth?: Array<number | null> }).referenceDepth?.[idx]
+        const value = typeof raw === 'number'
+          ? `${Math.round(raw)}${referenceDepth != null ? ` (n=${referenceDepth})` : ''}`
+          : String(raw)
         const name = (ds.label ?? '').slice(0, MAX_LABEL_CHARS)
         const color = ds.borderColor as string
         rows.push({ color, name, value })
@@ -587,11 +596,101 @@ function makeYearIndicatorPlugin(): Plugin<'line'> & { activeIndex: number | nul
   }
 }
 
+function makeFlaggedSegmentsPlugin(segments: readonly SegmentDiagnosis[]): Plugin<'line'> {
+  return {
+    id: 'flaggedSegments',
+
+    beforeDatasetsDraw(chart) {
+      if (segments.length === 0) return
+
+      const { ctx, chartArea, data, scales } = chart
+      const xScale = scales.x
+      const labels = data.labels ?? []
+      if (!xScale || labels.length === 0) return
+
+      const firstYear = Number(labels[0])
+      const lastYear = Number(labels[labels.length - 1])
+      if (!Number.isFinite(firstYear) || !Number.isFinite(lastYear)) return
+
+      const limitedSegments = segments.slice(0, MAX_FLAGGED_SEGMENT_BANDS)
+
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top)
+      ctx.clip()
+
+      limitedSegments.forEach((segment, index) => {
+        const startYear = Math.max(segment.startYear, firstYear)
+        const endYear = Math.min(segment.endYear, lastYear)
+        if (startYear > endYear) return
+
+        const startIndex = clamp(Math.round(startYear - firstYear), 0, labels.length - 1)
+        const endIndex = clamp(Math.round(endYear - firstYear), 0, labels.length - 1)
+        if (startIndex > endIndex) return
+
+        const startX = xScale.getPixelForValue(startIndex)
+        const endX = xScale.getPixelForValue(endIndex)
+        const nextIndex = Math.min(startIndex + 1, labels.length - 1)
+        const previousIndex = Math.max(startIndex - 1, 0)
+        const neighborX = nextIndex !== startIndex
+          ? xScale.getPixelForValue(nextIndex)
+          : previousIndex !== startIndex
+            ? xScale.getPixelForValue(previousIndex)
+            : startX + 8
+        const halfStep = Math.max(3, Math.abs(neighborX - startX) / 2)
+        const left = clamp(Math.min(startX, endX) - halfStep, chartArea.left, chartArea.right)
+        const right = clamp(Math.max(startX, endX) + halfStep, chartArea.left, chartArea.right)
+        const width = right - left
+        if (width <= 1) return
+
+        const hasLagSuggestion = segment.bestLag !== 0
+        ctx.fillStyle = hasLagSuggestion ? 'rgba(217, 119, 6, 0.12)' : 'rgba(220, 38, 38, 0.10)'
+        ctx.fillRect(left, chartArea.top, width, chartArea.bottom - chartArea.top)
+
+        ctx.strokeStyle = hasLagSuggestion ? 'rgba(180, 83, 9, 0.32)' : 'rgba(185, 28, 28, 0.28)'
+        ctx.lineWidth = 1
+        ctx.setLineDash([4, 4])
+        ctx.beginPath()
+        ctx.moveTo(left + 0.5, chartArea.top)
+        ctx.lineTo(left + 0.5, chartArea.bottom)
+        ctx.moveTo(right - 0.5, chartArea.top)
+        ctx.lineTo(right - 0.5, chartArea.bottom)
+        ctx.stroke()
+        ctx.setLineDash([])
+
+        if (width < FLAGGED_SEGMENT_TEXT_MIN_WIDTH) return
+
+        const label = width > 118
+          ? `${segment.targetTree} ${segment.startYear}-${segment.endYear}`
+          : segment.targetTree
+        const detail = hasLagSuggestion
+          ? `lag ${segment.bestLag > 0 ? '+' : ''}${segment.bestLag}`
+          : segment.currentCorrelation === null
+            ? `n=${segment.samplePairs}`
+            : `r=${segment.currentCorrelation.toFixed(2)}`
+        const y = chartArea.top + 15 + (index % 3) * 16
+
+        ctx.font = `bold 11px ${CHART_FONT_FAMILY}`
+        ctx.textBaseline = 'middle'
+        ctx.textAlign = 'left'
+        ctx.fillStyle = hasLagSuggestion ? '#8a4b08' : '#8a2d24'
+        ctx.fillText(`${label} ${detail}`, left + 5, y, Math.max(12, width - 10))
+      })
+
+      ctx.restore()
+    }
+  }
+}
+
 type Props = {
   data: Map<string, Map<number, number>>
   sampleSizeData?: ReadonlyMap<string, ReadonlyMap<number, number | null>>
+  referenceSeries?: ReferenceSeries | null
+  diagnosisSegments?: readonly SegmentDiagnosis[]
+  hoverSimulation?: LocalCrossdatingSimulation | null
   highlightedTreeCode?: string | null
   onHighlightedTreeCodeChange?: (treeCode: string | null) => void
+  onHoverTargetChange?: (target: { tree: string; year: number } | null) => void
   zoomWindow?: { min: number; max: number } | null
   onZoomWindowChange?: (zoomWindow: { min: number; max: number } | null) => void
   onShiftHighlightedTree?: (treeCode: string, direction: -1 | 1) => void
@@ -617,8 +716,12 @@ const CHART_FONT_FAMILY = "'Arial', 'Helvetica', sans-serif"
 export function MultiLineChart({
   data,
   sampleSizeData,
+  referenceSeries,
+  diagnosisSegments = [],
+  hoverSimulation,
   highlightedTreeCode = null,
   onHighlightedTreeCodeChange,
+  onHoverTargetChange,
   zoomWindow = null,
   onZoomWindowChange,
   onShiftHighlightedTree,
@@ -628,10 +731,12 @@ export function MultiLineChart({
 }: Props) {
   const chartRef = useRef<ChartJSInstance<'line'> | null>(null)
   const isDragged = useRef(false)
-  // const tooltipPlugin = useMemo(() => makePersistentTooltipPlugin(), []) // 暂时屏蔽，恢复时加回 plugins 数组
+  const tooltipPlugin = useMemo(() => makePersistentTooltipPlugin(), [])
   const yearIndicatorPlugin = useMemo(() => makeYearIndicatorPlugin(), [])
   const markerLinesPlugin = useMemo(() => makeMarkerLinesPlugin(), [])
+  const flaggedSegmentsPlugin = useMemo(() => makeFlaggedSegmentsPlugin(diagnosisSegments), [diagnosisSegments])
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tree: string; year: number } | null>(null)
+  const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number; tree: string; year: number } | null>(null)
   const [showSampleSize, setShowSampleSize] = useState(true)
   const treeCodes = useMemo(() => Array.from(data.keys()), [data])
   const highlightedIndex = highlightedTreeCode ? treeCodes.indexOf(highlightedTreeCode) : -1
@@ -660,11 +765,15 @@ export function MultiLineChart({
         if (year > maxYear) maxYear = year
       })
     })
+    referenceSeries?.data.forEach((_, year) => {
+      if (year < minYear) minYear = year
+      if (year > maxYear) maxYear = year
+    })
     if (!Number.isFinite(minYear)) return []
     const years: number[] = []
     for (let y = minYear; y <= maxYear; y++) years.push(y)
     return years
-  }, [data])
+  }, [data, referenceSeries])
 
   const sampleSize = useMemo(() => {
     let max = 0
@@ -715,6 +824,25 @@ export function MultiLineChart({
       colorIndex++
     })
 
+    if (referenceSeries && referenceSeries.data.size > 0) {
+      nextDatasets.push({
+        label: referenceSeries.label,
+        data: allYears.map(year => referenceSeries.data.get(year) ?? null),
+        borderColor: '#111827',
+        backgroundColor: '#111827',
+        fill: false,
+        borderWidth: 3.25,
+        borderDash: [10, 5],
+        tension: 0.008,
+        cubicInterpolationMode: 'default',
+        pointRadius: 0,
+        pointHoverRadius: 0,
+        pointHitRadius: 0,
+        order: -20,
+        referenceDepth: allYears.map(year => referenceSeries.sampleDepth.get(year) ?? null),
+      } as ChartData<'line'>['datasets'][number] & { referenceDepth: Array<number | null> })
+    }
+
     if (showSampleSize && sampleSize.counts.length > 0) {
       nextDatasets.push({
         label: SAMPLE_SIZE_LABEL,
@@ -734,7 +862,7 @@ export function MultiLineChart({
     }
 
     return nextDatasets
-  }, [allYears, data, highlightedIndex, sampleSize, showSampleSize])
+  }, [allYears, data, highlightedIndex, referenceSeries, sampleSize, showSampleSize])
 
   const chartData: ChartData<'line'> = {
     labels: allYears.map(year => year.toString()),
@@ -780,9 +908,15 @@ export function MultiLineChart({
         }
       })
     })
+    referenceSeries?.data.forEach(value => {
+      if (typeof value === 'number' && !isNaN(value)) {
+        if (value < globalMin) globalMin = value
+        if (value > globalMax) globalMax = value
+      }
+    })
     const yMargin = (globalMax - globalMin) * 0.1
     return [globalMin - yMargin, globalMax + yMargin]
-  }, [data])
+  }, [data, referenceSeries])
 
   const emitZoomWindowRef = useRef(emitZoomWindow)
   useEffect(() => { emitZoomWindowRef.current = emitZoomWindow }, [emitZoomWindow])
@@ -921,6 +1055,63 @@ export function MultiLineChart({
   }), [allYears.length, sampleSize.max, yMin, yMax])
 
   // 点击折线时切换高亮，并保存当前缩放状态。
+  const getClosestTreeAtPoint = useCallback((
+    event: React.MouseEvent,
+    chart: ChartJS<'line'>,
+    thresholdPx: number,
+  ) => {
+    const rect = chart.canvas.getBoundingClientRect()
+    const pointerX = event.clientX - rect.left
+    const pointerY = event.clientY - rect.top
+    const { chartArea } = chart
+
+    if (
+      pointerX < chartArea.left
+      || pointerX > chartArea.right
+      || pointerY < chartArea.top
+      || pointerY > chartArea.bottom
+    ) {
+      return null
+    }
+
+    const elements = chart.getElementsAtEventForMode(
+      event.nativeEvent,
+      'index',
+      { intersect: false },
+      false
+    )
+    if (elements.length === 0) return null
+
+    const dataIndex = elements[0].index
+    const yScale = chart.scales['y']
+    const xScale = chart.scales['x']
+    let closestIndex = -1
+    let closestDist = thresholdPx
+
+    chart.data.datasets.forEach((ds, index) => {
+      if (ds.yAxisID === SAMPLE_SIZE_AXIS_ID || ds.label === REFERENCE_SERIES_LABEL) return
+
+      for (const [idxA, idxB] of [[dataIndex - 1, dataIndex], [dataIndex, dataIndex + 1]] as [number, number][]) {
+        const valA = ds.data[idxA]
+        const valB = ds.data[idxB]
+        if (valA == null || valB == null) continue
+        const ax = xScale.getPixelForValue(idxA)
+        const ay = yScale.getPixelForValue(valA as number)
+        const bx = xScale.getPixelForValue(idxB)
+        const by = yScale.getPixelForValue(valB as number)
+        const dist = distToSegment(pointerX, pointerY, ax, ay, bx, by)
+        if (dist < closestDist) {
+          closestDist = dist
+          closestIndex = index
+        }
+      }
+    })
+
+    const year = allYears[dataIndex]
+    const tree = treeCodes[closestIndex]
+    return closestIndex >= 0 && tree && year != null ? { tree, year } : null
+  }, [allYears, treeCodes])
+
   const handleLineChartClick = (
     event: unknown,
     chart: ChartJS<'line'> | null,
@@ -960,7 +1151,7 @@ export function MultiLineChart({
     const xScale = chart.scales['x']
 
     chart.data.datasets.forEach((ds, i) => {
-      if (ds.yAxisID === SAMPLE_SIZE_AXIS_ID) return
+      if (ds.yAxisID === SAMPLE_SIZE_AXIS_ID || ds.label === REFERENCE_SERIES_LABEL) return
 
       for (const [idxA, idxB] of [[dataIndex - 1, dataIndex], [dataIndex, dataIndex + 1]] as [number, number][]) {
         const valA = ds.data[idxA]
@@ -1021,10 +1212,101 @@ export function MultiLineChart({
     setContextMenu({ x: e.clientX, y: e.clientY, tree: highlightedTreeCode, year })
   }
 
+  const handleChartMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
+    const chart = chartRef.current
+    if (!chart) return
+
+    const target = getClosestTreeAtPoint(event, chart, HOVER_LINE_HIT_THRESHOLD_PX)
+    if (!target) {
+      setHoverPoint(null)
+      onHoverTargetChange?.(null)
+      return
+    }
+
+    const containerRect = event.currentTarget.getBoundingClientRect()
+    setHoverPoint({
+      ...target,
+      x: event.clientX - containerRect.left,
+      y: event.clientY - containerRect.top,
+    })
+    onHoverTargetChange?.(target)
+  }
+
+  const handleChartMouseLeave = () => {
+    setHoverPoint(null)
+    onHoverTargetChange?.(null)
+  }
+
+  const formatSimulationCorrelation = (value: number | null) => (
+    value === null ? '-' : value.toFixed(2)
+  )
+
+  const simulationTooltip = hoverPoint
+    && hoverSimulation
+    && hoverSimulation.targetTree === hoverPoint.tree
+    && hoverSimulation.year === hoverPoint.year ? (
+    <div
+      style={{
+        position: 'absolute',
+        zIndex: 4,
+        left: hoverPoint.x > 280 ? hoverPoint.x - 270 : hoverPoint.x + 14,
+        top: hoverPoint.y > 168 ? hoverPoint.y - 156 : hoverPoint.y + 14,
+        width: 256,
+        padding: '8px 10px',
+        border: '1px solid #c9d3df',
+        borderRadius: 5,
+        background: 'rgba(255,255,255,0.97)',
+        boxShadow: '0 8px 24px rgba(15,23,42,0.16)',
+        color: '#172033',
+        fontFamily: CHART_FONT_FAMILY,
+        fontSize: 12,
+        lineHeight: 1.35,
+        pointerEvents: 'none',
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 5 }}>
+        <strong style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {hoverSimulation.targetTree} · {hoverSimulation.year}
+        </strong>
+        <span style={{ color: '#667084', flex: '0 0 auto' }}>
+          n={hoverSimulation.samplePairs}
+        </span>
+      </div>
+      <div style={{ color: '#4b5c72', marginBottom: 5 }}>
+        r {formatSimulationCorrelation(hoverSimulation.currentCorrelation)}
+        {' · '}
+        {hoverSimulation.segmentStartYear}-{hoverSimulation.segmentEndYear}
+      </div>
+      <div style={{ color: '#111827', fontWeight: 650, marginBottom: 4 }}>
+        {hoverSimulation.bestOption.label}
+      </div>
+      <div style={{ color: '#5b6b7f' }}>
+        r {formatSimulationCorrelation(hoverSimulation.bestOption.currentCorrelation)}
+        {' → '}
+        {formatSimulationCorrelation(hoverSimulation.bestOption.simulatedCorrelation)}
+        {hoverSimulation.bestOption.delta !== null ? ` (${hoverSimulation.bestOption.delta >= 0 ? '+' : ''}${hoverSimulation.bestOption.delta.toFixed(2)})` : ''}
+      </div>
+      <div style={{
+        display: 'inline-flex',
+        marginTop: 6,
+        padding: '1px 6px',
+        borderRadius: 10,
+        background: hoverSimulation.bestOption.confidence === 'high' ? '#f6d6c8' : hoverSimulation.bestOption.confidence === 'medium' ? '#f7e5bd' : '#eef0f3',
+        color: hoverSimulation.bestOption.confidence === 'high' ? '#8f2d18' : hoverSimulation.bestOption.confidence === 'medium' ? '#6e5010' : '#5f6d7c',
+        fontSize: 11,
+        fontWeight: 700,
+      }}>
+        {hoverSimulation.bestOption.confidence}
+      </div>
+    </div>
+  ) : null
+
   return (
     <div
       style={{ position: 'relative', height: '100%', minHeight: 0, background: '#fff' }}
       onContextMenu={handleContextMenu}
+      onMouseMove={handleChartMouseMove}
+      onMouseLeave={handleChartMouseLeave}
     >
       <label
         title="显示/隐藏样本量曲线"
@@ -1076,7 +1358,7 @@ export function MultiLineChart({
         ref={chartRef}
         data={chartData}
         options={chartOptions}
-        plugins={[fixedChartAreaPlugin, referenceGridPlugin, markerLinesPlugin, chartBoxBorderPlugin, xAxisLabelsPlugin, /* tooltipPlugin, */ yearIndicatorPlugin]}
+        plugins={[fixedChartAreaPlugin, referenceGridPlugin, flaggedSegmentsPlugin, markerLinesPlugin, chartBoxBorderPlugin, xAxisLabelsPlugin, tooltipPlugin, yearIndicatorPlugin]}
         onClick={(event) =>
           handleLineChartClick(event, chartRef.current)
         }
@@ -1103,6 +1385,7 @@ export function MultiLineChart({
           onClose={() => setContextMenu(null)}
         />
       )}
+      {simulationTooltip}
     </div>
   )
 }

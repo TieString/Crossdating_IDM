@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ClipboardEvent, type KeyboardEvent, type MouseEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ClipboardEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { AnimatePresence } from "motion/react";
 import { TreeChartManager } from "@/components/Chart/TreeChartManager";
 import { RollingNumber } from "@/components/RollingNumber/RollingNumber";
 import WidthContainer from "@/components/WidthContainer/WidthContainer";
+import ContextMenu, { type ContextMenuItem } from "@/components/ContextMenu/ContextMenu";
 import { FloatingScrollArea } from "@/components/FloatingScrollArea/FloatingScrollArea";
 import { FloatingScrollbar } from "@/components/FloatingScrollbar/FloatingScrollbar";
 import { FindReplaceBar, type FindReplaceMode } from "@/components/FindReplace/FindReplaceBar";
@@ -13,7 +14,9 @@ import style from "./Home.module.css";
 import { ALL_OPTION_VALUE, TitleMenuKind } from "./home/constants";
 import { HomeTitleBarBridge } from "./home/HomeTitleBarBridge";
 import { useHomeWorkspace } from "./home/useHomeWorkspace";
+import { COFECHA_PART6_ANCHOR_ATTR, COFECHA_PART6_PART_VALUE, cofechaReportShowsPart6, findCofechaPart6Anchor, scrollCofechaAnchorIntoView } from "./home/cofechaReportAnchor";
 import {
+    isWorkspaceWindowLabel,
     openWorkspaceWindow,
     serializeRwlSiteData,
     workspaceWindowLabels,
@@ -84,6 +87,7 @@ const COFECHA_ABSENT_RING_SUMMARY_RE = /^(\s*)(\S+)(\s+\d+\s+absent\s+rings?:\s*
 const COFECHA_ABSENT_RING_CONTINUATION_RE = /^(\s{8,})(-?\d{4}(?:\s+-?\d{4})*)(\s*)$/;
 const COFECHA_YEAR_TOKEN_RE = /\b(-?\d{4})\b/g;
 const COFECHA_PART_SEPARATOR_RE = /^\s*=+\s*$/;
+const COFECHA_PART6_HIGHLIGHT_MS = 2600;
 
 const getErrorMessage = (error: unknown) => (
     error instanceof Error ? error.message : String(error)
@@ -121,6 +125,12 @@ const makeCofechaCellLinkHtml = (tree: string, rawYear: string, label = rawYear)
 
 const makeCofechaSeriesLinkHtml = (tree: string) => (
     `<span class="${style["cofecha-year-link"]}" data-cofecha-link="true" data-tree="${escapeHtml(tree)}" role="button" tabindex="0" title="跳转到 ${escapeHtml(tree)}" style="color:#0f5f9e;background-color:rgba(47,95,147,0.08);font-weight:700;text-decoration:underline;text-underline-offset:2px;cursor:pointer;border-radius:3px;padding:0 2px;">${escapeHtml(tree)}</span>`
+);
+
+// PART 6 序列标题里的序列名：除了普通的跳转链接，还带上锚点属性，便于从年轮网格右键
+// “在 COFECHA 中定位”反向跳转到该序列的潜在问题块。命中跳转时附加高亮类。
+const makeCofechaPart6HeaderHtml = (tree: string, highlighted: boolean) => (
+    `<span class="${style["cofecha-year-link"]}${highlighted ? ` ${style["cofecha-part6-active"]}` : ""}" data-cofecha-link="true" ${COFECHA_PART6_ANCHOR_ATTR}="${escapeHtml(tree)}" data-tree="${escapeHtml(tree)}" role="button" tabindex="0" title="跳转到 ${escapeHtml(tree)}" style="color:#0f5f9e;background-color:rgba(47,95,147,0.08);font-weight:700;text-decoration:underline;text-underline-offset:2px;cursor:pointer;border-radius:3px;padding:0 2px;">${escapeHtml(tree)}</span>`
 );
 
 const linkCofechaTreesInText = (text: string, knownTrees: readonly string[]) => {
@@ -178,6 +188,7 @@ const renderCofechaLineWithLinks = (
     knownTrees: readonly string[],
     currentSeriesTree: string | null,
     absentRingTree: string | null,
+    highlightTree: string | null,
 ) => {
     if (COFECHA_PART_SEPARATOR_RE.test(line)) {
         const plainText = linkCofechaTreesInText(line + lineBreak, knownTrees);
@@ -212,10 +223,12 @@ const renderCofechaLineWithLinks = (
     if (seriesHeaderMatch) {
         const [, prefix, tree, gap, rawStartYear, toLabel, rawEndYear, suffix] = seriesHeaderMatch;
 
+        const isHighlighted = highlightTree !== null && tree.toLowerCase() === highlightTree.toLowerCase();
+
         return {
             html: [
                 linkCofechaTreesInText(prefix, knownTrees).html,
-                makeCofechaSeriesLinkHtml(tree),
+                makeCofechaPart6HeaderHtml(tree, isHighlighted),
                 linkCofechaTreesInText(gap, knownTrees).html,
                 makeCofechaCellLinkHtml(tree, rawStartYear),
                 linkCofechaTreesInText(toLabel, knownTrees).html,
@@ -296,7 +309,11 @@ const renderCofechaLineWithLinks = (
     };
 };
 
-const renderCofechaHtmlWithLinks = (text: string | undefined, trees: readonly string[]) => {
+const renderCofechaHtmlWithLinks = (
+    text: string | undefined,
+    trees: readonly string[],
+    highlightTree: string | null = null,
+) => {
     const lines = (text ?? "").split(/\r\n|\n|\r/);
     const knownTrees = [...trees].sort((a, b) => b.length - a.length);
     let currentSeriesTree: string | null = null;
@@ -305,7 +322,7 @@ const renderCofechaHtmlWithLinks = (text: string | undefined, trees: readonly st
 
     const html = lines.map((line, index) => {
         const lineBreak = index < lines.length - 1 ? "\n" : "";
-        const result = renderCofechaLineWithLinks(line, lineBreak, knownTrees, currentSeriesTree, absentRingTree);
+        const result = renderCofechaLineWithLinks(line, lineBreak, knownTrees, currentSeriesTree, absentRingTree, highlightTree);
 
         currentSeriesTree = result.currentSeriesTree;
         absentRingTree = result.absentRingTree;
@@ -323,11 +340,15 @@ export default function Home() {
     const rightPanelsRef = useRef<HTMLDivElement>(null);
     const deleteSeriesRequestIdRef = useRef(0);
     const cofechaCellJumpIdRef = useRef(0);
+    const cofechaPart6JumpIdRef = useRef(0);
+    const handledCofechaPart6JumpIdRef = useRef<number | null>(null);
+    const cofechaReportScrollRef = useRef<HTMLDivElement | null>(null);
     const editHighlightIdRef = useRef(0);
     const { layout, draggingKey, startResize } = useResizablePanels();
     const [activeMenu, setActiveMenu] = useState<TitleMenuKind | null>(null);
     const [deleteSeriesRequest, setDeleteSeriesRequest] = useState<DeleteSeriesRequest | null>(null);
     const [cofechaCellJumpTarget, setCofechaCellJumpTarget] = useState<CofechaCellJumpTarget | null>(null);
+    const [cofechaPart6JumpTarget, setCofechaPart6JumpTarget] = useState<{ id: number; tree: string } | null>(null);
     const [editHighlightTarget, setEditHighlightTarget] = useState<EditHighlightTarget | null>(null);
     const [isRawEditing, setIsRawEditing] = useState(false);
     const [rawEditorTree, setRawEditorTree] = useState<string | null>(null);
@@ -335,6 +356,7 @@ export default function Home() {
     const [rawEditorRevision, setRawEditorRevision] = useState(0);
     const [rawEditorError, setRawEditorError] = useState("");
     const [externalWorkspaceWindows, setExternalWorkspaceWindows] = useState<ExternalWorkspaceWindows>(EMPTY_EXTERNAL_WORKSPACE_WINDOWS);
+    const [panelContextMenu, setPanelContextMenu] = useState<{ x: number; y: number; kind: WorkspaceWindowKind } | null>(null);
     const [findReplaceOpen, setFindReplaceOpen] = useState(false);
     const [findReplaceMode, setFindReplaceMode] = useState<FindReplaceMode>("find");
     const [findQuery, setFindQuery] = useState("");
@@ -343,9 +365,13 @@ export default function Home() {
     const {
         applyRawRwlText,
         applyRawRwlTextForTree,
+        canResetToRawData,
         cofechaResult,
         cofechaVersion,
+        crossdatingValidationSummary,
+        crossdatingDiagnosis,
         deletionMarkers,
+        diagnosisBatchResult,
         fileName,
         getCurrentRwlText,
         handleDeleteSeries,
@@ -356,23 +382,34 @@ export default function Home() {
         handleLoad: handleWorkspaceLoad,
         handleMarkYearRangeAsMissing,
         handleMoveSeriesTailByOffset,
+        handleApplyDiagnosisCandidate,
+        handleApplyDiagnosisCandidateBatch,
+        handleApplyLocalSimulation,
+        handleReferenceConfigChange,
         handleRedo,
         handleReplaceTreeData,
+        handleResetToRawData,
         handleRestoreDeletion,
+        handleRunCofechaValidation,
         handleSave: handleStructuredSave,
         handleSaveAs: handleStructuredSaveAs,
         handleTreeSelectionChange,
         handleUndo,
         handleUndoOperationLogEntry,
+        handleUndoOperationLogBatch,
         handleRedoOperationLogEntry,
         hasChart,
         hasProblems,
         historyAnimation,
+        isCofechaOutdated,
+        isCofechaRunning,
         operationLog,
         possibleProblemsDetail,
         problemTextColor,
+        referenceConfig,
         processingText,
         reportText,
+        cofechaPart6Text,
         selectedPart,
         selectedProblemText,
         selectedTree,
@@ -413,9 +450,36 @@ export default function Home() {
     }, []);
 
     const handleOpenWorkspaceWindow = useCallback((kind: WorkspaceWindowKind) => {
-        setExternalWorkspaceWindows((previous) => ({ ...previous, [kind]: true }));
-        void openWorkspaceWindow(kind);
+        void openWorkspaceWindow(kind)
+            .then(() => {
+                setExternalWorkspaceWindows((previous) => ({ ...previous, [kind]: true }));
+            })
+            .catch((error) => {
+                console.error("打开工作区独立窗口失败:", error);
+                setExternalWorkspaceWindows((previous) => ({ ...previous, [kind]: false }));
+            });
     }, []);
+
+    const handlePanelContextMenu = useCallback((kind: WorkspaceWindowKind) => (event: MouseEvent) => {
+        event.preventDefault();
+        setPanelContextMenu({ x: event.clientX, y: event.clientY, kind });
+    }, []);
+
+    const closePanelContextMenu = useCallback(() => setPanelContextMenu(null), []);
+
+    const panelContextMenuItems = useMemo<ContextMenuItem[]>(() => {
+        if (!panelContextMenu) {
+            return [];
+        }
+        const isOpen = externalWorkspaceWindows[panelContextMenu.kind];
+        return [
+            {
+                key: "open-window",
+                label: isOpen ? "聚焦独立窗口" : "在独立窗口中打开",
+                onSelect: () => handleOpenWorkspaceWindow(panelContextMenu.kind),
+            },
+        ];
+    }, [panelContextMenu, externalWorkspaceWindows, handleOpenWorkspaceWindow]);
 
     const handleDeleteSeriesRequestHandled = useCallback((id: number) => {
         setDeleteSeriesRequest((request) => request?.id === id ? null : request);
@@ -443,17 +507,90 @@ export default function Home() {
     }, [handleTreeSelectionChange, selectedTree, siteData]);
 
     const linkedReport = useMemo(() => (
-        renderCofechaHtmlWithLinks(reportText, treeOptions)
-    ), [reportText, treeOptions]);
+        renderCofechaHtmlWithLinks(reportText, treeOptions, cofechaPart6JumpTarget?.tree ?? null)
+    ), [reportText, treeOptions, cofechaPart6JumpTarget]);
+
+    // 拥有 PART 6 潜在问题块的序列集合（小写），用于决定右键菜单是否显示
+    // “在 COFECHA 中定位”。可用 possibleProblemsDetail 不够：它只收录带 [A] Segment
+    // 的序列，而仅有 [B]/[E] 等条目的序列同样出现在 PART 6 里。
+    const cofechaPart6Trees = useMemo(() => {
+        const trees = new Set<string>();
+        for (const line of (cofechaPart6Text ?? "").split(/\r\n|\n|\r/)) {
+            const match = line.match(COFECHA_PART6_SERIES_HEADER_RE);
+            if (match) {
+                trees.add(match[2].toLowerCase());
+            }
+        }
+        return trees;
+    }, [cofechaPart6Text]);
+
+    const handleJumpToCofechaPart6 = useCallback((tree: string) => {
+        const resolvedTree = resolveCofechaTreeCode(tree, siteData);
+        cofechaPart6JumpIdRef.current += 1;
+        setIsRawEditing(false);
+        // 已显示“全部内容”时报告已含 PART 6 区段，保持当前视图直接跳转；
+        // 仅当选中了其它单一部分时才切到 PART 6，避免无谓地改动 selector。
+        if (!cofechaReportShowsPart6(selectedPart)) {
+            setSelectedPart(COFECHA_PART6_PART_VALUE);
+        }
+        setCofechaPart6JumpTarget({ id: cofechaPart6JumpIdRef.current, tree: resolvedTree });
+        // 报告已弹出到独立窗口时，主窗口只剩占位符——聚焦独立窗口，让那边完成滚动。
+        if (externalWorkspaceWindows.cofecha) {
+            handleOpenWorkspaceWindow("cofecha");
+        }
+    }, [externalWorkspaceWindows.cofecha, handleOpenWorkspaceWindow, selectedPart, setSelectedPart, siteData]);
+
+    // PART 6 跳转：切到 PART 6 且报告在主窗口内时，滚动到对应序列的标题锚点。
+    useLayoutEffect(() => {
+        const target = cofechaPart6JumpTarget;
+        if (!target || handledCofechaPart6JumpIdRef.current === target.id) {
+            return;
+        }
+        if (externalWorkspaceWindows.cofecha) {
+            handledCofechaPart6JumpIdRef.current = target.id;
+            return;
+        }
+        if (!cofechaReportShowsPart6(selectedPart)) {
+            return; // 等 setSelectedPart 切到 PART 6、报告重渲染后再滚动
+        }
+        const scroller = cofechaReportScrollRef.current;
+        if (!scroller) {
+            return;
+        }
+        handledCofechaPart6JumpIdRef.current = target.id;
+        const anchor = findCofechaPart6Anchor(scroller, target.tree);
+        if (anchor) {
+            scrollCofechaAnchorIntoView(scroller, anchor);
+        }
+    }, [cofechaPart6JumpTarget, externalWorkspaceWindows.cofecha, linkedReport, selectedPart]);
+
+    // 高亮维持一段时间后清除跳转目标，报告随之去掉高亮类。
+    useEffect(() => {
+        const target = cofechaPart6JumpTarget;
+        if (!target) {
+            return;
+        }
+        const timer = window.setTimeout(() => {
+            setCofechaPart6JumpTarget((previous) => (previous?.id === target.id ? null : previous));
+        }, COFECHA_PART6_HIGHLIGHT_MS);
+        return () => {
+            window.clearTimeout(timer);
+        };
+    }, [cofechaPart6JumpTarget]);
 
     const workspaceWindowState = useMemo<Record<WorkspaceWindowKind, WorkspaceWindowState>>(() => ({
         "operation-log": {
             kind: "operation-log",
             fileName,
             operationLog,
+            canResetToRawData,
         },
         cofecha: {
             kind: "cofecha",
+            isCofechaOutdated,
+            isCofechaRunning,
+            canRunValidation: Boolean(fileName),
+            validationSummary: crossdatingValidationSummary,
             cofechaResult: cofechaResult ? {
                 possibleProblemsCount: cofechaResult.possibleProblemsCount,
                 masterSeriesYear: cofechaResult.masterSeriesYear,
@@ -464,12 +601,16 @@ export default function Home() {
             linkedReport,
             partOptions: COFECHA_PART_OPTIONS,
             selectedPart,
+            jumpTarget: cofechaPart6JumpTarget ?? undefined,
         },
         "line-chart": {
             kind: "line-chart",
             siteData: serializeRwlSiteData(siteData),
+            referenceConfig,
+            diagnosis: crossdatingDiagnosis,
+            diagnosisBatchResult,
         },
-    }), [cofechaResult, fileName, linkedReport, operationLog, selectedPart, siteData]);
+    }), [canResetToRawData, cofechaPart6JumpTarget, cofechaResult, crossdatingDiagnosis, crossdatingValidationSummary, diagnosisBatchResult, fileName, isCofechaOutdated, isCofechaRunning, linkedReport, operationLog, referenceConfig, selectedPart, siteData]);
 
     const handleCofechaTextClick = useCallback((event: MouseEvent<HTMLParagraphElement>) => {
         const target = event.target;
@@ -518,31 +659,55 @@ export default function Home() {
         handleCofechaCellReferenceClick({ tree, year });
     }, [handleCofechaCellReferenceClick]);
 
+    // 始终持有最新的工作区状态 / 命令处理函数，供「只注册一次」的事件监听器读取。
+    // 若把它们放进监听器 effect 的依赖里，每次状态变化都会重注册监听器，
+    // 其异步间隙会丢掉子窗口发来的 COMMAND（例如独立窗口里切换 PART 不生效）。
+    const workspaceWindowStateRef = useRef(workspaceWindowState);
+    useEffect(() => {
+        workspaceWindowStateRef.current = workspaceWindowState;
+    }, [workspaceWindowState]);
+
     const emitWorkspaceState = useCallback((kind: WorkspaceWindowKind, targetLabel = workspaceWindowLabels[kind]) => {
         void emitTo(targetLabel, WORKSPACE_WINDOW_STATE_EVENT, {
             kind,
-            state: workspaceWindowState[kind],
+            state: workspaceWindowStateRef.current[kind],
         });
-    }, [workspaceWindowState]);
+    }, []);
 
     const handleWorkspaceWindowCommand = useCallback((command: WorkspaceWindowCommand) => {
         switch (command.kind) {
             case "operation-log":
                 if (command.type === "undo-log-entry") {
                     handleUndoOperationLogEntry(command.entryId);
-                } else {
+                } else if (command.type === "undo-log-batch") {
+                    handleUndoOperationLogBatch(command.batchId);
+                } else if (command.type === "redo-log-entry") {
                     handleRedoOperationLogEntry(command.entryId);
+                } else if (command.type === "reset-to-raw") {
+                    handleResetToRawData();
+                } else {
+                    handleCofechaCellReferenceClick({ tree: command.tree, year: command.year });
                 }
                 break;
             case "cofecha":
                 if (command.type === "select-part") {
                     setSelectedPart(command.part);
+                } else if (command.type === "run-validation") {
+                    void handleRunCofechaValidation();
                 } else {
                     handleCofechaCellReferenceClick({ tree: command.tree, year: command.year });
                 }
                 break;
             case "line-chart":
-                if (command.type === "insert-missing") {
+                if (command.type === "set-reference") {
+                    handleReferenceConfigChange(command.config);
+                } else if (command.type === "apply-diagnosis-candidate") {
+                    handleApplyDiagnosisCandidate(command.candidate);
+                } else if (command.type === "apply-diagnosis-candidates") {
+                    handleApplyDiagnosisCandidateBatch(command.candidates);
+                } else if (command.type === "apply-local-simulation") {
+                    handleApplyLocalSimulation(command.request);
+                } else if (command.type === "insert-missing") {
                     handleInsertMissingYearAtSideFromChart(command.tree, command.year, command.side);
                 } else if (command.type === "delete-year") {
                     handleDeleteYearWithModeFromChart(command.tree, command.year, command.mode, command.shift);
@@ -555,11 +720,23 @@ export default function Home() {
         handleCofechaCellReferenceClick,
         handleDeleteSeriesFromChart,
         handleDeleteYearWithModeFromChart,
+        handleApplyDiagnosisCandidate,
+        handleApplyDiagnosisCandidateBatch,
+        handleApplyLocalSimulation,
         handleInsertMissingYearAtSideFromChart,
+        handleReferenceConfigChange,
         handleRedoOperationLogEntry,
+        handleRunCofechaValidation,
+        handleResetToRawData,
         handleUndoOperationLogEntry,
+        handleUndoOperationLogBatch,
         setSelectedPart,
     ]);
+
+    const handleWorkspaceWindowCommandRef = useRef(handleWorkspaceWindowCommand);
+    useEffect(() => {
+        handleWorkspaceWindowCommandRef.current = handleWorkspaceWindowCommand;
+    }, [handleWorkspaceWindowCommand]);
 
     useEffect(() => {
         let isMounted = true;
@@ -570,6 +747,14 @@ export default function Home() {
                 WORKSPACE_WINDOW_REQUEST_EVENT,
                 (event) => {
                     if (!isMounted) return;
+                    if (!isWorkspaceWindowLabel(event.payload.kind, event.payload.requesterLabel)) return;
+                    // 窗口主动请求状态即代表其存活，标记为已打开，
+                    // 以便后续状态变化（如切换 PART）能继续同步过去。
+                    setExternalWorkspaceWindows((previous) => (
+                        previous[event.payload.kind]
+                            ? previous
+                            : { ...previous, [event.payload.kind]: true }
+                    ));
                     emitWorkspaceState(event.payload.kind, event.payload.requesterLabel);
                 },
             ));
@@ -577,13 +762,14 @@ export default function Home() {
                 WORKSPACE_WINDOW_COMMAND_EVENT,
                 (event) => {
                     if (!isMounted) return;
-                    handleWorkspaceWindowCommand(event.payload);
+                    handleWorkspaceWindowCommandRef.current(event.payload);
                 },
             ));
             unlisteners.push(await listen<WorkspaceWindowClosedPayload>(
                 WORKSPACE_WINDOW_CLOSED_EVENT,
                 (event) => {
                     if (!isMounted) return;
+                    if (!isWorkspaceWindowLabel(event.payload.kind, event.payload.requesterLabel)) return;
                     setExternalWorkspaceWindows((previous) => ({
                         ...previous,
                         [event.payload.kind]: false,
@@ -598,7 +784,7 @@ export default function Home() {
             isMounted = false;
             unlisteners.forEach((unlisten) => unlisten());
         };
-    }, [emitWorkspaceState, handleWorkspaceWindowCommand]);
+    }, [emitWorkspaceState]);
 
     useEffect(() => {
         (Object.keys(externalWorkspaceWindows) as WorkspaceWindowKind[]).forEach((kind) => {
@@ -606,7 +792,8 @@ export default function Home() {
                 emitWorkspaceState(kind);
             }
         });
-    }, [emitWorkspaceState, externalWorkspaceWindows]);
+        // 依赖 workspaceWindowState：状态变化时把最新快照推送给所有已打开的独立窗口。
+    }, [emitWorkspaceState, externalWorkspaceWindows, workspaceWindowState]);
 
     const jumpToCellRef = useRef(handleCofechaCellReferenceClick);
     useEffect(() => {
@@ -1031,39 +1218,43 @@ export default function Home() {
                                 >
                                     {(dataContainerRef) => (
                                         <>
-                                        {shouldShowWelcome ? (
-                                            <div className={style["loading-container"]}>
-                                                <img src="IDM.png" className={style["loading-image"]} alt="IDM loading" />
-                                                <p className={style["developers"]}>{WELCOME_TEXT}</p>
-                                            </div>
-                                        ) : (
-                                            <WidthContainer
-                                                siteData={siteData}
-                                                selected={selectedTree}
-                                                masterSeries={cofechaResult?.masterDatingSeries}
-                                                historyAnimation={historyAnimation}
-                                                jumpTarget={cofechaCellJumpTarget}
-                                                editHighlightTarget={editHighlightTarget}
-                                                deleteSeriesRequest={deleteSeriesRequest}
-                                                deletionMarkers={deletionMarkers}
-                                                scrollContainerRef={dataContainerRef}
-                                                onInsertMissingYearAtSide={handleInsertMissingYearAtSide}
-                                                onMoveSeriesTailByOffset={handleMoveSeriesTailByOffset}
-                                                onDeleteYearWithMode={handleDeleteYearWithMode}
-                                                onMarkYearRangeAsMissing={handleMarkYearRangeAsMissing}
-                                                onRestoreDeletion={handleRestoreDeletion}
-                                                onDeleteSeries={handleDeleteSeries}
-                                                onEditAsText={handleOpenRawEditor}
-                                                onDeleteSeriesRequestHandled={handleDeleteSeriesRequestHandled}
-                                                onReplaceTreeData={handleReplaceTreeData}
-                                            />
-                                        )}
+                                            {shouldShowWelcome ? (
+                                                <div className={style["loading-container"]}>
+                                                    <img src="IDM.png" className={style["loading-image"]} alt="IDM loading" />
+                                                    <p className={style["developers"]}>{WELCOME_TEXT}</p>
+                                                </div>
+                                            ) : (
+                                                <WidthContainer
+                                                    siteData={siteData}
+                                                    selected={selectedTree}
+                                                    masterSeries={cofechaResult?.masterDatingSeries}
+                                                    masterCorrelations={cofechaResult?.masterCorrelations}
+                                                    seriesProblemCounts={cofechaResult?.seriesProblemCounts}
+                                                    historyAnimation={historyAnimation}
+                                                    jumpTarget={cofechaCellJumpTarget}
+                                                    editHighlightTarget={editHighlightTarget}
+                                                    deleteSeriesRequest={deleteSeriesRequest}
+                                                    deletionMarkers={deletionMarkers}
+                                                    scrollContainerRef={dataContainerRef}
+                                                    onInsertMissingYearAtSide={handleInsertMissingYearAtSide}
+                                                    onMoveSeriesTailByOffset={handleMoveSeriesTailByOffset}
+                                                    onDeleteYearWithMode={handleDeleteYearWithMode}
+                                                    onMarkYearRangeAsMissing={handleMarkYearRangeAsMissing}
+                                                    onRestoreDeletion={handleRestoreDeletion}
+                                                    onDeleteSeries={handleDeleteSeries}
+                                                    onEditAsText={handleOpenRawEditor}
+                                                    onDeleteSeriesRequestHandled={handleDeleteSeriesRequestHandled}
+                                                    onReplaceTreeData={handleReplaceTreeData}
+                                                    onJumpToCofecha={handleJumpToCofechaPart6}
+                                                    cofechaPart6Trees={cofechaPart6Trees}
+                                                />
+                                            )}
 
-                                        {shouldShowProcessing ? (
-                                            <div className={style["processing-mask"]}>
-                                                <span>{processingText}</span>
-                                            </div>
-                                        ) : null}
+                                            {shouldShowProcessing ? (
+                                                <div className={style["processing-mask"]}>
+                                                    <span>{processingText}</span>
+                                                </div>
+                                            ) : null}
                                         </>
                                     )}
                                 </FloatingScrollArea>
@@ -1146,69 +1337,96 @@ export default function Home() {
                             </span>
                         </span>
                     </FloatingScrollArea>
+                    <div className={`${style["validation-summary"]} ${style[`validation-${crossdatingValidationSummary.severity}`]}`}>
+                        <div>
+                            <strong>{crossdatingValidationSummary.title}</strong>
+                            <span>{crossdatingValidationSummary.detail}</span>
+                        </div>
+                        {crossdatingValidationSummary.items.length > 0 ? (
+                            <ul>
+                                {crossdatingValidationSummary.items.slice(0, 3).map((item) => (
+                                    <li key={item}>{item}</li>
+                                ))}
+                            </ul>
+                        ) : null}
+                    </div>
 
                     <div className={style["cofecha-panels"]} ref={rightPanelsRef}>
-                        <FloatingScrollArea
-                            className={style["full-text"]}
-                            viewportStyle={cofechaTextStyle}
+                        <div
+                            className={style["cofecha-pane"]}
+                            style={cofechaTextStyle}
+                            onContextMenu={handlePanelContextMenu("cofecha")}
                         >
-                            <div className={style["cofecha-panel-content"]}>
-                                {externalWorkspaceWindows.cofecha ? (
-                                    <div className={style["external-window-placeholder"]}>
-                                        <span>COFECHA 已在独立窗口打开</span>
-                                        <button
-                                            type="button"
-                                            className={style["placeholder-button"]}
-                                            onClick={() => handleOpenWorkspaceWindow("cofecha")}
-                                        >
-                                            聚焦窗口
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <>
-                                        {!shouldShowWelcome ? (
-                                            <div className={style["cofecha-toolbar"]}>
-                                                <select
-                                                    name="cofecha"
-                                                    id={style["cofecha-selector"]}
-                                                    value={selectedPart}
-                                                    onChange={(event) => {
-                                                        setSelectedPart(event.target.value);
-                                                    }}
+                            {externalWorkspaceWindows.cofecha ? (
+                                <div className={style["external-window-placeholder"]}>
+                                    <span>COFECHA 已在独立窗口打开</span>
+                                    <button
+                                        type="button"
+                                        className={style["placeholder-button"]}
+                                        onClick={() => handleOpenWorkspaceWindow("cofecha")}
+                                    >
+                                        聚焦窗口
+                                    </button>
+                                </div>
+                            ) : (
+                                <>
+                                    {!shouldShowWelcome ? (
+                                        <div className={style["cofecha-toolbar"]}>
+                                            <select
+                                                name="cofecha"
+                                                id={style["cofecha-selector"]}
+                                                value={selectedPart}
+                                                onChange={(event) => {
+                                                    setSelectedPart(event.target.value);
+                                                }}
+                                            >
+                                                {COFECHA_PART_OPTIONS.map((option) => (
+                                                    <option key={option.value} value={option.value}>
+                                                        {option.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <button
+                                                type="button"
+                                                className={style["cofecha-validation-button"]}
+                                                disabled={!fileName || isCofechaRunning}
+                                                title={fileName ? "用当前工作数据重新运行 COFECHA" : "打开 RWL 文件后才能运行 COFECHA"}
+                                                onClick={() => { void handleRunCofechaValidation(); }}
+                                            >
+                                                {isCofechaRunning ? "正在验证" : "重新验证"}
+                                            </button>
+                                            {linkedReport.count > 0 ? (
+                                                <span className={style["cofecha-link-count"]}>
+                                                    跳转链接 {linkedReport.count}
+                                                </span>
+                                            ) : null}
+                                            {isCofechaOutdated ? (
+                                                <span
+                                                    className={style["cofecha-outdated-badge"]}
+                                                    title="当前 RWL 工作数据或 COFECHA 版本已变化，可以手动重新验证当前工作数据。"
                                                 >
-                                                    {COFECHA_PART_OPTIONS.map((option) => (
-                                                        <option key={option.value} value={option.value}>
-                                                            {option.label}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                                {linkedReport.count > 0 ? (
-                                                    <span className={style["cofecha-link-count"]}>
-                                                        跳转链接 {linkedReport.count}
-                                                    </span>
-                                                ) : null}
-                                                <button
-                                                    type="button"
-                                                    className={style["panel-open-button"]}
-                                                    title="打开 COFECHA 独立页面"
-                                                    aria-label="打开 COFECHA 独立页面"
-                                                    onClick={() => handleOpenWorkspaceWindow("cofecha")}
-                                                >
-                                                    ↗
-                                                </button>
-                                            </div>
-                                        ) : null}
+                                                    COFECHA 待验证
+                                                </span>
+                                            ) : null}
+                                        </div>
+                                    ) : null}
 
-                                        <p
-                                            id={style["cofecha-text"]}
-                                            onClick={handleCofechaTextClick}
-                                            onKeyDown={handleCofechaTextKeyDown}
-                                            dangerouslySetInnerHTML={{ __html: linkedReport.html }}
-                                        />
-                                    </>
-                                )}
-                            </div>
-                        </FloatingScrollArea>
+                                    <FloatingScrollArea
+                                        ref={cofechaReportScrollRef}
+                                        className={style["full-text"]}
+                                    >
+                                        <div className={style["cofecha-panel-content"]}>
+                                            <p
+                                                id={style["cofecha-text"]}
+                                                onClick={handleCofechaTextClick}
+                                                onKeyDown={handleCofechaTextKeyDown}
+                                                dangerouslySetInnerHTML={{ __html: linkedReport.html }}
+                                            />
+                                        </div>
+                                    </FloatingScrollArea>
+                                </>
+                            )}
+                        </div>
 
                         {hasChart ? (
                             <>
@@ -1226,18 +1444,10 @@ export default function Home() {
                                     })}
                                 />
 
-                                <FloatingScrollArea className={style["line-chart"]}>
-                                    <div className={style["line-chart-toolbar"]}>
-                                        <button
-                                            type="button"
-                                            className={style["panel-open-button"]}
-                                            title="打开折线图独立页面"
-                                            aria-label="打开折线图独立页面"
-                                            onClick={() => handleOpenWorkspaceWindow("line-chart")}
-                                        >
-                                            ↗
-                                        </button>
-                                    </div>
+                                <FloatingScrollArea
+                                    className={style["line-chart"]}
+                                    onContextMenu={handlePanelContextMenu("line-chart")}
+                                >
                                     {externalWorkspaceWindows["line-chart"] ? (
                                         <div className={`${style["cofecha-panel-content"]} ${style["line-chart-content"]}`}>
                                             <div className={style["external-window-placeholder"]}>
@@ -1255,6 +1465,13 @@ export default function Home() {
                                         <div className={`${style["cofecha-panel-content"]} ${style["line-chart-content"]}`}>
                                             <TreeChartManager
                                                 fullData={siteData}
+                                                referenceConfig={referenceConfig}
+                                                diagnosis={crossdatingDiagnosis}
+                                                diagnosisBatchResult={diagnosisBatchResult}
+                                                onReferenceConfigChange={handleReferenceConfigChange}
+                                                onApplyDiagnosisCandidate={handleApplyDiagnosisCandidate}
+                                                onApplyDiagnosisCandidateBatch={handleApplyDiagnosisCandidateBatch}
+                                                onApplyLocalSimulation={handleApplyLocalSimulation}
                                                 onInsertMissingYearAtSide={handleInsertMissingYearAtSideFromChart}
                                                 onDeleteYearWithMode={handleDeleteYearWithModeFromChart}
                                                 onDeleteSeries={handleDeleteSeriesFromChart}
@@ -1267,6 +1484,14 @@ export default function Home() {
                     </div>
                 </div>
             </div>
+
+            <ContextMenu
+                open={panelContextMenu !== null}
+                x={panelContextMenu?.x ?? 0}
+                y={panelContextMenu?.y ?? 0}
+                items={panelContextMenuItems}
+                onClose={closePanelContextMenu}
+            />
         </>
     );
 }

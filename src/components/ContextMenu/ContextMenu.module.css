@@ -1,0 +1,76 @@
+.menu-root {
+    position: fixed;
+    z-index: 1000;
+    min-width: 168px;
+    padding: 3px;
+    border-radius: 6px;
+    background: #ffffff;
+    box-shadow: 0 16px 36px rgba(15, 23, 42, 0.18), 0 2px 8px rgba(15, 23, 42, 0.08);
+    border: 1px solid rgb(186, 186, 186);
+    font-family: "Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-size: 13px;
+    color: #1f2937;
+    user-select: none;
+    animation: context-menu-pop 140ms cubic-bezier(0.16, 1, 0.3, 1);
+    transform-origin: var(--menu-origin-x, left) var(--menu-origin-y, top);
+}
+
+.menu-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    padding: 5px 9px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 100ms ease, color 100ms ease;
+}
+
+.menu-item:hover,
+.menu-item:focus-visible {
+    background-color: #eef2ff;
+    color: #1d4ed8;
+    outline: none;
+}
+
+.menu-item:disabled {
+    color: #9aa3b2;
+    cursor: default;
+    background: transparent;
+}
+
+.menu-item-danger:hover,
+.menu-item-danger:focus-visible {
+    background-color: #fbeae8;
+    color: #a4332a;
+}
+
+.menu-item-icon {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    opacity: 0.8;
+}
+
+.menu-item-label {
+    flex: 1 1 auto;
+    font-weight: 600;
+    letter-spacing: 0;
+    white-space: nowrap;
+}
+
+@keyframes context-menu-pop {
+    from {
+        opacity: 0;
+        transform: scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
