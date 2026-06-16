@@ -11,6 +11,7 @@
     "validate:samples:strict": "node scripts/validate-samples.mjs --strict-internal",
     "validate:cofecha:samples": "node scripts/validate-cofecha-samples.mjs",
     "validate:workspace-windows": "node scripts/validate-workspace-windows.mjs",
+    "validate:auto-crossdating": "node scripts/validate-auto-crossdating.mjs",
     "trial:auto-crossdating": "node scripts/trial-auto-crossdating.mjs",
     "tauri": "tauri"
   },

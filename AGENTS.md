@@ -63,15 +63,15 @@
 - [src/components/Chart/MultiLineChart.tsx](src/components/Chart/MultiLineChart.tsx)：以加粗虚线绘制 reference series，并在 tooltip 中显示 sample depth；会把当前可见序列的 flagged/problem segments 作为淡色背景带显示。
 - [src/pages/home/useHomeWorkspace.ts](src/pages/home/useHomeWorkspace.ts)：按文件路径持久化 reference config 和参考辅助日志。
 - [src/pages/home/workspaceWindowBridge.ts](src/pages/home/workspaceWindowBridge.ts)：独立折线图窗口会同步 reference config，并把参考变更命令发回主窗口。
-- [src/features/crossdating/diagnosis.ts](src/features/crossdating/diagnosis.ts)：自动生成内部 problem segment count、lag search 结果和候选检查项；用户确认后可应用 `SHIFT_RANGE` 候选。
-- 折线图 hover 时会调用 [src/features/crossdating/diagnosis.ts](src/features/crossdating/diagnosis.ts) 的局部模拟，比较插入缺轮、删除伪轮和局部平移后的相关变化；模拟计算只读内存，不运行 COFECHA，不写磁盘，用户确认“应用”后才进入统一编辑路径。
+- [src/features/crossdating/diagnosis.ts](src/features/crossdating/diagnosis.ts)：自动生成内部 problem segment count、A-like/B-like segment、propagation pattern、三类候选编辑与 before/after evidence；用户确认后可一次应用一个候选。
+- 折线图候选生成由“生成候选”按钮触发；本轮不使用 hover 触发自动分析。
 
 **约束**：
 - reference series 是 derived series，不进入 RWL 数据本体，不允许作为普通序列编辑。
 - reference 计算按年份对齐，默认 arithmetic mean，低于最小 sample depth 的年份不绘制。
 - 参考变更写入操作日志，但不参与 RwlEditor 的撤销/恢复栈。
 - 内部诊断是 COFECHA-like 快速提示，不替代外部 COFECHA 最终验证；候选项必须由用户确认后才能通过 edit.ts 操作落地。
-- 应用诊断候选或 hover 局部模拟建议时必须复用 [src/features/rwl/edit.ts](src/features/rwl/edit.ts) 的编辑路径，并以 `auto-suggested` 来源写入操作日志，保留 reason、候选年份、side/shift 与 before/after metrics。
+- 应用诊断候选时必须复用 [src/features/rwl/edit.ts](src/features/rwl/edit.ts) 的编辑路径，并以 `auto-suggested` 来源写入既有操作记录，保留 reason、候选年份、side/shift、selectedRange/missingRange 与 before/after metrics。
 - [src/features/rwl/edit.ts](src/features/rwl/edit.ts)：`RwlEditor` 保留首次加载的 raw baseline，并在 history snapshot 中持久化 raw/working 数据、删除标记与 operation log；操作日志窗口的“回到原始”会走 `resetToRawData()`，不会依赖逐条反向猜测。
 - [src/pages/home/useHomeWorkspace.ts](src/pages/home/useHomeWorkspace.ts)：打开文件时若恢复了 working series，后续 COFECHA 运行使用 editor 当前导出的 working RWL；`Save As` 会切换当前文件路径，并把保存后的当前数据作为新文件的 raw baseline。
 - [src/components/WidthContainer/WidthContainer.tsx](src/components/WidthContainer/WidthContainer.tsx)：宽度网格顶部显示最近操作记录摘要，条目来自统一 workspace operation log；可定位到真实 series/year 的条目会复用主窗口跳转高亮逻辑。
@@ -93,6 +93,7 @@
 - `npm run validate:samples:strict` — crossdated 样例仍有内部问题段时返回非零并列出序列
 - `npm run validate:cofecha:samples` — 直接调用本地 COFECHA sidecar 验证 crossdated 样例的 A/problem
 - `npm run validate:workspace-windows` — SSR smoke 验证独立操作日志/COFECHA 窗口关键渲染与桥接常量
+- `npm run validate:auto-crossdating` — synthetic demo 验证自动交叉定年主线、三类候选、应用后重新诊断与 stale 标记
 - `npm run trial:auto-crossdating` — 在临时目录对 RAW 样例应用自动诊断候选并跑 COFECHA 对比；每轮每条序列只应用一个候选，不修改源文件
 - `npm run tauri`
 

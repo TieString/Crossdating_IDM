@@ -9,12 +9,9 @@ import {
 import {
   getDiagnosisCandidateLabel,
   isActionableDiagnosisCandidate,
-  selectSafeDiagnosisCandidateBatch,
-  simulateLocalCrossdating,
   type CrossdatingDiagnosis,
   type DiagnosisBatchApplyResult,
   type DiagnosisCandidateOperation,
-  type LocalCrossdatingSimulation,
   type LocalSimulationApplyRequest,
 } from '@/features/crossdating/diagnosis'
 import { RwlSiteData } from '@/features/rwl'
@@ -42,8 +39,6 @@ type Props = {
   onDeleteSeries?: (tree: string) => void
 }
 
-const HOVER_SIMULATION_DELAY_MS = 120
-
 function TreeChartManagerBase({
   fullData,
   variant = 'panel',
@@ -52,8 +47,6 @@ function TreeChartManagerBase({
   diagnosisBatchResult = null,
   onReferenceConfigChange,
   onApplyDiagnosisCandidate,
-  onApplyDiagnosisCandidateBatch,
-  onApplyLocalSimulation,
   onInsertMissingYearAtSide,
   onDeleteYearWithMode,
   onDeleteSeries,
@@ -64,10 +57,9 @@ function TreeChartManagerBase({
   const [highlightedTreeCode, setHighlightedTreeCode] = useState<string | null>(null)
   const [treeOffsets, setTreeOffsets] = useState<Map<string, number>>(new Map())
   const [zoomWindow, setZoomWindow] = useState<ChartZoomWindow>(null)
-  const [hoverTarget, setHoverTarget] = useState<{ tree: string; year: number } | null>(null)
-  const [hoverSimulation, setHoverSimulation] = useState<LocalCrossdatingSimulation | null>(null)
   const [search, setSearch] = useState('')
-  const [selectedBatchCandidateIds, setSelectedBatchCandidateIds] = useState<string[]>([])
+  const [candidatePanelOpen, setCandidatePanelOpen] = useState(false)
+  const [rejectedCandidateIds, setRejectedCandidateIds] = useState<string[]>([])
 
   useEffect(() => {
     setSelectedTrees((previous) => previous.filter((treeCode) => fullData.has(treeCode)))
@@ -226,39 +218,13 @@ function TreeChartManagerBase({
     return { flaggedSegmentCount, candidateCount }
   }, [activeSelection, diagnosisByTree])
 
-  useEffect(() => {
-    if (!hoverTarget) {
-      setHoverSimulation(null)
-      return
-    }
-
-    setHoverSimulation((previous) => (
-      previous?.targetTree === hoverTarget.tree && previous.year === hoverTarget.year
-        ? previous
-        : null
-    ))
-
-    let cancelled = false
-    const timer = window.setTimeout(() => {
-      const nextSimulation = simulateLocalCrossdating(fullData, hoverTarget.tree, hoverTarget.year, { referenceConfig })
-      if (!cancelled) {
-        setHoverSimulation(nextSimulation)
-      }
-    }, HOVER_SIMULATION_DELAY_MS)
-
-    return () => {
-      cancelled = true
-      window.clearTimeout(timer)
-    }
-  }, [fullData, hoverTarget, referenceConfig])
-
   const visibleDiagnosisCandidates = useMemo(() => {
     const candidates = diagnosis?.candidates ?? []
     const selectionSet = new Set(activeSelection)
     const scoped = selectionSet.size > 0
       ? candidates.filter((candidate) => selectionSet.has(candidate.targetTree))
       : candidates
-    return scoped.slice(0, isExpanded ? 8 : 3)
+    return scoped.slice(0, isExpanded ? 8 : 4)
   }, [activeSelection, diagnosis, isExpanded])
 
   const visibleFlaggedDiagnosisSegments = useMemo(() => {
@@ -309,14 +275,6 @@ function TreeChartManagerBase({
   const resetChartView = useCallback(() => {
     setTreeOffsets(new Map())
     setZoomWindow(null)
-  }, [])
-
-  const handleHoverTargetChange = useCallback((target: { tree: string; year: number } | null) => {
-    setHoverTarget((previous) => {
-      if (!target && !previous) return previous
-      if (target && previous && target.tree === previous.tree && target.year === previous.year) return previous
-      return target
-    })
   }, [])
 
   const beginReferenceSelection = useCallback(() => {
@@ -372,59 +330,24 @@ function TreeChartManagerBase({
   }
 
   const isCandidateApplicable = useCallback((candidate: DiagnosisCandidateOperation) => {
-    if (!onApplyDiagnosisCandidate && !onApplyDiagnosisCandidateBatch) return false
+    if (!onApplyDiagnosisCandidate) return false
     return isActionableDiagnosisCandidate(candidate)
-  }, [onApplyDiagnosisCandidate, onApplyDiagnosisCandidateBatch])
+  }, [onApplyDiagnosisCandidate])
 
   const applicableCandidateCount = useMemo(() => (
     (diagnosis?.candidates ?? []).filter(isCandidateApplicable).length
   ), [diagnosis, isCandidateApplicable])
 
-  const visibleActionableCandidates = useMemo(() => (
-    visibleDiagnosisCandidates.filter(isCandidateApplicable)
-  ), [isCandidateApplicable, visibleDiagnosisCandidates])
+  const visiblePropagationPatterns = useMemo(() => {
+    if (!diagnosis) return []
+    const selectionSet = new Set(activeSelection)
+    const scoped = selectionSet.size > 0
+      ? diagnosis.propagationPatterns.filter((pattern) => selectionSet.has(pattern.targetTree))
+      : diagnosis.propagationPatterns
+    return scoped.slice(0, isExpanded ? 6 : 3)
+  }, [activeSelection, diagnosis, isExpanded])
 
-  const safeVisibleActionableCandidates = useMemo(() => (
-    selectSafeDiagnosisCandidateBatch(visibleActionableCandidates).selected
-  ), [visibleActionableCandidates])
-
-  const safeVisibleActionableCandidateIds = useMemo(() => (
-    new Set(safeVisibleActionableCandidates.map((candidate) => candidate.id))
-  ), [safeVisibleActionableCandidates])
-
-  const safeVisibleActionableCandidateSignature = safeVisibleActionableCandidates.map((candidate) => candidate.id).join('|')
-
-  useEffect(() => {
-    setSelectedBatchCandidateIds(safeVisibleActionableCandidates.map((candidate) => candidate.id))
-  }, [safeVisibleActionableCandidateSignature])
-
-  const selectedBatchCandidates = useMemo(() => {
-    const selectedIds = new Set(selectedBatchCandidateIds)
-    return visibleActionableCandidates.filter((candidate) => selectedIds.has(candidate.id))
-  }, [selectedBatchCandidateIds, visibleActionableCandidates])
-
-  const toggleBatchCandidate = useCallback((candidateId: string) => {
-    setSelectedBatchCandidateIds((previous) => (
-      previous.includes(candidateId)
-        ? previous.filter((id) => id !== candidateId)
-        : [...previous, candidateId]
-    ))
-  }, [])
-
-  const selectAllVisibleBatchCandidates = useCallback(() => {
-    setSelectedBatchCandidateIds(safeVisibleActionableCandidates.map((candidate) => candidate.id))
-  }, [safeVisibleActionableCandidates])
-
-  const clearVisibleBatchCandidates = useCallback(() => {
-    setSelectedBatchCandidateIds([])
-  }, [])
-
-  const applySelectedBatchCandidates = useCallback(() => {
-    if (selectedBatchCandidates.length === 0) return
-    onApplyDiagnosisCandidateBatch?.(selectedBatchCandidates)
-  }, [onApplyDiagnosisCandidateBatch, selectedBatchCandidates])
-
-  const candidatePanel = diagnosis && visibleDiagnosisCandidates.length > 0 ? (
+  const candidatePanel = diagnosis && candidatePanelOpen && visibleDiagnosisCandidates.length > 0 ? (
     <div style={{
       display: 'flex',
       flexDirection: 'column',
@@ -442,47 +365,6 @@ function TreeChartManagerBase({
         <strong style={{ fontSize: 12, color: '#4c321e' }}>候选检查</strong>
         <span>{visibleDiagnosisCandidates.length} / {diagnosis.candidateCount} · 可执行 {applicableCandidateCount}</span>
       </div>
-      {onApplyDiagnosisCandidateBatch && visibleActionableCandidates.length > 1 ? (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1fr) auto auto auto',
-          gap: 6,
-          alignItems: 'center',
-          padding: '4px 6px',
-          border: '1px solid #ead7b6',
-          borderRadius: 5,
-          background: '#fffdf7',
-        }}>
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#6f5312' }}>
-            已选 {selectedBatchCandidates.length} / 推荐 {safeVisibleActionableCandidates.length}
-          </span>
-          <button
-            type="button"
-            onClick={selectAllVisibleBatchCandidates}
-            style={{ ...btnBase, padding: '2px 7px', fontSize: 11 }}
-          >
-            全选
-          </button>
-          <button
-            type="button"
-            onClick={clearVisibleBatchCandidates}
-            style={{ ...btnBase, padding: '2px 7px', fontSize: 11 }}
-          >
-            清空
-          </button>
-          <button
-            type="button"
-            disabled={selectedBatchCandidates.length === 0}
-            title={selectedBatchCandidates.length === 0 ? '先勾选要应用的候选' : '同一批次每条序列只应用一个候选，其余会记录为跳过'}
-            onClick={applySelectedBatchCandidates}
-            style={selectedBatchCandidates.length === 0
-              ? { ...btnDisabled, padding: '2px 7px', fontSize: 11 }
-              : { ...btnBase, padding: '2px 7px', fontSize: 11, borderColor: '#9a6a13', color: '#6f5312', fontWeight: 650 }}
-          >
-            应用已选
-          </button>
-        </div>
-      ) : null}
       {diagnosisBatchResult ? (
         <div style={{
           display: 'flex',
@@ -495,16 +377,13 @@ function TreeChartManagerBase({
           color: diagnosisBatchResult.failedCount > 0 ? '#7e351e' : '#2f5d35',
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
-            <strong style={{ fontSize: 11 }}>批次 {formatShortBatchId(diagnosisBatchResult.batchId)}</strong>
+            <strong style={{ fontSize: 11 }}>最近应用 {formatShortBatchId(diagnosisBatchResult.batchId)}</strong>
             <span>
-              请求 {diagnosisBatchResult.requestedCount} · 应用 {diagnosisBatchResult.appliedCount} · 跳过 {diagnosisBatchResult.skippedCount} · 失败 {diagnosisBatchResult.failedCount}
+              应用 {diagnosisBatchResult.appliedCount} · 跳过 {diagnosisBatchResult.skippedCount} · 失败 {diagnosisBatchResult.failedCount}
             </span>
           </div>
-          {diagnosisBatchResult.appliedCount > 0 ? (
-            <span style={{ color: '#4f6b4c' }}>可在操作日志中按批次整批回滚。</span>
-          ) : null}
           {diagnosisBatchResult.results
-            .filter((result) => result.status !== 'applied' && result.reason)
+            .filter((result) => result.reason)
             .slice(0, 2)
             .map((result) => (
               <span key={result.candidateId} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -514,39 +393,29 @@ function TreeChartManagerBase({
         </div>
       ) : null}
       {visibleDiagnosisCandidates.map((candidate) => {
-        const canApply = Boolean(onApplyDiagnosisCandidate) && isCandidateApplicable(candidate)
-        const canBatchSelect = Boolean(onApplyDiagnosisCandidateBatch) && isCandidateApplicable(candidate)
-        const batchSelected = selectedBatchCandidateIds.includes(candidate.id)
-        const batchRecommended = safeVisibleActionableCandidateIds.has(candidate.id)
+        const rejected = rejectedCandidateIds.includes(candidate.id)
+        const canApply = Boolean(onApplyDiagnosisCandidate) && isCandidateApplicable(candidate) && !rejected
         const candidateYear = candidate.targetYear !== undefined ? ` · ${candidate.targetYear}` : ''
         const candidateDelta = candidate.delta !== undefined && candidate.delta !== null
           ? ` (${candidate.delta >= 0 ? '+' : ''}${candidate.delta.toFixed(2)})`
           : ''
+        const evidence = candidate.evidence
         return (
           <div
             key={candidate.id}
             style={{
               display: 'grid',
-              gridTemplateColumns: 'minmax(0, 1fr) auto',
+              gridTemplateColumns: 'minmax(0, 1fr) auto auto',
               gap: 6,
-              alignItems: 'center',
+              alignItems: 'start',
               padding: '5px 6px',
               borderRadius: 5,
-              background: '#fff',
+              background: rejected ? '#f6f6f6' : '#fff',
               border: '1px solid #efdfcc',
             }}
           >
             <div style={{ minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
-                {canBatchSelect ? (
-                  <input
-                    type="checkbox"
-                    checked={batchSelected}
-                    title={batchRecommended ? '纳入批量应用' : '同一序列已有更高优先级候选；批量应用时会跳过冲突项'}
-                    onChange={() => toggleBatchCandidate(candidate.id)}
-                    style={{ flex: '0 0 auto', margin: 0 }}
-                  />
-                ) : null}
                 <strong style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#352417' }}>
                   {candidate.targetTree}
                 </strong>
@@ -561,9 +430,23 @@ function TreeChartManagerBase({
                 }}>
                   {candidate.confidence}
                 </span>
+                {rejected ? (
+                  <span style={{ fontSize: 10, color: '#777' }}>已忽略</span>
+                ) : null}
               </div>
               <div style={{ marginTop: 2, color: '#6f5a45', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {candidate.segmentStartYear}-{candidate.segmentEndYear}{candidateYear} · {getDiagnosisCandidateLabel(candidate)} · r {formatCorrelation(candidate.currentCorrelation)} → {formatCorrelation(candidate.expectedCorrelation)}{candidateDelta}
+              </div>
+              <div style={{ marginTop: 3, color: '#765b40', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 8px' }}>
+                <span>A/B {evidence.before.unresolvedA}/{evidence.before.unresolvedB} → {evidence.after.unresolvedA}/{evidence.after.unresolvedB}</span>
+                <span>bestLag {evidence.before.bestLag} → {evidence.after.bestLag}</span>
+                {candidate.mode ? <span>模式 {candidate.mode}</span> : <span>score {candidate.score.toFixed(2)}</span>}
+                {candidate.selectedRange ? <span>范围 {candidate.selectedRange.startYear}-{candidate.selectedRange.endYear}</span> : <span>anchor {candidate.anchorYear}</span>}
+                {candidate.missingRange ? <span>缺测 {candidate.missingRange.startYear}-{candidate.missingRange.endYear}</span> : null}
+                {candidate.deltaYears ? <span>delta {candidate.deltaYears > 0 ? '+' : ''}{candidate.deltaYears}</span> : null}
+              </div>
+              <div style={{ marginTop: 3, color: '#8a6b4c', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {evidence.explanation}
               </div>
             </div>
             <button
@@ -575,59 +458,18 @@ function TreeChartManagerBase({
             >
               应用
             </button>
+            <button
+              type="button"
+              disabled={rejected}
+              title={rejected ? '该候选已在当前视图中忽略' : '仅在当前视图中忽略，不修改数据'}
+              onClick={() => setRejectedCandidateIds((previous) => previous.includes(candidate.id) ? previous : [...previous, candidate.id])}
+              style={rejected ? { ...btnDisabled, padding: '3px 8px' } : { ...btnBase, padding: '3px 8px' }}
+            >
+              忽略
+            </button>
           </div>
         )
       })}
-    </div>
-  ) : null
-
-  const canApplyHoverSimulation = Boolean(
-    hoverSimulation
-    && hoverSimulation.bestOption.operationType !== 'NO_ACTION'
-    && hoverSimulation.bestOption.delta !== null
-    && hoverSimulation.bestOption.delta > 0
-    && onApplyLocalSimulation
-  )
-
-  const hoverSimulationPanel = hoverSimulation ? (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 5,
-      marginBottom: 8,
-      padding: 7,
-      border: '1px solid #d7e1ec',
-      borderRadius: 6,
-      background: '#f7fbff',
-      color: '#28445f',
-      fontFamily: 'Segoe UI, system-ui, sans-serif',
-      fontSize: 11,
-    }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
-        <strong style={{ fontSize: 12, color: '#1f344b' }}>悬停模拟</strong>
-        <span>{hoverSimulation.targetTree} · {hoverSimulation.year}</span>
-      </div>
-      <div style={{ color: '#52677e' }}>
-        {hoverSimulation.segmentStartYear}-{hoverSimulation.segmentEndYear} · r {formatCorrelation(hoverSimulation.bestOption.currentCorrelation)} → {formatCorrelation(hoverSimulation.bestOption.simulatedCorrelation)}
-        {hoverSimulation.bestOption.delta !== null ? ` (${hoverSimulation.bestOption.delta >= 0 ? '+' : ''}${hoverSimulation.bestOption.delta.toFixed(2)})` : ''}
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 6, alignItems: 'center' }}>
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {hoverSimulation.bestOption.label} · {hoverSimulation.bestOption.confidence}
-        </span>
-        <button
-          type="button"
-          disabled={!canApplyHoverSimulation}
-          title={canApplyHoverSimulation ? hoverSimulation.bestOption.reason : '没有正向改善或当前建议不可应用'}
-          onClick={() => hoverSimulation && onApplyLocalSimulation?.({
-            simulation: hoverSimulation,
-            option: hoverSimulation.bestOption,
-          })}
-          style={canApplyHoverSimulation ? { ...btnBase, padding: '3px 8px', borderColor: '#2e6da4', color: '#23527c' } : { ...btnDisabled, padding: '3px 8px' }}
-        >
-          应用
-        </button>
-      </div>
     </div>
   ) : null
 
@@ -637,10 +479,8 @@ function TreeChartManagerBase({
       sampleSizeData={fullData}
       referenceSeries={referenceSeries}
       diagnosisSegments={visibleFlaggedDiagnosisSegments}
-      hoverSimulation={hoverSimulation}
       highlightedTreeCode={highlightedTreeCode}
       onHighlightedTreeCodeChange={setHighlightedTreeCode}
-      onHoverTargetChange={handleHoverTargetChange}
       zoomWindow={zoomWindow}
       onZoomWindowChange={setZoomWindow}
       onShiftHighlightedTree={shiftHighlightedTree}
@@ -738,6 +578,34 @@ function TreeChartManagerBase({
             诊断 {diagnosis.problemSegmentCount} / {diagnosis.candidateCount}
           </span>
         ) : null}
+        {diagnosis && diagnosis.masterNarrowYears.length > 0 ? (
+          <span
+            title={diagnosis.masterNarrowYears.slice(0, 12).map((item) => `${item.year} (${item.masterValue.toFixed(2)}, n=${item.sampleDepth})`).join(' · ')}
+            style={{
+              fontSize: 11,
+              color: '#244a63',
+              background: '#eef7fc',
+              border: '1px solid #c9dfeb',
+              borderRadius: 10,
+              padding: '1px 8px',
+              fontWeight: 600,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            窄年 {diagnosis.masterNarrowYears.length}
+          </span>
+        ) : null}
+        {diagnosis && diagnosis.candidateCount > 0 ? (
+          <button
+            type="button"
+            onClick={() => setCandidatePanelOpen((open) => !open)}
+            style={candidatePanelOpen
+              ? { ...btnBase, borderColor: '#b86b33', color: '#8a3b12', fontWeight: 650 }
+              : btnBase}
+          >
+            {candidatePanelOpen ? '收起候选' : '生成候选'}
+          </button>
+        ) : null}
       </div>
 
       {isExpanded ? (
@@ -760,8 +628,30 @@ function TreeChartManagerBase({
         </div>
       ) : null}
 
+      {candidatePanelOpen && visiblePropagationPatterns.length > 0 ? (
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 4,
+          marginBottom: 8,
+          padding: 7,
+          border: '1px solid #d5dce7',
+          borderRadius: 6,
+          background: '#f8fbff',
+          color: '#41546b',
+          fontFamily: 'Segoe UI, system-ui, sans-serif',
+          fontSize: 11,
+        }}>
+          <strong style={{ fontSize: 12, color: '#26384d' }}>传播型偏移</strong>
+          {visiblePropagationPatterns.map((pattern) => (
+            <span key={`${pattern.targetTree}-${pattern.lag}-${pattern.olderBoundaryYear}-${pattern.newerBoundaryYear}`}>
+              {pattern.targetTree} · lag {pattern.lag > 0 ? '+' : ''}{pattern.lag} · {pattern.patternType} · {pattern.olderBoundaryYear}-{pattern.newerBoundaryYear}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
       {candidatePanel}
-      {hoverSimulationPanel}
 
       <FloatingScrollArea
         viewportStyle={{

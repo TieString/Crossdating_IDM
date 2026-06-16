@@ -4,6 +4,7 @@ import { parseCofechaResult, splitReportByParts } from "@/features/cofecha/forma
 import {
     diagnoseCrossdating,
     getDiagnosisCandidateLabel,
+    markCandidatesStale,
     selectSafeDiagnosisCandidateBatch,
     type DiagnosisBatchApplyResult,
     type DiagnosisBatchCandidateResult,
@@ -338,6 +339,7 @@ export function useHomeWorkspace() {
     const referenceOperationCounterRef = useRef(0);
     const cofechaOperationCounterRef = useRef(0);
     const lastCofechaValidationRef = useRef<{ input: string; version: CofechaVersion } | null>(null);
+    const latestDiagnosisCandidatesRef = useRef<DiagnosisCandidateOperation[]>([]);
 
     const [siteData, setSiteData] = useState<RwlSiteData>(() => rwlEditorRef.current.getData());
     const [deletionMarkers, setDeletionMarkers] = useState<RwlDeletionMarkers>(() => rwlEditorRef.current.getDeletionMarkers());
@@ -827,21 +829,24 @@ export function useHomeWorkspace() {
         };
 
         if (candidate.operationType === "SHIFT_RANGE") {
-            const shift = candidate.shift ?? candidate.suggestedLag;
+            const shift = candidate.deltaYears ?? candidate.shift ?? candidate.suggestedLag;
             if (shift === 0) return false;
-            const startYear = candidate.targetYear ?? candidate.segmentStartYear;
+            const selectedRange = candidate.selectedRange ?? {
+                startYear: candidate.targetYear ?? candidate.segmentStartYear,
+                endYear: candidate.segmentEndYear,
+            };
             rwlEditorRef.current.moveSeriesTailByOffset(
                 candidate.targetTree,
-                startYear,
-                candidate.segmentEndYear,
+                selectedRange.startYear,
+                selectedRange.endYear,
                 shift,
                 logMetadata,
             );
             triggerHistoryAnimation({
                 type: "move-selection",
                 tree: candidate.targetTree,
-                selectedStartYear: startYear,
-                selectedEndYear: candidate.segmentEndYear,
+                selectedStartYear: selectedRange.startYear,
+                selectedEndYear: selectedRange.endYear,
                 yearOffset: shift,
                 direction: "redo",
             });
@@ -888,7 +893,26 @@ export function useHomeWorkspace() {
     }, [triggerHistoryAnimation]);
 
     const handleApplyDiagnosisCandidate = useCallback((candidate: DiagnosisCandidateOperation) => {
-        applyDiagnosisCandidate(candidate);
+        const applied = applyDiagnosisCandidate(candidate);
+        const staleCandidates = markCandidatesStale(latestDiagnosisCandidatesRef.current);
+
+        setDiagnosisBatchResult({
+            batchId: `single-suggestion-${Date.now()}`,
+            createdAt: new Date().toISOString(),
+            requestedCount: 1,
+            appliedCount: applied ? 1 : 0,
+            skippedCount: applied ? 0 : 1,
+            failedCount: 0,
+            results: [{
+                candidateId: candidate.id,
+                targetTree: candidate.targetTree,
+                label: getDiagnosisCandidateLabel(candidate),
+                status: applied ? "applied" : "skipped",
+                reason: applied
+                    ? `已应用；${staleCandidates.length} 个旧候选在内存中标记为 stale，诊断会随当前工作序列重新计算。`
+                    : "当前候选未产生可应用编辑。",
+            }],
+        });
     }, [applyDiagnosisCandidate]);
 
     const handleApplyDiagnosisCandidateBatch = useCallback((candidates: DiagnosisCandidateOperation[]): DiagnosisBatchApplyResult => {
@@ -1065,6 +1089,9 @@ export function useHomeWorkspace() {
     const crossdatingDiagnosis = useMemo(() => (
         diagnoseCrossdating(siteData, { referenceConfig })
     ), [referenceConfig, siteData]);
+    useEffect(() => {
+        latestDiagnosisCandidatesRef.current = crossdatingDiagnosis.candidates;
+    }, [crossdatingDiagnosis.candidates]);
     const canResetToRawData = useMemo(() => (
         rwlEditorRef.current.hasRawDataChanges()
     ), [deletionMarkers, siteData]);
