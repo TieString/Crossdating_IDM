@@ -10,20 +10,23 @@ interface MenuItemProps {
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
   isActive?: boolean;
+  disabled?: boolean;
   children?: React.ReactNode;
 }
 
-const MenuItem: React.FC<MenuItemProps> = ({ label, onClick, onMouseEnter, onMouseLeave, isActive, children }) => {
+const MenuItem: React.FC<MenuItemProps> = ({ label, onClick, onMouseEnter, onMouseLeave, isActive, disabled, children }) => {
 
   return (
     <div
-      className={`${style["menu-item"]} ${isActive ? style["menu-item-active"] : ""}`}
+      className={`${style["menu-item"]} ${isActive ? style["menu-item-active"] : ""} ${disabled ? style["menu-item-disabled"] : ""}`}
+      aria-disabled={disabled || undefined}
       onClick={(e) => {
         e.stopPropagation();
+        if (disabled) return;
         if (onClick) onClick();
       }}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
+      onMouseEnter={disabled ? undefined : onMouseEnter}
+      onMouseLeave={disabled ? undefined : onMouseLeave}
     >
       <div className={style["menu-item-label"]}>
         {label}

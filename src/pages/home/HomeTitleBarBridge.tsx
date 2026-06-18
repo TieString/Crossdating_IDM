@@ -7,6 +7,7 @@ import { CofechaVersion, TitleMenuKind } from "./constants";
 type MenuItem = {
     label: string;
     onClick?: () => void | Promise<void>;
+    disabled?: boolean;
 };
 
 type HomeTitleBarBridgeProps = {
@@ -17,6 +18,8 @@ type HomeTitleBarBridgeProps = {
     onSaveAs: () => void | Promise<void>;
     onUndo: () => void | Promise<void>;
     onRedo: () => void | Promise<void>;
+    canUndo?: boolean;
+    canRedo?: boolean;
     onCofechaVersionChange: (version: CofechaVersion) => void;
     onActiveMenuChange?: (menu: TitleMenuKind | null) => void;
     onOpenOperationLog?: () => void | Promise<void>;
@@ -45,6 +48,8 @@ export function HomeTitleBarBridge({
     onSaveAs,
     onUndo,
     onRedo,
+    canUndo = true,
+    canRedo = true,
     onCofechaVersionChange,
     onActiveMenuChange,
     onOpenOperationLog,
@@ -93,12 +98,12 @@ export function HomeTitleBarBridge({
     ]), [closeAnd, onLoad, onSave, onSaveAs, onOpenSettings]);
 
     const editItems = useMemo<MenuItem[]>(() => ([
-        { label: "\u64a4\u9500", onClick: closeAnd(onUndo) },
-        { label: "\u6062\u590d", onClick: closeAnd(onRedo) },
+        { label: "\u64a4\u9500", onClick: closeAnd(onUndo), disabled: !canUndo },
+        { label: "\u6062\u590d", onClick: closeAnd(onRedo), disabled: !canRedo },
         { label: "\u64cd\u4f5c\u65e5\u5fd7", onClick: closeAnd(onOpenOperationLog) },
         { label: "\u67e5\u627e", onClick: closeAnd(onOpenFind) },
         { label: "\u66ff\u6362", onClick: closeAnd(onOpenReplace) },
-    ]), [closeAnd, onOpenFind, onOpenOperationLog, onOpenReplace, onRedo, onUndo]);
+    ]), [closeAnd, canRedo, canUndo, onOpenFind, onOpenOperationLog, onOpenReplace, onRedo, onUndo]);
 
     const runItems = useMemo<MenuItem[]>(() => ([
         {
@@ -159,6 +164,20 @@ export function HomeTitleBarBridge({
             document.body.removeEventListener("keydown", handleKeyDown);
         };
     }, [onOpenFind, onOpenReplace, onRedo, onSave, onUndo]);
+
+    useEffect(() => {
+        const undoButton = document.getElementById("title-submenu-undo-button") as HTMLButtonElement | null;
+        const redoButton = document.getElementById("title-submenu-redo-button") as HTMLButtonElement | null;
+
+        if (undoButton) {
+            undoButton.disabled = !canUndo;
+            undoButton.title = canUndo ? "撤销" : "没有可撤销的操作";
+        }
+        if (redoButton) {
+            redoButton.disabled = !canRedo;
+            redoButton.title = canRedo ? "恢复" : "没有可恢复的操作";
+        }
+    }, [canRedo, canUndo]);
 
     useEffect(() => {
         const undoButton = document.getElementById("title-submenu-undo-button");

@@ -71,7 +71,7 @@ interface VisualShiftTargets {
 
 const SHIFT_STAGGER_SECONDS = 0.014;
 
-const getGridTextContent = (element: HTMLElement) => {
+export const getGridTextContent = (element: HTMLElement) => {
     const firstTextNode = Array.from(element.childNodes).find((node) => node.nodeType === Node.TEXT_NODE);
     return firstTextNode?.textContent ?? element.textContent ?? "";
 };
@@ -238,7 +238,6 @@ const getVisualShiftTargets = (
     }
 
     const firstRowLastBefore = getFirstRowLastCellIndex(firstYearBefore);
-    const firstRowLastAfter = getFirstRowLastCellIndex(firstYearAfter);
     const firstYearMovesRight = firstYearAfter > firstYearBefore;
 
     shiftTargets.forEach(({ sourceYear, targetYear }) => {
@@ -246,6 +245,7 @@ const getVisualShiftTargets = (
         const targetPosition = getLayoutCellPosition(firstYearAfter, targetYear);
         const yearDelta = targetYear - sourceYear;
         const touchesFirstRow = sourcePosition.rowIndex === 0 || targetPosition.rowIndex === 0;
+        const hasSameVisualPosition = sameLayoutCellPosition(sourcePosition, targetPosition);
         const wrapsRightIntoNextRowStart = yearDelta > 0
             && sourcePosition.cellIndex === VALUE_COLUMN_COUNT - 1
             && targetPosition.cellIndex === 0;
@@ -258,9 +258,18 @@ const getVisualShiftTargets = (
             && targetPosition.rowIndex === 1
             && targetPosition.cellIndex === 0;
 
-        if (wrapsRightIntoNextRowStart || wrapsLeftIntoPreviousRowEnd || exitsFirstRowRightEdge) {
+        if (
+            (wrapsRightIntoNextRowStart && sourcePosition.rowIndex === 0)
+            || (wrapsLeftIntoPreviousRowEnd && targetPosition.rowIndex === 0)
+            || exitsFirstRowRightEdge
+        ) {
             edgeFadeTargetYears.add(targetYear);
             sourceExitTargetYears.add(targetYear);
+            return;
+        }
+
+        if (hasSameVisualPosition) {
+            stationaryTargetYears.add(targetYear);
             return;
         }
 
@@ -276,27 +285,6 @@ const getVisualShiftTargets = (
                 stationaryTargetYears.add(targetYear);
             }
             return;
-        }
-
-        if (sameLayoutCellPosition(sourcePosition, targetPosition) && targetPosition.rowIndex === 0) {
-            const sourceAtLeftEdge = sourcePosition.cellIndex === 0;
-            const sourceAtRightEdge = sourcePosition.cellIndex === firstRowLastBefore;
-            const targetAtLeftEdge = targetPosition.cellIndex === 0;
-            const targetAtRightEdge = targetPosition.cellIndex === firstRowLastAfter;
-
-            if (
-                (yearDelta < 0 && (sourceAtLeftEdge || targetAtLeftEdge))
-                || (yearDelta > 0 && (sourceAtRightEdge || targetAtRightEdge || targetAtLeftEdge))
-            ) {
-                edgeFadeTargetYears.add(targetYear);
-            }
-
-            if (
-                (yearDelta < 0 && sourceAtLeftEdge)
-                || (yearDelta > 0 && sourceAtRightEdge)
-            ) {
-                sourceExitTargetYears.add(targetYear);
-            }
         }
 
         const columnDelta = targetPosition.cellIndex - sourcePosition.cellIndex;
@@ -319,7 +307,10 @@ export const buildShiftPlan = (params: {
 }): { shiftedYears: number[]; shiftedCells: ShiftedCellAnimation[]; ghostCells: InsertFlipCell[] } => {
     const { shiftTargets, sourceElements, firstYearBefore, firstYearAfter, shiftAnchorTargetYear, useFlightShift } = params;
     const extra = params.extraExcludedTargetYears ?? new Set<number>();
-    const canAnimateFirstRow = isFirstRowFull(firstYearBefore, sourceElements.keys());
+    const editableSourceYears = Array.from(sourceElements.entries())
+        .filter(([, element]) => element.dataset.widthGridStopCell !== "true")
+        .map(([year]) => year);
+    const canAnimateFirstRow = isFirstRowFull(firstYearBefore, editableSourceYears);
     const {
         crossRowTargetYears,
         stationaryTargetYears,
@@ -334,9 +325,7 @@ export const buildShiftPlan = (params: {
     const measuredShiftOffsets = useFlightShift
         ? getShiftTargetOffsets(shiftTargets, sourceElements)
         : new Map<number, ShiftedCellOffset>();
-    const shiftOffsets = new Map(
-        Array.from(measuredShiftOffsets).filter(([targetYear]) => !animatedEdgeFadeTargetYears.has(targetYear))
-    );
+    const shiftOffsets = measuredShiftOffsets;
     const shiftQueue = buildShiftQueue(shiftTargets, shiftAnchorTargetYear, animatedCrossRowTargetYears, excludedTargetYears, shiftOffsets, animatedEdgeFadeTargetYears);
     const crossRowGhostTargetYears = new Set(
         Array.from(animatedCrossRowTargetYears).filter((targetYear) => !useFlightShift || !shiftOffsets.has(targetYear))

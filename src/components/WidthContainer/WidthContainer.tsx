@@ -16,12 +16,15 @@ import {
     ROW_HEIGHT,
     VALUE_COLUMN_COUNT,
     getFirstRowBreakYear,
+    getFirstRowLastCellIndex,
+    getLayoutCellPosition,
     getYearOffsetWithinDecade,
 } from "./widthGridLayout";
 import {
     buildHistoryShiftPlan,
     buildShiftPlan,
     getDeleteShiftAnchorTargetYear,
+    getGridTextContent,
     getInsertShiftAnchorTargetYear,
     getOppositeSide,
     getRestoreShiftAnchorTargetYear,
@@ -64,8 +67,8 @@ const OVERSCAN_PX = 320;
 const GRID_GAP = 5;
 const DRAG_THRESHOLD_PX = 3;
 const INSERT_SHIFT_ANIMATION_MS = 1250;
-const CROSS_ROW_SOURCE_EXIT_MS = 1320;
-const CROSS_ROW_SOURCE_EXIT_EASING = "cubic-bezier(0.25, 0.1, 0.25, 1)";
+const CROSS_ROW_SOURCE_EXIT_MS = 950;
+const CROSS_ROW_SOURCE_EXIT_EASING = "cubic-bezier(0.16, 1, 0.3, 1)";
 const ANIMATION_PLAN_CLEAR_PADDING_MS = 360;
 const DELETE_BURST_ANIMATION_MS = 820;
 const DELETE_BURST_SWEEP_MS = 420;
@@ -303,7 +306,9 @@ const buildTimeline = (entries: Array<[number, number | null]>): YearCell[] => {
 
 const getTreeYearGridElements = (container: HTMLElement, tree: string) => {
     const elementsByYear = new Map<number, HTMLElement>();
-    const cells = container.querySelectorAll<HTMLElement>("[data-width-grid-cell='true']");
+    const cells = container.querySelectorAll<HTMLElement>(
+        "[data-width-grid-cell='true'], [data-width-grid-stop-cell='true']"
+    );
 
     cells.forEach((cell) => {
         if (cell.dataset.tree !== tree) {
@@ -528,6 +533,42 @@ const getFirstYearAfterDelete = (
         });
 
     return nextYears.length > 0 ? Math.min(...nextYears) : undefined;
+};
+
+const buildFirstRowRightEdgeDeleteGhost = (
+    deletedElement: HTMLElement | undefined,
+    treeData: Map<number, number | null> | undefined,
+    deletedYear: number,
+    shift: DeleteShift,
+): InsertFlipCell | null => {
+    if (!deletedElement || !treeData || shift !== "right") {
+        return null;
+    }
+
+    const firstYearBefore = getFirstSeriesYear(treeData);
+    if (firstYearBefore === undefined || getFirstRowLastCellIndex(firstYearBefore) !== VALUE_COLUMN_COUNT - 1) {
+        return null;
+    }
+
+    const sourcePosition = getLayoutCellPosition(firstYearBefore, deletedYear);
+    if (sourcePosition.rowIndex !== 0 || sourcePosition.cellIndex !== VALUE_COLUMN_COUNT - 1) {
+        return null;
+    }
+
+    const firstYearAfter = getFirstYearAfterDelete(treeData, deletedYear, shift);
+    if (firstYearAfter !== firstYearBefore + 1) {
+        return null;
+    }
+
+    return {
+        sourceYear: deletedYear,
+        targetYear: deletedYear,
+        sourceRect: deletedElement.getBoundingClientRect(),
+        sourceText: getGridTextContent(deletedElement),
+        sourceClassName: deletedElement.className,
+        sourceStyleText: deletedElement.getAttribute("style") ?? "",
+        delaySeconds: 0,
+    };
 };
 
 const getMoveAnimationYears = (
@@ -1502,17 +1543,12 @@ function WidthContainer({
             ghost.style.zIndex = "2";
             container.appendChild(ghost);
 
-            const driftDirection = pendingInsertFlip.side === "right" ? -1 : 1;
-            const drift = Math.min(28, Math.max(14, cell.sourceRect.width * 0.55));
-            const earlyDrift = driftDirection < 0 ? -Math.min(5.5, drift) : Math.min(12, drift);
-            const animation = ghost.animate(driftDirection < 0 ? [
+            const shiftDistance = cell.sourceRect.width + GRID_GAP;
+            const shiftX = pendingInsertFlip.side === "right" ? -shiftDistance : shiftDistance;
+            const animation = ghost.animate([
                 { opacity: 1, transform: "translate3d(0, 0, 0)", offset: 0 },
-                { opacity: 0.18, transform: `translate3d(${earlyDrift}px, 0, 0)`, offset: 0.24 },
-                { opacity: 0, transform: `translate3d(${-drift}px, 0, 0)`, offset: 1 },
-            ] : [
-                { opacity: 1, transform: "translate3d(0, 0, 0)", offset: 0 },
-                { opacity: 0.48, transform: `translate3d(${earlyDrift}px, 0, 0)`, offset: 0.34 },
-                { opacity: 0, transform: `translate3d(${drift}px, 0, 0)`, offset: 1 },
+                { opacity: 0.58, transform: `translate3d(${shiftX * 0.55}px, 0, 0)`, offset: 0.55 },
+                { opacity: 0, transform: `translate3d(${shiftX}px, 0, 0)`, offset: 1 },
             ], {
                 duration: scaleAnimationMs(CROSS_ROW_SOURCE_EXIT_MS, animationSpeed),
                 easing: CROSS_ROW_SOURCE_EXIT_EASING,
@@ -1928,6 +1964,7 @@ function WidthContainer({
         if (container) {
             const sourceElements = getTreeYearGridElements(container, tree);
             const deletedElement = sourceElements.get(year);
+            const deletedEdgeExitGhost = buildFirstRowRightEdgeDeleteGhost(deletedElement, treeData, year, shift);
             const shiftTargets = Array.from(sourceElements.entries())
                 .filter(([sourceYear]) => shift === "left" ? sourceYear > year : sourceYear < year)
                 .map(([sourceYear]) => ({
@@ -1945,13 +1982,19 @@ function WidthContainer({
             });
             shiftedYears = plan.shiftedYears;
             shiftedCells = plan.shiftedCells;
-            pendingInsertFlipRef.current = { tree, side: animationInsertSide, cells: plan.ghostCells };
+            pendingInsertFlipRef.current = {
+                tree,
+                side: animationInsertSide,
+                cells: deletedEdgeExitGhost ? [...plan.ghostCells, deletedEdgeExitGhost] : plan.ghostCells,
+            };
 
             if (deletedElement) {
                 clearDeleteBurstAnimations();
-                const cleanup = createDeletePixelBurst(container, deletedElement, animationSpeed);
-                if (cleanup) {
-                    deleteBurstCleanupRef.current = [cleanup];
+                if (!deletedEdgeExitGhost) {
+                    const cleanup = createDeletePixelBurst(container, deletedElement, animationSpeed);
+                    if (cleanup) {
+                        deleteBurstCleanupRef.current = [cleanup];
+                    }
                 }
             }
         }
@@ -2509,7 +2552,22 @@ function WidthContainer({
                                 }
 
                                 if (cell.width === stopMarker.value) {
-                                    return <WidthGrid gridValue={cell.width} key={`stop-${series.treeCode}-${cell.year}`} />;
+                                    return (
+                                        <WidthGrid
+                                            key={`stop-${series.treeCode}-${cell.year}-${cellAnimationKey}`}
+                                            gridValue={cell.width}
+                                            year={cell.year}
+                                            tree={series.treeCode}
+                                            animationKind={cellAnimationKind}
+                                            animationDelay={cellAnimationDelay}
+                                            animationOffset={cellAnimationOffset}
+                                            insertCellMotion={insertCellMotion}
+                                            animationSpeed={animationSpeed}
+                                            data-width-grid-stop-cell="true"
+                                            data-tree={series.treeCode}
+                                            data-year={cell.year}
+                                        />
+                                    );
                                 }
 
                                 const effectiveValue = cell.width ?? null;

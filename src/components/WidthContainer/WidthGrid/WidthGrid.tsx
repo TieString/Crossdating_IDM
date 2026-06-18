@@ -81,13 +81,24 @@ const getMotionConfig = (
     if (isShiftAnimation(animationKind) && animationOffset) {
         const isCrossRowShift = animationKind === "insert-cross-row-shift-left"
             || animationKind === "insert-cross-row-shift-right";
+        const isEdgeFadeShift = animationKind === "insert-edge-fade-left"
+            || animationKind === "insert-edge-fade-right";
+        const initial: TargetAndTransition = { x: animationOffset.x, y: animationOffset.y };
+        const animate: TargetAndTransition = { x: 0, y: 0 };
+
+        if (isEdgeFadeShift) {
+            initial.opacity = 0;
+            animate.opacity = 1;
+        }
+
         return {
-            initial: { x: animationOffset.x, y: animationOffset.y },
-            animate: { x: 0, y: 0 },
+            initial,
+            animate,
             transition: withDelay({
                 duration: isCrossRowShift ? 1.18 : 0.95,
                 ease: isCrossRowShift ? [0.22, 1, 0.36, 1] : [0.16, 1, 0.3, 1],
             }, delaySeconds, animationSpeed),
+            transitionEnd: isEdgeFadeShift ? { opacity: 1 } : undefined,
         };
     }
 
@@ -169,16 +180,16 @@ const getMotionConfig = (
             };
         case "insert-edge-fade-left":
             return {
-                initial: { x: 86, opacity: 0 },
+                initial: { x: "calc(100% + 5px)", opacity: 0 },
                 animate: { x: 0, opacity: 1 },
-                transition: withDelay({ duration: 0.74, ease: [0.22, 1, 0.36, 1] }, delaySeconds, animationSpeed),
+                transition: withDelay({ duration: 0.95, ease: [0.16, 1, 0.3, 1] }, delaySeconds, animationSpeed),
                 transitionEnd: { opacity: 1 },
             };
         case "insert-edge-fade-right":
             return {
-                initial: { x: -86, opacity: 0 },
+                initial: { x: "calc(-100% - 5px)", opacity: 0 },
                 animate: { x: 0, opacity: 1 },
-                transition: withDelay({ duration: 0.74, ease: [0.22, 1, 0.36, 1] }, delaySeconds, animationSpeed),
+                transition: withDelay({ duration: 0.95, ease: [0.16, 1, 0.3, 1] }, delaySeconds, animationSpeed),
                 transitionEnd: { opacity: 1 },
             };
         case "insert-cross-row-shift-left":

@@ -28,3 +28,12 @@
 .menu-item-active {
     background: #e3e5e7;
 }
+
+.menu-item-disabled {
+    color: #b5b7ba;
+    cursor: default;
+}
+
+.menu-item-disabled:hover {
+    background: transparent;
+}

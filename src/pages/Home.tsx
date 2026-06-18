@@ -454,6 +454,7 @@ export default function Home() {
         hasChart,
         hasProblems,
         historyAnimation,
+        historyStatus,
         isCofechaOutdated,
         isCofechaRunning,
         operationLog,
@@ -1142,6 +1143,8 @@ export default function Home() {
                 onSaveAs={handleSaveAs}
                 onUndo={handleUndo}
                 onRedo={handleRedo}
+                canUndo={historyStatus.undoCount > 0}
+                canRedo={historyStatus.redoCount > 0}
                 onCofechaVersionChange={setCofechaVersion}
                 onActiveMenuChange={setActiveMenu}
                 onOpenOperationLog={() => handleOpenWorkspaceWindow("operation-log")}

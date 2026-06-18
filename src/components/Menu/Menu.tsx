@@ -7,7 +7,7 @@ import styles from './Menu.module.css';
 // 菜单本身不处理业务逻辑，只负责显示、展开和点击协调。
 
 interface MenuProps {
-  items: { label: string; onClick?: () => void | Promise<void>; children?: React.ReactNode }[];
+  items: { label: string; onClick?: () => void | Promise<void>; disabled?: boolean; children?: React.ReactNode }[];
 }
 
 const Menu: React.FC<MenuProps> = ({ items }) => {
@@ -39,6 +39,7 @@ const Menu: React.FC<MenuProps> = ({ items }) => {
             isActive={activeMenuItem === item.label}
             key={index}
             label={item.label}
+            disabled={item.disabled}
             onClick={() => handleMenuClick(item.onClick, hasChildren)}
             onMouseEnter={() => handleMenuMouseEnter(item.label, hasChildren)}
             onMouseLeave={() => {
