@@ -11,6 +11,29 @@ import style from "./WidthContainer.module.css";
 import { stopMarker } from '@/shared/constants';
 import { useSettings } from "@/features/settings/SettingsContext";
 import { normalizeAnimationSpeed } from "@/features/settings/settings";
+import {
+    ROW_GAP,
+    ROW_HEIGHT,
+    VALUE_COLUMN_COUNT,
+    getFirstRowBreakYear,
+    getYearOffsetWithinDecade,
+} from "./widthGridLayout";
+import {
+    buildHistoryShiftPlan,
+    buildShiftPlan,
+    getDeleteShiftAnchorTargetYear,
+    getInsertShiftAnchorTargetYear,
+    getOppositeSide,
+    getRestoreShiftAnchorTargetYear,
+    getVisibleInsertShiftTargets,
+    isYearOnInsertSide,
+    type GridAnimationPlan,
+    type GridAnimationPlanInput,
+    type InsertFlipCell,
+    type PlusSide,
+    type RollingCellAnimation,
+    type ShiftedCellAnimation,
+} from "./widthGridAnimationPlan";
 
 interface YearCell {
     year: number;
@@ -35,18 +58,14 @@ interface VirtualSeries {
     bottom: number;
 }
 
-const ROW_HEIGHT = 24;
-const ROW_GAP = 5;
 const SERIES_HEADER_HEIGHT = 36;
 const SERIES_GAP = 12;
 const OVERSCAN_PX = 320;
-const VALUE_COLUMN_COUNT = 10;
 const GRID_GAP = 5;
 const DRAG_THRESHOLD_PX = 3;
 const INSERT_SHIFT_ANIMATION_MS = 1250;
 const CROSS_ROW_SOURCE_EXIT_MS = 1320;
 const CROSS_ROW_SOURCE_EXIT_EASING = "cubic-bezier(0.25, 0.1, 0.25, 1)";
-const SHIFT_STAGGER_SECONDS = 0.014;
 const ANIMATION_PLAN_CLEAR_PADDING_MS = 360;
 const DELETE_BURST_ANIMATION_MS = 820;
 const DELETE_BURST_SWEEP_MS = 420;
@@ -57,7 +76,6 @@ const scaleAnimationMs = (durationMs: number, animationSpeed: number) => (
     Math.max(1, Math.round(durationMs / animationSpeed))
 );
 
-type PlusSide = "left" | "right";
 type WidthHistoryAnimation = RwlHistoryAnimation & { id: number };
 
 interface GridSelection {
@@ -84,21 +102,6 @@ interface GridEditHighlightTarget {
     scrollYear?: number;
 }
 
-interface InsertFlipCell {
-    sourceYear: number;
-    targetYear: number;
-    sourceRect: DOMRect;
-    sourceText: string;
-    sourceClassName: string;
-    sourceStyleText: string;
-    delaySeconds: number;
-}
-
-interface InsertShiftTarget {
-    sourceYear: number;
-    targetYear: number;
-}
-
 interface PendingInsertFlip {
     tree: string;
     side: PlusSide;
@@ -110,57 +113,13 @@ type GridAnimationKind =
     | "insert-right"
     | "insert-shift-left"
     | "insert-shift-right"
+    | "insert-edge-fade-left"
+    | "insert-edge-fade-right"
     | "insert-cross-row-shift-left"
     | "insert-cross-row-shift-right"
     | "move-target"
     | "move-gap"
     | "overwrite";
-
-interface RollingCellAnimation {
-    year: number;
-    fromValue?: number;
-}
-
-interface ShiftedCellAnimation {
-    year: number;
-    delaySeconds: number;
-    crossRow?: boolean;
-    offsetX?: number;
-    offsetY?: number;
-}
-
-interface ShiftedCellOffset {
-    x: number;
-    y: number;
-}
-
-interface LayoutCellPosition {
-    rowIndex: number;
-    cellIndex: number;
-}
-
-interface VisualShiftTargets {
-    crossRowTargetYears: Set<number>;
-    stationaryTargetYears: Set<number>;
-}
-
-interface GridAnimationPlan {
-    id: number;
-    tree: string;
-    insertSide?: PlusSide;
-    insertedYears: number[];
-    shiftedYears: number[];
-    movedYears: number[];
-    gapYears: number[];
-    overwrittenYears: number[];
-    shiftedCells: ShiftedCellAnimation[];
-    rollingCells: RollingCellAnimation[];
-    elevatedYears: number[];
-}
-
-type GridAnimationPlanInput =
-    Omit<GridAnimationPlan, "id" | "shiftedCells" | "rollingCells" | "elevatedYears">
-    & Partial<Pick<GridAnimationPlan, "shiftedCells" | "rollingCells" | "elevatedYears">>;
 
 interface DeletionHoverItem {
     year: number;
@@ -194,8 +153,6 @@ type GridInteraction =
         hasMoved: boolean;
     };
 
-const getYearOffsetWithinDecade = (year: number) => ((year % 10) + 10) % 10;
-
 const getRollingWidthValue = (value: number | null | undefined) => (
     typeof value === "number" && value !== stopMarker.value ? value : undefined
 );
@@ -226,82 +183,6 @@ const addRollingTargetIfChanged = (
     targets.push({ year: targetYear, fromValue: numericFromValue });
 };
 
-const getUniqueYears = (years: number[]) => Array.from(new Set(years));
-
-const getOrderedShiftQueueYears = (years: number[], anchorTargetYear: number) => (
-    getUniqueYears(years).sort((yearA, yearB) => {
-        const distanceA = Math.abs(yearA - anchorTargetYear);
-        const distanceB = Math.abs(yearB - anchorTargetYear);
-
-        return distanceA === distanceB ? yearA - yearB : distanceA - distanceB;
-    })
-);
-
-const buildShiftedCells = (
-    shiftedYears: number[],
-    anchorTargetYear: number,
-    crossRowYears = new Set<number>(),
-    offsets = new Map<number, ShiftedCellOffset>(),
-): ShiftedCellAnimation[] => (
-    getOrderedShiftQueueYears(shiftedYears, anchorTargetYear).map((year, index) => {
-        const offset = offsets.get(year);
-        return {
-            year,
-            delaySeconds: index * SHIFT_STAGGER_SECONDS,
-            crossRow: crossRowYears.has(year),
-            offsetX: offset?.x,
-            offsetY: offset?.y,
-        };
-    })
-);
-
-const getShiftDelayByYear = (shiftedCells: ShiftedCellAnimation[]) => (
-    new Map(shiftedCells.map((cell) => [cell.year, cell.delaySeconds]))
-);
-
-const buildShiftQueue = (
-    shiftTargets: InsertShiftTarget[],
-    anchorTargetYear: number,
-    crossRowYears = new Set<number>(),
-    excludedTargetYears = new Set<number>(),
-    offsets = new Map<number, ShiftedCellOffset>(),
-) => {
-    const shiftedYears = getUniqueYears(shiftTargets.map(({ targetYear }) => targetYear))
-        .filter((targetYear) => !excludedTargetYears.has(targetYear));
-    const shiftedCells = buildShiftedCells(shiftedYears, anchorTargetYear, crossRowYears, offsets);
-    const shiftDelayByYear = getShiftDelayByYear(shiftedCells);
-
-    return { shiftedYears, shiftedCells, shiftDelayByYear };
-};
-
-const buildCrossRowGhostCells = (
-    shiftTargets: InsertShiftTarget[],
-    sourceElements: Map<number, HTMLElement>,
-    crossRowTargetYears: Set<number>,
-    shiftDelayByYear: Map<number, number>,
-): InsertFlipCell[] => (
-    shiftTargets
-        .filter(({ targetYear }) => crossRowTargetYears.has(targetYear))
-        .map(({ sourceYear, targetYear }): InsertFlipCell | null => {
-            const sourceElement = sourceElements.get(sourceYear);
-
-            if (!sourceElement) {
-                return null;
-            }
-
-            return {
-                sourceYear,
-                targetYear,
-                sourceRect: sourceElement.getBoundingClientRect(),
-                sourceText: getGridTextContent(sourceElement),
-                sourceClassName: sourceElement.className,
-                sourceStyleText: sourceElement.getAttribute("style") ?? "",
-                delaySeconds: shiftDelayByYear.get(targetYear) ?? 0,
-            };
-        })
-        .filter((cell): cell is InsertFlipCell => cell !== null)
-);
-
 const getAnimationPlanTimeoutMs = (plan: GridAnimationPlan, animationSpeed: number) => {
     const maxShiftDelaySeconds = plan.shiftedCells.reduce(
         (maxDelay, cell) => Math.max(maxDelay, cell.delaySeconds),
@@ -313,14 +194,6 @@ const getAnimationPlanTimeoutMs = (plan: GridAnimationPlan, animationSpeed: numb
         scaleAnimationMs(Math.ceil(maxShiftDelaySeconds * 1000) + INSERT_SHIFT_ANIMATION_MS + ANIMATION_PLAN_CLEAR_PADDING_MS, animationSpeed)
     );
 };
-
-const getInsertShiftAnchorTargetYear = (year: number, side: PlusSide) => (
-    side === "right" ? year - 1 : year + 1
-);
-
-const getDeleteShiftAnchorTargetYear = (year: number) => year;
-
-const getRestoreShiftAnchorTargetYear = (year: number) => year - 1;
 
 const buildDeleteRollingCells = (
     treeData: Map<number, number | null> | undefined,
@@ -363,39 +236,6 @@ const buildDeleteRollingCells = (
 
     return rollingCells;
 };
-
-const getFirstRowBreakYear = (startYear: number) => {
-    const offset = getYearOffsetWithinDecade(startYear);
-    return offset === 0 ? startYear : startYear + (10 - offset);
-};
-
-const getLayoutCellPosition = (firstYear: number, year: number): LayoutCellPosition => {
-    // buildSeriesRows renders a decade-aligned first year as row 0, not as the row after a partial header row.
-    if (getYearOffsetWithinDecade(firstYear) === 0) {
-        return {
-            rowIndex: Math.floor((year - firstYear) / VALUE_COLUMN_COUNT),
-            cellIndex: getYearOffsetWithinDecade(year),
-        };
-    }
-
-    const firstRowBreakYear = getFirstRowBreakYear(firstYear);
-
-    if (year < firstRowBreakYear) {
-        return {
-            rowIndex: 0,
-            cellIndex: year - firstYear,
-        };
-    }
-
-    return {
-        rowIndex: 1 + Math.floor((year - firstRowBreakYear) / VALUE_COLUMN_COUNT),
-        cellIndex: getYearOffsetWithinDecade(year),
-    };
-};
-
-const sameLayoutCellPosition = (a: LayoutCellPosition, b: LayoutCellPosition) => (
-    a.rowIndex === b.rowIndex && a.cellIndex === b.cellIndex
-);
 
 const normalizeSelection = (tree: string, yearA: number, yearB: number): GridSelection => ({
     tree,
@@ -477,11 +317,6 @@ const getTreeYearGridElements = (container: HTMLElement, tree: string) => {
     });
 
     return elementsByYear;
-};
-
-const getGridTextContent = (element: HTMLElement) => {
-    const firstTextNode = Array.from(element.childNodes).find((node) => node.nodeType === Node.TEXT_NODE);
-    return firstTextNode?.textContent ?? element.textContent ?? "";
 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -694,185 +529,6 @@ const getFirstYearAfterDelete = (
 
     return nextYears.length > 0 ? Math.min(...nextYears) : undefined;
 };
-
-const getVisibleInsertShiftTargets = (
-    sourceElements: Map<number, HTMLElement>,
-    currentYear: number,
-    side: PlusSide,
-): InsertShiftTarget[] => {
-    const direction = side === "left" ? 1 : -1;
-
-    return Array.from(sourceElements.entries())
-        .filter(([sourceYear]) => side === "left" ? sourceYear >= currentYear : sourceYear <= currentYear)
-        .map(([sourceYear]) => ({
-            sourceYear,
-            targetYear: sourceYear + direction,
-        }));
-};
-
-const getShiftTargetOffsets = (
-    shiftTargets: InsertShiftTarget[],
-    sourceElements: Map<number, HTMLElement>,
-) => {
-    const offsets = new Map<number, ShiftedCellOffset>();
-
-    shiftTargets.forEach(({ sourceYear, targetYear }) => {
-        const sourceElement = sourceElements.get(sourceYear);
-        const targetElement = sourceElements.get(targetYear);
-
-        if (!sourceElement || !targetElement) {
-            return;
-        }
-
-        const sourceRect = sourceElement.getBoundingClientRect();
-        const targetRect = targetElement.getBoundingClientRect();
-        const x = sourceRect.left - targetRect.left;
-        const y = sourceRect.top - targetRect.top;
-
-        if (Math.abs(x) > 0.5 || Math.abs(y) > 0.5) {
-            offsets.set(targetYear, { x, y });
-        }
-    });
-
-    return offsets;
-};
-
-const getVisualShiftTargets = (
-    shiftTargets: InsertShiftTarget[],
-    firstYearBefore: number | undefined,
-    firstYearAfter: number | undefined,
-): VisualShiftTargets => {
-    const crossRowTargetYears = new Set<number>();
-    const stationaryTargetYears = new Set<number>();
-
-    if (firstYearBefore === undefined || firstYearAfter === undefined || shiftTargets.length === 0) {
-        return { crossRowTargetYears, stationaryTargetYears };
-    }
-
-    shiftTargets.forEach(({ sourceYear, targetYear }) => {
-        const sourcePosition = getLayoutCellPosition(firstYearBefore, sourceYear);
-        const targetPosition = getLayoutCellPosition(firstYearAfter, targetYear);
-
-        if (sameLayoutCellPosition(sourcePosition, targetPosition)) {
-            // 屏幕位置不变的格子里，只有首行（rowIndex 0）作为锚点保持不动；
-            // 其它行的“原地”格子也要跟着整体向左/右滑，让第一宽度列和其它列一样移动，
-            // 否则它静止地待在那里、相邻不透明格子滑过来会盖住它造成重叠。
-            if (targetPosition.rowIndex === 0) {
-                stationaryTargetYears.add(targetYear);
-                return;
-            }
-        }
-
-        // 仅当格子真正“绕行换列”才算跨行：列号变化方向与移动方向（targetYear-sourceYear）相反，
-        // 说明它从一行边缘绕到相邻行的另一端（col0↔col9）。
-        // 若列号顺着移动方向变化，即便 rowIndex 因首行是整十年（满 10 格）时插入/删除导致整体上移/下移而改变，
-        // 也应保持为同行平移，避免大批格子被误判为跨行而乱飞。
-        const columnDelta = targetPosition.cellIndex - sourcePosition.cellIndex;
-        const yearDelta = targetYear - sourceYear;
-
-        if (columnDelta * yearDelta < 0) {
-            crossRowTargetYears.add(targetYear);
-        }
-    });
-
-    return { crossRowTargetYears, stationaryTargetYears };
-};
-
-// 插入/删除/恢复/撤回重做共用的位移计划：跨行分类（绕列才跨行、首行原地锚点）、
-// 同行/跨行队列与交错延时，以及给绕列格子生成 source-exit ghost（在旧格里向位移方向淡出滑走）。
-// 调用方拿到 shiftedYears/shiftedCells 喂给 showAnimationPlan，并把 ghostCells 放进 pendingInsertFlipRef。
-const buildShiftPlan = (params: {
-    shiftTargets: InsertShiftTarget[];
-    sourceElements: Map<number, HTMLElement>;
-    firstYearBefore: number | undefined;
-    firstYearAfter: number | undefined;
-    shiftAnchorTargetYear: number;
-    useFlightShift: boolean;
-    extraExcludedTargetYears?: Set<number>;
-}): { shiftedYears: number[]; shiftedCells: ShiftedCellAnimation[]; ghostCells: InsertFlipCell[] } => {
-    const { shiftTargets, sourceElements, firstYearBefore, firstYearAfter, shiftAnchorTargetYear, useFlightShift } = params;
-    const extra = params.extraExcludedTargetYears ?? new Set<number>();
-    const { crossRowTargetYears, stationaryTargetYears } = getVisualShiftTargets(shiftTargets, firstYearBefore, firstYearAfter);
-    const animatedCrossRowTargetYears = extra.size
-        ? new Set(Array.from(crossRowTargetYears).filter((targetYear) => !extra.has(targetYear)))
-        : crossRowTargetYears;
-    const excludedTargetYears = new Set<number>([...Array.from(extra), ...Array.from(stationaryTargetYears)]);
-    const shiftOffsets = useFlightShift
-        ? getShiftTargetOffsets(shiftTargets, sourceElements)
-        : new Map<number, ShiftedCellOffset>();
-    const shiftQueue = buildShiftQueue(shiftTargets, shiftAnchorTargetYear, animatedCrossRowTargetYears, excludedTargetYears, shiftOffsets);
-    const crossRowGhostTargetYears = new Set(
-        Array.from(animatedCrossRowTargetYears).filter((targetYear) => !useFlightShift || !shiftOffsets.has(targetYear))
-    );
-    const ghostCells = buildCrossRowGhostCells(shiftTargets, sourceElements, crossRowGhostTargetYears, shiftQueue.shiftDelayByYear);
-    return { shiftedYears: shiftQueue.shiftedYears, shiftedCells: shiftQueue.shiftedCells, ghostCells };
-};
-
-// 撤回/重做专用：动画在数据已改之后才计算（拿不到「操作前」的 DOM），所以
-// 跨行分类只用年份映射；source-exit ghost 的「旧位置」用「列固定、行块顶固定」从撤回后的 DOM
-// 反推（列 x 取自当前格子、行 y = 行块顶 + rowIndex*步长），ghost 显示的旧值取自 previousVisibleSiteRef。
-const buildHistoryShiftPlan = (params: {
-    container: HTMLElement | null;
-    treeCode: string;
-    prevTreeData: Map<number, number | null> | undefined;
-    shiftTargets: InsertShiftTarget[];
-    firstYearBefore: number | undefined;
-    firstYearAfter: number | undefined;
-    shiftAnchorTargetYear: number;
-}): { shiftedYears: number[]; shiftedCells: ShiftedCellAnimation[]; ghostCells: InsertFlipCell[] } => {
-    const { container, treeCode, prevTreeData, shiftTargets, firstYearBefore, firstYearAfter, shiftAnchorTargetYear } = params;
-    const { crossRowTargetYears, stationaryTargetYears } = getVisualShiftTargets(shiftTargets, firstYearBefore, firstYearAfter);
-    const shiftedYears = shiftTargets.map((target) => target.targetYear).filter((year) => !stationaryTargetYears.has(year));
-    const shiftedCells = buildShiftedCells(shiftedYears, shiftAnchorTargetYear, crossRowTargetYears);
-    const shiftDelayByYear = getShiftDelayByYear(shiftedCells);
-
-    const ghostCells: InsertFlipCell[] = [];
-    if (container && prevTreeData && firstYearBefore !== undefined && firstYearAfter !== undefined && crossRowTargetYears.size > 0) {
-        const afterElements = getTreeYearGridElements(container, treeCode);
-        const colX = new Map<number, number>();
-        const rowY = new Map<number, number>();
-        let cellWidth = 0;
-        let cellHeight = 0;
-        afterElements.forEach((element, year) => {
-            const pos = getLayoutCellPosition(firstYearAfter, year);
-            const rect = element.getBoundingClientRect();
-            if (!colX.has(pos.cellIndex)) colX.set(pos.cellIndex, rect.left);
-            if (!rowY.has(pos.rowIndex)) rowY.set(pos.rowIndex, rect.top);
-            cellWidth = rect.width;
-            cellHeight = rect.height;
-        });
-        const rowIndices = Array.from(rowY.keys()).sort((a, b) => a - b);
-        if (rowIndices.length > 0 && cellWidth > 0) {
-            const rowStride = ROW_HEIGHT + ROW_GAP;
-            const row0Y = rowY.get(rowIndices[0])! - rowIndices[0] * rowStride;
-            shiftTargets.forEach(({ sourceYear, targetYear }) => {
-                if (!crossRowTargetYears.has(targetYear)) return;
-                const beforePos = getLayoutCellPosition(firstYearBefore, sourceYear);
-                const left = colX.get(beforePos.cellIndex);
-                if (left === undefined) return;
-                const value = prevTreeData.get(sourceYear);
-                if (typeof value !== "number" || value === stopMarker.value) return;
-                ghostCells.push({
-                    sourceYear,
-                    targetYear,
-                    sourceRect: new DOMRect(left, row0Y + beforePos.rowIndex * rowStride, cellWidth, cellHeight),
-                    sourceText: String(value),
-                    sourceClassName: style["width-grid"],
-                    sourceStyleText: "",
-                    delaySeconds: shiftDelayByYear.get(targetYear) ?? 0,
-                });
-            });
-        }
-    }
-
-    return { shiftedYears, shiftedCells, ghostCells };
-};
-
-const getOppositeSide = (side: PlusSide): PlusSide => side === "left" ? "right" : "left";
-
-const isYearOnInsertSide = (year: number, currentYear: number, side: PlusSide) => (
-    side === "left" ? year >= currentYear : year <= currentYear
-);
 
 const getMoveAnimationYears = (
     selectedStartYear: number,
@@ -1365,6 +1021,11 @@ function WidthContainer({
                     .filter((cell) => cell.crossRow)
                     .map((cell) => cell.year)
             ),
+            edgeFadeYears: new Set(
+                animationPlan.shiftedCells
+                    .filter((cell) => cell.edgeFade)
+                    .map((cell) => cell.year)
+            ),
             rollingCells: new Map(animationPlan.rollingCells.map((cell) => [cell.year, cell.fromValue])),
             elevatedYears: new Set(animationPlan.elevatedYears),
         };
@@ -1381,11 +1042,14 @@ function WidthContainer({
 
         if (animationLookup.shiftedYears.has(year)) {
             const isCrossRowShift = animationLookup.crossRowShiftedYears.has(year);
+            const isEdgeFade = animationLookup.edgeFadeYears.has(year);
 
             if (animationLookup.insertSide === "right") {
+                if (isEdgeFade) return "insert-edge-fade-left";
                 return isCrossRowShift ? "insert-cross-row-shift-left" : "insert-shift-left";
             }
 
+            if (isEdgeFade) return "insert-edge-fade-right";
             return isCrossRowShift ? "insert-cross-row-shift-right" : "insert-shift-right";
         }
 
@@ -1659,9 +1323,12 @@ function WidthContainer({
         const applyHistoryShift = (shiftedYears: number[], insertSide: PlusSide, shiftAnchorTargetYear: number) => {
             const direction = insertSide === "right" ? -1 : 1;
             const shiftTargets = shiftedYears.map((targetYear) => ({ sourceYear: targetYear - direction, targetYear }));
+            const afterElements = containerRef.current
+                ? getTreeYearGridElements(containerRef.current, historyAnimation.tree)
+                : new Map<number, HTMLElement>();
             const plan = buildHistoryShiftPlan({
-                container: containerRef.current,
-                treeCode: historyAnimation.tree,
+                afterElements,
+                ghostClassName: style["width-grid"],
                 prevTreeData,
                 shiftTargets,
                 firstYearBefore,
@@ -1828,17 +1495,24 @@ function WidthContainer({
             ghost.style.lineHeight = `${cell.sourceRect.height}px`;
             ghost.style.pointerEvents = "none";
             ghost.style.transform = "translate3d(0, 0, 0)";
-            ghost.style.willChange = "opacity";
+            ghost.style.willChange = "opacity, transform";
             ghost.style.backfaceVisibility = "hidden";
+            ghost.style.textAlign = "center";
             // 低于滑入格子的 z-index(3)，让新值滑过来时盖住它；仍高于静态内容，空着的 col0 处可见
             ghost.style.zIndex = "2";
             container.appendChild(ghost);
 
-            const animation = ghost.animate([
-                { opacity: 1, offset: 0 },
-                { opacity: 0.6, offset: 0.4 },
-                { opacity: 0.2, offset: 0.72 },
-                { opacity: 0, offset: 1 },
+            const driftDirection = pendingInsertFlip.side === "right" ? -1 : 1;
+            const drift = Math.min(28, Math.max(14, cell.sourceRect.width * 0.55));
+            const earlyDrift = driftDirection < 0 ? -Math.min(5.5, drift) : Math.min(12, drift);
+            const animation = ghost.animate(driftDirection < 0 ? [
+                { opacity: 1, transform: "translate3d(0, 0, 0)", offset: 0 },
+                { opacity: 0.18, transform: `translate3d(${earlyDrift}px, 0, 0)`, offset: 0.24 },
+                { opacity: 0, transform: `translate3d(${-drift}px, 0, 0)`, offset: 1 },
+            ] : [
+                { opacity: 1, transform: "translate3d(0, 0, 0)", offset: 0 },
+                { opacity: 0.48, transform: `translate3d(${earlyDrift}px, 0, 0)`, offset: 0.34 },
+                { opacity: 0, transform: `translate3d(${drift}px, 0, 0)`, offset: 1 },
             ], {
                 duration: scaleAnimationMs(CROSS_ROW_SOURCE_EXIT_MS, animationSpeed),
                 easing: CROSS_ROW_SOURCE_EXIT_EASING,

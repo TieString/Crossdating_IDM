@@ -1,9 +1,8 @@
 import { ask, open, save } from "@tauri-apps/plugin-dialog";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parseCofechaResult, splitReportByParts } from "@/features/cofecha/formatter";
 import {
     type CrossdatingDiagnosis,
-    diagnoseCrossdating,
     getDiagnosisCandidateLabel,
     markCandidatesStale,
     selectSafeDiagnosisCandidateBatch,
@@ -23,6 +22,7 @@ import { runCofecha } from "@/services/cofecha/runner";
 import { readRwlFile, saveFile } from "@/services/fs/io";
 import { stopMarker } from "@/shared/constants";
 import { ALL_OPTION_VALUE, CofechaVersion, DEFAULT_HOME_TITLE } from "./constants";
+import type { DiagnosisWorkerRequest, DiagnosisWorkerResponse } from "./diagnosisWorker";
 
 export type WidthHistoryAnimation = RwlHistoryAnimation & { id: number };
 
@@ -31,8 +31,7 @@ const REFERENCE_STORAGE_PREFIX = "crossdating:reference-state:v1:";
 const COFECHA_STORAGE_PREFIX = "crossdating:cofecha-state:v1:";
 const MAX_REFERENCE_OPERATION_LOG_ENTRIES = 200;
 const HISTORY_SNAPSHOT_PERSIST_DELAY_MS = 250;
-const DIAGNOSIS_IDLE_DELAY_MS = 90;
-const DIAGNOSIS_AFTER_HISTORY_ANIMATION_DELAY_MS = 1100;
+const DIAGNOSIS_DEBOUNCE_MS = 120;
 
 type PersistedReferenceState = {
     version: 1;
@@ -297,7 +296,8 @@ export function useHomeWorkspace() {
     const filePathRef = useRef<string | null>(null);
     const historyAnimationIdRef = useRef(0);
     const historyPersistTimerRef = useRef<number | null>(null);
-    const diagnosisHistoryAnimationIdRef = useRef<number | null>(null);
+    const diagnosisRequestIdRef = useRef(0);
+    const diagnosisWorkerRef = useRef<Worker | null>(null);
     const referenceOperationCounterRef = useRef(0);
     const lastCofechaValidationRef = useRef<{ input: string; version: CofechaVersion } | null>(null);
     const latestDiagnosisCandidatesRef = useRef<DiagnosisCandidateOperation[]>([]);
@@ -340,6 +340,11 @@ export function useHomeWorkspace() {
         if (historyPersistTimerRef.current !== null) {
             window.clearTimeout(historyPersistTimerRef.current);
         }
+    }, []);
+
+    useEffect(() => () => {
+        diagnosisWorkerRef.current?.terminate();
+        diagnosisWorkerRef.current = null;
     }, []);
 
     const syncEditor = useCallback((editor: RwlEditor) => {
@@ -1067,48 +1072,84 @@ export function useHomeWorkspace() {
         let cancelled = false;
         let startTimer: number | null = null;
         let idleHandle: number | null = null;
-        const historyAnimationId = historyAnimation?.id ?? null;
-        const shouldWaitForHistoryAnimation =
-            historyAnimationId !== null
-            && diagnosisHistoryAnimationIdRef.current !== historyAnimationId;
+        let workerForRequest: Worker | null = null;
+        const requestId = ++diagnosisRequestIdRef.current;
 
-        if (shouldWaitForHistoryAnimation) {
-            diagnosisHistoryAnimationIdRef.current = historyAnimationId;
-        }
+        startTransition(() => {
+            setCrossdatingDiagnosis((previous) => {
+                if (previous.candidates.length === 0) {
+                    return previous;
+                }
 
-        setCrossdatingDiagnosis((previous) => {
-            if (previous.candidates.length === 0) {
-                return previous;
-            }
-
-            const staleCandidates = markCandidatesStale(previous.candidates);
-            return {
-                ...previous,
-                candidateCount: staleCandidates.length,
-                candidates: staleCandidates,
-            };
+                const staleCandidates = markCandidatesStale(previous.candidates);
+                return {
+                    ...previous,
+                    candidateCount: staleCandidates.length,
+                    candidates: staleCandidates,
+                };
+            });
         });
 
         const runDiagnosis = () => {
             if (cancelled) return;
-            const nextDiagnosis = diagnoseCrossdating(siteData, { referenceConfig });
-            if (!cancelled) {
-                setCrossdatingDiagnosis(nextDiagnosis);
-            }
+
+            diagnosisWorkerRef.current?.terminate();
+            const worker = new Worker(new URL("./diagnosisWorker.ts", import.meta.url), { type: "module" });
+            workerForRequest = worker;
+            diagnosisWorkerRef.current = worker;
+
+            worker.onmessage = (event: MessageEvent<DiagnosisWorkerResponse>) => {
+                const response = event.data;
+                if (
+                    cancelled
+                    || response.id !== diagnosisRequestIdRef.current
+                    || diagnosisWorkerRef.current !== worker
+                ) {
+                    return;
+                }
+
+                worker.terminate();
+                diagnosisWorkerRef.current = null;
+                workerForRequest = null;
+
+                if ("error" in response) {
+                    console.warn("内部诊断计算失败:", response.error);
+                    return;
+                }
+
+                startTransition(() => {
+                    setCrossdatingDiagnosis(response.diagnosis);
+                });
+            };
+
+            worker.onerror = (event) => {
+                if (diagnosisWorkerRef.current === worker) {
+                    worker.terminate();
+                    diagnosisWorkerRef.current = null;
+                    workerForRequest = null;
+                }
+                console.warn("内部诊断 worker 运行失败:", event.message);
+            };
+
+            worker.postMessage({
+                id: requestId,
+                siteData,
+                referenceConfig,
+            } satisfies DiagnosisWorkerRequest);
         };
 
-        const diagnosisDelayMs = shouldWaitForHistoryAnimation
-            ? DIAGNOSIS_AFTER_HISTORY_ANIMATION_DELAY_MS
-            : DIAGNOSIS_IDLE_DELAY_MS;
-
-        startTimer = window.setTimeout(() => {
-            startTimer = null;
+        const scheduleDiagnosis = () => {
             if ("requestIdleCallback" in window) {
                 idleHandle = window.requestIdleCallback(runDiagnosis, { timeout: 700 });
                 return;
             }
             runDiagnosis();
-        }, diagnosisDelayMs);
+        };
+
+        startTimer = window.setTimeout(() => {
+            startTimer = null;
+            scheduleDiagnosis();
+        }, DIAGNOSIS_DEBOUNCE_MS);
 
         return () => {
             cancelled = true;
@@ -1117,6 +1158,10 @@ export function useHomeWorkspace() {
             }
             if (idleHandle !== null && "cancelIdleCallback" in window) {
                 window.cancelIdleCallback(idleHandle);
+            }
+            if (workerForRequest && diagnosisWorkerRef.current === workerForRequest) {
+                workerForRequest.terminate();
+                diagnosisWorkerRef.current = null;
             }
         };
     }, [historyAnimation?.id, referenceConfig, siteData]);

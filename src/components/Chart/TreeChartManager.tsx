@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChartZoomWindow, MultiLineChart, colorPalette } from './MultiLineChart.tsx'
 import { FloatingScrollArea } from '@/components/FloatingScrollArea/FloatingScrollArea'
 import {
@@ -23,6 +23,23 @@ import { stopMarker } from '@/shared/constants'
 // 1. 上方按钮区负责树种选择；
 // 2. 下方交给 MultiLineChart 渲染具体曲线。
 // 它本身不改写原始数据，只做筛选和展示。
+
+// 面板模式下序列选择器可上下拖拽改变高度，配置持久化到 localStorage。
+const PICKER_HEIGHT_STORAGE_KEY = 'crossdating.chartPickerHeight.v1'
+const PICKER_MIN_HEIGHT = 44
+const PICKER_MAX_HEIGHT = 360
+const PICKER_DEFAULT_HEIGHT = 76
+
+const clampPickerHeight = (value: number) => (
+  Math.min(Math.max(value, PICKER_MIN_HEIGHT), PICKER_MAX_HEIGHT)
+)
+
+const readStoredPickerHeight = () => {
+  if (typeof window === 'undefined') return PICKER_DEFAULT_HEIGHT
+  const raw = window.localStorage.getItem(PICKER_HEIGHT_STORAGE_KEY)
+  const parsed = raw ? Number.parseFloat(raw) : Number.NaN
+  return Number.isFinite(parsed) ? clampPickerHeight(parsed) : PICKER_DEFAULT_HEIGHT
+}
 
 type Props = {
   fullData: RwlSiteData
@@ -62,6 +79,47 @@ function TreeChartManagerBase({
   const [search, setSearch] = useState('')
   const [candidatePanelOpen, setCandidatePanelOpen] = useState(false)
   const [rejectedCandidateIds, setRejectedCandidateIds] = useState<string[]>([])
+  const [pickerHeight, setPickerHeight] = useState<number>(readStoredPickerHeight)
+  const [isResizingPicker, setIsResizingPicker] = useState(false)
+  const pickerHeightRef = useRef(pickerHeight)
+
+  useEffect(() => {
+    pickerHeightRef.current = pickerHeight
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(PICKER_HEIGHT_STORAGE_KEY, String(pickerHeight))
+    }
+  }, [pickerHeight])
+
+  const startPickerResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+
+    const startY = event.clientY
+    const startHeight = pickerHeightRef.current
+    const originalUserSelect = document.body.style.userSelect
+    const originalCursor = document.body.style.cursor
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      setPickerHeight(clampPickerHeight(startHeight + (moveEvent.clientY - startY)))
+    }
+
+    const finishResize = () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', finishResize)
+      window.removeEventListener('pointercancel', finishResize)
+      document.body.style.userSelect = originalUserSelect
+      document.body.style.cursor = originalCursor
+      setIsResizingPicker(false)
+    }
+
+    setIsResizingPicker(true)
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'row-resize'
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', finishResize)
+    window.addEventListener('pointercancel', finishResize)
+  }, [])
 
   useEffect(() => {
     setSelectedTrees((previous) => previous.filter((treeCode) => fullData.has(treeCode)))
@@ -676,7 +734,8 @@ function TreeChartManagerBase({
       <FloatingScrollArea
         viewportStyle={{
         flex: isExpanded ? '1 1 auto' : '0 0 auto',
-        maxHeight: isExpanded ? 'none' : 76,
+        height: isExpanded ? undefined : pickerHeight,
+        maxHeight: isExpanded ? 'none' : undefined,
         minHeight: isExpanded ? 0 : undefined,
         border: '1px solid #e8e8e8',
         borderRadius: 6,
@@ -745,6 +804,37 @@ function TreeChartManagerBase({
           })
         }
       </FloatingScrollArea>
+
+      {isExpanded ? null : (
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="拖动调整序列选择器高度"
+          title="上下拖动调整序列选择器高度"
+          onPointerDown={startPickerResize}
+          style={{
+            flex: '0 0 auto',
+            height: 9,
+            marginTop: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'row-resize',
+            touchAction: 'none',
+          }}
+        >
+          <span
+            aria-hidden="true"
+            style={{
+              width: 40,
+              height: 3,
+              borderRadius: 2,
+              background: isResizingPicker ? '#94a3b4' : '#d4d9e0',
+              transition: 'background 0.12s',
+            }}
+          />
+        </div>
+      )}
     </>
   )
 

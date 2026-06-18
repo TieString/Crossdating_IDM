@@ -10,6 +10,8 @@ type GridAnimationKind =
     | "insert-right"
     | "insert-shift-left"
     | "insert-shift-right"
+    | "insert-edge-fade-left"
+    | "insert-edge-fade-right"
     | "insert-cross-row-shift-left"
     | "insert-cross-row-shift-right"
     | "move-target"
@@ -63,6 +65,8 @@ const withDelay = (transition: Transition, delaySeconds: number, animationSpeed:
 const isShiftAnimation = (animationKind: GridAnimationKind | undefined) => (
     animationKind === "insert-shift-left"
     || animationKind === "insert-shift-right"
+    || animationKind === "insert-edge-fade-left"
+    || animationKind === "insert-edge-fade-right"
     || animationKind === "insert-cross-row-shift-left"
     || animationKind === "insert-cross-row-shift-right"
 );
@@ -162,6 +166,20 @@ const getMotionConfig = (
                 initial: { x: "calc(-100% - 5px)" },
                 animate: { x: 0 },
                 transition: withDelay({ duration: 0.95, ease: [0.16, 1, 0.3, 1] }, delaySeconds, animationSpeed),
+            };
+        case "insert-edge-fade-left":
+            return {
+                initial: { x: 86, opacity: 0 },
+                animate: { x: 0, opacity: 1 },
+                transition: withDelay({ duration: 0.74, ease: [0.22, 1, 0.36, 1] }, delaySeconds, animationSpeed),
+                transitionEnd: { opacity: 1 },
+            };
+        case "insert-edge-fade-right":
+            return {
+                initial: { x: -86, opacity: 0 },
+                animate: { x: 0, opacity: 1 },
+                transition: withDelay({ duration: 0.74, ease: [0.22, 1, 0.36, 1] }, delaySeconds, animationSpeed),
+                transitionEnd: { opacity: 1 },
             };
         case "insert-cross-row-shift-left":
             return {

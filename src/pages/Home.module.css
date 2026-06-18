@@ -525,7 +525,7 @@
 .chart-skeleton-svg polyline {
     fill: none;
     stroke: #9cb4cc;
-    stroke-width: 2;
+    stroke-width: 0.75;
     stroke-linecap: round;
     stroke-linejoin: round;
     opacity: 0.75;
