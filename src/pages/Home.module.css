@@ -461,6 +461,36 @@
     height: 13px;
 }
 
+.cofecha-empty-state {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 100%;
+    padding: 2px 0 24px;
+    box-sizing: border-box;
+    pointer-events: none;
+}
+
+.cofecha-empty-state-rule {
+    width: 100%;
+    height: 1px;
+    background-color: #e1e7ef;
+}
+
+.cofecha-empty-state-lines {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-top: 2px;
+}
+
+.cofecha-empty-state-line {
+    display: block;
+    height: 13px;
+    border-radius: 2px;
+    background-color: #eef3f8;
+}
+
 .chart-empty-skeleton {
     display: flex;
     flex: 1 1 auto;
@@ -550,6 +580,91 @@
 }
 
 .chart-skeleton-axis-y {
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+}
+
+.chart-empty-state {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+    min-height: 100%;
+    pointer-events: none;
+}
+
+.chart-empty-state-toolbar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.chart-empty-state-toolbar span {
+    display: block;
+    width: 92px;
+    height: 24px;
+    border-radius: 4px;
+    background-color: #eef3f8;
+}
+
+.chart-empty-state-toolbar span + span {
+    width: 64px;
+}
+
+.chart-empty-state-plot {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 260px;
+    overflow: hidden;
+    border-left: 1px solid #cfd8e4;
+    border-bottom: 1px solid #cfd8e4;
+    background-image:
+        linear-gradient(to right, rgba(207, 216, 228, 0.45) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(207, 216, 228, 0.45) 1px, transparent 1px);
+    background-size: 11.111% 100%, 100% 20%;
+    background-color: #fbfcfe;
+}
+
+.chart-empty-state-svg {
+    position: absolute;
+    inset: 20px 18px 26px 18px;
+    width: calc(100% - 36px);
+    height: calc(100% - 46px);
+    overflow: visible;
+}
+
+.chart-empty-state-svg polyline {
+    fill: none;
+    stroke: #afc0d1;
+    stroke-width: 0.75;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    opacity: 0.62;
+}
+
+.chart-empty-state-svg polyline + polyline {
+    stroke: #d3bd8d;
+    opacity: 0.58;
+}
+
+.chart-empty-state-axis-x,
+.chart-empty-state-axis-y {
+    position: absolute;
+    background-color: #b7c2d0;
+}
+
+.chart-empty-state-axis-x {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 1px;
+}
+
+.chart-empty-state-axis-y {
     left: 0;
     top: 0;
     bottom: 0;
@@ -799,17 +914,20 @@
     z-index: -1;
 }
 
-.loading-container {
+.width-empty-state {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    height: 100%;
     width: 100%;
     max-width: 100%;
+    pointer-events: none;
 }
 
-.loading-image {
+.width-empty-state-image {
     opacity: 0.2;
     width: 300px;
     max-width: 100%;
@@ -818,7 +936,7 @@
     filter: brightness(0.99) grayscale(30%);
 }
 
-.developers {
+.width-empty-state-developers {
     opacity: 0.9;
     color: #686868;
     text-align: center;

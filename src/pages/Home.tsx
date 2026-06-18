@@ -362,6 +362,23 @@ function CofechaEmptySkeleton() {
     );
 }
 
+function CofechaEmptyState() {
+    return (
+        <div className={style["cofecha-empty-state"]} aria-hidden="true">
+            <div className={style["cofecha-empty-state-rule"]} />
+            <div className={style["cofecha-empty-state-lines"]}>
+                {COFECHA_SKELETON_LINE_WIDTHS.slice(0, 7).map((width, index) => (
+                    <span
+                        key={`${width}-${index}`}
+                        className={style["cofecha-empty-state-line"]}
+                        style={{ width: `${width}%` }}
+                    />
+                ))}
+            </div>
+        </div>
+    );
+}
+
 function LineChartEmptySkeleton() {
     return (
         <div className={style["chart-empty-skeleton"]} aria-hidden="true">
@@ -383,6 +400,25 @@ function LineChartEmptySkeleton() {
                 </svg>
                 <div className={style["chart-skeleton-axis-x"]} />
                 <div className={style["chart-skeleton-axis-y"]} />
+            </div>
+        </div>
+    );
+}
+
+function LineChartEmptyState() {
+    return (
+        <div className={style["chart-empty-state"]} aria-hidden="true">
+            <div className={style["chart-empty-state-toolbar"]}>
+                <span />
+                <span />
+            </div>
+            <div className={style["chart-empty-state-plot"]}>
+                <svg className={style["chart-empty-state-svg"]} viewBox="0 0 100 100" preserveAspectRatio="none">
+                    <polyline points="0,70 12,62 23,68 36,50 49,56 61,40 74,48 86,34 100,42" />
+                    <polyline points="0,78 14,73 27,76 41,64 54,68 68,55 82,60 100,48" />
+                </svg>
+                <div className={style["chart-empty-state-axis-x"]} />
+                <div className={style["chart-empty-state-axis-y"]} />
             </div>
         </div>
     );
@@ -457,6 +493,7 @@ export default function Home() {
         historyStatus,
         isCofechaOutdated,
         isCofechaRunning,
+        isFileLoading,
         operationLog,
         possibleProblemsDetail,
         problemTextColor,
@@ -491,8 +528,9 @@ export default function Home() {
             ...(!leftBottomDividerCollapsed ? { maxHeight: `calc(100% - ${PANEL_DIVIDER_GUTTER_SIZE}px)` } : {}),
         }
         : undefined;
-    const shouldShowEmptySkeleton = shouldShowWelcome || (!hasChart && shouldShowProcessing);
-    const shouldShowRightBottomPane = hasChart || shouldShowEmptySkeleton;
+    const shouldShowRightSkeleton = isFileLoading;
+    const shouldShowWidthSkeleton = shouldShowWelcome || isFileLoading || (!hasChart && shouldShowProcessing);
+    const shouldShowRightBottomPane = hasChart || shouldShowWelcome || shouldShowRightSkeleton;
     const cofechaTextStyle = shouldShowRightBottomPane
         ? {
             flex: `0 0 ${layout.rightBottomRatio * 100}%`,
@@ -500,7 +538,7 @@ export default function Home() {
         }
         : undefined;
     const renderStatValue = (value: string | number | null | undefined) => (
-        shouldShowEmptySkeleton
+        shouldShowRightSkeleton
             ? <span className={style["stat-value-skeleton"]} aria-hidden="true" />
             : <RollingNumber value={value} />
     );
@@ -1230,7 +1268,7 @@ export default function Home() {
                         </div>
                     ) : (
                         <div className={style["structured-width-container"]}>
-                            {!shouldShowEmptySkeleton ? (
+                            {!shouldShowWidthSkeleton ? (
                                 <select
                                     name="trees"
                                     id={style["tree_selector"]}
@@ -1275,19 +1313,19 @@ export default function Home() {
                                     className={style["data-container"]}
                                     aria-busy={shouldShowProcessing}
                                     topClearanceSelector="[data-grid-header]"
-                                    scrollbarRevision={`${shouldShowEmptySkeleton}:${selectedTree ?? ""}`}
+                                    scrollbarRevision={`${shouldShowWidthSkeleton}:${selectedTree ?? ""}`}
                                 >
                                     {(dataContainerRef) => (
                                         <>
-                                            {shouldShowEmptySkeleton ? (
+                                            {shouldShowWidthSkeleton ? (
                                                 <>
-                                                    <WidthGridSkeleton />
-                                                    <div className={style["loading-container"]}>
-                                                        <img src="IDM.png" className={style["loading-image"]} alt="IDM loading" />
-                                                        {shouldShowWelcome ? (
-                                                            <p className={style["developers"]}>{WELCOME_TEXT}</p>
-                                                        ) : null}
-                                                    </div>
+                                                    <WidthGridSkeleton showRows={isFileLoading} />
+                                                    {shouldShowWelcome ? (
+                                                        <div className={style["width-empty-state"]}>
+                                                            <img src="IDM.png" className={style["width-empty-state-image"]} alt="IDM" />
+                                                            <p className={style["width-empty-state-developers"]}>{WELCOME_TEXT}</p>
+                                                        </div>
+                                                    ) : null}
                                                 </>
                                             ) : (
                                                 <WidthContainer
@@ -1436,7 +1474,7 @@ export default function Home() {
                                 </div>
                             ) : (
                                 <>
-                                    {!shouldShowEmptySkeleton ? (
+                                    {!shouldShowRightSkeleton ? (
                                         <div className={style["cofecha-toolbar"]}>
                                             <select
                                                 name="cofecha"
@@ -1484,8 +1522,10 @@ export default function Home() {
                                         className={style["full-text"]}
                                     >
                                         <div className={style["cofecha-panel-content"]}>
-                                            {shouldShowEmptySkeleton ? (
+                                            {shouldShowRightSkeleton ? (
                                                 <CofechaEmptySkeleton />
+                                            ) : !hasChart ? (
+                                                <CofechaEmptyState />
                                             ) : (
                                                 <p
                                                     id={style["cofecha-text"]}
@@ -1535,8 +1575,10 @@ export default function Home() {
                                         </div>
                                     ) : (
                                         <div className={`${style["cofecha-panel-content"]} ${style["line-chart-content"]}`}>
-                                            {shouldShowEmptySkeleton ? (
+                                            {shouldShowRightSkeleton ? (
                                                 <LineChartEmptySkeleton />
+                                            ) : !hasChart ? (
+                                                <LineChartEmptyState />
                                             ) : (
                                                 <TreeChartManager
                                                     fullData={siteData}

@@ -143,7 +143,10 @@
     .delete-pixel-burst-source,
     .delete-pixel-burst-pixel,
     .delete-pixel-burst-mouth,
-    .series-block-annihilating {
+    .series-block-annihilating,
+    .width-grid-skeleton-title::after,
+    .width-grid-skeleton-meta::after,
+    .width-grid-skeleton-cell::after {
         animation: none;
         transition: none;
     }
@@ -185,6 +188,101 @@
 .grid-header-yr {
     align-items: center;
     text-align: center;
+}
+
+.width-grid-skeleton-loading {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    box-sizing: border-box;
+    padding: 10px 10px 10px 20px;
+    min-height: 0;
+    overflow: hidden;
+    background-color: #ffffff;
+    pointer-events: none;
+}
+
+.width-grid-skeleton-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-top: 12px;
+}
+
+.width-grid-skeleton-series {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.width-grid-skeleton-series-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 36px;
+    box-sizing: border-box;
+    margin: 0 -10px 0 -20px;
+    padding: 0 10px 0 20px;
+    background-color: #f7f9fc;
+    border-top: 1px solid #dde3ec;
+    border-bottom: 1px solid #dde3ec;
+}
+
+.width-grid-skeleton-title,
+.width-grid-skeleton-meta,
+.width-grid-skeleton-cell {
+    position: relative;
+    display: block;
+    overflow: hidden;
+    border-radius: 3px;
+    background-color: #e8edf4;
+}
+
+.width-grid-skeleton-title::after,
+.width-grid-skeleton-meta::after,
+.width-grid-skeleton-cell::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.72) 50%, transparent 100%);
+    transform: translateX(-100%);
+    animation: width-grid-skeleton-sweep 1.35s linear infinite;
+    will-change: transform;
+}
+
+.width-grid-skeleton-title {
+    width: 64px;
+    height: 14px;
+}
+
+.width-grid-skeleton-meta {
+    width: 132px;
+    height: 11px;
+    opacity: 0.78;
+}
+
+.width-grid-skeleton-row {
+    display: grid;
+    grid-template-columns: minmax(6ch, 1.25fr) repeat(11, minmax(0, 1fr));
+    gap: 5px;
+}
+
+.width-grid-skeleton-cell {
+    height: 24px;
+}
+
+.width-grid-skeleton-code {
+    opacity: 0.72;
+}
+
+.width-grid-skeleton-year {
+    opacity: 0.82;
+}
+
+@keyframes width-grid-skeleton-sweep {
+    100% {
+        transform: translateX(100%);
+    }
 }
 
 .series-header {
