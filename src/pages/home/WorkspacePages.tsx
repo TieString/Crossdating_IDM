@@ -12,7 +12,7 @@ import type {
 import type { CrossdatingValidationSummary } from "@/features/crossdating/validation";
 import type { ReferenceSeriesConfig } from "@/features/crossdating/reference";
 import type { ICofechaResult } from "@/features/cofecha/types";
-import type { DeleteMode, DeleteShift, MissingInsertSide, RwlOperationLogEntry, RwlOperationSource } from "@/features/rwl/edit";
+import type { DeleteMode, DeleteShift, MissingInsertSide, RwlOperationLogEntry } from "@/features/rwl/edit";
 import type { RwlSiteData } from "@/features/rwl/types";
 import styles from "./WorkspacePages.module.css";
 
@@ -81,26 +81,6 @@ const formatLogTime = (value: string) => {
     }).format(date);
 };
 
-const operationSourceLabels: Record<RwlOperationSource, string> = {
-    manual: "手动",
-    "reference-assisted": "参考",
-    "cofecha-assisted": "COFECHA",
-    "auto-suggested": "建议",
-    imported: "导入",
-    system: "系统",
-};
-
-type OperationLogStateFilter = "all" | "applied" | "reverted" | "undoable" | "redoable" | "batch";
-
-const operationLogStateFilterOptions: Array<{ value: OperationLogStateFilter; label: string }> = [
-    { value: "all", label: "全部状态" },
-    { value: "applied", label: "已应用" },
-    { value: "reverted", label: "已回滚" },
-    { value: "undoable", label: "可撤销" },
-    { value: "redoable", label: "可重做" },
-    { value: "batch", label: "批次" },
-];
-
 const formatAffectedRange = (entry: RwlOperationLogEntry) => {
     if (entry.affectedRange) {
         const { startYear, endYear } = entry.affectedRange;
@@ -125,33 +105,19 @@ const formatLogValue = (value: number | null | undefined) => {
 
 const formatValueChange = (entry: RwlOperationLogEntry) => {
     if (entry.oldValue === undefined && entry.newValue === undefined) return null;
-    return `值 ${formatLogValue(entry.oldValue)} → ${formatLogValue(entry.newValue)}`;
+    return `值 ${formatLogValue(entry.oldValue)} -> ${formatLogValue(entry.newValue)}`;
 };
 
 const formatYearChange = (entry: RwlOperationLogEntry) => {
     if (entry.oldYear === undefined || entry.newYear === undefined || entry.oldYear === entry.newYear) return null;
-    return `年份 ${entry.oldYear} → ${entry.newYear}`;
+    return `年份 ${entry.oldYear} -> ${entry.newYear}`;
 };
-
-const formatShortId = (value: string | undefined) => {
-    if (!value) return null;
-    return value.length > 16 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value;
-};
-
-const formatMetrics = (
-    prefix: string,
-    metrics: Record<string, number | string | null> | undefined,
-) => (
-    Object.entries(metrics ?? {}).map(([key, value]) => `${prefix}.${key}: ${formatMetricValue(value)}`)
-);
 
 type OperationLogPageProps = {
     fileName: string | null;
     operationLog: RwlOperationLogEntry[];
     canResetToRawData: boolean;
     onUndoEntry: (entryId: string) => void | Promise<void>;
-    onUndoBatch: (batchId: string) => void | Promise<void>;
-    onRedoEntry: (entryId: string) => void | Promise<void>;
     onJumpEntry: (tree: string, year?: number) => void | Promise<void>;
     onResetToRawData: () => void | Promise<void>;
     onClose: () => void;
@@ -162,45 +128,16 @@ export function OperationLogPage({
     operationLog,
     canResetToRawData,
     onUndoEntry,
-    onUndoBatch,
-    onRedoEntry,
     onJumpEntry,
     onResetToRawData,
     onClose,
 }: OperationLogPageProps) {
     const [logQuery, setLogQuery] = useState("");
-    const [sourceFilter, setSourceFilter] = useState<RwlOperationSource | "all">("all");
-    const [stateFilter, setStateFilter] = useState<OperationLogStateFilter>("all");
     const filteredOperationLog = useMemo(() => {
         const query = logQuery.trim().toLowerCase();
 
         return operationLog.filter((entry) => {
-            const source = entry.source ?? "manual";
-            const isReverted = entry.isReverted ?? Boolean(entry.undone);
-            const isApplied = entry.isApplied ?? !isReverted;
-
-            if (sourceFilter !== "all" && source !== sourceFilter) {
-                return false;
-            }
-            if (stateFilter === "applied" && (!isApplied || isReverted)) {
-                return false;
-            }
-            if (stateFilter === "reverted" && !isReverted) {
-                return false;
-            }
-            if (stateFilter === "undoable" && !entry.canUndo) {
-                return false;
-            }
-            if (stateFilter === "redoable" && !entry.canRedo) {
-                return false;
-            }
-            if (stateFilter === "batch" && !entry.batchId) {
-                return false;
-            }
-
-            if (!query) {
-                return true;
-            }
+            if (!query) return true;
 
             const searchable = [
                 entry.sequence,
@@ -208,8 +145,6 @@ export function OperationLogPage({
                 entry.summary,
                 entry.detail,
                 entry.operationType,
-                operationSourceLabels[source],
-                source,
                 entry.reason,
                 entry.targetYear,
                 entry.targetIndex,
@@ -217,16 +152,14 @@ export function OperationLogPage({
                 entry.newValue,
                 entry.oldYear,
                 entry.newYear,
-                entry.batchId,
-                entry.parentOperationId,
                 formatAffectedRange(entry),
-                ...formatMetrics("before", entry.metricsBefore),
-                ...formatMetrics("after", entry.metricsAfter),
+                formatValueChange(entry),
+                formatYearChange(entry),
             ].filter((value) => value !== undefined && value !== null).join(" ").toLowerCase();
 
             return searchable.includes(query);
         });
-    }, [logQuery, operationLog, sourceFilter, stateFilter]);
+    }, [logQuery, operationLog]);
 
     const sequenceGroups = useMemo(() => {
         const groups = new Map<string, RwlOperationLogEntry[]>();
@@ -238,41 +171,8 @@ export function OperationLogPage({
             .map(([tree, entries]) => ({ tree, entries: [...entries].reverse() }))
             .sort((a, b) => a.tree.localeCompare(b.tree));
     }, [filteredOperationLog]);
-    const undoableCount = operationLog.filter((entry) => entry.canUndo).length;
-    const redoableCount = operationLog.filter((entry) => entry.canRedo).length;
-    const appliedCount = operationLog.filter((entry) => entry.isApplied ?? !entry.undone).length;
-    const revertedCount = operationLog.filter((entry) => entry.isReverted ?? Boolean(entry.undone)).length;
-    const referenceCount = operationLog.filter((entry) => entry.source === "reference-assisted").length;
-    const suggestedCount = operationLog.filter((entry) => entry.source === "auto-suggested").length;
-    const cofechaCount = operationLog.filter((entry) => entry.source === "cofecha-assisted").length;
-    const batchCount = new Set(operationLog.map((entry) => entry.batchId).filter(Boolean)).size;
-    const batchSummaries = useMemo(() => {
-        const groups = new Map<string, RwlOperationLogEntry[]>();
-        filteredOperationLog.forEach((entry) => {
-            if (!entry.batchId) return;
-            groups.set(entry.batchId, [...(groups.get(entry.batchId) ?? []), entry]);
-        });
 
-        return Array.from(groups.entries())
-            .map(([batchId, entries]) => {
-                const latestTimestamp = entries
-                    .map((entry) => new Date(entry.timestamp).getTime())
-                    .filter(Number.isFinite)
-                    .sort((a, b) => b - a)[0] ?? 0;
-                const reverted = entries.filter((entry) => entry.isReverted ?? Boolean(entry.undone)).length;
-                return {
-                    batchId,
-                    latestTimestamp,
-                    total: entries.length,
-                    applied: entries.length - reverted,
-                    reverted,
-                    canUndo: entries.some((entry) => entry.canUndoBatch),
-                    trees: Array.from(new Set(entries.map((entry) => entry.tree).filter((tree): tree is string => Boolean(tree)))),
-                };
-            })
-            .sort((a, b) => b.latestTimestamp - a.latestTimestamp)
-            .slice(0, 5);
-    }, [filteredOperationLog]);
+    const editableCount = operationLog.filter((entry) => entry.canUndo).length;
 
     return (
         <PageShell
@@ -285,7 +185,7 @@ export function OperationLogPage({
                     <div className={styles["summary-number"]}>
                         <span>显示 / 总计</span>
                         <strong>{filteredOperationLog.length}</strong>
-                        <small>{operationLog.length} 条日志</small>
+                        <small>{operationLog.length} 条编辑记录</small>
                     </div>
                     <div className={styles["log-filter-panel"]}>
                         <label>
@@ -293,46 +193,14 @@ export function OperationLogPage({
                             <input
                                 type="search"
                                 value={logQuery}
-                                placeholder="序列、年份、批次、原因"
+                                placeholder="序列、年份、操作或数值"
                                 onChange={(event) => setLogQuery(event.target.value)}
                             />
                         </label>
-                        <div className={styles["log-filter-row"]}>
-                            <label>
-                                <span>来源</span>
-                                <select
-                                    value={sourceFilter}
-                                    onChange={(event) => setSourceFilter(event.target.value as RwlOperationSource | "all")}
-                                >
-                                    <option value="all">全部来源</option>
-                                    {Object.entries(operationSourceLabels).map(([source, label]) => (
-                                        <option key={source} value={source}>{label}</option>
-                                    ))}
-                                </select>
-                            </label>
-                            <label>
-                                <span>状态</span>
-                                <select
-                                    value={stateFilter}
-                                    onChange={(event) => setStateFilter(event.target.value as OperationLogStateFilter)}
-                                >
-                                    {operationLogStateFilterOptions.map((option) => (
-                                        <option key={option.value} value={option.value}>{option.label}</option>
-                                    ))}
-                                </select>
-                            </label>
-                        </div>
                     </div>
                     <div className={styles["summary-grid"]}>
                         <span>序列</span><strong>{sequenceGroups.length}</strong>
-                        <span>已应用</span><strong>{appliedCount}</strong>
-                        <span>已回滚</span><strong>{revertedCount}</strong>
-                        <span>可撤销</span><strong>{undoableCount}</strong>
-                        <span>可重做</span><strong>{redoableCount}</strong>
-                        <span>参考记录</span><strong>{referenceCount}</strong>
-                        <span>建议记录</span><strong>{suggestedCount}</strong>
-                        <span>COFECHA</span><strong>{cofechaCount}</strong>
-                        <span>批次</span><strong>{batchCount}</strong>
+                        <span>可撤销</span><strong>{editableCount}</strong>
                     </div>
                     <div className={styles["summary-actions"]}>
                         <button
@@ -345,30 +213,6 @@ export function OperationLogPage({
                             回到原始
                         </button>
                     </div>
-                    {batchSummaries.length > 0 ? (
-                        <div className={styles["batch-summary-list"]}>
-                            <div className={styles["batch-summary-title"]}>建议批次</div>
-                            {batchSummaries.map((batch) => (
-                                <div key={batch.batchId} className={styles["batch-summary-item"]}>
-                                    <div className={styles["batch-summary-copy"]}>
-                                        <strong title={batch.batchId}>{formatShortId(batch.batchId)}</strong>
-                                        <span>{batch.total} 条 · 应用 {batch.applied} · 回滚 {batch.reverted}</span>
-                                        <small title={batch.trees.join(", ")}>
-                                            {batch.trees.slice(0, 3).join(", ") || "未分组"}
-                                        </small>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        disabled={!batch.canUndo}
-                                        title={batch.canUndo ? `整批回滚 ${batch.batchId}` : "该批次当前不能完整回滚"}
-                                        onClick={() => { void onUndoBatch(batch.batchId); }}
-                                    >
-                                        回滚
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
-                    ) : null}
                     <FloatingScrollArea className={styles["sequence-list"]}>
                         {sequenceGroups.map((group) => (
                             <a key={group.tree} href={`#log-tree-${encodeURIComponent(group.tree)}`}>
@@ -386,7 +230,7 @@ export function OperationLogPage({
                             initial={{ opacity: 0, y: 8 }}
                             animate={{ opacity: 1, y: 0 }}
                         >
-                            {operationLog.length === 0 ? "还没有序列操作。" : "没有匹配的操作记录。"}
+                            {operationLog.length === 0 ? "还没有序列编辑记录。" : "没有匹配的编辑记录。"}
                         </motion.div>
                     ) : (
                         <div className={styles["log-list"]}>
@@ -397,127 +241,77 @@ export function OperationLogPage({
                                     className={styles["log-group"]}
                                 >
                                     <h2>{group.tree}</h2>
-                                    {group.entries.map((entry, index) => (
-                                        (() => {
-                                            const source = entry.source ?? "manual";
-                                            const range = formatAffectedRange(entry);
-                                            const jumpYear = entry.targetYear ?? entry.affectedRange?.startYear;
-                                            const isReverted = entry.isReverted ?? Boolean(entry.undone);
-                                            const isApplied = entry.isApplied ?? !isReverted;
-                                            const stateLabel = isReverted ? "已回滚" : isApplied ? "已应用" : "待确认";
-                                            const stateClass = isReverted ? styles["action-undone"] : styles["action-apply"];
-                                            const canJump = Boolean(
-                                                entry.tree
-                                                && source !== "reference-assisted"
-                                                && source !== "cofecha-assisted"
-                                            );
-                                            const sourceClass = styles[`source-${source}`] ?? "";
-                                            const canUndoBatch = Boolean(entry.canUndoBatch);
-                                            const metricLabels = [
-                                                ...formatMetrics("before", entry.metricsBefore),
-                                                ...formatMetrics("after", entry.metricsAfter),
-                                            ];
-                                            const auditLabels = [
-                                                formatValueChange(entry),
-                                                formatYearChange(entry),
-                                                entry.targetIndex === undefined ? null : `index ${entry.targetIndex}`,
-                                                entry.createdBy ? `by ${entry.createdBy}` : null,
-                                                entry.batchId ? `batch ${formatShortId(entry.batchId)}` : null,
-                                                entry.parentOperationId ? `parent ${formatShortId(entry.parentOperationId)}` : null,
-                                            ].filter((label): label is string => Boolean(label));
-                                            return (
-                                        <motion.article
-                                            layout
-                                            key={entry.id}
-                                            className={styles["log-entry"]}
-                                            initial={{ opacity: 0, x: 16 }}
-                                            animate={{ opacity: 1, x: 0 }}
-                                            transition={{ duration: 0.18, delay: Math.min((groupIndex + index) * 0.012, 0.12) }}
-                                        >
-                                            <div className={styles["log-entry-main"]}>
-                                                <span className={`${styles["action-badge"]} ${stateClass}`}>
-                                                    {stateLabel}
-                                                </span>
-                                                <div className={styles["log-entry-copy"]}>
-                                                    <div className={styles["log-entry-title-row"]}>
-                                                        <h3>{entry.summary}</h3>
-                                                        <span className={`${styles["source-badge"]} ${sourceClass}`}>
-                                                            {operationSourceLabels[source]}
-                                                        </span>
+                                    {group.entries.map((entry, index) => {
+                                        const range = formatAffectedRange(entry);
+                                        const jumpYear = entry.targetYear ?? entry.affectedRange?.startYear;
+                                        const auditLabels = [
+                                            formatValueChange(entry),
+                                            formatYearChange(entry),
+                                            entry.targetIndex === undefined ? null : `index ${entry.targetIndex}`,
+                                        ].filter((label): label is string => Boolean(label));
+                                        return (
+                                            <motion.article
+                                                layout
+                                                key={entry.id}
+                                                className={styles["log-entry"]}
+                                                initial={{ opacity: 0, x: 16 }}
+                                                animate={{ opacity: 1, x: 0 }}
+                                                transition={{ duration: 0.18, delay: Math.min((groupIndex + index) * 0.012, 0.12) }}
+                                            >
+                                                <div className={styles["log-entry-main"]}>
+                                                    <span className={styles["action-badge"] + " " + styles["action-apply"]}>
+                                                        编辑
+                                                    </span>
+                                                    <div className={styles["log-entry-copy"]}>
+                                                        <div className={styles["log-entry-title-row"]}>
+                                                            <h3>{entry.summary}</h3>
+                                                        </div>
+                                                        <p>{entry.detail}</p>
+                                                        {(entry.operationType || range || auditLabels.length > 0) ? (
+                                                            <p className={styles["log-entry-details"]}>
+                                                                {entry.operationType ? <span>{entry.operationType}</span> : null}
+                                                                {range ? <span>{range}</span> : null}
+                                                                {auditLabels.map((label) => <span key={label}>{label}</span>)}
+                                                            </p>
+                                                        ) : null}
+                                                        {entry.reason ? (
+                                                            <p className={styles["log-entry-details"]}>
+                                                                <span>{entry.reason}</span>
+                                                            </p>
+                                                        ) : null}
                                                     </div>
-                                                    <p>{entry.detail}</p>
-                                                    {(entry.operationType || range || auditLabels.length > 0) ? (
-                                                        <p className={styles["log-entry-details"]}>
-                                                            {entry.operationType ? <span>{entry.operationType}</span> : null}
-                                                            {range ? <span>{range}</span> : null}
-                                                            {auditLabels.map((label) => <span key={label}>{label}</span>)}
-                                                        </p>
-                                                    ) : null}
-                                                    {(entry.reason || metricLabels.length > 0) ? (
-                                                        <p className={styles["log-entry-details"]}>
-                                                            {entry.reason ? <span>{entry.reason}</span> : null}
-                                                            {metricLabels.map((label) => <span key={label}>{label}</span>)}
-                                                        </p>
-                                                    ) : null}
                                                 </div>
-                                            </div>
-                                            <div className={styles["log-entry-side"]}>
-                                                <div className={styles["log-entry-controls"]}>
-                                                    <button
-                                                        type="button"
-                                                        disabled={!canJump}
-                                                        title={jumpYear == null ? "定位到序列" : `定位到 ${entry.tree} ${jumpYear}`}
-                                                        onClick={() => {
-                                                            if (entry.tree) {
-                                                                void onJumpEntry(entry.tree, jumpYear);
-                                                            }
-                                                        }}
-                                                    >
-                                                        ⌖
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        disabled={!canUndoBatch}
-                                                        aria-label={entry.batchId ? `整批回滚 ${entry.batchId}` : "该记录不属于批次"}
-                                                        title={entry.batchId
-                                                            ? canUndoBatch
-                                                                ? `整批回滚 ${entry.batchId}`
-                                                                : "该批次当前不能完整回滚"
-                                                            : "该记录不属于批次"}
-                                                        onClick={() => {
-                                                            if (entry.batchId) {
-                                                                void onUndoBatch(entry.batchId);
-                                                            }
-                                                        }}
-                                                    >
-                                                        批
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        disabled={!entry.canUndo}
-                                                        title="撤销该条操作"
-                                                        onClick={() => { void onUndoEntry(entry.id); }}
-                                                    >
-                                                        ↶
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        disabled={!entry.canRedo}
-                                                        title="重做该条操作"
-                                                        onClick={() => { void onRedoEntry(entry.id); }}
-                                                    >
-                                                        ↷
-                                                    </button>
+                                                <div className={styles["log-entry-side"]}>
+                                                    <div className={styles["log-entry-controls"]}>
+                                                        <button
+                                                            type="button"
+                                                            disabled={!entry.tree}
+                                                            title={jumpYear == null ? "定位到序列" : `定位到 ${entry.tree} ${jumpYear}`}
+                                                            onClick={() => {
+                                                                if (entry.tree) {
+                                                                    void onJumpEntry(entry.tree, jumpYear);
+                                                                }
+                                                            }}
+                                                        >
+                                                            ↗
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            disabled={!entry.canUndo}
+                                                            title="撤销该条操作"
+                                                            onClick={() => { void onUndoEntry(entry.id); }}
+                                                        >
+                                                            ↩
+                                                        </button>
+                                                    </div>
+                                                    <div className={styles["log-entry-meta"]}>
+                                                        <span>#{entry.sequence}</span>
+                                                        <span>{formatLogTime(entry.timestamp)}</span>
+                                                    </div>
                                                 </div>
-                                                <div className={styles["log-entry-meta"]}>
-                                                    <span>#{entry.sequence}</span>
-                                                    <span>{formatLogTime(entry.timestamp)}</span>
-                                                </div>
-                                            </div>
-                                        </motion.article>
-                                            );
-                                        })()
-                                    ))}
+                                            </motion.article>
+                                        );
+                                    })}
                                 </section>
                             ))}
                         </div>
@@ -527,7 +321,6 @@ export function OperationLogPage({
         </PageShell>
     );
 }
-
 type CofechaReportPageProps = {
     cofechaResult?: Partial<Pick<
         ICofechaResult,
@@ -667,6 +460,7 @@ type ExpandedChartPageProps = {
     referenceConfig: ReferenceSeriesConfig | null;
     diagnosis: CrossdatingDiagnosis;
     diagnosisBatchResult: DiagnosisBatchApplyResult | null;
+    showPersistentTooltip?: boolean;
     onReferenceConfigChange: (config: ReferenceSeriesConfig | null) => void;
     onApplyDiagnosisCandidate: (candidate: DiagnosisCandidateOperation) => void;
     onApplyDiagnosisCandidateBatch: (candidates: DiagnosisCandidateOperation[]) => void;
@@ -682,6 +476,7 @@ export function ExpandedChartPage({
     referenceConfig,
     diagnosis,
     diagnosisBatchResult,
+    showPersistentTooltip = false,
     onReferenceConfigChange,
     onApplyDiagnosisCandidate,
     onApplyDiagnosisCandidateBatch,
@@ -726,6 +521,7 @@ export function ExpandedChartPage({
                 <Suspense fallback={<div className={styles["chart-loading"]}>正在加载折线图...</div>}>
                     <LazyTreeChartManager
                         variant="expanded"
+                        showPersistentTooltip={showPersistentTooltip}
                         fullData={siteData}
                         referenceConfig={referenceConfig}
                         diagnosis={diagnosis}

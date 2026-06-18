@@ -27,6 +27,7 @@ import { stopMarker } from '@/shared/constants'
 type Props = {
   fullData: RwlSiteData
   variant?: 'panel' | 'expanded'
+  showPersistentTooltip?: boolean
   referenceConfig?: ReferenceSeriesConfig | null
   diagnosis?: CrossdatingDiagnosis
   diagnosisBatchResult?: DiagnosisBatchApplyResult | null
@@ -42,6 +43,7 @@ type Props = {
 function TreeChartManagerBase({
   fullData,
   variant = 'panel',
+  showPersistentTooltip = false,
   referenceConfig = null,
   diagnosis,
   diagnosisBatchResult = null,
@@ -227,20 +229,6 @@ function TreeChartManagerBase({
     return scoped.slice(0, isExpanded ? 8 : 4)
   }, [activeSelection, diagnosis, isExpanded])
 
-  const visibleFlaggedDiagnosisSegments = useMemo(() => {
-    const visibleTreeSet = new Set(visibleTrees)
-    if (!diagnosis || visibleTreeSet.size === 0) return []
-
-    return diagnosis.segments
-      .filter((segment) => segment.flagged && visibleTreeSet.has(segment.targetTree))
-      .sort((a, b) => {
-        const lagPriority = Number(b.bestLag !== 0) - Number(a.bestLag !== 0)
-        if (lagPriority !== 0) return lagPriority
-        return (a.currentCorrelation ?? 1) - (b.currentCorrelation ?? 1)
-      })
-      .slice(0, isExpanded ? 36 : 18)
-  }, [diagnosis, isExpanded, visibleTrees])
-
   const selectLongestTrees = useCallback(() => {
     const longest = allTreeCodes
       .map(treeCode => {
@@ -324,6 +312,21 @@ function TreeChartManagerBase({
     value === null ? '-' : value.toFixed(2)
   )
 
+  const formatProbabilityLike = (value: number | undefined) => (
+    typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value * 100)}%` : '-'
+  )
+
+  const formatAlgorithmSource = (sources: DiagnosisCandidateOperation['algorithmSource']) => {
+    const labels: Record<string, string> = {
+      global_sliding_match: 'global',
+      segmented_diagnosis: 'segmented',
+      propagation_pattern: 'propagation',
+      local_edit_alignment: 'edit',
+      candidate_ranking: 'ranking',
+    }
+    return sources.map((source) => labels[source] ?? source).join(' + ')
+  }
+
   const formatShortBatchId = (batchId: string) => {
     const parts = batchId.split('-')
     return parts.length >= 2 ? parts.slice(-2).join('-') : batchId.slice(-12)
@@ -400,6 +403,16 @@ function TreeChartManagerBase({
           ? ` (${candidate.delta >= 0 ? '+' : ''}${candidate.delta.toFixed(2)})`
           : ''
         const evidence = candidate.evidence
+        const confidenceLevel = candidate.confidenceLevel ?? candidate.confidence
+        const confidenceStyle = confidenceLevel === 'high'
+          ? { background: '#f6d6c8', color: '#8f2d18' }
+          : confidenceLevel === 'medium'
+            ? { background: '#f7e5bd', color: '#6e5010' }
+            : confidenceLevel === 'ambiguous'
+              ? { background: '#efe4f5', color: '#65407a' }
+              : { background: '#eef0f3', color: '#5f6d7c' }
+        const algorithmSource = formatAlgorithmSource(candidate.algorithmSource ?? evidence.algorithmSource ?? [])
+        const warningLabel = candidate.ambiguous ? '歧义' : candidate.lowConfidence ? '低置信' : null
         return (
           <div
             key={candidate.id}
@@ -423,13 +436,14 @@ function TreeChartManagerBase({
                   flex: '0 0 auto',
                   padding: '1px 5px',
                   borderRadius: 9,
-                  background: candidate.confidence === 'high' ? '#f6d6c8' : candidate.confidence === 'medium' ? '#f7e5bd' : '#eef0f3',
-                  color: candidate.confidence === 'high' ? '#8f2d18' : candidate.confidence === 'medium' ? '#6e5010' : '#5f6d7c',
+                  ...confidenceStyle,
                   fontSize: 10,
                   fontWeight: 700,
                 }}>
-                  {candidate.confidence}
+                  {confidenceLevel}
                 </span>
+                {candidate.rank ? <span style={{ fontSize: 10, color: '#8a6b4c' }}>#{candidate.rank}</span> : null}
+                {warningLabel ? <span style={{ fontSize: 10, color: '#7a4a2f' }}>{warningLabel}</span> : null}
                 {rejected ? (
                   <span style={{ fontSize: 10, color: '#777' }}>已忽略</span>
                 ) : null}
@@ -437,13 +451,19 @@ function TreeChartManagerBase({
               <div style={{ marginTop: 2, color: '#6f5a45', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {candidate.segmentStartYear}-{candidate.segmentEndYear}{candidateYear} · {getDiagnosisCandidateLabel(candidate)} · r {formatCorrelation(candidate.currentCorrelation)} → {formatCorrelation(candidate.expectedCorrelation)}{candidateDelta}
               </div>
-              <div style={{ marginTop: 3, color: '#765b40', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 8px' }}>
+              <div style={{ marginTop: 3, color: '#765b40', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '2px 8px' }}>
                 <span>A/B {evidence.before.unresolvedA}/{evidence.before.unresolvedB} → {evidence.after.unresolvedA}/{evidence.after.unresolvedB}</span>
                 <span>bestLag {evidence.before.bestLag} → {evidence.after.bestLag}</span>
-                {candidate.mode ? <span>模式 {candidate.mode}</span> : <span>score {candidate.score.toFixed(2)}</span>}
+                <span>score {(candidate.candidateScore ?? candidate.score).toFixed(2)}</span>
+                <span>相对置信 {formatProbabilityLike(candidate.probabilityLike)}</span>
+                <span>置信 {confidenceLevel}</span>
+                <span title={algorithmSource}>来源 {algorithmSource || '-'}</span>
+                {candidate.mode ? <span>模式 {candidate.mode}</span> : <span>类型 {candidate.candidateType}</span>}
                 {candidate.selectedRange ? <span>范围 {candidate.selectedRange.startYear}-{candidate.selectedRange.endYear}</span> : <span>anchor {candidate.anchorYear}</span>}
                 {candidate.missingRange ? <span>缺测 {candidate.missingRange.startYear}-{candidate.missingRange.endYear}</span> : null}
                 {candidate.deltaYears ? <span>delta {candidate.deltaYears > 0 ? '+' : ''}{candidate.deltaYears}</span> : null}
+                {evidence.localEditAlignment ? <span>edit {evidence.localEditAlignment.method}</span> : null}
+                {evidence.globalSliding ? <span>global t {formatCorrelation(evidence.globalSliding.bestGlobalTLike)}</span> : null}
               </div>
               <div style={{ marginTop: 3, color: '#8a6b4c', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {evidence.explanation}
@@ -478,7 +498,7 @@ function TreeChartManagerBase({
       data={filteredData}
       sampleSizeData={fullData}
       referenceSeries={referenceSeries}
-      diagnosisSegments={visibleFlaggedDiagnosisSegments}
+      showPersistentTooltip={showPersistentTooltip}
       highlightedTreeCode={highlightedTreeCode}
       onHighlightedTreeCodeChange={setHighlightedTreeCode}
       zoomWindow={zoomWindow}

@@ -373,6 +373,205 @@
     padding: 0 16px;
 }
 
+.skeleton-block {
+    position: relative;
+    display: inline-block;
+    overflow: hidden;
+    border-radius: 4px;
+    background-color: #e8eef6;
+}
+
+.stat-value-skeleton {
+    position: relative;
+    display: inline-block;
+    overflow: hidden;
+    width: 5.5ch;
+    height: 1em;
+    border-radius: 4px;
+    background-color: #e8eef6;
+}
+
+.skeleton-block::after,
+.stat-value-skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.64) 50%, transparent 100%);
+    transform: translateX(-120%);
+    animation: skeleton-sweep 1.35s linear infinite;
+    will-change: transform;
+}
+
+.cofecha-toolbar-skeleton {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    pointer-events: none;
+}
+
+.skeleton-select {
+    width: 300px;
+    max-width: 46%;
+    height: 24px;
+}
+
+.skeleton-button {
+    width: 78px;
+    height: 24px;
+}
+
+.skeleton-chip {
+    width: 96px;
+    height: 20px;
+    border-radius: 999px;
+}
+
+.cofecha-empty-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 100%;
+    padding: 2px 0 24px;
+    box-sizing: border-box;
+    pointer-events: none;
+}
+
+.cofecha-skeleton-title {
+    width: 34%;
+    min-width: 180px;
+    height: 18px;
+}
+
+.cofecha-skeleton-rule {
+    width: 100%;
+    height: 1px;
+    background-color: #d8e0ea;
+}
+
+.cofecha-skeleton-lines {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    padding-top: 2px;
+}
+
+.cofecha-skeleton-line {
+    height: 13px;
+}
+
+.chart-empty-skeleton {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+    min-height: 100%;
+    pointer-events: none;
+}
+
+.chart-skeleton-toolbar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.chart-skeleton-toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.chart-skeleton-tab {
+    width: 96px;
+    height: 26px;
+}
+
+.chart-skeleton-tab-short {
+    width: 68px;
+    height: 26px;
+}
+
+.chart-skeleton-icon {
+    width: 28px;
+    height: 26px;
+}
+
+.chart-skeleton-plot {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 260px;
+    overflow: hidden;
+    border-left: 1px solid #cfd8e4;
+    border-bottom: 1px solid #cfd8e4;
+    background-image:
+        linear-gradient(to right, rgba(207, 216, 228, 0.45) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(207, 216, 228, 0.45) 1px, transparent 1px);
+    background-size: 11.111% 100%, 100% 20%;
+    background-color: #fbfcfe;
+}
+
+.chart-skeleton-svg {
+    position: absolute;
+    inset: 20px 18px 26px 18px;
+    width: calc(100% - 36px);
+    height: calc(100% - 46px);
+    overflow: visible;
+}
+
+.chart-skeleton-svg polyline {
+    fill: none;
+    stroke: #9cb4cc;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    opacity: 0.75;
+}
+
+.chart-skeleton-svg polyline + polyline {
+    stroke: #c2a56b;
+    opacity: 0.55;
+}
+
+.chart-skeleton-axis-x,
+.chart-skeleton-axis-y {
+    position: absolute;
+    background-color: #b7c2d0;
+}
+
+.chart-skeleton-axis-x {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 1px;
+}
+
+.chart-skeleton-axis-y {
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+}
+
+@keyframes skeleton-sweep {
+    0% {
+        transform: translateX(-120%);
+    }
+    100% {
+        transform: translateX(120%);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .skeleton-block::after,
+    .stat-value-skeleton::after {
+        animation: none;
+    }
+}
+
 .panel-divider {
     position: relative;
     flex: 0 0 auto;

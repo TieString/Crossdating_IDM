@@ -173,8 +173,6 @@ export type WorkspaceWindowClosedPayload = {
 
 export type WorkspaceWindowCommand =
     | { kind: "operation-log"; type: "undo-log-entry"; entryId: string }
-    | { kind: "operation-log"; type: "undo-log-batch"; batchId: string }
-    | { kind: "operation-log"; type: "redo-log-entry"; entryId: string }
     | { kind: "operation-log"; type: "reset-to-raw" }
     | { kind: "operation-log"; type: "jump"; tree: string; year?: number }
     | { kind: "cofecha"; type: "select-part"; part: string }

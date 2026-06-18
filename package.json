@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "validate": "npm run validate:samples && npm run validate:workspace-windows && npm run validate:auto-crossdating",
     "validate:samples": "node scripts/validate-samples.mjs",
     "validate:samples:strict": "node scripts/validate-samples.mjs --strict-internal",
     "validate:cofecha:samples": "node scripts/validate-cofecha-samples.mjs",

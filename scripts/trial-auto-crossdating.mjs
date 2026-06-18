@@ -163,10 +163,13 @@ function applyCandidate(editor, candidate, batchId, index) {
   };
 
   if (candidate.operationType === "SHIFT_RANGE") {
-    const shift = candidate.shift ?? candidate.suggestedLag;
+    const shift = candidate.deltaYears ?? candidate.shift ?? candidate.suggestedLag;
     if (shift === 0) return { applied: false, reason: "zero-shift" };
-    const startYear = candidate.targetYear ?? candidate.segmentStartYear;
-    editor.moveSeriesTailByOffset(candidate.targetTree, startYear, candidate.segmentEndYear, shift, metadata);
+    const selectedRange = candidate.selectedRange ?? {
+      startYear: candidate.targetYear ?? candidate.segmentStartYear,
+      endYear: candidate.segmentEndYear,
+    };
+    editor.moveSeriesTailByOffset(candidate.targetTree, selectedRange.startYear, selectedRange.endYear, shift, metadata);
     return { applied: true };
   }
 

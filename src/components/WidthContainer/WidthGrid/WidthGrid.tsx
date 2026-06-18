@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { motion, useReducedMotion, type TargetAndTransition, type Transition } from "motion/react";
 import { callChangeYearWidth } from "@/features/rwl/edit";
 import { RollingNumber } from "@/components/RollingNumber/RollingNumber";
@@ -29,6 +29,13 @@ type WidthGridMotionConfig = {
     transitionEnd?: TargetAndTransition["transitionEnd"];
 };
 
+type AnimationOffset = {
+    x: number;
+    y: number;
+};
+
+type InsertCellMotion = "rise" | "pulse" | "side-pop";
+
 const getAnimationDurationScale = (animationSpeed: number) => (
     Number.isFinite(animationSpeed) && animationSpeed > 0 ? 1 / animationSpeed : 1
 );
@@ -53,17 +60,87 @@ const withDelay = (transition: Transition, delaySeconds: number, animationSpeed:
     return scaleTransitionTiming(delayed, animationSpeed);
 };
 
-const getMotionConfig = (animationKind: GridAnimationKind | undefined, delaySeconds = 0, animationSpeed = 1): WidthGridMotionConfig => {
+const isShiftAnimation = (animationKind: GridAnimationKind | undefined) => (
+    animationKind === "insert-shift-left"
+    || animationKind === "insert-shift-right"
+    || animationKind === "insert-cross-row-shift-left"
+    || animationKind === "insert-cross-row-shift-right"
+);
+
+const getMotionConfig = (
+    animationKind: GridAnimationKind | undefined,
+    delaySeconds = 0,
+    animationSpeed = 1,
+    animationOffset?: AnimationOffset,
+    insertCellMotion: InsertCellMotion = "rise",
+): WidthGridMotionConfig => {
+    if (isShiftAnimation(animationKind) && animationOffset) {
+        const isCrossRowShift = animationKind === "insert-cross-row-shift-left"
+            || animationKind === "insert-cross-row-shift-right";
+        return {
+            initial: { x: animationOffset.x, y: animationOffset.y },
+            animate: { x: 0, y: 0 },
+            transition: withDelay({
+                duration: isCrossRowShift ? 1.18 : 0.95,
+                ease: isCrossRowShift ? [0.22, 1, 0.36, 1] : [0.16, 1, 0.3, 1],
+            }, delaySeconds, animationSpeed),
+        };
+    }
+
     switch (animationKind) {
         case "insert-left":
+        case "insert-right": {
+            if (insertCellMotion === "pulse") {
+                return {
+                    initial: {
+                        scale: 0.82,
+                        opacity: 0,
+                        transformOrigin: "50% 50%",
+                        boxShadow: "inset 0 0 0 2px #22c55e, 0 0 0 0 rgba(34, 197, 94, 0.22)",
+                    },
+                    animate: {
+                        scale: [0.82, 1.08, 1],
+                        opacity: [0, 1, 1],
+                        boxShadow: [
+                            "inset 0 0 0 2px #16a34a, 0 0 0 0 rgba(34, 197, 94, 0.24)",
+                            "inset 0 0 0 2px #16a34a, 0 0 0 7px rgba(34, 197, 94, 0.16)",
+                            "inset 0 0 0 0 rgba(34, 197, 94, 0), 0 0 0 0 rgba(34, 197, 94, 0)",
+                        ],
+                    },
+                    transition: withDelay({ duration: 0.7, ease: [0.16, 1, 0.3, 1], times: [0, 0.48, 1] }, delaySeconds + 0.08, animationSpeed),
+                    transitionEnd: { boxShadow: "", opacity: 1, scale: 1 },
+                };
+            }
+
+            if (insertCellMotion === "rise") {
+                return {
+                    initial: {
+                        scale: 0.62,
+                        opacity: 0,
+                        transformOrigin: "50% 50%",
+                        boxShadow: "inset 0 0 0 2px #22c55e, 0 0 0 0 rgba(34, 197, 94, 0.18)",
+                    },
+                    animate: {
+                        scale: 1,
+                        opacity: 1,
+                        boxShadow: "inset 0 0 0 0 rgba(34, 197, 94, 0), 0 0 0 0 rgba(34, 197, 94, 0)",
+                    },
+                    transition: withDelay({ duration: 0.52, ease: [0.16, 1, 0.3, 1] }, delaySeconds + 0.08, animationSpeed),
+                    transitionEnd: { boxShadow: "", opacity: 1, scale: 1 },
+                };
+            }
+
+            const sideOffset = animationKind === "insert-left" ? -5 : 5;
             return {
                 initial: {
-                    x: -5,
+                    x: sideOffset,
                     scale: 0.96,
+                    opacity: 0,
                     boxShadow: "inset 0 0 0 2px #22c55e, 0 0 0 0 rgba(34, 197, 94, 0.22)",
                 },
                 animate: {
                     x: 0,
+                    opacity: 1,
                     scale: [1.04, 1],
                     boxShadow: [
                         "inset 0 0 0 2px #16a34a, 0 0 0 4px rgba(34, 197, 94, 0.16)",
@@ -71,26 +148,9 @@ const getMotionConfig = (animationKind: GridAnimationKind | undefined, delaySeco
                     ],
                 },
                 transition: withDelay({ duration: 0.68, ease: "easeOut", times: [0.45, 1] }, delaySeconds, animationSpeed),
-                transitionEnd: { boxShadow: "" },
+                transitionEnd: { boxShadow: "", opacity: 1 },
             };
-        case "insert-right":
-            return {
-                initial: {
-                    x: 5,
-                    scale: 0.96,
-                    boxShadow: "inset 0 0 0 2px #22c55e, 0 0 0 0 rgba(34, 197, 94, 0.22)",
-                },
-                animate: {
-                    x: 0,
-                    scale: [1.04, 1],
-                    boxShadow: [
-                        "inset 0 0 0 2px #16a34a, 0 0 0 4px rgba(34, 197, 94, 0.16)",
-                        "inset 0 0 0 0 rgba(34, 197, 94, 0), 0 0 0 0 rgba(34, 197, 94, 0)",
-                    ],
-                },
-                transition: withDelay({ duration: 0.68, ease: "easeOut", times: [0.45, 1] }, delaySeconds, animationSpeed),
-                transitionEnd: { boxShadow: "" },
-            };
+        }
         case "insert-shift-left":
             return {
                 initial: { x: "calc(100% + 5px)" },
@@ -105,16 +165,22 @@ const getMotionConfig = (animationKind: GridAnimationKind | undefined, delaySeco
             };
         case "insert-cross-row-shift-left":
             return {
-                initial: { x: "calc(50% + 2.5px)", opacity: 0 },
+                initial: {
+                    x: "calc(100% + 5px)",
+                    opacity: 0,
+                },
                 animate: { x: 0, opacity: 1 },
-                transition: withDelay({ duration: 0.95, ease: [0.16, 1, 0.3, 1] }, delaySeconds, animationSpeed),
+                transition: withDelay({ duration: 1.04, ease: [0.16, 1, 0.3, 1] }, delaySeconds, animationSpeed),
                 transitionEnd: { opacity: 1 },
             };
         case "insert-cross-row-shift-right":
             return {
-                initial: { x: "calc(-50% - 2.5px)", opacity: 0 },
+                initial: {
+                    x: "calc(-100% - 5px)",
+                    opacity: 0,
+                },
                 animate: { x: 0, opacity: 1 },
-                transition: withDelay({ duration: 0.95, ease: [0.16, 1, 0.3, 1] }, delaySeconds, animationSpeed),
+                transition: withDelay({ duration: 1.04, ease: [0.16, 1, 0.3, 1] }, delaySeconds, animationSpeed),
                 transitionEnd: { opacity: 1 },
             };
         case "move-target":
@@ -199,6 +265,8 @@ type WidthGridProps = Omit<React.HTMLAttributes<HTMLSpanElement>, MotionReserved
     dragYearOffset?: number;
     animationKind?: GridAnimationKind;
     animationDelay?: number;
+    animationOffset?: AnimationOffset;
+    insertCellMotion?: InsertCellMotion;
     animationSpeed?: number;
     hasLeftDeletionMark?: boolean;
     hasRightDeletionMark?: boolean;
@@ -227,6 +295,8 @@ export default function WidthGrid({
     dragYearOffset = 0,
     animationKind,
     animationDelay = 0,
+    animationOffset,
+    insertCellMotion = "rise",
     animationSpeed = 1,
     hasLeftDeletionMark = false,
     hasRightDeletionMark = false,
@@ -384,10 +454,16 @@ export default function WidthGrid({
     const plusButtonClassName = hoverPlusSide
         ? `${style["insert-missing-button"]} ${style[`insert-missing-button-${hoverPlusSide}`]} ${style["insert-missing-button-visible"]}`
         : style["insert-missing-button"];
-    const motionConfig = shouldReduceMotion ? {} : getMotionConfig(animationKind, animationDelay, animationSpeed);
-    const motionAnimate = motionConfig.animate && motionConfig.transitionEnd
-        ? { ...motionConfig.animate, transitionEnd: motionConfig.transitionEnd }
-        : motionConfig.animate;
+    const motionConfig = useMemo(
+        () => shouldReduceMotion ? {} : getMotionConfig(animationKind, animationDelay, animationSpeed, animationOffset, insertCellMotion),
+        [animationDelay, animationKind, animationOffset, animationSpeed, insertCellMotion, shouldReduceMotion],
+    );
+    const motionAnimate = useMemo(
+        () => motionConfig.animate && motionConfig.transitionEnd
+            ? { ...motionConfig.animate, transitionEnd: motionConfig.transitionEnd }
+            : motionConfig.animate,
+        [motionConfig],
+    );
 
     const handleDeletionMarkEnter = (event: React.MouseEvent<HTMLSpanElement>, markerYear: number | undefined, side: "left" | "right") => {
         event.stopPropagation();

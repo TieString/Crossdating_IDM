@@ -24,6 +24,10 @@ const assertIncludes = (html, value, message) => {
   assert.ok(html.includes(value), message ?? `Expected rendered HTML to include ${value}`);
 };
 
+const assertNotIncludes = (html, value, message) => {
+  assert.ok(!html.includes(value), message ?? `Expected rendered HTML not to include ${value}`);
+};
+
 const assertArrayIncludes = (values, value, message) => {
   assert.ok(values.includes(value), message ?? `Expected array to include ${value}`);
 };
@@ -73,8 +77,6 @@ const sampleEntries = [
     isApplied: true,
     isReverted: false,
     canUndo: true,
-    canRedo: false,
-    canUndoBatch: false,
     undoDepth: 1,
     redoDepth: 0,
   },
@@ -96,35 +98,13 @@ const sampleEntries = [
     isApplied: true,
     isReverted: false,
     canUndo: true,
-    canRedo: false,
-    canUndoBatch: true,
     undoDepth: 2,
-    redoDepth: 0,
-  },
-  {
-    id: "cofecha-1",
-    sequence: 3,
-    timestamp: "2026-06-16T04:02:00.000Z",
-    tree: "COFECHA",
-    summary: "运行 COFECHA",
-    detail: "COFECHA · A/problem 1 · Intercorr. 0.657",
-    operationType: "RUN_COFECHA",
-    source: "cofecha-assisted",
-    reason: "manual validation",
-    cofechaAfter: { possibleProblemsCount: 1 },
-    isApplied: true,
-    isReverted: false,
-    canUndo: false,
-    canRedo: false,
-    canUndoBatch: false,
-    undoDepth: 0,
     redoDepth: 0,
   },
 ];
 
 try {
   const pages = await server.ssrLoadModule("/src/pages/home/WorkspacePages.tsx");
-  const homeWorkspace = await server.ssrLoadModule("/src/pages/home/useHomeWorkspace.ts");
   const bridge = await server.ssrLoadModule("/src/pages/home/workspaceWindowBridge.ts");
   const formatter = await server.ssrLoadModule("/src/features/cofecha/formatter.ts");
   const validation = await server.ssrLoadModule("/src/features/crossdating/validation.ts");
@@ -230,40 +210,11 @@ PART 7:
   assert.equal(staleValidation.status, "stale");
   assert.ok(staleValidation.items.some((item) => item.includes("EBD011")));
 
-  const restoredCofechaLog = [
-    { ...sampleEntries[2], id: "cofecha-restored-1", sequence: 1 },
-    { ...sampleEntries[2], id: "cofecha-restored-2", sequence: 2 },
-  ];
-  const appendedCofechaLog = homeWorkspace.appendCofechaOperationLogEntry(
-    restoredCofechaLog,
-    { ...sampleEntries[2], id: "cofecha-new-run", sequence: 3 },
-  );
-  assert.deepEqual(appendedCofechaLog.map((entry) => entry.id), [
-    "cofecha-restored-1",
-    "cofecha-restored-2",
-    "cofecha-new-run",
-  ]);
-
-  const fullCofechaLog = Array.from({ length: 200 }, (_, index) => ({
-    ...sampleEntries[2],
-    id: `cofecha-old-${index}`,
-    sequence: index + 1,
-  }));
-  const trimmedCofechaLog = homeWorkspace.appendCofechaOperationLogEntry(
-    fullCofechaLog,
-    { ...sampleEntries[2], id: "cofecha-trimmed-new", sequence: 201 },
-  );
-  assert.equal(trimmedCofechaLog.length, 200);
-  assert.equal(trimmedCofechaLog[0].id, "cofecha-old-1");
-  assert.equal(trimmedCofechaLog.at(-1).id, "cofecha-trimmed-new");
-
   const operationLogHtml = renderToStaticMarkup(React.createElement(pages.OperationLogPage, {
     fileName: "smoke.rwl",
-    operationLog: sampleEntries,
+    operationLog: sampleEntries.slice(0, 2),
     canResetToRawData: true,
     onUndoEntry() {},
-    onUndoBatch() {},
-    onRedoEntry() {},
     onJumpEntry() {},
     onResetToRawData() {},
     onClose() {},
@@ -274,18 +225,18 @@ PART 7:
   assertIncludes(operationLogHtml, "smoke.rwl");
   assertIncludes(operationLogHtml, "显示 / 总计");
   assertIncludes(operationLogHtml, "搜索");
-  assertIncludes(operationLogHtml, "全部来源");
-  assertIncludes(operationLogHtml, "全部状态");
-  assertIncludes(operationLogHtml, "建议批次");
   assertIncludes(operationLogHtml, "回到原始");
+  assertIncludes(operationLogHtml, "可撤销");
   assertIncludes(operationLogHtml, "应用候选");
   assertIncludes(operationLogHtml, "segment correlation improved");
-  assertIncludes(operationLogHtml, "suggestion-batch-smoke-2");
-  assertIncludes(operationLogHtml, "aria-label=\"整批回滚 suggestion-batch-smoke-2\"");
   assertIncludes(operationLogHtml, "title=\"定位到 EBD151 1901\"");
   assertIncludes(operationLogHtml, "title=\"撤销该条操作\"");
-  assertIncludes(operationLogHtml, "title=\"重做该条操作\"");
-  assertIncludes(operationLogHtml, "COFECHA · A/problem 1");
+  assertNotIncludes(operationLogHtml, "全部来源");
+  assertNotIncludes(operationLogHtml, "全部状态");
+  assertNotIncludes(operationLogHtml, "建议批次");
+  assertNotIncludes(operationLogHtml, "整批回滚");
+  assertNotIncludes(operationLogHtml, "title=\"重做该条操作\"");
+  assertNotIncludes(operationLogHtml, "COFECHA · A/problem 1");
 
   const cofechaHtml = renderToStaticMarkup(React.createElement(pages.CofechaReportPage, {
     cofechaResult: {
@@ -332,47 +283,78 @@ PART 7:
 
   const initialHistoryData = buildHistorySmokeData();
   const initialHistorySignature = serializeSiteDataForAssert(initialHistoryData);
-  const batchId = "suggestion-batch-history-smoke";
   const editor = new rwlEdit.RwlEditor(initialHistoryData);
 
   editor.insertMissingYearAtSide("SMK001", 1902, "right", {
     operationType: "APPLY_SUGGESTION",
     source: "auto-suggested",
     reason: "history smoke insert",
-    batchId,
   });
+  const oneEditSignature = serializeSiteDataForAssert(editor.getData());
   editor.deleteYearWithMode("SMK002", 1903, "direct", "right", {
     operationType: "APPLY_SUGGESTION",
     source: "auto-suggested",
     reason: "history smoke delete",
-    batchId,
   });
 
   const changedSignature = serializeSiteDataForAssert(editor.getData());
   assert.notEqual(changedSignature, initialHistorySignature);
   assert.equal(editor.hasRawDataChanges(), true);
-  assert.equal(editor.getOperationLog().filter((entry) => entry.batchId === batchId).length, 2);
-  assert.equal(editor.getOperationLog().every((entry) => entry.canUndoBatch), true);
+  assert.equal(editor.getOperationLog().length, 2);
+  assert.equal(editor.getOperationLog().every((entry) => entry.isReverted !== true), true);
+
+  const undoAnimation = editor.undo();
+  assert.ok(undoAnimation, "Expected history undo to return an animation");
+  assert.equal(serializeSiteDataForAssert(editor.getData()), oneEditSignature);
+  assert.equal(editor.getOperationLog().length, 1);
+  assert.equal(editor.getOperationLog()[0].tree, "SMK001");
+
+  const redoAnimation = editor.redo();
+  assert.ok(redoAnimation, "Expected history redo to return an animation");
+  assert.equal(serializeSiteDataForAssert(editor.getData()), changedSignature);
+  assert.equal(editor.getOperationLog().length, 2);
 
   const persistedWhileChanged = editor.toHistorySnapshot();
+  assert.equal(Object.hasOwn(persistedWhileChanged, "operationLog"), false);
+  assert.ok(Array.isArray(persistedWhileChanged.operationLogBySeries));
+  const persistedSeriesLog = new Map(persistedWhileChanged.operationLogBySeries);
+  assert.deepEqual(Array.from(persistedSeriesLog.keys()).sort(), ["SMK001", "SMK002"]);
+  assert.equal(persistedSeriesLog.get("SMK001").length, 1);
+  assert.equal(persistedSeriesLog.get("SMK002").length, 1);
+
   const restoredChanged = new rwlEdit.RwlEditor(new Map());
   restoredChanged.restorePersistedHistory(persistedWhileChanged);
   assert.equal(serializeSiteDataForAssert(restoredChanged.getData()), changedSignature);
-  assert.equal(restoredChanged.getOperationLog().every((entry) => entry.canUndoBatch), true);
+  assert.equal(restoredChanged.getOperationLog().length, 2);
 
-  const rollbackAnimation = restoredChanged.undoOperationLogBatch(batchId);
-  assert.ok(rollbackAnimation, "Expected batch rollback to return the last rollback animation");
-  assert.equal(serializeSiteDataForAssert(restoredChanged.getData()), initialHistorySignature);
-  assert.equal(restoredChanged.hasRawDataChanges(), false);
-  assert.equal(restoredChanged.getOperationLog().every((entry) => entry.isReverted), true);
-  assert.equal(restoredChanged.getOperationLog().some((entry) => entry.canUndoBatch), false);
+  const legacyFlatSnapshot = {
+    ...persistedWhileChanged,
+    operationLog: editor.getOperationLog(),
+    operationLogBySeries: undefined,
+  };
+  assert.equal(rwlEdit.RwlEditor.isPersistedHistorySnapshot(legacyFlatSnapshot), true);
+  const restoredLegacyFlat = new rwlEdit.RwlEditor(new Map());
+  restoredLegacyFlat.restorePersistedHistory(legacyFlatSnapshot);
+  assert.equal(serializeSiteDataForAssert(restoredLegacyFlat.getData()), changedSignature);
+  assert.equal(restoredLegacyFlat.getOperationLog().length, 2);
+
+  const latestEntry = restoredChanged.getOperationLog().at(-1);
+  assert.ok(latestEntry, "Expected a latest operation log entry");
+  const rollbackAnimation = restoredChanged.undoOperationLogEntry(latestEntry.id);
+  assert.ok(rollbackAnimation, "Expected log entry undo to return an animation");
+  assert.equal(serializeSiteDataForAssert(restoredChanged.getData()), oneEditSignature);
+  assert.equal(restoredChanged.getOperationLog().length, 1);
+  assert.equal(restoredChanged.getOperationLog()[0].tree, "SMK001");
 
   const persistedAfterRollback = restoredChanged.toHistorySnapshot();
+  const persistedAfterRollbackSeriesLog = new Map(persistedAfterRollback.operationLogBySeries);
+  assert.deepEqual(Array.from(persistedAfterRollbackSeriesLog.keys()), ["SMK001"]);
+  assert.equal(persistedAfterRollbackSeriesLog.get("SMK001").length, 1);
+
   const restoredRollback = new rwlEdit.RwlEditor(new Map());
   restoredRollback.restorePersistedHistory(persistedAfterRollback);
-  assert.equal(serializeSiteDataForAssert(restoredRollback.getData()), initialHistorySignature);
-  assert.equal(restoredRollback.getOperationLog().every((entry) => entry.isReverted), true);
-
+  assert.equal(serializeSiteDataForAssert(restoredRollback.getData()), oneEditSignature);
+  assert.equal(restoredRollback.getOperationLog().length, 1);
   console.log("Workspace window smoke validation passed.");
 } finally {
   await server.close();

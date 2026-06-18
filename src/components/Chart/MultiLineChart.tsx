@@ -17,7 +17,7 @@ import {
 } from 'chart.js'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import WidthGridContextMenu from '@/components/WidthContainer/WidthGridContextMenu/WidthGridContextMenu'
-import type { LocalCrossdatingSimulation, SegmentDiagnosis } from '@/features/crossdating/diagnosis'
+import type { LocalCrossdatingSimulation } from '@/features/crossdating/diagnosis'
 import type { ReferenceSeries } from '@/features/crossdating/reference'
 import { REFERENCE_SERIES_LABEL } from '@/features/crossdating/reference'
 import type { DeleteMode, DeleteShift, MissingInsertSide } from '@/features/rwl/edit'
@@ -90,8 +90,6 @@ const HOVER_LINE_HIT_THRESHOLD_PX = 10
 const SAMPLE_SIZE_AXIS_ID = 'sampleSize'
 const SAMPLE_SIZE_LABEL = '样本量'
 const SAMPLE_SIZE_COLOR = 'rgba(104, 110, 120, 0.62)'
-const MAX_FLAGGED_SEGMENT_BANDS = 36
-const FLAGGED_SEGMENT_TEXT_MIN_WIDTH = 56
 
 type XAxisLabel = {
   index: number
@@ -596,97 +594,11 @@ function makeYearIndicatorPlugin(): Plugin<'line'> & { activeIndex: number | nul
   }
 }
 
-function makeFlaggedSegmentsPlugin(segments: readonly SegmentDiagnosis[]): Plugin<'line'> {
-  return {
-    id: 'flaggedSegments',
-
-    beforeDatasetsDraw(chart) {
-      if (segments.length === 0) return
-
-      const { ctx, chartArea, data, scales } = chart
-      const xScale = scales.x
-      const labels = data.labels ?? []
-      if (!xScale || labels.length === 0) return
-
-      const firstYear = Number(labels[0])
-      const lastYear = Number(labels[labels.length - 1])
-      if (!Number.isFinite(firstYear) || !Number.isFinite(lastYear)) return
-
-      const limitedSegments = segments.slice(0, MAX_FLAGGED_SEGMENT_BANDS)
-
-      ctx.save()
-      ctx.beginPath()
-      ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top)
-      ctx.clip()
-
-      limitedSegments.forEach((segment, index) => {
-        const startYear = Math.max(segment.startYear, firstYear)
-        const endYear = Math.min(segment.endYear, lastYear)
-        if (startYear > endYear) return
-
-        const startIndex = clamp(Math.round(startYear - firstYear), 0, labels.length - 1)
-        const endIndex = clamp(Math.round(endYear - firstYear), 0, labels.length - 1)
-        if (startIndex > endIndex) return
-
-        const startX = xScale.getPixelForValue(startIndex)
-        const endX = xScale.getPixelForValue(endIndex)
-        const nextIndex = Math.min(startIndex + 1, labels.length - 1)
-        const previousIndex = Math.max(startIndex - 1, 0)
-        const neighborX = nextIndex !== startIndex
-          ? xScale.getPixelForValue(nextIndex)
-          : previousIndex !== startIndex
-            ? xScale.getPixelForValue(previousIndex)
-            : startX + 8
-        const halfStep = Math.max(3, Math.abs(neighborX - startX) / 2)
-        const left = clamp(Math.min(startX, endX) - halfStep, chartArea.left, chartArea.right)
-        const right = clamp(Math.max(startX, endX) + halfStep, chartArea.left, chartArea.right)
-        const width = right - left
-        if (width <= 1) return
-
-        const hasLagSuggestion = segment.bestLag !== 0
-        ctx.fillStyle = hasLagSuggestion ? 'rgba(217, 119, 6, 0.12)' : 'rgba(220, 38, 38, 0.10)'
-        ctx.fillRect(left, chartArea.top, width, chartArea.bottom - chartArea.top)
-
-        ctx.strokeStyle = hasLagSuggestion ? 'rgba(180, 83, 9, 0.32)' : 'rgba(185, 28, 28, 0.28)'
-        ctx.lineWidth = 1
-        ctx.setLineDash([4, 4])
-        ctx.beginPath()
-        ctx.moveTo(left + 0.5, chartArea.top)
-        ctx.lineTo(left + 0.5, chartArea.bottom)
-        ctx.moveTo(right - 0.5, chartArea.top)
-        ctx.lineTo(right - 0.5, chartArea.bottom)
-        ctx.stroke()
-        ctx.setLineDash([])
-
-        if (width < FLAGGED_SEGMENT_TEXT_MIN_WIDTH) return
-
-        const label = width > 118
-          ? `${segment.targetTree} ${segment.startYear}-${segment.endYear}`
-          : segment.targetTree
-        const detail = hasLagSuggestion
-          ? `lag ${segment.bestLag > 0 ? '+' : ''}${segment.bestLag}`
-          : segment.currentCorrelation === null
-            ? `n=${segment.samplePairs}`
-            : `r=${segment.currentCorrelation.toFixed(2)}`
-        const y = chartArea.top + 15 + (index % 3) * 16
-
-        ctx.font = `bold 11px ${CHART_FONT_FAMILY}`
-        ctx.textBaseline = 'middle'
-        ctx.textAlign = 'left'
-        ctx.fillStyle = hasLagSuggestion ? '#8a4b08' : '#8a2d24'
-        ctx.fillText(`${label} ${detail}`, left + 5, y, Math.max(12, width - 10))
-      })
-
-      ctx.restore()
-    }
-  }
-}
-
 type Props = {
   data: Map<string, Map<number, number>>
   sampleSizeData?: ReadonlyMap<string, ReadonlyMap<number, number | null>>
   referenceSeries?: ReferenceSeries | null
-  diagnosisSegments?: readonly SegmentDiagnosis[]
+  showPersistentTooltip?: boolean
   hoverSimulation?: LocalCrossdatingSimulation | null
   highlightedTreeCode?: string | null
   onHighlightedTreeCodeChange?: (treeCode: string | null) => void
@@ -717,7 +629,7 @@ export function MultiLineChart({
   data,
   sampleSizeData,
   referenceSeries,
-  diagnosisSegments = [],
+  showPersistentTooltip = false,
   hoverSimulation,
   highlightedTreeCode = null,
   onHighlightedTreeCodeChange,
@@ -734,7 +646,6 @@ export function MultiLineChart({
   const tooltipPlugin = useMemo(() => makePersistentTooltipPlugin(), [])
   const yearIndicatorPlugin = useMemo(() => makeYearIndicatorPlugin(), [])
   const markerLinesPlugin = useMemo(() => makeMarkerLinesPlugin(), [])
-  const flaggedSegmentsPlugin = useMemo(() => makeFlaggedSegmentsPlugin(diagnosisSegments), [diagnosisSegments])
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tree: string; year: number } | null>(null)
   const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number; tree: string; year: number } | null>(null)
   const [showSampleSize, setShowSampleSize] = useState(true)
@@ -1190,7 +1101,7 @@ export function MultiLineChart({
 
   const handleContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault()
-    if (!highlightedTreeCode || !chartRef.current) return
+    if (!chartRef.current) return
 
     const chart = chartRef.current
     const rect = chart.canvas.getBoundingClientRect()
@@ -1200,6 +1111,11 @@ export function MultiLineChart({
     const { chartArea } = chart
     if (mouseX < chartArea.left || mouseX > chartArea.right ||
         mouseY < chartArea.top || mouseY > chartArea.bottom) return
+
+    // 在绘图区内右键：阻止冒泡，避免触发外层面板的「在独立窗口中打开」菜单。
+    e.stopPropagation()
+
+    if (!highlightedTreeCode) return
 
     const xScale = chart.scales['x']
     const rawIdx = xScale.getValueForPixel(mouseX)
@@ -1358,7 +1274,7 @@ export function MultiLineChart({
         ref={chartRef}
         data={chartData}
         options={chartOptions}
-        plugins={[fixedChartAreaPlugin, referenceGridPlugin, flaggedSegmentsPlugin, markerLinesPlugin, chartBoxBorderPlugin, xAxisLabelsPlugin, tooltipPlugin, yearIndicatorPlugin]}
+        plugins={[fixedChartAreaPlugin, referenceGridPlugin, markerLinesPlugin, chartBoxBorderPlugin, xAxisLabelsPlugin, ...(showPersistentTooltip ? [tooltipPlugin] : []), yearIndicatorPlugin]}
         onClick={(event) =>
           handleLineChartClick(event, chartRef.current)
         }

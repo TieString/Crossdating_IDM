@@ -10,6 +10,7 @@ import { stopMarker } from "@/shared/constants";
 import type { RwlSiteData, RwlTreeData } from "@/features/rwl/types";
 
 export type DiagnosisConfidence = "high" | "medium" | "low";
+export type CandidateRankingConfidence = DiagnosisConfidence | "ambiguous";
 
 export type DiagnosisCandidateOperationType =
     | "SHIFT_RANGE"
@@ -25,6 +26,77 @@ export type CrossdateCandidateStatus = "suggested" | "accepted" | "rejected" | "
 export type YearRange = {
     startYear: number;
     endYear: number;
+};
+
+export type CandidateAlgorithmSource =
+    | "global_sliding_match"
+    | "segmented_diagnosis"
+    | "propagation_pattern"
+    | "local_edit_alignment"
+    | "candidate_ranking";
+
+export type CandidateRankingMethod = "score_softmax_mvp";
+
+export type GlobalSlidingLagResult = {
+    lag: number;
+    r: number | null;
+    tLike: number | null;
+    overlapYears: number;
+};
+
+export type GlobalSlidingMatch = {
+    seriesId: string;
+    lagResults: GlobalSlidingLagResult[];
+    bestGlobalLag: number;
+    bestGlobalR: number | null;
+    bestGlobalTLike: number | null;
+    overlapYears: number;
+    currentR: number | null;
+    currentTLike: number | null;
+    currentOverlapYears: number;
+};
+
+export type LocalEditAlignmentMethod = "banded_edit_dp" | "fallback_single_edit_scan";
+export type LocalEditType = "insertMissingYear" | "deleteFalseYear";
+
+export type LocalEditAlignmentEdit = {
+    type: LocalEditType;
+    anchorYear: number;
+    scoreContribution: number;
+    reason: string;
+};
+
+export type LocalEditAlignmentResult = {
+    seriesId: string;
+    windowStartYear: number;
+    windowEndYear: number;
+    method: LocalEditAlignmentMethod;
+    pathScore: number;
+    edits: LocalEditAlignmentEdit[];
+};
+
+export type GlobalSlidingCandidateEvidence = {
+    beforeR: number | null;
+    afterR: number | null;
+    bestGlobalLag: number;
+    bestGlobalTLike: number | null;
+    overlapYears: number;
+    currentOverlapYears: number;
+    supportingSegmentCount: number;
+};
+
+export type PartialRangeMoveEvidence = {
+    fixedRange?: YearRange;
+    selectedRange: YearRange;
+    deltaYears: number;
+    inferredMissingRange?: YearRange;
+    boundaryYear: number;
+    olderSideLag: number;
+    newerSideMeanLag: number;
+    beforeUnresolvedA: number;
+    beforeUnresolvedB: number;
+    afterUnresolvedA: number;
+    afterUnresolvedB: number;
 };
 
 export type SegmentDiagnosis = {
@@ -87,6 +159,16 @@ export type CandidateEvidence = {
     missingRange?: YearRange;
     deltaYears?: number;
     deletedValue?: number | null;
+    algorithmSource: CandidateAlgorithmSource[];
+    globalSliding?: GlobalSlidingCandidateEvidence;
+    localEditAlignment?: LocalEditAlignmentResult;
+    partialRangeMove?: PartialRangeMoveEvidence;
+    rankingMethod?: CandidateRankingMethod;
+    probabilityLike?: number;
+    rank?: number;
+    confidenceLevel?: CandidateRankingConfidence;
+    ambiguous?: boolean;
+    lowConfidence?: boolean;
     explanation: string;
 };
 
@@ -110,7 +192,15 @@ export type DiagnosisCandidateOperation = {
     expectedCorrelation: number | null;
     delta?: number | null;
     score: number;
+    candidateScore: number;
+    probabilityLike: number;
+    rank: number;
     confidence: DiagnosisConfidence;
+    confidenceLevel: CandidateRankingConfidence;
+    ambiguous: boolean;
+    lowConfidence: boolean;
+    algorithmSource: CandidateAlgorithmSource[];
+    rankingMethod?: CandidateRankingMethod;
     side?: MissingInsertSide | DeleteShift;
     shift?: number;
     label?: string;
@@ -177,6 +267,7 @@ export type CrossdatingDiagnosis = {
     summaries: SeriesDiagnosisSummary[];
     segments: SegmentDiagnosis[];
     propagationPatterns: PropagationPattern[];
+    globalSlidingMatches: GlobalSlidingMatch[];
     masterNarrowYears: ScoringMasterYear[];
     candidates: DiagnosisCandidateOperation[];
 };
@@ -228,6 +319,12 @@ export type DiagnosisOptions = {
     narrowYearThreshold?: number;
     strongNarrowYearThreshold?: number;
     maxTopCandidates?: number;
+    globalLagMin?: number;
+    globalLagMax?: number;
+    minGlobalOverlap?: number;
+    localEditMaxGaps?: number;
+    localEditDiagonalBand?: number;
+    minLocalOverlap?: number;
 };
 
 type NumericSeries = Map<number, number>;
@@ -250,6 +347,7 @@ type SeriesCoreDiagnosis = {
     master: ScoringMaster;
     segments: SegmentDiagnosis[];
     propagationPatterns: PropagationPattern[];
+    globalSlidingMatch: GlobalSlidingMatch;
     unresolvedA: number;
     unresolvedB: number;
 };
@@ -267,6 +365,10 @@ type CandidateDraft = {
     side?: MissingInsertSide | DeleteShift;
     sourceSegment: SegmentDiagnosis;
     sourcePattern?: PropagationPattern;
+    algorithmSource?: CandidateAlgorithmSource[];
+    globalSlidingMatch?: GlobalSlidingMatch;
+    localEditAlignment?: LocalEditAlignmentResult;
+    partialRangeMoveEvidence?: Omit<PartialRangeMoveEvidence, "afterUnresolvedA" | "afterUnresolvedB">;
 };
 
 export const CrossdateConfig = {
@@ -283,6 +385,30 @@ export const CrossdateConfig = {
     maxTopCandidates: 5,
     minPairsForCorrelation: 8,
     minPropagationSegments: 2,
+    globalLagMin: -50,
+    globalLagMax: 50,
+    minGlobalOverlap: 25,
+    globalRImprovementThreshold: 0.08,
+    globalMinTLike: 3.5,
+    globalSupportRatio: 0.45,
+    localEditAlignment: {
+        maxGaps: 2,
+        insertPenalty: 1.0,
+        deletePenalty: 1.0,
+        excessiveEditPenalty: 2.0,
+        narrowYearBonus: 0.4,
+        strongNarrowYearBonus: 0.8,
+        diagonalBand: 3,
+        minLocalOverlap: 20,
+    },
+    candidateRanking: {
+        softmaxTemperature: 1.0,
+        highConfidenceMinProbability: 0.7,
+        mediumConfidenceMinProbability: 0.45,
+        ambiguousProbabilityGap: 0.15,
+        lowConfidenceMaxProbability: 0.4,
+        lowConfidenceMaxScore: 0.75,
+    },
     scoringWeights: {
         correlationGain: 7,
         flagResolution: 1.6,
@@ -319,6 +445,12 @@ const getConfig = (options: DiagnosisOptions): EffectiveDiagnosisConfig => {
         narrowYearThreshold: options.narrowYearThreshold ?? CrossdateConfig.narrowYearThreshold,
         strongNarrowYearThreshold: options.strongNarrowYearThreshold ?? CrossdateConfig.strongNarrowYearThreshold,
         maxTopCandidates: Math.max(1, Math.floor(options.maxTopCandidates ?? CrossdateConfig.maxTopCandidates)),
+        globalLagMin: Math.floor(options.globalLagMin ?? CrossdateConfig.globalLagMin),
+        globalLagMax: Math.floor(options.globalLagMax ?? CrossdateConfig.globalLagMax),
+        minGlobalOverlap: Math.max(3, Math.floor(options.minGlobalOverlap ?? CrossdateConfig.minGlobalOverlap)),
+        localEditMaxGaps: Math.max(1, Math.floor(options.localEditMaxGaps ?? CrossdateConfig.localEditAlignment.maxGaps)),
+        localEditDiagonalBand: Math.max(1, Math.floor(options.localEditDiagonalBand ?? CrossdateConfig.localEditAlignment.diagonalBand)),
+        minLocalOverlap: Math.max(3, Math.floor(options.minLocalOverlap ?? CrossdateConfig.localEditAlignment.minLocalOverlap)),
         minPairsForCorrelation: CrossdateConfig.minPairsForCorrelation,
     };
 };
@@ -386,6 +518,14 @@ const pearson = (pairs: Array<[number, number]>, minPairs: number): number | nul
     return numerator / denominator;
 };
 
+const tLikeForCorrelation = (r: number | null, overlapYears: number): number | null => {
+    if (r === null || overlapYears < 3) return null;
+    const bounded = Math.max(-0.999999, Math.min(0.999999, r));
+    const denominator = 1 - bounded * bounded;
+    if (!Number.isFinite(denominator) || denominator <= 0) return null;
+    return bounded * Math.sqrt((overlapYears - 2) / denominator);
+};
+
 const correlationForSegment = (
     target: NumericSeries,
     master: NumericSeries,
@@ -408,6 +548,89 @@ const correlationForSegment = (
         correlation: pearson(pairs, minPairs),
         samplePairs: pairs.length,
     };
+};
+
+type SlidingMatchOptions = {
+    seriesId?: string;
+    lagMin?: number;
+    lagMax?: number;
+    minOverlap?: number;
+};
+
+const compareSlidingLagResults = (
+    a: GlobalSlidingLagResult,
+    b: GlobalSlidingLagResult,
+): number => {
+    const aScore = a.tLike ?? (a.r ?? -Infinity);
+    const bScore = b.tLike ?? (b.r ?? -Infinity);
+    if (bScore !== aScore) return bScore - aScore;
+    if (b.overlapYears !== a.overlapYears) return b.overlapYears - a.overlapYears;
+    return Math.abs(a.lag) - Math.abs(b.lag);
+};
+
+export function runGlobalSlidingMatch(
+    targetSeries: Map<number, number>,
+    masterChronology: Map<number, number>,
+    options: SlidingMatchOptions = {},
+): GlobalSlidingMatch {
+    const lagMin = Math.floor(options.lagMin ?? CrossdateConfig.globalLagMin);
+    const lagMax = Math.floor(options.lagMax ?? CrossdateConfig.globalLagMax);
+    const minOverlap = Math.max(3, Math.floor(options.minOverlap ?? CrossdateConfig.minGlobalOverlap));
+    const [startLag, endLag] = lagMin <= lagMax ? [lagMin, lagMax] : [lagMax, lagMin];
+    const lagResults: GlobalSlidingLagResult[] = [];
+
+    for (let lag = startLag; lag <= endLag; lag += 1) {
+        const pairs: Array<[number, number]> = [];
+        targetSeries.forEach((targetValue, year) => {
+            const masterValue = masterChronology.get(year + lag);
+            if (masterValue !== undefined) {
+                pairs.push([targetValue, masterValue]);
+            }
+        });
+        const r = pearson(pairs, minOverlap);
+        lagResults.push({
+            lag,
+            r,
+            tLike: tLikeForCorrelation(r, pairs.length),
+            overlapYears: pairs.length,
+        });
+    }
+
+    const current = lagResults.find((result) => result.lag === 0) ?? {
+        lag: 0,
+        r: null,
+        tLike: null,
+        overlapYears: 0,
+    };
+    const best = lagResults
+        .filter((result) => result.r !== null)
+        .sort(compareSlidingLagResults)[0]
+        ?? current;
+
+    return {
+        seriesId: options.seriesId ?? "",
+        lagResults,
+        bestGlobalLag: best.lag,
+        bestGlobalR: best.r,
+        bestGlobalTLike: best.tLike,
+        overlapYears: best.overlapYears,
+        currentR: current.r,
+        currentTLike: current.tLike,
+        currentOverlapYears: current.overlapYears,
+    };
+}
+
+const filterSeriesByRange = (
+    series: NumericSeries,
+    range: YearRange,
+): NumericSeries => {
+    const filtered = new Map<number, number>();
+    series.forEach((value, year) => {
+        if (year >= range.startYear && year <= range.endYear) {
+            filtered.set(year, value);
+        }
+    });
+    return filtered;
 };
 
 const createSegmentsForSeries = (
@@ -502,6 +725,184 @@ const buildMasterNarrowYears = (
         .filter((year) => year.narrow)
         .sort((a, b) => a.year - b.year);
 };
+
+type LocalEditAlignmentOptions = {
+    maxGaps?: number;
+    insertPenalty?: number;
+    deletePenalty?: number;
+    excessiveEditPenalty?: number;
+    narrowYearBonus?: number;
+    strongNarrowYearBonus?: number;
+    diagonalBand?: number;
+    minLocalOverlap?: number;
+    narrowYearThreshold?: number;
+    strongNarrowYearThreshold?: number;
+};
+
+type LocalDpState = {
+    score: number;
+    edits: LocalEditAlignmentEdit[];
+};
+
+const localEditOptionsWithDefaults = (
+    options: LocalEditAlignmentOptions,
+) => ({
+    ...CrossdateConfig.localEditAlignment,
+    ...options,
+});
+
+const localSimilarityScore = (targetValue: number, masterValue: number): number => (
+    1 - Math.min(3, Math.abs(targetValue - masterValue))
+);
+
+const getMasterNarrowBonus = (
+    masterValue: number | undefined,
+    options: ReturnType<typeof localEditOptionsWithDefaults>,
+): number => {
+    if (masterValue === undefined) return 0;
+    const narrowThreshold = options.narrowYearThreshold ?? CrossdateConfig.narrowYearThreshold;
+    const strongThreshold = options.strongNarrowYearThreshold ?? CrossdateConfig.strongNarrowYearThreshold;
+    if (masterValue <= strongThreshold) return options.strongNarrowYearBonus;
+    if (masterValue <= narrowThreshold) return options.narrowYearBonus;
+    if (masterValue > 0) return -options.narrowYearBonus * 0.5;
+    return 0;
+};
+
+const shouldKeepLocalState = (
+    current: LocalDpState | undefined,
+    candidate: LocalDpState,
+): boolean => (
+    !current
+    || candidate.score > current.score
+    || (
+        candidate.score === current.score
+        && candidate.edits.length < current.edits.length
+    )
+);
+
+const localDpKey = (i: number, j: number, gapCount: number): string => `${i}:${j}:${gapCount}`;
+
+export function runLocalEditAlignment(
+    seriesId: string,
+    targetSeries: Map<number, number>,
+    masterChronology: Map<number, number>,
+    window: YearRange,
+    options: LocalEditAlignmentOptions = {},
+): LocalEditAlignmentResult | null {
+    const effective = localEditOptionsWithDefaults(options);
+    const targetEntries = Array.from(targetSeries.entries())
+        .filter(([year]) => year >= window.startYear && year <= window.endYear)
+        .sort((a, b) => a[0] - b[0]);
+    const masterEntries = Array.from(masterChronology.entries())
+        .filter(([year]) => year >= window.startYear && year <= window.endYear)
+        .sort((a, b) => a[0] - b[0]);
+
+    if (
+        targetEntries.length < effective.minLocalOverlap
+        || masterEntries.length < effective.minLocalOverlap
+    ) {
+        return null;
+    }
+
+    const states = new Map<string, LocalDpState>();
+    states.set(localDpKey(0, 0, 0), { score: 0, edits: [] });
+
+    const update = (i: number, j: number, gapCount: number, candidate: LocalDpState) => {
+        const key = localDpKey(i, j, gapCount);
+        const current = states.get(key);
+        if (shouldKeepLocalState(current, candidate)) {
+            states.set(key, candidate);
+        }
+    };
+
+    for (let i = 0; i <= targetEntries.length; i += 1) {
+        for (let j = 0; j <= masterEntries.length; j += 1) {
+            for (let gapCount = 0; gapCount <= effective.maxGaps; gapCount += 1) {
+                const state = states.get(localDpKey(i, j, gapCount));
+                if (!state) continue;
+
+                if (i < targetEntries.length && j < masterEntries.length) {
+                    const diagonalDistance = Math.abs(i - j);
+                    if (diagonalDistance <= effective.diagonalBand + gapCount) {
+                        const [, targetValue] = targetEntries[i];
+                        const [, masterValue] = masterEntries[j];
+                        update(i + 1, j + 1, gapCount, {
+                            score: state.score + localSimilarityScore(targetValue, masterValue),
+                            edits: state.edits,
+                        });
+                    }
+                }
+
+                if (j < masterEntries.length && gapCount < effective.maxGaps) {
+                    const diagonalDistance = Math.abs(i - (j + 1));
+                    if (diagonalDistance <= effective.diagonalBand + gapCount + 1) {
+                        const [anchorYear, masterValue] = masterEntries[j];
+                        const contribution = -effective.insertPenalty + getMasterNarrowBonus(masterValue, effective);
+                        update(i, j + 1, gapCount + 1, {
+                            score: state.score + contribution,
+                            edits: [
+                                ...state.edits,
+                                {
+                                    type: "insertMissingYear",
+                                    anchorYear,
+                                    scoreContribution: contribution,
+                                    reason: masterValue <= (effective.strongNarrowYearThreshold ?? CrossdateConfig.strongNarrowYearThreshold)
+                                        ? "strong narrow-year prior"
+                                        : masterValue <= (effective.narrowYearThreshold ?? CrossdateConfig.narrowYearThreshold)
+                                            ? "narrow-year prior"
+                                            : "gap in target path",
+                                },
+                            ],
+                        });
+                    }
+                }
+
+                if (i < targetEntries.length && gapCount < effective.maxGaps) {
+                    const diagonalDistance = Math.abs((i + 1) - j);
+                    if (diagonalDistance <= effective.diagonalBand + gapCount + 1) {
+                        const [anchorYear] = targetEntries[i];
+                        const contribution = -effective.deletePenalty;
+                        update(i + 1, j, gapCount + 1, {
+                            score: state.score + contribution,
+                            edits: [
+                                ...state.edits,
+                                {
+                                    type: "deleteFalseYear",
+                                    anchorYear,
+                                    scoreContribution: contribution,
+                                    reason: "extra target ring in banded path",
+                                },
+                            ],
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    const terminalStates = Array.from(states.entries())
+        .filter(([key, state]) => {
+            const [i, j] = key.split(":").map(Number);
+            return i === targetEntries.length && j === masterEntries.length && state.edits.length > 0;
+        })
+        .map(([, state]) => state)
+        .sort((a, b) => (
+            b.score - a.score
+            || a.edits.length - b.edits.length
+        ));
+    const best = terminalStates[0];
+    if (!best) return null;
+
+    const excessiveEditPenalty = Math.max(0, best.edits.length - 1) * effective.excessiveEditPenalty;
+    return {
+        seriesId,
+        windowStartYear: window.startYear,
+        windowEndYear: window.endYear,
+        method: "banded_edit_dp",
+        pathScore: best.score - excessiveEditPenalty,
+        edits: best.edits,
+    };
+}
 
 const scanSegment = (
     targetTree: string,
@@ -675,6 +1076,12 @@ const diagnoseSeriesCore = (
     const target = preprocessSeries(rawTarget);
     const segments = createSegmentsForSeries(target, config.segmentLength, config.overlap)
         .map((segment) => scanSegment(targetTree, target, master.data, segment, config));
+    const globalSlidingMatch = runGlobalSlidingMatch(target, master.data, {
+        seriesId: targetTree,
+        lagMin: config.globalLagMin,
+        lagMax: config.globalLagMax,
+        minOverlap: config.minGlobalOverlap,
+    });
     const propagationPatterns = detectPropagationPatterns(targetTree, segments, targetRange);
     const { unresolvedA, unresolvedB } = summarizeSegments(segments);
 
@@ -684,6 +1091,7 @@ const diagnoseSeriesCore = (
         targetRange,
         master,
         segments,
+        globalSlidingMatch,
         propagationPatterns,
         unresolvedA,
         unresolvedB,
@@ -773,6 +1181,317 @@ const pickSingleYearAnchor = (
     ) ?? fallbackYear;
 };
 
+const uniqueAlgorithmSources = (
+    sources: Array<CandidateAlgorithmSource | undefined>,
+): CandidateAlgorithmSource[] => Array.from(new Set(sources.filter((source): source is CandidateAlgorithmSource => Boolean(source))));
+
+const getLagSupportingSegments = (
+    segments: SegmentDiagnosis[],
+    lag: number,
+): SegmentDiagnosis[] => (
+    segments.filter((segment) => segment.flag === "B_like" && segment.bestLag === lag)
+);
+
+const getMeanLag = (segments: SegmentDiagnosis[]): number => {
+    if (segments.length === 0) return 0;
+    return segments.reduce((sum, segment) => sum + segment.bestLag, 0) / segments.length;
+};
+
+const getRepresentativeSegmentForLag = (
+    diagnosis: SeriesCoreDiagnosis,
+    lag: number,
+): SegmentDiagnosis | null => (
+    getLagSupportingSegments(diagnosis.segments, lag)
+        .sort((a, b) => b.samplePairs - a.samplePairs)[0]
+    ?? getSegmentNearYear(diagnosis.segments, diagnosis.targetRange.endYear)
+);
+
+const localEditTypeForLag = (lag: number): LocalEditType | null => {
+    if (lag < 0) return "insertMissingYear";
+    if (lag > 0) return "deleteFalseYear";
+    return null;
+};
+
+const operationForLocalEdit = (
+    editType: LocalEditType,
+): Pick<CandidateDraft, "operationType" | "candidateType"> => (
+    editType === "insertMissingYear"
+        ? { operationType: "INSERT_MISSING_RING", candidateType: "insertMissingYear" }
+        : { operationType: "DELETE_FALSE_RING", candidateType: "deleteFalseYear" }
+);
+
+const createFallbackLocalEditAlignment = (
+    diagnosis: SeriesCoreDiagnosis,
+    segment: SegmentDiagnosis,
+    editType: LocalEditType,
+    anchorYear: number,
+): LocalEditAlignmentResult => ({
+    seriesId: diagnosis.targetTree,
+    windowStartYear: segment.startYear,
+    windowEndYear: segment.endYear,
+    method: "fallback_single_edit_scan",
+    pathScore: 0,
+    edits: [{
+        type: editType,
+        anchorYear,
+        scoreContribution: 0,
+        reason: "single-edit scan fallback from segmented lag",
+    }],
+});
+
+const getLocalEditAlignmentForSegment = (
+    diagnosis: SeriesCoreDiagnosis,
+    segment: SegmentDiagnosis,
+    editType: LocalEditType,
+    fallbackYear: number,
+    config: EffectiveDiagnosisConfig,
+): { alignment: LocalEditAlignmentResult; edit: LocalEditAlignmentEdit } => {
+    const target = preprocessSeries(diagnosis.rawTarget);
+    const alignment = runLocalEditAlignment(
+        diagnosis.targetTree,
+        target,
+        diagnosis.master.data,
+        { startYear: segment.startYear, endYear: segment.endYear },
+        {
+            maxGaps: config.localEditMaxGaps,
+            diagonalBand: config.localEditDiagonalBand,
+            minLocalOverlap: config.minLocalOverlap,
+            narrowYearThreshold: config.narrowYearThreshold,
+            strongNarrowYearThreshold: config.strongNarrowYearThreshold,
+        },
+    );
+    const edit = alignment?.edits
+        .filter((candidate) => candidate.type === editType)
+        .sort((a, b) => (
+            b.scoreContribution - a.scoreContribution
+            || Math.abs(a.anchorYear - fallbackYear) - Math.abs(b.anchorYear - fallbackYear)
+        ))[0];
+
+    if (alignment && edit) {
+        return { alignment, edit };
+    }
+
+    const fallback = createFallbackLocalEditAlignment(diagnosis, segment, editType, fallbackYear);
+    return { alignment: fallback, edit: fallback.edits[0] };
+};
+
+const createLocalEditDraft = (
+    diagnosis: SeriesCoreDiagnosis,
+    segment: SegmentDiagnosis,
+    editType: LocalEditType,
+    anchorYear: number,
+    alignment: LocalEditAlignmentResult,
+    sourcePattern?: PropagationPattern,
+): CandidateDraft => {
+    const operation = operationForLocalEdit(editType);
+    return {
+        targetTree: diagnosis.targetTree,
+        ...operation,
+        anchorYear,
+        targetYear: anchorYear,
+        selectedRange: { startYear: diagnosis.targetRange.startYear, endYear: anchorYear },
+        missingRange: editType === "insertMissingYear"
+            ? { startYear: anchorYear, endYear: anchorYear }
+            : undefined,
+        side: "right",
+        sourceSegment: segment,
+        sourcePattern,
+        localEditAlignment: alignment,
+        algorithmSource: uniqueAlgorithmSources([
+            "segmented_diagnosis",
+            sourcePattern ? "propagation_pattern" : undefined,
+            "local_edit_alignment",
+        ]),
+    };
+};
+
+const runSlidingMatchForRange = (
+    diagnosis: SeriesCoreDiagnosis,
+    range: YearRange,
+    config: EffectiveDiagnosisConfig,
+): GlobalSlidingMatch => (
+    runGlobalSlidingMatch(
+        filterSeriesByRange(preprocessSeries(diagnosis.rawTarget), range),
+        diagnosis.master.data,
+        {
+            seriesId: diagnosis.targetTree,
+            lagMin: config.globalLagMin,
+            lagMax: config.globalLagMax,
+            minOverlap: Math.max(config.minLocalOverlap, CrossdateConfig.localEditAlignment.minLocalOverlap),
+        },
+    )
+);
+
+const makePartialRangeEvidence = (
+    diagnosis: SeriesCoreDiagnosis,
+    selectedRange: YearRange,
+    deltaYears: number,
+): Omit<PartialRangeMoveEvidence, "afterUnresolvedA" | "afterUnresolvedB"> => {
+    const fixedRange = selectedRange.endYear < diagnosis.targetRange.endYear
+        ? { startYear: selectedRange.endYear + 1, endYear: diagnosis.targetRange.endYear }
+        : undefined;
+    const newerSegments = fixedRange
+        ? diagnosis.segments.filter((segment) => overlapRange(fixedRange, segment))
+        : [];
+
+    return {
+        fixedRange,
+        selectedRange,
+        deltaYears,
+        inferredMissingRange: missingRangeForMove(selectedRange, deltaYears),
+        boundaryYear: selectedRange.endYear,
+        olderSideLag: deltaYears,
+        newerSideMeanLag: getMeanLag(newerSegments),
+        beforeUnresolvedA: diagnosis.unresolvedA,
+        beforeUnresolvedB: diagnosis.unresolvedB,
+    };
+};
+
+const moveNumericRangeByOffset = (
+    series: NumericSeries,
+    selectedRange: YearRange,
+    deltaYears: number,
+): NumericSeries => {
+    const next = new Map<number, number>();
+    series.forEach((value, year) => {
+        if (year < selectedRange.startYear || year > selectedRange.endYear) {
+            next.set(year, value);
+        }
+    });
+    series.forEach((value, year) => {
+        if (year >= selectedRange.startYear && year <= selectedRange.endYear) {
+            next.set(year + deltaYears, value);
+        }
+    });
+    return new Map(Array.from(next.entries()).sort((a, b) => a[0] - b[0]));
+};
+
+const refinePartialSelectedRange = (
+    diagnosis: SeriesCoreDiagnosis,
+    initialRange: YearRange,
+    deltaYears: number,
+    config: EffectiveDiagnosisConfig,
+): YearRange => {
+    if (deltaYears === 0) return initialRange;
+
+    const years = Array.from(diagnosis.rawTarget.keys()).sort((a, b) => a - b);
+    const radius = Math.max(Math.abs(deltaYears) * 2, config.overlap, 8);
+    const candidateEndYears = years.filter((year) => (
+        year >= initialRange.endYear - radius
+        && year <= initialRange.endYear + radius
+        && year >= initialRange.startYear
+        && year < diagnosis.targetRange.endYear
+    ));
+    if (candidateEndYears.length === 0) return initialRange;
+
+    const scored = candidateEndYears
+        .map((endYear) => {
+            const selectedRange = { startYear: initialRange.startYear, endYear };
+            const moved = preprocessSeries(moveNumericRangeByOffset(diagnosis.rawTarget, selectedRange, deltaYears));
+            const movedRange = {
+                startYear: selectedRange.startYear + deltaYears,
+                endYear: selectedRange.endYear + deltaYears,
+            };
+            const older = correlationForSegment(
+                moved,
+                diagnosis.master.data,
+                movedRange.startYear,
+                movedRange.endYear,
+                0,
+                config.minPairsForCorrelation,
+            );
+            const fixed = correlationForSegment(
+                moved,
+                diagnosis.master.data,
+                endYear + 1,
+                diagnosis.targetRange.endYear,
+                0,
+                config.minPairsForCorrelation,
+            );
+            const olderScore = older.correlation ?? -1;
+            const fixedScore = fixed.correlation ?? 0;
+            return {
+                endYear,
+                score: olderScore + fixedScore * 0.25 - Math.abs(endYear - initialRange.endYear) * 0.001,
+            };
+        })
+        .sort((a, b) => b.score - a.score || Math.abs(a.endYear - initialRange.endYear) - Math.abs(b.endYear - initialRange.endYear));
+    const best = scored[0];
+    return best ? { ...initialRange, endYear: best.endYear } : initialRange;
+};
+
+const extendPartialBoundaryByPointFit = (
+    diagnosis: SeriesCoreDiagnosis,
+    selectedRange: YearRange,
+    deltaYears: number,
+): YearRange => {
+    if (deltaYears === 0 || selectedRange.endYear >= diagnosis.targetRange.endYear) return selectedRange;
+
+    const target = preprocessSeries(diagnosis.rawTarget);
+    const maxExtension = Math.max(2, Math.abs(deltaYears));
+    let endYear = selectedRange.endYear;
+
+    for (let nextYear = selectedRange.endYear + 1; nextYear <= selectedRange.endYear + maxExtension; nextYear += 1) {
+        if (nextYear >= diagnosis.targetRange.endYear) break;
+        const targetValue = target.get(nextYear);
+        const fixedMasterValue = diagnosis.master.data.get(nextYear);
+        const shiftedMasterValue = diagnosis.master.data.get(nextYear + deltaYears);
+        if (targetValue === undefined || shiftedMasterValue === undefined) break;
+
+        const fixedDistance = fixedMasterValue === undefined
+            ? Infinity
+            : Math.abs(targetValue - fixedMasterValue);
+        const shiftedDistance = Math.abs(targetValue - shiftedMasterValue);
+        if (shiftedDistance + 0.05 < fixedDistance) {
+            endYear = nextYear;
+            continue;
+        }
+        break;
+    }
+
+    return { ...selectedRange, endYear };
+};
+
+const makeGlobalSlidingDrafts = (
+    diagnosis: SeriesCoreDiagnosis,
+): CandidateDraft[] => {
+    const match = diagnosis.globalSlidingMatch;
+    if (match.bestGlobalLag === 0 || match.bestGlobalR === null) return [];
+
+    const currentR = match.currentR ?? -1;
+    const globalImprovement = match.bestGlobalR - currentR;
+    const supportingSegments = getLagSupportingSegments(diagnosis.segments, match.bestGlobalLag);
+    const supportRatio = supportingSegments.length / Math.max(1, diagnosis.segments.length);
+    const strongGlobalT = (match.bestGlobalTLike ?? 0) >= CrossdateConfig.globalMinTLike;
+    const clearImprovement = globalImprovement >= CrossdateConfig.globalRImprovementThreshold;
+    const enoughSupport = supportRatio >= CrossdateConfig.globalSupportRatio
+        || supportingSegments.length >= CrossdateConfig.minPropagationSegments;
+
+    if (
+        match.overlapYears < CrossdateConfig.minGlobalOverlap
+        || (!clearImprovement && !enoughSupport)
+        || (!strongGlobalT && !clearImprovement)
+    ) {
+        return [];
+    }
+
+    const sourceSegment = getRepresentativeSegmentForLag(diagnosis, match.bestGlobalLag);
+    if (!sourceSegment) return [];
+
+    return [{
+        targetTree: diagnosis.targetTree,
+        operationType: "SHIFT_RANGE",
+        candidateType: "batchMoveYears",
+        mode: "wholeSeriesMove",
+        anchorYear: diagnosis.targetRange.endYear,
+        selectedRange: { ...diagnosis.targetRange },
+        deltaYears: match.bestGlobalLag,
+        sourceSegment,
+        globalSlidingMatch: match,
+        algorithmSource: ["global_sliding_match", "segmented_diagnosis"],
+    }];
+};
+
 const makePatternDrafts = (
     diagnosis: SeriesCoreDiagnosis,
     config: EffectiveDiagnosisConfig,
@@ -796,40 +1515,54 @@ const makePatternDrafts = (
             : fallbackAnchorYear;
 
         if (pattern.patternType === "possibleMissingYear" && pattern.lag < 0) {
-            drafts.push({
-                targetTree: diagnosis.targetTree,
-                operationType: "INSERT_MISSING_RING",
-                candidateType: "insertMissingYear",
-                anchorYear,
-                targetYear: anchorYear,
-                selectedRange: { startYear: diagnosis.targetRange.startYear, endYear: anchorYear },
-                missingRange: { startYear: anchorYear, endYear: anchorYear },
-                side: "right",
+            const { alignment, edit } = getLocalEditAlignmentForSegment(
+                diagnosis,
                 sourceSegment,
-                sourcePattern: pattern,
-            });
+                "insertMissingYear",
+                anchorYear,
+                config,
+            );
+            drafts.push(createLocalEditDraft(diagnosis, sourceSegment, "insertMissingYear", edit.anchorYear, alignment, pattern));
             return;
         }
 
         if (pattern.patternType === "possibleFalseYear" && pattern.lag > 0) {
-            drafts.push({
-                targetTree: diagnosis.targetTree,
-                operationType: "DELETE_FALSE_RING",
-                candidateType: "deleteFalseYear",
-                anchorYear,
-                targetYear: anchorYear,
-                selectedRange: { startYear: diagnosis.targetRange.startYear, endYear: anchorYear },
-                side: "right",
+            const { alignment, edit } = getLocalEditAlignmentForSegment(
+                diagnosis,
                 sourceSegment,
-                sourcePattern: pattern,
-            });
+                "deleteFalseYear",
+                anchorYear,
+                config,
+            );
+            drafts.push(createLocalEditDraft(diagnosis, sourceSegment, "deleteFalseYear", edit.anchorYear, alignment, pattern));
             return;
         }
 
-        const selectedRange = pattern.patternType === "possibleWholeSeriesMove"
+        const initialSelectedRange = pattern.patternType === "possibleWholeSeriesMove"
             ? { ...diagnosis.targetRange }
             : { startYear: diagnosis.targetRange.startYear, endYear: anchorYear };
-        const deltaYears = pattern.lag;
+        const localSliding = pattern.patternType === "possiblePartialRangeMove"
+            ? runSlidingMatchForRange(diagnosis, initialSelectedRange, config)
+            : null;
+        const localImprovement = localSliding?.bestGlobalR === null
+            ? 0
+            : (localSliding?.bestGlobalR ?? -1) - (localSliding?.currentR ?? -1);
+        const deltaYears = localSliding
+            && localSliding.bestGlobalLag !== 0
+            && Math.sign(localSliding.bestGlobalLag) === Math.sign(pattern.lag)
+            && (
+                localImprovement >= CrossdateConfig.globalRImprovementThreshold
+                || (localSliding.bestGlobalTLike ?? 0) >= CrossdateConfig.globalMinTLike
+            )
+            ? localSliding.bestGlobalLag
+            : pattern.lag;
+        const selectedRange = pattern.patternType === "possiblePartialRangeMove"
+            ? extendPartialBoundaryByPointFit(
+                diagnosis,
+                refinePartialSelectedRange(diagnosis, initialSelectedRange, deltaYears, config),
+                deltaYears,
+            )
+            : initialSelectedRange;
 
         drafts.push({
             targetTree: diagnosis.targetTree,
@@ -844,6 +1577,14 @@ const makePatternDrafts = (
             deltaYears,
             sourceSegment,
             sourcePattern: pattern,
+            algorithmSource: uniqueAlgorithmSources([
+                "segmented_diagnosis",
+                "propagation_pattern",
+                pattern.patternType === "possiblePartialRangeMove" ? "global_sliding_match" : undefined,
+            ]),
+            partialRangeMoveEvidence: pattern.patternType === "possiblePartialRangeMove"
+                ? makePartialRangeEvidence(diagnosis, selectedRange, deltaYears)
+                : undefined,
         });
     });
 
@@ -852,6 +1593,7 @@ const makePatternDrafts = (
 
 const makeSegmentDrafts = (
     diagnosis: SeriesCoreDiagnosis,
+    config: EffectiveDiagnosisConfig,
 ): CandidateDraft[] => {
     const drafts: CandidateDraft[] = [];
     const patternCoveredSegments = new Set<string>();
@@ -871,39 +1613,28 @@ const makeSegmentDrafts = (
         const anchorYear = nearestExistingYear(years, midpoint, segment.startYear, segment.endYear);
         if (anchorYear === null) return;
 
-        if (segment.bestLag === -1) {
-            drafts.push({
-                targetTree: diagnosis.targetTree,
-                operationType: "INSERT_MISSING_RING",
-                candidateType: "insertMissingYear",
+        const editType = Math.abs(segment.bestLag) === 1 ? localEditTypeForLag(segment.bestLag) : null;
+        if (editType) {
+            const { alignment, edit } = getLocalEditAlignmentForSegment(
+                diagnosis,
+                segment,
+                editType,
                 anchorYear,
-                targetYear: anchorYear,
-                selectedRange: { startYear: diagnosis.targetRange.startYear, endYear: anchorYear },
-                missingRange: { startYear: anchorYear, endYear: anchorYear },
-                side: "right",
-                sourceSegment: segment,
-            });
+                config,
+            );
+            drafts.push(createLocalEditDraft(diagnosis, segment, editType, edit.anchorYear, alignment));
             return;
         }
 
-        if (segment.bestLag === 1) {
-            drafts.push({
-                targetTree: diagnosis.targetTree,
-                operationType: "DELETE_FALSE_RING",
-                candidateType: "deleteFalseYear",
-                anchorYear,
-                targetYear: anchorYear,
-                selectedRange: { startYear: diagnosis.targetRange.startYear, endYear: anchorYear },
-                side: "right",
-                sourceSegment: segment,
-            });
-            return;
-        }
-
-        const selectedRange = {
+        const initialSelectedRange = {
             startYear: diagnosis.targetRange.startYear,
             endYear: Math.min(diagnosis.targetRange.endYear, segment.endYear),
         };
+        const selectedRange = extendPartialBoundaryByPointFit(
+            diagnosis,
+            refinePartialSelectedRange(diagnosis, initialSelectedRange, segment.bestLag, config),
+            segment.bestLag,
+        );
         drafts.push({
             targetTree: diagnosis.targetTree,
             operationType: "SHIFT_RANGE",
@@ -914,6 +1645,8 @@ const makeSegmentDrafts = (
             missingRange: missingRangeForMove(selectedRange, segment.bestLag),
             deltaYears: segment.bestLag,
             sourceSegment: segment,
+            algorithmSource: ["segmented_diagnosis"],
+            partialRangeMoveEvidence: makePartialRangeEvidence(diagnosis, selectedRange, segment.bestLag),
         });
     });
 
@@ -1024,6 +1757,20 @@ const getNarrowYearBonus = (
     if (value === undefined) return 0;
     if (value <= config.strongNarrowYearThreshold) return 2;
     if (value <= config.narrowYearThreshold) return 1;
+    const nearbyValues: number[] = [];
+    for (let nearbyYear = year - 3; nearbyYear <= year + 3; nearbyYear += 1) {
+        const nearbyValue = diagnosis.master.data.get(nearbyYear);
+        if (nearbyValue !== undefined) {
+            nearbyValues.push(nearbyValue);
+        }
+    }
+    if (nearbyValues.length >= 3) {
+        const localMean = nearbyValues.reduce((sum, nearbyValue) => sum + nearbyValue, 0) / nearbyValues.length;
+        const localVariance = nearbyValues.reduce((sum, nearbyValue) => sum + (nearbyValue - localMean) ** 2, 0) / nearbyValues.length;
+        const localSd = Math.sqrt(localVariance);
+        const localMinimum = Math.min(...nearbyValues);
+        if (value === localMinimum && value <= localMean - localSd * 0.5) return 0.5;
+    }
     if (value > 0) return -0.5;
     return 0;
 };
@@ -1105,6 +1852,33 @@ const evaluateDraft = (
             afterLag: afterSegment?.bestLag ?? 0,
         };
     });
+    const algorithmSource = uniqueAlgorithmSources([
+        ...(draft.algorithmSource ?? ["segmented_diagnosis"]),
+        draft.sourcePattern ? "propagation_pattern" : undefined,
+        draft.globalSlidingMatch ? "global_sliding_match" : undefined,
+        draft.localEditAlignment ? "local_edit_alignment" : undefined,
+    ]);
+    const globalSliding = draft.globalSlidingMatch
+        ? {
+            beforeR: draft.globalSlidingMatch.currentR,
+            afterR: afterDiagnosis.globalSlidingMatch.currentR,
+            bestGlobalLag: draft.globalSlidingMatch.bestGlobalLag,
+            bestGlobalTLike: draft.globalSlidingMatch.bestGlobalTLike,
+            overlapYears: draft.globalSlidingMatch.overlapYears,
+            currentOverlapYears: draft.globalSlidingMatch.currentOverlapYears,
+            supportingSegmentCount: getLagSupportingSegments(
+                beforeDiagnosis.segments,
+                draft.globalSlidingMatch.bestGlobalLag,
+            ).length,
+        }
+        : undefined;
+    const partialRangeMove = draft.partialRangeMoveEvidence
+        ? {
+            ...draft.partialRangeMoveEvidence,
+            afterUnresolvedA: afterDiagnosis.unresolvedA,
+            afterUnresolvedB: afterDiagnosis.unresolvedB,
+        }
+        : undefined;
     const evidenceBase: Omit<CandidateEvidence, "explanation"> = {
         before,
         after,
@@ -1123,12 +1897,16 @@ const evaluateDraft = (
         deletedValue: draft.operationType === "DELETE_FALSE_RING" && draft.targetYear !== undefined
             ? siteData.get(draft.targetTree)?.get(draft.targetYear) ?? null
             : undefined,
+        algorithmSource,
+        globalSliding,
+        localEditAlignment: draft.localEditAlignment,
+        partialRangeMove,
     };
     const evidence: CandidateEvidence = {
         ...evidenceBase,
         explanation: buildEvidenceExplanation(draft, evidenceBase),
     };
-    const score = (
+    const baseScore = (
         CrossdateConfig.scoringWeights.correlationGain * evidence.deltaR0
         + CrossdateConfig.scoringWeights.flagResolution * evidence.resolvedSegmentCount
         + CrossdateConfig.scoringWeights.propagation * evidence.propagationResolutionBonus
@@ -1136,6 +1914,20 @@ const evaluateDraft = (
         - CrossdateConfig.scoringWeights.gapPenalty * evidence.gapPenalty
         - CrossdateConfig.scoringWeights.movePenalty * evidence.movePenalty
     );
+    const globalSlidingBonus = evidence.globalSliding
+        ? Math.max(0, (evidence.globalSliding.afterR ?? -1) - (evidence.globalSliding.beforeR ?? -1)) * 4
+            + Math.min(2, Math.max(0, (evidence.globalSliding.bestGlobalTLike ?? 0) / 5))
+            + Math.min(1.5, evidence.globalSliding.supportingSegmentCount * 0.4)
+        : 0;
+    const localEditBonus = evidence.localEditAlignment
+        ? (
+            evidence.localEditAlignment.method === "banded_edit_dp" ? 0.6 : 0.15
+        ) + Math.min(1, Math.max(0, evidence.localEditAlignment.pathScore / 40))
+        : 0;
+    const partialRangeBonus = evidence.partialRangeMove
+        ? Math.max(0, evidence.partialRangeMove.beforeUnresolvedB - evidence.partialRangeMove.afterUnresolvedB) * 0.5
+        : 0;
+    const score = baseScore + globalSlidingBonus + localEditBonus + partialRangeBonus;
 
     if (
         score <= -0.75
@@ -1178,7 +1970,14 @@ const evaluateDraft = (
         expectedCorrelation: after.r0,
         delta: evidence.deltaR0,
         score,
+        candidateScore: score,
+        probabilityLike: 0,
+        rank: 0,
         confidence: confidenceForScore(score, evidence),
+        confidenceLevel: confidenceForScore(score, evidence),
+        ambiguous: false,
+        lowConfidence: false,
+        algorithmSource,
         side: draft.side,
         shift: draft.deltaYears,
         label: labelForDraft(draft),
@@ -1214,6 +2013,10 @@ const compareDiagnosisCandidates = (
     const statusPriority = Number(a.status !== "suggested") - Number(b.status !== "suggested");
     if (statusPriority !== 0) return statusPriority;
 
+    if (a.rank > 0 && b.rank > 0 && a.rank !== b.rank) {
+        return a.rank - b.rank;
+    }
+
     const confidenceOrder = { high: 0, medium: 1, low: 2 };
     const confidencePriority = confidenceOrder[a.confidence] - confidenceOrder[b.confidence];
     if (confidencePriority !== 0) return confidencePriority;
@@ -1228,6 +2031,77 @@ const compareDiagnosisCandidates = (
         || a.segmentStartYear - b.segmentStartYear
         || (a.targetYear ?? a.anchorYear) - (b.targetYear ?? b.anchorYear)
         || a.candidateType.localeCompare(b.candidateType);
+};
+
+export const rankDiagnosisCandidates = (
+    candidates: DiagnosisCandidateOperation[],
+): DiagnosisCandidateOperation[] => {
+    if (candidates.length === 0) return [];
+
+    const sorted = [...candidates].sort((a, b) => (
+        b.score - a.score
+        || b.evidence.resolvedSegmentCount - a.evidence.resolvedSegmentCount
+        || a.targetTree.localeCompare(b.targetTree)
+        || a.segmentStartYear - b.segmentStartYear
+    ));
+    const temperature = Math.max(0.001, CrossdateConfig.candidateRanking.softmaxTemperature);
+    const maxScore = Math.max(...sorted.map((candidate) => candidate.score));
+    const weights = sorted.map((candidate) => Math.exp((candidate.score - maxScore) / temperature));
+    const weightSum = weights.reduce((sum, weight) => sum + weight, 0) || 1;
+    const probabilities = weights.map((weight) => weight / weightSum);
+    const topProbability = probabilities[0] ?? 0;
+    const secondProbability = probabilities[1] ?? 0;
+    const ambiguousTop = sorted.length > 1
+        && topProbability - secondProbability <= CrossdateConfig.candidateRanking.ambiguousProbabilityGap;
+    const lowConfidenceSet = maxScore <= CrossdateConfig.candidateRanking.lowConfidenceMaxScore
+        || topProbability <= CrossdateConfig.candidateRanking.lowConfidenceMaxProbability;
+
+    return sorted.map((candidate, index) => {
+        const probabilityLike = probabilities[index] ?? 0;
+        const rank = index + 1;
+        const ambiguous = ambiguousTop && rank <= 2;
+        const lowConfidence = lowConfidenceSet || probabilityLike <= CrossdateConfig.candidateRanking.lowConfidenceMaxProbability * 0.5;
+        const confidenceLevel: CandidateRankingConfidence = lowConfidence
+            ? "low"
+            : ambiguous
+                ? "ambiguous"
+                : probabilityLike >= CrossdateConfig.candidateRanking.highConfidenceMinProbability
+                    ? "high"
+                    : probabilityLike >= CrossdateConfig.candidateRanking.mediumConfidenceMinProbability
+                        ? "medium"
+                        : "low";
+        const confidence: DiagnosisConfidence = confidenceLevel === "ambiguous"
+            ? "medium"
+            : confidenceLevel;
+        const algorithmSource = uniqueAlgorithmSources([
+            ...candidate.algorithmSource,
+            ...candidate.evidence.algorithmSource,
+            "candidate_ranking",
+        ]);
+
+        return {
+            ...candidate,
+            candidateScore: candidate.score,
+            probabilityLike,
+            rank,
+            confidence,
+            confidenceLevel,
+            ambiguous,
+            lowConfidence,
+            algorithmSource,
+            rankingMethod: "score_softmax_mvp",
+            evidence: {
+                ...candidate.evidence,
+                algorithmSource,
+                rankingMethod: "score_softmax_mvp",
+                probabilityLike,
+                rank,
+                confidenceLevel,
+                ambiguous,
+                lowConfidence,
+            },
+        };
+    });
 };
 
 const dedupeDiagnosisCandidates = (
@@ -1337,18 +2211,20 @@ export function diagnoseCrossdating(
         .filter((diagnosis): diagnosis is SeriesCoreDiagnosis => diagnosis !== null);
     const segments = seriesDiagnoses.flatMap((diagnosis) => diagnosis.segments);
     const propagationPatterns = seriesDiagnoses.flatMap((diagnosis) => diagnosis.propagationPatterns);
+    const globalSlidingMatches = seriesDiagnoses.map((diagnosis) => diagnosis.globalSlidingMatch);
     const candidateDrafts = seriesDiagnoses.flatMap((diagnosis) => [
+        ...makeGlobalSlidingDrafts(diagnosis),
         ...makePatternDrafts(diagnosis, config),
-        ...makeSegmentDrafts(diagnosis),
+        ...makeSegmentDrafts(diagnosis, config),
     ]);
-    const candidates = dedupeDiagnosisCandidates(
+    const candidates = rankDiagnosisCandidates(dedupeDiagnosisCandidates(
         candidateDrafts
             .map((draft) => {
                 const before = seriesDiagnoses.find((diagnosis) => diagnosis.targetTree === draft.targetTree);
                 return before ? evaluateDraft(siteData, before, draft, config) : null;
             })
             .filter((candidate): candidate is DiagnosisCandidateOperation => candidate !== null),
-    )
+    ))
         .sort(compareDiagnosisCandidates)
         .slice(0, config.maxTopCandidates);
     const candidateCountByTree = candidates.reduce((counts, candidate) => {
@@ -1371,6 +2247,7 @@ export function diagnoseCrossdating(
         )),
         segments,
         propagationPatterns,
+        globalSlidingMatches,
         masterNarrowYears: buildMasterNarrowYears(siteData, config.referenceConfig, config),
         candidates,
     };

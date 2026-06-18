@@ -451,40 +451,6 @@
     white-space: nowrap;
 }
 
-.source-badge {
-    flex: 0 0 auto;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    height: 19px;
-    padding: 0 6px;
-    border: 1px solid #d2dbe7;
-    border-radius: 5px;
-    background: #ffffff;
-    color: #4b5c72;
-    font-family: "Segoe UI", system-ui, sans-serif;
-    font-size: 11px;
-    line-height: 1;
-}
-
-.source-reference-assisted {
-    border-color: #1f2937;
-    background: #f3f4f6;
-    color: #111827;
-}
-
-.source-cofecha-assisted {
-    border-color: #a8c8e9;
-    background: #eef6ff;
-    color: #245b91;
-}
-
-.source-auto-suggested {
-    border-color: #dec68a;
-    background: #fff8df;
-    color: #6f5312;
-}
-
 .log-entry-copy p {
     margin: 3px 0 0;
     overflow: hidden;

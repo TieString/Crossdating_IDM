@@ -183,9 +183,36 @@ function AnimationSection() {
                         name={`${groupId}-ins-year`}
                         value="slide-shift"
                         current={anim.insertYear}
-                        label="滑入移位"
-                        desc="新格子弹入，相邻格子平滑位移；跨行时有飞行动画"
+                        label="底层浮现"
+                        desc="0 值在原位从小到大浮现，邻近格子先平滑让位"
                         badge="默认"
+                        disabled={animationsDisabled}
+                        onChange={update("insertYear")}
+                    />
+                    <RadioOption
+                        name={`${groupId}-ins-year`}
+                        value="pulse-shift"
+                        current={anim.insertYear}
+                        label="脉冲浮现"
+                        desc="0 值原位浮现并轻微脉冲一次，强调新增位置"
+                        disabled={animationsDisabled}
+                        onChange={update("insertYear")}
+                    />
+                    <RadioOption
+                        name={`${groupId}-ins-year`}
+                        value="side-pop-shift"
+                        current={anim.insertYear}
+                        label="侧向弹入"
+                        desc="保留原来的侧向弹入和缩放反馈"
+                        disabled={animationsDisabled}
+                        onChange={update("insertYear")}
+                    />
+                    <RadioOption
+                        name={`${groupId}-ins-year`}
+                        value="flight-shift"
+                        current={anim.insertYear}
+                        label="跨行飞入"
+                        desc="格子按真实旧位置飞到新位置；适合强调跨行移动，但视觉更活跃"
                         disabled={animationsDisabled}
                         onChange={update("insertYear")}
                     />

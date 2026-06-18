@@ -37,11 +37,11 @@ function cloneTree(tree) {
   return new Map(tree);
 }
 
-function makeSite(targetTree) {
+function makeSite(targetTree, startYear = START_YEAR, endYear = END_YEAR) {
   return new Map([
-    ["REF1", makeTree(START_YEAR, END_YEAR, 0)],
-    ["REF2", makeTree(START_YEAR, END_YEAR, 3)],
-    ["REF3", makeTree(START_YEAR, END_YEAR, 7)],
+    ["REF1", makeTree(startYear, endYear, 0)],
+    ["REF2", makeTree(startYear, endYear, 3)],
+    ["REF3", makeTree(startYear, endYear, 7)],
     [TARGET_TREE, targetTree],
   ]);
 }
@@ -86,6 +86,32 @@ function applyCandidate(editor, candidate) {
     return;
   }
   throw new Error(`unsupported candidate operation: ${candidate.operationType}`);
+}
+
+function assertRankedCandidate(candidate, label) {
+  assert(candidate.rank >= 1, `${label} should include rank`);
+  assert(typeof candidate.probabilityLike === "number", `${label} should include probabilityLike`);
+  assert(candidate.evidence.rankingMethod === "score_softmax_mvp", `${label} should record score_softmax_mvp ranking`);
+  assert(candidate.algorithmSource.includes("candidate_ranking"), `${label} should include candidate_ranking source`);
+}
+
+function cloneCandidateForRanking(candidate, id, score) {
+  return {
+    ...candidate,
+    id,
+    score,
+    candidateScore: score,
+    rank: 0,
+    probabilityLike: 0,
+    evidence: {
+      ...candidate.evidence,
+      rank: undefined,
+      probabilityLike: undefined,
+      confidenceLevel: undefined,
+      ambiguous: undefined,
+      lowConfidence: undefined,
+    },
+  };
 }
 
 function makePartialRangeError(trueTree, gapStartYear, gapEndYear) {
@@ -138,6 +164,30 @@ async function main() {
     const trueTarget = makeTree();
     const normalDiagnosis = diagnosisModule.diagnoseCrossdating(makeSite(cloneTree(trueTarget)), options);
     assert(findTargetSummary(normalDiagnosis).flaggedSegmentCount === 0, "normal aligned target should have no abnormal segment");
+    const normalGlobalMatch = normalDiagnosis.globalSlidingMatches.find((item) => item.seriesId === TARGET_TREE);
+    assert(normalGlobalMatch?.bestGlobalLag === 0, "normal aligned target should have bestGlobalLag 0");
+
+    const globalMoveTree = editModule.moveSeriesTailByOffset(cloneTree(trueTarget), START_YEAR, END_YEAR, 10);
+    const globalDiagnosis = diagnosisModule.diagnoseCrossdating(makeSite(globalMoveTree), options);
+    const globalMatch = globalDiagnosis.globalSlidingMatches.find((item) => item.seriesId === TARGET_TREE);
+    assert(globalMatch, "global sliding match should be exposed for target");
+    assert(globalMatch.bestGlobalLag === -10, `global sliding should recover -10 lag; got ${globalMatch.bestGlobalLag}`);
+    const globalCandidate = findCandidate(
+      globalDiagnosis,
+      (candidate) => candidate.candidateType === "batchMoveYears" && candidate.mode === "wholeSeriesMove" && candidate.algorithmSource.includes("global_sliding_match"),
+      "global sliding wholeSeriesMove",
+    );
+    assert(globalCandidate.evidence.globalSliding?.bestGlobalLag === -10, "global candidate should carry global sliding evidence");
+    assert(globalCandidate.evidence.globalSliding.overlapYears >= 100, "global candidate should carry overlap years");
+    assertRankedCandidate(globalCandidate, "global whole-series candidate");
+    const globalEditor = new editModule.RwlEditor(makeSite(globalMoveTree));
+    const globalBeforeProblems = findTargetSummary(globalDiagnosis).flaggedSegmentCount;
+    applyCandidate(globalEditor, globalCandidate);
+    const globalAfterDiagnosis = diagnosisModule.diagnoseCrossdating(globalEditor.getData(), options);
+    assert(
+      findTargetSummary(globalAfterDiagnosis).flaggedSegmentCount <= globalBeforeProblems,
+      "applying global wholeSeriesMove should reduce or preserve problem segments",
+    );
 
     const missingTree = editModule.deleteYearWithMode(cloneTree(trueTarget), 1990, "direct", "right");
     const missingDiagnosis = diagnosisModule.diagnoseCrossdating(makeSite(missingTree), options);
@@ -148,6 +198,13 @@ async function main() {
     );
     assert(missingCandidate.targetYear !== undefined, "missing-ring candidate should include targetYear");
     assert(missingCandidate.evidence.after.problemSegmentCount <= missingCandidate.evidence.before.problemSegmentCount, "insert candidate should not worsen problem count");
+    assert(missingCandidate.algorithmSource.includes("local_edit_alignment"), "missing-ring candidate should come through local edit alignment");
+    assert(
+      ["banded_edit_dp", "fallback_single_edit_scan"].includes(missingCandidate.evidence.localEditAlignment?.method),
+      "missing-ring evidence should include local edit alignment method",
+    );
+    assert(missingCandidate.evidence.narrowYearBonus > 0, "missing-ring candidate should receive narrow-year prior bonus");
+    assertRankedCandidate(missingCandidate, "missing-ring candidate");
     assert(
       missingDiagnosis.propagationPatterns.some((pattern) => pattern.targetTree === TARGET_TREE && pattern.patternType === "possibleMissingYear"),
       "missing-ring case should expose propagation pattern",
@@ -166,6 +223,12 @@ async function main() {
       "deleteFalseYear",
     );
     assert(falseCandidate.evidence.deletedValue !== undefined, "delete candidate should keep deletedValue evidence");
+    assert(falseCandidate.algorithmSource.includes("local_edit_alignment"), "delete candidate should come through local edit alignment");
+    assert(
+      ["banded_edit_dp", "fallback_single_edit_scan"].includes(falseCandidate.evidence.localEditAlignment?.method),
+      "delete evidence should include local edit alignment method",
+    );
+    assertRankedCandidate(falseCandidate, "delete-false candidate");
 
     const wholeMoveTree = editModule.moveSeriesTailByOffset(cloneTree(trueTarget), START_YEAR, END_YEAR, 4);
     const wholeDiagnosis = diagnosisModule.diagnoseCrossdating(makeSite(wholeMoveTree), options);
@@ -187,6 +250,58 @@ async function main() {
     assert(partialCandidate.selectedRange, "partialRangeMove should include selectedRange");
     assert(partialCandidate.missingRange, "partialRangeMove should include missingRange");
     assert(partialCandidate.deltaYears, "partialRangeMove should include deltaYears");
+    assert(partialCandidate.selectedRange.endYear === 1965, "partialRangeMove should refine the selected boundary to 1965");
+    assert(partialCandidate.missingRange.startYear === 1961 && partialCandidate.missingRange.endYear === 1965, "partialRangeMove should infer missing range 1961-1965");
+    assert(partialCandidate.evidence.partialRangeMove, "partialRangeMove should include partial evidence");
+    assert(partialCandidate.evidence.partialRangeMove.inferredMissingRange, "partial evidence should include inferredMissingRange");
+    assert(partialCandidate.algorithmSource.includes("global_sliding_match"), "partialRangeMove should be backed by older-side sliding match");
+    assertRankedCandidate(partialCandidate, "partial-range candidate");
+
+    const longPartialStart = 1800;
+    const longPartialEnd = 2024;
+    const longPartialTrueTarget = makeTree(longPartialStart, longPartialEnd);
+    const longPartialTree = makePartialRangeError(cloneTree(longPartialTrueTarget), 1915, 1930);
+    const longPartialOptions = {
+      ...options,
+      lagMin: -20,
+      lagMax: 20,
+      maxTopCandidates: 10,
+    };
+    const longPartialDiagnosis = diagnosisModule.diagnoseCrossdating(
+      makeSite(longPartialTree, longPartialStart, longPartialEnd),
+      longPartialOptions,
+    );
+    const longPartialCandidate = findCandidate(
+      longPartialDiagnosis,
+      (candidate) => candidate.candidateType === "batchMoveYears" && candidate.mode === "partialRangeMove",
+      "long partialRangeMove",
+    );
+    assert(longPartialCandidate.deltaYears === -16, "long partialRangeMove should detect delta -16");
+    assert(longPartialCandidate.selectedRange.startYear === 1816 && longPartialCandidate.selectedRange.endYear === 1930, "long partialRangeMove should select 1816-1930");
+    assert(longPartialCandidate.missingRange.startYear === 1915 && longPartialCandidate.missingRange.endYear === 1930, "long partialRangeMove should infer 1915-1930 missing range");
+    assert(longPartialCandidate.evidence.partialRangeMove.fixedRange.startYear === 1931, "long partialRangeMove should keep 1931+ fixed");
+    const longEditor = new editModule.RwlEditor(makeSite(longPartialTree, longPartialStart, longPartialEnd));
+    const longBeforeProblems = findTargetSummary(longPartialDiagnosis).flaggedSegmentCount;
+    applyCandidate(longEditor, longPartialCandidate);
+    const longAfterDiagnosis = diagnosisModule.diagnoseCrossdating(longEditor.getData(), longPartialOptions);
+    assert(
+      findTargetSummary(longAfterDiagnosis).flaggedSegmentCount <= longBeforeProblems,
+      "applying long partialRangeMove should reduce or preserve problem segments",
+    );
+    assertRankedCandidate(longPartialCandidate, "long partial-range candidate");
+
+    const ambiguousRanked = diagnosisModule.rankDiagnosisCandidates([
+      cloneCandidateForRanking(missingCandidate, "ambiguous-a", 1.0),
+      cloneCandidateForRanking(falseCandidate, "ambiguous-b", 0.95),
+    ]);
+    assert(ambiguousRanked[0].rank === 1 && ambiguousRanked[1].rank === 2, "ranking should assign ordered ranks");
+    assert(ambiguousRanked[0].confidenceLevel === "ambiguous", "close candidates should be marked ambiguous");
+    assert(ambiguousRanked[0].probabilityLike > ambiguousRanked[1].probabilityLike, "softmax ranking should preserve score order");
+
+    const lowRanked = diagnosisModule.rankDiagnosisCandidates([
+      cloneCandidateForRanking(missingCandidate, "low-a", 0.1),
+    ]);
+    assert(lowRanked[0].confidenceLevel === "low" && lowRanked[0].lowConfidence, "weak candidates should be marked low confidence");
 
     const editor = new editModule.RwlEditor(makeSite(missingTree));
     const staleCandidates = diagnosisModule.markCandidatesStale(missingDiagnosis.candidates);
@@ -201,8 +316,11 @@ async function main() {
     console.log(`normal target problems: ${findTargetSummary(normalDiagnosis).flaggedSegmentCount}`);
     console.log(`missing candidate: ${missingCandidate.label} @ ${missingCandidate.targetYear}, stale checked: ${staleCandidates.length}`);
     console.log(`false candidate: ${falseCandidate.label} @ ${falseCandidate.targetYear}, deletedValue=${falseCandidate.evidence.deletedValue}`);
+    console.log(`global sliding: lag=${globalMatch.bestGlobalLag}, candidate delta=${globalCandidate.deltaYears}, p~=${globalCandidate.probabilityLike.toFixed(2)}`);
     console.log(`whole move: delta=${wholeCandidate.deltaYears}, selected=${wholeCandidate.selectedRange.startYear}-${wholeCandidate.selectedRange.endYear}`);
     console.log(`partial move: delta=${partialCandidate.deltaYears}, selected=${partialCandidate.selectedRange.startYear}-${partialCandidate.selectedRange.endYear}, missing=${partialCandidate.missingRange.startYear}-${partialCandidate.missingRange.endYear}`);
+    console.log(`long partial move: delta=${longPartialCandidate.deltaYears}, selected=${longPartialCandidate.selectedRange.startYear}-${longPartialCandidate.selectedRange.endYear}, missing=${longPartialCandidate.missingRange.startYear}-${longPartialCandidate.missingRange.endYear}`);
+    console.log(`ranking checks: ambiguous=${ambiguousRanked[0].confidenceLevel}, low=${lowRanked[0].confidenceLevel}`);
   } finally {
     await server.close();
   }

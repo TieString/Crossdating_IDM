@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# verify-widthgrid-anim skill: harness copied to root + screenshot output (transient)
+/harness.html
+/harness/
+/.tmp-widthgrid-shots/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

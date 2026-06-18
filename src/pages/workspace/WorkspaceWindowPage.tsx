@@ -162,8 +162,6 @@ export default function WorkspaceWindowPage() {
                 operationLog={state.operationLog}
                 canResetToRawData={state.canResetToRawData}
                 onUndoEntry={(entryId) => sendCommand({ kind: "operation-log", type: "undo-log-entry", entryId })}
-                onUndoBatch={(batchId) => sendCommand({ kind: "operation-log", type: "undo-log-batch", batchId })}
-                onRedoEntry={(entryId) => sendCommand({ kind: "operation-log", type: "redo-log-entry", entryId })}
                 onJumpEntry={(tree, year) => sendCommand({ kind: "operation-log", type: "jump", tree, year })}
                 onResetToRawData={() => sendCommand({ kind: "operation-log", type: "reset-to-raw" })}
                 onClose={closeWindow}
@@ -195,6 +193,7 @@ export default function WorkspaceWindowPage() {
     return (
         <ExpandedChartPage
             siteData={chartData}
+            showPersistentTooltip
             referenceConfig={state.referenceConfig}
             diagnosis={state.diagnosis}
             diagnosisBatchResult={state.diagnosisBatchResult}

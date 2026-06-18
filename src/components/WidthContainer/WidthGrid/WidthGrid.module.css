@@ -161,7 +161,8 @@
 
 .width-grid.motion-animated {
     z-index: 3;
-    will-change: transform, box-shadow;
+    transition: background-color 120ms ease, box-shadow 120ms ease, outline-color 120ms ease;
+    will-change: transform, opacity, box-shadow;
 }
 
 .insert-missing-button {

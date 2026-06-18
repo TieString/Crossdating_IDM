@@ -1,7 +1,8 @@
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parseCofechaResult, splitReportByParts } from "@/features/cofecha/formatter";
 import {
+    type CrossdatingDiagnosis,
     diagnoseCrossdating,
     getDiagnosisCandidateLabel,
     markCandidatesStale,
@@ -29,7 +30,9 @@ const HISTORY_STORAGE_PREFIX = "crossdating:rwl-operation-journal:v1:";
 const REFERENCE_STORAGE_PREFIX = "crossdating:reference-state:v1:";
 const COFECHA_STORAGE_PREFIX = "crossdating:cofecha-state:v1:";
 const MAX_REFERENCE_OPERATION_LOG_ENTRIES = 200;
-const MAX_COFECHA_OPERATION_LOG_ENTRIES = 200;
+const HISTORY_SNAPSHOT_PERSIST_DELAY_MS = 250;
+const DIAGNOSIS_IDLE_DELAY_MS = 90;
+const DIAGNOSIS_AFTER_HISTORY_ANIMATION_DELAY_MS = 1100;
 
 type PersistedReferenceState = {
     version: 1;
@@ -53,13 +56,10 @@ type PersistedCofechaState = {
     cofechaResult?: SerializedCofechaResult;
     cofechaVersion: CofechaVersion;
     selectedPart: string;
-    cofechaOperationLog: RwlOperationLogEntry[];
-    cofechaOperationCounter: number;
 };
 
 type RunCofechaApplyOptions = {
     version?: CofechaVersion;
-    baseOperationLog?: RwlOperationLogEntry[];
     selectedPart?: string;
 };
 
@@ -88,6 +88,10 @@ const rwlDataEquals = (a: RwlSiteData, b: RwlSiteData) => {
     return true;
 };
 
+const stringArraysEqual = (a: string[], b: string[]) => (
+    a.length === b.length && a.every((value, index) => value === b[index])
+);
+
 const getHistoryStorageKey = (filePath: string) => `${HISTORY_STORAGE_PREFIX}${filePath}`;
 const getReferenceStorageKey = (filePath: string) => `${REFERENCE_STORAGE_PREFIX}${filePath}`;
 const getCofechaStorageKey = (filePath: string) => `${COFECHA_STORAGE_PREFIX}${filePath}`;
@@ -103,8 +107,7 @@ const isPersistedCofechaState = (value: unknown): value is PersistedCofechaState
     if (!value || typeof value !== "object") return false;
     const candidate = value as Partial<PersistedCofechaState>;
     return candidate.version === 1
-        && typeof candidate.outFileContent === "string"
-        && Array.isArray(candidate.cofechaOperationLog);
+        && typeof candidate.outFileContent === "string";
 };
 
 const loadPersistedHistorySnapshot = (filePath: string): RwlPersistedHistorySnapshot | null => {
@@ -129,6 +132,23 @@ const persistHistorySnapshot = (filePath: string, editor: RwlEditor) => {
         console.warn("保存操作日志失败:", error);
     }
 };
+
+const createEmptyCrossdatingDiagnosis = (): CrossdatingDiagnosis => ({
+    createdAt: new Date().toISOString(),
+    seriesCount: 0,
+    problemSegmentCount: 0,
+    candidateCount: 0,
+    segmentLength: 0,
+    overlap: 0,
+    lagRange: { min: 0, max: 0 },
+    lowCorrelationThreshold: 0,
+    summaries: [],
+    segments: [],
+    propagationPatterns: [],
+    globalSlidingMatches: [],
+    masterNarrowYears: [],
+    candidates: [],
+});
 
 const loadPersistedReferenceState = (filePath: string): PersistedReferenceState | null => {
     try {
@@ -198,8 +218,6 @@ const persistCofechaState = (
     cofechaResult: ICofechaResult | undefined,
     cofechaVersion: CofechaVersion,
     selectedPart: string,
-    cofechaOperationLog: RwlOperationLogEntry[],
-    cofechaOperationCounter: number,
 ) => {
     try {
         window.localStorage.setItem(
@@ -211,20 +229,11 @@ const persistCofechaState = (
                 cofechaResult: cofechaResult ? serializeCofechaResult(cofechaResult) : undefined,
                 cofechaVersion,
                 selectedPart,
-                cofechaOperationLog,
-                cofechaOperationCounter,
             } satisfies PersistedCofechaState),
         );
     } catch (error) {
         console.warn("保存 COFECHA 状态失败:", error);
     }
-};
-
-const hydratePersistedHistory = (editor: RwlEditor, filePath: string) => {
-    const snapshot = loadPersistedHistorySnapshot(filePath);
-    if (!snapshot) return;
-
-    editor.restorePersistedHistory(snapshot);
 };
 
 const createReferenceOperationLogEntry = (
@@ -264,55 +273,6 @@ const createReferenceOperationLogEntry = (
     };
 };
 
-const createCofechaOperationLogEntry = (
-    result: ICofechaResult,
-    version: CofechaVersion,
-    sequence: number,
-    projectId?: string | null,
-): RwlOperationLogEntry => {
-    const id = `cofecha-${Date.now()}-${sequence}`;
-    const timestamp = new Date().toISOString();
-    const metricsAfter = {
-        possibleProblemsCount: result.possibleProblemsCount,
-        seriesIntercorrelation: result.seriesIntercorrelation,
-        averageMeanSensitivity: result.averageMeanSensitivity,
-        meanLength: result.meanLength,
-    };
-
-    return {
-        id,
-        operationId: id,
-        projectId: projectId || undefined,
-        seriesId: "COFECHA",
-        sequence,
-        timestamp,
-        createdAt: timestamp,
-        createdBy: "system",
-        action: "apply",
-        operationType: "RUN_COFECHA",
-        source: "cofecha-assisted",
-        summary: "运行 COFECHA",
-        detail: `${version === "cofecha12k" ? "COFECHA 12K" : "COFECHA"} · A/problem ${result.possibleProblemsCount} · Intercorr. ${result.seriesIntercorrelation}`,
-        tree: "COFECHA",
-        metricsAfter,
-        cofechaAfter: metricsAfter,
-        undone: false,
-        isApplied: true,
-        isReverted: false,
-        canUndo: false,
-        canRedo: false,
-        undoDepth: 0,
-        redoDepth: 0,
-    };
-};
-
-export const appendCofechaOperationLogEntry = (
-    operationLog: RwlOperationLogEntry[],
-    entry: RwlOperationLogEntry,
-): RwlOperationLogEntry[] => (
-    [...operationLog, entry].slice(-MAX_COFECHA_OPERATION_LOG_ENTRIES)
-);
-
 const normalizeWorkspaceOperationLogEntry = (
     entry: RwlOperationLogEntry,
     projectId?: string | null,
@@ -325,7 +285,7 @@ const normalizeWorkspaceOperationLogEntry = (
         projectId: entry.projectId ?? projectId ?? undefined,
         seriesId: entry.seriesId ?? entry.tree,
         createdAt: entry.createdAt ?? entry.timestamp,
-        createdBy: entry.createdBy ?? (entry.source === "cofecha-assisted" || entry.source === "system" ? "system" : "user"),
+        createdBy: entry.createdBy ?? (entry.source === "system" ? "system" : "user"),
         isApplied,
         isReverted,
     };
@@ -336,8 +296,9 @@ export function useHomeWorkspace() {
     const originalDataRef = useRef<RwlSiteData>(new Map());
     const filePathRef = useRef<string | null>(null);
     const historyAnimationIdRef = useRef(0);
+    const historyPersistTimerRef = useRef<number | null>(null);
+    const diagnosisHistoryAnimationIdRef = useRef<number | null>(null);
     const referenceOperationCounterRef = useRef(0);
-    const cofechaOperationCounterRef = useRef(0);
     const lastCofechaValidationRef = useRef<{ input: string; version: CofechaVersion } | null>(null);
     const latestDiagnosisCandidatesRef = useRef<DiagnosisCandidateOperation[]>([]);
 
@@ -346,11 +307,11 @@ export function useHomeWorkspace() {
     const [operationLog, setOperationLog] = useState<RwlOperationLogEntry[]>(() => rwlEditorRef.current.getOperationLog());
     const [referenceConfig, setReferenceConfig] = useState<ReferenceSeriesConfig | null>(null);
     const [referenceOperationLog, setReferenceOperationLog] = useState<RwlOperationLogEntry[]>([]);
-    const [cofechaOperationLog, setCofechaOperationLog] = useState<RwlOperationLogEntry[]>([]);
     const [historyStatus, setHistoryStatus] = useState<RwlHistoryStatus>(() => rwlEditorRef.current.getHistoryStatus());
     const [treeOptions, setTreeOptions] = useState<string[]>([]);
     const [selectedTree, setSelectedTree] = useState<string>(ALL_OPTION_VALUE);
     const [historyAnimation, setHistoryAnimation] = useState<WidthHistoryAnimation | null>(null);
+    const [crossdatingDiagnosis, setCrossdatingDiagnosis] = useState<CrossdatingDiagnosis>(() => createEmptyCrossdatingDiagnosis());
     const [fileName, setFileName] = useState<string | null>(null);
     const [isModified, setIsModified] = useState(false);
 
@@ -364,20 +325,40 @@ export function useHomeWorkspace() {
     const [isCofechaRunning, setIsCofechaRunning] = useState(false);
     const [diagnosisBatchResult, setDiagnosisBatchResult] = useState<DiagnosisBatchApplyResult | null>(null);
 
+    const scheduleHistorySnapshotPersist = useCallback((filePath: string, editor: RwlEditor) => {
+        if (historyPersistTimerRef.current !== null) {
+            window.clearTimeout(historyPersistTimerRef.current);
+        }
+
+        historyPersistTimerRef.current = window.setTimeout(() => {
+            historyPersistTimerRef.current = null;
+            persistHistorySnapshot(filePath, editor);
+        }, HISTORY_SNAPSHOT_PERSIST_DELAY_MS);
+    }, []);
+
+    useEffect(() => () => {
+        if (historyPersistTimerRef.current !== null) {
+            window.clearTimeout(historyPersistTimerRef.current);
+        }
+    }, []);
+
     const syncEditor = useCallback((editor: RwlEditor) => {
         editor.registerChangeCallback(() => {
             const nextData = editor.getData();
             setIsModified(!rwlDataEquals(originalDataRef.current, nextData));
             setSiteData(nextData);
-            setTreeOptions(Array.from(nextData.keys()));
+            const nextTreeOptions = Array.from(nextData.keys());
+            setTreeOptions((previous) => (
+                stringArraysEqual(previous, nextTreeOptions) ? previous : nextTreeOptions
+            ));
             setDeletionMarkers(editor.getDeletionMarkers());
             setOperationLog(editor.getOperationLog());
             setHistoryStatus(editor.getHistoryStatus());
             if (filePathRef.current) {
-                persistHistorySnapshot(filePathRef.current, editor);
+                scheduleHistorySnapshotPersist(filePathRef.current, editor);
             }
         });
-    }, []);
+    }, [scheduleHistorySnapshotPersist]);
 
     useEffect(() => {
         syncEditor(rwlEditorRef.current);
@@ -428,30 +409,32 @@ export function useHomeWorkspace() {
     }, [referenceConfig, referenceOperationLog]);
 
     useEffect(() => {
-        if (!filePathRef.current || (!outFileContent && !cofechaResult && cofechaOperationLog.length === 0)) return;
+        if (!filePathRef.current || (!outFileContent && !cofechaResult)) return;
         persistCofechaState(
             filePathRef.current,
             outFileContent,
             cofechaResult,
             cofechaVersion,
             selectedPart,
-            cofechaOperationLog,
-            cofechaOperationCounterRef.current,
         );
-    }, [cofechaOperationLog, cofechaResult, cofechaVersion, outFileContent, selectedPart]);
+    }, [cofechaResult, cofechaVersion, outFileContent, selectedPart]);
 
-    const replaceEditor = useCallback((nextEditor: RwlEditor) => {
+    // savedBaseline：磁盘上真正保存的数据。恢复 localStorage 草稿后，工作数据可能与磁盘不一致，
+    // 此时用磁盘数据当基线，让 isModified（标题的 *）如实反映"草稿未写盘"。不传则以工作数据为基线（视为已保存）。
+    const replaceEditor = useCallback((nextEditor: RwlEditor, savedBaseline?: RwlSiteData) => {
         nextEditor.setProjectId(filePathRef.current);
         rwlEditorRef.current = nextEditor;
         syncEditor(nextEditor);
         const nextData = nextEditor.getData();
-        originalDataRef.current = nextData;
+        const baseline = savedBaseline ?? nextData;
+        originalDataRef.current = baseline;
         setSiteData(nextData);
         setDeletionMarkers(nextEditor.getDeletionMarkers());
         setOperationLog(nextEditor.getOperationLog());
         setHistoryStatus(nextEditor.getHistoryStatus());
         setHistoryAnimation(null);
-        setIsModified(false);
+        setCrossdatingDiagnosis(createEmptyCrossdatingDiagnosis());
+        setIsModified(!rwlDataEquals(baseline, nextData));
     }, [syncEditor]);
 
     const runCofechaAndApplyResult = useCallback(async (
@@ -462,9 +445,6 @@ export function useHomeWorkspace() {
         const version = typeof options === "string"
             ? options
             : options?.version ?? cofechaVersion;
-        const baseOperationLog = typeof options === "object" && options.baseOperationLog
-            ? options.baseOperationLog
-            : cofechaOperationLog;
         const selectedPartForPersistence = typeof options === "object" && options.selectedPart
             ? options.selectedPart
             : selectedPart;
@@ -475,11 +455,6 @@ export function useHomeWorkspace() {
             const baseName = sourcePath.split(/\\|\//).pop() || "INPUT.RWL";
             const nextOutText = await runCofecha(input, baseName, sourcePath, version);
             const nextResult = parseCofechaResult(nextOutText);
-            cofechaOperationCounterRef.current += 1;
-            const nextOperationLog = appendCofechaOperationLogEntry(
-                baseOperationLog,
-                createCofechaOperationLogEntry(nextResult, version, cofechaOperationCounterRef.current, sourcePath),
-            );
 
             lastCofechaValidationRef.current = {
                 input: rwlEditorRef.current.exportAsRwlString(),
@@ -489,20 +464,17 @@ export function useHomeWorkspace() {
             setCofechaResult(nextResult);
             setPossibleProblemsDetail(nextResult.possibleProblemsDetail);
             setCofechaParts(splitReportByParts(nextOutText));
-            setCofechaOperationLog(nextOperationLog);
             persistCofechaState(
                 sourcePath,
                 nextOutText,
                 nextResult,
                 version,
                 selectedPartForPersistence,
-                nextOperationLog,
-                cofechaOperationCounterRef.current,
             );
         } finally {
             setIsCofechaRunning(false);
         }
-    }, [cofechaOperationLog, cofechaVersion, selectedPart]);
+    }, [cofechaVersion, selectedPart]);
 
     const handleLoad = useCallback(async () => {
         try {
@@ -522,12 +494,35 @@ export function useHomeWorkspace() {
             filePathRef.current = filePath;
 
             const rwlData = await readRwlFile(filePath);
-            const nextEditor = new RwlEditor(rwlData.data, rwlData.readOptions, rwlData.format);
+            let nextEditor = new RwlEditor(rwlData.data, rwlData.readOptions, rwlData.format);
+            // 在恢复草稿前抓取磁盘内容快照，作为"已保存基线"。
+            const diskBaseline = nextEditor.getData();
             const persistedReference = loadPersistedReferenceState(filePath);
             const persistedCofecha = loadPersistedCofechaState(filePath);
 
-            hydratePersistedHistory(nextEditor, filePath);
-            replaceEditor(nextEditor);
+            // 恢复本地缓存草稿（操作日志快照）。草稿可能因未保存的编辑、或磁盘文件被外部
+            // 改动而与磁盘内容不一致；不一致时弹框让用户选择载入哪一个，而不是默默套用草稿。
+            const persistedHistory = loadPersistedHistorySnapshot(filePath);
+            if (persistedHistory) {
+                nextEditor.restorePersistedHistory(persistedHistory);
+                if (!rwlDataEquals(diskBaseline, nextEditor.getData())) {
+                    const baseName = filePath.split(/\\|\//).pop() || filePath;
+                    const keepCachedDraft = await ask(
+                        `“${baseName}” 存在未保存的本地编辑缓存，且与磁盘文件内容不一致。\n\n要载入哪一个版本？`,
+                        {
+                            title: "本地缓存与磁盘文件不一致",
+                            kind: "warning",
+                            okLabel: "本地缓存（保留未保存的编辑）",
+                            cancelLabel: "磁盘文件（放弃缓存）",
+                        },
+                    );
+                    if (!keepCachedDraft) {
+                        // 放弃草稿：用磁盘内容重建编辑器（保留原始格式/读取选项），不恢复历史。
+                        nextEditor = new RwlEditor(rwlData.data, rwlData.readOptions, rwlData.format);
+                    }
+                }
+            }
+            replaceEditor(nextEditor, diskBaseline);
             setReferenceConfig(normalizeReferenceSeriesConfig(
                 persistedReference?.referenceConfig ?? null,
                 nextEditor.getData(),
@@ -540,32 +535,23 @@ export function useHomeWorkspace() {
             lastCofechaValidationRef.current = null;
             const restoredCofechaVersion = persistedCofecha?.cofechaVersion ?? "cofecha";
             let restoredSelectedPart = ALL_OPTION_VALUE;
-            let restoredCofechaOperationLog: RwlOperationLogEntry[] = [];
             if (persistedCofecha) {
                 const restoredResult = persistedCofecha.cofechaResult
                     ? deserializeCofechaResult(persistedCofecha.cofechaResult)
                     : undefined;
                 restoredSelectedPart = persistedCofecha.selectedPart || ALL_OPTION_VALUE;
-                restoredCofechaOperationLog = persistedCofecha.cofechaOperationLog.map((entry) => (
-                    normalizeWorkspaceOperationLogEntry(entry, filePath)
-                ));
                 setOutFileContent(persistedCofecha.outFileContent);
                 setCofechaResult(restoredResult);
                 setPossibleProblemsDetail(restoredResult?.possibleProblemsDetail ?? new Map());
                 setCofechaParts(splitReportByParts(persistedCofecha.outFileContent));
                 setSelectedPart(restoredSelectedPart);
                 setCofechaVersion(restoredCofechaVersion);
-                setCofechaOperationLog(restoredCofechaOperationLog);
-                cofechaOperationCounterRef.current = persistedCofecha.cofechaOperationCounter
-                    ?? Math.max(...persistedCofecha.cofechaOperationLog.map((entry) => entry.sequence), 0);
             } else {
                 setOutFileContent("");
                 setCofechaResult(undefined);
                 setPossibleProblemsDetail(new Map());
                 setCofechaParts(new Map());
                 setCofechaVersion(restoredCofechaVersion);
-                setCofechaOperationLog([]);
-                cofechaOperationCounterRef.current = 0;
             }
             setTreeOptions(Array.from(nextEditor.getData().keys()));
             setSelectedTree(ALL_OPTION_VALUE);
@@ -575,7 +561,6 @@ export function useHomeWorkspace() {
             try {
                 await runCofechaAndApplyResult(nextEditor.exportAsRwlString(), filePath, {
                     version: restoredCofechaVersion,
-                    baseOperationLog: restoredCofechaOperationLog,
                     selectedPart: restoredSelectedPart,
                 });
             } catch (error) {
@@ -780,14 +765,6 @@ export function useHomeWorkspace() {
 
     const handleUndoOperationLogEntry = useCallback((entryId: string) => {
         triggerHistoryAnimation(rwlEditorRef.current.undoOperationLogEntry(entryId));
-    }, [triggerHistoryAnimation]);
-
-    const handleUndoOperationLogBatch = useCallback((batchId: string) => {
-        triggerHistoryAnimation(rwlEditorRef.current.undoOperationLogBatch(batchId));
-    }, [triggerHistoryAnimation]);
-
-    const handleRedoOperationLogEntry = useCallback((entryId: string) => {
-        triggerHistoryAnimation(rwlEditorRef.current.redoOperationLogEntry(entryId));
     }, [triggerHistoryAnimation]);
 
     const handleResetToRawData = useCallback(() => {
@@ -1080,15 +1057,70 @@ export function useHomeWorkspace() {
 
     const selectedProblemText = possibleProblemsDetail.get(selectedTree);
     const workspaceOperationLog = useMemo(() => (
-        [...operationLog, ...referenceOperationLog, ...cofechaOperationLog]
+        operationLog
             .map((entry) => normalizeWorkspaceOperationLogEntry(entry, filePathRef.current))
             .sort((a, b) => (
                 new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
             ))
-    ), [cofechaOperationLog, fileName, operationLog, referenceOperationLog]);
-    const crossdatingDiagnosis = useMemo(() => (
-        diagnoseCrossdating(siteData, { referenceConfig })
-    ), [referenceConfig, siteData]);
+    ), [fileName, operationLog]);
+    useEffect(() => {
+        let cancelled = false;
+        let startTimer: number | null = null;
+        let idleHandle: number | null = null;
+        const historyAnimationId = historyAnimation?.id ?? null;
+        const shouldWaitForHistoryAnimation =
+            historyAnimationId !== null
+            && diagnosisHistoryAnimationIdRef.current !== historyAnimationId;
+
+        if (shouldWaitForHistoryAnimation) {
+            diagnosisHistoryAnimationIdRef.current = historyAnimationId;
+        }
+
+        setCrossdatingDiagnosis((previous) => {
+            if (previous.candidates.length === 0) {
+                return previous;
+            }
+
+            const staleCandidates = markCandidatesStale(previous.candidates);
+            return {
+                ...previous,
+                candidateCount: staleCandidates.length,
+                candidates: staleCandidates,
+            };
+        });
+
+        const runDiagnosis = () => {
+            if (cancelled) return;
+            const nextDiagnosis = diagnoseCrossdating(siteData, { referenceConfig });
+            if (!cancelled) {
+                setCrossdatingDiagnosis(nextDiagnosis);
+            }
+        };
+
+        const diagnosisDelayMs = shouldWaitForHistoryAnimation
+            ? DIAGNOSIS_AFTER_HISTORY_ANIMATION_DELAY_MS
+            : DIAGNOSIS_IDLE_DELAY_MS;
+
+        startTimer = window.setTimeout(() => {
+            startTimer = null;
+            if ("requestIdleCallback" in window) {
+                idleHandle = window.requestIdleCallback(runDiagnosis, { timeout: 700 });
+                return;
+            }
+            runDiagnosis();
+        }, diagnosisDelayMs);
+
+        return () => {
+            cancelled = true;
+            if (startTimer !== null) {
+                window.clearTimeout(startTimer);
+            }
+            if (idleHandle !== null && "cancelIdleCallback" in window) {
+                window.cancelIdleCallback(idleHandle);
+            }
+        };
+    }, [historyAnimation?.id, referenceConfig, siteData]);
+
     useEffect(() => {
         latestDiagnosisCandidatesRef.current = crossdatingDiagnosis.candidates;
     }, [crossdatingDiagnosis.candidates]);
@@ -1160,7 +1192,6 @@ export function useHomeWorkspace() {
         handleReferenceConfigChange,
         handleRedo,
         handleReplaceTreeData,
-        handleRedoOperationLogEntry,
         handleResetToRawData,
         handleRestoreDeletion,
         handleRunCofechaValidation,
@@ -1171,7 +1202,6 @@ export function useHomeWorkspace() {
         handleTreeSelectionChange,
         handleUndo,
         handleUndoOperationLogEntry,
-        handleUndoOperationLogBatch,
         applyRawRwlText,
         applyRawRwlTextForTree,
         getCurrentRwlText,

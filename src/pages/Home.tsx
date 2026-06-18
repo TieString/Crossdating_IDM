@@ -3,7 +3,7 @@ import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { AnimatePresence } from "motion/react";
 import { TreeChartManager } from "@/components/Chart/TreeChartManager";
 import { RollingNumber } from "@/components/RollingNumber/RollingNumber";
-import WidthContainer from "@/components/WidthContainer/WidthContainer";
+import WidthContainer, { WidthGridSkeleton } from "@/components/WidthContainer/WidthContainer";
 import ContextMenu, { type ContextMenuItem } from "@/components/ContextMenu/ContextMenu";
 import { FloatingScrollArea } from "@/components/FloatingScrollArea/FloatingScrollArea";
 import { FloatingScrollbar } from "@/components/FloatingScrollbar/FloatingScrollbar";
@@ -88,6 +88,7 @@ const COFECHA_ABSENT_RING_CONTINUATION_RE = /^(\s{8,})(-?\d{4}(?:\s+-?\d{4})*)(\
 const COFECHA_YEAR_TOKEN_RE = /\b(-?\d{4})\b/g;
 const COFECHA_PART_SEPARATOR_RE = /^\s*=+\s*$/;
 const COFECHA_PART6_HIGHLIGHT_MS = 2600;
+const COFECHA_SKELETON_LINE_WIDTHS = [48, 84, 64, 92, 76, 52, 88, 58, 71, 43, 80, 66];
 
 const getErrorMessage = (error: unknown) => (
     error instanceof Error ? error.message : String(error)
@@ -333,6 +334,60 @@ const renderCofechaHtmlWithLinks = (
     return { html, count };
 };
 
+function CofechaToolbarSkeleton() {
+    return (
+        <div className={style["cofecha-toolbar-skeleton"]} aria-hidden="true">
+            <span className={`${style["skeleton-block"]} ${style["skeleton-select"]}`} />
+            <span className={`${style["skeleton-block"]} ${style["skeleton-button"]}`} />
+            <span className={`${style["skeleton-block"]} ${style["skeleton-chip"]}`} />
+        </div>
+    );
+}
+
+function CofechaEmptySkeleton() {
+    return (
+        <div className={style["cofecha-empty-skeleton"]} aria-hidden="true">
+            <span className={`${style["skeleton-block"]} ${style["cofecha-skeleton-title"]}`} />
+            <div className={style["cofecha-skeleton-rule"]} />
+            <div className={style["cofecha-skeleton-lines"]}>
+                {COFECHA_SKELETON_LINE_WIDTHS.map((width, index) => (
+                    <span
+                        key={`${width}-${index}`}
+                        className={`${style["skeleton-block"]} ${style["cofecha-skeleton-line"]}`}
+                        style={{ width: `${width}%` }}
+                    />
+                ))}
+            </div>
+        </div>
+    );
+}
+
+function LineChartEmptySkeleton() {
+    return (
+        <div className={style["chart-empty-skeleton"]} aria-hidden="true">
+            <div className={style["chart-skeleton-toolbar"]}>
+                <div className={style["chart-skeleton-toolbar-group"]}>
+                    <span className={`${style["skeleton-block"]} ${style["chart-skeleton-tab"]}`} />
+                    <span className={`${style["skeleton-block"]} ${style["chart-skeleton-tab-short"]}`} />
+                </div>
+                <div className={style["chart-skeleton-toolbar-group"]}>
+                    <span className={`${style["skeleton-block"]} ${style["chart-skeleton-icon"]}`} />
+                    <span className={`${style["skeleton-block"]} ${style["chart-skeleton-icon"]}`} />
+                    <span className={`${style["skeleton-block"]} ${style["chart-skeleton-icon"]}`} />
+                </div>
+            </div>
+            <div className={style["chart-skeleton-plot"]}>
+                <svg className={style["chart-skeleton-svg"]} viewBox="0 0 100 100" preserveAspectRatio="none">
+                    <polyline points="0,72 10,64 19,70 30,46 42,54 53,30 65,42 76,24 88,36 100,18" />
+                    <polyline points="0,58 12,50 24,57 36,42 48,47 60,36 74,44 86,32 100,39" />
+                </svg>
+                <div className={style["chart-skeleton-axis-x"]} />
+                <div className={style["chart-skeleton-axis-y"]} />
+            </div>
+        </div>
+    );
+}
+
 export default function Home() {
     const homeContainerRef = useRef<HTMLDivElement>(null);
     const rawEditorRef = useRef<HTMLParagraphElement>(null);
@@ -396,8 +451,6 @@ export default function Home() {
         handleTreeSelectionChange,
         handleUndo,
         handleUndoOperationLogEntry,
-        handleUndoOperationLogBatch,
-        handleRedoOperationLogEntry,
         hasChart,
         hasProblems,
         historyAnimation,
@@ -437,12 +490,19 @@ export default function Home() {
             ...(!leftBottomDividerCollapsed ? { maxHeight: `calc(100% - ${PANEL_DIVIDER_GUTTER_SIZE}px)` } : {}),
         }
         : undefined;
-    const cofechaTextStyle = hasChart
+    const shouldShowEmptySkeleton = shouldShowWelcome || (!hasChart && shouldShowProcessing);
+    const shouldShowRightBottomPane = hasChart || shouldShowEmptySkeleton;
+    const cofechaTextStyle = shouldShowRightBottomPane
         ? {
             flex: `0 0 ${layout.rightBottomRatio * 100}%`,
             ...(!rightBottomDividerCollapsed ? { maxHeight: `calc(100% - ${PANEL_DIVIDER_GUTTER_SIZE}px)` } : {}),
         }
         : undefined;
+    const renderStatValue = (value: string | number | null | undefined) => (
+        shouldShowEmptySkeleton
+            ? <span className={style["stat-value-skeleton"]} aria-hidden="true" />
+            : <RollingNumber value={value} />
+    );
 
     const handleDeleteSeriesFromChart = useCallback((tree: string) => {
         deleteSeriesRequestIdRef.current += 1;
@@ -679,10 +739,6 @@ export default function Home() {
             case "operation-log":
                 if (command.type === "undo-log-entry") {
                     handleUndoOperationLogEntry(command.entryId);
-                } else if (command.type === "undo-log-batch") {
-                    handleUndoOperationLogBatch(command.batchId);
-                } else if (command.type === "redo-log-entry") {
-                    handleRedoOperationLogEntry(command.entryId);
                 } else if (command.type === "reset-to-raw") {
                     handleResetToRawData();
                 } else {
@@ -725,11 +781,9 @@ export default function Home() {
         handleApplyLocalSimulation,
         handleInsertMissingYearAtSideFromChart,
         handleReferenceConfigChange,
-        handleRedoOperationLogEntry,
         handleRunCofechaValidation,
         handleResetToRawData,
         handleUndoOperationLogEntry,
-        handleUndoOperationLogBatch,
         setSelectedPart,
     ]);
 
@@ -968,11 +1022,17 @@ export default function Home() {
                 }
 
                 editHighlightIdRef.current += 1;
-                setEditHighlightTarget({
+                const highlightTarget: EditHighlightTarget = {
                     id: editHighlightIdRef.current,
                     cells: changed,
                     scrollTree,
                     scrollYear: Number.isFinite(scrollYear) ? scrollYear : undefined,
+                };
+                // 退出文本模式会让 WidthContainer 全新重挂载；它消费跳转的 layout effect 会
+                // 在祖先（FloatingScrollArea）的滚动容器 ref attach 之前先跑，此时拿不到滚动容器
+                // 而直接放弃。推迟到下一帧再设目标，保证在“已挂载”的更新渲染里触发，一次到位。
+                window.requestAnimationFrame(() => {
+                    setEditHighlightTarget(highlightTarget);
                 });
             } else {
                 setEditHighlightTarget(null);
@@ -1167,45 +1227,43 @@ export default function Home() {
                         </div>
                     ) : (
                         <div className={style["structured-width-container"]}>
-                            {!shouldShowWelcome ? (
-                                <>
-                                    <select
-                                        name="trees"
-                                        id={style["tree_selector"]}
-                                        value={selectedTree}
-                                        onChange={(event) => {
-                                            handleTreeSelectionChange(event.target.value);
-                                        }}
-                                    >
-                                        <option key={ALL_OPTION_VALUE} value={ALL_OPTION_VALUE}>
-                                            {TREE_ALL_OPTION_LABEL}
+                            {!shouldShowEmptySkeleton ? (
+                                <select
+                                    name="trees"
+                                    id={style["tree_selector"]}
+                                    value={selectedTree}
+                                    onChange={(event) => {
+                                        handleTreeSelectionChange(event.target.value);
+                                    }}
+                                >
+                                    <option key={ALL_OPTION_VALUE} value={ALL_OPTION_VALUE}>
+                                        {TREE_ALL_OPTION_LABEL}
+                                    </option>
+                                    {treeOptions.map((tree) => (
+                                        <option key={tree} value={tree}>
+                                            {possibleProblemsDetail.has(tree) ? TREE_WARNING_MARK : TREE_NORMAL_MARK}{tree}
                                         </option>
-                                        {treeOptions.map((tree) => (
-                                            <option key={tree} value={tree}>
-                                                {possibleProblemsDetail.has(tree) ? TREE_WARNING_MARK : TREE_NORMAL_MARK}{tree}
-                                            </option>
-                                        ))}
-                                    </select>
-                                    <div className={style["width-legend"]} aria-hidden="true">
-                                        <span className={style["legend-item"]}>
-                                            <span className={`${style["legend-swatch"]} ${style["legend-swatch-narrow"]}`} />
-                                            窄年
-                                        </span>
-                                        <span className={style["legend-item"]}>
-                                            <span className={`${style["legend-swatch"]} ${style["legend-swatch-false-ring"]}`} />
-                                            伪轮
-                                        </span>
-                                        <span className={style["legend-item"]}>
-                                            <span className={`${style["legend-swatch"]} ${style["legend-swatch-absent"]}`} />
-                                            缺轮
-                                        </span>
-                                        <span className={style["legend-item"]}>
-                                            <span className={`${style["legend-swatch"]} ${style["legend-swatch-missing"]}`} />
-                                            缺测
-                                        </span>
-                                    </div>
-                                </>
+                                    ))}
+                                </select>
                             ) : null}
+                            <div className={style["width-legend"]} aria-hidden="true">
+                                <span className={style["legend-item"]}>
+                                    <span className={`${style["legend-swatch"]} ${style["legend-swatch-narrow"]}`} />
+                                    窄年
+                                </span>
+                                <span className={style["legend-item"]}>
+                                    <span className={`${style["legend-swatch"]} ${style["legend-swatch-false-ring"]}`} />
+                                    伪轮
+                                </span>
+                                <span className={style["legend-item"]}>
+                                    <span className={`${style["legend-swatch"]} ${style["legend-swatch-absent"]}`} />
+                                    缺轮
+                                </span>
+                                <span className={style["legend-item"]}>
+                                    <span className={`${style["legend-swatch"]} ${style["legend-swatch-missing"]}`} />
+                                    缺测
+                                </span>
+                            </div>
 
                             <div className={style["width-panels"]} ref={leftPanelsRef}>
                                 <FloatingScrollArea
@@ -1214,15 +1272,20 @@ export default function Home() {
                                     className={style["data-container"]}
                                     aria-busy={shouldShowProcessing}
                                     topClearanceSelector="[data-grid-header]"
-                                    scrollbarRevision={`${shouldShowWelcome}:${selectedTree ?? ""}`}
+                                    scrollbarRevision={`${shouldShowEmptySkeleton}:${selectedTree ?? ""}`}
                                 >
                                     {(dataContainerRef) => (
                                         <>
-                                            {shouldShowWelcome ? (
-                                                <div className={style["loading-container"]}>
-                                                    <img src="IDM.png" className={style["loading-image"]} alt="IDM loading" />
-                                                    <p className={style["developers"]}>{WELCOME_TEXT}</p>
-                                                </div>
+                                            {shouldShowEmptySkeleton ? (
+                                                <>
+                                                    <WidthGridSkeleton />
+                                                    <div className={style["loading-container"]}>
+                                                        <img src="IDM.png" className={style["loading-image"]} alt="IDM loading" />
+                                                        {shouldShowWelcome ? (
+                                                            <p className={style["developers"]}>{WELCOME_TEXT}</p>
+                                                        ) : null}
+                                                    </div>
+                                                </>
                                             ) : (
                                                 <WidthContainer
                                                     siteData={siteData}
@@ -1309,31 +1372,31 @@ export default function Home() {
                         <span className={style["stat-item"]} style={{ color: problemTextColor }}>
                             <span className={style["stat-label"]}>*A*</span>
                             <span className={style["stat-value"]}>
-                                <RollingNumber value={cofechaResult?.possibleProblemsCount} />
+                                {renderStatValue(cofechaResult?.possibleProblemsCount)}
                             </span>
                         </span>
                         <span className={style["stat-item"]}>
                             <span className={style["stat-label"]}>Master series</span>
                             <span className={style["stat-value"]}>
-                                <RollingNumber value={cofechaResult?.masterSeriesYear} />
+                                {renderStatValue(cofechaResult?.masterSeriesYear)}
                             </span>
                         </span>
                         <span className={style["stat-item"]}>
                             <span className={style["stat-label"]}>Intercorrelation</span>
                             <span className={style["stat-value"]}>
-                                <RollingNumber value={cofechaResult?.seriesIntercorrelation} />
+                                {renderStatValue(cofechaResult?.seriesIntercorrelation)}
                             </span>
                         </span>
                         <span className={style["stat-item"]}>
                             <span className={style["stat-label"]}>Mean sensitivity</span>
                             <span className={style["stat-value"]}>
-                                <RollingNumber value={cofechaResult?.averageMeanSensitivity} />
+                                {renderStatValue(cofechaResult?.averageMeanSensitivity)}
                             </span>
                         </span>
                         <span className={style["stat-item"]}>
                             <span className={style["stat-label"]}>Mean length</span>
                             <span className={style["stat-value"]}>
-                                <RollingNumber value={cofechaResult?.meanLength} />
+                                {renderStatValue(cofechaResult?.meanLength)}
                             </span>
                         </span>
                     </FloatingScrollArea>
@@ -1370,7 +1433,7 @@ export default function Home() {
                                 </div>
                             ) : (
                                 <>
-                                    {!shouldShowWelcome ? (
+                                    {!shouldShowEmptySkeleton ? (
                                         <div className={style["cofecha-toolbar"]}>
                                             <select
                                                 name="cofecha"
@@ -1409,26 +1472,32 @@ export default function Home() {
                                                 </span>
                                             ) : null}
                                         </div>
-                                    ) : null}
+                                    ) : (
+                                        <CofechaToolbarSkeleton />
+                                    )}
 
                                     <FloatingScrollArea
                                         ref={cofechaReportScrollRef}
                                         className={style["full-text"]}
                                     >
                                         <div className={style["cofecha-panel-content"]}>
-                                            <p
-                                                id={style["cofecha-text"]}
-                                                onClick={handleCofechaTextClick}
-                                                onKeyDown={handleCofechaTextKeyDown}
-                                                dangerouslySetInnerHTML={{ __html: linkedReport.html }}
-                                            />
+                                            {shouldShowEmptySkeleton ? (
+                                                <CofechaEmptySkeleton />
+                                            ) : (
+                                                <p
+                                                    id={style["cofecha-text"]}
+                                                    onClick={handleCofechaTextClick}
+                                                    onKeyDown={handleCofechaTextKeyDown}
+                                                    dangerouslySetInnerHTML={{ __html: linkedReport.html }}
+                                                />
+                                            )}
                                         </div>
                                     </FloatingScrollArea>
                                 </>
                             )}
                         </div>
 
-                        {hasChart ? (
+                        {shouldShowRightBottomPane ? (
                             <>
                                 <div
                                     role="separator"
@@ -1463,19 +1532,23 @@ export default function Home() {
                                         </div>
                                     ) : (
                                         <div className={`${style["cofecha-panel-content"]} ${style["line-chart-content"]}`}>
-                                            <TreeChartManager
-                                                fullData={siteData}
-                                                referenceConfig={referenceConfig}
-                                                diagnosis={crossdatingDiagnosis}
-                                                diagnosisBatchResult={diagnosisBatchResult}
-                                                onReferenceConfigChange={handleReferenceConfigChange}
-                                                onApplyDiagnosisCandidate={handleApplyDiagnosisCandidate}
-                                                onApplyDiagnosisCandidateBatch={handleApplyDiagnosisCandidateBatch}
-                                                onApplyLocalSimulation={handleApplyLocalSimulation}
-                                                onInsertMissingYearAtSide={handleInsertMissingYearAtSideFromChart}
-                                                onDeleteYearWithMode={handleDeleteYearWithModeFromChart}
-                                                onDeleteSeries={handleDeleteSeriesFromChart}
-                                            />
+                                            {shouldShowEmptySkeleton ? (
+                                                <LineChartEmptySkeleton />
+                                            ) : (
+                                                <TreeChartManager
+                                                    fullData={siteData}
+                                                    referenceConfig={referenceConfig}
+                                                    diagnosis={crossdatingDiagnosis}
+                                                    diagnosisBatchResult={diagnosisBatchResult}
+                                                    onReferenceConfigChange={handleReferenceConfigChange}
+                                                    onApplyDiagnosisCandidate={handleApplyDiagnosisCandidate}
+                                                    onApplyDiagnosisCandidateBatch={handleApplyDiagnosisCandidateBatch}
+                                                    onApplyLocalSimulation={handleApplyLocalSimulation}
+                                                    onInsertMissingYearAtSide={handleInsertMissingYearAtSideFromChart}
+                                                    onDeleteYearWithMode={handleDeleteYearWithModeFromChart}
+                                                    onDeleteSeries={handleDeleteSeriesFromChart}
+                                                />
+                                            )}
                                         </div>
                                     )}
                                 </FloatingScrollArea>

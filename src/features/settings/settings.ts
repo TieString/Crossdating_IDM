@@ -1,6 +1,6 @@
 export type DeleteSeriesAnimation = "shatter-rise" | "fade" | "none";
 export type DeleteYearAnimation = "pixel-burst" | "none";
-export type InsertYearAnimation = "slide-shift" | "none";
+export type InsertYearAnimation = "slide-shift" | "pulse-shift" | "side-pop-shift" | "flight-shift" | "none";
 export type AnimationSwitch = "enabled" | "disabled";
 export type HistoryAnimation = AnimationSwitch;
 
