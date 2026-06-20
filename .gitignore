@@ -1,4 +1,4 @@
-# Logs
+﻿# Logs
 logs
 *.log
 npm-debug.log*
@@ -6,11 +6,16 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+package-lock.json
 
 node_modules
 dist
 dist-ssr
 *.local
+
+# Generated documentation/build artifacts
+/docs/api/
+/storybook-static/
 
 # verify-widthgrid-anim skill: harness copied to root + screenshot output (transient)
 /harness.html

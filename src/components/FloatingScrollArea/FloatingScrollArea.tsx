@@ -12,16 +12,24 @@ import {
 import { FloatingScrollbar } from "@/components/FloatingScrollbar/FloatingScrollbar";
 import styles from "./FloatingScrollArea.module.css";
 
-type FloatingScrollAreaChildren =
+/** Children can be static content or a render function receiving the scroll element ref. */
+export type FloatingScrollAreaChildren =
     | ReactNode
     | ((scrollRef: RefObject<HTMLDivElement | null>) => ReactNode);
 
-type FloatingScrollAreaProps = Omit<HTMLAttributes<HTMLDivElement>, "children"> & {
+/** Props for a native scrolling area decorated with the floating scrollbar overlay. */
+export type FloatingScrollAreaProps = Omit<HTMLAttributes<HTMLDivElement>, "children"> & {
+    /** Scroll content or render function that can access the scroll container ref. */
     children: FloatingScrollAreaChildren;
+    /** Extra class name for the outer viewport wrapper. */
     viewportClassName?: string;
+    /** Inline style for the outer viewport wrapper. */
     viewportStyle?: CSSProperties;
+    /** Changing value used to force FloatingScrollbar measurements to refresh. */
     scrollbarRevision?: unknown;
+    /** Selector inside the scroll target that the vertical thumb should avoid. */
     topClearanceSelector?: string;
+    /** Pixel inset from scrollbar track edges. */
     edgeInset?: number;
 };
 
@@ -38,6 +46,7 @@ const setRef = (ref: Ref<HTMLDivElement> | undefined, node: HTMLDivElement | nul
     (ref as MutableRefObject<HTMLDivElement | null>).current = node;
 };
 
+/** Wraps scrollable content and renders floating overlay scroll thumbs. */
 export const FloatingScrollArea = forwardRef<HTMLDivElement, FloatingScrollAreaProps>(
     function FloatingScrollArea(
         {

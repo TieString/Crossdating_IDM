@@ -1,6 +1,10 @@
+/** Animation used when an entire series is deleted. */
 export type DeleteSeriesAnimation = "shatter-rise" | "fade" | "none";
+/** Animation used when a single year is deleted. */
 export type DeleteYearAnimation = "pixel-burst" | "none";
+/** Animation used when a missing year is inserted. */
 export type InsertYearAnimation = "slide-shift" | "pulse-shift" | "side-pop-shift" | "flight-shift" | "none";
+/** Generic enabled/disabled animation switch. */
 export type AnimationSwitch = "enabled" | "disabled";
 export type HistoryAnimation = AnimationSwitch;
 
@@ -10,15 +14,23 @@ export const ANIMATION_SPEED_STEP = 0.1;
 export const DEFAULT_ANIMATION_SPEED = 1;
 
 export interface AnimationSettings {
+    /** Global animation enable switch. */
     enabled: AnimationSwitch;
+    /** User animation speed multiplier. */
     speed: number;
+    /** Whole-series delete animation. */
     deleteSeries: DeleteSeriesAnimation;
+    /** Single-year delete animation. */
     deleteYear: DeleteYearAnimation;
+    /** Missing-year insert animation. */
     insertYear: InsertYearAnimation;
+    /** Undo/redo animation switch. */
     historyAnim: HistoryAnimation;
 }
 
+/** Persisted application settings shape. */
 export interface AppSettings {
+    /** Animation-related preferences. */
     animation: AnimationSettings;
 }
 
@@ -35,6 +47,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 
 export const STORAGE_KEY = "crossdating-idm-settings";
 
+/** Coerces any input to the persisted animation-speed step and bounds. */
 export function normalizeAnimationSpeed(value: unknown): number {
     const numeric = typeof value === "number" ? value : Number(value);
 
@@ -46,6 +59,7 @@ export function normalizeAnimationSpeed(value: unknown): number {
     return Math.min(ANIMATION_SPEED_MAX, Math.max(ANIMATION_SPEED_MIN, stepped));
 }
 
+/** Loads settings from localStorage, falling back to defaults for invalid or missing values. */
 export function loadSettings(): AppSettings {
     try {
         const raw = localStorage.getItem(STORAGE_KEY);
@@ -67,6 +81,7 @@ export function loadSettings(): AppSettings {
     }
 }
 
+/** Saves settings to localStorage and ignores storage write failures. */
 export function saveSettings(settings: AppSettings): void {
     try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));

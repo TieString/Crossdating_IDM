@@ -2,7 +2,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { AnimatePresence } from "motion/react";
 import { TreeChartManager } from "@/components/Chart/TreeChartManager";
-import { RollingNumber } from "@/components/RollingNumber/RollingNumber";
 import WidthContainer, { WidthGridSkeleton } from "@/components/WidthContainer/WidthContainer";
 import ContextMenu, { type ContextMenuItem } from "@/components/ContextMenu/ContextMenu";
 import { FloatingScrollArea } from "@/components/FloatingScrollArea/FloatingScrollArea";
@@ -11,10 +10,52 @@ import { FindReplaceBar, type FindReplaceMode } from "@/components/FindReplace/F
 import { openSettingsWindow } from "@/pages/settings/openSettingsWindow";
 import { stopMarker } from "@/shared/constants";
 import style from "./Home.module.css";
-import { ALL_OPTION_VALUE, TitleMenuKind } from "./home/constants";
+import {
+    ALL_OPTION_VALUE,
+    COLLAPSED_PANEL_RATIO,
+    COFECHA_PART_OPTIONS,
+    EMPTY_EXTERNAL_WORKSPACE_WINDOWS,
+    isPanelRatioCollapsed,
+    PANEL_DIVIDER_GUTTER_SIZE,
+    TitleMenuKind,
+    TREE_ALL_OPTION_LABEL,
+    TREE_NORMAL_MARK,
+    TREE_WARNING_MARK,
+    WELCOME_TEXT,
+    escapeHtml,
+    getErrorMessage,
+    resolveCofechaTreeCode,
+    type CofechaCellJumpTarget,
+    type CofechaCellReference,
+    type DeleteSeriesRequest,
+    type EditHighlightTarget,
+    type ExternalWorkspaceWindows,
+} from "./home/homeShared";
+import {
+    CofechaEmptySkeleton,
+    CofechaEmptyState,
+    CofechaStatValue,
+    CofechaToolbarSkeleton,
+    LineChartEmptySkeleton,
+    LineChartEmptyState,
+    WorkspaceWindowPlaceholder,
+} from "./home/HomePanelComponents";
 import { HomeTitleBarBridge } from "./home/HomeTitleBarBridge";
 import { useHomeWorkspace } from "./home/useHomeWorkspace";
-import { COFECHA_PART6_ANCHOR_ATTR, COFECHA_PART6_PART_VALUE, cofechaReportShowsPart6, findCofechaPart6Anchor, scrollCofechaAnchorIntoView } from "./home/cofechaReportAnchor";
+import {
+    COFECHA_ABSENT_RING_CONTINUATION_RE,
+    COFECHA_ABSENT_RING_SUMMARY_RE,
+    COFECHA_PART6_ANCHOR_ATTR,
+    COFECHA_PART6_HIGHLIGHT_MS,
+    COFECHA_PART6_PART_VALUE,
+    COFECHA_PART6_SERIES_HEADER_RE,
+    COFECHA_PART_SEPARATOR_RE,
+    COFECHA_PROBLEM_REFERENCE_RE,
+    COFECHA_YEAR_TOKEN_RE,
+    cofechaReportShowsPart6,
+    findCofechaPart6Anchor,
+    scrollCofechaAnchorIntoView,
+} from "./home/cofechaReportAnchor";
 import {
     isWorkspaceWindowLabel,
     openWorkspaceWindow,
@@ -31,90 +72,6 @@ import {
     type WorkspaceWindowState,
 } from "./home/workspaceWindowBridge";
 import { useResizablePanels } from "./useResizablePanels";
-
-const TREE_ALL_OPTION_LABEL = "📜 全部";
-const TREE_WARNING_MARK = "⚠️";
-const TREE_NORMAL_MARK = "🪵";
-const WELCOME_TEXT = "开发者：何志浩、张同文、张瑞波、靳春寒、喻树龙、尚华明、秦莉";
-const PANEL_DIVIDER_GUTTER_SIZE = 8;
-const COLLAPSED_PANEL_RATIO = 0.995;
-
-const COFECHA_PART_OPTIONS = [
-    { value: ALL_OPTION_VALUE, label: "📜 全部内容" },
-    { value: "PART 1", label: "📌 PART 1: Summary" },
-    { value: "PART 2", label: "📈 PART 2: Time Plot of Series" },
-    { value: "PART 3", label: "⭐ PART 3: Master Dating Series" },
-    { value: "PART 4", label: "📊 PART 4: Master Bar Plot" },
-    { value: "PART 5", label: "🔗 PART 5: Correlation of Series by Segment" },
-    { value: "PART 6", label: "⚠️ PART 6: Potential Problems" },
-    { value: "PART 7", label: "🪧 PART 7: Descriptive Statistics" },
-];
-
-type DeleteSeriesRequest = {
-    id: number;
-    tree: string;
-};
-
-type CofechaCellJumpTarget = {
-    id: number;
-    tree: string;
-    year?: number;
-};
-
-type CofechaCellReference = {
-    tree: string;
-    year?: number;
-};
-
-type EditHighlightTarget = {
-    id: number;
-    cells: { tree: string; year: number }[];
-    scrollTree: string;
-    scrollYear?: number;
-};
-
-type ExternalWorkspaceWindows = Record<WorkspaceWindowKind, boolean>;
-
-const EMPTY_EXTERNAL_WORKSPACE_WINDOWS: ExternalWorkspaceWindows = {
-    "operation-log": false,
-    cofecha: false,
-    "line-chart": false,
-};
-
-const COFECHA_PROBLEM_REFERENCE_RE = /^(.*?[>＞]{2}\s+)(\S+)(\s+)(-?\d{4})(.*)$/;
-const COFECHA_PART6_SERIES_HEADER_RE = /^(\s*)(\S+)(\s+)(-?\d{4})(\s+to\s+)(-?\d{4})(.*\bSeries\b.*)$/i;
-const COFECHA_ABSENT_RING_SUMMARY_RE = /^(\s*)(\S+)(\s+\d+\s+absent\s+rings?:\s*)(.*)$/i;
-const COFECHA_ABSENT_RING_CONTINUATION_RE = /^(\s{8,})(-?\d{4}(?:\s+-?\d{4})*)(\s*)$/;
-const COFECHA_YEAR_TOKEN_RE = /\b(-?\d{4})\b/g;
-const COFECHA_PART_SEPARATOR_RE = /^\s*=+\s*$/;
-const COFECHA_PART6_HIGHLIGHT_MS = 2600;
-const COFECHA_SKELETON_LINE_WIDTHS = [48, 84, 64, 92, 76, 52, 88, 58, 71, 43, 80, 66];
-
-const getErrorMessage = (error: unknown) => (
-    error instanceof Error ? error.message : String(error)
-);
-
-const isPanelRatioCollapsed = (ratio: number) => (
-    ratio <= 1 - COLLAPSED_PANEL_RATIO || ratio >= COLLAPSED_PANEL_RATIO
-);
-
-const resolveCofechaTreeCode = (tree: string, siteData: ReadonlyMap<string, unknown>) => {
-    if (siteData.has(tree)) {
-        return tree;
-    }
-
-    const normalizedTree = tree.toLowerCase();
-    return Array.from(siteData.keys()).find((siteTree) => siteTree.toLowerCase() === normalizedTree) ?? tree;
-};
-
-const escapeHtml = (value: string) => (
-    value
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;")
-);
 
 const isTreeBoundary = (value: string | undefined) => (
     value === undefined || !/[A-Za-z0-9_]/.test(value)
@@ -334,96 +291,6 @@ const renderCofechaHtmlWithLinks = (
     return { html, count };
 };
 
-function CofechaToolbarSkeleton() {
-    return (
-        <div className={style["cofecha-toolbar-skeleton"]} aria-hidden="true">
-            <span className={`${style["skeleton-block"]} ${style["skeleton-select"]}`} />
-            <span className={`${style["skeleton-block"]} ${style["skeleton-button"]}`} />
-            <span className={`${style["skeleton-block"]} ${style["skeleton-chip"]}`} />
-        </div>
-    );
-}
-
-function CofechaEmptySkeleton() {
-    return (
-        <div className={style["cofecha-empty-skeleton"]} aria-hidden="true">
-            <span className={`${style["skeleton-block"]} ${style["cofecha-skeleton-title"]}`} />
-            <div className={style["cofecha-skeleton-rule"]} />
-            <div className={style["cofecha-skeleton-lines"]}>
-                {COFECHA_SKELETON_LINE_WIDTHS.map((width, index) => (
-                    <span
-                        key={`${width}-${index}`}
-                        className={`${style["skeleton-block"]} ${style["cofecha-skeleton-line"]}`}
-                        style={{ width: `${width}%` }}
-                    />
-                ))}
-            </div>
-        </div>
-    );
-}
-
-function CofechaEmptyState() {
-    return (
-        <div className={style["cofecha-empty-state"]} aria-hidden="true">
-            <div className={style["cofecha-empty-state-rule"]} />
-            <div className={style["cofecha-empty-state-lines"]}>
-                {COFECHA_SKELETON_LINE_WIDTHS.slice(0, 7).map((width, index) => (
-                    <span
-                        key={`${width}-${index}`}
-                        className={style["cofecha-empty-state-line"]}
-                        style={{ width: `${width}%` }}
-                    />
-                ))}
-            </div>
-        </div>
-    );
-}
-
-function LineChartEmptySkeleton() {
-    return (
-        <div className={style["chart-empty-skeleton"]} aria-hidden="true">
-            <div className={style["chart-skeleton-toolbar"]}>
-                <div className={style["chart-skeleton-toolbar-group"]}>
-                    <span className={`${style["skeleton-block"]} ${style["chart-skeleton-tab"]}`} />
-                    <span className={`${style["skeleton-block"]} ${style["chart-skeleton-tab-short"]}`} />
-                </div>
-                <div className={style["chart-skeleton-toolbar-group"]}>
-                    <span className={`${style["skeleton-block"]} ${style["chart-skeleton-icon"]}`} />
-                    <span className={`${style["skeleton-block"]} ${style["chart-skeleton-icon"]}`} />
-                    <span className={`${style["skeleton-block"]} ${style["chart-skeleton-icon"]}`} />
-                </div>
-            </div>
-            <div className={style["chart-skeleton-plot"]}>
-                <svg className={style["chart-skeleton-svg"]} viewBox="0 0 100 100" preserveAspectRatio="none">
-                    <polyline points="0,72 10,64 19,70 30,46 42,54 53,30 65,42 76,24 88,36 100,18" />
-                    <polyline points="0,58 12,50 24,57 36,42 48,47 60,36 74,44 86,32 100,39" />
-                </svg>
-                <div className={style["chart-skeleton-axis-x"]} />
-                <div className={style["chart-skeleton-axis-y"]} />
-            </div>
-        </div>
-    );
-}
-
-function LineChartEmptyState() {
-    return (
-        <div className={style["chart-empty-state"]} aria-hidden="true">
-            <div className={style["chart-empty-state-toolbar"]}>
-                <span />
-                <span />
-            </div>
-            <div className={style["chart-empty-state-plot"]}>
-                <svg className={style["chart-empty-state-svg"]} viewBox="0 0 100 100" preserveAspectRatio="none">
-                    <polyline points="0,70 12,62 23,68 36,50 49,56 61,40 74,48 86,34 100,42" />
-                    <polyline points="0,78 14,73 27,76 41,64 54,68 68,55 82,60 100,48" />
-                </svg>
-                <div className={style["chart-empty-state-axis-x"]} />
-                <div className={style["chart-empty-state-axis-y"]} />
-            </div>
-        </div>
-    );
-}
-
 export default function Home() {
     const homeContainerRef = useRef<HTMLDivElement>(null);
     const rawEditorRef = useRef<HTMLParagraphElement>(null);
@@ -537,12 +404,6 @@ export default function Home() {
             ...(!rightBottomDividerCollapsed ? { maxHeight: `calc(100% - ${PANEL_DIVIDER_GUTTER_SIZE}px)` } : {}),
         }
         : undefined;
-    const renderStatValue = (value: string | number | null | undefined) => (
-        shouldShowRightSkeleton
-            ? <span className={style["stat-value-skeleton"]} aria-hidden="true" />
-            : <RollingNumber value={value} />
-    );
-
     const handleDeleteSeriesFromChart = useCallback((tree: string) => {
         deleteSeriesRequestIdRef.current += 1;
         setDeleteSeriesRequest({ id: deleteSeriesRequestIdRef.current, tree });
@@ -1141,6 +1002,10 @@ export default function Home() {
 
         if (isCommandKey && key === "s") {
             event.preventDefault();
+            // 忽略按住时的自动重复，避免连续触发保存与 COFECHA 验证。
+            if (event.repeat) {
+                return;
+            }
             void handleSave();
             return;
         }
@@ -1413,31 +1278,31 @@ export default function Home() {
                         <span className={style["stat-item"]} style={{ color: problemTextColor }}>
                             <span className={style["stat-label"]}>*A*</span>
                             <span className={style["stat-value"]}>
-                                {renderStatValue(cofechaResult?.possibleProblemsCount)}
+                                <CofechaStatValue value={cofechaResult?.possibleProblemsCount} showSkeleton={shouldShowRightSkeleton} />
                             </span>
                         </span>
                         <span className={style["stat-item"]}>
                             <span className={style["stat-label"]}>Master series</span>
                             <span className={style["stat-value"]}>
-                                {renderStatValue(cofechaResult?.masterSeriesYear)}
+                                <CofechaStatValue value={cofechaResult?.masterSeriesYear} showSkeleton={shouldShowRightSkeleton} />
                             </span>
                         </span>
                         <span className={style["stat-item"]}>
                             <span className={style["stat-label"]}>Intercorrelation</span>
                             <span className={style["stat-value"]}>
-                                {renderStatValue(cofechaResult?.seriesIntercorrelation)}
+                                <CofechaStatValue value={cofechaResult?.seriesIntercorrelation} showSkeleton={shouldShowRightSkeleton} />
                             </span>
                         </span>
                         <span className={style["stat-item"]}>
                             <span className={style["stat-label"]}>Mean sensitivity</span>
                             <span className={style["stat-value"]}>
-                                {renderStatValue(cofechaResult?.averageMeanSensitivity)}
+                                <CofechaStatValue value={cofechaResult?.averageMeanSensitivity} showSkeleton={shouldShowRightSkeleton} />
                             </span>
                         </span>
                         <span className={style["stat-item"]}>
                             <span className={style["stat-label"]}>Mean length</span>
                             <span className={style["stat-value"]}>
-                                {renderStatValue(cofechaResult?.meanLength)}
+                                <CofechaStatValue value={cofechaResult?.meanLength} showSkeleton={shouldShowRightSkeleton} />
                             </span>
                         </span>
                     </FloatingScrollArea>
@@ -1462,16 +1327,10 @@ export default function Home() {
                             onContextMenu={handlePanelContextMenu("cofecha")}
                         >
                             {externalWorkspaceWindows.cofecha ? (
-                                <div className={style["external-window-placeholder"]}>
-                                    <span>COFECHA 已在独立窗口打开</span>
-                                    <button
-                                        type="button"
-                                        className={style["placeholder-button"]}
-                                        onClick={() => handleOpenWorkspaceWindow("cofecha")}
-                                    >
-                                        聚焦窗口
-                                    </button>
-                                </div>
+                                <WorkspaceWindowPlaceholder
+                                    message="COFECHA 已在独立窗口打开"
+                                    onFocusWindow={() => handleOpenWorkspaceWindow("cofecha")}
+                                />
                             ) : (
                                 <>
                                     {!shouldShowRightSkeleton ? (
@@ -1562,16 +1421,10 @@ export default function Home() {
                                 >
                                     {externalWorkspaceWindows["line-chart"] ? (
                                         <div className={`${style["cofecha-panel-content"]} ${style["line-chart-content"]}`}>
-                                            <div className={style["external-window-placeholder"]}>
-                                                <span>Line Chart 已在独立窗口打开</span>
-                                                <button
-                                                    type="button"
-                                                    className={style["placeholder-button"]}
-                                                    onClick={() => handleOpenWorkspaceWindow("line-chart")}
-                                                >
-                                                    聚焦窗口
-                                                </button>
-                                            </div>
+                                            <WorkspaceWindowPlaceholder
+                                                message="Line Chart 已在独立窗口打开"
+                                                onFocusWindow={() => handleOpenWorkspaceWindow("line-chart")}
+                                            />
                                         </div>
                                     ) : (
                                         <div className={`${style["cofecha-panel-content"]} ${style["line-chart-content"]}`}>

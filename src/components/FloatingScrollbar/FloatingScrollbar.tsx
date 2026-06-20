@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent,
 import styles from "./FloatingScrollbar.module.css";
 import "./FloatingScrollbar.scroll.css";
 
-type FloatingScrollbarProps = {
+/** Props for the floating overlay scrollbar attached to a native scroll target. */
+export type FloatingScrollbarProps = {
     /** The native scroll container to mirror. Must be the child of a positioned wrapper that also contains this component. */
     targetRef: RefObject<HTMLElement | null>;
     /** Bump (e.g. selected series / welcome toggle) to force a metrics recompute when the content element swaps. */

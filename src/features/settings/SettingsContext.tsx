@@ -2,13 +2,17 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { AnimationSettings, AppSettings } from "./settings";
 import { loadSettings, saveSettings, STORAGE_KEY } from "./settings";
 
-interface SettingsContextValue {
+/** Runtime settings context exposed to React components. */
+export interface SettingsContextValue {
+    /** Current persisted settings. */
     settings: AppSettings;
+    /** Merges animation setting updates and persists the result. */
     updateAnimationSettings: (update: Partial<AnimationSettings>) => void;
 }
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
 
+/** Provides app settings and synchronizes localStorage changes from other windows. */
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
     const [settings, setSettings] = useState<AppSettings>(loadSettings);
 
@@ -43,6 +47,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
 }
 
+/** Reads the settings context and throws when used outside SettingsProvider. */
 export function useSettings() {
     const ctx = useContext(SettingsContext);
     if (!ctx) throw new Error("useSettings must be used within SettingsProvider");

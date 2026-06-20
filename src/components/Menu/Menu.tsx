@@ -6,10 +6,25 @@ import styles from './Menu.module.css';
 // 这里负责管理菜单项的激活状态，并把点击行为转交给具体的 MenuItem。
 // 菜单本身不处理业务逻辑，只负责显示、展开和点击协调。
 
-interface MenuProps {
-  items: { label: string; onClick?: () => void | Promise<void>; disabled?: boolean; children?: React.ReactNode }[];
+/** Single top-level menu item configuration. */
+export interface MenuConfigItem {
+  /** Visible label for the menu item. */
+  label: string;
+  /** Optional action called when a leaf item is clicked. */
+  onClick?: () => void | Promise<void>;
+  /** Prevents click and hover interaction when true. */
+  disabled?: boolean;
+  /** Nested submenu content. */
+  children?: React.ReactNode;
 }
 
+/** Props for the top navigation menu container. */
+export interface MenuProps {
+  /** Menu items rendered in order. */
+  items: MenuConfigItem[];
+}
+
+/** Renders the top menu and coordinates active submenu state. */
 const Menu: React.FC<MenuProps> = ({ items }) => {
   const [activeMenuItem, setActiveMenuItem] = useState<string | null>(null);
   

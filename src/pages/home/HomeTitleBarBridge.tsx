@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createPortal } from "react-dom";
 import Menu from "@/components/Menu/Menu";
-import { CofechaVersion, TitleMenuKind } from "./constants";
+import { CofechaVersion, TitleMenuKind } from "./homeShared";
 
 type MenuItem = {
     label: string;
@@ -126,6 +126,12 @@ export function HomeTitleBarBridge({
         const handleKeyDown = (event: KeyboardEvent) => {
             const key = event.key.toLowerCase();
             if (!event.ctrlKey) {
+                return;
+            }
+
+            // 忽略按住快捷键时操作系统产生的自动重复事件，
+            // 否则按住 Ctrl+S 会不停触发保存与 COFECHA 验证。
+            if (event.repeat) {
                 return;
             }
 

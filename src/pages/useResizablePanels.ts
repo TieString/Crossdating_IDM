@@ -19,6 +19,12 @@ type ResizeConfig = {
     minEnd: number;
 };
 
+/** Persisted ratio layout used by the Home split panels. */
+export type ResizablePanelLayout = StoredLayout;
+
+/** Configuration passed when starting a panel resize interaction. */
+export type ResizablePanelResizeConfig = ResizeConfig;
+
 type StoredLayout = Record<LayoutKey, number>;
 
 const isValidRatio = (value: unknown): value is number => {
@@ -100,6 +106,7 @@ const getResizeBounds = (size: number, dividerSize: number, minStart: number, mi
     };
 };
 
+/** Manages the Home page split-panel ratios, drag lifecycle, and localStorage persistence. */
 export function useResizablePanels() {
     const [layout, setLayout] = useState<StoredLayout>(() => readStoredLayout());
     const [draggingKey, setDraggingKey] = useState<LayoutKey | null>(null);

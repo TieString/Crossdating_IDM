@@ -8,21 +8,35 @@ import styles from "./FindReplaceBar.module.css";
 
 export type FindReplaceMode = "find" | "replace";
 
-interface FindReplaceBarProps {
+/** Props for the controlled find/replace toolbar used by text and width editors. */
+export interface FindReplaceBarProps {
+    /** Current toolbar mode. */
     mode: FindReplaceMode;
     /** true：文本匹配（作用于文本编辑器内容）；false：宽度值匹配。 */
     textMode?: boolean;
+    /** Current search query. */
     query: string;
+    /** Current replacement text. */
     replaceValue: string;
+    /** Zero-based index of the active match. */
     matchIndex: number;
+    /** Total number of matches for the current query. */
     matchCount: number;
+    /** Switches between find and replace modes. */
     onModeChange: (mode: FindReplaceMode) => void;
+    /** Updates the search query. */
     onQueryChange: (query: string) => void;
+    /** Updates the replacement text. */
     onReplaceValueChange: (value: string) => void;
+    /** Moves to the next match. */
     onNext: () => void;
+    /** Moves to the previous match. */
     onPrev: () => void;
+    /** Replaces the active match. */
     onReplaceOne: () => void;
+    /** Replaces all matches. */
     onReplaceAll: () => void;
+    /** Closes the toolbar. */
     onClose: () => void;
 }
 

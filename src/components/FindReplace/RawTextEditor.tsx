@@ -21,31 +21,50 @@ import styles from "./RawTextEditor.module.css";
 // - 查找/替换由外部 FindReplaceBar 通过 ref 暴露的接口驱动，作用于编辑器文本本身
 
 export interface RawEditorHandle {
+    /** Returns the current CodeMirror document text. */
     getValue: () => string;
+    /** Focuses the editor view. */
     focus: () => void;
+    /** Sets the active literal search and replacement query. */
     setSearch: (query: string, replace: string) => void;
+    /** Selects the next search match. */
     findNext: () => void;
+    /** Selects the previous search match. */
     findPrev: () => void;
+    /** Replaces the active search match. */
     replaceCurrent: () => void;
+    /** Replaces every search match. */
     replaceAll: () => void;
+    /** Clears the active search query. */
     clearSearch: () => void;
 }
 
 export interface RawEditorSearchState {
+    /** Total number of literal matches. */
     count: number;
+    /** One-based active match index, or 0 when no match is active. */
     current: number;
 }
 
-interface RawTextEditorProps {
+/** Props for the controlled raw text editor wrapper around CodeMirror 6. */
+export interface RawTextEditorProps {
+    /** Text used to initialize the editor. Recreate the component to reset it. */
     initialText: string;
+    /** Applies the invalid visual state when true. */
     invalid?: boolean;
+    /** Called when the editor document changes. */
     onInput?: () => void;
+    /** Called when search count or active match changes. */
     onSearchStateChange?: (state: RawEditorSearchState) => void;
+    /** Called by the Mod+S key binding. */
     onSave?: () => void;
+    /** Called by the Mod+Enter key binding. */
     onApply?: () => void;
+    /** Called by the Escape key binding. */
     onCancel?: () => void;
 }
 
+/** CodeMirror-based raw text editor with imperative find/replace controls. */
 export const RawTextEditor = forwardRef<RawEditorHandle, RawTextEditorProps>(function RawTextEditor({
     initialText,
     invalid,

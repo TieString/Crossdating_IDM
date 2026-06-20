@@ -4,16 +4,25 @@ import style from './MenuItem.module.css'
 // 负责标签显示、点击态和子菜单展开。
 // 这里不决定具体动作，只接受父组件传入的 onClick、onMouseEnter、onMouseLeave 和 children。
 
-interface MenuItemProps {
+/** Props for a single menu row with optional nested submenu content. */
+export interface MenuItemProps {
+  /** Visible row label. */
   label: string;
+  /** Called when the row is clicked and not disabled. */
   onClick?: () => void;
+  /** Called when the pointer enters the enabled row. */
   onMouseEnter?: () => void;
+  /** Called when the pointer leaves the enabled row. */
   onMouseLeave?: () => void;
+  /** Whether the submenu should be shown as active. */
   isActive?: boolean;
+  /** Prevents row interaction when true. */
   disabled?: boolean;
+  /** Nested submenu rendered beside the row. */
   children?: React.ReactNode;
 }
 
+/** Presentational menu item used by the top menu container. */
 const MenuItem: React.FC<MenuItemProps> = ({ label, onClick, onMouseEnter, onMouseLeave, isActive, disabled, children }) => {
 
   return (

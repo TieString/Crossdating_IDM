@@ -1,11 +1,17 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import style from "./RollingNumber.module.css";
 
-interface RollingNumberProps {
+/** Props for {@link RollingNumber}. */
+export interface RollingNumberProps {
+    /** Value to render. Empty, null, or undefined values render the placeholder. */
     value: string | number | null | undefined;
+    /** Optional previous value used as the initial digit reel position. */
     fromValue?: string | number | null;
+    /** Text shown when value is empty. Defaults to "-". */
     placeholder?: string;
+    /** Delay in milliseconds between animated digits. Defaults to 60. */
     stagger?: number;
+    /** Animation speed multiplier. Non-positive or invalid values fall back to 1. */
     speed?: number;
 }
 
@@ -65,6 +71,10 @@ function RollingDigit({ digit, delay, initialDigit, durationMs }: RollingDigitPr
     );
 }
 
+/**
+ * Displays numeric characters with a rolling digit animation while preserving
+ * non-digit characters as static text.
+ */
 export function RollingNumber({ value, fromValue, placeholder = "-", stagger = 60, speed = 1 }: RollingNumberProps) {
     if (value === null || value === undefined || value === "") {
         return <span className={`${style.rolling} ${style.placeholder}`}>{placeholder}</span>;

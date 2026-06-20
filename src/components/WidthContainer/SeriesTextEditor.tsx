@@ -4,6 +4,7 @@ import style from './SeriesTextEditor.module.css';
 
 // ── Data conversion ────────────────────────────────────────────────────────
 
+/** Converts a series map into the line-oriented text format used by SeriesTextEditor. */
 export function seriesDataToText(data: Map<number, number | null>, stopMarkerValue: number): string {
     return Array.from(data.entries())
         .filter(([, v]) => v !== stopMarkerValue)
@@ -12,6 +13,7 @@ export function seriesDataToText(data: Map<number, number | null>, stopMarkerVal
         .join('\n');
 }
 
+/** Parses SeriesTextEditor text back into a series map, appending the stop marker after the last year. */
 export function textToSeriesData(
     text: string,
     stopMarkerValue: number,
@@ -111,14 +113,20 @@ interface ExtraCursor {
 const PADDING_LEFT = 10;
 const PADDING_TOP = 8;
 
-interface Props {
+/** Props for editing one tree-ring series as year/value text. */
+export interface SeriesTextEditorProps {
+    /** Series identifier displayed in the editor header. */
     treeCode: string;
+    /** Initial editable text. */
     initialText: string;
+    /** Numeric stop marker appended by the parser. */
     stopMarkerValue: number;
+    /** Called with text on commit, or without text when cancelled. */
     onClose: (newText?: string) => void;
 }
 
-export default function SeriesTextEditor({ treeCode, initialText, stopMarkerValue, onClose }: Props) {
+/** Text-mode editor for one width series, including multi-cursor shortcuts. */
+export default function SeriesTextEditor({ treeCode, initialText, stopMarkerValue, onClose }: SeriesTextEditorProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const [charWidth, setCharWidth] = useState(7.8);

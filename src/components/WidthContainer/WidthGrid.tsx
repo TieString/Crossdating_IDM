@@ -280,12 +280,19 @@ const getMotionConfig = (
     }
 };
 
-type WidthGridProps = Omit<React.HTMLAttributes<HTMLSpanElement>, MotionReservedHtmlProps> & {
+/** Props for one rendered width-grid cell. */
+export type WidthGridProps = Omit<React.HTMLAttributes<HTMLSpanElement>, MotionReservedHtmlProps> & {
+    /** Calendar year represented by the cell. */
     year?: number;
+    /** Series code represented by the cell. */
     tree?: string;
+    /** Displayed cell value. */
     gridValue: string | number | null;
+    /** Optional reference-series value used for warning coloring. */
     masterSeriesValue?: number;
+    /** Enables double-click value editing and insert affordances. */
     isEditable?: boolean;
+    /** Marks the cell as a structural missing-year placeholder. */
     isMissing?: boolean;
     isSelected?: boolean;
     isJumpHighlighted?: boolean;

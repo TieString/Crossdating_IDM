@@ -235,6 +235,27 @@ function TreeChartManagerBase({
     return nextData
   }, [fullData, treeOffsets, visibleTrees])
 
+  // 收集每条折线中插入的缺失年轮（0 值）所在年份。这些 0 值被 filteredData 过滤掉，
+  // 在折线上表现为断点，交给图表用绿色竖线标记。
+  const missingRingYears = useMemo(() => {
+    const result = new Map<string, number[]>()
+
+    visibleTrees.forEach(treeCode => {
+      const treeData = fullData.get(treeCode)
+      if (!treeData) return
+      const yearOffset = treeOffsets.get(treeCode) ?? 0
+      const years: number[] = []
+
+      treeData.forEach((value, year) => {
+        if (value === 0) years.push(year + yearOffset)
+      })
+
+      if (years.length > 0) result.set(treeCode, years)
+    })
+
+    return result
+  }, [fullData, treeOffsets, visibleTrees])
+
   const allTreeCodes = useMemo(() => Array.from(fullData.keys()), [fullData])
   const filteredTreeCodes = useMemo(() =>
     search.trim() === '' ? allTreeCodes : allTreeCodes.filter(c => c.toLowerCase().includes(search.toLowerCase())),
@@ -554,6 +575,7 @@ function TreeChartManagerBase({
   const chartNode = filteredData.size > 0 || referenceSeries ? (
     <MultiLineChart
       data={filteredData}
+      missingRingYears={missingRingYears}
       sampleSizeData={fullData}
       referenceSeries={referenceSeries}
       showPersistentTooltip={showPersistentTooltip}

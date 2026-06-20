@@ -4,9 +4,10 @@ import { RwlSiteData } from '@/features/rwl';
 import { moveSeriesTailByOffset as previewMoveSeriesTailByOffset } from '@/features/rwl/edit';
 import type { DeleteMode, DeleteShift, DeletionMarkerInfo, RwlDeletionMarkers, RwlHistoryAnimation } from '@/features/rwl/edit';
 import { RollingNumber } from '@/components/RollingNumber/RollingNumber';
-import WidthGrid from './WidthGrid/WidthGrid';
-import WidthGridContextMenu from './WidthGridContextMenu/WidthGridContextMenu';
-import SeriesTextEditor, { seriesDataToText, textToSeriesData } from './SeriesTextEditor/SeriesTextEditor';
+import WidthGrid from './WidthGrid';
+import WidthGridContextMenu from './WidthGridContextMenu';
+import { WidthGridSkeletonView } from './WidthGridSkeleton';
+import SeriesTextEditor, { seriesDataToText, textToSeriesData } from './SeriesTextEditor';
 import style from "./WidthContainer.module.css";
 import { stopMarker } from '@/shared/constants';
 import { useSettings } from "@/features/settings/SettingsContext";
@@ -663,32 +664,53 @@ const findVisibleEndIndex = (series: VirtualSeries[], end: number) => {
     return answer;
 };
 
-type WidthContainerProps = {
+/** Props for the editable tree-ring width grid. */
+export type WidthContainerProps = {
+    /** Parsed RWL site data keyed by series code and year. */
     siteData: RwlSiteData,
+    /** Optional derived reference/master series keyed by year. */
     masterSeries?: Map<number, number>,
     /** COFECHA PART 7 各序列与主序列的整体相关性，键为大写序列号。 */
     masterCorrelations?: Map<string, number>,
     /** COFECHA PART 7 各序列的潜在问题分段数（Flags），键为大写序列号。 */
     seriesProblemCounts?: Map<string, number>,
+    /** Currently selected series code. */
     selected?: string,
+    /** Most recent history animation instruction. */
     historyAnimation?: WidthHistoryAnimation | null,
+    /** COFECHA or operation-log jump target. */
     jumpTarget?: GridJumpTarget | null,
+    /** Cells to highlight after an edit operation. */
     editHighlightTarget?: GridEditHighlightTarget | null,
+    /** External request to animate and delete one series. */
     deleteSeriesRequest?: { id: number; tree: string } | null,
+    /** Deletion marker stacks keyed by series and marker year. */
     deletionMarkers?: RwlDeletionMarkers,
+    /** Called when an editable year cell is clicked. */
     onYearClick?: (tree: string, year: number) => void,
+    /** Inserts a missing year on the requested side of an existing year. */
     onInsertMissingYearAtSide?: (tree: string, year: number, side: PlusSide) => void,
+    /** Moves the selected tail/range by a year offset. */
     onMoveSeriesTailByOffset?: (tree: string, selectedStartYear: number, selectedEndYear: number, yearOffset: number) => void,
+    /** Deletes one year and applies the selected redistribution mode. */
     onDeleteYearWithMode?: (tree: string, year: number, mode: DeleteMode, shift?: DeleteShift) => void,
+    /** Marks a year range as missing. */
     onMarkYearRangeAsMissing?: (tree: string, startYear: number, endYear: number) => void,
+    /** Restores one deletion marker stack entry. */
     onRestoreDeletion?: (tree: string, markerYear: number, index: number) => void,
+    /** Deletes an entire series. */
     onDeleteSeries?: (tree: string) => void,
+    /** Opens text-edit mode for the active series. */
     onEditAsText?: () => void,
+    /** Jumps to COFECHA details for the given series. */
     onJumpToCofecha?: (tree: string) => void,
     /** 拥有 PART 6 潜在问题块的序列集合（小写），决定是否显示“在 COFECHA 中定位”。 */
     cofechaPart6Trees?: ReadonlySet<string>,
+    /** Acknowledges an external delete-series request. */
     onDeleteSeriesRequestHandled?: (id: number) => void,
+    /** Replaces one series with parsed text-editor data. */
     onReplaceTreeData?: (tree: string, data: Map<number, number | null>) => void,
+    /** Parent scroll container for jump/highlight coordination. */
     scrollContainerRef?: RefObject<HTMLElement | null>,
     /** Actual scrolling element. Preferred over scrollContainerRef when provided. */
     scrollElement?: HTMLElement | null
@@ -717,43 +739,21 @@ function WidthGridHeader(): ReactNode {
     );
 }
 
-export function WidthGridSkeleton({ showRows = false }: { showRows?: boolean } = {}): ReactNode {
-    const skeletonSeriesRows = useMemo(() => (
-        Array.from({ length: 12 }, () => 3 + Math.floor(Math.random() * 4))
-    ), []);
+/** Public props for the exported width-grid loading skeleton. */
+export interface WidthGridSkeletonProps {
+    /** Whether to render placeholder data rows under the grid header. */
+    showRows?: boolean;
+}
 
+/** Width-grid loading skeleton using the same header spacing as WidthContainer. */
+export function WidthGridSkeleton({ showRows = false }: WidthGridSkeletonProps = {}): ReactNode {
     return (
-        <div
-            className={`${style["width-grid-container"]} ${style["width-grid-skeleton"]}${showRows ? ` ${style["width-grid-skeleton-loading"]}` : ""}`}
-            aria-hidden="true"
-        >
-            <WidthGridHeader />
-            {showRows ? (
-                <div className={style["width-grid-skeleton-body"]}>
-                    {skeletonSeriesRows.map((rowCount, seriesIndex) => (
-                        <div className={style["width-grid-skeleton-series"]} key={`skeleton-series-${seriesIndex}`}>
-                            <div className={style["width-grid-skeleton-series-header"]}>
-                                <span className={style["width-grid-skeleton-title"]} />
-                                <span className={style["width-grid-skeleton-meta"]} />
-                            </div>
-                            {Array.from({ length: rowCount }, (_, rowIndex) => (
-                                <div className={style["width-grid-skeleton-row"]} key={`skeleton-row-${seriesIndex}-${rowIndex}`}>
-                                    <span className={`${style["width-grid-skeleton-cell"]} ${style["width-grid-skeleton-code"]}`} />
-                                    <span className={`${style["width-grid-skeleton-cell"]} ${style["width-grid-skeleton-year"]}`} />
-                                    {Array.from({ length: VALUE_COLUMN_COUNT }, (_, cellIndex) => (
-                                        <span
-                                            key={`skeleton-cell-${seriesIndex}-${rowIndex}-${cellIndex}`}
-                                            className={style["width-grid-skeleton-cell"]}
-                                            style={{ animationDelay: `${(seriesIndex * 7 + rowIndex * 3 + cellIndex) * 45}ms` }}
-                                        />
-                                    ))}
-                                </div>
-                            ))}
-                        </div>
-                    ))}
-                </div>
-            ) : null}
-        </div>
+        <WidthGridSkeletonView
+            header={<WidthGridHeader />}
+            containerClassName={style["width-grid-container"]}
+            baseSkeletonClassName={style["width-grid-skeleton"]}
+            showRows={showRows}
+        />
     );
 }
 

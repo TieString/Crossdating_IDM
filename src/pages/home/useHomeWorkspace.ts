@@ -16,278 +16,39 @@ import { normalizeReferenceSeriesConfig, type ReferenceSeriesConfig } from "@/fe
 import type { ICofechaResult } from "@/features/cofecha/types";
 import { detectPrecision, readRwlString } from "@/features/rwl";
 import { RwlEditor, registerChangeYearWidth } from "@/features/rwl/edit";
-import type { DeleteMode, DeleteShift, RwlDeletionMarkers, RwlHistoryAnimation, RwlHistoryStatus, RwlOperationLogEntry, RwlPersistedHistorySnapshot } from "@/features/rwl/edit";
+import type { DeleteMode, DeleteShift, RwlDeletionMarkers, RwlHistoryAnimation, RwlHistoryStatus, RwlOperationLogEntry } from "@/features/rwl/edit";
 import type { RwlSiteData } from "@/features/rwl/types";
 import { runCofecha } from "@/services/cofecha/runner";
 import { readRwlFile, saveFile } from "@/services/fs/io";
 import { stopMarker } from "@/shared/constants";
-import { ALL_OPTION_VALUE, CofechaVersion, DEFAULT_HOME_TITLE } from "./constants";
+import { ALL_OPTION_VALUE, CofechaVersion, formatTitle } from "./homeShared";
 import type { DiagnosisWorkerRequest, DiagnosisWorkerResponse } from "./diagnosisWorker";
+import {
+    deserializeCofechaResult,
+    loadPersistedCofechaState,
+    loadPersistedHistorySnapshot,
+    loadPersistedReferenceState,
+    persistCofechaState,
+    persistHistorySnapshot,
+    persistReferenceState,
+} from "./workspacePersistence";
+import {
+    createEmptyCrossdatingDiagnosis,
+    createReferenceOperationLogEntry,
+    MAX_REFERENCE_OPERATION_LOG_ENTRIES,
+    normalizeWorkspaceOperationLogEntry,
+    rwlDataEquals,
+    stringArraysEqual,
+} from "./workspaceState";
 
 export type WidthHistoryAnimation = RwlHistoryAnimation & { id: number };
 
-const HISTORY_STORAGE_PREFIX = "crossdating:rwl-operation-journal:v1:";
-const REFERENCE_STORAGE_PREFIX = "crossdating:reference-state:v1:";
-const COFECHA_STORAGE_PREFIX = "crossdating:cofecha-state:v1:";
-const MAX_REFERENCE_OPERATION_LOG_ENTRIES = 200;
 const HISTORY_SNAPSHOT_PERSIST_DELAY_MS = 250;
 const DIAGNOSIS_DEBOUNCE_MS = 120;
-
-type PersistedReferenceState = {
-    version: 1;
-    savedAt: string;
-    referenceConfig: ReferenceSeriesConfig | null;
-    referenceOperationLog: RwlOperationLogEntry[];
-    referenceOperationCounter: number;
-};
-
-type SerializedCofechaResult = Omit<ICofechaResult, "masterDatingSeries" | "masterCorrelations" | "seriesProblemCounts" | "possibleProblemsDetail"> & {
-    masterDatingSeries: Array<[number, number]>;
-    masterCorrelations: Array<[string, number]>;
-    seriesProblemCounts: Array<[string, number]>;
-    possibleProblemsDetail: Array<[string, string]>;
-};
-
-type PersistedCofechaState = {
-    version: 1;
-    savedAt: string;
-    outFileContent: string;
-    cofechaResult?: SerializedCofechaResult;
-    cofechaVersion: CofechaVersion;
-    selectedPart: string;
-};
 
 type RunCofechaApplyOptions = {
     version?: CofechaVersion;
     selectedPart?: string;
-};
-
-const formatTitle = (fileName: string | null, isModified: boolean) => (
-    fileName ? `${fileName}${isModified ? " *" : ""}` : DEFAULT_HOME_TITLE
-);
-
-const rwlDataEquals = (a: RwlSiteData, b: RwlSiteData) => {
-    if (a.size !== b.size) {
-        return false;
-    }
-
-    for (const [tree, mapA] of a) {
-        const mapB = b.get(tree);
-        if (!mapB || mapA.size !== mapB.size) {
-            return false;
-        }
-
-        for (const [year, widthA] of mapA) {
-            if (widthA !== mapB.get(year)) {
-                return false;
-            }
-        }
-    }
-
-    return true;
-};
-
-const stringArraysEqual = (a: string[], b: string[]) => (
-    a.length === b.length && a.every((value, index) => value === b[index])
-);
-
-const getHistoryStorageKey = (filePath: string) => `${HISTORY_STORAGE_PREFIX}${filePath}`;
-const getReferenceStorageKey = (filePath: string) => `${REFERENCE_STORAGE_PREFIX}${filePath}`;
-const getCofechaStorageKey = (filePath: string) => `${COFECHA_STORAGE_PREFIX}${filePath}`;
-
-const isPersistedReferenceState = (value: unknown): value is PersistedReferenceState => {
-    if (!value || typeof value !== "object") return false;
-    const candidate = value as Partial<PersistedReferenceState>;
-    return candidate.version === 1
-        && Array.isArray(candidate.referenceOperationLog);
-};
-
-const isPersistedCofechaState = (value: unknown): value is PersistedCofechaState => {
-    if (!value || typeof value !== "object") return false;
-    const candidate = value as Partial<PersistedCofechaState>;
-    return candidate.version === 1
-        && typeof candidate.outFileContent === "string";
-};
-
-const loadPersistedHistorySnapshot = (filePath: string): RwlPersistedHistorySnapshot | null => {
-    try {
-        const raw = window.localStorage.getItem(getHistoryStorageKey(filePath));
-        if (!raw) return null;
-        const parsed = JSON.parse(raw) as unknown;
-        return RwlEditor.isPersistedHistorySnapshot(parsed) ? parsed : null;
-    } catch (error) {
-        console.warn("读取操作日志失败:", error);
-        return null;
-    }
-};
-
-const persistHistorySnapshot = (filePath: string, editor: RwlEditor) => {
-    try {
-        window.localStorage.setItem(
-            getHistoryStorageKey(filePath),
-            JSON.stringify(editor.toHistorySnapshot()),
-        );
-    } catch (error) {
-        console.warn("保存操作日志失败:", error);
-    }
-};
-
-const createEmptyCrossdatingDiagnosis = (): CrossdatingDiagnosis => ({
-    createdAt: new Date().toISOString(),
-    seriesCount: 0,
-    problemSegmentCount: 0,
-    candidateCount: 0,
-    segmentLength: 0,
-    overlap: 0,
-    lagRange: { min: 0, max: 0 },
-    lowCorrelationThreshold: 0,
-    summaries: [],
-    segments: [],
-    propagationPatterns: [],
-    globalSlidingMatches: [],
-    masterNarrowYears: [],
-    candidates: [],
-});
-
-const loadPersistedReferenceState = (filePath: string): PersistedReferenceState | null => {
-    try {
-        const raw = window.localStorage.getItem(getReferenceStorageKey(filePath));
-        if (!raw) return null;
-        const parsed = JSON.parse(raw) as unknown;
-        return isPersistedReferenceState(parsed) ? parsed : null;
-    } catch (error) {
-        console.warn("读取参考序列状态失败:", error);
-        return null;
-    }
-};
-
-const persistReferenceState = (
-    filePath: string,
-    referenceConfig: ReferenceSeriesConfig | null,
-    referenceOperationLog: RwlOperationLogEntry[],
-    referenceOperationCounter: number,
-) => {
-    try {
-        window.localStorage.setItem(
-            getReferenceStorageKey(filePath),
-            JSON.stringify({
-                version: 1,
-                savedAt: new Date().toISOString(),
-                referenceConfig,
-                referenceOperationLog,
-                referenceOperationCounter,
-            } satisfies PersistedReferenceState),
-        );
-    } catch (error) {
-        console.warn("保存参考序列状态失败:", error);
-    }
-};
-
-const serializeCofechaResult = (result: ICofechaResult): SerializedCofechaResult => ({
-    ...result,
-    masterDatingSeries: Array.from(result.masterDatingSeries.entries()),
-    masterCorrelations: Array.from(result.masterCorrelations.entries()),
-    seriesProblemCounts: Array.from(result.seriesProblemCounts.entries()),
-    possibleProblemsDetail: Array.from(result.possibleProblemsDetail.entries()),
-});
-
-const deserializeCofechaResult = (result: SerializedCofechaResult): ICofechaResult => ({
-    ...result,
-    masterDatingSeries: new Map(result.masterDatingSeries),
-    masterCorrelations: new Map(result.masterCorrelations ?? []),
-    seriesProblemCounts: new Map(result.seriesProblemCounts ?? []),
-    possibleProblemsDetail: new Map(result.possibleProblemsDetail),
-});
-
-const loadPersistedCofechaState = (filePath: string): PersistedCofechaState | null => {
-    try {
-        const raw = window.localStorage.getItem(getCofechaStorageKey(filePath));
-        if (!raw) return null;
-        const parsed = JSON.parse(raw) as unknown;
-        return isPersistedCofechaState(parsed) ? parsed : null;
-    } catch (error) {
-        console.warn("读取 COFECHA 状态失败:", error);
-        return null;
-    }
-};
-
-const persistCofechaState = (
-    filePath: string,
-    outFileContent: string,
-    cofechaResult: ICofechaResult | undefined,
-    cofechaVersion: CofechaVersion,
-    selectedPart: string,
-) => {
-    try {
-        window.localStorage.setItem(
-            getCofechaStorageKey(filePath),
-            JSON.stringify({
-                version: 1,
-                savedAt: new Date().toISOString(),
-                outFileContent,
-                cofechaResult: cofechaResult ? serializeCofechaResult(cofechaResult) : undefined,
-                cofechaVersion,
-                selectedPart,
-            } satisfies PersistedCofechaState),
-        );
-    } catch (error) {
-        console.warn("保存 COFECHA 状态失败:", error);
-    }
-};
-
-const createReferenceOperationLogEntry = (
-    config: ReferenceSeriesConfig | null,
-    sequence: number,
-    projectId?: string | null,
-): RwlOperationLogEntry => {
-    const selectedCount = config?.selectedTrees.length ?? 0;
-    const id = `reference-${Date.now()}-${sequence}`;
-    const timestamp = new Date().toISOString();
-
-    return {
-        id,
-        operationId: id,
-        projectId: projectId || undefined,
-        seriesId: "Reference",
-        sequence,
-        timestamp,
-        createdAt: timestamp,
-        createdBy: "user",
-        action: "apply",
-        operationType: config ? "SET_REFERENCE_SERIES" : "CLEAR_REFERENCE_SERIES",
-        source: "reference-assisted",
-        summary: config ? "设置参考序列" : "关闭参考序列",
-        detail: config
-            ? `${selectedCount} 条序列 · ${config.method} · min n=${config.minSampleDepth}`
-            : "移除当前 reference / master-like series",
-        tree: "Reference",
-        reason: config ? "用户选择可靠序列生成视觉参考线" : "用户关闭参考线",
-        undone: false,
-        isApplied: true,
-        isReverted: false,
-        canUndo: false,
-        canRedo: false,
-        undoDepth: 0,
-        redoDepth: 0,
-    };
-};
-
-const normalizeWorkspaceOperationLogEntry = (
-    entry: RwlOperationLogEntry,
-    projectId?: string | null,
-): RwlOperationLogEntry => {
-    const isReverted = entry.isReverted ?? Boolean(entry.undone);
-    const isApplied = entry.isApplied ?? !isReverted;
-    return {
-        ...entry,
-        operationId: entry.operationId ?? entry.id,
-        projectId: entry.projectId ?? projectId ?? undefined,
-        seriesId: entry.seriesId ?? entry.tree,
-        createdAt: entry.createdAt ?? entry.timestamp,
-        createdBy: entry.createdBy ?? (entry.source === "system" ? "system" : "user"),
-        isApplied,
-        isReverted,
-    };
 };
 
 export function useHomeWorkspace() {

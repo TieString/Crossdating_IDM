@@ -1,0 +1,21 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": [
+    "src/components",
+    "src/features",
+    "src/services",
+    "src/pages/useResizablePanels.ts"
+  ],
+  "entryPointStrategy": "expand",
+  "out": "docs/api",
+  "tsconfig": "tsconfig.json",
+  "exclude": [
+    "**/*.stories.tsx",
+    "**/*.module.css",
+    "src/**/*.d.ts"
+  ],
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "readme": "none",
+  "name": "Crossdating IDM API"
+}

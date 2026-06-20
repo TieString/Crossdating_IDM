@@ -16,7 +16,7 @@ import {
   Plugin,
 } from 'chart.js'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import WidthGridContextMenu from '@/components/WidthContainer/WidthGridContextMenu/WidthGridContextMenu'
+import WidthGridContextMenu from '@/components/WidthContainer/WidthGridContextMenu'
 import type { LocalCrossdatingSimulation } from '@/features/crossdating/diagnosis'
 import type { ReferenceSeries } from '@/features/crossdating/reference'
 import { REFERENCE_SERIES_LABEL } from '@/features/crossdating/reference'
@@ -90,6 +90,8 @@ const HOVER_LINE_HIT_THRESHOLD_PX = 10
 const SAMPLE_SIZE_AXIS_ID = 'sampleSize'
 const SAMPLE_SIZE_LABEL = '样本量'
 const SAMPLE_SIZE_COLOR = 'rgba(104, 110, 120, 0.62)'
+const MISSING_RING_COLOR = '#2ecc71'
+const MISSING_RING_LABEL = '缺失年轮'
 
 type XAxisLabel = {
   index: number
@@ -112,6 +114,36 @@ function distToSegment(px: number, py: number, ax: number, ay: number, bx: numbe
   if (lenSq === 0) return Math.hypot(px - ax, py - ay)
   const t = clamp(((px - ax) * dx + (py - ay) * dy) / lenSq, 0, 1)
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+}
+
+// 返回 dataIndex 附近实际绘制的折线段（用索引对表示）。会跨过 null 缺口
+// 连接最近的有效点，因此缺失年轮处的绿色桥接线段也能参与命中检测。
+function lineSegmentsNearIndex(data: Array<number | null | unknown>, index: number): [number, number][] {
+  const segments: [number, number][] = []
+
+  let left = index
+  while (left >= 0 && data[left] == null) left--
+  let right = index
+  while (right < data.length && data[right] == null) right++
+
+  // 跨过缺口连接两侧有效点（缺轮年份点击/悬停时命中此段）。
+  if (left >= 0 && right < data.length && left !== right) {
+    segments.push([left, right])
+  }
+  // 左侧相邻段
+  if (left >= 0) {
+    let prev = left - 1
+    while (prev >= 0 && data[prev] == null) prev--
+    if (prev >= 0) segments.push([prev, left])
+  }
+  // 右侧相邻段
+  if (right < data.length) {
+    let next = right + 1
+    while (next < data.length && data[next] == null) next++
+    if (next < data.length) segments.push([right, next])
+  }
+
+  return segments
 }
 
 function getNiceYearStep(rawStep: number) {
@@ -557,6 +589,82 @@ function makeMarkerLinesPlugin(): Plugin<'line'> & { markerIndex: number | null 
   }
 }
 
+// 缺失年轮（插入的 0 值）标记插件：0 宽度的年份不在折线上绘制（表现为断点），
+// 用绿色线段跨过该断点、连接断点两侧的相邻点，使其落在对应折线的高度上，
+// 从而清楚标识是哪条折线的缺失年轮。高亮某条折线时，其它折线的标记会变淡。
+type MissingRingState = {
+  byTree: ReadonlyMap<string, readonly number[]>
+  highlightedTree: string | null
+  enabled: boolean
+}
+
+function makeMissingRingLinesPlugin(): Plugin<'line'> & MissingRingState {
+  return {
+    id: 'missingRingLines',
+    byTree: new Map(),
+    highlightedTree: null,
+    enabled: true,
+
+    afterDatasetsDraw(chart) {
+      if (!this.enabled || this.byTree.size === 0) return
+      const { ctx, chartArea, data, scales } = chart
+      const xScale = scales.x
+      const yScale = scales.y
+      if (!xScale || !yScale) return
+
+      const labels = data.labels ?? []
+      const yearToIndex = new Map<number, number>()
+      labels.forEach((label, index) => yearToIndex.set(Number(label), index))
+
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top)
+      ctx.clip()
+      ctx.lineWidth = 2
+      ctx.setLineDash([])
+
+      data.datasets.forEach((ds) => {
+        const years = this.byTree.get(ds.label ?? '')
+        if (!years) return
+        const isDim = this.highlightedTree != null && ds.label !== this.highlightedTree
+        ctx.strokeStyle = isDim ? MISSING_RING_COLOR + '55' : MISSING_RING_COLOR
+
+        years.forEach((year) => {
+          const idx = yearToIndex.get(year)
+          if (idx == null) return
+
+          // 向两侧寻找最近的有效相邻点（连续缺轮时可能不止相邻一格）。
+          let left = idx - 1
+          while (left >= 0 && ds.data[left] == null) left--
+          let right = idx + 1
+          while (right < ds.data.length && ds.data[right] == null) right++
+
+          const leftValue = ds.data[left]
+          const rightValue = ds.data[right]
+
+          if (left >= 0 && right < ds.data.length && leftValue != null && rightValue != null) {
+            // 用绿色线段跨过断点连接两侧的点。
+            ctx.beginPath()
+            ctx.moveTo(xScale.getPixelForValue(left), yScale.getPixelForValue(leftValue as number))
+            ctx.lineTo(xScale.getPixelForValue(right), yScale.getPixelForValue(rightValue as number))
+            ctx.stroke()
+          } else {
+            // 折线端点处缺轮、无法连接时，退化为一条短竖线标记。
+            const x = xScale.getPixelForValue(idx)
+            if (x < chartArea.left || x > chartArea.right) return
+            ctx.beginPath()
+            ctx.moveTo(x, chartArea.top)
+            ctx.lineTo(x, chartArea.bottom)
+            ctx.stroke()
+          }
+        })
+      })
+
+      ctx.restore()
+    }
+  }
+}
+
 // 左上角年份指示插件：鼠标悬停时在图表左上角显示当前年份，样式与 tooltip 年份一致。
 function makeYearIndicatorPlugin(): Plugin<'line'> & { activeIndex: number | null } {
   return {
@@ -596,6 +704,7 @@ function makeYearIndicatorPlugin(): Plugin<'line'> & { activeIndex: number | nul
 
 type Props = {
   data: Map<string, Map<number, number>>
+  missingRingYears?: ReadonlyMap<string, readonly number[]>
   sampleSizeData?: ReadonlyMap<string, ReadonlyMap<number, number | null>>
   referenceSeries?: ReferenceSeries | null
   showPersistentTooltip?: boolean
@@ -627,6 +736,7 @@ const CHART_FONT_FAMILY = "'Arial', 'Helvetica', sans-serif"
 
 export function MultiLineChart({
   data,
+  missingRingYears,
   sampleSizeData,
   referenceSeries,
   showPersistentTooltip = false,
@@ -646,9 +756,12 @@ export function MultiLineChart({
   const tooltipPlugin = useMemo(() => makePersistentTooltipPlugin(), [])
   const yearIndicatorPlugin = useMemo(() => makeYearIndicatorPlugin(), [])
   const markerLinesPlugin = useMemo(() => makeMarkerLinesPlugin(), [])
+  const missingRingLinesPlugin = useMemo(() => makeMissingRingLinesPlugin(), [])
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tree: string; year: number } | null>(null)
   const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number; tree: string; year: number } | null>(null)
   const [showSampleSize, setShowSampleSize] = useState(true)
+  const [showMissingRings, setShowMissingRings] = useState(true)
+  const [lineHoverable, setLineHoverable] = useState(false)
   const treeCodes = useMemo(() => Array.from(data.keys()), [data])
   const highlightedIndex = highlightedTreeCode ? treeCodes.indexOf(highlightedTreeCode) : -1
 
@@ -779,6 +892,14 @@ export function MultiLineChart({
     labels: allYears.map(year => year.toString()),
     datasets
   }
+
+  // 将缺失年轮状态同步给插件，并触发重绘。
+  useEffect(() => {
+    missingRingLinesPlugin.byTree = missingRingYears ?? new Map()
+    missingRingLinesPlugin.highlightedTree = highlightedTreeCode
+    missingRingLinesPlugin.enabled = showMissingRings
+    chartRef.current?.draw()
+  }, [missingRingLinesPlugin, missingRingYears, highlightedTreeCode, showMissingRings])
 
   // 键盘左右键移动当前高亮折线。
   useEffect(() => {
@@ -1002,7 +1123,7 @@ export function MultiLineChart({
     chart.data.datasets.forEach((ds, index) => {
       if (ds.yAxisID === SAMPLE_SIZE_AXIS_ID || ds.label === REFERENCE_SERIES_LABEL) return
 
-      for (const [idxA, idxB] of [[dataIndex - 1, dataIndex], [dataIndex, dataIndex + 1]] as [number, number][]) {
+      for (const [idxA, idxB] of lineSegmentsNearIndex(ds.data, dataIndex)) {
         const valA = ds.data[idxA]
         const valB = ds.data[idxB]
         if (valA == null || valB == null) continue
@@ -1064,7 +1185,7 @@ export function MultiLineChart({
     chart.data.datasets.forEach((ds, i) => {
       if (ds.yAxisID === SAMPLE_SIZE_AXIS_ID || ds.label === REFERENCE_SERIES_LABEL) return
 
-      for (const [idxA, idxB] of [[dataIndex - 1, dataIndex], [dataIndex, dataIndex + 1]] as [number, number][]) {
+      for (const [idxA, idxB] of lineSegmentsNearIndex(ds.data, dataIndex)) {
         const valA = ds.data[idxA]
         const valB = ds.data[idxB]
         if (valA == null || valB == null) continue
@@ -1133,6 +1254,7 @@ export function MultiLineChart({
     if (!chart) return
 
     const target = getClosestTreeAtPoint(event, chart, HOVER_LINE_HIT_THRESHOLD_PX)
+    setLineHoverable(!!target)
     if (!target) {
       setHoverPoint(null)
       onHoverTargetChange?.(null)
@@ -1150,6 +1272,7 @@ export function MultiLineChart({
 
   const handleChartMouseLeave = () => {
     setHoverPoint(null)
+    setLineHoverable(false)
     onHoverTargetChange?.(null)
   }
 
@@ -1219,62 +1342,112 @@ export function MultiLineChart({
 
   return (
     <div
-      style={{ position: 'relative', height: '100%', minHeight: 0, background: '#fff' }}
+      style={{ position: 'relative', height: '100%', minHeight: 0, background: '#fff', cursor: lineHoverable ? 'pointer' : 'default' }}
       onContextMenu={handleContextMenu}
       onMouseMove={handleChartMouseMove}
       onMouseLeave={handleChartMouseLeave}
     >
-      <label
-        title="显示/隐藏样本量曲线"
+      <div
         style={{
           position: 'absolute',
           top: 2,
           right: 8,
           zIndex: 2,
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 6,
-          padding: '2px 7px',
-          border: '1px solid rgba(210,210,210,0.85)',
-          borderRadius: 4,
-          background: 'rgba(255,255,255,0.88)',
-          color: '#555',
-          fontFamily: CHART_FONT_FAMILY,
-          fontSize: 11,
-          lineHeight: 1.4,
-          cursor: 'pointer',
-          userSelect: 'none',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-end',
+          gap: 4,
         }}
         onContextMenu={(event) => event.stopPropagation()}
       >
-        <input
-          type="checkbox"
-          checked={showSampleSize}
-          aria-label="显示样本量曲线"
-          onChange={(event) => setShowSampleSize(event.target.checked)}
+        <label
+          title="显示/隐藏样本量曲线"
           style={{
-            width: 12,
-            height: 12,
-            margin: 0,
-            accentColor: '#777',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '2px 7px',
+            border: '1px solid rgba(210,210,210,0.85)',
+            borderRadius: 4,
+            background: 'rgba(255,255,255,0.88)',
+            color: '#555',
+            fontFamily: CHART_FONT_FAMILY,
+            fontSize: 11,
+            lineHeight: 1.4,
             cursor: 'pointer',
+            userSelect: 'none',
           }}
-        />
-        <span
-          aria-hidden="true"
+        >
+          <input
+            type="checkbox"
+            checked={showSampleSize}
+            aria-label="显示样本量曲线"
+            onChange={(event) => setShowSampleSize(event.target.checked)}
+            style={{
+              width: 12,
+              height: 12,
+              margin: 0,
+              accentColor: '#777',
+              cursor: 'pointer',
+            }}
+          />
+          <span
+            aria-hidden="true"
+            style={{
+              width: 24,
+              height: 0,
+              borderTop: `2px dashed ${SAMPLE_SIZE_COLOR}`,
+            }}
+          />
+          <span>{SAMPLE_SIZE_LABEL}</span>
+        </label>
+        <label
+          title="显示/隐藏缺失年轮标记"
           style={{
-            width: 24,
-            height: 0,
-            borderTop: `2px dashed ${SAMPLE_SIZE_COLOR}`,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '2px 7px',
+            border: '1px solid rgba(210,210,210,0.85)',
+            borderRadius: 4,
+            background: 'rgba(255,255,255,0.88)',
+            color: '#555',
+            fontFamily: CHART_FONT_FAMILY,
+            fontSize: 11,
+            lineHeight: 1.4,
+            cursor: 'pointer',
+            userSelect: 'none',
           }}
-        />
-        <span>{SAMPLE_SIZE_LABEL}</span>
-      </label>
+        >
+          <input
+            type="checkbox"
+            checked={showMissingRings}
+            aria-label="显示缺失年轮标记"
+            onChange={(event) => setShowMissingRings(event.target.checked)}
+            style={{
+              width: 12,
+              height: 12,
+              margin: 0,
+              accentColor: MISSING_RING_COLOR,
+              cursor: 'pointer',
+            }}
+          />
+          <span
+            aria-hidden="true"
+            style={{
+              width: 24,
+              height: 0,
+              borderTop: `2px solid ${MISSING_RING_COLOR}`,
+            }}
+          />
+          <span>{MISSING_RING_LABEL}</span>
+        </label>
+      </div>
       <Line
         ref={chartRef}
         data={chartData}
         options={chartOptions}
-        plugins={[fixedChartAreaPlugin, referenceGridPlugin, markerLinesPlugin, chartBoxBorderPlugin, xAxisLabelsPlugin, ...(showPersistentTooltip ? [tooltipPlugin] : []), yearIndicatorPlugin]}
+        plugins={[fixedChartAreaPlugin, referenceGridPlugin, markerLinesPlugin, missingRingLinesPlugin, chartBoxBorderPlugin, xAxisLabelsPlugin, ...(showPersistentTooltip ? [tooltipPlugin] : []), yearIndicatorPlugin]}
         onClick={(event) =>
           handleLineChartClick(event, chartRef.current)
         }

@@ -2,12 +2,20 @@
 // 生成端（Home 的报告渲染）和消费端（主窗口 / 独立 COFECHA 窗口的滚动）共用，
 // 避免锚点属性名与滚动逻辑在多处各写一份而走样。
 
-import { ALL_OPTION_VALUE } from "./constants";
+import { ALL_OPTION_VALUE } from "./homeShared";
 
 export const COFECHA_PART6_ANCHOR_ATTR = "data-cofecha-part6-anchor";
 
 // PART 6 在 selector 里的取值，与 COFECHA_PART_OPTIONS 中那一项保持一致。
 export const COFECHA_PART6_PART_VALUE = "PART 6";
+
+export const COFECHA_PROBLEM_REFERENCE_RE = /^(.*?[>＞]{2}\s+)(\S+)(\s+)(-?\d{4})(.*)$/;
+export const COFECHA_PART6_SERIES_HEADER_RE = /^(\s*)(\S+)(\s+)(-?\d{4})(\s+to\s+)(-?\d{4})(.*\bSeries\b.*)$/i;
+export const COFECHA_ABSENT_RING_SUMMARY_RE = /^(\s*)(\S+)(\s+\d+\s+absent\s+rings?:\s*)(.*)$/i;
+export const COFECHA_ABSENT_RING_CONTINUATION_RE = /^(\s{8,})(-?\d{4}(?:\s+-?\d{4})*)(\s*)$/;
+export const COFECHA_YEAR_TOKEN_RE = /\b(-?\d{4})\b/g;
+export const COFECHA_PART_SEPARATOR_RE = /^\s*=+\s*$/;
+export const COFECHA_PART6_HIGHLIGHT_MS = 2600;
 
 // 当前选中的部分下，报告里是否含 PART 6 区段（即锚点是否存在）：
 // 显示“全部内容”或单独选了 PART 6 时为真，选了其它单一部分时为假。

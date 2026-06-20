@@ -3,19 +3,30 @@ import { createPortal } from "react-dom";
 import style from "./ContextMenu.module.css";
 
 export interface ContextMenuItem {
+    /** Stable key used as the React list key. */
     key: string;
+    /** Visible menu item label. */
     label: string;
+    /** Optional leading icon rendered before the label. */
     icon?: ReactNode;
+    /** Renders the item with the destructive action style. */
     danger?: boolean;
+    /** Disables the item and prevents selection. */
     disabled?: boolean;
+    /** Called before the menu closes when the item is selected. */
     onSelect: () => void;
 }
 
 export interface ContextMenuProps {
+    /** Whether the menu is currently mounted. */
     open: boolean;
+    /** Requested viewport x coordinate for the menu anchor. */
     x: number;
+    /** Requested viewport y coordinate for the menu anchor. */
     y: number;
+    /** Items rendered in order. */
     items: ContextMenuItem[];
+    /** Called for outside pointer, Escape, scroll, resize, or after a selection. */
     onClose: () => void;
 }
 
