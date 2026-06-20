@@ -28,10 +28,22 @@ export interface AnimationSettings {
     historyAnim: HistoryAnimation;
 }
 
+/** Selectable COFECHA executable (sidecar) used for crossdating runs. */
+export type CofechaEngine = "cofecha" | "cofecha12k" | "cofechawin";
+
+export const COFECHA_ENGINES: readonly CofechaEngine[] = ["cofecha", "cofecha12k", "cofechawin"];
+
+export interface CofechaSettings {
+    /** Which COFECHA executable to run. */
+    engine: CofechaEngine;
+}
+
 /** Persisted application settings shape. */
 export interface AppSettings {
     /** Animation-related preferences. */
     animation: AnimationSettings;
+    /** COFECHA engine preferences. */
+    cofecha: CofechaSettings;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -43,7 +55,17 @@ export const DEFAULT_SETTINGS: AppSettings = {
         insertYear: "slide-shift",
         historyAnim: "enabled",
     },
+    cofecha: {
+        engine: "cofecha",
+    },
 };
+
+/** Coerces any input to a valid COFECHA engine, falling back to the default. */
+export function normalizeCofechaEngine(value: unknown): CofechaEngine {
+    return COFECHA_ENGINES.includes(value as CofechaEngine)
+        ? (value as CofechaEngine)
+        : DEFAULT_SETTINGS.cofecha.engine;
+}
 
 export const STORAGE_KEY = "crossdating-idm-settings";
 
@@ -68,12 +90,20 @@ export function loadSettings(): AppSettings {
         const parsedAnimation = parsed.animation && typeof parsed.animation === "object"
             ? parsed.animation
             : {};
+        const parsedCofecha = parsed.cofecha && typeof parsed.cofecha === "object"
+            ? parsed.cofecha
+            : {};
 
         return {
             animation: {
                 ...DEFAULT_SETTINGS.animation,
                 ...parsedAnimation,
                 speed: normalizeAnimationSpeed((parsedAnimation as Partial<AnimationSettings>).speed),
+            },
+            cofecha: {
+                ...DEFAULT_SETTINGS.cofecha,
+                ...parsedCofecha,
+                engine: normalizeCofechaEngine((parsedCofecha as Partial<CofechaSettings>).engine),
             },
         };
     } catch {

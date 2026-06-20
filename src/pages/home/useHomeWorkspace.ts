@@ -21,6 +21,7 @@ import type { RwlSiteData } from "@/features/rwl/types";
 import { runCofecha } from "@/services/cofecha/runner";
 import { readRwlFile, saveFile } from "@/services/fs/io";
 import { stopMarker } from "@/shared/constants";
+import { useSettings } from "@/features/settings/SettingsContext";
 import { ALL_OPTION_VALUE, CofechaVersion, formatTitle } from "./homeShared";
 import type { DiagnosisWorkerRequest, DiagnosisWorkerResponse } from "./diagnosisWorker";
 import {
@@ -81,7 +82,12 @@ export function useHomeWorkspace() {
     const [possibleProblemsDetail, setPossibleProblemsDetail] = useState<Map<string, string>>(new Map());
     const [cofechaParts, setCofechaParts] = useState<Map<string, string>>(new Map());
     const [selectedPart, setSelectedPart] = useState<string>(ALL_OPTION_VALUE);
-    const [cofechaVersion, setCofechaVersion] = useState<CofechaVersion>("cofecha");
+    // COFECHA 引擎是全局设置（运行菜单与设置窗口共享同一来源），不再随工作区局部保存。
+    const { settings, updateCofechaSettings } = useSettings();
+    const cofechaVersion = settings.cofecha.engine;
+    const setCofechaVersion = useCallback((version: CofechaVersion) => {
+        updateCofechaSettings({ engine: version });
+    }, [updateCofechaSettings]);
     const [isFileLoading, setIsFileLoading] = useState(false);
     const [isCofechaRunning, setIsCofechaRunning] = useState(false);
     const [diagnosisBatchResult, setDiagnosisBatchResult] = useState<DiagnosisBatchApplyResult | null>(null);
@@ -299,7 +305,7 @@ export function useHomeWorkspace() {
             referenceOperationCounterRef.current = persistedReference?.referenceOperationCounter
                 ?? Math.max(...(persistedReference?.referenceOperationLog ?? []).map((entry) => entry.sequence), 0);
             lastCofechaValidationRef.current = null;
-            const restoredCofechaVersion = persistedCofecha?.cofechaVersion ?? "cofecha";
+            // 引擎为全局设置，载入工作区时不再覆盖；沿用当前设置中的引擎重新运行。
             let restoredSelectedPart = ALL_OPTION_VALUE;
             if (persistedCofecha) {
                 const restoredResult = persistedCofecha.cofechaResult
@@ -311,13 +317,11 @@ export function useHomeWorkspace() {
                 setPossibleProblemsDetail(restoredResult?.possibleProblemsDetail ?? new Map());
                 setCofechaParts(splitReportByParts(persistedCofecha.outFileContent));
                 setSelectedPart(restoredSelectedPart);
-                setCofechaVersion(restoredCofechaVersion);
             } else {
                 setOutFileContent("");
                 setCofechaResult(undefined);
                 setPossibleProblemsDetail(new Map());
                 setCofechaParts(new Map());
-                setCofechaVersion(restoredCofechaVersion);
             }
             setTreeOptions(Array.from(nextEditor.getData().keys()));
             setSelectedTree(ALL_OPTION_VALUE);
@@ -326,7 +330,6 @@ export function useHomeWorkspace() {
 
             try {
                 await runCofechaAndApplyResult(nextEditor.exportAsRwlString(), filePath, {
-                    version: restoredCofechaVersion,
                     selectedPart: restoredSelectedPart,
                 });
             } catch (error) {

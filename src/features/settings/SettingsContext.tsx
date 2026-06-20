@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import type { AnimationSettings, AppSettings } from "./settings";
+import type { AnimationSettings, AppSettings, CofechaSettings } from "./settings";
 import { loadSettings, saveSettings, STORAGE_KEY } from "./settings";
 
 /** Runtime settings context exposed to React components. */
@@ -8,6 +8,8 @@ export interface SettingsContextValue {
     settings: AppSettings;
     /** Merges animation setting updates and persists the result. */
     updateAnimationSettings: (update: Partial<AnimationSettings>) => void;
+    /** Merges COFECHA setting updates and persists the result. */
+    updateCofechaSettings: (update: Partial<CofechaSettings>) => void;
 }
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
@@ -21,6 +23,17 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
             const next: AppSettings = {
                 ...prev,
                 animation: { ...prev.animation, ...update },
+            };
+            saveSettings(next);
+            return next;
+        });
+    }, []);
+
+    const updateCofechaSettings = useCallback((update: Partial<CofechaSettings>) => {
+        setSettings((prev) => {
+            const next: AppSettings = {
+                ...prev,
+                cofecha: { ...prev.cofecha, ...update },
             };
             saveSettings(next);
             return next;
@@ -42,7 +55,10 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         return () => window.removeEventListener("storage", handleStorage);
     }, []);
 
-    const value = useMemo(() => ({ settings, updateAnimationSettings }), [settings, updateAnimationSettings]);
+    const value = useMemo(
+        () => ({ settings, updateAnimationSettings, updateCofechaSettings }),
+        [settings, updateAnimationSettings, updateCofechaSettings],
+    );
 
     return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
 }

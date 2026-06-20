@@ -759,9 +759,9 @@ function TreeChartManagerBase({
         height: isExpanded ? undefined : pickerHeight,
         maxHeight: isExpanded ? 'none' : undefined,
         minHeight: isExpanded ? 0 : undefined,
-        border: '1px solid #e8e8e8',
+        border: '1px solid #eceff3',
         borderRadius: 6,
-        background: '#f8f9fa',
+        background: '#ffffff',
       }}
         style={{
         display: 'flex',
@@ -865,10 +865,9 @@ function TreeChartManagerBase({
       <div style={{
         display: 'grid',
         gridTemplateColumns: 'minmax(260px, 330px) minmax(0, 1fr)',
-        gap: 12,
+        gap: 0,
         minHeight: 0,
         height: '100%',
-        padding: 12,
         boxSizing: 'border-box',
       }}>
         <aside style={{
@@ -876,10 +875,9 @@ function TreeChartManagerBase({
           flexDirection: 'column',
           minWidth: 0,
           minHeight: 0,
-          padding: 10,
-          border: '1px solid #d9e0ea',
-          borderRadius: 6,
-          background: '#fff',
+          padding: 14,
+          borderRight: '1px solid #eceff3',
+          background: '#fafbfc',
           boxSizing: 'border-box',
         }}>
           {picker}
@@ -890,8 +888,6 @@ function TreeChartManagerBase({
           flexDirection: 'column',
           minWidth: 0,
           minHeight: 0,
-          border: '1px solid #d9e0ea',
-          borderRadius: 6,
           background: '#fff',
           boxSizing: 'border-box',
           overflow: 'hidden',
@@ -902,8 +898,8 @@ function TreeChartManagerBase({
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: 8,
-            padding: '8px 10px',
-            borderBottom: '1px solid #e3e8ef',
+            padding: '10px 14px',
+            borderBottom: '1px solid #eef1f4',
             fontFamily: 'Segoe UI, system-ui, sans-serif',
             fontSize: 12,
             color: '#5f6d7c',

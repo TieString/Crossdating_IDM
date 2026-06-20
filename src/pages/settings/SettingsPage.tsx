@@ -2,55 +2,100 @@ import { useId, useState } from "react";
 import { FloatingScrollArea } from "@/components/FloatingScrollArea/FloatingScrollArea";
 import { useSettings } from "@/features/settings/SettingsContext";
 import {
-    ANIMATION_SPEED_MAX,
-    ANIMATION_SPEED_MIN,
-    ANIMATION_SPEED_STEP,
     normalizeAnimationSpeed,
     type AnimationSettings,
+    type CofechaEngine,
 } from "@/features/settings/settings";
 import styles from "./SettingsPage.module.css";
 
-type SectionId = "animation" | "about";
+type SectionId = "animation" | "cofecha" | "about";
 
 const SECTIONS: { id: SectionId; label: string }[] = [
     { id: "animation", label: "动画" },
+    { id: "cofecha", label: "COFECHA 引擎" },
     { id: "about", label: "关于" },
 ];
 
-const formatSpeedLabel = (speed: number) => (
-    `${speed.toFixed(2).replace(/\.00$/, "").replace(/0$/, "")}x`
-);
+const SPEED_PRESETS: { value: number; label: string }[] = [
+    { value: 0.5, label: "0.5×（慢）" },
+    { value: 0.75, label: "0.75×" },
+    { value: 1, label: "1×（正常）" },
+    { value: 1.5, label: "1.5×" },
+    { value: 2, label: "2×（快）" },
+    { value: 3, label: "3×（极快）" },
+];
 
-interface RadioOptionProps<T extends string> {
+/** Per-engine metadata shown beneath the COFECHA engine picker. */
+const COFECHA_ENGINE_INFO: {
+    engine: CofechaEngine;
     name: string;
-    value: T;
-    current: T;
+    build: string;
+    deps: string;
+    note: string;
+}[] = [
+    {
+        engine: "cofecha",
+        name: "COFECHA（经典）",
+        build: "32 位；Microsoft Fortran + Phar Lap TNT DOS 扩展器（COF6.06，1990 年代）",
+        deps: "tnt.dll（Phar Lap DOS 扩展器）",
+        note: "经典版本，标准最大时间跨度。兼容性最稳，作为默认引擎。",
+    },
+    {
+        engine: "cofecha12k",
+        name: "COFECHA 12K（扩展）",
+        build: "与经典版同源重编译，仅放大内部数组维度",
+        deps: "tnt.dll（Phar Lap DOS 扩展器）",
+        note: "最大时间跨度扩展到约 12,000 年，用于超长年表；其余算法与经典版一致。",
+    },
+    {
+        engine: "cofechawin",
+        name: "COFECHA Win（原生）",
+        build: "32 位；GNU/MinGW（gfortran）原生 Windows 重编译",
+        deps: "仅系统 DLL（KERNEL32 / comdlg32），自包含，无需 DOS 扩展器",
+        note: "现代原生 Windows 版本，算法相同。文件交互沿用控制台输入。",
+    },
+];
+
+interface RowProps {
     label: string;
-    desc?: string;
-    badge?: string;
-    disabled?: boolean;
-    onChange: (value: T) => void;
+    htmlFor?: string;
+    align?: "center" | "top";
+    children: React.ReactNode;
 }
 
-function RadioOption<T extends string>({ name, value, current, label, desc, badge, disabled = false, onChange }: RadioOptionProps<T>) {
+/** Typora-style preferences row: bold label on the left, control(s) on the right. */
+function Row({ label, htmlFor, align = "center", children }: RowProps) {
     return (
-        <label className={`${styles["radio-option"]} ${disabled ? styles["radio-option-disabled"] : ""}`}>
-            <input
-                type="radio"
-                name={name}
+        <div className={`${styles["row"]} ${align === "top" ? styles["row-top"] : ""}`}>
+            <label className={styles["row-label"]} htmlFor={htmlFor}>{label}</label>
+            <div className={styles["row-body"]}>{children}</div>
+        </div>
+    );
+}
+
+interface SelectProps {
+    id?: string;
+    value: string;
+    disabled?: boolean;
+    onChange: (value: string) => void;
+    options: { value: string; label: string }[];
+}
+
+function Select({ id, value, disabled = false, onChange, options }: SelectProps) {
+    return (
+        <span className={styles["select-wrap"]}>
+            <select
+                id={id}
+                className={styles["select"]}
                 value={value}
-                checked={current === value}
                 disabled={disabled}
-                onChange={() => onChange(value)}
-            />
-            <span className={styles["radio-option-text"]}>
-                <span className={styles["radio-option-label"]}>
-                    {label}
-                    {badge && <span className={styles["radio-option-badge"]}>{badge}</span>}
-                </span>
-                {desc && <span className={styles["radio-option-desc"]}>{desc}</span>}
-            </span>
-        </label>
+                onChange={(event) => onChange(event.currentTarget.value)}
+            >
+                {options.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+            </select>
+        </span>
     );
 }
 
@@ -58,200 +103,128 @@ function AnimationSection() {
     const { settings, updateAnimationSettings } = useSettings();
     const anim = settings.animation;
     const groupId = useId();
-    const animationsDisabled = anim.enabled === "disabled";
-    const animationSpeed = normalizeAnimationSpeed(anim.speed);
+    const disabled = anim.enabled === "disabled";
+    const speed = normalizeAnimationSpeed(anim.speed);
+    const nearestSpeed = SPEED_PRESETS.reduce((closest, preset) => (
+        Math.abs(preset.value - speed) < Math.abs(closest.value - speed) ? preset : closest
+    ), SPEED_PRESETS[0]).value;
 
-    const update = <K extends keyof AnimationSettings>(key: K) => (value: AnimationSettings[K]) => {
-        updateAnimationSettings({ [key]: value } as Partial<AnimationSettings>);
+    const update = <K extends keyof AnimationSettings>(key: K) => (value: string) => {
+        updateAnimationSettings({ [key]: value } as unknown as Partial<AnimationSettings>);
     };
 
     return (
         <div>
             <h2 className={styles["section-title"]}>动画</h2>
 
-            <div className={styles["setting-group"]}>
-                <label className={styles["switch-row"]}>
-                    <span className={styles["switch-text"]}>
-                        <span className={styles["switch-title"]}>动画总开关</span>
-                        <span className={styles["switch-desc"]}>关闭后所有操作立即生效，不播放格子、数字和序列过渡动画</span>
-                    </span>
+            <Row label="动画效果">
+                <label className={styles["check"]}>
                     <input
-                        className={styles["switch-input"]}
                         type="checkbox"
                         checked={anim.enabled === "enabled"}
                         onChange={(event) => updateAnimationSettings({
                             enabled: event.currentTarget.checked ? "enabled" : "disabled",
                         })}
                     />
-                    <span className={styles["switch-track"]} aria-hidden="true">
-                        <span className={styles["switch-thumb"]} />
-                    </span>
+                    <span>启用动画</span>
                 </label>
-            </div>
+            </Row>
 
-            <div className={styles["setting-group"]}>
-                <label
-                    className={`${styles["slider-row"]} ${animationsDisabled ? styles["slider-row-disabled"] : ""}`}
-                    htmlFor={`${groupId}-speed`}
-                >
-                    <span className={styles["slider-text"]}>
-                        <span className={styles["switch-title"]}>动画速度</span>
-                        <span className={styles["switch-desc"]}>调节格子移动、数字滚动和删除过渡的播放速度</span>
-                    </span>
-                    <span className={styles["slider-control"]}>
-                        <input
-                            id={`${groupId}-speed`}
-                            className={styles["slider-input"]}
-                            type="range"
-                            min={ANIMATION_SPEED_MIN}
-                            max={ANIMATION_SPEED_MAX}
-                            step={ANIMATION_SPEED_STEP}
-                            value={animationSpeed}
-                            disabled={animationsDisabled}
-                            onChange={(event) => updateAnimationSettings({
-                                speed: normalizeAnimationSpeed(event.currentTarget.value),
-                            })}
-                        />
-                        <span className={styles["slider-value"]}>{formatSpeedLabel(animationSpeed)}</span>
-                    </span>
-                </label>
-            </div>
+            <Row label="动画速度" htmlFor={`${groupId}-speed`}>
+                <Select
+                    id={`${groupId}-speed`}
+                    value={String(nearestSpeed)}
+                    disabled={disabled}
+                    onChange={(value) => updateAnimationSettings({ speed: normalizeAnimationSpeed(value) })}
+                    options={SPEED_PRESETS.map((preset) => ({ value: String(preset.value), label: preset.label }))}
+                />
+            </Row>
 
-            <div className={styles["setting-group"]}>
-                <div className={styles["setting-group-label"]}>删除序列动画</div>
-                <div className={styles["radio-list"]}>
-                    <RadioOption
-                        name={`${groupId}-del-series`}
-                        value="fade"
-                        current={anim.deleteSeries}
-                        label="淡出消散"
-                        desc="序列渐变黑白后淡出，布局同步收缩"
-                        badge="默认"
-                        disabled={animationsDisabled}
-                        onChange={update("deleteSeries")}
-                    />
-                    <RadioOption
-                        name={`${groupId}-del-series`}
-                        value="shatter-rise"
-                        current={anim.deleteSeries}
-                        label="粉碎上升"
-                        desc="碎片从下方涌起压碎，序列块同步收缩消失"
-                        disabled={animationsDisabled}
-                        onChange={update("deleteSeries")}
-                    />
-                    <RadioOption
-                        name={`${groupId}-del-series`}
-                        value="none"
-                        current={anim.deleteSeries}
-                        label="无动画"
-                        desc="立即删除，无过渡效果"
-                        disabled={animationsDisabled}
-                        onChange={update("deleteSeries")}
-                    />
+            <Row label="删除序列动画" htmlFor={`${groupId}-del-series`}>
+                <Select
+                    id={`${groupId}-del-series`}
+                    value={anim.deleteSeries}
+                    disabled={disabled}
+                    onChange={update("deleteSeries")}
+                    options={[
+                        { value: "fade", label: "淡出消散（默认）" },
+                        { value: "shatter-rise", label: "粉碎上升" },
+                        { value: "none", label: "无动画" },
+                    ]}
+                />
+            </Row>
+
+            <Row label="删除年份动画" htmlFor={`${groupId}-del-year`}>
+                <Select
+                    id={`${groupId}-del-year`}
+                    value={anim.deleteYear}
+                    disabled={disabled}
+                    onChange={update("deleteYear")}
+                    options={[
+                        { value: "pixel-burst", label: "像素爆炸（默认）" },
+                        { value: "none", label: "无动画" },
+                    ]}
+                />
+            </Row>
+
+            <Row label="插入年份动画" htmlFor={`${groupId}-ins-year`}>
+                <Select
+                    id={`${groupId}-ins-year`}
+                    value={anim.insertYear}
+                    disabled={disabled}
+                    onChange={update("insertYear")}
+                    options={[
+                        { value: "slide-shift", label: "底层浮现（默认）" },
+                        { value: "pulse-shift", label: "脉冲浮现" },
+                        { value: "side-pop-shift", label: "侧向弹入" },
+                        { value: "flight-shift", label: "跨行飞入" },
+                        { value: "none", label: "无动画" },
+                    ]}
+                />
+            </Row>
+
+            <Row label="撤销 / 恢复动画" htmlFor={`${groupId}-history`}>
+                <Select
+                    id={`${groupId}-history`}
+                    value={anim.historyAnim}
+                    disabled={disabled}
+                    onChange={update("historyAnim")}
+                    options={[
+                        { value: "enabled", label: "启用（默认）" },
+                        { value: "disabled", label: "禁用" },
+                    ]}
+                />
+            </Row>
+        </div>
+    );
+}
+
+function CofechaSection() {
+    const { settings, updateCofechaSettings } = useSettings();
+    const current = settings.cofecha.engine;
+    const groupId = useId();
+    const info = COFECHA_ENGINE_INFO.find((item) => item.engine === current) ?? COFECHA_ENGINE_INFO[0];
+
+    return (
+        <div>
+            <h2 className={styles["section-title"]}>COFECHA 引擎</h2>
+
+            <Row label="交叉定年引擎" htmlFor={`${groupId}-engine`} align="top">
+                <Select
+                    id={`${groupId}-engine`}
+                    value={current}
+                    onChange={(value) => updateCofechaSettings({ engine: value as CofechaEngine })}
+                    options={COFECHA_ENGINE_INFO.map((item) => ({ value: item.engine, label: item.name }))}
+                />
+                <div className={styles["engine-spec"]}>
+                    <span className={styles["engine-spec-key"]}>架构/编译</span>
+                    <span className={styles["engine-spec-val"]}>{info.build}</span>
+                    <span className={styles["engine-spec-key"]}>依赖</span>
+                    <span className={styles["engine-spec-val"]}>{info.deps}</span>
+                    <span className={styles["engine-spec-key"]}>说明</span>
+                    <span className={styles["engine-spec-val"]}>{info.note}</span>
                 </div>
-            </div>
-
-            <div className={styles["setting-group"]}>
-                <div className={styles["setting-group-label"]}>删除年份动画</div>
-                <div className={styles["radio-list"]}>
-                    <RadioOption
-                        name={`${groupId}-del-year`}
-                        value="pixel-burst"
-                        current={anim.deleteYear}
-                        label="像素爆炸"
-                        desc="被删除的格子碎成像素向右飞散"
-                        badge="默认"
-                        disabled={animationsDisabled}
-                        onChange={update("deleteYear")}
-                    />
-                    <RadioOption
-                        name={`${groupId}-del-year`}
-                        value="none"
-                        current={anim.deleteYear}
-                        label="无动画"
-                        desc="格子直接消失，相邻格子滑入填补"
-                        disabled={animationsDisabled}
-                        onChange={update("deleteYear")}
-                    />
-                </div>
-            </div>
-
-            <div className={styles["setting-group"]}>
-                <div className={styles["setting-group-label"]}>插入年份动画</div>
-                <div className={styles["radio-list"]}>
-                    <RadioOption
-                        name={`${groupId}-ins-year`}
-                        value="slide-shift"
-                        current={anim.insertYear}
-                        label="底层浮现"
-                        desc="0 值在原位从小到大浮现，邻近格子先平滑让位"
-                        badge="默认"
-                        disabled={animationsDisabled}
-                        onChange={update("insertYear")}
-                    />
-                    <RadioOption
-                        name={`${groupId}-ins-year`}
-                        value="pulse-shift"
-                        current={anim.insertYear}
-                        label="脉冲浮现"
-                        desc="0 值原位浮现并轻微脉冲一次，强调新增位置"
-                        disabled={animationsDisabled}
-                        onChange={update("insertYear")}
-                    />
-                    <RadioOption
-                        name={`${groupId}-ins-year`}
-                        value="side-pop-shift"
-                        current={anim.insertYear}
-                        label="侧向弹入"
-                        desc="保留原来的侧向弹入和缩放反馈"
-                        disabled={animationsDisabled}
-                        onChange={update("insertYear")}
-                    />
-                    <RadioOption
-                        name={`${groupId}-ins-year`}
-                        value="flight-shift"
-                        current={anim.insertYear}
-                        label="跨行飞入"
-                        desc="格子按真实旧位置飞到新位置；适合强调跨行移动，但视觉更活跃"
-                        disabled={animationsDisabled}
-                        onChange={update("insertYear")}
-                    />
-                    <RadioOption
-                        name={`${groupId}-ins-year`}
-                        value="none"
-                        current={anim.insertYear}
-                        label="无动画"
-                        desc="格子直接出现，无位移过渡"
-                        disabled={animationsDisabled}
-                        onChange={update("insertYear")}
-                    />
-                </div>
-            </div>
-
-            <div className={styles["setting-group"]}>
-                <div className={styles["setting-group-label"]}>撤销 / 恢复动画</div>
-                <div className={styles["radio-list"]}>
-                    <RadioOption
-                        name={`${groupId}-history`}
-                        value="enabled"
-                        current={anim.historyAnim}
-                        label="启用"
-                        desc="撤销和恢复操作时显示格子滑入/滑出的过渡动画"
-                        badge="默认"
-                        disabled={animationsDisabled}
-                        onChange={update("historyAnim")}
-                    />
-                    <RadioOption
-                        name={`${groupId}-history`}
-                        value="disabled"
-                        current={anim.historyAnim}
-                        label="禁用"
-                        desc="撤销和恢复立即生效，不播放过渡动画"
-                        disabled={animationsDisabled}
-                        onChange={update("historyAnim")}
-                    />
-                </div>
-            </div>
+            </Row>
         </div>
     );
 }
@@ -260,57 +233,61 @@ function AboutSection() {
     return (
         <div>
             <h2 className={styles["section-title"]}>关于</h2>
-            <div className={styles["about-grid"]}>
-                <span className={styles["about-key"]}>应用名称</span>
-                <span className={styles["about-value"]}>交叉定年 · IDM</span>
 
-                <span className={styles["about-key"]}>版本</span>
-                <span className={styles["about-value"]}>1.1.5</span>
-
-                <hr className={styles["about-divider"]} />
-
-                <span className={styles["about-key"]}>开发团队</span>
-                <span className={styles["about-value"]}>
+            <Row label="应用名称"><span className={styles["about-text"]}>交叉定年 · IDM</span></Row>
+            <Row label="版本"><span className={styles["about-text"]}>1.2.0</span></Row>
+            <Row label="技术栈"><span className={styles["about-text"]}>Tauri · React · TypeScript</span></Row>
+            <Row label="COFECHA"><span className={styles["about-text"]}>International Tree-Ring Data Bank</span></Row>
+            <Row label="开发团队" align="top">
+                <span className={styles["about-text"]}>
                     何志浩、张同文、张瑞波<br />
                     靳春寒、喻树龙、尚华明、秦莉
                 </span>
-
-                <hr className={styles["about-divider"]} />
-
-                <span className={styles["about-key"]}>技术栈</span>
-                <span className={styles["about-value"]}>Tauri · React · TypeScript</span>
-
-                <span className={styles["about-key"]}>COFECHA</span>
-                <span className={styles["about-value"]}>International Tree-Ring Data Bank</span>
-            </div>
+            </Row>
         </div>
     );
 }
 
 export default function SettingsPage() {
     const [activeSection, setActiveSection] = useState<SectionId>("animation");
+    const [query, setQuery] = useState("");
+
+    const normalizedQuery = query.trim().toLowerCase();
+    const visibleSections = normalizedQuery
+        ? SECTIONS.filter((section) => section.label.toLowerCase().includes(normalizedQuery))
+        : SECTIONS;
 
     return (
         <div className={styles["page"]}>
             <div className={styles["body"]}>
-                <FloatingScrollArea
-                    className={styles["sidebar"]}
-                    viewportClassName={styles["sidebar-viewport"]}
-                    role="navigation"
-                >
-                    {SECTIONS.map((section) => (
-                        <button
-                            key={section.id}
-                            className={`${styles["sidebar-item"]} ${activeSection === section.id ? styles["sidebar-item-active"] : ""}`}
-                            onClick={() => setActiveSection(section.id)}
-                        >
-                            {section.label}
-                        </button>
-                    ))}
-                </FloatingScrollArea>
+                <div className={styles["sidebar"]}>
+                    <input
+                        className={styles["search"]}
+                        type="text"
+                        placeholder="查找..."
+                        value={query}
+                        onChange={(event) => setQuery(event.currentTarget.value)}
+                    />
+                    <FloatingScrollArea
+                        className={styles["sidebar-nav"]}
+                        viewportClassName={styles["sidebar-viewport"]}
+                        role="navigation"
+                    >
+                        {visibleSections.map((section) => (
+                            <button
+                                key={section.id}
+                                className={`${styles["sidebar-item"]} ${activeSection === section.id ? styles["sidebar-item-active"] : ""}`}
+                                onClick={() => setActiveSection(section.id)}
+                            >
+                                {section.label}
+                            </button>
+                        ))}
+                    </FloatingScrollArea>
+                </div>
 
                 <FloatingScrollArea className={styles["content"]}>
                     {activeSection === "animation" && <AnimationSection />}
+                    {activeSection === "cofecha" && <CofechaSection />}
                     {activeSection === "about" && <AboutSection />}
                 </FloatingScrollArea>
             </div>

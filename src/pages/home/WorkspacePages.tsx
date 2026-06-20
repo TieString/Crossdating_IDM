@@ -34,7 +34,10 @@ type PageShellProps = {
     onClose: () => void;
 };
 
-function PageShell({ title, subtitle, actions, children, onClose }: PageShellProps) {
+// 独立窗口使用系统原生标题栏（窗口标题与关闭按钮均由系统提供），
+// 因此这里不再渲染页面内自定义页头；title/subtitle/onClose 等仍保留在
+// 类型中以兼容调用方，但不再展示。
+function PageShell({ children }: PageShellProps) {
     return (
         <motion.section
             className={styles["workspace-page"]}
@@ -43,24 +46,6 @@ function PageShell({ title, subtitle, actions, children, onClose }: PageShellPro
             exit={{ opacity: 0, y: 16, scale: 0.985 }}
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
         >
-            <header className={styles["workspace-header"]}>
-                <div className={styles["workspace-title-block"]}>
-                    <h1>{title}</h1>
-                    {subtitle ? <p>{subtitle}</p> : null}
-                </div>
-                <div className={styles["workspace-actions"]}>
-                    {actions}
-                    <button
-                        type="button"
-                        className={styles["icon-button"]}
-                        title="关闭"
-                        aria-label="关闭"
-                        onClick={onClose}
-                    >
-                        ×
-                    </button>
-                </div>
-            </header>
             <div className={styles["workspace-body"]}>
                 {children}
             </div>

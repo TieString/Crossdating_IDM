@@ -216,8 +216,8 @@ export async function openWorkspaceWindow(kind: WorkspaceWindowKind) {
         title: workspaceWindowTitles[kind],
         width,
         height,
-        // 与主窗口一致：使用无原生边框 + 页面内自定义标题栏
-        decorations: false,
+        // 除主窗口外统一使用系统原生标题栏（与设置窗口一致）
+        decorations: true,
         resizable: true,
         center: true,
     });
