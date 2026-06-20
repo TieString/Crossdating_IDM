@@ -8,6 +8,7 @@ type MenuItem = {
     label: string;
     onClick?: () => void | Promise<void>;
     disabled?: boolean;
+    checked?: boolean;
 };
 
 type HomeTitleBarBridgeProps = {
@@ -107,16 +108,26 @@ export function HomeTitleBarBridge({
 
     const runItems = useMemo<MenuItem[]>(() => ([
         {
-            label: `${cofechaVersion === "cofecha" ? "\u2713 " : ""}COFECHA`,
+            label: "COFECHA",
+            checked: cofechaVersion === "cofecha",
             onClick: () => {
                 onCofechaVersionChange("cofecha");
                 setActiveMenu(null);
             },
         },
         {
-            label: `${cofechaVersion === "cofecha12k" ? "\u2713 " : ""}COFECHA 12K`,
+            label: "COFECHA 12K",
+            checked: cofechaVersion === "cofecha12k",
             onClick: () => {
                 onCofechaVersionChange("cofecha12k");
+                setActiveMenu(null);
+            },
+        },
+        {
+            label: "COFECHA Win",
+            checked: cofechaVersion === "cofechawin",
+            onClick: () => {
+                onCofechaVersionChange("cofechawin");
                 setActiveMenu(null);
             },
         },

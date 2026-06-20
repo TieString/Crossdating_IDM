@@ -1,9 +1,29 @@
 .menu-item-label {
     font-size: 13px;
+    display: flex;
+    align-items: center;
+    flex: 1 1 auto;
+    white-space: nowrap;
+}
+
+/* 固定宽度的勾选槽位：保证选中/未选中项文字左缘始终对齐。 */
+.menu-item-check {
+    flex: 0 0 auto;
+    width: 1.1em;
+    margin-right: 4px;
+    text-align: center;
+    color: #2f7bd6;
+}
+
+.menu-item-text {
+    flex: 1 1 auto;
 }
 
 .menu-item {
+    min-width: 120px;
     height: 24px;
+    display: flex;
+    align-items: center;
     background-color: transparent;
     border: none;
     box-shadow: none;

@@ -18,12 +18,14 @@ export interface MenuItemProps {
   isActive?: boolean;
   /** Prevents row interaction when true. */
   disabled?: boolean;
+  /** When defined, reserves a check gutter; true renders the check mark. */
+  checked?: boolean;
   /** Nested submenu rendered beside the row. */
   children?: React.ReactNode;
 }
 
 /** Presentational menu item used by the top menu container. */
-const MenuItem: React.FC<MenuItemProps> = ({ label, onClick, onMouseEnter, onMouseLeave, isActive, disabled, children }) => {
+const MenuItem: React.FC<MenuItemProps> = ({ label, onClick, onMouseEnter, onMouseLeave, isActive, disabled, checked, children }) => {
 
   return (
     <div
@@ -38,7 +40,10 @@ const MenuItem: React.FC<MenuItemProps> = ({ label, onClick, onMouseEnter, onMou
       onMouseLeave={disabled ? undefined : onMouseLeave}
     >
       <div className={style["menu-item-label"]}>
-        {label}
+        {checked !== undefined && (
+          <span className={style["menu-item-check"]}>{checked ? "✓" : ""}</span>
+        )}
+        <span className={style["menu-item-text"]}>{label}</span>
         {children && <span className={style["menu-item-arrow"]}>&gt;</span>}
       </div>
       {/* 始终在 DOM 中保留子菜单，通过 CSS 控制显示状态。 */}

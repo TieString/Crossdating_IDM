@@ -14,6 +14,8 @@ export interface MenuConfigItem {
   onClick?: () => void | Promise<void>;
   /** Prevents click and hover interaction when true. */
   disabled?: boolean;
+  /** When defined, renders a fixed-width check gutter; true shows the check mark. */
+  checked?: boolean;
   /** Nested submenu content. */
   children?: React.ReactNode;
 }
@@ -55,6 +57,7 @@ const Menu: React.FC<MenuProps> = ({ items }) => {
             key={index}
             label={item.label}
             disabled={item.disabled}
+            checked={item.checked}
             onClick={() => handleMenuClick(item.onClick, hasChildren)}
             onMouseEnter={() => handleMenuMouseEnter(item.label, hasChildren)}
             onMouseLeave={() => {

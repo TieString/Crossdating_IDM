@@ -91,7 +91,6 @@ const SAMPLE_SIZE_AXIS_ID = 'sampleSize'
 const SAMPLE_SIZE_LABEL = '样本量'
 const SAMPLE_SIZE_COLOR = 'rgba(104, 110, 120, 0.62)'
 const MISSING_RING_COLOR = '#2ecc71'
-const MISSING_RING_LABEL = '缺失年轮'
 
 type XAxisLabel = {
   index: number
@@ -116,31 +115,22 @@ function distToSegment(px: number, py: number, ax: number, ay: number, bx: numbe
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
 }
 
-// 返回 dataIndex 附近实际绘制的折线段（用索引对表示）。会跨过 null 缺口
-// 连接最近的有效点，因此缺失年轮处的绿色桥接线段也能参与命中检测。
+// 返回 dataIndex 附近用于命中检测的折线段（用索引对表示）。
+// 紧邻两段与原逻辑一致（端点为 null 由调用方跳过）；仅当该列本身是缺口（缺失年轮）时，
+// 额外补一段跨过缺口、连接两侧最近有效点的桥接段，使绿色桥接线也能被点击/悬停命中。
+// 不向端点方向远距离延伸，避免在折线端点附近误命中（否则会抢占放置标记线的空白点击）。
 function lineSegmentsNearIndex(data: Array<number | null | unknown>, index: number): [number, number][] {
   const segments: [number, number][] = []
 
-  let left = index
-  while (left >= 0 && data[left] == null) left--
-  let right = index
-  while (right < data.length && data[right] == null) right++
+  if (index - 1 >= 0) segments.push([index - 1, index])
+  if (index + 1 < data.length) segments.push([index, index + 1])
 
-  // 跨过缺口连接两侧有效点（缺轮年份点击/悬停时命中此段）。
-  if (left >= 0 && right < data.length && left !== right) {
-    segments.push([left, right])
-  }
-  // 左侧相邻段
-  if (left >= 0) {
-    let prev = left - 1
-    while (prev >= 0 && data[prev] == null) prev--
-    if (prev >= 0) segments.push([prev, left])
-  }
-  // 右侧相邻段
-  if (right < data.length) {
-    let next = right + 1
-    while (next < data.length && data[next] == null) next++
-    if (next < data.length) segments.push([right, next])
+  if (data[index] == null) {
+    let left = index - 1
+    while (left >= 0 && data[left] == null) left--
+    let right = index + 1
+    while (right < data.length && data[right] == null) right++
+    if (left >= 0 && right < data.length) segments.push([left, right])
   }
 
   return segments
@@ -760,7 +750,6 @@ export function MultiLineChart({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tree: string; year: number } | null>(null)
   const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number; tree: string; year: number } | null>(null)
   const [showSampleSize, setShowSampleSize] = useState(true)
-  const [showMissingRings, setShowMissingRings] = useState(true)
   const [lineHoverable, setLineHoverable] = useState(false)
   const treeCodes = useMemo(() => Array.from(data.keys()), [data])
   const highlightedIndex = highlightedTreeCode ? treeCodes.indexOf(highlightedTreeCode) : -1
@@ -770,6 +759,9 @@ export function MultiLineChart({
     const scale = chart.scales['x']
     const min = Number(scale.min)
     const max = Number(scale.max)
+
+    // 图表已处于目标缩放状态，标记跳过回传引起的二次套用。
+    skipZoomRestoreRef.current = true
 
     if (!Number.isFinite(min) || !Number.isFinite(max)) {
       onZoomWindowChange(null)
@@ -888,18 +880,18 @@ export function MultiLineChart({
     return nextDatasets
   }, [allYears, data, highlightedIndex, referenceSeries, sampleSize, showSampleSize])
 
-  const chartData: ChartData<'line'> = {
+  // 记忆化 chartData，避免每次渲染（含鼠标移动）都生成新引用导致 react-chartjs-2 重复 update 卡顿。
+  const chartData: ChartData<'line'> = useMemo(() => ({
     labels: allYears.map(year => year.toString()),
     datasets
-  }
+  }), [allYears, datasets])
 
   // 将缺失年轮状态同步给插件，并触发重绘。
   useEffect(() => {
     missingRingLinesPlugin.byTree = missingRingYears ?? new Map()
     missingRingLinesPlugin.highlightedTree = highlightedTreeCode
-    missingRingLinesPlugin.enabled = showMissingRings
     chartRef.current?.draw()
-  }, [missingRingLinesPlugin, missingRingYears, highlightedTreeCode, showMissingRings])
+  }, [missingRingLinesPlugin, missingRingYears, highlightedTreeCode])
 
   // 键盘左右键移动当前高亮折线。
   useEffect(() => {
@@ -917,8 +909,29 @@ export function MultiLineChart({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [data, emitZoomWindow, highlightedTreeCode, onShiftHighlightedTree])
 
-  // 数据变更后恢复缩放状态。
+  const zoomWindowRef = useRef(zoomWindow)
+  useEffect(() => { zoomWindowRef.current = zoomWindow }, [zoomWindow])
+  // 标记「本次 zoomWindow 变化来自图表自身缩放/平移回传」，避免再把窗口重新套回图表造成来回跳动。
+  const skipZoomRestoreRef = useRef(false)
+
+  // 数据/系列变化后，按当前缩放窗口恢复 X 轴范围。
   useEffect(() => {
+    const chart = chartRef.current
+    if (!chart) return
+
+    const scale = chart.scales['x']
+    const win = zoomWindowRef.current
+    scale.options.min = win?.min
+    scale.options.max = win?.max
+    chart.update('none')
+  }, [datasets, allYears])
+
+  // 外部修改缩放窗口（例如重置）时应用到图表；忽略由缩放/平移自身回传引起的变化。
+  useEffect(() => {
+    if (skipZoomRestoreRef.current) {
+      skipZoomRestoreRef.current = false
+      return
+    }
     const chart = chartRef.current
     if (!chart) return
 
@@ -926,7 +939,7 @@ export function MultiLineChart({
     scale.options.min = zoomWindow?.min
     scale.options.max = zoomWindow?.max
     chart.update('none')
-  }, [chartData, highlightedTreeCode, zoomWindow])
+  }, [zoomWindow])
 
   // 根据当前数据计算 Y 轴范围，给曲线留出上下边距。
   const [yMin, yMax] = useMemo(() => {
@@ -1400,47 +1413,6 @@ export function MultiLineChart({
             }}
           />
           <span>{SAMPLE_SIZE_LABEL}</span>
-        </label>
-        <label
-          title="显示/隐藏缺失年轮标记"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '2px 7px',
-            border: '1px solid rgba(210,210,210,0.85)',
-            borderRadius: 4,
-            background: 'rgba(255,255,255,0.88)',
-            color: '#555',
-            fontFamily: CHART_FONT_FAMILY,
-            fontSize: 11,
-            lineHeight: 1.4,
-            cursor: 'pointer',
-            userSelect: 'none',
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={showMissingRings}
-            aria-label="显示缺失年轮标记"
-            onChange={(event) => setShowMissingRings(event.target.checked)}
-            style={{
-              width: 12,
-              height: 12,
-              margin: 0,
-              accentColor: MISSING_RING_COLOR,
-              cursor: 'pointer',
-            }}
-          />
-          <span
-            aria-hidden="true"
-            style={{
-              width: 24,
-              height: 0,
-              borderTop: `2px solid ${MISSING_RING_COLOR}`,
-            }}
-          />
-          <span>{MISSING_RING_LABEL}</span>
         </label>
       </div>
       <Line
