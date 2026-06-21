@@ -4,6 +4,8 @@ import { RwlSiteData } from '@/features/rwl';
 import { moveSeriesTailByOffset as previewMoveSeriesTailByOffset } from '@/features/rwl/edit';
 import { BayesianDateButton } from '@/features/rwl/components/BayesianDateButton';
 import type { BayesianDatingCandidate, BayesianMcmcDatingResult } from '@/features/rwl/bayesianDating';
+import { AlphaEditSuggestionPanel } from '@/features/rwl/components/AlphaEditSuggestionPanel';
+import type { AlphaEditCandidate, AlphaEditSuggestionResult } from '@/features/rwl/alphaEditSuggestions';
 import type { CofechaPassReference } from '@/features/crossdating/reference';
 import type { DeleteMode, DeleteShift, DeletionMarkerInfo, RwlDeletionMarkers, RwlHistoryAnimation } from '@/features/rwl/edit';
 import { RollingNumber } from '@/components/RollingNumber/RollingNumber';
@@ -722,6 +724,12 @@ export type WidthContainerProps = {
         result: BayesianMcmcDatingResult,
         candidate: BayesianDatingCandidate,
     ) => void,
+    /** Applies one Wenk 2003 alpha-edit insert/delete suggestion to one series. */
+    onApplyAlphaEditCandidate?: (
+        tree: string,
+        result: AlphaEditSuggestionResult,
+        candidate: AlphaEditCandidate,
+    ) => void,
     /** Parent scroll container for jump/highlight coordination. */
     scrollContainerRef?: RefObject<HTMLElement | null>,
     /** Actual scrolling element. Preferred over scrollContainerRef when provided. */
@@ -903,6 +911,7 @@ function WidthContainer({
     onDeleteSeriesRequestHandled,
     onReplaceTreeData,
     onApplyBayesianStartYear,
+    onApplyAlphaEditCandidate,
     scrollContainerRef,
     scrollElement
 }: WidthContainerProps): ReactNode {
@@ -2510,6 +2519,12 @@ function WidthContainer({
                                     series={visibleSite.get(series.treeCode) ?? new Map()}
                                     reference={cofechaPassReference}
                                     onApplyStartYear={onApplyBayesianStartYear}
+                                />
+                                <AlphaEditSuggestionPanel
+                                    seriesId={series.treeCode}
+                                    series={visibleSite.get(series.treeCode) ?? new Map()}
+                                    reference={cofechaPassReference}
+                                    onApplyCandidate={onApplyAlphaEditCandidate}
                                 />
                             </div>
                             {series.rows.map((row, rowIndex) => (

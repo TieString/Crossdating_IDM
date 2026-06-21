@@ -1,5 +1,6 @@
 use tauri::Builder;
 
+mod alpha_edit_suggestions;
 mod bayesian_dating_mcmc;
 mod commands;
 mod file_ops;
@@ -16,6 +17,7 @@ pub fn run() {
             commands::greet,
             commands::list_files_and_directories,
             commands::write_out_next_to_rwl,
+            alpha_edit_suggestions::suggest_insert_delete_years_alpha_edit,
             bayesian_dating_mcmc::bayesian_date_series_mcmc,
         ])
         .run(tauri::generate_context!())

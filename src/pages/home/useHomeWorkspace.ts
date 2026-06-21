@@ -20,6 +20,7 @@ import {
 } from "@/features/crossdating/reference";
 import type { ICofechaResult } from "@/features/cofecha/types";
 import { detectPrecision, readRwlString } from "@/features/rwl";
+import type { AlphaEditCandidate, AlphaEditSuggestionResult } from "@/features/rwl/alphaEditSuggestions";
 import { rebuildTreeDataFromStartYear, type BayesianDatingCandidate, type BayesianMcmcDatingResult } from "@/features/rwl/bayesianDating";
 import { RwlEditor, registerChangeYearWidth } from "@/features/rwl/edit";
 import type { DeleteMode, DeleteShift, RwlDeletionMarkers, RwlHistoryAnimation, RwlHistoryStatus, RwlOperationLogEntry } from "@/features/rwl/edit";
@@ -1012,6 +1013,103 @@ export function useHomeWorkspace() {
         });
     }, [triggerHistoryAnimation]);
 
+    const getCurrentBarkToPithRings = useCallback((tree: string) => (
+        Array.from(rwlEditorRef.current.getData().get(tree)?.entries() ?? [])
+            .filter((entry): entry is [number, number] => {
+                const [, value] = entry;
+                return typeof value === "number"
+                    && Number.isFinite(value)
+                    && value !== stopMarker.value;
+            })
+            .sort((a, b) => b[0] - a[0])
+            .map(([year, value], ringIndex) => ({ ringIndex, year, value }))
+    ), []);
+
+    const handleApplyAlphaEditCandidate = useCallback((
+        tree: string,
+        result: AlphaEditSuggestionResult,
+        candidate: AlphaEditCandidate,
+    ) => {
+        if (candidate.operations.length === 0) {
+            return;
+        }
+
+        const batchId = `wenk-alpha-edit-${Date.now()}-${candidate.operations.length}`;
+        const sortedOperations = [...candidate.operations].sort((a, b) => {
+            const indexA = a.recommendedDeleteIndex ?? a.targetBoundaryIndex ?? -1;
+            const indexB = b.recommendedDeleteIndex ?? b.targetBoundaryIndex ?? -1;
+            return indexB - indexA || b.operationOrder - a.operationOrder;
+        });
+
+        sortedOperations.forEach((operation, operationIndex) => {
+            const currentRings = getCurrentBarkToPithRings(tree);
+            const targetIndex = operation.operationType === "insert_missing_ring_suggestion"
+                ? operation.targetBoundaryIndex
+                : operation.recommendedDeleteIndex;
+            if (targetIndex === null || targetIndex === undefined) {
+                return;
+            }
+            const targetRing = currentRings[targetIndex];
+            if (!targetRing) {
+                return;
+            }
+
+            const logMetadata = {
+                operationType: "WENK_2003_ALPHA_EDIT_SUGGESTION",
+                source: "auto-suggested" as const,
+                reason: operation.operationType === "insert_missing_ring_suggestion"
+                    ? "Wenk 2003 alpha-edit suggested missing ring"
+                    : "Wenk 2003 alpha-edit suggested double/false ring",
+                batchId,
+                targetIndex,
+                oldYear: targetRing.year,
+                metricsBefore: {
+                    candidateId: candidate.id,
+                    candidateRank: candidate.rank,
+                    alpha: candidate.alpha,
+                    editCount: candidate.editCount,
+                    insertCount: candidate.insertCount,
+                    mergeCount: candidate.mergeCount,
+                    operationIndex: operationIndex + 1,
+                    referenceYear: operation.referenceYear,
+                    suggestedOuterYear: candidate.suggestedOuterYear,
+                    suggestedInnerYear: candidate.suggestedInnerYear,
+                },
+                metricsAfter: {
+                    tValue: candidate.tValue ?? null,
+                    correlation: candidate.correlation ?? null,
+                    normalizedEditDistance: candidate.normalizedEditDistance,
+                    sumSquaredError: candidate.sumSquaredError,
+                    overlap: candidate.overlap,
+                    costContribution: operation.costContribution,
+                    candidateCount: result.candidateCount,
+                },
+            };
+
+            if (operation.operationType === "insert_missing_ring_suggestion") {
+                rwlEditorRef.current.insertMissingYearAtSide(tree, targetRing.year, "right", logMetadata);
+                triggerHistoryAnimation({
+                    type: "insert-missing",
+                    tree,
+                    year: targetRing.year,
+                    side: "right",
+                    direction: "redo",
+                });
+                return;
+            }
+
+            rwlEditorRef.current.deleteYearWithMode(tree, targetRing.year, "right", "right", logMetadata);
+            triggerHistoryAnimation({
+                type: "delete-year",
+                tree,
+                year: targetRing.year,
+                mode: "right",
+                shift: "right",
+                direction: "redo",
+            });
+        });
+    }, [getCurrentBarkToPithRings, triggerHistoryAnimation]);
+
     const handleInsertMissingYearAtSideFromChart = useCallback((tree: string, nextYear: number, side: "left" | "right") => {
         rwlEditorRef.current.insertMissingYearAtSide(tree, nextYear, side);
         triggerHistoryAnimation({ type: "insert-missing", tree, year: nextYear, side, direction: "redo" });
@@ -1201,6 +1299,7 @@ export function useHomeWorkspace() {
         handleApplyDiagnosisCandidate,
         handleApplyDiagnosisCandidateBatch,
         handleApplyBayesianStartYear,
+        handleApplyAlphaEditCandidate,
         handleApplyLocalSimulation,
         handleReferenceConfigChange,
         handleResetReferenceToDynamic,

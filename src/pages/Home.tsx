@@ -344,6 +344,7 @@ export default function Home() {
         handleApplyDiagnosisCandidate,
         handleApplyDiagnosisCandidateBatch,
         handleApplyBayesianStartYear,
+        handleApplyAlphaEditCandidate,
         handleApplyLocalSimulation,
         handleReferenceConfigChange,
         handleResetReferenceToDynamic,
@@ -1223,6 +1224,7 @@ export default function Home() {
                                                     onDeleteSeriesRequestHandled={handleDeleteSeriesRequestHandled}
                                                     onReplaceTreeData={handleReplaceTreeData}
                                                     onApplyBayesianStartYear={handleApplyBayesianStartYear}
+                                                    onApplyAlphaEditCandidate={handleApplyAlphaEditCandidate}
                                                     onJumpToCofecha={handleJumpToCofechaPart6}
                                                     cofechaPart6Trees={cofechaPart6Trees}
                                                 />
