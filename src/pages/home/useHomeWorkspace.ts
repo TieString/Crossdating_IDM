@@ -20,6 +20,7 @@ import {
 } from "@/features/crossdating/reference";
 import type { ICofechaResult } from "@/features/cofecha/types";
 import { detectPrecision, readRwlString } from "@/features/rwl";
+import { rebuildTreeDataFromStartYear, type BayesianDatingCandidate, type BayesianMcmcDatingResult } from "@/features/rwl/bayesianDating";
 import { RwlEditor, registerChangeYearWidth } from "@/features/rwl/edit";
 import type { DeleteMode, DeleteShift, RwlDeletionMarkers, RwlHistoryAnimation, RwlHistoryStatus, RwlOperationLogEntry } from "@/features/rwl/edit";
 import type { RwlSiteData } from "@/features/rwl/types";
@@ -962,6 +963,55 @@ export function useHomeWorkspace() {
         rwlEditorRef.current.replaceTreeData(tree, data);
     }, []);
 
+    const handleApplyBayesianStartYear = useCallback((
+        tree: string,
+        startYear: number,
+        result: BayesianMcmcDatingResult,
+        candidate: BayesianDatingCandidate,
+    ) => {
+        const currentSeries = rwlEditorRef.current.getData().get(tree);
+        if (!currentSeries) {
+            return;
+        }
+
+        const oldYears = Array.from(currentSeries.keys()).sort((a, b) => a - b);
+        const oldStartYear = oldYears[0];
+        const newData = rebuildTreeDataFromStartYear(currentSeries, startYear);
+        const best = candidate;
+        const second = result.secondBest;
+
+        rwlEditorRef.current.replaceTreeData(tree, newData, {
+            operationType: "BAYESIAN_DATE_SERIES",
+            source: "auto-suggested",
+            reason: `Bayesian MCMC dating applied ${best.startYear}-${best.endYear} with posterior ${(best.posterior * 100).toFixed(1)}%.`,
+            oldYear: oldStartYear,
+            newYear: startYear,
+            metricsBefore: {
+                originalStartYear: oldStartYear ?? null,
+                originalEndYear: oldYears[oldYears.length - 1] ?? null,
+                targetLength: result.targetLength,
+            },
+            metricsAfter: {
+                bestStartYear: best.startYear,
+                bestEndYear: best.endYear,
+                bestPosterior: best.posterior,
+                secondStartYear: second?.startYear ?? null,
+                secondPosterior: second?.posterior ?? null,
+                hpd95Count: result.hpd95.length,
+                candidateCount: result.candidateCount,
+                overlap: best.overlap,
+                correlation: best.correlation ?? null,
+                tValue: best.tValue ?? null,
+                decision: result.decision.status,
+            },
+        });
+        triggerHistoryAnimation({
+            type: "replace-tree-data",
+            tree,
+            direction: "redo",
+        });
+    }, [triggerHistoryAnimation]);
+
     const handleInsertMissingYearAtSideFromChart = useCallback((tree: string, nextYear: number, side: "left" | "right") => {
         rwlEditorRef.current.insertMissingYearAtSide(tree, nextYear, side);
         triggerHistoryAnimation({ type: "insert-missing", tree, year: nextYear, side, direction: "redo" });
@@ -1150,6 +1200,7 @@ export function useHomeWorkspace() {
         handleMoveSeriesTailByOffset,
         handleApplyDiagnosisCandidate,
         handleApplyDiagnosisCandidateBatch,
+        handleApplyBayesianStartYear,
         handleApplyLocalSimulation,
         handleReferenceConfigChange,
         handleResetReferenceToDynamic,

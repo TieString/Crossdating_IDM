@@ -1384,7 +1384,7 @@ export class RwlEditor {
         };
     }
 
-    replaceTreeData(tree: string, newData: RwlTreeData): void {
+    replaceTreeData(tree: string, newData: RwlTreeData, logMetadata?: RwlOperationLogMetadata): void {
         if (!this.rwlData.has(tree)) return;
 
         const operation: RwlEditOperation = { type: "replace-tree-data", tree };
@@ -1400,7 +1400,7 @@ export class RwlEditor {
         nextMarkers.delete(tree);
         this.deletionMarkers = nextMarkers;
 
-        this.appendOperationLog(operation, tree, beforeState);
+        this.appendOperationLog(operation, tree, beforeState, logMetadata);
         this.notifyChange();
     }
 

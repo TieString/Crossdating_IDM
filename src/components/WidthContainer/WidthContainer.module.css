@@ -214,8 +214,19 @@
     color: #8a94a3;
 }
 
-.series-header-stats {
+.series-header-spacer {
     margin-left: auto;
+}
+
+.series-header-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.series-header-stats {
     display: flex;
     align-items: center;
     gap: 8px;

@@ -1,9 +1,9 @@
-// src/lib.rs
 use tauri::Builder;
 
-mod models;     // 数据结构模块
-mod file_ops;   // 文件操作模块
-mod commands;   // Tauri 命令模块
+mod bayesian_dating_mcmc;
+mod commands;
+mod file_ops;
+mod models;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -12,8 +12,12 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![commands::greet, commands::list_files_and_directories, commands::write_out_next_to_rwl]) // 绑定命令
+        .invoke_handler(tauri::generate_handler![
+            commands::greet,
+            commands::list_files_and_directories,
+            commands::write_out_next_to_rwl,
+            bayesian_dating_mcmc::bayesian_date_series_mcmc,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-

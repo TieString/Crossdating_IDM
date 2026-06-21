@@ -343,6 +343,7 @@ export default function Home() {
         handleMoveSeriesTailByOffset,
         handleApplyDiagnosisCandidate,
         handleApplyDiagnosisCandidateBatch,
+        handleApplyBayesianStartYear,
         handleApplyLocalSimulation,
         handleReferenceConfigChange,
         handleResetReferenceToDynamic,
@@ -1203,6 +1204,7 @@ export default function Home() {
                                                     siteData={siteData}
                                                     selected={selectedTree}
                                                     masterSeries={cofechaResult?.masterDatingSeries}
+                                                    cofechaPassReference={dynamicReferenceConfig?.cofechaPassReference ?? null}
                                                     masterCorrelations={cofechaResult?.masterCorrelations}
                                                     seriesProblemCounts={cofechaResult?.seriesProblemCounts}
                                                     historyAnimation={historyAnimation}
@@ -1220,6 +1222,7 @@ export default function Home() {
                                                     onEditAsText={handleOpenRawEditor}
                                                     onDeleteSeriesRequestHandled={handleDeleteSeriesRequestHandled}
                                                     onReplaceTreeData={handleReplaceTreeData}
+                                                    onApplyBayesianStartYear={handleApplyBayesianStartYear}
                                                     onJumpToCofecha={handleJumpToCofechaPart6}
                                                     cofechaPart6Trees={cofechaPart6Trees}
                                                 />

@@ -2,6 +2,9 @@ import { memo, ReactNode, RefObject, useCallback, useEffect, useLayoutEffect, us
 import { createPortal, flushSync } from 'react-dom';
 import { RwlSiteData } from '@/features/rwl';
 import { moveSeriesTailByOffset as previewMoveSeriesTailByOffset } from '@/features/rwl/edit';
+import { BayesianDateButton } from '@/features/rwl/components/BayesianDateButton';
+import type { BayesianDatingCandidate, BayesianMcmcDatingResult } from '@/features/rwl/bayesianDating';
+import type { CofechaPassReference } from '@/features/crossdating/reference';
 import type { DeleteMode, DeleteShift, DeletionMarkerInfo, RwlDeletionMarkers, RwlHistoryAnimation } from '@/features/rwl/edit';
 import { RollingNumber } from '@/components/RollingNumber/RollingNumber';
 import WidthGrid from './WidthGrid';
@@ -670,6 +673,8 @@ export type WidthContainerProps = {
     siteData: RwlSiteData,
     /** Optional derived reference/master series keyed by year. */
     masterSeries?: Map<number, number>,
+    /** Dynamic COFECHA-pass reference used by Bayesian dating. */
+    cofechaPassReference?: CofechaPassReference | null,
     /** COFECHA PART 7 各序列与主序列的整体相关性，键为大写序列号。 */
     masterCorrelations?: Map<string, number>,
     /** COFECHA PART 7 各序列的潜在问题分段数（Flags），键为大写序列号。 */
@@ -710,6 +715,13 @@ export type WidthContainerProps = {
     onDeleteSeriesRequestHandled?: (id: number) => void,
     /** Replaces one series with parsed text-editor data. */
     onReplaceTreeData?: (tree: string, data: Map<number, number | null>) => void,
+    /** Applies a Bayesian posterior start-year choice to one series. */
+    onApplyBayesianStartYear?: (
+        tree: string,
+        startYear: number,
+        result: BayesianMcmcDatingResult,
+        candidate: BayesianDatingCandidate,
+    ) => void,
     /** Parent scroll container for jump/highlight coordination. */
     scrollContainerRef?: RefObject<HTMLElement | null>,
     /** Actual scrolling element. Preferred over scrollContainerRef when provided. */
@@ -869,6 +881,7 @@ function createSeriesShatterAnimation(rect: { left: number; top: number; width: 
 function WidthContainer({
     siteData: site,
     masterSeries,
+    cofechaPassReference,
     masterCorrelations,
     seriesProblemCounts,
     selected,
@@ -889,6 +902,7 @@ function WidthContainer({
     cofechaPart6Trees,
     onDeleteSeriesRequestHandled,
     onReplaceTreeData,
+    onApplyBayesianStartYear,
     scrollContainerRef,
     scrollElement
 }: WidthContainerProps): ReactNode {
@@ -2470,6 +2484,7 @@ function WidthContainer({
                                         {yearRange[0]}–{yearRange[1]} · {yearRange[1] - yearRange[0] + 1} 年
                                     </span>
                                 )}
+                                <span className={style["series-header-spacer"]} aria-hidden="true" />
                                 {(typeof masterCorrelation === "number" || typeof problemCount === "number") && (
                                     <span className={style["series-header-stats"]}>
                                         {typeof problemCount === "number" && (
@@ -2490,6 +2505,12 @@ function WidthContainer({
                                         )}
                                     </span>
                                 )}
+                                <BayesianDateButton
+                                    seriesId={series.treeCode}
+                                    series={visibleSite.get(series.treeCode) ?? new Map()}
+                                    reference={cofechaPassReference}
+                                    onApplyStartYear={onApplyBayesianStartYear}
+                                />
                             </div>
                             {series.rows.map((row, rowIndex) => (
                         <div className={style["series-row"]} key={`${series.treeCode}-${rowIndex}-${row.startYear}`}>
