@@ -1,6 +1,6 @@
 import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { parseCofechaResult, splitReportByParts } from "@/features/cofecha/formatter";
+import { extractPart6FlaggedASeriesIds, parseCofechaResult, splitReportByParts } from "@/features/cofecha/formatter";
 import {
     type CrossdatingDiagnosis,
     getDiagnosisCandidateLabel,
@@ -12,7 +12,12 @@ import {
     type LocalSimulationApplyRequest,
 } from "@/features/crossdating/diagnosis";
 import { buildCrossdatingValidationSummary } from "@/features/crossdating/validation";
-import { normalizeReferenceSeriesConfig, type ReferenceSeriesConfig } from "@/features/crossdating/reference";
+import {
+    createCofechaPassReferenceConfig,
+    hashRwlSiteData,
+    normalizeReferenceSeriesConfig,
+    type ReferenceSeriesConfig,
+} from "@/features/crossdating/reference";
 import type { ICofechaResult } from "@/features/cofecha/types";
 import { detectPrecision, readRwlString } from "@/features/rwl";
 import { RwlEditor, registerChangeYearWidth } from "@/features/rwl/edit";
@@ -52,6 +57,84 @@ type RunCofechaApplyOptions = {
     selectedPart?: string;
 };
 
+const calculatePearsonCorrelation = (pairs: Array<[number, number]>): number | null => {
+    if (pairs.length < 3) return null;
+
+    const meanA = pairs.reduce((sum, [a]) => sum + a, 0) / pairs.length;
+    const meanB = pairs.reduce((sum, [, b]) => sum + b, 0) / pairs.length;
+    let numerator = 0;
+    let denominatorA = 0;
+    let denominatorB = 0;
+
+    pairs.forEach(([a, b]) => {
+        const da = a - meanA;
+        const db = b - meanB;
+        numerator += da * db;
+        denominatorA += da * da;
+        denominatorB += db * db;
+    });
+
+    const denominator = Math.sqrt(denominatorA * denominatorB);
+    return denominator > 0 ? numerator / denominator : null;
+};
+
+const summarizeSeriesRange = (values: readonly number[]) => {
+    if (values.length === 0) return null;
+    return {
+        min: Math.min(...values),
+        max: Math.max(...values),
+        mean: values.reduce((sum, value) => sum + value, 0) / values.length,
+    };
+};
+
+const logCofechaReferenceComparison = (
+    cofechaMaster: Map<number, number>,
+    dynamicReferenceConfig: ReferenceSeriesConfig,
+) => {
+    const dynamicReference = dynamicReferenceConfig.cofechaPassReference;
+    if (!dynamicReference || dynamicReference.points.length === 0 || cofechaMaster.size === 0) {
+        console.info("[COFECHA reference comparison] skipped", {
+            cofechaMasterPoints: cofechaMaster.size,
+            dynamicReferencePoints: dynamicReference?.points.length ?? 0,
+        });
+        return;
+    }
+
+    const dynamicByYear = new Map(dynamicReference.points.map((point) => [point.year, point.value]));
+    const replicationByYear = new Map(dynamicReference.points.map((point) => [point.year, point.replication]));
+    const rows = Array.from(cofechaMaster.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([year, cofechaValue]) => {
+            const dynamicValue = dynamicByYear.get(year);
+            return dynamicValue === undefined
+                ? null
+                : {
+                    year,
+                    cofechaMaster: cofechaValue,
+                    dynamicReference: dynamicValue,
+                    delta: dynamicValue - cofechaValue,
+                    replication: replicationByYear.get(year) ?? null,
+                };
+        })
+        .filter((row): row is NonNullable<typeof row> => row !== null);
+    const pairs = rows.map((row) => [row.cofechaMaster, row.dynamicReference] as [number, number]);
+    const correlation = calculatePearsonCorrelation(pairs);
+
+    console.groupCollapsed("[COFECHA reference comparison]");
+    console.info({
+        overlapYears: pairs.length,
+        pearsonR: correlation,
+        cofechaMasterRange: summarizeSeriesRange(rows.map((row) => row.cofechaMaster)),
+        dynamicReferenceRange: summarizeSeriesRange(rows.map((row) => row.dynamicReference)),
+        cofechaMasterTotalPoints: cofechaMaster.size,
+        dynamicReferenceTotalPoints: dynamicReference.points.length,
+        includedSeries: dynamicReference.includedSeriesIds.length,
+        candidateSeries: dynamicReference.candidateSeriesIds.length,
+    });
+    console.table(rows);
+    console.groupEnd();
+};
+
 export function useHomeWorkspace() {
     const rwlEditorRef = useRef<RwlEditor>(new RwlEditor(new Map()));
     const originalDataRef = useRef<RwlSiteData>(new Map());
@@ -63,6 +146,7 @@ export function useHomeWorkspace() {
     const referenceOperationCounterRef = useRef(0);
     const lastCofechaValidationRef = useRef<{ input: string; version: CofechaVersion } | null>(null);
     const latestDiagnosisCandidatesRef = useRef<DiagnosisCandidateOperation[]>([]);
+    const latestDynamicReferenceConfigRef = useRef<ReferenceSeriesConfig | null>(null);
 
     const [siteData, setSiteData] = useState<RwlSiteData>(() => rwlEditorRef.current.getData());
     const [deletionMarkers, setDeletionMarkers] = useState<RwlDeletionMarkers>(() => rwlEditorRef.current.getDeletionMarkers());
@@ -91,6 +175,14 @@ export function useHomeWorkspace() {
     const [isFileLoading, setIsFileLoading] = useState(false);
     const [isCofechaRunning, setIsCofechaRunning] = useState(false);
     const [diagnosisBatchResult, setDiagnosisBatchResult] = useState<DiagnosisBatchApplyResult | null>(null);
+
+    const [dynamicReferenceConfig, setDynamicReferenceConfig] = useState<ReferenceSeriesConfig | null>(null);
+
+    useEffect(() => {
+        if (dynamicReferenceConfig?.mode === "dynamic") {
+            latestDynamicReferenceConfigRef.current = dynamicReferenceConfig;
+        }
+    }, [dynamicReferenceConfig]);
 
     const scheduleHistorySnapshotPersist = useCallback((filePath: string, editor: RwlEditor) => {
         if (historyPersistTimerRef.current !== null) {
@@ -126,6 +218,11 @@ export function useHomeWorkspace() {
             setDeletionMarkers(editor.getDeletionMarkers());
             setOperationLog(editor.getOperationLog());
             setHistoryStatus(editor.getHistoryStatus());
+            setDynamicReferenceConfig((previous) => (
+                previous?.mode === "dynamic" && !previous.isStale
+                    ? { ...previous, isStale: true }
+                    : previous
+            ));
             if (filePathRef.current) {
                 scheduleHistorySnapshotPersist(filePathRef.current, editor);
             }
@@ -163,10 +260,19 @@ export function useHomeWorkspace() {
     useEffect(() => {
         setReferenceConfig((previous) => {
             const normalized = normalizeReferenceSeriesConfig(previous, siteData);
-            if (JSON.stringify(previous) === JSON.stringify(normalized)) {
+            const manualOnly = normalized?.mode === "dynamic" ? null : normalized;
+            if (JSON.stringify(previous) === JSON.stringify(manualOnly)) {
                 return previous;
             }
-            return normalized;
+            return manualOnly;
+        });
+        setDynamicReferenceConfig((previous) => {
+            const normalized = normalizeReferenceSeriesConfig(previous, siteData);
+            const dynamicOnly = normalized?.mode === "dynamic" ? normalized : null;
+            if (JSON.stringify(previous) === JSON.stringify(dynamicOnly)) {
+                return previous;
+            }
+            return dynamicOnly;
         });
     }, [siteData]);
 
@@ -175,10 +281,11 @@ export function useHomeWorkspace() {
         persistReferenceState(
             filePathRef.current,
             referenceConfig,
+            dynamicReferenceConfig,
             referenceOperationLog,
             referenceOperationCounterRef.current,
         );
-    }, [referenceConfig, referenceOperationLog]);
+    }, [dynamicReferenceConfig, referenceConfig, referenceOperationLog]);
 
     useEffect(() => {
         if (!filePathRef.current || (!outFileContent && !cofechaResult)) return;
@@ -227,15 +334,26 @@ export function useHomeWorkspace() {
             const baseName = sourcePath.split(/\\|\//).pop() || "INPUT.RWL";
             const nextOutText = await runCofecha(input, baseName, sourcePath, version);
             const nextResult = parseCofechaResult(nextOutText);
+            const nextParts = splitReportByParts(nextOutText);
+            const cofechaRunId = `cofecha-${Date.now()}`;
+            const dynamicReferenceConfig = createCofechaPassReferenceConfig({
+                siteData: rwlEditorRef.current.getData(),
+                flaggedAIds: extractPart6FlaggedASeriesIds(nextParts.get("PART 6") ?? ""),
+                cofechaRunId,
+                rwlHash: hashRwlSiteData(rwlEditorRef.current.getData()),
+            });
+            logCofechaReferenceComparison(nextResult.masterDatingSeries, dynamicReferenceConfig);
 
             lastCofechaValidationRef.current = {
                 input: rwlEditorRef.current.exportAsRwlString(),
                 version,
             };
+            latestDynamicReferenceConfigRef.current = dynamicReferenceConfig;
+            setDynamicReferenceConfig(dynamicReferenceConfig);
             setOutFileContent(nextOutText);
             setCofechaResult(nextResult);
             setPossibleProblemsDetail(nextResult.possibleProblemsDetail);
-            setCofechaParts(splitReportByParts(nextOutText));
+            setCofechaParts(nextParts);
             persistCofechaState(
                 sourcePath,
                 nextOutText,
@@ -295,10 +413,24 @@ export function useHomeWorkspace() {
                 }
             }
             replaceEditor(nextEditor, diskBaseline);
-            setReferenceConfig(normalizeReferenceSeriesConfig(
+            const restoredReferenceConfig = normalizeReferenceSeriesConfig(
                 persistedReference?.referenceConfig ?? null,
                 nextEditor.getData(),
-            ));
+            );
+            const restoredDynamicReferenceConfig = normalizeReferenceSeriesConfig(
+                persistedReference?.dynamicReferenceConfig
+                    ?? (restoredReferenceConfig?.mode === "dynamic" ? restoredReferenceConfig : null),
+                nextEditor.getData(),
+            );
+            const manualReferenceConfig = restoredReferenceConfig?.mode === "dynamic"
+                ? null
+                : restoredReferenceConfig;
+            const dynamicReferenceConfig = restoredDynamicReferenceConfig?.mode === "dynamic"
+                ? restoredDynamicReferenceConfig
+                : null;
+            setReferenceConfig(manualReferenceConfig);
+            setDynamicReferenceConfig(dynamicReferenceConfig);
+            latestDynamicReferenceConfigRef.current = dynamicReferenceConfig;
             setReferenceOperationLog((persistedReference?.referenceOperationLog ?? []).map((entry) => (
                 normalizeWorkspaceOperationLogEntry(entry, filePath)
             )));
@@ -468,6 +600,7 @@ export function useHomeWorkspace() {
             persistReferenceState(
                 filePathToSave,
                 referenceConfig,
+                dynamicReferenceConfig,
                 referenceOperationLog,
                 referenceOperationCounterRef.current,
             );
@@ -481,7 +614,7 @@ export function useHomeWorkspace() {
         } catch (error) {
             console.error("写入文件时出错:", error);
         }
-    }, [markCurrentDataAsSaved, referenceConfig, referenceOperationLog, runCofechaAndApplyResult]);
+    }, [dynamicReferenceConfig, markCurrentDataAsSaved, referenceConfig, referenceOperationLog, runCofechaAndApplyResult]);
 
     const handleSaveRawTextAs = useCallback(async (rawText: string) => {
         if (!filePathRef.current) {
@@ -508,6 +641,7 @@ export function useHomeWorkspace() {
             persistReferenceState(
                 filePathToSave,
                 referenceConfig,
+                dynamicReferenceConfig,
                 referenceOperationLog,
                 referenceOperationCounterRef.current,
             );
@@ -522,7 +656,7 @@ export function useHomeWorkspace() {
             console.error("写入文本编辑内容时出错:", error);
             throw error;
         }
-    }, [applyParsedRwlText, markCurrentDataAsSaved, referenceConfig, referenceOperationLog, runCofechaAndApplyResult]);
+    }, [applyParsedRwlText, dynamicReferenceConfig, markCurrentDataAsSaved, referenceConfig, referenceOperationLog, runCofechaAndApplyResult]);
 
     const handleUndo = useCallback(() => {
         triggerHistoryAnimation(rwlEditorRef.current.undo());
@@ -798,12 +932,30 @@ export function useHomeWorkspace() {
 
     const handleReferenceConfigChange = useCallback((nextConfig: ReferenceSeriesConfig | null) => {
         const normalized = normalizeReferenceSeriesConfig(nextConfig, rwlEditorRef.current.getData());
+        const manualOnly = normalized?.mode === "dynamic" ? null : normalized;
         referenceOperationCounterRef.current += 1;
-        setReferenceConfig(normalized);
+        setReferenceConfig(manualOnly);
         setReferenceOperationLog((previous) => [
             ...previous,
-            createReferenceOperationLogEntry(normalized, referenceOperationCounterRef.current, filePathRef.current),
+            createReferenceOperationLogEntry(manualOnly, referenceOperationCounterRef.current, filePathRef.current),
         ].slice(-MAX_REFERENCE_OPERATION_LOG_ENTRIES));
+    }, []);
+
+    const handleResetReferenceToDynamic = useCallback(() => {
+        const currentData = rwlEditorRef.current.getData();
+        const currentHash = hashRwlSiteData(currentData);
+        const latestDynamic = latestDynamicReferenceConfigRef.current;
+        const nextDynamic = latestDynamic
+            ? {
+                ...latestDynamic,
+                isStale: latestDynamic.isStale || latestDynamic.rwlHash !== currentHash,
+            }
+            : null;
+
+        setDynamicReferenceConfig(nextDynamic);
+        if (nextDynamic?.mode === "dynamic") {
+            latestDynamicReferenceConfigRef.current = nextDynamic;
+        }
     }, []);
 
     const handleReplaceTreeData = useCallback((tree: string, data: Map<number, number | null>) => {
@@ -898,7 +1050,7 @@ export function useHomeWorkspace() {
             worker.postMessage({
                 id: requestId,
                 siteData,
-                referenceConfig,
+                referenceConfig: dynamicReferenceConfig,
             } satisfies DiagnosisWorkerRequest);
         };
 
@@ -928,7 +1080,7 @@ export function useHomeWorkspace() {
                 diagnosisWorkerRef.current = null;
             }
         };
-    }, [historyAnimation?.id, referenceConfig, siteData]);
+    }, [dynamicReferenceConfig, historyAnimation?.id, siteData]);
 
     useEffect(() => {
         latestDiagnosisCandidatesRef.current = crossdatingDiagnosis.candidates;
@@ -985,6 +1137,7 @@ export function useHomeWorkspace() {
         crossdatingDiagnosis,
         deletionMarkers,
         diagnosisBatchResult,
+        dynamicReferenceConfig,
         fileName,
         historyStatus,
         handleDeleteSeries,
@@ -999,6 +1152,7 @@ export function useHomeWorkspace() {
         handleApplyDiagnosisCandidateBatch,
         handleApplyLocalSimulation,
         handleReferenceConfigChange,
+        handleResetReferenceToDynamic,
         handleRedo,
         handleReplaceTreeData,
         handleResetToRawData,

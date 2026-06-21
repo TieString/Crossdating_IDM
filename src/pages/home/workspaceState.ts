@@ -53,6 +53,7 @@ export const createReferenceOperationLogEntry = (
     projectId?: string | null,
 ): RwlOperationLogEntry => {
     const selectedCount = config?.selectedTrees.length ?? 0;
+    const isDynamic = config?.mode === "dynamic";
     const id = `reference-${Date.now()}-${sequence}`;
     const timestamp = new Date().toISOString();
 
@@ -68,12 +69,18 @@ export const createReferenceOperationLogEntry = (
         action: "apply",
         operationType: config ? "SET_REFERENCE_SERIES" : "CLEAR_REFERENCE_SERIES",
         source: "reference-assisted",
-        summary: config ? "设置参考序列" : "关闭参考序列",
+        summary: config ? (isDynamic ? "恢复动态参考序列" : "设置参考序列") : "关闭参考序列",
         detail: config
-            ? `${selectedCount} 条序列 · ${config.method} · min n=${config.minSampleDepth}`
+            ? isDynamic
+                ? `COFECHA 无 A 参考组 ${selectedCount} 条 · 待检查 ${config.classification?.candidateFlaggedIds.length ?? 0} 条`
+                : `${selectedCount} 条序列 · ${config.method} · min n=${config.minSampleDepth}`
             : "移除当前 reference / master-like series",
         tree: "Reference",
-        reason: config ? "用户选择可靠序列生成视觉参考线" : "用户关闭参考线",
+        reason: config
+            ? isDynamic
+                ? "使用最新 COFECHA-pass 动态参考序列"
+                : "用户选择可靠序列生成视觉参考线"
+            : "用户关闭参考线",
         undone: false,
         isApplied: true,
         isReverted: false,

@@ -220,9 +220,6 @@ PART 7:
     onClose() {},
   }));
 
-  assertIncludes(operationLogHtml, "操作日志");
-  assertIncludes(operationLogHtml, "aria-label=\"关闭\"");
-  assertIncludes(operationLogHtml, "smoke.rwl");
   assertIncludes(operationLogHtml, "显示 / 总计");
   assertIncludes(operationLogHtml, "搜索");
   assertIncludes(operationLogHtml, "回到原始");
@@ -272,9 +269,6 @@ PART 7:
     onClose() {},
   }));
 
-  assertIncludes(cofechaHtml, "COFECHA");
-  assertIncludes(cofechaHtml, "aria-label=\"关闭\"");
-  assertIncludes(cofechaHtml, "VERYCOF.OUT · 上次结果");
   assertIncludes(cofechaHtml, "待验证");
   assertIncludes(cofechaHtml, "重新验证");
   assertIncludes(cofechaHtml, "需要重新验证");

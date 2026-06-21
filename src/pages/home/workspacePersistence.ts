@@ -27,6 +27,7 @@ export type PersistedReferenceState = {
     version: 1;
     savedAt: string;
     referenceConfig: ReferenceSeriesConfig | null;
+    dynamicReferenceConfig?: ReferenceSeriesConfig | null;
     referenceOperationLog: RwlOperationLogEntry[];
     referenceOperationCounter: number;
 };
@@ -116,6 +117,7 @@ export const loadPersistedReferenceState = (filePath: string): PersistedReferenc
 export const persistReferenceState = (
     filePath: string,
     referenceConfig: ReferenceSeriesConfig | null,
+    dynamicReferenceConfig: ReferenceSeriesConfig | null,
     referenceOperationLog: RwlOperationLogEntry[],
     referenceOperationCounter: number,
 ) => {
@@ -126,6 +128,7 @@ export const persistReferenceState = (
                 version: 1,
                 savedAt: new Date().toISOString(),
                 referenceConfig,
+                dynamicReferenceConfig,
                 referenceOperationLog,
                 referenceOperationCounter,
             } satisfies PersistedReferenceState),

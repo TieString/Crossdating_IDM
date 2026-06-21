@@ -443,10 +443,12 @@ export function CofechaReportPage({
 type ExpandedChartPageProps = {
     siteData: RwlSiteData;
     referenceConfig: ReferenceSeriesConfig | null;
+    dynamicReferenceConfig?: ReferenceSeriesConfig | null;
     diagnosis: CrossdatingDiagnosis;
     diagnosisBatchResult: DiagnosisBatchApplyResult | null;
     showPersistentTooltip?: boolean;
     onReferenceConfigChange: (config: ReferenceSeriesConfig | null) => void;
+    onResetReferenceToDynamic: () => void;
     onApplyDiagnosisCandidate: (candidate: DiagnosisCandidateOperation) => void;
     onApplyDiagnosisCandidateBatch: (candidates: DiagnosisCandidateOperation[]) => void;
     onApplyLocalSimulation: (request: LocalSimulationApplyRequest) => void;
@@ -459,10 +461,12 @@ type ExpandedChartPageProps = {
 export function ExpandedChartPage({
     siteData,
     referenceConfig,
+    dynamicReferenceConfig = null,
     diagnosis,
     diagnosisBatchResult,
     showPersistentTooltip = false,
     onReferenceConfigChange,
+    onResetReferenceToDynamic,
     onApplyDiagnosisCandidate,
     onApplyDiagnosisCandidateBatch,
     onApplyLocalSimulation,
@@ -509,9 +513,11 @@ export function ExpandedChartPage({
                         showPersistentTooltip={showPersistentTooltip}
                         fullData={siteData}
                         referenceConfig={referenceConfig}
+                        dynamicReferenceConfig={dynamicReferenceConfig}
                         diagnosis={diagnosis}
                         diagnosisBatchResult={diagnosisBatchResult}
                         onReferenceConfigChange={onReferenceConfigChange}
+                        onResetReferenceToDynamic={onResetReferenceToDynamic}
                         onApplyDiagnosisCandidate={onApplyDiagnosisCandidate}
                         onApplyDiagnosisCandidateBatch={onApplyDiagnosisCandidateBatch}
                         onApplyLocalSimulation={onApplyLocalSimulation}

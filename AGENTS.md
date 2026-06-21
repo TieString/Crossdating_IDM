@@ -6,7 +6,7 @@
 
 - [src/pages/Home.tsx](src/pages/Home.tsx)：主界面和整体流程编排入口
 - [src/features/rwl/index.ts](src/features/rwl/index.ts)：RWL 格式识别与解析入口
-- [src/features/crossdating/reference.ts](src/features/crossdating/reference.ts)：参考序列配置、按年份对齐计算与 sample depth 入口
+- [src/features/crossdating/reference.ts](src/features/crossdating/reference.ts)：手动参考序列、COFECHA-pass 动态参考序列、PART 6 分类、COFECHA-style 标准化与 sample depth 入口
 - [src/features/crossdating/diagnosis.ts](src/features/crossdating/diagnosis.ts)：内部轻量诊断、分段相关、lag search 与候选检查项入口
 - [src/services/fs/io.ts](src/services/fs/io.ts)：文件读写辅助与解析桥接
 - [src/services/cofecha/runner.ts](src/services/cofecha/runner.ts)：COFECHA 执行与 OUT 文件处理
@@ -66,12 +66,15 @@
 - [src/features/crossdating/diagnosis.ts](src/features/crossdating/diagnosis.ts)：自动生成内部 problem segment count、A-like/B-like segment、propagation pattern、三类候选编辑与 before/after evidence；用户确认后可一次应用一个候选。
 - 自动交叉定年主管线第一版已经完成；当前算法层在同一入口中显式包含 Baillie & Pilcher-style global sliding match、Holmes/COFECHA-like segmented diagnosis、Van Deusen/Wenk-style local edit alignment，以及 Hassan-style MVP relative-confidence ranking。
 - 折线图候选生成由“生成候选”按钮触发；本轮不使用 hover 触发自动分析。
+- COFECHA-pass 动态参考序列已接入：每次 COFECHA 完成后复用 PART 6 `[A] Segment` 判断，把无 A flag 样芯作为 `anchor_pass` 参考锚定组，有 A flag 样芯作为 `candidate_flagged` 待检查组，并用标准化后的 anchor 序列生成 `COFECHA-pass 参考序列`。用户手动生成参考后会切到 manual 模式；折线图提供“恢复动态”回到最新 COFECHA-pass 参考。
+- [src/features/crossdating/reference.ts](src/features/crossdating/reference.ts)：动态参考生成按 COFECHA master dating series 流程执行：每条样芯先做 32 年 50% response cubic smoothing spline 去趋势，计算 `raw / spline` 的 dimensionless index，再用 AR(p) 预白化、默认 log transform、可选 first difference；随后按年份 accumulator/counter 算术平均，并把最终 master 标准化为 mean=0、sd=1。0 值 absent ring 默认不进入 reference。
 
 **约束**：
 - reference series 是 derived series，不进入 RWL 数据本体，不允许作为普通序列编辑。
-- reference 计算按年份对齐，默认 arithmetic mean，低于最小 sample depth 的年份不绘制。
+- 手动 reference 计算按年份对齐并直接 arithmetic mean；COFECHA-pass 动态 reference 只能平均转换后的 residual index，最终输出 mean=0、sd=1 的 residual chronology，低于最小 replication 的年份不绘制。
 - 参考变更写入操作日志，但不参与 RwlEditor 的撤销/恢复栈。
 - 内部诊断是 COFECHA-like 快速提示，不替代外部 COFECHA 最终验证；候选项必须由用户确认后才能通过 edit.ts 操作落地。
+- COFECHA-pass reference 与 COFECHA run/rwlHash 绑定；RWL 编辑后动态 reference 标记为 stale，直到重新运行 COFECHA。`anchor_pass` 不进入后续整体 offset 检查目标，预留检查入口只使用 `candidate_flagged`。
 - 自动候选仍只允许落到三类可执行编辑：`insertMissingYear`、`deleteFalseYear`、`batchMoveYears`（包含 `wholeSeriesMove` 与 `partialRangeMove`）。`wholeSeriesMove` 必须来自整条序列移动证据，`partialRangeMove` 必须保留 selectedRange/missingRange evidence，不能退化成插入一串 0。
 - 候选 evidence 需要保留 algorithmSource、before/after metrics、relative confidence（rank/probabilityLike/confidenceLevel），其中 probabilityLike 只表示内部候选相对置信度，不是严格贝叶斯后验概率。
 - 应用诊断候选时必须复用 [src/features/rwl/edit.ts](src/features/rwl/edit.ts) 的编辑路径，并以 `auto-suggested` 来源写入既有操作记录，保留 reason、候选年份、side/shift、selectedRange/missingRange 与 before/after metrics。
@@ -99,6 +102,7 @@
 - `npm run validate:cofecha:samples` — 直接调用本地 COFECHA sidecar 验证 crossdated 样例的 A/problem
 - `npm run validate:workspace-windows` — SSR smoke 验证独立操作日志/COFECHA 窗口关键渲染与桥接常量
 - `npm run validate:auto-crossdating` — synthetic demo 验证 global sliding、segmented diagnosis、local edit alignment、partial range move、candidate ranking、三类候选、应用后重新诊断与 stale 标记
+- `npm run validate:cofecha-reference` — synthetic demo 验证 PART 6 A flag 分类、COFECHA-pass reference 生成、最终 master mean=0/sd=1 与 offset target set
 - `npm run trial:auto-crossdating` — 在临时目录对 RAW 样例应用自动诊断候选并跑 COFECHA 对比；每轮每条序列只应用一个候选，不修改源文件
 - `npm run tauri`
 

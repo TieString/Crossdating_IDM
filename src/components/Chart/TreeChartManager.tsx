@@ -46,9 +46,11 @@ type Props = {
   variant?: 'panel' | 'expanded'
   showPersistentTooltip?: boolean
   referenceConfig?: ReferenceSeriesConfig | null
+  dynamicReferenceConfig?: ReferenceSeriesConfig | null
   diagnosis?: CrossdatingDiagnosis
   diagnosisBatchResult?: DiagnosisBatchApplyResult | null
   onReferenceConfigChange?: (config: ReferenceSeriesConfig | null) => void
+  onResetReferenceToDynamic?: () => void
   onApplyDiagnosisCandidate?: (candidate: DiagnosisCandidateOperation) => void
   onApplyDiagnosisCandidateBatch?: (candidates: DiagnosisCandidateOperation[]) => void
   onApplyLocalSimulation?: (request: LocalSimulationApplyRequest) => void
@@ -62,9 +64,11 @@ function TreeChartManagerBase({
   variant = 'panel',
   showPersistentTooltip = false,
   referenceConfig = null,
+  dynamicReferenceConfig = null,
   diagnosis,
   diagnosisBatchResult = null,
   onReferenceConfigChange,
+  onResetReferenceToDynamic: _onResetReferenceToDynamic,
   onApplyDiagnosisCandidate,
   onInsertMissingYearAtSide,
   onDeleteYearWithMode,
@@ -77,6 +81,7 @@ function TreeChartManagerBase({
   const [treeOffsets, setTreeOffsets] = useState<Map<string, number>>(new Map())
   const [zoomWindow, setZoomWindow] = useState<ChartZoomWindow>(null)
   const [search, setSearch] = useState('')
+  const [showDynamicReference, setShowDynamicReference] = useState(false)
   const [candidatePanelOpen, setCandidatePanelOpen] = useState(false)
   const [rejectedCandidateIds, setRejectedCandidateIds] = useState<string[]>([])
   const [pickerHeight, setPickerHeight] = useState<number>(readStoredPickerHeight)
@@ -196,14 +201,56 @@ function TreeChartManagerBase({
       ? Array.from(new Set([...selectedTrees, ...referenceDraftTrees]))
       : selectedTrees
   ), [isReferenceMode, referenceDraftTrees, selectedTrees])
+  const allTreeCodes = useMemo(() => Array.from(fullData.keys()), [fullData])
 
   const referenceSeries = useMemo(() => (
-    buildReferenceSeries(fullData, referenceConfig)
+    referenceConfig?.mode === 'dynamic' ? null : buildReferenceSeries(fullData, referenceConfig)
   ), [fullData, referenceConfig])
+
+  const dynamicReferenceSeries = useMemo(() => (
+    dynamicReferenceConfig?.mode === 'dynamic' ? buildReferenceSeries(fullData, dynamicReferenceConfig) : null
+  ), [dynamicReferenceConfig, fullData])
 
   const referenceSourceSet = useMemo(() => (
     new Set(referenceConfig?.selectedTrees ?? [])
   ), [referenceConfig])
+  const dynamicReferenceSummary = dynamicReferenceSeries?.summary
+  const dynamicReferenceStatusLabel = useMemo(() => {
+    if (!dynamicReferenceConfig) return null
+    const total = dynamicReferenceConfig.classification?.allSeriesIds.length ?? allTreeCodes.length
+    const anchorCount = dynamicReferenceConfig.classification?.anchorPassIds.length ?? dynamicReferenceConfig.selectedTrees.length
+    const candidateCount = dynamicReferenceConfig.classification?.candidateFlaggedIds.length ?? 0
+    const stale = dynamicReferenceConfig.isStale ? ' stale' : ''
+    const invalid = dynamicReferenceConfig.unavailableReason ? ` ${dynamicReferenceConfig.unavailableReason}` : ''
+    const range = dynamicReferenceSummary?.startYear != null && dynamicReferenceSummary.endYear != null
+      ? ` ${dynamicReferenceSummary.startYear}-${dynamicReferenceSummary.endYear}`
+      : ''
+    const replication = dynamicReferenceSummary?.meanReplication != null
+      ? ` mean n=${dynamicReferenceSummary.meanReplication.toFixed(1)}`
+      : ''
+    return `COFECHA-pass algorithm reference ${anchorCount} / ${total}; candidates ${candidateCount}${range}${replication}${stale}${invalid}`
+  }, [allTreeCodes.length, dynamicReferenceConfig, dynamicReferenceSummary])
+  const referenceSummary = referenceSeries?.summary
+  const referenceStatusLabel = useMemo(() => {
+    if (referenceConfig?.mode === 'dynamic') {
+      const total = referenceConfig.classification?.allSeriesIds.length ?? allTreeCodes.length
+      const anchorCount = referenceConfig.classification?.anchorPassIds.length ?? referenceConfig.selectedTrees.length
+      const candidateCount = referenceConfig.classification?.candidateFlaggedIds.length ?? 0
+      const stale = referenceConfig.isStale ? ' · 参考序列过期' : ''
+      const invalid = referenceConfig.unavailableReason ? ` · ${referenceConfig.unavailableReason}` : ''
+      const range = referenceSummary?.startYear != null && referenceSummary.endYear != null
+        ? ` · ${referenceSummary.startYear}-${referenceSummary.endYear}`
+        : ''
+      const replication = referenceSummary?.meanReplication != null
+        ? ` · 平均 n=${referenceSummary.meanReplication.toFixed(1)}`
+        : ''
+      return `COFECHA 无 A 参考组 ${anchorCount} / ${total} · 待检查 ${candidateCount}${range}${replication}${stale}${invalid}`
+    }
+    if (referenceSeries) {
+      return `手动参考 ${referenceSeries.selectedTrees.length} 条 · 点 ${referenceSeries.pointCount}`
+    }
+    return null
+  }, [allTreeCodes.length, referenceConfig, referenceSeries, referenceSummary])
 
   const diagnosisByTree = useMemo(() => (
     new Map((diagnosis?.summaries ?? []).map((summary) => [summary.tree, summary]))
@@ -256,7 +303,6 @@ function TreeChartManagerBase({
     return result
   }, [fullData, treeOffsets, visibleTrees])
 
-  const allTreeCodes = useMemo(() => Array.from(fullData.keys()), [fullData])
   const filteredTreeCodes = useMemo(() =>
     search.trim() === '' ? allTreeCodes : allTreeCodes.filter(c => c.toLowerCase().includes(search.toLowerCase())),
     [allTreeCodes, search]
@@ -572,12 +618,14 @@ function TreeChartManagerBase({
     </div>
   ) : null
 
-  const chartNode = filteredData.size > 0 || referenceSeries ? (
+  const chartNode = filteredData.size > 0 || referenceSeries || (showDynamicReference && dynamicReferenceSeries) ? (
     <MultiLineChart
       data={filteredData}
       missingRingYears={missingRingYears}
       sampleSizeData={fullData}
       referenceSeries={referenceSeries}
+      dynamicReferenceSeries={dynamicReferenceSeries}
+      showDynamicReference={showDynamicReference}
       showPersistentTooltip={showPersistentTooltip}
       highlightedTreeCode={highlightedTreeCode}
       onHighlightedTreeCodeChange={setHighlightedTreeCode}
@@ -645,7 +693,7 @@ function TreeChartManagerBase({
         {isReferenceMode ? (
           <>
             <button onClick={applyReferenceSelection} disabled={referenceDraftTrees.length === 0}
-              style={referenceDraftTrees.length === 0 ? btnDisabled : { ...btnBase, borderColor: '#111827', color: '#111827', fontWeight: 650 }}>生成参考</button>
+              style={referenceDraftTrees.length === 0 ? btnDisabled : { ...btnBase, borderColor: '#111827', color: '#111827', fontWeight: 650 }}>生成手动参考</button>
             <button onClick={cancelReferenceSelection} style={btnBase}>取消</button>
           </>
         ) : (
@@ -653,7 +701,7 @@ function TreeChartManagerBase({
             style={allTreeCodes.length === 0 ? btnDisabled : referenceSeries ? { ...btnBase, borderColor: '#111827', color: '#111827', fontWeight: 650 } : btnBase}>参考</button>
         )}
         {referenceSeries ? (
-          <button onClick={clearReferenceSelection} style={btnBase}>关闭参考</button>
+          <button onClick={clearReferenceSelection} style={btnBase}>Clear reference</button>
         ) : null}
         <span style={{
           fontSize: 11, color: '#fff', background: '#2e6da4',
@@ -707,6 +755,94 @@ function TreeChartManagerBase({
           </button>
         ) : null}
       </div>
+
+      {referenceStatusLabel ? (
+        <div style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 6,
+          alignItems: 'center',
+          marginBottom: 7,
+          color: referenceConfig?.isStale ? '#7a2e0e' : '#374151',
+          fontFamily: 'Segoe UI, system-ui, sans-serif',
+          fontSize: 11,
+          lineHeight: 1.35,
+        }}>
+          <span style={{
+            border: `1px solid ${referenceConfig?.isStale ? '#f2c79a' : '#cfd7e2'}`,
+            borderRadius: 10,
+            padding: '1px 8px',
+            background: referenceConfig?.isStale ? '#fff3e4' : '#f8fafc',
+            fontWeight: 650,
+          }}>
+            {referenceStatusLabel}
+          </span>
+          {referenceSummary?.minReplication != null ? (
+            <span style={{ color: '#6b7280' }}>最低 n={referenceSummary.minReplication}</span>
+          ) : null}
+        </div>
+      ) : null}
+
+      {dynamicReferenceStatusLabel ? (
+        <div style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 6,
+          alignItems: 'center',
+          marginBottom: 7,
+          color: dynamicReferenceConfig?.isStale ? '#7a2e0e' : '#236344',
+          fontFamily: 'Segoe UI, system-ui, sans-serif',
+          fontSize: 11,
+          lineHeight: 1.35,
+        }}>
+          <span style={{
+            border: `1px solid ${dynamicReferenceConfig?.isStale ? '#f2c79a' : '#b7dec7'}`,
+            borderRadius: 10,
+            padding: '1px 8px',
+            background: dynamicReferenceConfig?.isStale ? '#fff3e4' : '#e9f6ef',
+            fontWeight: 650,
+          }}>
+            {dynamicReferenceStatusLabel}
+          </span>
+          {dynamicReferenceSeries ? (
+            <label
+              title="显示/隐藏 COFECHA-pass 动态参考序列"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '1px 8px',
+                border: '1px solid #b7dec7',
+                borderRadius: 10,
+                background: showDynamicReference ? '#e9f6ef' : '#fff',
+                color: '#236344',
+                fontFamily: 'Segoe UI, system-ui, sans-serif',
+                fontSize: 11,
+                fontWeight: 650,
+                lineHeight: 1.35,
+                cursor: 'pointer',
+                userSelect: 'none',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={showDynamicReference}
+                onChange={(event) => setShowDynamicReference(event.target.checked)}
+                style={{ width: 12, height: 12, margin: 0, accentColor: '#236344' }}
+              />
+              <span
+                aria-hidden="true"
+                style={{ width: 22, height: 0, borderTop: '2px dashed rgba(35, 99, 68, 0.9)' }}
+              />
+              <span>COFECHA-pass</span>
+            </label>
+          ) : null}
+          {dynamicReferenceSummary?.minReplication != null ? (
+            <span style={{ color: '#6b7280' }}>min n={dynamicReferenceSummary.minReplication}</span>
+          ) : null}
+        </div>
+      ) : null}
 
       {isExpanded ? (
         <div style={{

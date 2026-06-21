@@ -330,6 +330,7 @@ export default function Home() {
         crossdatingDiagnosis,
         deletionMarkers,
         diagnosisBatchResult,
+        dynamicReferenceConfig,
         fileName,
         getCurrentRwlText,
         handleDeleteSeries,
@@ -344,6 +345,7 @@ export default function Home() {
         handleApplyDiagnosisCandidateBatch,
         handleApplyLocalSimulation,
         handleReferenceConfigChange,
+        handleResetReferenceToDynamic,
         handleRedo,
         handleReplaceTreeData,
         handleResetToRawData,
@@ -567,10 +569,11 @@ export default function Home() {
             kind: "line-chart",
             siteData: serializeRwlSiteData(siteData),
             referenceConfig,
+            dynamicReferenceConfig,
             diagnosis: crossdatingDiagnosis,
             diagnosisBatchResult,
         },
-    }), [canResetToRawData, cofechaPart6JumpTarget, cofechaResult, crossdatingDiagnosis, crossdatingValidationSummary, diagnosisBatchResult, fileName, isCofechaOutdated, isCofechaRunning, linkedReport, operationLog, referenceConfig, selectedPart, siteData]);
+    }), [canResetToRawData, cofechaPart6JumpTarget, cofechaResult, crossdatingDiagnosis, crossdatingValidationSummary, diagnosisBatchResult, dynamicReferenceConfig, fileName, isCofechaOutdated, isCofechaRunning, linkedReport, operationLog, referenceConfig, selectedPart, siteData]);
 
     const handleCofechaTextClick = useCallback((event: MouseEvent<HTMLParagraphElement>) => {
         const target = event.target;
@@ -657,6 +660,8 @@ export default function Home() {
             case "line-chart":
                 if (command.type === "set-reference") {
                     handleReferenceConfigChange(command.config);
+                } else if (command.type === "reset-reference-dynamic") {
+                    handleResetReferenceToDynamic();
                 } else if (command.type === "apply-diagnosis-candidate") {
                     handleApplyDiagnosisCandidate(command.candidate);
                 } else if (command.type === "apply-diagnosis-candidates") {
@@ -681,6 +686,7 @@ export default function Home() {
         handleApplyLocalSimulation,
         handleInsertMissingYearAtSideFromChart,
         handleReferenceConfigChange,
+        handleResetReferenceToDynamic,
         handleRunCofechaValidation,
         handleResetToRawData,
         handleUndoOperationLogEntry,
@@ -1436,9 +1442,11 @@ export default function Home() {
                                                 <TreeChartManager
                                                     fullData={siteData}
                                                     referenceConfig={referenceConfig}
+                                                    dynamicReferenceConfig={dynamicReferenceConfig}
                                                     diagnosis={crossdatingDiagnosis}
                                                     diagnosisBatchResult={diagnosisBatchResult}
                                                     onReferenceConfigChange={handleReferenceConfigChange}
+                                                    onResetReferenceToDynamic={handleResetReferenceToDynamic}
                                                     onApplyDiagnosisCandidate={handleApplyDiagnosisCandidate}
                                                     onApplyDiagnosisCandidateBatch={handleApplyDiagnosisCandidateBatch}
                                                     onApplyLocalSimulation={handleApplyLocalSimulation}

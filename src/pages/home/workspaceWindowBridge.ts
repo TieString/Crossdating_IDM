@@ -147,6 +147,7 @@ export type LineChartWindowState = {
     kind: "line-chart";
     siteData: SerializedRwlSiteData;
     referenceConfig: ReferenceSeriesConfig | null;
+    dynamicReferenceConfig: ReferenceSeriesConfig | null;
     diagnosis: CrossdatingDiagnosis;
     diagnosisBatchResult: DiagnosisBatchApplyResult | null;
 };
@@ -179,6 +180,7 @@ export type WorkspaceWindowCommand =
     | { kind: "cofecha"; type: "run-validation" }
     | { kind: "cofecha"; type: "jump"; tree: string; year?: number }
     | { kind: "line-chart"; type: "set-reference"; config: ReferenceSeriesConfig | null }
+    | { kind: "line-chart"; type: "reset-reference-dynamic" }
     | { kind: "line-chart"; type: "apply-diagnosis-candidate"; candidate: DiagnosisCandidateOperation }
     | { kind: "line-chart"; type: "apply-diagnosis-candidates"; candidates: DiagnosisCandidateOperation[] }
     | { kind: "line-chart"; type: "apply-local-simulation"; request: LocalSimulationApplyRequest }

@@ -190,7 +190,7 @@ export function splitReportByParts(text: string): Map<string, string> {
 }
 
 
-function extractPossibleProblemsDetail(text: string): Map<string, string> {
+export function extractPossibleProblemsDetail(text: string): Map<string, string> {
     const possibleProblems = new Map<string, string>();
 
     // 按 `==========` 分割成多个块
@@ -218,6 +218,10 @@ function extractPossibleProblemsDetail(text: string): Map<string, string> {
     }
 
     return possibleProblems;
+}
+
+export function extractPart6FlaggedASeriesIds(text: string): string[] {
+    return Array.from(extractPossibleProblemsDetail(text).keys());
 }
 
 

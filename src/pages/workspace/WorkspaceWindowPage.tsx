@@ -195,10 +195,14 @@ export default function WorkspaceWindowPage() {
             siteData={chartData}
             showPersistentTooltip
             referenceConfig={state.referenceConfig}
+            dynamicReferenceConfig={state.dynamicReferenceConfig}
             diagnosis={state.diagnosis}
             diagnosisBatchResult={state.diagnosisBatchResult}
             onReferenceConfigChange={(config) => {
                 void sendCommand({ kind: "line-chart", type: "set-reference", config });
+            }}
+            onResetReferenceToDynamic={() => {
+                void sendCommand({ kind: "line-chart", type: "reset-reference-dynamic" });
             }}
             onApplyDiagnosisCandidate={(candidate) => {
                 void sendCommand({ kind: "line-chart", type: "apply-diagnosis-candidate", candidate });

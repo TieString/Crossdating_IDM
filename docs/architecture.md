@@ -58,7 +58,7 @@ Tucson 读写的格式透明性由 `RwlReadResult.readOptions` 和 formatter 共
 
 ## 参考序列与诊断
 
-`features/crossdating/reference.ts` 根据 reference config 按年份对齐生成 derived reference series。reference series 不进入 RWL 数据本体。
+`features/crossdating/reference.ts` 根据 reference config 生成 derived reference series。手动 reference 按用户选择序列逐年平均；COFECHA-pass 动态 reference 在每次 COFECHA 完成后，按 PART 6 无 A flag 样芯生成 COFECHA-style residual master chronology。reference series 不进入 RWL 数据本体。算法细节见 [COFECHA-pass 参考序列](cofecha-reference.md)。
 
 `features/crossdating/diagnosis.ts` 提供内部快速诊断和候选生成。它不运行外部 COFECHA，也不自动修改数据；候选必须由用户确认后通过 `RwlEditor` 路径落地。
 
@@ -73,6 +73,8 @@ Tucson 读写的格式透明性由 `RwlReadResult.readOptions` 和 formatter 共
 - 把 OUT 文本交给前端解析和展示。
 
 `features/cofecha/formatter.ts` 解析 COFECHA 输出摘要。`useHomeWorkspace.ts` 按文件路径持久化最近一次 OUT/result 与 `RUN_COFECHA` 日志。Rust 命令 `write_out_next_to_rwl` 会在可行时把 OUT 文件镜像保存到源 `.rwl` 文件旁。
+
+COFECHA PART 6 的 `[A] Segment` 判断同时用于动态 reference 分类：无 A flag 的序列进入 `anchor_pass`，有 A flag 的序列进入 `candidate_flagged`。`anchor_pass` 生成 reference，`candidate_flagged` 作为后续 offset check target set。
 
 ## 窗口与桥接
 
