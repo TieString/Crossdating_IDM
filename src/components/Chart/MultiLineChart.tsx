@@ -70,6 +70,7 @@ const COL_GAP = 16
 const MAX_LABEL_CHARS = 12
 const TOOLTIP_MAX_SERIES = 35
 const Y_AXIS_WIDTH = 60
+const SAMPLE_SIZE_AXIS_WIDTH = 44   // 显示样本量时在右侧为其 Y 轴预留的宽度
 const X_AXIS_HEIGHT = 38    //底部x轴区域
 const CHART_AREA_RIGHT_PADDING = 2
 const MIN_CHART_AREA_WIDTH = 120
@@ -94,6 +95,17 @@ const SAMPLE_SIZE_COLOR = 'rgba(104, 110, 120, 0.62)'
 const DYNAMIC_REFERENCE_LABEL = 'COFECHA-pass'
 const DYNAMIC_REFERENCE_COLOR = 'rgba(35, 99, 68, 0.9)'
 const MISSING_RING_COLOR = '#2ecc71'
+
+// Y 轴视觉缩放（Shift + 滚轮）：只缩放 Y 轴显示范围，不改变原始数据/年份/算法结果。
+// 倍率 M = 基准范围 / 当前显示范围；每档 ±0.1，限制在 [MIN, MAX]。
+// 下限为 1（只放大，不缩到比数据范围更大），保证显示窗口始终落在 [yMin, yMax] 内、与上下平移边界一致。
+const Y_VISUAL_SCALE_MIN = 1
+const Y_VISUAL_SCALE_MAX = 8
+const Y_VISUAL_SCALE_STEP = 0.1
+
+function formatVisualScale(scale: number) {
+  return scale % 1 === 0 ? `${scale}` : scale.toFixed(scale < 10 ? 1 : 0)
+}
 
 type XAxisLabel = {
   index: number
@@ -245,7 +257,10 @@ const fixedChartAreaPlugin: Plugin<'line'> = {
   id: 'fixedChartArea',
   afterLayout(chart) {
     const { chartArea, scales, width } = chart
-    const right = Math.max(0, width - CHART_AREA_RIGHT_PADDING)
+    const sampleSizeScale = scales[SAMPLE_SIZE_AXIS_ID]
+    const showSampleAxis = Boolean(sampleSizeScale?.options.display)
+    const rightMargin = showSampleAxis ? SAMPLE_SIZE_AXIS_WIDTH : CHART_AREA_RIGHT_PADDING
+    const right = Math.max(0, width - rightMargin)
     const left = Math.min(Y_AXIS_WIDTH, Math.max(0, right - MIN_CHART_AREA_WIDTH))
     const chartAreaWidth = right - left
 
@@ -272,11 +287,10 @@ const fixedChartAreaPlugin: Plugin<'line'> = {
       yScale.configure()
     }
 
-    const sampleSizeScale = scales[SAMPLE_SIZE_AXIS_ID]
     if (sampleSizeScale) {
       sampleSizeScale.left = right
-      sampleSizeScale.right = right
-      sampleSizeScale.width = 0
+      sampleSizeScale.right = showSampleAxis ? Math.max(right, width - CHART_AREA_RIGHT_PADDING) : right
+      sampleSizeScale.width = sampleSizeScale.right - sampleSizeScale.left
       sampleSizeScale.top = chartArea.top
       sampleSizeScale.bottom = chartArea.bottom
       sampleSizeScale.height = chartArea.bottom - chartArea.top
@@ -762,7 +776,10 @@ export function MultiLineChart({
   onDeleteSeries,
 }: Props) {
   const chartRef = useRef<ChartJSInstance<'line'> | null>(null)
+  const containerRef = useRef<HTMLDivElement | null>(null)
   const isDragged = useRef(false)
+  // Y 轴视觉缩放窗口（Shift + 滚轮）：仅改变 Y 轴显示范围，不改原始数据/年份/算法结果。null 表示自动范围。
+  const [yViewWindow, setYViewWindow] = useState<{ min: number; max: number } | null>(null)
   const tooltipPlugin = useMemo(() => makePersistentTooltipPlugin(), [])
   const yearIndicatorPlugin = useMemo(() => makeYearIndicatorPlugin(), [])
   const markerLinesPlugin = useMemo(() => makeMarkerLinesPlugin(), [])
@@ -1055,8 +1072,36 @@ export function MultiLineChart({
     return [globalMin - yMargin, globalMax + yMargin]
   }, [data, dynamicReferenceUsesWidthAxis, referenceDisplayData, visibleDynamicReferenceSeries])
 
+  // Y 轴视觉缩放窗口应用到图表（仅改 Y 轴 min/max，不动 X 轴范围，不改原始数据）。
+  // 用命令式方式设置，避免把 yViewWindow 放进 memo 化的 options 而重建 options、连带重置 X 缩放。
+  useEffect(() => {
+    const chart = chartRef.current
+    if (!chart) return
+    const yScale = chart.scales['y']
+    yScale.options.min = yViewWindow?.min ?? yMin
+    yScale.options.max = yViewWindow?.max ?? yMax
+    chart.update('none')
+  }, [yViewWindow, yMin, yMax])
+
   const emitZoomWindowRef = useRef(emitZoomWindow)
   useEffect(() => { emitZoomWindowRef.current = emitZoomWindow }, [emitZoomWindow])
+
+  // 拖动平移后把图表当前 Y 范围同步回 yViewWindow（接近基准范围则视为未缩放 = null）。
+  const syncYViewWindowRef = useRef<(chart: ChartJSInstance<'line'> | ChartJS) => void>(() => {})
+  useEffect(() => {
+    syncYViewWindowRef.current = (chart) => {
+      const yScale = chart.scales['y']
+      const min = Number(yScale.min)
+      const max = Number(yScale.max)
+      if (!Number.isFinite(min) || !Number.isFinite(max)) return
+      const eps = Math.max(1e-9, (yMax - yMin) * 1e-4)
+      if (Math.abs(min - yMin) <= eps && Math.abs(max - yMax) <= eps) {
+        setYViewWindow(null)
+      } else {
+        setYViewWindow({ min, max })
+      }
+    }
+  }, [yMin, yMax])
 
   const chartOptions: ChartOptions<'line'> = useMemo(() => ({
     responsive: true,
@@ -1084,15 +1129,33 @@ export function MultiLineChart({
             max: Math.max(allYears.length - 1, 0),
             minRange: 1,
           },
+          // Y 平移限制在数据范围内：未放大时无可平移空间，放大后只能在 [yMin, yMax] 内上下拖动。
+          y: {
+            min: yMin,
+            max: yMax,
+          },
+          // 次级 Y 轴（样本量 / 动态参考）锁定在各自原始范围，'xy' 平移时不随主轴上下移动。
+          [SAMPLE_SIZE_AXIS_ID]: {
+            min: 'original',
+            max: 'original',
+          },
+          [DYNAMIC_REFERENCE_AXIS_ID]: {
+            min: 'original',
+            max: 'original',
+          },
         },
         pan: {
           enabled: true,
-          mode: 'x',
+          // 'xy'：拖动可同时左右（X）与上下（Y）平移，与 PAST 一致；Y 仅在放大后有可移动空间。
+          mode: 'xy',
           onPanStart: () => {
             isDragged.current = true;
             return undefined;
           },
-          onPanComplete: ({ chart }) => { emitZoomWindowRef.current(chart) }
+          onPanComplete: ({ chart }) => {
+            emitZoomWindowRef.current(chart)
+            syncYViewWindowRef.current(chart)
+          }
         },
         zoom: {
           wheel: { enabled: true },
@@ -1175,16 +1238,32 @@ export function MultiLineChart({
       [SAMPLE_SIZE_AXIS_ID]: {
         type: 'linear',
         axis: 'y',
-        display: false,
+        display: showSampleSize,
         position: 'right',
         min: 0,
         max: Math.max(2, sampleSize.max + 1),
+        afterFit(scale) { scale.width = SAMPLE_SIZE_AXIS_WIDTH - CHART_AREA_RIGHT_PADDING },
+        border: { display: true, color: '#111', width: 1.5 },
         grid: {
           drawOnChartArea: false,
           drawTicks: false,
+          tickColor: '#111',
+          tickLength: 7,
+          color: GRID_MAJOR_COLOR,
+          lineWidth: 1,
         },
         ticks: {
-          display: false,
+          font: { family: CHART_FONT_FAMILY, size: 12 },
+          color: '#333',
+          padding: 6,
+          callback: (value) => Math.round(Number(value)).toLocaleString(),
+        },
+        title: {
+          display: true,
+          text: 'Sample depth (n)',
+          font: { family: CHART_FONT_FAMILY, size: 13, weight: 'bold' },
+          color: '#222',
+          padding: { bottom: 6 },
         },
       },
       [DYNAMIC_REFERENCE_AXIS_ID]: {
@@ -1202,7 +1281,7 @@ export function MultiLineChart({
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [allYears.length, dynamicReferenceUsesWidthAxis, sampleSize.max, yMin, yMax])
+  }), [allYears.length, dynamicReferenceUsesWidthAxis, sampleSize.max, yMin, yMax, showSampleSize])
 
   // 点击折线时切换高亮，并保存当前缩放状态。
   const getClosestTreeAtPoint = useCallback((
@@ -1261,6 +1340,66 @@ export function MultiLineChart({
     const tree = treeCodes[closestIndex]
     return closestIndex >= 0 && tree && year != null ? { tree, year } : null
   }, [allYears, treeCodes])
+
+  // Shift + 滚轮：缩放整条 Y 轴的显示范围（不改原始数据/年份/算法结果，X 轴范围保持不变）。
+  // 以鼠标所在的 Y 值为锚点：向上滚动放大 Y 轴（缩小显示范围），向下滚动缩小 Y 轴（扩大显示范围）。
+  // 用原生非被动监听并在捕获阶段拦截，避免触发 chartjs-plugin-zoom 的横轴 wheel 缩放与页面滚动。
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const baseRange = yMax - yMin
+    if (!(baseRange > 0)) return
+
+    const handleWheel = (event: WheelEvent) => {
+      if (!event.shiftKey) return
+      const chart = chartRef.current
+      if (!chart) return
+
+      const rect = chart.canvas.getBoundingClientRect()
+      const x = event.clientX - rect.left
+      const y = event.clientY - rect.top
+      const { chartArea } = chart
+      if (x < chartArea.left || x > chartArea.right || y < chartArea.top || y > chartArea.bottom) return
+
+      event.preventDefault()
+      event.stopPropagation()
+
+      const yScale = chart.scales['y']
+      const curMin = Number(yScale.min)
+      const curMax = Number(yScale.max)
+      const anchor = yScale.getValueForPixel(y)
+      if (!Number.isFinite(curMin) || !Number.isFinite(curMax) || anchor == null || !Number.isFinite(anchor)) return
+
+      const curRange = curMax - curMin
+      if (!(curRange > 0)) return
+
+      // 当前倍率 M 落在 0.1 网格上（始终从 1 起步并按 ±0.1 步进）；向上滚动放大（M+），向下缩小（M-）。
+      const curM = baseRange / curRange
+      const nextM = clamp(
+        Math.round((curM + (event.deltaY < 0 ? Y_VISUAL_SCALE_STEP : -Y_VISUAL_SCALE_STEP)) * 10) / 10,
+        Y_VISUAL_SCALE_MIN,
+        Y_VISUAL_SCALE_MAX,
+      )
+      if (nextM === curM) return
+
+      // 回到 1.0 倍时复位为自动范围。
+      if (Math.abs(nextM - 1) < 1e-6) {
+        setYViewWindow(null)
+        return
+      }
+
+      // 保持锚点像素位置不变地按 M 缩放上下边界（ratio = 新范围 / 当前范围 = curM / nextM）。
+      const ratio = curM / nextM
+      const nextMin = Number((anchor - (anchor - curMin) * ratio).toFixed(6))
+      const nextMax = Number((anchor + (curMax - anchor) * ratio).toFixed(6))
+      if (nextMax <= nextMin) return
+      setYViewWindow({ min: nextMin, max: nextMax })
+    }
+
+    container.addEventListener('wheel', handleWheel, { passive: false, capture: true })
+    return () => container.removeEventListener('wheel', handleWheel, { capture: true })
+  }, [yMin, yMax])
 
   const handleLineChartClick = (
     event: unknown,
@@ -1458,8 +1597,14 @@ export function MultiLineChart({
     </div>
   ) : null
 
+  // 视觉提示：当前 Y 轴视觉放大倍率 = 基准范围 / 当前显示范围（自动范围时为 1，仅提示不可交互）。
+  const yVisualMagnification = yViewWindow && yMax > yMin
+    ? (yMax - yMin) / (yViewWindow.max - yViewWindow.min)
+    : 1
+
   return (
     <div
+      ref={containerRef}
       style={{ position: 'relative', height: '100%', minHeight: 0, background: '#fff', cursor: lineHoverable ? 'pointer' : 'default' }}
       onContextMenu={handleContextMenu}
       onMouseMove={handleChartMouseMove}
@@ -1468,8 +1613,8 @@ export function MultiLineChart({
       <div
         style={{
           position: 'absolute',
-          top: 2,
-          right: 8,
+          top: 0,
+          right: 43,
           zIndex: 2,
           display: 'flex',
           flexDirection: 'column',
@@ -1479,7 +1624,7 @@ export function MultiLineChart({
         onContextMenu={(event) => event.stopPropagation()}
       >
         <label
-          title="显示/隐藏样本量曲线"
+          title="样本量曲线"
           style={{
             display: 'inline-flex',
             alignItems: 'center',
@@ -1519,6 +1664,27 @@ export function MultiLineChart({
           />
           <span>{SAMPLE_SIZE_LABEL}</span>
         </label>
+        {yViewWindow && (
+          <div
+            title="Shift + 滚轮缩放 Y 轴显示范围（双击图表外或继续向反方向滚动可复位）"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              padding: '2px 8px',
+              border: '1px solid rgba(210,210,210,0.85)',
+              borderRadius: 4,
+              background: 'rgba(255,255,255,0.88)',
+              fontFamily: CHART_FONT_FAMILY,
+              fontSize: 11,
+              lineHeight: 1.4,
+              color: '#222',
+              fontWeight: 'bold',
+              userSelect: 'none',
+            }}
+          >
+            Y×{formatVisualScale(yVisualMagnification)}
+          </div>
+        )}
       </div>
       <Line
         ref={chartRef}
