@@ -13,7 +13,7 @@ import {
 } from "@/features/crossdating/diagnosis";
 import { buildCrossdatingValidationSummary } from "@/features/crossdating/validation";
 import {
-    createCofechaPassReferenceConfig,
+    createCofechaMasterReferenceConfig,
     hashRwlSiteData,
     normalizeReferenceSeriesConfig,
     type ReferenceSeriesConfig,
@@ -338,11 +338,15 @@ export function useHomeWorkspace() {
             const nextResult = parseCofechaResult(nextOutText);
             const nextParts = splitReportByParts(nextOutText);
             const cofechaRunId = `cofecha-${Date.now()}`;
-            const dynamicReferenceConfig = createCofechaPassReferenceConfig({
+            const flaggedAIds = extractPart6FlaggedASeriesIds(nextParts.get("PART 6") ?? "");
+            // Temporary experiment: drive automatic crossdating from COFECHA's
+            // own PART 3 master dating series instead of our anchor-pass rebuild.
+            const dynamicReferenceConfig = createCofechaMasterReferenceConfig({
                 siteData: rwlEditorRef.current.getData(),
-                flaggedAIds: extractPart6FlaggedASeriesIds(nextParts.get("PART 6") ?? ""),
+                flaggedAIds,
                 cofechaRunId,
                 rwlHash: hashRwlSiteData(rwlEditorRef.current.getData()),
+                masterDatingSeries: nextResult.masterDatingSeries,
             });
             logCofechaReferenceComparison(nextResult.masterDatingSeries, dynamicReferenceConfig);
 
@@ -964,7 +968,7 @@ export function useHomeWorkspace() {
         rwlEditorRef.current.replaceTreeData(tree, data);
     }, []);
 
-    const handleApplyBayesianStartYear = useCallback((
+ const handleApplyBayesianStartYear = useCallback((
         tree: string,
         startYear: number,
         result: BayesianMcmcDatingResult,
@@ -1044,7 +1048,9 @@ export function useHomeWorkspace() {
         sortedOperations.forEach((operation, operationIndex) => {
             const currentRings = getCurrentBarkToPithRings(tree);
             const targetIndex = operation.operationType === "insert_missing_ring_suggestion"
-                ? operation.targetBoundaryIndex
+                ? (operation.targetBoundaryIndex === null || operation.targetBoundaryIndex === undefined
+                    ? undefined
+                    : operation.targetBoundaryIndex + 1)
                 : operation.recommendedDeleteIndex;
             if (targetIndex === null || targetIndex === undefined) {
                 return;
@@ -1263,7 +1269,7 @@ export function useHomeWorkspace() {
             batchResult: diagnosisBatchResult,
         })
     ), [cofechaResult, crossdatingDiagnosis, diagnosisBatchResult, isCofechaOutdated, isCofechaRunning, siteData]);
-    const hasProblems = Boolean(selectedProblemText);
+     const hasProblems = Boolean(selectedProblemText);
     const hasChart = siteData.size > 0;
     const shouldShowWelcome = !fileName && !isFileLoading;
     const shouldShowProcessing = isFileLoading || isCofechaRunning;

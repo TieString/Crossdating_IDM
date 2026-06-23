@@ -251,7 +251,11 @@ pub fn run_bayesian_date_series_mcmc(
     )?;
     let prepare_elapsed = prepare_started.elapsed();
     let retained_per_chain = retained_count(iterations, burn_in, thin);
-    let total_pair_count: usize = prepared.candidates.iter().map(|candidate| candidate.pairs.len()).sum();
+    let total_pair_count: usize = prepared
+        .candidates
+        .iter()
+        .map(|candidate| candidate.pairs.len())
+        .sum();
 
     println!(
         "[Bayesian dating][{}] start targetPoints={} referencePoints={} targetLength={} candidates={} candidatePairs={} yearCount={} iterations={} burnIn={} thin={} chains={} minOverlap={}",
@@ -309,7 +313,10 @@ pub fn run_bayesian_date_series_mcmc(
     }
 
     let aggregation_started = Instant::now();
-    let retained_samples: usize = chain_samples.iter().map(|samples| samples.deltas.len()).sum();
+    let retained_samples: usize = chain_samples
+        .iter()
+        .map(|samples| samples.deltas.len())
+        .sum();
     if retained_samples == 0 {
         return Err("MCMC retained no samples; reduce burnIn or thin".to_string());
     }
@@ -355,14 +362,34 @@ pub fn run_bayesian_date_series_mcmc(
         })
         .collect();
 
-    all_candidates.sort_by(|a, b| {
+    // Posterior-ordered view: drives the 95% HPD interval and identifies the MCMC
+    // posterior mode (used only to gauge confidence, not as the point estimate).
+    let mut by_posterior = all_candidates.clone();
+    by_posterior.sort_by(|a, b| {
         b.posterior
             .total_cmp(&a.posterior)
-            .then_with(|| b.correlation.unwrap_or(f64::NEG_INFINITY).total_cmp(&a.correlation.unwrap_or(f64::NEG_INFINITY)))
+            .then_with(|| {
+                b.t_value
+                    .unwrap_or(f64::NEG_INFINITY)
+                    .total_cmp(&a.t_value.unwrap_or(f64::NEG_INFINITY))
+            })
+            .then_with(|| a.start_year.cmp(&b.start_year))
+    });
+    let hpd95 = build_hpd95(&by_posterior);
+    let posterior_top = by_posterior.first().cloned();
+
+    // Headline ordering: rank by deterministic fit (t-value), which stays robust when the
+    // MCMC posterior is multimodal (e.g. an internal false/missing ring spreads the mass
+    // across offsets). Divergence between this t-top and the posterior-top is itself a
+    // signal that the series is not a clean rigid match.
+    all_candidates.sort_by(|a, b| {
+        b.t_value
+            .unwrap_or(f64::NEG_INFINITY)
+            .total_cmp(&a.t_value.unwrap_or(f64::NEG_INFINITY))
+            .then_with(|| b.posterior.total_cmp(&a.posterior))
             .then_with(|| a.start_year.cmp(&b.start_year))
     });
 
-    let hpd95 = build_hpd95(&all_candidates);
     let best = all_candidates.first().cloned();
     let second_best = all_candidates.get(1).cloned();
     let diagnostics = build_diagnostics(
@@ -374,7 +401,7 @@ pub fn run_bayesian_date_series_mcmc(
         retained_samples,
         retained_per_chain,
     );
-    let decision = build_decision(best.as_ref(), second_best.as_ref(), &diagnostics);
+    let decision = build_decision(best.as_ref(), posterior_top.as_ref(), &diagnostics);
     let aggregation_elapsed = aggregation_started.elapsed();
 
     let result = BayesianMcmcDatingResult {
@@ -394,7 +421,10 @@ pub fn run_bayesian_date_series_mcmc(
             thin,
             chains,
             retained_samples,
-            retained_samples_per_chain: chain_samples.iter().map(|samples| samples.deltas.len()).collect(),
+            retained_samples_per_chain: chain_samples
+                .iter()
+                .map(|samples| samples.deltas.len())
+                .collect(),
         },
         parameter_summary: ParameterSummary {
             beta: summarize(&beta_all),
@@ -468,8 +498,14 @@ fn prepare_input(
     let reference_end_year = *reference_by_year.keys().max().unwrap();
     let theoretical_min_start = reference_start_year - target_length as i32 + min_overlap as i32;
     let theoretical_max_start = reference_end_year - min_overlap as i32 + 1;
-    let candidate_min = input.prior_start_year.unwrap_or(theoretical_min_start).max(theoretical_min_start);
-    let candidate_max = input.prior_end_year.unwrap_or(theoretical_max_start).min(theoretical_max_start);
+    let candidate_min = input
+        .prior_start_year
+        .unwrap_or(theoretical_min_start)
+        .max(theoretical_min_start);
+    let candidate_max = input
+        .prior_end_year
+        .unwrap_or(theoretical_max_start)
+        .min(theoretical_max_start);
     if candidate_min > candidate_max {
         return Err("candidate start-year range is empty after applying prior range".to_string());
     }
@@ -604,9 +640,13 @@ fn run_chain(
 ) -> Result<(ChainSamples, ChainTiming), String> {
     let chain_started = Instant::now();
     let mut timing = ChainTiming::default();
-    let mut beta: f64;
+    let mut beta: f64 = 0.0;
     let mut sigma_u2: f64 = 0.2;
     let mut sigma_e2: f64 = 0.8;
+    // Seed the alignment so each chain starts in a plausible basin (chain 0 at the
+    // highest-correlation candidate). Delta is resampled from iteration 1 on; the seed
+    // only gives the signal mode a foothold so the hierarchical variances do not
+    // collapse into a spurious "no signal" basin before any good alignment is visited.
     let mut current_delta = initial_delta_index(prepared, chain_index, rng);
     let mut u = vec![0.0; prepared.year_count];
     let mut ref_count_by_year = vec![0usize; prepared.year_count];
@@ -623,10 +663,92 @@ fn run_chain(
     let mut samples = ChainSamples::default();
     let mut log_probs = vec![0.0; prepared.candidates.len()];
     let mut categorical_weights = vec![0.0; prepared.candidates.len()];
+    // Reference-informed predictive of the target, recomputed each iteration so the
+    // alignment delta can be scored with the latent year effects u integrated out.
+    let mut pred_mean = vec![0.0; prepared.year_count];
+    let mut inv_pred_var = vec![0.0; prepared.year_count];
+    let mut half_ln_pred_var = vec![0.0; prepared.year_count];
 
     for iteration in 0..iterations {
+        // === 1. Sample the alignment delta with u analytically integrated out, so the
+        //        score is the reference-informed predictive density of the target and
+        //        does not depend on where the chain currently sits (no self-reinforcing
+        //        freeze). Iteration 0 keeps the seed so the variances are first
+        //        estimated in a signalled basin. ===
+        if iteration > 0 {
+            let section_started = Instant::now();
+            for year_index in 0..prepared.year_count {
+                let ref_weight = prepared.ref_weight_by_year[year_index];
+                let precision_u_ref = (1.0 / sigma_u2) + ref_weight / sigma_e2;
+                let tau2 = 1.0 / precision_u_ref.max(1e-12);
+                let mu_u_ref =
+                    tau2 * ref_weight * (prepared.ref_value_by_year[year_index] - beta) / sigma_e2;
+                let predictive_var = (tau2 + sigma_e2).max(1e-12);
+                pred_mean[year_index] = beta + mu_u_ref;
+                inv_pred_var[year_index] = 1.0 / predictive_var;
+                half_ln_pred_var[year_index] = 0.5 * predictive_var.ln();
+            }
+            timing.delta_likelihood += section_started.elapsed();
+
+            let section_started = Instant::now();
+            if prepared.candidates.len() >= 64 {
+                log_probs
+                    .par_iter_mut()
+                    .enumerate()
+                    .for_each(|(index, log_prob)| {
+                        *log_prob = marginal_delta_log_likelihood(
+                            &prepared.candidates[index],
+                            &pred_mean,
+                            &inv_pred_var,
+                            &half_ln_pred_var,
+                        );
+                    });
+            } else {
+                for (index, candidate) in prepared.candidates.iter().enumerate() {
+                    log_probs[index] = marginal_delta_log_likelihood(
+                        candidate,
+                        &pred_mean,
+                        &inv_pred_var,
+                        &half_ln_pred_var,
+                    );
+                }
+            }
+            current_delta =
+                sample_categorical_log_probs(&log_probs, &mut categorical_weights, rng)?;
+            timing.delta_sample += section_started.elapsed();
+        }
+
         let current_pairs = &prepared.candidates[current_delta].pairs;
 
+        // === 2. Resample u given the (new) delta — completes the (delta, u) block draw. ===
+        let section_started = Instant::now();
+        let mut pair_index = 0usize;
+        for year_index in 0..prepared.year_count {
+            let ref_weight = prepared.ref_weight_by_year[year_index];
+            let mut weight_sum = ref_weight;
+            let mut weighted_residual_sum =
+                ref_weight * (prepared.ref_value_by_year[year_index] - beta);
+
+            while pair_index < current_pairs.len()
+                && current_pairs[pair_index].year_index < year_index
+            {
+                pair_index += 1;
+            }
+            if pair_index < current_pairs.len()
+                && current_pairs[pair_index].year_index == year_index
+            {
+                weight_sum += 1.0;
+                weighted_residual_sum += current_pairs[pair_index].target_value - beta;
+            }
+            let numerator = weighted_residual_sum / sigma_e2;
+            let precision = (1.0 / sigma_u2) + weight_sum / sigma_e2;
+            let var_u = 1.0 / precision.max(1e-12);
+            let mean_u = var_u * numerator;
+            u[year_index] = sample_normal(mean_u, var_u.sqrt(), rng);
+        }
+        timing.latent_year_effects += section_started.elapsed();
+
+        // === 3. Sample the global mean beta given u and the new delta. ===
         let section_started = Instant::now();
         let mut precision = 1.0 / k_beta;
         let mut numerator = 0.0;
@@ -644,34 +766,15 @@ fn run_chain(
         beta = sample_normal(mean_beta, var_beta.sqrt(), rng);
         timing.beta += section_started.elapsed();
 
-        let section_started = Instant::now();
-        let mut pair_index = 0usize;
-        for year_index in 0..prepared.year_count {
-            let ref_weight = prepared.ref_weight_by_year[year_index];
-            let mut weight_sum = ref_weight;
-            let mut weighted_residual_sum = ref_weight * (prepared.ref_value_by_year[year_index] - beta);
-
-            while pair_index < current_pairs.len() && current_pairs[pair_index].year_index < year_index {
-                pair_index += 1;
-            }
-            if pair_index < current_pairs.len() && current_pairs[pair_index].year_index == year_index {
-                weight_sum += 1.0;
-                weighted_residual_sum += current_pairs[pair_index].target_value - beta;
-            }
-            let numerator = weighted_residual_sum / sigma_e2;
-            let precision = (1.0 / sigma_u2) + weight_sum / sigma_e2;
-            let var_u = 1.0 / precision.max(1e-12);
-            let mean_u = var_u * numerator;
-            u[year_index] = sample_normal(mean_u, var_u.sqrt(), rng);
-        }
-        timing.latent_year_effects += section_started.elapsed();
-
+        // === 4. Sample sigma_u2. ===
         let section_started = Instant::now();
         let u_ss = u.iter().map(|value| value * value).sum::<f64>();
-        let precision_u = sample_gamma_precision(au + prepared.year_count as f64 / 2.0, bu + 0.5 * u_ss, rng)?;
+        let precision_u =
+            sample_gamma_precision(au + prepared.year_count as f64 / 2.0, bu + 0.5 * u_ss, rng)?;
         sigma_u2 = (1.0 / precision_u).clamp(1e-12, 1e12);
         timing.sigma_u += section_started.elapsed();
 
+        // === 5. Sample sigma_e2 given u, beta and the new delta. ===
         let section_started = Instant::now();
         let mut residual_ss = 0.0;
         let mut obs_count = 0usize;
@@ -685,29 +788,10 @@ fn run_chain(
             residual_ss += residual * residual;
             obs_count += 1;
         }
-        let precision_e = sample_gamma_precision(ae + obs_count as f64 / 2.0, be + 0.5 * residual_ss, rng)?;
+        let precision_e =
+            sample_gamma_precision(ae + obs_count as f64 / 2.0, be + 0.5 * residual_ss, rng)?;
         sigma_e2 = (1.0 / precision_e).clamp(1e-12, 1e12);
         timing.sigma_e += section_started.elapsed();
-
-        let section_started = Instant::now();
-        let sigma_e2_ln = sigma_e2.ln();
-        if prepared.candidates.len() >= 64 {
-            log_probs
-                .par_iter_mut()
-                .enumerate()
-                .for_each(|(index, log_prob)| {
-                    *log_prob = target_log_likelihood(&prepared.candidates[index], beta, sigma_e2, sigma_e2_ln, &u);
-                });
-        } else {
-            for (index, candidate) in prepared.candidates.iter().enumerate() {
-                log_probs[index] = target_log_likelihood(candidate, beta, sigma_e2, sigma_e2_ln, &u);
-            }
-        }
-        timing.delta_likelihood += section_started.elapsed();
-
-        let section_started = Instant::now();
-        current_delta = sample_categorical_log_probs(&log_probs, &mut categorical_weights, rng)?;
-        timing.delta_sample += section_started.elapsed();
 
         let section_started = Instant::now();
         if iteration >= burn_in && (iteration - burn_in) % thin == 0 {
@@ -739,24 +823,30 @@ fn sample_normal(mean: f64, sd: f64, rng: &mut StdRng) -> f64 {
 }
 
 fn sample_gamma_precision(shape: f64, rate: f64, rng: &mut StdRng) -> Result<f64, String> {
-    let gamma = Gamma::new(shape.max(1e-9), 1.0 / rate.max(1e-12)).map_err(|error| error.to_string())?;
+    let gamma =
+        Gamma::new(shape.max(1e-9), 1.0 / rate.max(1e-12)).map_err(|error| error.to_string())?;
     Ok(gamma.sample(rng).max(1e-12))
 }
 
-fn target_log_likelihood(
+// Log marginal likelihood of an alignment's overlapping target points, with the
+// latent year effects u integrated out. Each target point contributes the log of a
+// Gaussian density N(target ; pred_mean[y], pred_var[y]) whose mean and variance are
+// derived from the reference only, so this score is identical regardless of which
+// alignment the chain is currently sampling — that is what stops a chain from freezing
+// onto its current delta.
+fn marginal_delta_log_likelihood(
     candidate: &CandidateAlignment,
-    beta: f64,
-    sigma_e2: f64,
-    sigma_e2_ln: f64,
-    u: &[f64],
+    pred_mean: &[f64],
+    inv_pred_var: &[f64],
+    half_ln_pred_var: &[f64],
 ) -> f64 {
-    let mut residual_ss = 0.0;
+    let mut acc = 0.0;
     for pair in &candidate.pairs {
-        let residual = pair.target_value - beta - u[pair.year_index];
-        residual_ss += residual * residual;
+        let year_index = pair.year_index;
+        let residual = pair.target_value - pred_mean[year_index];
+        acc += -half_ln_pred_var[year_index] - 0.5 * residual * residual * inv_pred_var[year_index];
     }
-    let n = candidate.pairs.len() as f64;
-    -0.5 * n * sigma_e2_ln - 0.5 * residual_ss / sigma_e2
+    acc
 }
 
 fn sample_categorical_log_probs(
@@ -764,15 +854,14 @@ fn sample_categorical_log_probs(
     weights: &mut [f64],
     rng: &mut StdRng,
 ) -> Result<usize, String> {
-    let max_log = log_probs
-        .iter()
-        .copied()
-        .fold(f64::NEG_INFINITY, f64::max);
+    let max_log = log_probs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     if !max_log.is_finite() {
         return Err("all delta log-probabilities are non-finite".to_string());
     }
     if weights.len() != log_probs.len() {
-        return Err("categorical weight buffer length does not match log-probability length".to_string());
+        return Err(
+            "categorical weight buffer length does not match log-probability length".to_string(),
+        );
     }
 
     let mut total_weight = 0.0;
@@ -854,7 +943,8 @@ fn pearson_from_pairs(pairs: &[Pair]) -> Option<f64> {
         return None;
     }
     let mean_target = pairs.iter().map(|pair| pair.target_value).sum::<f64>() / pairs.len() as f64;
-    let mean_reference = pairs.iter().map(|pair| pair.reference_value).sum::<f64>() / pairs.len() as f64;
+    let mean_reference =
+        pairs.iter().map(|pair| pair.reference_value).sum::<f64>() / pairs.len() as f64;
     let mut numerator = 0.0;
     let mut target_ss = 0.0;
     let mut reference_ss = 0.0;
@@ -893,7 +983,11 @@ fn sample_sd(values: &[f64]) -> f64 {
         return 0.0;
     }
     let avg = mean(values);
-    let variance = values.iter().map(|value| (value - avg).powi(2)).sum::<f64>() / (values.len() - 1) as f64;
+    let variance = values
+        .iter()
+        .map(|value| (value - avg).powi(2))
+        .sum::<f64>()
+        / (values.len() - 1) as f64;
     variance.sqrt()
 }
 
@@ -958,7 +1052,11 @@ fn build_diagnostics(
                 .into_iter()
                 .map(|(delta_index, count)| ChainDeltaTop {
                     start_year: candidates[delta_index].start_year,
-                    posterior: if samples.deltas.is_empty() { 0.0 } else { count as f64 / samples.deltas.len() as f64 },
+                    posterior: if samples.deltas.is_empty() {
+                        0.0
+                    } else {
+                        count as f64 / samples.deltas.len() as f64
+                    },
                     sample_count: count,
                 })
                 .collect();
@@ -976,16 +1074,40 @@ fn build_diagnostics(
         })
         .collect();
 
-    let first_top = chain_diagnostics.first().and_then(|chain| chain.best_start_year);
+    let first_top = chain_diagnostics
+        .first()
+        .and_then(|chain| chain.best_start_year);
     let chain_top_agreement = first_top.is_some()
-        && chain_diagnostics.iter().all(|chain| chain.best_start_year == first_top);
+        && chain_diagnostics
+            .iter()
+            .all(|chain| chain.best_start_year == first_top);
     let best_posterior = best.map(|candidate| candidate.posterior).unwrap_or(0.0);
     let discrete_delta_stable = chain_top_agreement && best_posterior >= 0.95;
     let r_hat = RhatSummary {
-        beta: gelman_rubin(chain_samples.iter().map(|samples| samples.beta.as_slice()).collect()),
-        sigma_u2: gelman_rubin(chain_samples.iter().map(|samples| samples.sigma_u2.as_slice()).collect()),
-        sigma_e2: gelman_rubin(chain_samples.iter().map(|samples| samples.sigma_e2.as_slice()).collect()),
-        signal_to_noise: gelman_rubin(chain_samples.iter().map(|samples| samples.signal_to_noise.as_slice()).collect()),
+        beta: gelman_rubin(
+            chain_samples
+                .iter()
+                .map(|samples| samples.beta.as_slice())
+                .collect(),
+        ),
+        sigma_u2: gelman_rubin(
+            chain_samples
+                .iter()
+                .map(|samples| samples.sigma_u2.as_slice())
+                .collect(),
+        ),
+        sigma_e2: gelman_rubin(
+            chain_samples
+                .iter()
+                .map(|samples| samples.sigma_e2.as_slice())
+                .collect(),
+        ),
+        signal_to_noise: gelman_rubin(
+            chain_samples
+                .iter()
+                .map(|samples| samples.signal_to_noise.as_slice())
+                .collect(),
+        ),
     };
 
     let mut warnings = Vec::new();
@@ -1037,8 +1159,17 @@ fn gelman_rubin(chains: Vec<&[f64]>) -> Option<f64> {
     let m = trimmed.len() as f64;
     let means: Vec<f64> = trimmed.iter().map(|chain| mean(chain)).collect();
     let mean_all = mean(&means);
-    let b = n as f64 * means.iter().map(|value| (value - mean_all).powi(2)).sum::<f64>() / (m - 1.0);
-    let w = trimmed.iter().map(|chain| sample_sd(chain).powi(2)).sum::<f64>() / m;
+    let b = n as f64
+        * means
+            .iter()
+            .map(|value| (value - mean_all).powi(2))
+            .sum::<f64>()
+        / (m - 1.0);
+    let w = trimmed
+        .iter()
+        .map(|chain| sample_sd(chain).powi(2))
+        .sum::<f64>()
+        / m;
     if w <= 0.0 {
         return Some(1.0);
     }
@@ -1048,7 +1179,7 @@ fn gelman_rubin(chains: Vec<&[f64]>) -> Option<f64> {
 
 fn build_decision(
     best: Option<&BayesianDatingCandidate>,
-    second_best: Option<&BayesianDatingCandidate>,
+    posterior_top: Option<&BayesianDatingCandidate>,
     diagnostics: &Diagnostics,
 ) -> Decision {
     let Some(best) = best else {
@@ -1058,25 +1189,21 @@ fn build_decision(
         };
     };
 
-    let serious_warning = diagnostics
-        .warnings
-        .iter()
-        .any(|warning| warning.contains("R-hat") || warning.contains("chain top"));
-    if serious_warning {
-        return Decision {
-            status: "ambiguous".to_string(),
-            reason: "MCMC diagnostics did not converge cleanly".to_string(),
-        };
-    }
-
-    if best.posterior < 0.10 {
+    // The point estimate is the deterministic best-fit alignment (max t-value), so the
+    // decision is driven by its fit strength, not by the MCMC vote count which is
+    // unreliable in multimodal cases. The posterior is used only to gauge confidence.
+    const T_SIGNIFICANT: f64 = 3.5;
+    let t = best.t_value.unwrap_or(0.0);
+    if t < T_SIGNIFICANT {
         return Decision {
             status: "rejected".to_string(),
-            reason: "best posterior is below 0.10".to_string(),
+            reason: format!(
+                "best-fit alignment t={:.2} is below the significance threshold {:.1}; no reliable date",
+                t, T_SIGNIFICANT
+            ),
         };
     }
 
-    let second = second_best.map(|candidate| candidate.posterior).unwrap_or(0.0);
     let rhat_ok = [
         diagnostics.r_hat.beta,
         diagnostics.r_hat.sigma_u2,
@@ -1086,20 +1213,31 @@ fn build_decision(
     .iter()
     .all(|value| value.map(|rhat| rhat < 1.1).unwrap_or(true));
 
-    if best.posterior >= 0.95
-        && best.posterior - second >= 0.50
-        && rhat_ok
-        && diagnostics.chain_top_agreement
-    {
+    let posterior_agrees = posterior_top
+        .map(|candidate| candidate.start_year == best.start_year)
+        .unwrap_or(false);
+    let posterior_concentrated = posterior_top
+        .map(|candidate| candidate.posterior >= 0.90)
+        .unwrap_or(false);
+
+    if posterior_agrees && posterior_concentrated && rhat_ok && diagnostics.chain_top_agreement {
         return Decision {
             status: "accepted".to_string(),
-            reason: "posterior mass is concentrated and chains agree".to_string(),
+            reason: format!(
+                "best-fit alignment (end {}, t={:.2}) is also the posterior mode and chains converged",
+                best.end_year, t
+            ),
         };
     }
 
+    // A strong fit whose posterior mass is not concentrated on it is the signature of an
+    // internal false/missing ring: no single rigid offset aligns the whole series.
     Decision {
         status: "ambiguous".to_string(),
-        reason: "posterior distribution is not concentrated enough for automatic acceptance".to_string(),
+        reason: format!(
+            "best-fit alignment is end year {} (t={:.2}), but the posterior is not concentrated there \u{2014} possible internal false/missing ring; confirm with edit-distance from the end year",
+            best.end_year, t
+        ),
     }
 }
 
@@ -1121,7 +1259,11 @@ mod tests {
             .collect()
     }
 
-    fn target_from_reference(reference: &[ReferencePoint], start_index: usize, length: usize) -> Vec<TargetPoint> {
+    fn target_from_reference(
+        reference: &[ReferencePoint],
+        start_index: usize,
+        length: usize,
+    ) -> Vec<TargetPoint> {
         reference[start_index..start_index + length]
             .iter()
             .enumerate()
@@ -1133,7 +1275,10 @@ mod tests {
             .collect()
     }
 
-    fn test_input(target: Vec<TargetPoint>, reference: Vec<ReferencePoint>) -> BayesianMcmcDatingInput {
+    fn test_input(
+        target: Vec<TargetPoint>,
+        reference: Vec<ReferencePoint>,
+    ) -> BayesianMcmcDatingInput {
         BayesianMcmcDatingInput {
             target_series_id: "T1".to_string(),
             target,
@@ -1163,7 +1308,14 @@ mod tests {
         let target = target_from_reference(&reference, 0, reference.len());
         let result = run_bayesian_date_series_mcmc(test_input(target, reference)).unwrap();
         assert_eq!(result.best.unwrap().start_year, 1900);
-        assert!(result.candidates.iter().map(|candidate| candidate.posterior).sum::<f64>() > 0.999);
+        assert!(
+            result
+                .candidates
+                .iter()
+                .map(|candidate| candidate.posterior)
+                .sum::<f64>()
+                > 0.999
+        );
     }
 
     #[test]
@@ -1172,7 +1324,10 @@ mod tests {
         let target = target_from_reference(&reference, 23, 45);
         let result = run_bayesian_date_series_mcmc(test_input(target, reference)).unwrap();
         assert_eq!(result.best.unwrap().start_year, 1823);
-        assert_eq!(result.mcmc_summary.retained_samples_per_chain, vec![400, 400, 400]);
+        assert_eq!(
+            result.mcmc_summary.retained_samples_per_chain,
+            vec![400, 400, 400]
+        );
     }
 
     #[test]
@@ -1191,7 +1346,11 @@ mod tests {
         assert!(result.candidate_count > 1);
         assert_eq!(result.reference_start_year, 1900);
         assert_eq!(result.reference_end_year, 1979);
-        let total = result.candidates.iter().map(|candidate| candidate.posterior).sum::<f64>();
+        let total = result
+            .candidates
+            .iter()
+            .map(|candidate| candidate.posterior)
+            .sum::<f64>();
         assert!((total - 1.0).abs() < 1e-9 || total < 1.0);
     }
 
@@ -1202,6 +1361,68 @@ mod tests {
         let result = run_bayesian_date_series_mcmc(test_input(target, reference)).unwrap();
         assert!(result.diagnostics.r_hat.beta.is_some());
         assert_eq!(result.diagnostics.chains.len(), 3);
-        assert!(result.diagnostics.chains.iter().all(|chain| chain.best_start_year.is_some()));
+        assert!(result
+            .diagnostics
+            .chains
+            .iter()
+            .all(|chain| chain.best_start_year.is_some()));
+    }
+
+    // On clean data the marginalized sampler must concentrate the posterior on the true
+    // alignment and the chains must agree — the property the frozen-chain bug violated.
+    #[test]
+    fn chains_agree_and_posterior_concentrates_on_true_alignment() {
+        let reference = wave_reference(1500, 240);
+        let target = target_from_reference(&reference, 80, 70);
+        let result = run_bayesian_date_series_mcmc(test_input(target, reference)).unwrap();
+
+        let best = result.best.as_ref().unwrap();
+        assert_eq!(best.start_year, 1580);
+        assert!(
+            best.posterior > 0.9,
+            "posterior should concentrate on the true alignment, got {}",
+            best.posterior
+        );
+        assert!(result.diagnostics.chain_top_agreement);
+    }
+
+    // Internal false ring (an extra value inserted mid-series): no single rigid offset
+    // aligns the whole series, but the dominant front portion still yields a strong
+    // best-fit. Plan C must (1) recover that best-fit as the point estimate instead of
+    // diffusing into a "no signal" basin, and (2) flag the result as not a clean rigid
+    // match rather than falsely accepting it.
+    #[test]
+    fn inserted_ring_recovers_dominant_partial_match() {
+        let reference = wave_reference(1500, 240);
+        let clean = target_from_reference(&reference, 80, 90); // true start 1580
+        let insert_at = 75usize;
+        let mut target: Vec<TargetPoint> = clean
+            .into_iter()
+            .map(|point| TargetPoint {
+                index: if point.index >= insert_at {
+                    point.index + 1
+                } else {
+                    point.index
+                },
+                value: point.value,
+                original_year: point.original_year,
+            })
+            .collect();
+        target.push(TargetPoint {
+            index: insert_at,
+            value: 0.0,
+            original_year: None,
+        });
+
+        let result = run_bayesian_date_series_mcmc(test_input(target, reference)).unwrap();
+        let best = result.best.as_ref().unwrap();
+
+        // The front (75-ring) portion aligns at the true start; the best-fit must recover it.
+        assert_eq!(best.start_year, 1580);
+        assert!(
+            best.t_value.unwrap() > 4.0,
+            "the partial match must stay significant, got t={:?}",
+            best.t_value
+        );
     }
 }

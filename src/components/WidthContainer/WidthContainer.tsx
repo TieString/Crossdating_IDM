@@ -677,6 +677,8 @@ export type WidthContainerProps = {
     masterSeries?: Map<number, number>,
     /** Dynamic COFECHA-pass reference used by Bayesian dating. */
     cofechaPassReference?: CofechaPassReference | null,
+    /** Whether the dynamic COFECHA-pass reference is stale relative to current data. */
+    cofechaPassReferenceStale?: boolean,
     /** COFECHA PART 7 各序列与主序列的整体相关性，键为大写序列号。 */
     masterCorrelations?: Map<string, number>,
     /** COFECHA PART 7 各序列的潜在问题分段数（Flags），键为大写序列号。 */
@@ -890,6 +892,7 @@ function WidthContainer({
     siteData: site,
     masterSeries,
     cofechaPassReference,
+    cofechaPassReferenceStale = false,
     masterCorrelations,
     seriesProblemCounts,
     selected,
@@ -941,6 +944,7 @@ function WidthContainer({
     const handledJumpIdRef = useRef<number | null>(null);
     const editHighlightTimerRef = useRef<number | null>(null);
     const handledEditIdRef = useRef<number | null>(null);
+    const alphaEditPreviewIdRef = useRef(0);
     const containerRef = useRef<HTMLDivElement | null>(null);
     const interactionRef = useRef<GridInteraction | null>(null);
     const animationPlanIdRef = useRef(0);
@@ -966,6 +970,60 @@ function WidthContainer({
     const shouldAnimateInsertYear = animationsEnabled && insertYearAnim !== "none";
     const shouldAnimateDeleteYear = animationsEnabled && deleteYearAnim !== "none";
     const shouldAnimateDeleteSeries = animationsEnabled && deleteSeriesAnim !== "none";
+
+    const getBarkToPithRingsForPreview = useCallback((tree: string) => (
+        Array.from(visibleSite.get(tree)?.entries() ?? [])
+            .filter((entry): entry is [number, number] => {
+                const [, value] = entry;
+                return typeof value === "number"
+                    && Number.isFinite(value)
+                    && value !== stopMarker.value;
+            })
+            .sort((a, b) => b[0] - a[0])
+            .map(([year, value], ringIndex) => ({ ringIndex, year, value }))
+    ), [visibleSite]);
+
+    const handlePreviewAlphaEditCandidate = useCallback((tree: string, candidate: AlphaEditCandidate) => {
+        const rings = getBarkToPithRingsForPreview(tree);
+        const years = new Set<number>();
+        candidate.operations.forEach((operation) => {
+            if (operation.operationType === "insert_missing_ring_suggestion") {
+                const boundaryIndex = operation.targetBoundaryIndex;
+                if (boundaryIndex === null || boundaryIndex === undefined) return;
+                const barkSide = rings[boundaryIndex];
+                const pithSide = rings[boundaryIndex + 1];
+                if (barkSide) years.add(barkSide.year);
+                if (pithSide) years.add(pithSide.year);
+                return;
+            }
+            if (operation.targetRingIndex !== null && operation.targetRingIndex !== undefined) {
+                const ring = rings[operation.targetRingIndex];
+                if (ring) years.add(ring.year);
+            }
+            if (operation.targetRingIndex2 !== null && operation.targetRingIndex2 !== undefined) {
+                const ring = rings[operation.targetRingIndex2];
+                if (ring) years.add(ring.year);
+            }
+        });
+
+        if (years.size === 0) {
+            return;
+        }
+
+        alphaEditPreviewIdRef.current += 1;
+        const id = alphaEditPreviewIdRef.current;
+        setEditHighlight({
+            id,
+            keys: new Set(Array.from(years).map((year) => `${tree} ${year}`)),
+        });
+        if (editHighlightTimerRef.current !== null) {
+            window.clearTimeout(editHighlightTimerRef.current);
+        }
+        editHighlightTimerRef.current = window.setTimeout(() => {
+            setEditHighlight((previous) => previous?.id === id ? null : previous);
+            editHighlightTimerRef.current = null;
+        }, COFECHA_JUMP_HIGHLIGHT_MS);
+    }, [getBarkToPithRingsForPreview]);
     const shouldUseFlightShift = insertYearAnim === "flight-shift";
     const insertCellMotion = insertYearAnim === "side-pop-shift"
         ? "side-pop"
@@ -2524,7 +2582,9 @@ function WidthContainer({
                                     seriesId={series.treeCode}
                                     series={visibleSite.get(series.treeCode) ?? new Map()}
                                     reference={cofechaPassReference}
+                                    referenceStale={cofechaPassReferenceStale}
                                     onApplyCandidate={onApplyAlphaEditCandidate}
+                                    onPreviewCandidate={handlePreviewAlphaEditCandidate}
                                 />
                             </div>
                             {series.rows.map((row, rowIndex) => (

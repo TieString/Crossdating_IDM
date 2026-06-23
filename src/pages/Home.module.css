@@ -303,11 +303,52 @@
 }
 
 .problems-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
     flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
     padding: 10px;
     background-color: #f9f9f9;
     border: 1px solid #ccc;
     border-radius: 8px;
+}
+
+.problem-tabs {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 6px;
+}
+
+.problem-tab {
+    font-size: 12px;
+    padding: 3px 12px;
+    border-radius: 5px;
+    border: 1px solid #d0d0d0;
+    background-color: #fff;
+    color: #555;
+    cursor: pointer;
+    line-height: 1.4;
+}
+
+.problem-tab:disabled {
+    color: #bbb;
+    background-color: #f4f4f4;
+    border-color: #e4e4e4;
+    cursor: default;
+}
+
+.problem-tab-active {
+    border-color: #b86b33;
+    color: #8a3b12;
+    font-weight: 650;
+    background-color: #fff7ef;
+}
+
+.problem-tab-body {
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 .potential-problems {

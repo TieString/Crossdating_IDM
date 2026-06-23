@@ -61,16 +61,30 @@ export function diagnoseCrossdating(
         ...makePatternDrafts(diagnosis, config),
         ...makeSegmentDrafts(diagnosis, config),
     ]);
-    const candidates = rankDiagnosisCandidates(dedupeDiagnosisCandidates(
+    const evaluatedCandidates = dedupeDiagnosisCandidates(
         candidateDrafts
             .map((draft) => {
                 const before = seriesDiagnoses.find((diagnosis) => diagnosis.targetTree === draft.targetTree);
                 return before ? evaluateDraft(siteData, before, draft, config) : null;
             })
             .filter((candidate): candidate is DiagnosisCandidateOperation => candidate !== null),
-    ))
-        .sort(compareDiagnosisCandidates)
-        .slice(0, config.maxTopCandidates);
+    );
+    // 每条序列单独排序并取前 maxTopCandidates 个候选，避免全局名额被某条序列挤占，
+    // 保证按序列查看时每条都能看到属于自己的候选建议。
+    const candidatesByTree = new Map<string, DiagnosisCandidateOperation[]>();
+    evaluatedCandidates.forEach((candidate) => {
+        const group = candidatesByTree.get(candidate.targetTree);
+        if (group) {
+            group.push(candidate);
+        } else {
+            candidatesByTree.set(candidate.targetTree, [candidate]);
+        }
+    });
+    const candidates = Array.from(candidatesByTree.values())
+        .flatMap((group) => rankDiagnosisCandidates(group)
+            .sort(compareDiagnosisCandidates)
+            .slice(0, config.maxTopCandidates))
+        .sort(compareDiagnosisCandidates);
     const candidateCountByTree = candidates.reduce((counts, candidate) => {
         counts.set(candidate.targetTree, (counts.get(candidate.targetTree) ?? 0) + 1);
         return counts;

@@ -1,5 +1,7 @@
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::time::Instant;
 
 const INF: f64 = f64::INFINITY;
 
@@ -216,6 +218,7 @@ pub async fn suggest_insert_delete_years_alpha_edit(
 pub fn run_alpha_edit_suggestions(
     input: AlphaEditSuggestionInput,
 ) -> Result<AlphaEditSuggestionResult, String> {
+    let started = Instant::now();
     let effective = normalize_input(input)?;
     let mut warnings = Vec::new();
     if effective.cost_mode != "wenk_2003_standardized" {
@@ -227,7 +230,10 @@ pub fn run_alpha_edit_suggestions(
         warnings.push("Unsupported sortBy was replaced by t_value.".to_string());
     }
     if effective.include_heuristic_rejected {
-        warnings.push("includeHeuristicRejected is reserved; DP-stage opposite edit gap is always enforced.".to_string());
+        warnings.push(
+            "includeHeuristicRejected is reserved; DP-stage opposite edit gap is always enforced."
+                .to_string(),
+        );
     }
 
     let offsets: Vec<usize> = effective
@@ -235,10 +241,16 @@ pub fn run_alpha_edit_suggestions(
         .iter()
         .enumerate()
         .filter_map(|(index, point)| {
-            if effective.scan_outer_year_min.is_some_and(|min| point.year < min) {
+            if effective
+                .scan_outer_year_min
+                .is_some_and(|min| point.year < min)
+            {
                 return None;
             }
-            if effective.scan_outer_year_max.is_some_and(|max| point.year > max) {
+            if effective
+                .scan_outer_year_max
+                .is_some_and(|max| point.year > max)
+            {
                 return None;
             }
             Some(index)
@@ -249,6 +261,7 @@ pub fn run_alpha_edit_suggestions(
         .into_par_iter()
         .flat_map(|offset| run_offset_box(&effective, offset).unwrap_or_default())
         .collect();
+    let raw_candidate_count = candidates.len();
 
     mark_path_redundancy(&mut candidates, effective.redundancy_ratio);
     mark_inter_box_redundancy(&mut candidates, effective.redundancy_ratio);
@@ -259,7 +272,7 @@ pub fn run_alpha_edit_suggestions(
     }
 
     sort_candidates(&mut candidates);
-    candidates.truncate(effective.top_k);
+    retain_top_k_with_baseline(&mut candidates, effective.top_k);
     for (index, candidate) in candidates.iter_mut().enumerate() {
         candidate.rank = index + 1;
     }
@@ -267,6 +280,19 @@ pub fn run_alpha_edit_suggestions(
     let reference_outer_year = effective.reference.first().map(|point| point.year);
     let reference_inner_year = effective.reference.last().map(|point| point.year);
     let returned_count = candidates.len();
+
+    println!(
+        "[Alpha edit][{}] targetPoints={} referencePoints={} offsets={} rawCandidates={} returned={} alphaMax={} minOverlap={} total={:.1}ms",
+        effective.series_id,
+        effective.target.len(),
+        effective.reference.len(),
+        offsets_len_hint(&effective),
+        raw_candidate_count,
+        returned_count,
+        effective.alpha_max,
+        effective.min_overlap,
+        started.elapsed().as_secs_f64() * 1000.0,
+    );
 
     Ok(AlphaEditSuggestionResult {
         series_id: effective.series_id,
@@ -283,6 +309,21 @@ pub fn run_alpha_edit_suggestions(
     })
 }
 
+fn offsets_len_hint(effective: &EffectiveInput) -> usize {
+    effective
+        .reference
+        .iter()
+        .filter(|point| {
+            !effective
+                .scan_outer_year_min
+                .is_some_and(|min| point.year < min)
+                && !effective
+                    .scan_outer_year_max
+                    .is_some_and(|max| point.year > max)
+        })
+        .count()
+}
+
 fn normalize_input(input: AlphaEditSuggestionInput) -> Result<EffectiveInput, String> {
     let mut target = input.target;
     target.retain(|point| point.standardized_value.is_finite());
@@ -291,8 +332,15 @@ fn normalize_input(input: AlphaEditSuggestionInput) -> Result<EffectiveInput, St
         return Err("target is empty after filtering finite standardized values".to_string());
     }
 
-    let mut reference = input.reference;
-    reference.retain(|point| point.standardized_value.is_finite());
+    let mut reference_by_year: HashMap<i32, ReferenceWenkPoint> = HashMap::new();
+    for point in input
+        .reference
+        .into_iter()
+        .filter(|point| point.standardized_value.is_finite())
+    {
+        reference_by_year.entry(point.year).or_insert(point);
+    }
+    let mut reference: Vec<ReferenceWenkPoint> = reference_by_year.into_values().collect();
     reference.sort_by(|a, b| b.year.cmp(&a.year));
     if reference.is_empty() {
         return Err("reference is empty after filtering finite standardized values".to_string());
@@ -303,7 +351,9 @@ fn normalize_input(input: AlphaEditSuggestionInput) -> Result<EffectiveInput, St
     let top_k = input.top_k.unwrap_or(20).max(1).min(200);
     let redundancy_ratio = input.redundancy_ratio.unwrap_or(0.9).clamp(0.0, 1.0);
     let sort_by = input.sort_by.unwrap_or_else(|| "t_value".to_string());
-    let cost_mode = input.cost_mode.unwrap_or_else(|| "wenk_2003_standardized".to_string());
+    let cost_mode = input
+        .cost_mode
+        .unwrap_or_else(|| "wenk_2003_standardized".to_string());
 
     Ok(EffectiveInput {
         series_id: input.series_id,
@@ -326,9 +376,16 @@ fn normalize_input(input: AlphaEditSuggestionInput) -> Result<EffectiveInput, St
     })
 }
 
-fn run_offset_box(effective: &EffectiveInput, offset: usize) -> Result<Vec<AlphaEditCandidate>, String> {
+fn run_offset_box(
+    effective: &EffectiveInput,
+    offset: usize,
+) -> Result<Vec<AlphaEditCandidate>, String> {
     let n = effective.target.len();
-    let max_columns = effective.reference.len().saturating_sub(offset).min(n + effective.alpha_max);
+    let max_columns = effective
+        .reference
+        .len()
+        .saturating_sub(offset)
+        .min(n + effective.alpha_max);
     if max_columns < effective.min_overlap {
         return Ok(Vec::new());
     }
@@ -346,7 +403,11 @@ fn run_offset_box(effective: &EffectiveInput, offset: usize) -> Result<Vec<Alpha
     for i in 0..=n {
         for j in 0..=max_columns {
             for k in 0..=effective.alpha_max {
-                for kind in [GapBlockKind::None, GapBlockKind::InsertBlocksMerge, GapBlockKind::MergeBlocksInsert] {
+                for kind in [
+                    GapBlockKind::None,
+                    GapBlockKind::InsertBlocksMerge,
+                    GapBlockKind::MergeBlocksInsert,
+                ] {
                     for remaining in 0..=effective.opposite_edit_min_gap {
                         let from_index = state_shape.index(i, j, k, kind, remaining);
                         let from = cells[from_index];
@@ -356,7 +417,8 @@ fn run_offset_box(effective: &EffectiveInput, offset: usize) -> Result<Vec<Alpha
 
                         if i < n && j < max_columns {
                             let target_value = effective.target[i].standardized_value;
-                            let reference_value = effective.reference[offset + j].standardized_value;
+                            let reference_value =
+                                effective.reference[offset + j].standardized_value;
                             let contribution = squared(target_value - reference_value);
                             let (next_kind, next_remaining) = advance_gap(kind, remaining);
                             relax(
@@ -380,12 +442,14 @@ fn run_offset_box(effective: &EffectiveInput, offset: usize) -> Result<Vec<Alpha
                             );
                         }
 
-                        if j < max_columns && k < effective.alpha_max && can_insert(effective, i, n) {
+                        if j < max_columns && k < effective.alpha_max && can_insert(effective, i, n)
+                        {
                             if !(kind == GapBlockKind::MergeBlocksInsert && remaining > 0) {
                                 let target_value = (effective.target[i - 1].standardized_value
                                     + effective.target[i].standardized_value)
                                     / 2.0;
-                                let reference_value = effective.reference[offset + j].standardized_value;
+                                let reference_value =
+                                    effective.reference[offset + j].standardized_value;
                                 let contribution = squared(target_value - reference_value);
                                 relax(
                                     &mut cells,
@@ -415,7 +479,8 @@ fn run_offset_box(effective: &EffectiveInput, offset: usize) -> Result<Vec<Alpha
                             {
                                 let target_value = effective.target[i].standardized_value
                                     + effective.target[i + 1].standardized_value;
-                                let reference_value = effective.reference[offset + j].standardized_value;
+                                let reference_value =
+                                    effective.reference[offset + j].standardized_value;
                                 let contribution = squared(target_value - reference_value);
                                 relax(
                                     &mut cells,
@@ -477,14 +542,7 @@ impl StateShape {
         (self.n + 1) * (self.columns + 1) * (self.alpha_max + 1) * 3 * (self.max_gap_remaining + 1)
     }
 
-    fn index(
-        &self,
-        i: usize,
-        j: usize,
-        k: usize,
-        kind: GapBlockKind,
-        remaining: usize,
-    ) -> usize {
+    fn index(&self, i: usize, j: usize, k: usize, kind: GapBlockKind, remaining: usize) -> usize {
         ((((i * (self.columns + 1) + j) * (self.alpha_max + 1) + k) * 3 + kind as usize)
             * (self.max_gap_remaining + 1))
             + remaining
@@ -537,13 +595,20 @@ fn collect_best_state_for_cell(
     drafts: &mut Vec<DpCandidateDraft>,
 ) {
     let mut best: Option<(GapBlockKind, usize, DpCell)> = None;
-    for kind in [GapBlockKind::None, GapBlockKind::InsertBlocksMerge, GapBlockKind::MergeBlocksInsert] {
+    for kind in [
+        GapBlockKind::None,
+        GapBlockKind::InsertBlocksMerge,
+        GapBlockKind::MergeBlocksInsert,
+    ] {
         for remaining in 0..=shape.max_gap_remaining {
             let cell = cells[shape.index(i, j, k, kind, remaining)];
             if !cell.cost.is_finite() {
                 continue;
             }
-            if best.map(|(_, _, current)| cell.cost < current.cost).unwrap_or(true) {
+            if best
+                .map(|(_, _, current)| cell.cost < current.cost)
+                .unwrap_or(true)
+            {
                 best = Some((kind, remaining, cell));
             }
         }
@@ -577,7 +642,9 @@ fn build_candidate(
     let t_value = correlation.and_then(|r| t_value_from_r(r, draft.final_j));
     let mut warnings = Vec::new();
     if correlation.is_none() {
-        warnings.push("correlation unavailable because overlap is too small or variance is zero".to_string());
+        warnings.push(
+            "correlation unavailable because overlap is too small or variance is zero".to_string(),
+        );
     }
 
     let operations: Vec<AlphaEditOperation> = trace
@@ -637,7 +704,11 @@ fn build_candidate(
     let suggested_inner_year = effective.reference[offset + draft.final_j - 1].year;
     let id = format!(
         "{}:{}:{}:{}:{}",
-        effective.series_id, suggested_outer_year, suggested_inner_year, draft.final_k, draft.final_i
+        effective.series_id,
+        suggested_outer_year,
+        suggested_inner_year,
+        draft.final_k,
+        draft.final_i
     );
 
     Some(AlphaEditCandidate {
@@ -664,7 +735,11 @@ fn build_candidate(
     })
 }
 
-fn traceback(cells: &[DpCell], shape: &StateShape, draft: &DpCandidateDraft) -> Option<Vec<TraceStep>> {
+fn traceback(
+    cells: &[DpCell],
+    shape: &StateShape,
+    draft: &DpCandidateDraft,
+) -> Option<Vec<TraceStep>> {
     let mut i = draft.final_i;
     let mut j = draft.final_j;
     let mut k = draft.final_k;
@@ -737,18 +812,40 @@ fn raw_op_label(kind: RawOpKind) -> &'static str {
 
 fn sort_candidates(candidates: &mut [AlphaEditCandidate]) {
     candidates.sort_by(|a, b| {
-        option_desc(b.t_value, a.t_value)
-            .then_with(|| option_desc(b.correlation, a.correlation))
-            .then_with(|| a.normalized_edit_distance.total_cmp(&b.normalized_edit_distance))
+        option_desc(a.t_value, b.t_value)
+            .then_with(|| option_desc(a.correlation, b.correlation))
+            .then_with(|| {
+                a.normalized_edit_distance
+                    .total_cmp(&b.normalized_edit_distance)
+            })
             .then_with(|| a.edit_count.cmp(&b.edit_count))
             .then_with(|| b.overlap.cmp(&a.overlap))
             .then_with(|| b.suggested_outer_year.cmp(&a.suggested_outer_year))
     });
 }
 
+fn retain_top_k_with_baseline(candidates: &mut Vec<AlphaEditCandidate>, top_k: usize) {
+    let baseline = candidates
+        .iter()
+        .find(|candidate| candidate.alpha == 0 && candidate.edit_count == 0)
+        .cloned();
+    candidates.truncate(top_k);
+    if let Some(baseline) = baseline {
+        let baseline_retained = candidates
+            .iter()
+            .any(|candidate| candidate.id == baseline.id);
+        if !baseline_retained {
+            if candidates.len() >= top_k {
+                candidates.pop();
+            }
+            candidates.push(baseline);
+        }
+    }
+}
+
 fn option_desc(left: Option<f64>, right: Option<f64>) -> std::cmp::Ordering {
     match (left, right) {
-        (Some(a), Some(b)) => a.total_cmp(&b),
+        (Some(a), Some(b)) => b.total_cmp(&a),
         (Some(_), None) => std::cmp::Ordering::Less,
         (None, Some(_)) => std::cmp::Ordering::Greater,
         (None, None) => std::cmp::Ordering::Equal,
@@ -927,18 +1024,84 @@ mod tests {
         }
     }
 
+    fn redundancy_candidate(
+        outer_year: i32,
+        inner_year: i32,
+        edit_sequence: &str,
+        normalized_edit_distance: f64,
+    ) -> AlphaEditCandidate {
+        let operations = edit_sequence
+            .chars()
+            .enumerate()
+            .map(|(index, op)| AlphaEditOperation {
+                operation_type: if op == 'I' {
+                    "insert_missing_ring_suggestion".to_string()
+                } else {
+                    "merge_double_ring_suggestion".to_string()
+                },
+                target_boundary_index: (op == 'I').then_some(index),
+                target_ring_index: (op == 'M').then_some(index),
+                target_ring_index2: (op == 'M').then_some(index + 1),
+                recommended_delete_index: (op == 'M').then_some(index + 1),
+                merge_into: (op == 'M').then(|| "bark_side_neighbor".to_string()),
+                reference_year: outer_year - index as i32,
+                cost_contribution: normalized_edit_distance,
+                operation_order: index,
+                direction: "bark_to_pith".to_string(),
+            })
+            .collect::<Vec<_>>();
+        AlphaEditCandidate {
+            id: format!("{}-{}-{}", outer_year, inner_year, edit_sequence),
+            rank: 0,
+            suggested_outer_year: outer_year,
+            suggested_inner_year: inner_year,
+            reference_outer_year: outer_year,
+            reference_inner_year: inner_year,
+            alpha: operations.len(),
+            edit_count: operations.len(),
+            insert_count: operations
+                .iter()
+                .filter(|operation| operation.operation_type == "insert_missing_ring_suggestion")
+                .count(),
+            merge_count: operations
+                .iter()
+                .filter(|operation| operation.operation_type == "merge_double_ring_suggestion")
+                .count(),
+            overlap: 10,
+            sum_squared_error: normalized_edit_distance * 10.0,
+            normalized_edit_distance,
+            correlation: Some(0.8),
+            t_value: Some(3.0),
+            operations,
+            warnings: Vec::new(),
+            is_redundant: false,
+            redundancy_reason: None,
+            raw_transformation: Vec::new(),
+        }
+    }
+
     #[test]
     fn alpha_zero_returns_identity_baseline_only() {
-        let result = run_alpha_edit_suggestions(input(&[1.0, 2.0, 3.0, 4.0], &[1.0, 2.0, 3.0, 4.0], 0)).unwrap();
+        let result =
+            run_alpha_edit_suggestions(input(&[1.0, 2.0, 3.0, 4.0], &[1.0, 2.0, 3.0, 4.0], 0))
+                .unwrap();
         let best = result.candidates.first().unwrap();
         assert_eq!(best.alpha, 0);
         assert!(best.operations.is_empty());
-        assert_eq!(best.raw_transformation.iter().map(|step| step.op.as_str()).collect::<Vec<_>>(), vec!["N", "N", "N", "N"]);
+        assert_eq!(
+            best.raw_transformation
+                .iter()
+                .map(|step| step.op.as_str())
+                .collect::<Vec<_>>(),
+            vec!["N", "N", "N", "N"]
+        );
     }
 
     #[test]
     fn missing_ring_uses_insert_average() {
-        let result = run_alpha_edit_suggestions(input(&[1.0, 2.0, 4.0, 5.0], &[1.0, 2.0, 3.0, 4.0, 5.0], 1)).unwrap();
+        let result =
+            run_alpha_edit_suggestions(input(&[1.0, 2.0, 4.0, 5.0], &[1.0, 2.0, 3.0, 4.0, 5.0], 1))
+                .unwrap();
         let candidate = result
             .candidates
             .iter()
@@ -955,11 +1118,21 @@ mod tests {
             .unwrap();
         assert_eq!(inserted.transformed_value, 3.0);
         assert_eq!(candidate.sum_squared_error, 0.0);
+        assert_eq!(
+            candidate
+                .raw_transformation
+                .iter()
+                .map(|step| step.op.as_str())
+                .collect::<Vec<_>>(),
+            vec!["N", "N", "I", "N", "N"]
+        );
     }
 
     #[test]
     fn double_ring_uses_wenk_sum_merge_not_average() {
-        let result = run_alpha_edit_suggestions(input(&[1.0, 2.0, 3.0, 4.0, 5.0], &[1.0, 2.0, 7.0, 5.0], 1)).unwrap();
+        let result =
+            run_alpha_edit_suggestions(input(&[1.0, 2.0, 3.0, 4.0, 5.0], &[1.0, 2.0, 7.0, 5.0], 1))
+                .unwrap();
         let candidate = result
             .candidates
             .iter()
@@ -988,6 +1161,18 @@ mod tests {
     }
 
     #[test]
+    fn last_row_returns_full_target_against_reference_prefix() {
+        let mut request = input(&[1.0, 2.0, 3.0], &[1.0, 2.0, 3.0, 9.0], 0);
+        request.min_overlap = Some(3);
+        let result = run_alpha_edit_suggestions(request).unwrap();
+        let best = result.candidates.first().unwrap();
+        assert_eq!(best.overlap, 3);
+        assert_eq!(best.raw_transformation.len(), 3);
+        assert_eq!(best.suggested_outer_year, 2000);
+        assert_eq!(best.suggested_inner_year, 1998);
+    }
+
+    #[test]
     fn last_column_returns_target_prefix_when_reference_ends() {
         let mut request = input(&[1.0, 2.0, 3.0, 4.0, 9.0], &[1.0, 2.0, 3.0, 4.0], 0);
         request.min_overlap = Some(4);
@@ -999,6 +1184,70 @@ mod tests {
     }
 
     #[test]
+    fn sort_candidates_prioritizes_t_value_before_edit_distance() {
+        let mut candidates = vec![
+            AlphaEditCandidate {
+                id: "lower-t-better-distance".to_string(),
+                t_value: Some(2.0),
+                correlation: Some(0.7),
+                normalized_edit_distance: 0.0,
+                ..redundancy_candidate(2000, 1991, "", 0.0)
+            },
+            AlphaEditCandidate {
+                id: "higher-t-worse-distance".to_string(),
+                t_value: Some(5.0),
+                correlation: Some(0.8),
+                normalized_edit_distance: 10.0,
+                ..redundancy_candidate(1999, 1990, "I", 10.0)
+            },
+            AlphaEditCandidate {
+                id: "null-t".to_string(),
+                t_value: None,
+                correlation: None,
+                normalized_edit_distance: 0.0,
+                ..redundancy_candidate(1998, 1989, "", 0.0)
+            },
+        ];
+        sort_candidates(&mut candidates);
+        assert_eq!(candidates[0].id, "higher-t-worse-distance");
+        assert_eq!(candidates[1].id, "lower-t-better-distance");
+        assert_eq!(candidates[2].id, "null-t");
+    }
+
+    #[test]
+    fn top_k_retains_alpha_zero_baseline() {
+        let mut candidates = vec![
+            AlphaEditCandidate {
+                id: "edit-best".to_string(),
+                t_value: Some(5.0),
+                correlation: Some(0.9),
+                ..redundancy_candidate(2000, 1991, "I", 0.2)
+            },
+            AlphaEditCandidate {
+                id: "baseline".to_string(),
+                t_value: Some(1.0),
+                correlation: Some(0.5),
+                ..redundancy_candidate(1999, 1990, "", 1.0)
+            },
+            AlphaEditCandidate {
+                id: "edit-second".to_string(),
+                t_value: Some(4.0),
+                correlation: Some(0.8),
+                ..redundancy_candidate(1998, 1989, "M", 0.3)
+            },
+        ];
+        sort_candidates(&mut candidates);
+        retain_top_k_with_baseline(&mut candidates, 2);
+        assert_eq!(candidates.len(), 2);
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.id == "edit-best"));
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.id == "baseline"));
+    }
+
+    #[test]
     fn opposite_edit_gap_is_enforced_during_dp() {
         let mut request = input(&[1.0, 2.0, 4.0, 2.0, 3.0], &[1.0, 2.0, 3.0, 6.0, 3.0], 2);
         request.opposite_edit_min_gap = Some(10);
@@ -1007,5 +1256,33 @@ mod tests {
             .candidates
             .iter()
             .all(|candidate| edit_sequence(candidate) != "IM" && edit_sequence(candidate) != "MI"));
+    }
+
+    #[test]
+    fn path_redundancy_check_marks_insufficient_edit_improvement() {
+        let mut candidates = vec![
+            redundancy_candidate(2000, 1991, "", 1.0),
+            redundancy_candidate(2000, 1991, "I", 0.95),
+        ];
+        mark_path_redundancy(&mut candidates, 0.9);
+        assert!(candidates[1].is_redundant);
+        assert_eq!(
+            candidates[1].redundancy_reason.as_deref(),
+            Some("path_redundancy_check_failed"),
+        );
+    }
+
+    #[test]
+    fn inter_box_redundancy_check_marks_edit_prefix_offset_shift() {
+        let mut candidates = vec![
+            redundancy_candidate(2001, 1992, "M", 1.0),
+            redundancy_candidate(2000, 1991, "IM", 0.95),
+        ];
+        mark_inter_box_redundancy(&mut candidates, 0.9);
+        assert!(candidates[1].is_redundant);
+        assert_eq!(
+            candidates[1].redundancy_reason.as_deref(),
+            Some("inter_box_edit_prefix_redundancy"),
+        );
     }
 }

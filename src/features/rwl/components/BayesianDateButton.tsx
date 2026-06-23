@@ -12,7 +12,7 @@ import type { RwlTreeData } from "@/features/rwl/types";
 import styles from "./BayesianDateButton.module.css";
 
 type BayesianDateButtonProps = {
-    seriesId: string;
+     seriesId: string;
     series: RwlTreeData;
     reference: CofechaPassReference | null | undefined;
     disabled?: boolean;
@@ -280,11 +280,13 @@ export function BayesianDateButton({
 
     const disabledReason = useMemo(() => {
         if (disabled) return "当前序列不可定年";
-        if (!reference) return "需要先生成 COFECHA-pass 参考序列";
-        if (reference.source !== "cofecha_pass_anchor") return "需要使用动态 COFECHA-pass 参考序列";
-        if (reference.points.length === 0) return "COFECHA-pass 参考序列没有可用点";
+        if (!reference) return "需要先生成动态 COFECHA 参考序列";
+        if (reference.source !== "cofecha_pass_anchor" && reference.source !== "cofecha_master_series") {
+            return "需要使用动态 COFECHA 参考序列";
+        }
+        if (reference.points.length === 0) return "动态 COFECHA 参考序列没有可用点";
         return "";
-    }, [disabled, reference]);
+     }, [disabled, reference]);
 
     const handleRun = async () => {
         if (!reference || disabledReason || running) return;
@@ -302,7 +304,7 @@ export function BayesianDateButton({
         globalBayesianDatingRunning = true;
 
         try {
-            const nextResult = await runBayesianDatingMcmc({
+           const nextResult = await runBayesianDatingMcmc({
                 targetSeriesId: seriesId,
                 series,
                 reference,
@@ -328,10 +330,10 @@ export function BayesianDateButton({
                 type="button"
                 className={styles.button}
                 disabled={running || Boolean(disabledReason)}
-                title={disabledReason || `默认 MCMC：${DEFAULT_BAYESIAN_MCMC_CONFIG.chains} chains × ${DEFAULT_BAYESIAN_MCMC_CONFIG.iterations} iterations`}
+                title={disabledReason || `贝叶斯定年 默认 MCMC：${DEFAULT_BAYESIAN_MCMC_CONFIG.chains} chains × ${DEFAULT_BAYESIAN_MCMC_CONFIG.iterations} iterations`}
                 onClick={() => { void handleRun(); }}
             >
-                {running ? "定年中…" : "贝叶斯定年"}
+                {running ? "确定中…" : "年代确定"}
             </button>
             {open ? (
                 <ResultPopover

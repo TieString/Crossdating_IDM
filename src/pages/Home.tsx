@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { AnimatePresence } from "motion/react";
 import { TreeChartManager } from "@/components/Chart/TreeChartManager";
+import { DiagnosisCandidatePanel } from "@/components/DiagnosisCandidates/DiagnosisCandidatePanel";
 import WidthContainer, { WidthGridSkeleton } from "@/components/WidthContainer/WidthContainer";
 import ContextMenu, { type ContextMenuItem } from "@/components/ContextMenu/ContextMenu";
 import { FloatingScrollArea } from "@/components/FloatingScrollArea/FloatingScrollArea";
@@ -320,6 +321,7 @@ export default function Home() {
     const [findQuery, setFindQuery] = useState("");
     const [replaceValue, setReplaceValue] = useState("");
     const [findMatchIndex, setFindMatchIndex] = useState(0);
+    const [problemTab, setProblemTab] = useState<"problems" | "candidates">("problems");
     const {
         applyRawRwlText,
         applyRawRwlTextForTree,
@@ -359,7 +361,6 @@ export default function Home() {
         handleUndo,
         handleUndoOperationLogEntry,
         hasChart,
-        hasProblems,
         historyAnimation,
         historyStatus,
         isCofechaOutdated,
@@ -384,6 +385,21 @@ export default function Home() {
         windowTitle,
     } = useHomeWorkspace();
 
+    const selectedTreeCandidates = useMemo(
+        () => crossdatingDiagnosis.candidates.filter((candidate) => candidate.targetTree === selectedTree),
+        [crossdatingDiagnosis, selectedTree],
+    );
+    const candidateTabAvailable = selectedTreeCandidates.length > 0;
+    const problemTabAvailable = Boolean(selectedProblemText);
+    const showProblemsPanel = problemTabAvailable || candidateTabAvailable;
+    const activeProblemTab: "problems" | "candidates" = problemTab === "candidates" && candidateTabAvailable
+        ? "candidates"
+        : problemTab === "problems" && problemTabAvailable
+            ? "problems"
+            : candidateTabAvailable
+                ? "candidates"
+                : "problems";
+
     const mainDividerCollapsed = isPanelRatioCollapsed(layout.mainSplitRatio);
     const leftBottomDividerCollapsed = layout.leftBottomRatio >= COLLAPSED_PANEL_RATIO;
     const rightBottomDividerCollapsed = isPanelRatioCollapsed(layout.rightBottomRatio);
@@ -393,7 +409,7 @@ export default function Home() {
         flex: `0 0 ${layout.mainSplitRatio * 100}%`,
         ...(!mainDividerCollapsed ? { maxWidth: `calc(100% - ${PANEL_DIVIDER_GUTTER_SIZE}px)` } : {}),
     };
-    const dataContainerStyle = hasProblems
+    const dataContainerStyle = showProblemsPanel
         ? {
             flex: `0 0 ${layout.leftBottomRatio * 100}%`,
             ...(!leftBottomDividerCollapsed ? { maxHeight: `calc(100% - ${PANEL_DIVIDER_GUTTER_SIZE}px)` } : {}),
@@ -1206,6 +1222,7 @@ export default function Home() {
                                                     selected={selectedTree}
                                                     masterSeries={cofechaResult?.masterDatingSeries}
                                                     cofechaPassReference={dynamicReferenceConfig?.cofechaPassReference ?? null}
+                                                    cofechaPassReferenceStale={dynamicReferenceConfig?.isStale ?? false}
                                                     masterCorrelations={cofechaResult?.masterCorrelations}
                                                     seriesProblemCounts={cofechaResult?.seriesProblemCounts}
                                                     historyAnimation={historyAnimation}
@@ -1239,7 +1256,7 @@ export default function Home() {
                                     )}
                                 </FloatingScrollArea>
 
-                                {hasProblems ? (
+                                {showProblemsPanel ? (
                                     <>
                                         <div
                                             role="separator"
@@ -1255,11 +1272,40 @@ export default function Home() {
                                             })}
                                         />
 
-                                        <FloatingScrollArea className={style["problems-container"]}>
-                                            <p className={style["potential-problems"]}>
-                                                {selectedProblemText}
-                                            </p>
-                                        </FloatingScrollArea>
+                                        <div className={style["problems-container"]}>
+                                            <div className={style["problem-tabs"]}>
+                                                <button
+                                                    type="button"
+                                                    className={`${style["problem-tab"]} ${activeProblemTab === "problems" ? style["problem-tab-active"] : ""}`}
+                                                    disabled={!problemTabAvailable}
+                                                    onClick={() => setProblemTab("problems")}
+                                                >
+                                                    可能问题
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className={`${style["problem-tab"]} ${activeProblemTab === "candidates" ? style["problem-tab-active"] : ""}`}
+                                                    disabled={!candidateTabAvailable}
+                                                    onClick={() => setProblemTab("candidates")}
+                                                >
+                                                    定年建议{candidateTabAvailable ? ` ${selectedTreeCandidates.length}` : ""}
+                                                </button>
+                                            </div>
+
+                                            <FloatingScrollArea className={style["problem-tab-body"]}>
+                                                {activeProblemTab === "candidates" ? (
+                                                    <DiagnosisCandidatePanel
+                                                        candidates={selectedTreeCandidates}
+                                                        diagnosisBatchResult={diagnosisBatchResult}
+                                                        onApplyDiagnosisCandidate={handleApplyDiagnosisCandidate}
+                                                    />
+                                                ) : (
+                                                    <p className={style["potential-problems"]}>
+                                                        {selectedProblemText}
+                                                    </p>
+                                                )}
+                                            </FloatingScrollArea>
+                                        </div>
                                     </>
                                 ) : null}
                             </div>

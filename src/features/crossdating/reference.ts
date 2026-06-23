@@ -48,7 +48,7 @@ export type CofechaReferencePoint = {
 
 export type CofechaPassReference = {
     id: string;
-    source: "cofecha_pass_anchor";
+    source: "cofecha_pass_anchor" | "cofecha_master_series";
     cofechaRunId: string;
     includedSeriesIds: string[];
     candidateSeriesIds: string[];
@@ -601,6 +601,83 @@ export function createCofechaPassReferenceConfig(params: {
     };
 }
 
+export function createCofechaMasterReferenceConfig(params: {
+    siteData: RwlSiteData;
+    flaggedAIds: Iterable<string>;
+    cofechaRunId: string;
+    rwlHash: string;
+    masterDatingSeries: Map<number, number>;
+    options?: CofechaReferenceOptions;
+}): ReferenceSeriesConfig {
+    const classification = classifyCofechaPart6Series(
+        Array.from(params.siteData.keys()),
+        params.flaggedAIds,
+        params.cofechaRunId,
+    );
+    const options = params.options ?? COFECHA_REFERENCE_DEFAULT_OPTIONS;
+    const sortedMasterEntries = Array.from(params.masterDatingSeries.entries())
+        .filter((entry): entry is [number, number] => (
+            Number.isFinite(entry[0]) && Number.isFinite(entry[1])
+        ))
+        .sort((a, b) => a[0] - b[0]);
+
+    const replicationForYear = (year: number) => (
+        classification.allSeriesIds.reduce((count, seriesId) => {
+            const value = params.siteData.get(seriesId)?.get(year);
+            return isUsableWidth(value, options) ? count + 1 : count;
+        }, 0)
+    );
+
+    const points: CofechaReferencePoint[] = sortedMasterEntries.map(([year, value]) => {
+        const replication = replicationForYear(year);
+        return {
+            year,
+            value,
+            replication,
+            sd: 0,
+            se: 0,
+            weight: Math.min(1, replication / options.targetReplication),
+        };
+    });
+    const replications = points.map((point) => point.replication);
+    const cofechaPassReference: CofechaPassReference | null = points.length > 0
+        ? {
+            id: `cofecha-master-reference-${params.cofechaRunId}`,
+            source: "cofecha_master_series",
+            cofechaRunId: params.cofechaRunId,
+            includedSeriesIds: classification.allSeriesIds,
+            candidateSeriesIds: classification.candidateFlaggedIds,
+            options,
+            points,
+            summary: {
+                includedCount: classification.allSeriesIds.length,
+                candidateCount: classification.candidateFlaggedIds.length,
+                startYear: points[0]?.year ?? null,
+                endYear: points[points.length - 1]?.year ?? null,
+                meanReplication: replications.length > 0 ? mean(replications) : null,
+                minReplication: replications.length > 0 ? Math.min(...replications) : null,
+                maxReplication: replications.length > 0 ? Math.max(...replications) : null,
+            },
+        }
+        : null;
+
+    return {
+        selectedTrees: classification.allSeriesIds,
+        minSampleDepth: options.minReplication,
+        method: "mean",
+        mode: "dynamic",
+        updatedAt: new Date().toISOString(),
+        cofechaRunId: params.cofechaRunId,
+        rwlHash: params.rwlHash,
+        isStale: false,
+        classification,
+        cofechaPassReference,
+        unavailableReason: cofechaPassReference
+            ? undefined
+            : "COFECHA master series 为空，无法生成临时参考序列。",
+    };
+}
+
 export function getOffsetCheckTargetSet(config: ReferenceSeriesConfig | null | undefined): OffsetCheckTargetSet | null {
     if (!config?.cofechaPassReference || !config.classification) return null;
     return {
@@ -715,7 +792,7 @@ function buildDynamicReferenceSeries(normalized: ReferenceSeriesConfig): Referen
     });
 
     return {
-        label: COFECHA_PASS_REFERENCE_LABEL,
+        label: reference.source === "cofecha_master_series" ? "COFECHA master series" : COFECHA_PASS_REFERENCE_LABEL,
         data,
         sampleDepth,
         selectedTrees: normalized.selectedTrees,

@@ -15,12 +15,14 @@ type AlphaEditSuggestionPanelProps = {
     seriesId: string;
     series: RwlTreeData;
     reference: CofechaPassReference | null | undefined;
+    referenceStale?: boolean;
     disabled?: boolean;
     onApplyCandidate?: (
         seriesId: string,
         result: AlphaEditSuggestionResult,
         candidate: AlphaEditCandidate,
     ) => void;
+    onPreviewCandidate?: (seriesId: string, candidate: AlphaEditCandidate) => void;
 };
 
 let globalAlphaEditRunning = false;
@@ -38,11 +40,13 @@ function AlphaEditPopover({
     error,
     onClose,
     onApply,
+    onPreview,
 }: {
     result: AlphaEditSuggestionResult | null;
     error: string;
     onClose: () => void;
     onApply: (candidate: AlphaEditCandidate) => void;
+    onPreview: (candidate: AlphaEditCandidate) => void;
 }) {
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const selectedCandidate = useMemo(() => (
@@ -182,7 +186,7 @@ function AlphaEditPopover({
                                     type="button"
                                     className={styles.secondary}
                                     disabled={!selectedCandidate}
-                                    onClick={() => selectedCandidate && setSelectedId(selectedCandidate.id)}
+                                    onClick={() => selectedCandidate && onPreview(selectedCandidate)}
                                 >
                                     预览候选
                                 </button>
@@ -210,8 +214,10 @@ export function AlphaEditSuggestionPanel({
     seriesId,
     series,
     reference,
+    referenceStale = false,
     disabled = false,
     onApplyCandidate,
+    onPreviewCandidate,
 }: AlphaEditSuggestionPanelProps) {
     const [running, setRunning] = useState(false);
     const [result, setResult] = useState<AlphaEditSuggestionResult | null>(null);
@@ -224,6 +230,10 @@ export function AlphaEditSuggestionPanel({
         if (reference.points.length === 0) return "COFECHA-pass 参考序列没有可用点";
         return "";
     }, [disabled, reference]);
+
+    const referenceWarning = referenceStale
+        ? "Reference 已过期，建议结果仅供参考。"
+        : "";
 
     const handleRun = async () => {
         if (!reference || disabledReason || running) return;
@@ -246,7 +256,12 @@ export function AlphaEditSuggestionPanel({
                 series,
                 reference,
             });
-            setResult(nextResult);
+            setResult(referenceWarning
+                ? {
+                    ...nextResult,
+                    warnings: [referenceWarning, ...nextResult.warnings],
+                }
+                : nextResult);
         } catch (nextError) {
             setError(nextError instanceof Error ? nextError.message : String(nextError));
         } finally {
@@ -261,6 +276,10 @@ export function AlphaEditSuggestionPanel({
         setOpen(false);
     };
 
+    const handlePreview = (candidate: AlphaEditCandidate) => {
+        onPreviewCandidate?.(seriesId, candidate);
+    };
+
     return (
         <span className={styles.root}>
             <button
@@ -270,7 +289,7 @@ export function AlphaEditSuggestionPanel({
                 title={disabledReason || `Wenk 2003 alpha-edit: alphaMax=${DEFAULT_ALPHA_EDIT_CONFIG.alphaMax}, minOverlap=${DEFAULT_ALPHA_EDIT_CONFIG.minOverlap}`}
                 onClick={() => { void handleRun(); }}
             >
-                {running ? "计算中..." : "插删年建议"}
+                {running ? "计算中..." : "定年建议"}
             </button>
             {open ? (
                 <AlphaEditPopover
@@ -278,6 +297,7 @@ export function AlphaEditSuggestionPanel({
                     error={error}
                     onClose={() => setOpen(false)}
                     onApply={handleApply}
+                    onPreview={handlePreview}
                 />
             ) : null}
         </span>

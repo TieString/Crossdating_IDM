@@ -7,8 +7,6 @@ import {
   type ReferenceSeriesConfig,
 } from '@/features/crossdating/reference'
 import {
-  getDiagnosisCandidateLabel,
-  isActionableDiagnosisCandidate,
   type CrossdatingDiagnosis,
   type DiagnosisBatchApplyResult,
   type DiagnosisCandidateOperation,
@@ -66,10 +64,8 @@ function TreeChartManagerBase({
   referenceConfig = null,
   dynamicReferenceConfig = null,
   diagnosis,
-  diagnosisBatchResult = null,
   onReferenceConfigChange,
   onResetReferenceToDynamic: _onResetReferenceToDynamic,
-  onApplyDiagnosisCandidate,
   onInsertMissingYearAtSide,
   onDeleteYearWithMode,
   onDeleteSeries,
@@ -82,8 +78,6 @@ function TreeChartManagerBase({
   const [zoomWindow, setZoomWindow] = useState<ChartZoomWindow>(null)
   const [search, setSearch] = useState('')
   const [showDynamicReference, setShowDynamicReference] = useState(false)
-  const [candidatePanelOpen, setCandidatePanelOpen] = useState(false)
-  const [rejectedCandidateIds, setRejectedCandidateIds] = useState<string[]>([])
   const [pickerHeight, setPickerHeight] = useState<number>(readStoredPickerHeight)
   const [isResizingPicker, setIsResizingPicker] = useState(false)
   const pickerHeightRef = useRef(pickerHeight)
@@ -345,15 +339,6 @@ function TreeChartManagerBase({
     return { flaggedSegmentCount, candidateCount }
   }, [activeSelection, diagnosisByTree])
 
-  const visibleDiagnosisCandidates = useMemo(() => {
-    const candidates = diagnosis?.candidates ?? []
-    const selectionSet = new Set(activeSelection)
-    const scoped = selectionSet.size > 0
-      ? candidates.filter((candidate) => selectionSet.has(candidate.targetTree))
-      : candidates
-    return scoped.slice(0, isExpanded ? 8 : 4)
-  }, [activeSelection, diagnosis, isExpanded])
-
   const selectLongestTrees = useCallback(() => {
     const longest = allTreeCodes
       .map(treeCode => {
@@ -433,190 +418,6 @@ function TreeChartManagerBase({
     ...btnBase, background: '#f4f4f4', color: '#c0c0c0', cursor: 'default', border: '1px solid #e4e4e4',
   }
 
-  const formatCorrelation = (value: number | null) => (
-    value === null ? '-' : value.toFixed(2)
-  )
-
-  const formatProbabilityLike = (value: number | undefined) => (
-    typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value * 100)}%` : '-'
-  )
-
-  const formatAlgorithmSource = (sources: DiagnosisCandidateOperation['algorithmSource']) => {
-    const labels: Record<string, string> = {
-      global_sliding_match: 'global',
-      segmented_diagnosis: 'segmented',
-      propagation_pattern: 'propagation',
-      local_edit_alignment: 'edit',
-      candidate_ranking: 'ranking',
-    }
-    return sources.map((source) => labels[source] ?? source).join(' + ')
-  }
-
-  const formatShortBatchId = (batchId: string) => {
-    const parts = batchId.split('-')
-    return parts.length >= 2 ? parts.slice(-2).join('-') : batchId.slice(-12)
-  }
-
-  const isCandidateApplicable = useCallback((candidate: DiagnosisCandidateOperation) => {
-    if (!onApplyDiagnosisCandidate) return false
-    return isActionableDiagnosisCandidate(candidate)
-  }, [onApplyDiagnosisCandidate])
-
-  const applicableCandidateCount = useMemo(() => (
-    (diagnosis?.candidates ?? []).filter(isCandidateApplicable).length
-  ), [diagnosis, isCandidateApplicable])
-
-  const visiblePropagationPatterns = useMemo(() => {
-    if (!diagnosis) return []
-    const selectionSet = new Set(activeSelection)
-    const scoped = selectionSet.size > 0
-      ? diagnosis.propagationPatterns.filter((pattern) => selectionSet.has(pattern.targetTree))
-      : diagnosis.propagationPatterns
-    return scoped.slice(0, isExpanded ? 6 : 3)
-  }, [activeSelection, diagnosis, isExpanded])
-
-  const candidatePanel = diagnosis && candidatePanelOpen && visibleDiagnosisCandidates.length > 0 ? (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 6,
-      marginBottom: 8,
-      padding: 7,
-      border: '1px solid #e2d4c2',
-      borderRadius: 6,
-      background: '#fffaf3',
-      fontFamily: 'Segoe UI, system-ui, sans-serif',
-      fontSize: 11,
-      color: '#59402a',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-        <strong style={{ fontSize: 12, color: '#4c321e' }}>候选检查</strong>
-        <span>{visibleDiagnosisCandidates.length} / {diagnosis.candidateCount} · 可执行 {applicableCandidateCount}</span>
-      </div>
-      {diagnosisBatchResult ? (
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 3,
-          padding: '5px 6px',
-          border: `1px solid ${diagnosisBatchResult.failedCount > 0 ? '#e7b5a1' : '#c8d7c8'}`,
-          borderRadius: 5,
-          background: diagnosisBatchResult.failedCount > 0 ? '#fff7f3' : '#f5fbf5',
-          color: diagnosisBatchResult.failedCount > 0 ? '#7e351e' : '#2f5d35',
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
-            <strong style={{ fontSize: 11 }}>最近应用 {formatShortBatchId(diagnosisBatchResult.batchId)}</strong>
-            <span>
-              应用 {diagnosisBatchResult.appliedCount} · 跳过 {diagnosisBatchResult.skippedCount} · 失败 {diagnosisBatchResult.failedCount}
-            </span>
-          </div>
-          {diagnosisBatchResult.results
-            .filter((result) => result.reason)
-            .slice(0, 2)
-            .map((result) => (
-              <span key={result.candidateId} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {result.targetTree} · {result.label}: {result.reason}
-              </span>
-            ))}
-        </div>
-      ) : null}
-      {visibleDiagnosisCandidates.map((candidate) => {
-        const rejected = rejectedCandidateIds.includes(candidate.id)
-        const canApply = Boolean(onApplyDiagnosisCandidate) && isCandidateApplicable(candidate) && !rejected
-        const candidateYear = candidate.targetYear !== undefined ? ` · ${candidate.targetYear}` : ''
-        const candidateDelta = candidate.delta !== undefined && candidate.delta !== null
-          ? ` (${candidate.delta >= 0 ? '+' : ''}${candidate.delta.toFixed(2)})`
-          : ''
-        const evidence = candidate.evidence
-        const confidenceLevel = candidate.confidenceLevel ?? candidate.confidence
-        const confidenceStyle = confidenceLevel === 'high'
-          ? { background: '#f6d6c8', color: '#8f2d18' }
-          : confidenceLevel === 'medium'
-            ? { background: '#f7e5bd', color: '#6e5010' }
-            : confidenceLevel === 'ambiguous'
-              ? { background: '#efe4f5', color: '#65407a' }
-              : { background: '#eef0f3', color: '#5f6d7c' }
-        const algorithmSource = formatAlgorithmSource(candidate.algorithmSource ?? evidence.algorithmSource ?? [])
-        const warningLabel = candidate.ambiguous ? '歧义' : candidate.lowConfidence ? '低置信' : null
-        return (
-          <div
-            key={candidate.id}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(0, 1fr) auto auto',
-              gap: 6,
-              alignItems: 'start',
-              padding: '5px 6px',
-              borderRadius: 5,
-              background: rejected ? '#f6f6f6' : '#fff',
-              border: '1px solid #efdfcc',
-            }}
-          >
-            <div style={{ minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
-                <strong style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#352417' }}>
-                  {candidate.targetTree}
-                </strong>
-                <span style={{
-                  flex: '0 0 auto',
-                  padding: '1px 5px',
-                  borderRadius: 9,
-                  ...confidenceStyle,
-                  fontSize: 10,
-                  fontWeight: 700,
-                }}>
-                  {confidenceLevel}
-                </span>
-                {candidate.rank ? <span style={{ fontSize: 10, color: '#8a6b4c' }}>#{candidate.rank}</span> : null}
-                {warningLabel ? <span style={{ fontSize: 10, color: '#7a4a2f' }}>{warningLabel}</span> : null}
-                {rejected ? (
-                  <span style={{ fontSize: 10, color: '#777' }}>已忽略</span>
-                ) : null}
-              </div>
-              <div style={{ marginTop: 2, color: '#6f5a45', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {candidate.segmentStartYear}-{candidate.segmentEndYear}{candidateYear} · {getDiagnosisCandidateLabel(candidate)} · r {formatCorrelation(candidate.currentCorrelation)} → {formatCorrelation(candidate.expectedCorrelation)}{candidateDelta}
-              </div>
-              <div style={{ marginTop: 3, color: '#765b40', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '2px 8px' }}>
-                <span>A/B {evidence.before.unresolvedA}/{evidence.before.unresolvedB} → {evidence.after.unresolvedA}/{evidence.after.unresolvedB}</span>
-                <span>bestLag {evidence.before.bestLag} → {evidence.after.bestLag}</span>
-                <span>score {(candidate.candidateScore ?? candidate.score).toFixed(2)}</span>
-                <span>相对置信 {formatProbabilityLike(candidate.probabilityLike)}</span>
-                <span>置信 {confidenceLevel}</span>
-                <span title={algorithmSource}>来源 {algorithmSource || '-'}</span>
-                {candidate.mode ? <span>模式 {candidate.mode}</span> : <span>类型 {candidate.candidateType}</span>}
-                {candidate.selectedRange ? <span>范围 {candidate.selectedRange.startYear}-{candidate.selectedRange.endYear}</span> : <span>anchor {candidate.anchorYear}</span>}
-                {candidate.missingRange ? <span>缺测 {candidate.missingRange.startYear}-{candidate.missingRange.endYear}</span> : null}
-                {candidate.deltaYears ? <span>delta {candidate.deltaYears > 0 ? '+' : ''}{candidate.deltaYears}</span> : null}
-                {evidence.localEditAlignment ? <span>edit {evidence.localEditAlignment.method}</span> : null}
-                {evidence.globalSliding ? <span>global t {formatCorrelation(evidence.globalSliding.bestGlobalTLike)}</span> : null}
-              </div>
-              <div style={{ marginTop: 3, color: '#8a6b4c', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {evidence.explanation}
-              </div>
-            </div>
-            <button
-              type="button"
-              disabled={!canApply}
-              title={canApply ? candidate.reason : '当前候选仅供检查，暂无可直接应用的编辑操作'}
-              onClick={() => onApplyDiagnosisCandidate?.(candidate)}
-              style={canApply ? { ...btnBase, padding: '3px 8px', borderColor: '#b86b33', color: '#8a3b12' } : { ...btnDisabled, padding: '3px 8px' }}
-            >
-              应用
-            </button>
-            <button
-              type="button"
-              disabled={rejected}
-              title={rejected ? '该候选已在当前视图中忽略' : '仅在当前视图中忽略，不修改数据'}
-              onClick={() => setRejectedCandidateIds((previous) => previous.includes(candidate.id) ? previous : [...previous, candidate.id])}
-              style={rejected ? { ...btnDisabled, padding: '3px 8px' } : { ...btnBase, padding: '3px 8px' }}
-            >
-              忽略
-            </button>
-          </div>
-        )
-      })}
-    </div>
-  ) : null
 
   const chartNode = filteredData.size > 0 || referenceSeries || (showDynamicReference && dynamicReferenceSeries) ? (
     <MultiLineChart
@@ -743,17 +544,6 @@ function TreeChartManagerBase({
             窄年 {diagnosis.masterNarrowYears.length}
           </span>
         ) : null}
-        {diagnosis && diagnosis.candidateCount > 0 ? (
-          <button
-            type="button"
-            onClick={() => setCandidatePanelOpen((open) => !open)}
-            style={candidatePanelOpen
-              ? { ...btnBase, borderColor: '#b86b33', color: '#8a3b12', fontWeight: 650 }
-              : btnBase}
-          >
-            {candidatePanelOpen ? '收起候选' : '生成候选'}
-          </button>
-        ) : null}
       </div>
 
       {referenceStatusLabel ? (
@@ -863,31 +653,6 @@ function TreeChartManagerBase({
           <span>候选 {selectedDiagnosisStats.candidateCount}</span>
         </div>
       ) : null}
-
-      {candidatePanelOpen && visiblePropagationPatterns.length > 0 ? (
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 4,
-          marginBottom: 8,
-          padding: 7,
-          border: '1px solid #d5dce7',
-          borderRadius: 6,
-          background: '#f8fbff',
-          color: '#41546b',
-          fontFamily: 'Segoe UI, system-ui, sans-serif',
-          fontSize: 11,
-        }}>
-          <strong style={{ fontSize: 12, color: '#26384d' }}>传播型偏移</strong>
-          {visiblePropagationPatterns.map((pattern) => (
-            <span key={`${pattern.targetTree}-${pattern.lag}-${pattern.olderBoundaryYear}-${pattern.newerBoundaryYear}`}>
-              {pattern.targetTree} · lag {pattern.lag > 0 ? '+' : ''}{pattern.lag} · {pattern.patternType} · {pattern.olderBoundaryYear}-{pattern.newerBoundaryYear}
-            </span>
-          ))}
-        </div>
-      ) : null}
-
-      {candidatePanel}
 
       <FloatingScrollArea
         viewportStyle={{
