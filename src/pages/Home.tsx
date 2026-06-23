@@ -418,12 +418,15 @@ export default function Home() {
     const shouldShowRightSkeleton = isFileLoading;
     const shouldShowWidthSkeleton = shouldShowWelcome || isFileLoading || (!hasChart && shouldShowProcessing);
     const shouldShowRightBottomPane = hasChart || shouldShowWelcome || shouldShowRightSkeleton;
-    const cofechaTextStyle = shouldShowRightBottomPane
-        ? {
-            flex: `0 0 ${layout.rightBottomRatio * 100}%`,
-            ...(!rightBottomDividerCollapsed ? { maxHeight: `calc(100% - ${PANEL_DIVIDER_GUTTER_SIZE}px)` } : {}),
-        }
-        : undefined;
+    const rightBottomCofechaCollapsed = layout.rightBottomRatio <= 1 - COLLAPSED_PANEL_RATIO;
+    const cofechaTextStyle: CSSProperties | undefined = !shouldShowRightBottomPane
+        ? undefined
+        : rightBottomCofechaCollapsed
+            ? { display: "none" }
+            : {
+                flex: `0 0 ${layout.rightBottomRatio * 100}%`,
+                ...(!rightBottomDividerCollapsed ? { maxHeight: `calc(100% - ${PANEL_DIVIDER_GUTTER_SIZE}px)` } : {}),
+            };
     const handleDeleteSeriesFromChart = useCallback((tree: string) => {
         deleteSeriesRequestIdRef.current += 1;
         setDeleteSeriesRequest({ id: deleteSeriesRequestIdRef.current, tree });
