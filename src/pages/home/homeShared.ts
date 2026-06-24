@@ -26,7 +26,7 @@ export const COFECHA_PART_OPTIONS = [
     { value: "PART 7", label: "🪶 PART 7: Descriptive Statistics" },
 ];
 
-export const PANEL_DIVIDER_GUTTER_SIZE = 8;
+export const PANEL_DIVIDER_GUTTER_SIZE = 0;
 export const COLLAPSED_PANEL_RATIO = 0.995;
 
 export const isPanelRatioCollapsed = (ratio: number) => (

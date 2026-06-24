@@ -48,12 +48,16 @@
     .titlebar .window-control {
       display: flex;
       justify-content: flex-end;
+      /* 窗口控制按钮始终保持完整宽度，窗口变窄时不被挤出 */
+      flex-shrink: 0;
     }
 
     .titlebar .menu {
       display: flex;
       align-items: center;
       padding-left: 10px;
+      flex-shrink: 0;
+      flex-wrap: nowrap;
     }
 
     .titlebar .menu .title-menu-item {
@@ -65,6 +69,7 @@
       border-radius: 4px;
       color: rgb(66, 66, 66);
       background-color: transparent;
+      white-space: nowrap;
     }
 
     .titlebar .menu .title-menu-item:hover {
@@ -134,6 +139,30 @@
       background-color: transparent;
     }
 
+    .titlebar .titlebar-legend {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 14px;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      font-size: 12px;
+      color: #5a6675;
+      user-select: none;
+      -webkit-user-select: none;
+      /* 容器自身接收指针事件以充当 data-tauri-drag-region 拖拽区 */
+      pointer-events: auto;
+      cursor: default;
+      /* 空间不足时图例先收缩让位，避免挤压窗口控制按钮 */
+      flex-shrink: 1;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    /* 图例内部元素不拦截事件，让点击落到容器上触发窗口拖拽 */
+    .titlebar .titlebar-legend * {
+      pointer-events: none;
+    }
+
     .titlebar .titlebar-logo {
       align-items: center;
       padding: 0 6px 0 12px;
@@ -182,6 +211,9 @@
           <span data-tauri-drag-region class="menu-title" id="menu-title"></span>
         </div>
       </div>
+
+      <!-- Width Legend（React 通过 createPortal 挂载窄年/伪轮/缺轮/缺测图例） -->
+      <div class="titlebar-legend" id="titlebar-legend-container" data-tauri-drag-region></div>
 
       <!-- Window Control Buttons -->
       <div class="window-control">

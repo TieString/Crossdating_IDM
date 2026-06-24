@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ClipboardEvent, type KeyboardEvent, type MouseEvent } from "react";
+import { createPortal } from "react-dom";
 import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { AnimatePresence } from "motion/react";
 import { TreeChartManager } from "@/components/Chart/TreeChartManager";
@@ -311,6 +312,7 @@ export default function Home() {
     const [cofechaPart6JumpTarget, setCofechaPart6JumpTarget] = useState<{ id: number; tree: string } | null>(null);
     const [editHighlightTarget, setEditHighlightTarget] = useState<EditHighlightTarget | null>(null);
     const [isRawEditing, setIsRawEditing] = useState(false);
+    const [legendContainer, setLegendContainer] = useState<HTMLElement | null>(null);
     const [rawEditorTree, setRawEditorTree] = useState<string | null>(null);
     const [rawEditorInitialText, setRawEditorInitialText] = useState("");
     const [rawEditorRevision, setRawEditorRevision] = useState(0);
@@ -1067,6 +1069,11 @@ export default function Home() {
         };
     }, [isRawEditing, rawEditorRevision]);
 
+    // 标题栏图例的 portal 挂载点（位于 index.html 的 .titlebar 内）
+    useEffect(() => {
+        setLegendContainer(document.getElementById("titlebar-legend-container"));
+    }, []);
+
     return (
         <>
             <HomeTitleBarBridge
@@ -1183,24 +1190,29 @@ export default function Home() {
                                     ))}
                                 </select>
                             ) : null}
-                            <div className={style["width-legend"]} aria-hidden="true">
-                                <span className={style["legend-item"]}>
-                                    <span className={`${style["legend-swatch"]} ${style["legend-swatch-narrow"]}`} />
-                                    窄年
-                                </span>
-                                <span className={style["legend-item"]}>
-                                    <span className={`${style["legend-swatch"]} ${style["legend-swatch-false-ring"]}`} />
-                                    伪轮
-                                </span>
-                                <span className={style["legend-item"]}>
-                                    <span className={`${style["legend-swatch"]} ${style["legend-swatch-absent"]}`} />
-                                    缺轮
-                                </span>
-                                <span className={style["legend-item"]}>
-                                    <span className={`${style["legend-swatch"]} ${style["legend-swatch-missing"]}`} />
-                                    缺测
-                                </span>
-                            </div>
+                            {legendContainer && !shouldShowWidthSkeleton
+                                ? createPortal(
+                                    <div aria-hidden="true" style={{ display: "contents" }}>
+                                        <span className={style["legend-item"]}>
+                                            <span className={`${style["legend-swatch"]} ${style["legend-swatch-narrow"]}`} />
+                                            窄年
+                                        </span>
+                                        <span className={style["legend-item"]}>
+                                            <span className={`${style["legend-swatch"]} ${style["legend-swatch-false-ring"]}`} />
+                                            伪轮
+                                        </span>
+                                        <span className={style["legend-item"]}>
+                                            <span className={`${style["legend-swatch"]} ${style["legend-swatch-absent"]}`} />
+                                            缺轮
+                                        </span>
+                                        <span className={style["legend-item"]}>
+                                            <span className={`${style["legend-swatch"]} ${style["legend-swatch-missing"]}`} />
+                                            缺测
+                                        </span>
+                                    </div>,
+                                    legendContainer,
+                                )
+                                : null}
 
                             <div className={style["width-panels"]} ref={leftPanelsRef}>
                                 <FloatingScrollArea

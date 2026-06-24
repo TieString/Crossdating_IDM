@@ -85,6 +85,8 @@ const X_TICK_TARGET_SPACING_PX = 58
 const X_AXIS_TICK_LENGTH = 7
 const X_AXIS_LABEL_Y_OFFSET = 10
 const X_AXIS_TITLE_Y_OFFSET = 25    // x轴标题相对于x轴底部的垂直偏移
+const X_AXIS_VIEW_PADDING_RATIO = 0.02   // 两端留白年数占数据跨度的比例，避免折线端点贴在 Y 轴上
+const X_AXIS_MIN_PADDING_YEARS = 2       // 两端留白的最少年数
 const NICE_YEAR_STEPS = [1, 2, 5, 10, 15, 20, 25, 50, 100, 200]
 const LINE_HIT_THRESHOLD_PX = 5   // 鼠标距离折线小于5px时点击选择该折线
 const HOVER_LINE_HIT_THRESHOLD_PX = 10
@@ -828,8 +830,13 @@ export function MultiLineChart({
       if (year > maxYear) maxYear = year
     })
     if (!Number.isFinite(minYear)) return []
+    // 两端各扩展若干空年份，使折线端点不贴在 Y 轴上（这些年份无数据，取值为 null）
+    const pad = Math.max(
+      X_AXIS_MIN_PADDING_YEARS,
+      Math.round((maxYear - minYear) * X_AXIS_VIEW_PADDING_RATIO),
+    )
     const years: number[] = []
-    for (let y = minYear; y <= maxYear; y++) years.push(y)
+    for (let y = minYear - pad; y <= maxYear + pad; y++) years.push(y)
     return years
   }, [data, referenceSeries, visibleDynamicReferenceSeries])
 
@@ -843,7 +850,7 @@ export function MultiLineChart({
         if (
           typeof value === 'number'
           && Number.isFinite(value)
-          && value > 0
+          && value >= 0
           && value !== stopMarker.value
         ) {
           count += 1

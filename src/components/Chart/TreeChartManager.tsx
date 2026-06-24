@@ -493,8 +493,8 @@ function TreeChartManagerBase({
         </div>
         {isReferenceMode ? (
           <>
-            <button onClick={applyReferenceSelection} disabled={referenceDraftTrees.length === 0}
-              style={referenceDraftTrees.length === 0 ? btnDisabled : { ...btnBase, borderColor: '#111827', color: '#111827', fontWeight: 650 }}>生成手动参考</button>
+            <button onClick={applyReferenceSelection} disabled={referenceDraftTrees.length === 0} title='在下方选择多个序列进行平均'
+              style={referenceDraftTrees.length === 0 ? btnDisabled : { ...btnBase, borderColor: '#111827', color: '#111827', fontWeight: 650 }}>生成参考</button>
             <button onClick={cancelReferenceSelection} style={btnBase}>取消</button>
           </>
         ) : (
@@ -502,7 +502,7 @@ function TreeChartManagerBase({
             style={allTreeCodes.length === 0 ? btnDisabled : referenceSeries ? { ...btnBase, borderColor: '#111827', color: '#111827', fontWeight: 650 } : btnBase}>参考</button>
         )}
         {referenceSeries ? (
-          <button onClick={clearReferenceSelection} style={btnBase}>Clear reference</button>
+          <button onClick={clearReferenceSelection} style={btnBase}>清除参考</button>
         ) : null}
         <span style={{
           fontSize: 11, color: '#fff', background: '#2e6da4',
