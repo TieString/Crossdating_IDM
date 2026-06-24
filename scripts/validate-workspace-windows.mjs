@@ -109,7 +109,6 @@ try {
   const formatter = await server.ssrLoadModule("/src/features/cofecha/formatter.ts");
   const validation = await server.ssrLoadModule("/src/features/crossdating/validation.ts");
   const rwlEdit = await server.ssrLoadModule("/src/features/rwl/edit.ts");
-  const alphaEdit = await server.ssrLoadModule("/src/features/rwl/components/AlphaEditSuggestionPanel.tsx");
 
   assert.equal(bridge.workspaceWindowLabels["operation-log"], "workspace-operation-log");
   assert.equal(bridge.workspaceWindowLabels.cofecha, "workspace-cofecha");
@@ -121,32 +120,6 @@ try {
     bridge.createWorkspaceWindowClosedPayload("cofecha", "workspace-cofecha"),
     { kind: "cofecha", requesterLabel: "workspace-cofecha" },
   );
-
-  const alphaEditDisabledHtml = renderToStaticMarkup(React.createElement(alphaEdit.AlphaEditSuggestionPanel, {
-    seriesId: "SMK001",
-    series: new Map([[1900, 11], [1901, 12], [1902, 13]]),
-    reference: null,
-  }));
-  assertIncludes(alphaEditDisabledHtml, "插删年建议");
-  assertIncludes(alphaEditDisabledHtml, "disabled=\"\"");
-  assertIncludes(alphaEditDisabledHtml, "COFECHA-pass");
-
-  const alphaEditEnabledHtml = renderToStaticMarkup(React.createElement(alphaEdit.AlphaEditSuggestionPanel, {
-    seriesId: "SMK001",
-    series: new Map([[1900, 11], [1901, 12], [1902, 13]]),
-    reference: {
-      source: "cofecha_pass_anchor",
-      points: [
-        { year: 1902, value: 0.2, replication: 3, weight: 1 },
-        { year: 1901, value: -0.1, replication: 3, weight: 1 },
-        { year: 1900, value: 0.4, replication: 3, weight: 1 },
-      ],
-      options: {},
-    },
-  }));
-  assertIncludes(alphaEditEnabledHtml, "插删年建议");
-  assertIncludes(alphaEditEnabledHtml, "Wenk 2003");
-  assertNotIncludes(alphaEditEnabledHtml, "disabled=\"\"");
 
   const capabilityPath = path.join(process.cwd(), "src-tauri", "capabilities", "default.json");
   const capability = JSON.parse(await readFile(capabilityPath, "utf8"));

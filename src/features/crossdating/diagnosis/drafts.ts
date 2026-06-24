@@ -15,6 +15,7 @@ import {
     missingRangeForMove,
     nearestExistingYear,
     pickSingleYearAnchor,
+    pickTopSingleYearAnchors,
     refinePartialSelectedRange,
     runSlidingMatchForRange,
 } from "./rangeMove";
@@ -186,33 +187,37 @@ export const makePatternDrafts = (
             diagnosis.targetRange.endYear,
         );
         if (fallbackAnchorYear === null) return;
-        const anchorYear = pattern.patternType === "possibleMissingYear" || pattern.patternType === "possibleFalseYear"
-            ? pickSingleYearAnchor(diagnosis, pattern, fallbackAnchorYear, config)
-            : fallbackAnchorYear;
-
         if (pattern.patternType === "possibleMissingYear" && pattern.lag < 0) {
-            const { alignment, edit } = getLocalEditAlignmentForSegment(
-                diagnosis,
-                sourceSegment,
-                "insertMissingYear",
-                anchorYear,
-                config,
-            );
-            drafts.push(createLocalEditDraft(diagnosis, sourceSegment, "insertMissingYear", edit.anchorYear, alignment, pattern));
+            // 生成多个插年候选（top 3），交给 evaluation 排名。
+            const anchorYears = pickTopSingleYearAnchors(diagnosis, pattern, fallbackAnchorYear, config, 3);
+            anchorYears.forEach((candidateYear) => {
+                const { alignment, edit } = getLocalEditAlignmentForSegment(
+                    diagnosis, sourceSegment, "insertMissingYear", candidateYear, config,
+                );
+                drafts.push(createLocalEditDraft(
+                    diagnosis, sourceSegment, "insertMissingYear", edit.anchorYear, alignment, pattern,
+                ));
+            });
             return;
         }
 
         if (pattern.patternType === "possibleFalseYear" && pattern.lag > 0) {
-            const { alignment, edit } = getLocalEditAlignmentForSegment(
-                diagnosis,
-                sourceSegment,
-                "deleteFalseYear",
-                anchorYear,
-                config,
-            );
-            drafts.push(createLocalEditDraft(diagnosis, sourceSegment, "deleteFalseYear", edit.anchorYear, alignment, pattern));
+            // 生成多个删年候选（预扫描 top 3），交给 evaluation 排名。
+            const anchorYears = pickTopSingleYearAnchors(diagnosis, pattern, fallbackAnchorYear, config, 3);
+            anchorYears.forEach((candidateYear) => {
+                const { alignment, edit } = getLocalEditAlignmentForSegment(
+                    diagnosis, sourceSegment, "deleteFalseYear", candidateYear, config,
+                );
+                drafts.push(createLocalEditDraft(
+                    diagnosis, sourceSegment, "deleteFalseYear", edit.anchorYear, alignment, pattern,
+                ));
+            });
             return;
         }
+
+        const anchorYear = pattern.patternType === "possibleMissingYear" || pattern.patternType === "possibleFalseYear"
+            ? pickSingleYearAnchor(diagnosis, pattern, fallbackAnchorYear, config)
+            : fallbackAnchorYear;
 
         const initialSelectedRange = pattern.patternType === "possibleWholeSeriesMove"
             ? { ...diagnosis.targetRange }

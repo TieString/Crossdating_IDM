@@ -73,6 +73,7 @@ import {
     type WorkspaceWindowState,
 } from "./home/workspaceWindowBridge";
 import { useResizablePanels } from "./useResizablePanels";
+import { publishConsoleDataExport } from "./home/consoleDataExport";
 
 const isTreeBoundary = (value: string | undefined) => (
     value === undefined || !/[A-Za-z0-9_]/.test(value)
@@ -346,7 +347,6 @@ export default function Home() {
         handleApplyDiagnosisCandidate,
         handleApplyDiagnosisCandidateBatch,
         handleApplyBayesianStartYear,
-        handleApplyAlphaEditCandidate,
         handleApplyLocalSimulation,
         handleReferenceConfigChange,
         handleResetReferenceToDynamic,
@@ -384,6 +384,10 @@ export default function Home() {
         treeOptions,
         windowTitle,
     } = useHomeWorkspace();
+
+    useEffect(() => {
+        publishConsoleDataExport(fileName, siteData, cofechaResult);
+    }, [cofechaResult, fileName, siteData]);
 
     const selectedTreeCandidates = useMemo(
         () => crossdatingDiagnosis.candidates.filter((candidate) => candidate.targetTree === selectedTree),
@@ -1225,7 +1229,6 @@ export default function Home() {
                                                     selected={selectedTree}
                                                     masterSeries={cofechaResult?.masterDatingSeries}
                                                     cofechaPassReference={dynamicReferenceConfig?.cofechaPassReference ?? null}
-                                                    cofechaPassReferenceStale={dynamicReferenceConfig?.isStale ?? false}
                                                     masterCorrelations={cofechaResult?.masterCorrelations}
                                                     seriesProblemCounts={cofechaResult?.seriesProblemCounts}
                                                     historyAnimation={historyAnimation}
@@ -1244,7 +1247,6 @@ export default function Home() {
                                                     onDeleteSeriesRequestHandled={handleDeleteSeriesRequestHandled}
                                                     onReplaceTreeData={handleReplaceTreeData}
                                                     onApplyBayesianStartYear={handleApplyBayesianStartYear}
-                                                    onApplyAlphaEditCandidate={handleApplyAlphaEditCandidate}
                                                     onJumpToCofecha={handleJumpToCofechaPart6}
                                                     cofechaPart6Trees={cofechaPart6Trees}
                                                 />

@@ -10,7 +10,7 @@ import {
 import type { RwlSiteData, RwlTreeData } from "@/features/rwl/types";
 import { CrossdateConfig } from "./config";
 import { diagnoseSeriesCore } from "./segments";
-import { cloneSiteData } from "./series";
+import { cloneSiteData, correlationForSegment, preprocessSeries } from "./series";
 import { getLagSupportingSegments } from "./rangeMove";
 import { uniqueAlgorithmSources } from "./candidateUtils";
 import type {
@@ -278,6 +278,24 @@ export const evaluateDraft = (
         ...evidenceBase,
         explanation: buildEvidenceExplanation(draft, evidenceBase),
     };
+    // 局部窗口质量：编辑后在目标年附近测相关性，正确的单年编辑应使局部对齐更好。
+    const localWindowQuality = draft.operationType === "DELETE_FALSE_RING" || draft.operationType === "INSERT_MISSING_RING"
+        ? (() => {
+            const targetYear = draft.targetYear ?? draft.anchorYear;
+            const afterTarget = preprocessSeries(afterDiagnosis.rawTarget);
+            const windowRadius = 20;
+            const localCorr = correlationForSegment(
+                afterTarget,
+                beforeDiagnosis.master.data,
+                targetYear - windowRadius,
+                targetYear + windowRadius,
+                0,
+                config.minPairsForCorrelation,
+            );
+            return (localCorr.correlation ?? -1) * CrossdateConfig.scoringWeights.correlationGain * 3;
+        })()
+        : 0;
+
     const baseScore = (
         CrossdateConfig.scoringWeights.correlationGain * evidence.deltaR0
         + CrossdateConfig.scoringWeights.flagResolution * evidence.resolvedSegmentCount
@@ -285,6 +303,7 @@ export const evaluateDraft = (
         + CrossdateConfig.scoringWeights.narrowYear * evidence.narrowYearBonus
         - CrossdateConfig.scoringWeights.gapPenalty * evidence.gapPenalty
         - CrossdateConfig.scoringWeights.movePenalty * evidence.movePenalty
+        + localWindowQuality
     );
     const globalSlidingBonus = evidence.globalSliding
         ? Math.max(0, (evidence.globalSliding.afterR ?? -1) - (evidence.globalSliding.beforeR ?? -1)) * 4
