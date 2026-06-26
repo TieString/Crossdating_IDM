@@ -209,9 +209,11 @@ async function main() {
       missingDiagnosis.propagationPatterns.some((pattern) => pattern.targetTree === TARGET_TREE && pattern.patternType === "possibleMissingYear"),
       "missing-ring case should expose propagation pattern",
     );
+    // 新设计输出 top-N 候选（同一缺轮的多个相邻年份猜测）。最有意义的正确性检查是：
+    // 排名最高的插年候选要精确定位到真实缺轮年（1990，一个局部窄轮/指针年）附近。
     assert(
-      missingDiagnosis.candidates.filter((candidate) => candidate.targetTree === TARGET_TREE && candidate.candidateType === "insertMissingYear").length <= 1,
-      "missing-ring propagation should not create one insert candidate per abnormal window",
+      Math.abs((missingCandidate.targetYear ?? 0) - 1990) <= 2,
+      `top missing-ring candidate should localize near 1990, got ${missingCandidate.targetYear}`,
     );
 
     const falseTree = editModule.insertMissingYearAtSide(cloneTree(trueTarget), 1965, "right");

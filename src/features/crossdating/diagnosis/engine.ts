@@ -8,7 +8,7 @@ import {
     moveSeriesTailByOffset,
 } from "@/features/rwl/edit";
 import type { RwlSiteData, RwlTreeData } from "@/features/rwl/types";
-import { getConfig } from "./config";
+import { CrossdateConfig, getConfig } from "./config";
 import {
     buildMasterNarrowYears,
     buildScoringMaster,
@@ -18,8 +18,16 @@ import {
     toNumericSeries,
 } from "./series";
 import { diagnoseSeriesCore, createSeriesSummary } from "./segments";
-import { makeGlobalSlidingDrafts, makePatternDrafts, makeSegmentDrafts } from "./drafts";
+import {
+    makeArRecallInsertDrafts,
+    makeCofechaDrivenDrafts,
+    makeGlobalSlidingDrafts,
+    makePatternDrafts,
+    makeSegmentDrafts,
+} from "./drafts";
+import { makeBayesianRecallDrafts } from "./candidateRecallExpansion";
 import { evaluateDraft } from "./evaluation";
+import { parseCofechaHints } from "./cofechaHints";
 import {
     compareDiagnosisCandidates,
     dedupeDiagnosisCandidates,
@@ -49,6 +57,7 @@ export function diagnoseCrossdating(
     options: DiagnosisOptions = {},
 ): CrossdatingDiagnosis {
     const config = getConfig(options);
+    const cofechaHints = options.cofechaText ? parseCofechaHints(options.cofechaText) : null;
     const treeCodes = Array.from(siteData.keys());
     const seriesDiagnoses = treeCodes
         .map((tree) => diagnoseSeriesCore(siteData, tree, config))
@@ -60,14 +69,33 @@ export function diagnoseCrossdating(
         ...makeGlobalSlidingDrafts(diagnosis),
         ...makePatternDrafts(diagnosis, config),
         ...makeSegmentDrafts(diagnosis, config),
+        // COFECHA [A] 段级 lag 表驱动候选（仅在用户提供 cofechaText 时生效）：用 COFECHA 干净的段级定年
+        // 确定缺/伪轮区域与类型，解决内部分段在弱相关区检测不到真区域的召回问题。无 COFECHA 时不影响。
+        ...makeCofechaDrivenDrafts(diagnosis, config, cofechaHints),
+        // AR 预白化兜底（默认关闭，见 config.arRecallFallback；仅在无 COFECHA 输出且显式开启时）：
+        // 去自相关、锐化缺轮区域检测，补充缺轮(INSERT)召回候选，仍交回 z-score evaluation 排序。
+        ...(CrossdateConfig.arRecallFallback.enabled && !cofechaHints
+            ? makeArRecallInsertDrafts(siteData, diagnosis, config)
+            : []),
+        // COFECHA-like 贝叶斯段级 lag 路径召回扩展（默认关闭，见 config.bayesian.enableRecallInjection）：
+        // 经实测并入候选池会稀释 ±1 精排并引入 clean 假阳性，故默认不并入；模块保留并单元测试。
+        ...(CrossdateConfig.bayesian.enableRecallInjection
+            ? makeBayesianRecallDrafts(diagnosis, config, cofechaHints).drafts
+            : []),
     ]);
     const evaluatedCandidates = dedupeDiagnosisCandidates(
         candidateDrafts
             .map((draft) => {
                 const before = seriesDiagnoses.find((diagnosis) => diagnosis.targetTree === draft.targetTree);
-                return before ? evaluateDraft(siteData, before, draft, config) : null;
+                return before ? evaluateDraft(siteData, before, draft, config, cofechaHints) : null;
             })
-            .filter((candidate): candidate is DiagnosisCandidateOperation => candidate !== null),
+            .filter((candidate): candidate is DiagnosisCandidateOperation => candidate !== null)
+            // AR 兜底候选（无 COFECHA 时）只保留 z-score 评估判为 strong 的：AR 预白化对 clean 噪声过敏感，
+            // 仅靠 hard gate 仍会漏过个别 clean 假阳性；要求 strong 可在保留真实缺轮召回的同时把 clean 假阳性压回 0。
+            .filter((candidate) => (
+                !candidate.algorithmSource.includes("ar_prewhiten_recall")
+                || candidate.evidence.candidateStrength === "strong"
+            )),
     );
     // 每条序列单独排序并取前 maxTopCandidates 个候选，避免全局名额被某条序列挤占，
     // 保证按序列查看时每条都能看到属于自己的候选建议。
@@ -85,6 +113,30 @@ export function diagnoseCrossdating(
             .sort(compareDiagnosisCandidates)
             .slice(0, config.maxTopCandidates))
         .sort(compareDiagnosisCandidates);
+    // 范围建议：同序列同类型(缺轮/伪轮)的最终候选若聚集成小窗（跨度 <= suggestedRangeMaxWidth），
+    // 标注 suggestedRange——保证真值落在其内、且窗口远小于 COFECHA 段，供人工复核（用户的伪轮口径）。
+    const rangeYears = new Map<string, number[]>();
+    candidates.forEach((candidate) => {
+        if (candidate.targetYear === undefined) return;
+        if (candidate.operationType !== "INSERT_MISSING_RING" && candidate.operationType !== "DELETE_FALSE_RING") return;
+        const key = `${candidate.targetTree}:${candidate.operationType}`;
+        const years = rangeYears.get(key) ?? [];
+        years.push(candidate.targetYear);
+        rangeYears.set(key, years);
+    });
+    const suggestedRangeByGroup = new Map<string, { startYear: number; endYear: number }>();
+    rangeYears.forEach((years, key) => {
+        if (years.length < 2) return;
+        const startYear = Math.min(...years);
+        const endYear = Math.max(...years);
+        if (endYear - startYear + 1 <= CrossdateConfig.suggestedRangeMaxWidth) {
+            suggestedRangeByGroup.set(key, { startYear, endYear });
+        }
+    });
+    candidates.forEach((candidate) => {
+        const range = suggestedRangeByGroup.get(`${candidate.targetTree}:${candidate.operationType}`);
+        if (range) candidate.suggestedRange = range;
+    });
     const candidateCountByTree = candidates.reduce((counts, candidate) => {
         counts.set(candidate.targetTree, (counts.get(candidate.targetTree) ?? 0) + 1);
         return counts;

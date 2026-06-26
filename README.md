@@ -72,6 +72,8 @@ npm run build-storybook
 
 ## 文档
 
+- [项目介绍](docs/project-introduction.md) — 主要功能、实现方式与核心数据流
+- [Technical Note 稿件](docs/technical-note-manuscript.md) — 英文 Technical Note 初稿及投稿前待补项
 - [架构说明](docs/architecture.md)
 - [开发指南](docs/development.md)
 - [核心组件文档](docs/components.md)

@@ -29,7 +29,12 @@ export type CandidateAlgorithmSource =
     | "segmented_diagnosis"
     | "propagation_pattern"
     | "local_edit_alignment"
+    | "bayesian_lag_path"
+    | "cofecha_segment_lag"
+    | "ar_prewhiten_recall"
     | "candidate_ranking";
+
+export type CandidateStrength = "strong" | "weak" | "rejected";
 
 export type CandidateRankingMethod = "score_softmax_mvp";
 
@@ -110,6 +115,17 @@ export type SegmentDiagnosis = {
     samplePairs: number;
     flagged: boolean;
     reason: string;
+    // 自适应分类相关的新增字段（向前兼容，UI 可选消费）。
+    effectiveN: number;
+    t0: number;
+    bestT: number;
+    tImprovement: number;
+    rImprovement: number;
+    fisherZ0: number;
+    fisherZBest: number;
+    fisherZImprovement: number;
+    classification: SegmentDiagnosisFlag;
+    confidence: number;
 };
 
 export type PropagationPatternType =
@@ -118,14 +134,25 @@ export type PropagationPatternType =
     | "possibleWholeSeriesMove"
     | "possiblePartialRangeMove";
 
+export type PropagationAffectedSide = "older" | "newer" | "whole";
+
 export type PropagationPattern = {
     seriesId: string;
     targetTree: string;
+    /** 主导 lag（= dominantLag），保留 lag 字段名以兼容既有 drafts/evaluation 消费。 */
     lag: number;
+    dominantLag: number;
+    lagConsistency: number;
+    lagVotes: Record<number, number>;
     affectedSegments: Array<{ startYear: number; endYear: number; flag: SegmentDiagnosisFlag }>;
     newerBoundaryYear: number;
     olderBoundaryYear: number;
     patternType: PropagationPatternType;
+    affectedSide: PropagationAffectedSide;
+    fixedSide: "newer";
+    confidence: number;
+    /** 正负 lag 混杂、无法形成单一 missing/false 模式时标记为 ambiguous，不输出插删年建议。 */
+    ambiguous: boolean;
     priority: number;
 };
 
@@ -137,6 +164,71 @@ export type CandidateMetrics = {
     unresolvedA: number;
     unresolvedB: number;
     problemSegmentCount: number;
+};
+
+/**
+ * 候选临时应用并重新整条诊断后的 before/after 差量。
+ * 这是判断一个候选是否真正“恢复了对应关系”的硬证据，evaluation 的 hard gate 与评分都基于它。
+ */
+export type CandidateEvaluationDelta = {
+    meanSegmentRBefore: number;
+    meanSegmentRAfter: number;
+    meanSegmentRDelta: number;
+
+    bLikeCountBefore: number;
+    bLikeCountAfter: number;
+    bLikeResolvedCount: number;
+
+    aLikeCountBefore: number;
+    aLikeCountAfter: number;
+
+    propagationCountBefore: number;
+    propagationCountAfter: number;
+    propagationResolved: boolean;
+    propagationWeakened: boolean;
+
+    dominantLagBefore: number | null;
+    dominantLagAfter: number | null;
+    lagRecoveryScore: number;
+
+    wholeSeriesRBefore: number;
+    wholeSeriesRAfter: number;
+    wholeSeriesRDelta: number;
+
+    localBoundaryRBefore: number | null;
+    localBoundaryRAfter: number | null;
+    localBoundaryRDelta: number | null;
+
+    localGlkBefore: number | null;
+    localGlkAfter: number | null;
+    localGlkDelta: number | null;
+
+    introducedNewStrongProblem: boolean;
+
+    hardGatePassedConditions: number;
+    hardGatePassed: boolean;
+};
+
+/**
+ * deleteFalseYear 候选的删除-恢复证据。核心判断是“删除后对应关系是否恢复”，
+ * 而不是“被删值是否极端”。
+ */
+export type DeleteFalseYearEvidence = {
+    candidateYear: number;
+    boundaryDistance: number;
+    beforeBLikeCount: number;
+    afterBLikeCount: number;
+    bLikeResolvedCount: number;
+    beforeDominantLag: number | null;
+    afterDominantLag: number | null;
+    lagMovedTowardZero: boolean;
+    beforeWholeSeriesR: number;
+    afterWholeSeriesR: number;
+    beforeLocalR: number | null;
+    afterLocalR: number | null;
+    beforeLocalGlk: number | null;
+    afterLocalGlk: number | null;
+    introducedNewPropagation: boolean;
 };
 
 export type CandidateEvidence = {
@@ -159,6 +251,13 @@ export type CandidateEvidence = {
     globalSliding?: GlobalSlidingCandidateEvidence;
     localEditAlignment?: LocalEditAlignmentResult;
     partialRangeMove?: PartialRangeMoveEvidence;
+    evaluationDelta?: CandidateEvaluationDelta;
+    deleteEvidence?: DeleteFalseYearEvidence;
+    cofechaHintScore?: number;
+    bayesianPosterior?: number;
+    bayesianSupportScales?: number;
+    recallSourceTags?: string[];
+    candidateStrength?: CandidateStrength;
     rankingMethod?: CandidateRankingMethod;
     probabilityLike?: number;
     rank?: number;
@@ -183,6 +282,9 @@ export type DiagnosisCandidateOperation = {
     selectedRange?: YearRange;
     missingRange?: YearRange;
     deltaYears?: number;
+    // 伪轮/缺轮"范围建议"：同序列同类型候选聚集而成的较小年份窗口，保证真值落在其内（人工流程：
+    // COFECHA 给 ~50 年段，算法收窄为这个小窗供人工复核）。仅当候选聚集（窗宽不过大）时给出。
+    suggestedRange?: YearRange;
     suggestedLag: number;
     currentCorrelation: number | null;
     expectedCorrelation: number | null;
@@ -193,6 +295,7 @@ export type DiagnosisCandidateOperation = {
     rank: number;
     confidence: DiagnosisConfidence;
     confidenceLevel: CandidateRankingConfidence;
+    candidateStrength: CandidateStrength;
     ambiguous: boolean;
     lowConfidence: boolean;
     algorithmSource: CandidateAlgorithmSource[];
@@ -321,11 +424,13 @@ export type DiagnosisOptions = {
     localEditMaxGaps?: number;
     localEditDiagonalBand?: number;
     minLocalOverlap?: number;
+    /** 可选 COFECHA 文本输出，解析为候选证据 hints；不提供时算法照常运行。 */
+    cofechaText?: string;
 };
 
 export type NumericSeries = Map<number, number>;
 
-export type EffectiveDiagnosisConfig = Required<Omit<DiagnosisOptions, "referenceConfig">> & {
+export type EffectiveDiagnosisConfig = Required<Omit<DiagnosisOptions, "referenceConfig" | "cofechaText">> & {
     referenceConfig: ReferenceSeriesConfig | null;
     minPairsForCorrelation: number;
 };
@@ -365,4 +470,9 @@ export type CandidateDraft = {
     globalSlidingMatch?: GlobalSlidingMatch;
     localEditAlignment?: LocalEditAlignmentResult;
     partialRangeMoveEvidence?: Omit<PartialRangeMoveEvidence, "afterUnresolvedA" | "afterUnresolvedB">;
+    /** HMM 边界后验（该候选年的 insert/delete 后验，0-1），用于重排。 */
+    bayesianPosterior?: number;
+    /** 多尺度支持数与召回证据 tags（来源去重后），用于重排与 explanation。 */
+    bayesianSupportScales?: number;
+    recallSourceTags?: string[];
 };

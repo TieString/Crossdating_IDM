@@ -41,6 +41,36 @@ const zScoreSeries = (series: NumericSeries): NumericSeries => {
 
 export const preprocessSeries = (series: NumericSeries): NumericSeries => zScoreSeries(series);
 
+/**
+ * AR(1) 预白化（COFECHA 标准做法之一）：拟合 lag-1 自相关系数 phi，取残差 v[t]-phi*v[t-1] 再 z-score。
+ * 树轮宽度自相关高（整体偏移 1 年时 Pearson 几乎不变，定位 ±1 极难）；AR 残差去除自相关，
+ * 使段级 lag/缺轮区域检测更锐利（实测真实缺轮 top5 0.70→0.80）。比固定系数=1 的一阶差分更温和。
+ * 仅在相邻年（无缺口）处取残差。用作**无 COFECHA 输出时的缺轮召回兜底预处理**（COFECHA 优先）。
+ */
+export const ar1WhitenSeries = (series: NumericSeries): NumericSeries => {
+    const sorted = Array.from(series.entries()).sort((a, b) => a[0] - b[0]);
+    if (sorted.length < 4) return zScoreSeries(series);
+    const vals = sorted.map((e) => e[1]);
+    const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
+    let num = 0;
+    let den = 0;
+    for (let i = 1; i < sorted.length; i += 1) {
+        if (sorted[i][0] === sorted[i - 1][0] + 1) {
+            num += (sorted[i][1] - mean) * (sorted[i - 1][1] - mean);
+        }
+    }
+    vals.forEach((v) => { den += (v - mean) ** 2; });
+    const phi = den > 0 ? Math.max(0, Math.min(0.9, num / den)) : 0;
+    const resid = new Map<number, number>();
+    for (let i = 1; i < sorted.length; i += 1) {
+        const [year, value] = sorted[i];
+        if (sorted[i][0] === sorted[i - 1][0] + 1) {
+            resid.set(year, value - phi * sorted[i - 1][1]);
+        }
+    }
+    return resid.size >= 3 ? zScoreSeries(resid) : zScoreSeries(series);
+};
+
 export const getRangeForSeries = (series: NumericSeries): YearRange | null => {
     const years = Array.from(series.keys()).sort((a, b) => a - b);
     if (years.length === 0) return null;
@@ -83,6 +113,73 @@ export const tLikeForCorrelation = (r: number | null, overlapYears: number): num
     const denominator = 1 - bounded * bounded;
     if (!Number.isFinite(denominator) || denominator <= 0) return null;
     return bounded * Math.sqrt((overlapYears - 2) / denominator);
+};
+
+/**
+ * 两组等长数组的 Pearson 相关系数。
+ * 与 pearson(pairs) 等价，但接受并行数组并对 NaN / 长度不一致做防御。
+ * 返回 null 表示无法计算（样本不足、方差为 0、出现非有限值）。
+ */
+export const pearsonR = (x: number[], y: number[]): number | null => {
+    const n = Math.min(x.length, y.length);
+    if (n < 3) return null;
+    const pairs: Array<[number, number]> = [];
+    for (let i = 0; i < n; i += 1) {
+        const a = x[i];
+        const b = y[i];
+        if (Number.isFinite(a) && Number.isFinite(b)) {
+            pairs.push([a, b]);
+        }
+    }
+    return pearson(pairs, 3);
+};
+
+/**
+ * 由相关系数 r 与样本量 n 计算 t-like 统计量。
+ * t = r * sqrt((n - 2) / (1 - r^2))。
+ * 对 n <= 2、|r| 接近 ±1、方差为 0、NaN/Infinity 做防御，无法计算时返回 0
+ * （tLike 用于比较改进幅度，0 表示“无证据”，比 null 更便于做差值运算）。
+ */
+export const tLikeFromR = (r: number | null, n: number): number => {
+    if (r === null || !Number.isFinite(r) || n <= 2) return 0;
+    const bounded = Math.max(-0.999999, Math.min(0.999999, r));
+    const denominator = 1 - bounded * bounded;
+    if (!Number.isFinite(denominator) || denominator <= 0) return 0;
+    const t = bounded * Math.sqrt((n - 2) / denominator);
+    return Number.isFinite(t) ? t : 0;
+};
+
+/**
+ * Fisher z 变换：z = 0.5 * ln((1 + r) / (1 - r))。
+ * 用于在比较相关性改进时获得方差稳定的尺度。对 |r| 接近 1 做夹紧。
+ */
+export const fisherZ = (r: number | null): number => {
+    if (r === null || !Number.isFinite(r)) return 0;
+    const bounded = Math.max(-0.999999, Math.min(0.999999, r));
+    const z = 0.5 * Math.log((1 + bounded) / (1 - bounded));
+    return Number.isFinite(z) ? z : 0;
+};
+
+/**
+ * 随有效样本量自适应的“低相关阈值”。
+ * 小样本窗口的 r 噪声更大，阈值更宽松（更高）以避免误判 A-like。
+ */
+export const adaptiveLowCorrelationThreshold = (effectiveN: number): number => {
+    if (effectiveN >= 40) return 0.32;
+    if (effectiveN >= 25) return 0.36;
+    if (effectiveN >= 15) return 0.42;
+    return 0.50;
+};
+
+/**
+ * 随有效样本量自适应的“最小 r 改进阈值”。
+ * 小样本下需要更大的改进幅度才认为 lag 移动是真信号。
+ */
+export const adaptiveImprovementThreshold = (effectiveN: number): number => {
+    if (effectiveN >= 40) return 0.08;
+    if (effectiveN >= 25) return 0.10;
+    if (effectiveN >= 15) return 0.14;
+    return 0.18;
 };
 
 export const correlationForSegment = (
@@ -162,6 +259,7 @@ export const buildScoringMaster = (
     siteData: RwlSiteData,
     targetTree: string | null,
     referenceConfig: ReferenceSeriesConfig | null,
+    preprocess: (series: NumericSeries) => NumericSeries = preprocessSeries,
 ): ScoringMaster => {
     if (referenceConfig?.mode === "dynamic" && referenceConfig.cofechaPassReference) {
         const data = new Map<number, number>();
@@ -173,33 +271,51 @@ export const buildScoringMaster = (
         });
 
         return {
-            data: preprocessSeries(data),
+            data: preprocess(data),
             sampleDepth,
             sourceTrees: referenceConfig.selectedTrees.filter((tree) => siteData.has(tree) && tree !== targetTree),
         };
     }
 
     const sourceTrees = getReferenceSourceTrees(siteData, targetTree, referenceConfig);
-    const valuesByYear = new Map<number, number[]>();
+
+    // 相关性加权 chronology：每条参考按其与 target 的整体相关度加权（高相关，如同株姊妹岩芯，
+    // 权重更大；低相关树降权）。这是标准树轮做法，能降低生物学噪声、锐化定位信号。
+    // targetTree 为空（如可视化窄轮）时退回等权平均。
+    const targetZ = targetTree ? preprocess(toNumericSeries(siteData.get(targetTree))) : null;
+    const refWeight = (refZ: NumericSeries): number => {
+        if (!targetZ) return 1;
+        const pairs: Array<[number, number]> = [];
+        targetZ.forEach((v, y) => { const rv = refZ.get(y); if (rv !== undefined) pairs.push([v, rv]); });
+        const r = pearson(pairs, 20);
+        if (r === null) return 0.1; // 重叠不足：保留较小权重
+        // 温和线性加权：高相关树（同株姊妹岩芯）权重大，低相关树降权但不至于消失。
+        // 实测此为最佳平衡（伪轮 top1 0.33→0.50、整条移动→1.00、缺轮保持，clean 仍 0）。
+        return Math.max(0, r) + 0.15;
+    };
+
+    const weightedSumByYear = new Map<number, number>();
+    const weightByYear = new Map<number, number>();
+    const countByYear = new Map<number, number>();
 
     sourceTrees.forEach((tree) => {
-        preprocessSeries(toNumericSeries(siteData.get(tree))).forEach((value, year) => {
-            const values = valuesByYear.get(year);
-            if (values) {
-                values.push(value);
-            } else {
-                valuesByYear.set(year, [value]);
-            }
+        const refZ = preprocess(toNumericSeries(siteData.get(tree)));
+        const w = refWeight(refZ);
+        refZ.forEach((value, year) => {
+            weightedSumByYear.set(year, (weightedSumByYear.get(year) ?? 0) + value * w);
+            weightByYear.set(year, (weightByYear.get(year) ?? 0) + w);
+            countByYear.set(year, (countByYear.get(year) ?? 0) + 1);
         });
     });
 
     const data = new Map<number, number>();
     const sampleDepth = new Map<number, number>();
 
-    Array.from(valuesByYear.entries()).sort((a, b) => a[0] - b[0]).forEach(([year, values]) => {
-        sampleDepth.set(year, values.length);
-        if (values.length > 0) {
-            data.set(year, values.reduce((sum, value) => sum + value, 0) / values.length);
+    Array.from(weightedSumByYear.entries()).sort((a, b) => a[0] - b[0]).forEach(([year, weightedSum]) => {
+        const w = weightByYear.get(year) ?? 0;
+        sampleDepth.set(year, countByYear.get(year) ?? 0);
+        if (w > 0) {
+            data.set(year, weightedSum / w);
         }
     });
 

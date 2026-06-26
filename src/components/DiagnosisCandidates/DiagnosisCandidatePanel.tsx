@@ -39,6 +39,9 @@ const formatAlgorithmSource = (sources: DiagnosisCandidateOperation['algorithmSo
     segmented_diagnosis: 'segmented',
     propagation_pattern: 'propagation',
     local_edit_alignment: 'edit',
+    cofecha_segment_lag: 'cofecha',
+    ar_prewhiten_recall: 'ar',
+    bayesian_lag_path: 'bayes',
     candidate_ranking: 'ranking',
   }
   return sources.map((source) => labels[source] ?? source).join(' + ')
@@ -179,6 +182,23 @@ export function DiagnosisCandidatePanel({
               <div style={{ marginTop: 2, color: '#6f5a45', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {candidate.segmentStartYear}-{candidate.segmentEndYear}{candidateYear} · {getDiagnosisCandidateLabel(candidate)} · r {formatCorrelation(candidate.currentCorrelation)} → {formatCorrelation(candidate.expectedCorrelation)}{candidateDelta}
               </div>
+              {candidate.suggestedRange ? (
+                <div style={{
+                  marginTop: 3,
+                  padding: '2px 6px',
+                  borderRadius: 4,
+                  background: '#eef5ec',
+                  border: '1px solid #c8ddc4',
+                  color: '#356b3a',
+                  fontWeight: 600,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}>
+                  建议范围 {candidate.suggestedRange.startYear}–{candidate.suggestedRange.endYear}
+                  （{candidate.operationType === 'DELETE_FALSE_RING' ? '伪轮' : candidate.operationType === 'INSERT_MISSING_RING' ? '缺轮' : '编辑'}应在此 {candidate.suggestedRange.endYear - candidate.suggestedRange.startYear + 1} 年内）
+                </div>
+              ) : null}
               <div style={{ marginTop: 3, color: '#765b40', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '2px 8px' }}>
                 <span>A/B {evidence.before.unresolvedA}/{evidence.before.unresolvedB} → {evidence.after.unresolvedA}/{evidence.after.unresolvedB}</span>
                 <span>bestLag {evidence.before.bestLag} → {evidence.after.bestLag}</span>

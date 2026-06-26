@@ -3,22 +3,25 @@
  * 这里负责窗口切分后的 lag 搜索、A/B-like 标记、传播模式识别，以及单条序列摘要。
  */
 import { CrossdateConfig } from "./config";
+import { classifySegment } from "./classification";
 import { runGlobalSlidingMatch } from "./sliding";
 import {
     buildScoringMaster,
     correlationForSegment,
     createSegmentsForSeries,
+    fisherZ,
     getRangeForSeries,
     preprocessSeries,
+    tLikeFromR,
     toNumericSeries,
 } from "./series";
 import type {
     EffectiveDiagnosisConfig,
     NumericSeries,
+    PropagationAffectedSide,
     PropagationPattern,
     PropagationPatternType,
     SegmentDiagnosis,
-    SegmentDiagnosisFlag,
     SeriesCoreDiagnosis,
     SeriesDiagnosisSummary,
     YearRange,
@@ -40,6 +43,8 @@ const scanSegment = (
         0,
         config.minPairsForCorrelation,
     );
+    // effectiveN 以 lag=0 的基线重叠年数为准，作为自适应阈值的样本量。
+    const effectiveN = current.samplePairs;
     let bestLag = 0;
     let bestCorrelation = current.correlation;
     let bestPairs = current.samplePairs;
@@ -60,118 +65,158 @@ const scanSegment = (
         }
     }
 
-    const improvement = bestCorrelation === null ? 0 : bestCorrelation - (current.correlation ?? -1);
-    const lowCorrelation = current.correlation !== null && current.correlation < config.lowCorrelationThreshold;
-    const lagLooksBetter = bestLag !== 0 && improvement >= config.lagImprovementThreshold;
-    const weakEvidence = current.samplePairs < config.minPairsForCorrelation;
-    const flag: SegmentDiagnosisFlag = weakEvidence
-        ? "none"
-        : lagLooksBetter
-            ? "B_like"
-            : lowCorrelation
-                ? "A_like"
-                : "none";
-    const reason = weakEvidence
-        ? "样本对不足，暂不判定"
-        : flag === "B_like"
-            ? `B-like：lag ${bestLag > 0 ? "+" : ""}${bestLag} 相关更高`
-            : flag === "A_like"
-                ? "A-like：当前分段相关偏低，未发现更好的整体 lag"
-                : "未发现明显问题";
+    const r0 = current.correlation;
+    const bestR = bestCorrelation;
+    const rImprovement = bestR === null ? 0 : bestR - (r0 ?? -1);
+    const t0 = tLikeFromR(r0, effectiveN);
+    const bestT = tLikeFromR(bestR, bestPairs);
+    const tImprovement = bestT - t0;
+    const fisherZ0 = fisherZ(r0);
+    const fisherZBest = fisherZ(bestR);
+    const fisherZImprovement = fisherZBest - fisherZ0;
+
+    const { classification, confidence, reason } = classifySegment(
+        { effectiveN, r0, bestLag, bestR, rImprovement, t0, bestT, tImprovement },
+        CrossdateConfig.adaptiveClassification,
+    );
 
     return {
         targetTree,
         seriesId: targetTree,
         startYear: segment.startYear,
         endYear: segment.endYear,
-        r0: current.correlation,
+        r0,
         bestLag,
-        bestR: bestCorrelation,
-        flag,
+        bestR,
+        flag: classification,
         sampleSize: bestPairs,
-        currentCorrelation: current.correlation,
-        bestCorrelation,
+        currentCorrelation: r0,
+        bestCorrelation: bestR,
         samplePairs: bestPairs,
-        flagged: flag !== "none",
+        flagged: classification !== "none",
         reason,
+        effectiveN,
+        t0,
+        bestT,
+        tImprovement,
+        rImprovement,
+        fisherZ0,
+        fisherZBest,
+        fisherZImprovement,
+        classification,
+        confidence,
     };
 };
 
-const detectPropagationPatterns = (
+const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
+
+/**
+ * 改进 1：传播模式按 lag 符号聚类，而不要求相邻窗口 bestLag 完全相同。
+ *
+ * 规则：
+ * - 只合并 B_like、bestLag != 0 的窗口；
+ * - 相邻（或重叠）且 bestLag 同号的窗口进入同一个 group，允许轻微抖动
+ *   （[-1,-1,-2,-1] 合并为 dominantLag = -1）；
+ * - dominantLag 用绝对票数最多的 lag；
+ * - lagConsistency = dominantLag 出现次数 / group 内窗口数；
+ * - 至少连续两个 B_like 窗口才形成 pattern；
+ * - 正负号混杂的相邻区域被符号切分后各自不足 2 个窗口，从而不输出，
+ *   等价于“标记 ambiguous / 不输出 propagation”。
+ */
+export const detectPropagationPatterns = (
     targetTree: string,
     segments: SegmentDiagnosis[],
     targetRange: YearRange,
 ): PropagationPattern[] => {
-    const lagGroups = new Map<number, SegmentDiagnosis[]>();
-
-    segments.forEach((segment) => {
-        if (segment.flag !== "B_like" || segment.bestLag === 0) return;
-        const group = lagGroups.get(segment.bestLag);
-        if (group) {
-            group.push(segment);
-        } else {
-            lagGroups.set(segment.bestLag, [segment]);
-        }
-    });
+    const bLikeSegments = segments
+        .filter((segment) => segment.flag === "B_like" && segment.bestLag !== 0)
+        .sort((a, b) => a.startYear - b.startYear);
 
     const patterns: PropagationPattern[] = [];
+    let cluster: SegmentDiagnosis[] = [];
 
-    lagGroups.forEach((group, lag) => {
-        const sorted = [...group].sort((a, b) => a.startYear - b.startYear);
-        let cluster: SegmentDiagnosis[] = [];
-        const flushCluster = () => {
-            if (cluster.length < CrossdateConfig.minPropagationSegments) {
-                cluster = [];
-                return;
-            }
-
-            const affectedStart = Math.min(...cluster.map((segment) => segment.startYear));
-            const affectedEnd = Math.max(...cluster.map((segment) => segment.endYear));
-            const ratio = cluster.length / Math.max(1, segments.length);
-            const newerNormalExists = segments.some((segment) => (
-                segment.startYear > affectedEnd
-                && segment.flag !== "B_like"
-            ));
-            const absLag = Math.abs(lag);
-            const patternType: PropagationPatternType = absLag === 1
-                ? lag < 0
-                    ? "possibleMissingYear"
-                    : "possibleFalseYear"
-                : absLag > 1 && ratio >= 0.6
-                    ? "possibleWholeSeriesMove"
-                    : newerNormalExists
-                        ? "possiblePartialRangeMove"
-                        : "possibleWholeSeriesMove";
-
-            patterns.push({
-                seriesId: targetTree,
-                targetTree,
-                lag,
-                affectedSegments: cluster.map((segment) => ({
-                    startYear: segment.startYear,
-                    endYear: segment.endYear,
-                    flag: segment.flag,
-                })),
-                newerBoundaryYear: Math.min(targetRange.endYear, affectedEnd),
-                olderBoundaryYear: Math.max(targetRange.startYear, affectedStart),
-                patternType,
-                priority: cluster.length * 10 + Math.round(ratio * 10) + absLag,
-            });
+    const flushCluster = () => {
+        if (cluster.length < CrossdateConfig.minPropagationSegments) {
             cluster = [];
-        };
+            return;
+        }
 
-        sorted.forEach((segment) => {
-            const previous = cluster[cluster.length - 1];
-            if (!previous || segment.startYear <= previous.endYear + 1) {
-                cluster.push(segment);
-                return;
-            }
-
-            flushCluster();
-            cluster.push(segment);
+        const votes = new Map<number, number>();
+        cluster.forEach((segment) => {
+            votes.set(segment.bestLag, (votes.get(segment.bestLag) ?? 0) + 1);
         });
+        const dominantLag = Array.from(votes.entries())
+            .sort((a, b) => b[1] - a[1] || Math.abs(a[0]) - Math.abs(b[0]))[0][0];
+        const lagConsistency = (votes.get(dominantLag) ?? 0) / cluster.length;
+        const lagVotes: Record<number, number> = {};
+        votes.forEach((count, lag) => {
+            lagVotes[lag] = count;
+        });
+
+        const affectedStart = Math.min(...cluster.map((segment) => segment.startYear));
+        const affectedEnd = Math.max(...cluster.map((segment) => segment.endYear));
+        const ratio = cluster.length / Math.max(1, segments.length);
+        const newerNormalExists = segments.some((segment) => (
+            segment.startYear > affectedEnd
+            && segment.flag !== "B_like"
+        ));
+        const absLag = Math.abs(dominantLag);
+        // 分类规则遵循 spec：dominantLag=-1 → 缺轮，+1 → 伪轮，|lag|>1 → 整条/部分移动。
+        // 均匀 ±1 偏移会被判为缺/伪轮，但 makeGlobalSlidingDrafts 同时会从整体滑动匹配
+        // 生成 wholeSeriesMove 候选，故整条移动仍能被覆盖。
+        const patternType: PropagationPatternType = absLag === 1
+            ? dominantLag < 0
+                ? "possibleMissingYear"
+                : "possibleFalseYear"
+            : absLag > 1 && ratio >= 0.6
+                ? "possibleWholeSeriesMove"
+                : newerNormalExists
+                    ? "possiblePartialRangeMove"
+                    : "possibleWholeSeriesMove";
+        const affectedSide: PropagationAffectedSide = patternType === "possibleWholeSeriesMove"
+            ? "whole"
+            : "older";
+
+        const meanSegConfidence = cluster.reduce((sum, segment) => sum + segment.confidence, 0) / cluster.length;
+        // lagConsistency 偏低时降低 confidence，但不直接丢弃（仍生成候选，交给 evaluation hard gate）。
+        const confidence = clamp01(meanSegConfidence * (0.5 + 0.5 * lagConsistency));
+
+        patterns.push({
+            seriesId: targetTree,
+            targetTree,
+            lag: dominantLag,
+            dominantLag,
+            lagConsistency,
+            lagVotes,
+            affectedSegments: cluster.map((segment) => ({
+                startYear: segment.startYear,
+                endYear: segment.endYear,
+                flag: segment.flag,
+            })),
+            newerBoundaryYear: Math.min(targetRange.endYear, affectedEnd),
+            olderBoundaryYear: Math.max(targetRange.startYear, affectedStart),
+            patternType,
+            affectedSide,
+            fixedSide: "newer",
+            confidence,
+            ambiguous: false,
+            priority: cluster.length * 10 + Math.round(ratio * 10) + absLag + Math.round(confidence * 5),
+        });
+        cluster = [];
+    };
+
+    bLikeSegments.forEach((segment) => {
+        const previous = cluster[cluster.length - 1];
+        const adjacent = previous ? segment.startYear <= previous.endYear + 1 : true;
+        const sameSign = previous ? Math.sign(previous.bestLag) === Math.sign(segment.bestLag) : true;
+        if (!previous || (adjacent && sameSign)) {
+            cluster.push(segment);
+            return;
+        }
         flushCluster();
+        cluster.push(segment);
     });
+    flushCluster();
 
     return patterns.sort((a, b) => b.priority - a.priority);
 };
@@ -186,15 +231,16 @@ export const diagnoseSeriesCore = (
     siteData: RwlSiteData,
     targetTree: string,
     config: EffectiveDiagnosisConfig,
+    preprocess: (series: NumericSeries) => NumericSeries = preprocessSeries,
 ): SeriesCoreDiagnosis | null => {
     const rawTarget = toNumericSeries(siteData.get(targetTree));
     const targetRange = getRangeForSeries(rawTarget);
     if (!targetRange) return null;
 
-    const master = buildScoringMaster(siteData, targetTree, config.referenceConfig);
+    const master = buildScoringMaster(siteData, targetTree, config.referenceConfig, preprocess);
     if (master.data.size === 0) return null;
 
-    const target = preprocessSeries(rawTarget);
+    const target = preprocess(rawTarget);
     const segments = createSegmentsForSeries(target, config.segmentLength, config.overlap)
         .map((segment) => scanSegment(targetTree, target, master.data, segment, config));
     const globalSlidingMatch = runGlobalSlidingMatch(target, master.data, {

@@ -1,6 +1,6 @@
-[]  Dendrochronology Program Library                                        Run VERY   Program COF  10:51  Tue 16 Jun 2026  Page   1
+[]  Dendrochronology Program Library                                        Run VERY   Program COF  03:59  Fri 26 Jun 2026  Page   1
 []
-[]  P R O G R A M      C O F E C H A                                                                          Version 6.06P    33406
+[]  P R O G R A M      C O F E C H A                                                                          Version 6.06P    33416
 ------------------------------------------------------------------------------------------------------------------------------------
 
  QUALITY CONTROL AND DATING CHECK OF TREE-RING MEASUREMENTS
@@ -50,7 +50,7 @@
  ABSENT RINGS listed by SERIES:            (See Master Dating Series for absent rings listed by year)
 
                No ring measurements of zero value
-PART 2:  TIME PLOT OF TREE-RING SERIES:                                                            10:51  Tue 16 Jun 2026  Page   2
+PART 2:  TIME PLOT OF TREE-RING SERIES:                                                            03:59  Fri 26 Jun 2026  Page   2
 ------------------------------------------------------------------------------------------------------------------------------------
  1050 1100 1150 1200 1250 1300 1350 1400 1450 1500 1550 1600 1650 1700 1750 1800 1850 1900 1950 2000 2050 Ident   Seq Time-span  Yrs
    :    :    :    :    :    :    :    :    :    :    :    :    :    :    :    :    :    :    :    :    : -------- --- ---- ---- ----
@@ -100,7 +100,7 @@
    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .<===============>  . EBD222    44 1865 2024  160
    :    :    :    :    :    :    :    :    :    :    :    :    :    :    :    :    :    :    :    :    :
  1050 1100 1150 1200 1250 1300 1350 1400 1450 1500 1550 1600 1650 1700 1750 1800 1850 1900 1950 2000 2050
-PART 3:  Master Dating Series:                                                                     10:51  Tue 16 Jun 2026  Page   3
+PART 3:  Master Dating Series:                                                                     03:59  Fri 26 Jun 2026  Page   3
 ------------------------------------------------------------------------------------------------------------------------------------
   Year  Value  No Ab    Year  Value  No Ab    Year  Value  No Ab    Year  Value  No Ab    Year  Value  No Ab    Year  Value  No Ab
   ------------------    ------------------    ------------------    ------------------    ------------------    ------------------
@@ -158,7 +158,7 @@
                         1797 -2.918  22       1847   .302  29       1897  1.249  37       1947  -.918  44       1997   .189  44
                         1798 -1.655  22       1848   .362  29       1898  1.332  37       1948  -.384  44       1998  -.699  44
   1749 -4.842   1       1799  -.974  22       1849   .491  29       1899  1.586  37       1949 -2.011  44       1999 -2.612  44
-PART 3:  Master Dating Series:                                                                     10:51  Tue 16 Jun 2026  Page   4
+PART 3:  Master Dating Series:                                                                     03:59  Fri 26 Jun 2026  Page   4
 ------------------------------------------------------------------------------------------------------------------------------------
   Year  Value  No Ab    Year  Value  No Ab    Year  Value  No Ab    Year  Value  No Ab    Year  Value  No Ab    Year  Value  No Ab
   ------------------    ------------------    ------------------    ------------------    ------------------    ------------------
@@ -217,7 +217,7 @@
 
 
 ------------------------------------------------------------------------------------------------------------------------------------
-PART 4:  Master Bar Plot:                                                                          10:51  Tue 16 Jun 2026  Page   5
+PART 4:  Master Bar Plot:                                                                          03:59  Fri 26 Jun 2026  Page   5
 ------------------------------------------------------------------------------------------------------------------------------------
    Year Rel value  Year Rel value  Year Rel value  Year Rel value  Year Rel value  Year Rel value  Year Rel value  Year Rel value
                    1750--------C   1800----a       1850-------B    1900------A     1950----@       2000-----@
@@ -270,7 +270,7 @@
                    1797l           1847------A     1897---------E  1947-d          1997------A
                    1798g           1848------A     1898----------E 1948---b        1998--c
    1749s           1799-d          1849-------B    1899----------F 1949h           1999j
-PART 5:  CORRELATION OF SERIES BY SEGMENTS:                                                        10:51  Tue 16 Jun 2026  Page   5
+PART 5:  CORRELATION OF SERIES BY SEGMENTS:                                                        03:59  Fri 26 Jun 2026  Page   5
 ------------------------------------------------------------------------------------------------------------------------------------
  Correlations of  50-year dated segments, lagged  25 years
  Flags:  A = correlation under   .3281 but highest as dated;  B = correlation higher at other than dated position
@@ -323,7 +323,7 @@
   43 EBD221   1860 2024                       .61  .38  .53  .70  .64  .70
   44 EBD222   1865 2024                       .61  .41  .46  .68  .67  .72
  Av segment correlation   .27  .31  .11  .18  .31  .29  .32  .36  .39  .42
-PART 6:  POTENTIAL PROBLEMS:                                                                       10:51  Tue 16 Jun 2026  Page   6
+PART 6:  POTENTIAL PROBLEMS:                                                                       03:59  Fri 26 Jun 2026  Page   6
 ------------------------------------------------------------------------------------------------------------------------------------
 
  For each series with potential problems the following diagnostics may appear:
@@ -1375,7 +1375,7 @@
        Lower   1918> -.024   1999> -.014   1903> -.009   1932> -.009   1879> -.009   1967> -.006  Higher   1988  .021   1963  .017
 
  ===================================================================================================================================
-PART 7:  DESCRIPTIVE STATISTICS:                                                                   10:51  Tue 16 Jun 2026  Page   7
+PART 7:  DESCRIPTIVE STATISTICS:                                                                   03:59  Fri 26 Jun 2026  Page   7
 ------------------------------------------------------------------------------------------------------------------------------------
 
                                                 Corr   //-------- Unfiltered --------\\  //---- Filtered -----\\

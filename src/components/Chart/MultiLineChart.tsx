@@ -261,7 +261,7 @@ const fixedChartAreaPlugin: Plugin<'line'> = {
     const { chartArea, scales, width } = chart
     const sampleSizeScale = scales[SAMPLE_SIZE_AXIS_ID]
     const showSampleAxis = Boolean(sampleSizeScale?.options.display)
-    const rightMargin = showSampleAxis ? SAMPLE_SIZE_AXIS_WIDTH : CHART_AREA_RIGHT_PADDING
+    const rightMargin = SAMPLE_SIZE_AXIS_WIDTH
     const right = Math.max(0, width - rightMargin)
     const left = Math.min(Y_AXIS_WIDTH, Math.max(0, right - MIN_CHART_AREA_WIDTH))
     const chartAreaWidth = right - left
@@ -1621,7 +1621,7 @@ export function MultiLineChart({
         style={{
           position: 'absolute',
           top: 0,
-          right: 43,
+          right: SAMPLE_SIZE_AXIS_WIDTH - 1,
           zIndex: 2,
           display: 'flex',
           flexDirection: 'column',

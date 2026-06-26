@@ -4,7 +4,8 @@
  */
 import { CrossdateConfig } from "./config";
 import { runLocalEditAlignment } from "./localEditAlignment";
-import { preprocessSeries } from "./series";
+import { ar1WhitenSeries, preprocessSeries } from "./series";
+import { diagnoseSeriesCore } from "./segments";
 import { uniqueAlgorithmSources } from "./candidateUtils";
 import {
     extendPartialBoundaryByPointFit,
@@ -16,9 +17,12 @@ import {
     nearestExistingYear,
     pickSingleYearAnchor,
     pickTopSingleYearAnchors,
+    prescanEditYearsInRegion,
     refinePartialSelectedRange,
     runSlidingMatchForRange,
 } from "./rangeMove";
+import { getNewestFlaggedCofechaSegment, type CofechaHints } from "./cofechaHints";
+import type { RwlSiteData } from "@/features/rwl/types";
 import type {
     CandidateDraft,
     EffectiveDiagnosisConfig,
@@ -177,6 +181,7 @@ export const makePatternDrafts = (
     const years = Array.from(diagnosis.rawTarget.keys()).sort((a, b) => a - b);
 
     diagnosis.propagationPatterns.forEach((pattern) => {
+        if (pattern.ambiguous) return;
         const sourceSegment = getSegmentNearYear(diagnosis.segments, pattern.newerBoundaryYear);
         if (!sourceSegment) return;
 
@@ -189,27 +194,29 @@ export const makePatternDrafts = (
         if (fallbackAnchorYear === null) return;
         if (pattern.patternType === "possibleMissingYear" && pattern.lag < 0) {
             // 生成多个插年候选（top 3），交给 evaluation 排名。
-            const anchorYears = pickTopSingleYearAnchors(diagnosis, pattern, fallbackAnchorYear, config, 3);
+            const anchorYears = pickTopSingleYearAnchors(diagnosis, pattern, fallbackAnchorYear, config, 5);
             anchorYears.forEach((candidateYear) => {
-                const { alignment, edit } = getLocalEditAlignmentForSegment(
+                // 锚年用预扫描（模拟端锚编辑 + 整条相关）选出的真实边界年；
+                // 局部 DP 对齐仅作为支持证据，不覆盖锚年。
+                const { alignment } = getLocalEditAlignmentForSegment(
                     diagnosis, sourceSegment, "insertMissingYear", candidateYear, config,
                 );
                 drafts.push(createLocalEditDraft(
-                    diagnosis, sourceSegment, "insertMissingYear", edit.anchorYear, alignment, pattern,
+                    diagnosis, sourceSegment, "insertMissingYear", candidateYear, alignment, pattern,
                 ));
             });
             return;
         }
 
         if (pattern.patternType === "possibleFalseYear" && pattern.lag > 0) {
-            // 生成多个删年候选（预扫描 top 3），交给 evaluation 排名。
-            const anchorYears = pickTopSingleYearAnchors(diagnosis, pattern, fallbackAnchorYear, config, 3);
+            // 生成多个删年候选，交给 evaluation 排名。
+            const anchorYears = pickTopSingleYearAnchors(diagnosis, pattern, fallbackAnchorYear, config, 5);
             anchorYears.forEach((candidateYear) => {
-                const { alignment, edit } = getLocalEditAlignmentForSegment(
+                const { alignment } = getLocalEditAlignmentForSegment(
                     diagnosis, sourceSegment, "deleteFalseYear", candidateYear, config,
                 );
                 drafts.push(createLocalEditDraft(
-                    diagnosis, sourceSegment, "deleteFalseYear", edit.anchorYear, alignment, pattern,
+                    diagnosis, sourceSegment, "deleteFalseYear", candidateYear, alignment, pattern,
                 ));
             });
             return;
@@ -272,6 +279,87 @@ export const makePatternDrafts = (
     return drafts;
 };
 
+/**
+ * COFECHA [A] 段级 lag 表驱动的候选生成（人工定年流程的核心：参考 COFECHA 输出，从最新 flagged 段处理）。
+ *
+ * 当用户提供 COFECHA 输出（cofechaText）时，COFECHA 已用样条+AR+log 给出极干净的段级 lag——
+ * 真缺/伪轮在"最新 flagged 段"（highLag -1=缺轮 / +1=伪轮）。这里直接用该段确定**区域和编辑类型**，
+ * 在区域内用锐利 prescan 取多候选（topN）。这解决了内部分段在弱相关区检测不到真区域的召回问题
+ * （伪轮 top5 区域召回尤其受益）。候选仍走统一 z-score evaluation 排序，clean 假阳性由 hard gate 控。
+ */
+export const makeCofechaDrivenDrafts = (
+    diagnosis: SeriesCoreDiagnosis,
+    config: EffectiveDiagnosisConfig,
+    cofechaHints: CofechaHints | null,
+): CandidateDraft[] => {
+    if (!cofechaHints) return [];
+    const region = getNewestFlaggedCofechaSegment(cofechaHints, diagnosis.targetTree);
+    if (!region) return [];
+
+    const editType: LocalEditType = region.editType === "insert" ? "insertMissingYear" : "deleteFalseYear";
+    const editKind = region.editType;
+    // 真编辑点常在最新 flagged 段的较新边界附近；区域向较新延伸半个段长以覆盖边界年。
+    const regionStart = Math.max(diagnosis.targetRange.startYear, region.startYear - 2);
+    const regionEnd = Math.min(diagnosis.targetRange.endYear, region.endYear + Math.floor(config.segmentLength / 2));
+    const boundaryYear = Math.min(diagnosis.targetRange.endYear, region.endYear);
+
+    // topN=3：实测最佳平衡（真实 COFECHA 基准）——缺轮 top5 0.70→0.73/top1 0.48→0.52、伪轮 top5 0.58→0.67；
+    // 取更多(6)会稀释伪轮 top1，取更少(2)会丢失缺轮 top5 增益。
+    const sharpYears = prescanEditYearsInRegion(diagnosis, editKind, regionStart, regionEnd, boundaryYear, config, 3);
+    if (sharpYears.length === 0) return [];
+
+    const sourceSegment = getSegmentNearYear(diagnosis.segments, boundaryYear);
+    if (!sourceSegment) return [];
+
+    return sharpYears.map((candidateYear) => {
+        const { alignment } = getLocalEditAlignmentForSegment(diagnosis, sourceSegment, editType, candidateYear, config);
+        const draft = createLocalEditDraft(diagnosis, sourceSegment, editType, candidateYear, alignment);
+        return {
+            ...draft,
+            algorithmSource: uniqueAlgorithmSources([...(draft.algorithmSource ?? []), "cofecha_segment_lag"]),
+        };
+    });
+};
+
+/**
+ * AR(1) 预白化兜底召回（仅在没有 COFECHA 输出时启用；COFECHA 优先）。
+ *
+ * 用 AR 预白化重跑一遍段级诊断（去自相关、锐化缺轮区域检测，实测真实缺轮 top5 0.70→0.80），
+ * 仅取其 **缺轮(INSERT)** 候选年——AR 对伪轮/整条/低频信号有害，故不取 delete/move。
+ * 这些候选仍交回统一的 z-score evaluation 排序与 hard gate（clean 假阳性、false/whole 由 z-score 保护）。
+ * 删年/整条仍走主 z-score 管线。
+ */
+export const makeArRecallInsertDrafts = (
+    siteData: RwlSiteData,
+    primaryDiagnosis: SeriesCoreDiagnosis,
+    config: EffectiveDiagnosisConfig,
+): CandidateDraft[] => {
+    // 门控：若主（z-score）诊断已显示整条/部分移动信号，则不加 AR 缺轮候选——AR 缺轮会与
+    // whole/partial 候选竞争并盖过真值（实测 whole 1.00→0.75、partial 掉档）。AR 只在“纯局部缺轮”场景补召回。
+    const hasMovePattern = primaryDiagnosis.propagationPatterns.some((pattern) => (
+        pattern.patternType === "possibleWholeSeriesMove" || pattern.patternType === "possiblePartialRangeMove"
+    ));
+    const globalMatch = primaryDiagnosis.globalSlidingMatch;
+    const hasGlobalMove = globalMatch.bestGlobalLag !== 0
+        && (globalMatch.bestGlobalTLike ?? 0) >= CrossdateConfig.globalMinTLike;
+    if (hasMovePattern || hasGlobalMove) return [];
+
+    const arDiagnosis = diagnoseSeriesCore(siteData, primaryDiagnosis.targetTree, config, ar1WhitenSeries);
+    if (!arDiagnosis) return [];
+    // AR 诊断里若出现整条/部分移动迹象，同样跳过（避免把整条移动错判成多个缺轮插入）。
+    if (arDiagnosis.propagationPatterns.some((pattern) => (
+        pattern.patternType === "possibleWholeSeriesMove" || pattern.patternType === "possiblePartialRangeMove"
+    ))) {
+        return [];
+    }
+    return [...makePatternDrafts(arDiagnosis, config), ...makeSegmentDrafts(arDiagnosis, config)]
+        .filter((draft) => draft.operationType === "INSERT_MISSING_RING")
+        .map((draft) => ({
+            ...draft,
+            algorithmSource: uniqueAlgorithmSources([...(draft.algorithmSource ?? []), "ar_prewhiten_recall"]),
+        }));
+};
+
 export const makeSegmentDrafts = (
     diagnosis: SeriesCoreDiagnosis,
     config: EffectiveDiagnosisConfig,
@@ -296,14 +384,21 @@ export const makeSegmentDrafts = (
 
         const editType = Math.abs(segment.bestLag) === 1 ? localEditTypeForLag(segment.bestLag) : null;
         if (editType) {
-            const { alignment, edit } = getLocalEditAlignmentForSegment(
-                diagnosis,
-                segment,
-                editType,
-                anchorYear,
-                config,
+            // 单个（未被传播模式覆盖的）B-like lag±1 段也可能是缺/伪轮边界——
+            // 不再用段中点（常偏离真值），改用区域内锐利 prescan 选精确年（多候选交给 evaluation 精排）。
+            const editKind = editType === "insertMissingYear" ? "insert" : "delete";
+            const regionStart = segment.startYear - 2;
+            const regionEnd = Math.min(diagnosis.targetRange.endYear, segment.endYear + config.segmentLength);
+            const sharpYears = prescanEditYearsInRegion(
+                diagnosis, editKind, regionStart, regionEnd, segment.endYear, config, 6,
             );
-            drafts.push(createLocalEditDraft(diagnosis, segment, editType, edit.anchorYear, alignment));
+            const anchorYears = sharpYears.length > 0 ? sharpYears : [anchorYear];
+            anchorYears.forEach((candidateYear) => {
+                const { alignment } = getLocalEditAlignmentForSegment(
+                    diagnosis, segment, editType, candidateYear, config,
+                );
+                drafts.push(createLocalEditDraft(diagnosis, segment, editType, candidateYear, alignment));
+            });
             return;
         }
 

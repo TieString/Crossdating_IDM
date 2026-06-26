@@ -1,0 +1,949 @@
+/goal
+在当前 Crossdating_Tauri 项目中完整实现“COFECHA-like Bayesian Segment Lag Path 优化版自动交叉定年建议系统”，重点提升缺轮 insertMissingYear 和伪轮 deleteFalseYear 的识别准确率。目标不是重写现有算法，而是在现有诊断流程上增加一层更强的段级年代状态推断和候选扩展机制。
+
+当前结果：
+
+* 缺轮 top1 ≈ 0.50
+* 伪轮 top1 ≈ 0.33
+* 缺轮 top5 ≈ 0.58
+* 伪轮 top5 ≈ 0.58
+* 整条移动 top1 ≈ 0.88
+* clean 假阳性 = 0.00
+
+优化目标：
+
+* 第一阶段：缺轮 top5 ≥ 0.85，伪轮 top5 ≥ 0.80
+* 第二阶段：缺轮 top1 ≥ 0.75，伪轮 top1 ≥ 0.65
+* 最终目标：缺轮和伪轮 top1 尽量接近或超过 0.80
+* clean 强假阳性保持 ≤ 0.20，优先保持当前 0.00 的保守性
+
+不要只调评分权重。当前最大问题是候选召回不足，真实位置经常没有进入 top5。必须优先增强候选生成和边界识别能力。
+
+────────────────────────
+一、总体架构
+────────────────────────
+
+保留当前主流程：
+
+工作序列
+→ 构建参考 chronology
+→ 分段 lag 搜索 + 整体滑动匹配
+→ 识别异常传播模式
+→ 生成插年 / 删年 / 范围移动草案
+→ 临时应用每个草案并重新诊断
+→ 按改善程度评分、排序
+→ 输出人工确认的定年建议
+
+新增优化层：
+
+工作序列
+→ leave-one-out master / dynamic reference
+→ 多尺度 COFECHA-like segment lag table
+→ lag correlations 转换为 segment lag likelihood
+→ Bayesian / HMM lag path inference
+→ 得到 MAP lag path 与 boundary posterior
+→ 高 posterior 边界附近扩展 insert/delete 候选
+→ 融合 COFECHA [A]/[B]/[C]/[E] hints、master 窄轮、target 局部异常、local edit alignment peaks
+→ 对所有候选执行真实编辑模拟
+→ 重新标准化、重新完整诊断
+→ rerank
+→ 输出人工确认建议
+
+新增模块建议：
+
+src/features/crossdating/diagnosis/segmentLagTable.ts
+src/features/crossdating/diagnosis/segmentLagLikelihood.ts
+src/features/crossdating/diagnosis/bayesianLagPath.ts
+src/features/crossdating/diagnosis/boundaryPosterior.ts
+src/features/crossdating/diagnosis/candidateRecallExpansion.ts
+src/features/crossdating/diagnosis/candidateReranker.ts
+src/features/crossdating/diagnosis/calibrateCrossdatingWeights.ts
+
+若项目已有相近模块，则复用并扩展，不要重复造孤立逻辑。
+
+────────────────────────
+二、多尺度 COFECHA-like segment lag table
+────────────────────────
+
+当前 segments.ts 只输出 r0 / bestLag / bestR 等摘要。需要新增完整 lag table。
+
+新增类型：
+
+type SegmentLagCorrelation = {
+lag: number
+r: number
+tLike: number
+effectiveN: number
+fisherZ: number
+}
+
+type SegmentLagTableRow = {
+scale: number
+step: number
+startYear: number
+endYear: number
+centerYear: number
+effectiveNAtLag0: number
+
+correlations: SegmentLagCorrelation[]
+
+bestLag: number
+bestR: number
+bestT: number
+
+r0: number
+t0: number
+
+rImprovement: number
+tImprovement: number
+
+posteriorByLag?: Record<number, number>
+entropy?: number
+confidence?: number
+}
+
+type MultiScaleSegmentLagTable = {
+targetId: string
+rows: SegmentLagTableRow[]
+lagRange: [number, number]
+scales: number[]
+}
+
+实现函数：
+
+computeSegmentLagTable(input, params): MultiScaleSegmentLagTable
+
+默认参数：
+
+* lagRange = [-10, +10]
+* scales = [30, 50, 70]
+* stepByScale:
+
+  * 30 → 10
+  * 50 → 10 或 25，优先 10 提高边界分辨率
+  * 70 → 15 或 25
+* minEffectiveN:
+
+  * scale 30 → 12
+  * scale 50 → 20
+  * scale 70 → 30
+* 保留当前 50/25 行为作为兼容模式，但新增 multi-scale 模式作为默认优化路径
+
+每个 segment 必须计算 lag -10 到 +10 的完整 correlation table，不再只取 bestLag。
+
+lag 定义必须保持项目当前约定：
+target[year] ↔ master[year + lag]
+
+解释：
+
+* lag < 0：较老侧可能缺轮，候选 insertMissingYear
+* lag > 0：较老侧可能多轮 / 伪轮，候选 deleteFalseYear
+
+必须处理：
+
+* NaN
+* 0 宽度值保留，但标准化函数决定如何处理
+* effectiveN 不足时该 lag 不参与
+* 方差为 0 时 r = NaN，不能崩溃
+* lag 表要可用于 UI/调试输出
+
+────────────────────────
+三、lag correlations → likelihood / posterior
+────────────────────────
+
+新增模块 segmentLagLikelihood.ts。
+
+目标：
+把每个 segment 的 lag correlations 转成每个 lag 的概率质量，而不是硬 bestLag。
+
+新增类型：
+
+type SegmentLagLikelihoodRow = SegmentLagTableRow & {
+likelihoodByLag: Record<number, number>
+posteriorByLag: Record<number, number>
+bestLagPosterior: number
+lagEntropy: number
+lagConcentration: number
+}
+
+实现函数：
+
+convertLagTableToLikelihood(table, params): SegmentLagLikelihoodRow[]
+
+建议方法：
+
+1. 对每个 lag 的 r / tLike 构造 score：
+   lagScore =
+   wR * fisherZ(r) * sqrt(max(effectiveN - 3, 1))
+
+   * wT * tLike
+   * wImprovement * max(0, r - r0)
+
+   - invalidPenalty
+
+2. softmax 转 posteriorByLag：
+   posteriorByLag[k] = exp(score[k] / temperature) / sum(exp(score / temperature))
+
+3. 默认 temperature = 0.35–0.60，需要可配置。
+
+4. 如果 bestR 和 secondBestR 差距很小，posterior 分布应更平。
+
+5. 如果 effectiveN 小，posterior 应更平。
+
+6. lagEntropy 高表示该 segment 不确定，后续 HMM 中权重降低。
+
+7. lagConcentration = max(posteriorByLag)。
+
+默认权重：
+
+* wR = 1.0
+* wT = 0.15
+* wImprovement = 1.5
+* minPosteriorFloor = 1e-6
+
+输出要求：
+每个 segment row 必须保留：
+
+* posteriorByLag
+* bestLagPosterior
+* entropy
+* confidence
+
+────────────────────────
+四、Bayesian / HMM lag path inference
+────────────────────────
+
+新增模块 bayesianLagPath.ts。
+
+目标：
+将多个 segment 的 lag posterior 作为观测，推断整条序列沿时间方向的隐藏累计 offset 状态路径。
+
+窗口按时间从新到老排序，因为当前编辑规则固定 endYear：
+
+newer → older
+
+隐藏状态：
+
+S_t = segment t 的累计 lag / offset 状态
+
+允许状态：
+
+* minState = -maxState
+* maxState = +maxState
+  默认 maxState = 3
+
+新增类型：
+
+type LagPathState = {
+segmentIndex: number
+centerYear: number
+stateLag: number
+logPosterior: number
+observationLogLikelihood: number
+}
+
+type LagTransition = {
+fromLag: number
+toLag: number
+delta: number
+kind: "none" | "insertMissingYear" | "deleteFalseYear" | "multiYearMove"
+boundaryYearEstimate: number
+logProbability: number
+}
+
+type BayesianLagPathResult = {
+targetId: string
+mapPath: LagPathState[]
+transitions: LagTransition[]
+pathLogPosterior: number
+boundaryPosteriors: BoundaryPosterior[]
+wholeSeriesLagPosterior: Record<number, number>
+diagnostics: {
+segmentCount: number
+stateRange: [number, number]
+averageLagEntropy: number
+averageLagConcentration: number
+}
+}
+
+HMM 观测似然：
+P(observation_t | S_t = k) = segmentPosteriorByLag[k]
+使用 log probability。
+
+转移先验：
+
+* no change: 高概率
+* stateLag 变化 ±1：低概率，代表单个 insert/delete 边界
+* stateLag 变化绝对值 > 1：强惩罚，只有 whole/partial move 场景才允许
+* 短距离连续反向变化强惩罚
+* 编辑次数越多，先验越低
+
+默认转移 log prior：
+
+* stay same: log(0.96)
+* +1 / -1 transition: log(0.02)
+* abs(delta) > 1: log(0.002)
+* reverse transition within 30 years: additional penalty
+* too many transitions: penalty
+
+实现：
+
+* Viterbi：输出 MAP lag path
+* Forward-backward：输出每个 boundary 的 transition posterior
+
+必须实现 forward-backward，不只 Viterbi。因为候选生成需要边界 posterior，不只是单条最优路径。
+
+边界定义：
+相邻 segment t 和 t+1 之间的年份范围。
+boundaryYearEstimate 可取两个 segment centerYear 的中点，也可根据重叠窗口边界计算更合理位置。
+
+transition 解释：
+从新到老：
+
+* 0 → -1：insertMissingYear 边界
+* 0 → +1：deleteFalseYear 边界
+* state 整体非 0 且无明显 transition：wholeSeriesMove
+* 某个边界前后长期不同 state：partialRangeMove
+
+必须输出：
+
+* boundaryPosteriors: 每个边界上 insert / delete / no-change / move 的概率
+* wholeSeriesLagPosterior: 整条移动可能性
+
+────────────────────────
+五、boundary posterior 生成候选
+────────────────────────
+
+新增模块 boundaryPosterior.ts。
+
+类型：
+
+type BoundaryPosterior = {
+boundaryYear: number
+insertPosterior: number
+deletePosterior: number
+noChangePosterior: number
+movePosterior: number
+dominantTransition: "insertMissingYear" | "deleteFalseYear" | "none" | "move"
+confidence: number
+supportingSegments: SegmentLagLikelihoodRow[]
+}
+
+从 HMM forward-backward 中提取：
+
+* P(S_t - S_{t-1} = -1) → insertPosterior
+* P(S_t - S_{t-1} = +1) → deletePosterior
+* P(S_t = S_{t-1}) → noChangePosterior
+
+注意项目 lag 符号：
+如果实现方向是 newer → older：
+
+* transition delta = -1 对应 insertMissingYear
+* transition delta = +1 对应 deleteFalseYear
+
+必须写单元测试防止符号反转。
+
+边界筛选：
+
+* insertPosterior >= 0.15 进入 insert 候选扩展
+* deletePosterior >= 0.15 进入 delete 候选扩展
+* 如果 posterior 不高但 COFECHA hints 很强，仍进入 recall expansion
+* 每条 target 最多保留 top 10 insert boundaries + top 10 delete boundaries
+
+────────────────────────
+六、候选召回扩展 candidateRecallExpansion
+────────────────────────
+
+新增模块 candidateRecallExpansion.ts。
+
+目标：
+把 top5 recall 从 0.58 提高到 0.85+。宁可多生成候选，也不要漏掉真值。后续 evaluation 会淘汰错误候选。
+
+候选来源必须包含：
+
+1. HMM boundary posterior peak
+2. boundary ± 10 年全枚举
+3. COFECHA [A] 支持的 segment 边界
+4. COFECHA [B] effect-on-correlation 年份
+5. COFECHA [C] year-to-year divergence 年份对
+6. COFECHA [E] outlier 年份
+7. master strong narrow 年份
+8. target local anomaly 年份
+9. localEditAlignment top peaks
+10. 当前 propagation boundary 旧逻辑候选
+
+类型：
+
+type RecallExpandedCandidate = {
+type: "insertMissingYear" | "deleteFalseYear"
+year: number
+sourceEvidence: {
+hmmBoundaryPosterior?: number
+cofechaSegmentSupport?: number
+cofechaEffectEvidence?: number
+cofechaYearToYearEvidence?: number
+cofechaOutlierEvidence?: number
+masterNarrowEvidence?: number
+targetAnomalyEvidence?: number
+localEditAlignmentEvidence?: number
+propagationBoundaryEvidence?: number
+}
+sourceTags: string[]
+preliminaryScore: number
+}
+
+规则：
+
+* 对每个高 posterior boundary，枚举 boundaryYear ± 10 年。
+* 如果 top5 recall 仍不足，将范围扩大到 ±15 年。
+* 每种类型最多保留 30 个候选进入 evaluation。
+* 优先保留多证据重合的年份。
+* 不能只保留 3 个候选年。
+* insert 和 delete 分开保留。
+* 不要在 recall 阶段过度过滤。
+* clean 数据中候选多没关系，只要 evaluation 不给强分。
+
+insert 候选加分：
+
+* boundary insertPosterior 高
+* master 在该年较窄 / 低 signal
+* COFECHA [C] 年际突变 pair 包含该年或相邻年
+* COFECHA [E] outlier 包含该年
+* 插入 0 后初步局部 r 改善
+
+delete 候选加分：
+
+* boundary deletePosterior 高
+* target 该年附近存在局部异常
+* 删除后初步 local lag 回 0
+* COFECHA [B]/[C] 年份附近有提示
+* 不要求被删值极端小
+
+────────────────────────
+七、真实编辑后 rerank
+────────────────────────
+
+保留当前 evaluation.ts 的核心设计：
+每个候选都必须临时执行真实编辑，再重新完整诊断。
+
+需要扩展评分输入，加入 HMM / COFECHA evidence。
+
+新增类型：
+
+type CandidateBayesianEvidence = {
+hmmBoundaryPosterior: number
+hmmPathSupport: number
+segmentLagLikelihoodGain: number
+cofechaHintEvidence: number
+recallSourceCount: number
+}
+
+type CandidateRerankInput = {
+candidate: RecallExpandedCandidate
+evaluationDelta: CandidateEvaluationDelta
+bayesianEvidence: CandidateBayesianEvidence
+}
+
+新增 candidateReranker.ts：
+
+score =
+4.0 * counterfactualImprovementScore
+
+* 3.0 * hmmBoundaryPosteriorScore
+* 2.5 * propagationResolutionScore
+* 2.0 * lagRecoveryScore
+* 1.5 * wholeSeriesImprovementScore
+* 1.2 * segmentLagLikelihoodGain
+* 1.0 * localBoundaryImprovementScore
+* 0.8 * localGlkImprovementScore
+* 0.8 * cofechaHintEvidence
+* 0.6 * recallSourceCountScore
+* 0.6 * narrowOrAnomalyEvidence
+
+- 1.2 * newProblemPenalty
+- 0.8 * editCountPenalty
+- 0.4 * distanceFromBoundaryPenalty
+
+Hard gate 仍然保留：
+候选必须满足至少 3 项：
+
+1. meanSegmentRAfter > meanSegmentRBefore
+2. bLikeCountAfter < bLikeCountBefore
+3. propagationResolved 或 propagationWeakened
+4. lagRecoveryScore > 0
+5. wholeSeriesRAfter >= wholeSeriesRBefore - 0.02
+6. localBoundaryRDelta > 0
+7. 没有 introducedNewStrongProblem
+
+但增加召回保护：
+如果 hmmBoundaryPosterior 很高且 counterfactual 不明显变差，可以保留为 low-confidence candidate，而不是直接丢弃。这样用于 top5 recall。
+规则：
+
+* strong candidate：hard gate passed
+* weak candidate：HMM posterior 高，但 hard gate 不足；仅进入 top5/ambiguous，不允许自动推荐
+* rejected candidate：真实编辑后明显变差
+
+输出字段：
+type CandidateStrength = "strong" | "weak" | "rejected"
+
+UI 中：
+
+* strong 才显示为正式建议
+* weak 显示为“备选检查点”
+* rejected 不显示或只在 debug 模式显示
+
+────────────────────────
+八、COFECHA hints 深度融合
+────────────────────────
+
+已有 cofechaHints.ts 需要扩展。
+
+解析：
+[A] Segment lag table
+[B] effect on correlation
+[C] year-to-year changes diverging
+[E] outliers
+
+COFECHA [A] 用于：
+
+* 增强 segment lag likelihood
+* 校验 multi-scale lag table
+* 增强 HMM boundary posterior
+* 如果项目自身 lag table 与 COFECHA [A] 接近，confidence 增加
+
+COFECHA [B]/[C]/[E] 用于：
+
+* candidateRecallExpansion 年份候选扩展
+* candidateReranker 中 cofechaHintEvidence 加分
+* 不作为硬裁决
+
+实现函数：
+
+mergeInternalAndCofechaSegmentEvidence(internalTable, cofechaHints)
+
+规则：
+
+* 如果同一 segment 年份范围接近，且 highLag 与 internal bestLag 同号，则提高该 segment confidence。
+* 如果 COFECHA highLag 与 internal bestLag 冲突，则保留两者，但降低该 segment certainty。
+* 不能让 COFECHA 文本成为必需输入。
+
+getCofechaEvidenceForCandidate(hints, candidate):
+
+* 对 [B] 年份匹配 candidate.year ± 1 加分
+* 对 [C] pair 包含 candidate.year 或边界 year 加分
+* 对 [E] outlier candidate.year ± 1 加分
+* 多段重复出现同一年，证据增强
+* 返回 0–1 归一化 evidence
+
+────────────────────────
+九、多尺度 segment evidence 与 HMM 的关系
+────────────────────────
+
+多尺度 rows 可能高度重叠，不能简单当作完全独立观测，否则会过度自信。
+
+处理方式：
+
+1. 每个 scale 单独跑 HMM，得到 boundary posterior。
+2. 再融合不同 scale 的 boundary posterior。
+   或：
+3. 在同一个 HMM 中给重叠窗口降权。
+
+优先实现简单稳健方案：
+
+* scale 30、50、70 分别构建 lag likelihood rows
+* 分别运行 HMM
+* 将三个 scale 的 boundary posterior 按权重融合
+
+默认 scale weights：
+
+* 30: 0.8
+* 50: 1.0
+* 70: 0.9
+
+融合方式：
+for each year:
+fusedInsertPosterior = weighted average of nearby boundary insert posterior within ±5 years
+fusedDeletePosterior = weighted average of nearby boundary delete posterior within ±5 years
+
+输出 MultiScaleBoundaryPosterior：
+
+type MultiScaleBoundaryPosterior = {
+year: number
+insertPosterior: number
+deletePosterior: number
+supportScales: number[]
+scalePosteriors: Record<number, BoundaryPosterior>
+confidence: number
+}
+
+如果多个尺度在同一边界 ±5 年内支持同一类型，则 confidence 增加。
+
+────────────────────────
+十、自动权重校准
+────────────────────────
+
+新增 calibrateCrossdatingWeights.ts。
+
+目标：
+使用 RDM.rwl synthetic cases 自动搜索更优默认权重，不靠手调。
+
+实现轻量校准，不需要复杂 ML。
+
+数据：
+
+* 从 RDM.rwl 所有 eligible series 构造 synthetic missing / false cases。
+* 按 seriesId deterministic split：
+
+  * train 70%
+  * validation 30%
+* 不要同一 series 的多个 case 同时出现在 train 和 validation，避免泄漏。
+
+搜索方法：
+
+* random search 或 grid search
+* 固定 seed
+* 搜索 100–300 组权重即可
+* 运行时间要可接受，可在单独脚本中执行，不放进普通快速测试
+
+可调权重：
+
+* wCounterfactual
+* wHmmBoundaryPosterior
+* wPropagationResolved
+* wLagRecovery
+* wWholeSeriesDelta
+* wSegmentLagLikelihoodGain
+* wLocalBoundaryDelta
+* wGlk
+* wCofechaHint
+* wNarrowOrAnomaly
+* wEditPenalty
+* wDistancePenalty
+* HMM transition priors
+* lag likelihood temperature
+
+目标函数：
+
+objective =
+2.0 * missingTop1
+
+* 2.0 * falseTop1
+* 0.8 * missingTop5
+* 0.8 * falseTop5
+
+- 1.5 * cleanStrongFalsePositiveRate
+- 0.5 * averageCandidateCountPenalty
+
+输出：
+
+* best weights
+* train metrics
+* validation metrics
+* JSON config file candidate
+
+不要自动覆盖生产默认权重，除非显式参数 allowWriteDefaultConfig = true。
+
+新增命令或脚本：
+
+npm run calibrate:auto-crossdating
+
+或项目已有脚本体系中对应命令。
+
+────────────────────────
+十一、RDM.rwl 批量测试升级
+────────────────────────
+
+现有测试通过，但阈值较低：
+
+* 缺轮 top1 ≥ 0.40
+* 伪轮 top1 ≥ 0.25
+* 整条 ≥ 0.75
+
+新增两层测试：
+
+1. 快速测试 quick：
+   保持当前 37/37 稳定通过，不要过慢。
+   阈值可以逐步提高：
+
+* missingTop5 ≥ 0.75
+* falseTop5 ≥ 0.70
+* missingTop1 ≥ 0.50
+* falseTop1 ≥ 0.35
+* clean false positive ≤ 0.20
+
+2. 完整评估 full：
+   需要手动运行或 CI 可选。
+   命令：
+   npm run validate-auto-crossdating
+   或新增：
+   npm run validate-auto-crossdating:full
+
+目标阈值：
+
+* missingTop5 ≥ 0.85
+* falseTop5 ≥ 0.80
+* missingTop1 ≥ 0.70
+* falseTop1 ≥ 0.60
+* wholeMoveTop1 ≥ 0.80
+* cleanStrongFalsePositiveRate ≤ 0.20
+
+最终追求：
+
+* missingTop1 ≥ 0.80
+* falseTop1 ≥ 0.80
+
+但不要一开始把测试硬阈值设到 0.8，先让算法实现可评估，再通过校准提升。
+
+测试必须输出：
+
+* 当前版本 metrics
+* 相比 baseline 的 delta
+* top5 recall
+* top1 accuracy
+* false positive rate
+* 每个失败 case 的 targetId、trueYear、top candidates summary、boundary posterior summary
+
+────────────────────────
+十二、必须新增单元测试
+────────────────────────
+
+新增测试文件：
+
+segmentLagTable.test.ts
+segmentLagLikelihood.test.ts
+bayesianLagPath.test.ts
+boundaryPosterior.test.ts
+candidateRecallExpansion.test.ts
+candidateReranker.test.ts
+cofechaHintsFusion.test.ts
+rdmSyntheticEvaluation.test.ts
+
+测试 1：lag table 保留完整 lag 分布
+构造一个 target/master，使 lag -1 明显最佳。
+期望：
+
+* correlations 包含 -10…+10
+* bestLag = -1
+* r0 和 bestR 正确
+* effectiveN 正确
+
+测试 2：lag likelihood softmax
+输入 lag correlations：
+lag -1 = 0.70
+lag 0 = 0.20
+lag +1 = -0.10
+期望：
+
+* posteriorByLag[-1] 最大
+* posteriorByLag[-1] > 0.70
+* entropy 低
+
+测试 3：弱差异时 posterior 不过度集中
+lag -1 = 0.42
+lag 0 = 0.40
+lag +1 = 0.39
+期望：
+
+* posterior 不应极端集中
+* bestLagPosterior < 0.50 或按默认 temperature 合理范围
+* confidence 低
+
+测试 4：HMM 识别缺轮路径
+构造 segment posterior：
+新侧 3 个 segment 支持 lag 0
+老侧 4 个 segment 支持 lag -1
+期望：
+
+* mapPath 出现 0 → -1
+* boundary insertPosterior 高
+* dominant transition = insertMissingYear
+
+测试 5：HMM 识别伪轮路径
+新侧支持 lag 0，老侧支持 lag +1。
+期望：
+
+* boundary deletePosterior 高
+* dominant transition = deleteFalseYear
+
+测试 6：整条移动不误判单年插删
+所有 segments 都支持 lag +1。
+期望：
+
+* wholeSeriesLagPosterior[+1] 高
+* 不生成高 confidence 单年 delete boundary
+
+测试 7：多尺度融合
+scale 30/50/70 都在 1865 ± 5 年支持 insert。
+期望：
+
+* fused boundary around 1865
+* supportScales 包含 30/50/70
+* confidence 高
+
+测试 8：候选扩展提高召回
+给定 boundaryYear = 1865，insertPosterior 高。
+期望：
+
+* 生成 1855–1875 内多个 insertMissingYear 候选
+* 包含 1865
+* 不只保留 3 个年份
+
+测试 9：COFECHA hints 扩展候选
+COFECHA [B]/[C]/[E] 指向 1865。
+期望：
+
+* 1865 的 cofechaHintEvidence > 0
+* candidateRecallExpansion 包含 1865
+* 证据 tags 包含 cofechaB / cofechaC / cofechaE
+
+测试 10：reranker 不允许局部高相关单独取胜
+候选 localBoundaryRDelta 高，但 propagation 未改善、wholeSeriesR 下降。
+期望：
+
+* candidateStrength = rejected 或 weak
+* 不能作为 top strong candidate
+
+测试 11：HMM 高 posterior 但 hard gate 未过，保留 weak
+候选 hmmBoundaryPosterior 高，真实编辑后没有明显变差，但 hard gate 不足。
+期望：
+
+* candidateStrength = weak
+* 可进入 top5 备选
+* 不作为 strong top1
+
+测试 12：真实强改善候选 top1
+候选同时满足 HMM posterior 高、传播解决、B-like 减少、wholeSeriesR 提升。
+期望：
+
+* candidateStrength = strong
+* score 高于 weak candidate
+
+测试 13：RDM synthetic missing top5 recall
+使用 RDM.rwl 多条 eligible series 构造 synthetic missing cases。
+期望：
+
+* attempted >= 5
+* top5 hit rate 达到 quick threshold
+* 输出失败 case summary
+
+测试 14：RDM synthetic false top5 recall
+使用 RDM.rwl 多条 eligible series 构造 synthetic false cases。
+期望：
+
+* attempted >= 5
+* top5 hit rate 达到 quick threshold
+* 输出失败 case summary
+
+测试 15：clean false positive 不恶化
+使用 RDM.rwl clean series。
+期望：
+
+* strong false positive rate ≤ 0.20
+* 不因候选扩展导致大量 strong 假阳性
+
+────────────────────────
+十三、实现约束
+────────────────────────
+
+1. 不要删除现有通过的测试。
+2. 不要降低当前 clean 假阳性控制。
+3. 不要把 COFECHA 文本作为必需输入。
+4. 不要把 RDM151/RDM192 写死为唯一测试对象。
+5. 不要在候选召回阶段过度过滤。
+6. 不要让 weak candidate 变成正式自动推荐。
+7. 不要破坏已有真实编辑函数。
+8. 不要改变用户数据，除非用户确认应用候选。
+9. 旧候选 stale 机制保持不变。
+10. 所有新增算法必须 deterministic。
+11. 所有新增参数集中在一个可配置 defaults 文件中。
+12. 所有新增 debug 输出必须可关闭。
+13. 编译必须通过。
+14. 测试必须通过。
+
+────────────────────────
+十四、输出字段要求
+────────────────────────
+
+最终候选 Candidate 增加字段：
+
+candidateStrength: "strong" | "weak" | "rejected"
+
+bayesianEvidence: {
+hmmBoundaryPosterior: number
+hmmPathSupport: number
+segmentLagLikelihoodGain: number
+multiScaleSupport: number
+supportScales: number[]
+}
+
+recallEvidence: {
+sourceTags: string[]
+cofechaHintEvidence: number
+masterNarrowEvidence: number
+targetAnomalyEvidence: number
+localEditAlignmentEvidence: number
+}
+
+evaluationDelta: {
+meanSegmentRBefore: number
+meanSegmentRAfter: number
+bLikeCountBefore: number
+bLikeCountAfter: number
+dominantLagBefore: number | null
+dominantLagAfter: number | null
+wholeSeriesRBefore: number
+wholeSeriesRAfter: number
+propagationResolved: boolean
+lagRecoveryScore: number
+}
+
+explanation: string
+
+explanation 示例：
+建议在 1865 年插入缺轮 0。
+该候选由 HMM 边界概率、多尺度 lag 支持和 COFECHA [B]/[C]/[E] 共同支持。
+编辑后 B-like 问题段 5 → 1，dominantLag -1 → 0，整体相关 0.736 → 0.809。1866–2023 保持不动，1865 年以前整体前移一年。
+
+────────────────────────
+十五、验收标准
+────────────────────────
+
+完成后运行：
+
+npx tsc --noEmit
+npm test
+npm run validate-auto-crossdating
+
+全部必须通过。
+
+validate 输出必须包含：
+
+* missingTop1
+* missingTop5
+* falseTop1
+* falseTop5
+* wholeMoveTop1
+* partialMoveTop5
+* cleanStrongFalsePositiveRate
+* candidate recall count
+* average candidate count
+* weak/strong candidate ratio
+
+目标：
+
+* quick tests 不低于当前水平
+* missingTop5 明显高于 0.58
+* falseTop5 明显高于 0.58
+* missingTop1 不低于 0.50
+* falseTop1 不低于 0.33
+* clean 假阳性不显著恶化
+* full validation 尽量向 missing/false top1 0.8 靠近
+
+完成后只汇报：
+
+* 新增了哪些模块
+* 修改了哪些核心文件
+* 新增了哪些测试
+* 当前 metrics 对比优化前
+* 哪些权重仍需校准
+* 如何运行校准脚本

@@ -10,6 +10,8 @@
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
     "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "validate": "npm run validate:samples && npm run validate:workspace-windows && npm run validate:auto-crossdating && npm run validate:cofecha-reference",
     "validate:samples": "node scripts/validate-samples.mjs",
     "validate:samples:strict": "node scripts/validate-samples.mjs --strict-internal",
@@ -50,6 +52,7 @@
     "storybook": "^10.4.6",
     "typedoc": "^0.28.19",
     "typescript": "~5.6.2",
-    "vite": "^6.0.3"
+    "vite": "^6.0.3",
+    "vitest": "^2.1.9"
   }
 }
