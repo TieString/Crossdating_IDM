@@ -395,6 +395,18 @@ export default function Home() {
         () => crossdatingDiagnosis.candidates.filter((candidate) => candidate.targetTree === selectedTree),
         [crossdatingDiagnosis, selectedTree],
     );
+    const suggestedRangeHighlights = useMemo(
+        () => crossdatingDiagnosis.candidates.flatMap((candidate) => (
+            candidate.suggestedRange
+                ? [{
+                    tree: candidate.targetTree,
+                    startYear: candidate.suggestedRange.startYear,
+                    endYear: candidate.suggestedRange.endYear,
+                }]
+                : []
+        )),
+        [crossdatingDiagnosis],
+    );
     const candidateTabAvailable = selectedTreeCandidates.length > 0;
     const problemTabAvailable = Boolean(selectedProblemText);
     const showProblemsPanel = problemTabAvailable || candidateTabAvailable;
@@ -1239,6 +1251,7 @@ export default function Home() {
                                                 <WidthContainer
                                                     siteData={siteData}
                                                     selected={selectedTree}
+                                                    suggestedRanges={suggestedRangeHighlights}
                                                     masterSeries={cofechaResult?.masterDatingSeries}
                                                     cofechaPassReference={dynamicReferenceConfig?.cofechaPassReference ?? null}
                                                     masterCorrelations={cofechaResult?.masterCorrelations}

@@ -91,6 +91,13 @@ interface GridSelection {
     endYear: number;
 }
 
+/** 诊断"建议范围"高亮：在某序列的 [startYear, endYear] 年份段画绿色框。 */
+export interface SuggestedRangeHighlight {
+    tree: string;
+    startYear: number;
+    endYear: number;
+}
+
 interface DragPreview extends GridSelection {
     yearOffset: number;
     hasMoved: boolean;
@@ -679,6 +686,8 @@ export type WidthContainerProps = {
     masterCorrelations?: Map<string, number>,
     /** COFECHA PART 7 各序列的潜在问题分段数（Flags），键为大写序列号。 */
     seriesProblemCounts?: Map<string, number>,
+    /** 诊断候选的"建议范围"，用绿色框在网格中标出年份段（按序列号匹配）。 */
+    suggestedRanges?: SuggestedRangeHighlight[],
     /** Currently selected series code. */
     selected?: string,
     /** Most recent history animation instruction. */
@@ -881,6 +890,7 @@ function createSeriesShatterAnimation(rect: { left: number; top: number; width: 
 function WidthContainer({
     siteData: site,
     masterSeries,
+    suggestedRanges,
     cofechaPassReference,
     masterCorrelations,
     seriesProblemCounts,
@@ -1055,6 +1065,39 @@ function WidthContainer({
         }
         return result;
     }, [renderSite]);
+
+    const suggestedRangeLookup = useMemo(() => {
+        const map = new Map<string, Array<[number, number]>>();
+        suggestedRanges?.forEach(({ tree, startYear, endYear }) => {
+            const lo = Math.min(startYear, endYear);
+            const hi = Math.max(startYear, endYear);
+            const list = map.get(tree) ?? [];
+            list.push([lo, hi]);
+            map.set(tree, list);
+        });
+        return map;
+    }, [suggestedRanges]);
+
+    const getSuggestedRangeFlags = useCallback((tree: string, year: number) => {
+        const ranges = suggestedRangeLookup.get(tree);
+        if (!ranges) {
+            return null;
+        }
+
+        let inRange = false;
+        let isStart = false;
+        let isEnd = false;
+        for (const [lo, hi] of ranges) {
+            if (year < lo || year > hi) {
+                continue;
+            }
+            inRange = true;
+            if (year === lo) isStart = true;
+            if (year === hi) isEnd = true;
+        }
+
+        return inRange ? { isStart, isEnd } : null;
+    }, [suggestedRangeLookup]);
 
     const renderSelection = useMemo(() => {
         if (!dragPreview?.hasMoved || dragPreview.yearOffset === 0) {
@@ -2529,6 +2572,7 @@ function WidthContainer({
                                     && jumpHighlight.tree === series.treeCode
                                     && (jumpHighlight.year === undefined || jumpHighlight.year === cell.year)
                                 );
+                                const cellSuggestedRangeFlags = getSuggestedRangeFlags(series.treeCode, cell.year);
                                 const cellIsEditHighlighted = editHighlight?.keys.has(`${series.treeCode} ${cell.year}`) ?? false;
                                 const cellIsJumpHighlighted = cellIsJumpMatch || cellIsEditHighlighted;
                                 const cellJumpHighlightId = cellIsEditHighlighted
@@ -2583,6 +2627,9 @@ function WidthContainer({
                                             isSelected={cellIsSelected}
                                             isJumpHighlighted={cellIsJumpHighlighted}
                                             jumpHighlightId={cellJumpHighlightId}
+                                            inSuggestedRange={Boolean(cellSuggestedRangeFlags)}
+                                            isSuggestedRangeStart={cellSuggestedRangeFlags?.isStart ?? false}
+                                            isSuggestedRangeEnd={cellSuggestedRangeFlags?.isEnd ?? false}
                                             isDragging={isDraggingSelection && cellIsSelected}
                                             dragYearOffset={dragYearOffset}
                                             animationKind={cellAnimationKind}
@@ -2645,6 +2692,9 @@ function WidthContainer({
                                         isSelected={cellIsSelected}
                                         isJumpHighlighted={cellIsJumpHighlighted}
                                         jumpHighlightId={cellJumpHighlightId}
+                                        inSuggestedRange={Boolean(cellSuggestedRangeFlags)}
+                                        isSuggestedRangeStart={cellSuggestedRangeFlags?.isStart ?? false}
+                                        isSuggestedRangeEnd={cellSuggestedRangeFlags?.isEnd ?? false}
                                         isDragging={isDraggingSelection && cellIsSelected}
                                         dragYearOffset={dragYearOffset}
                                         animationKind={cellAnimationKind}

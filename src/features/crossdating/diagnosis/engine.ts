@@ -108,12 +108,49 @@ export function diagnoseCrossdating(
             candidatesByTree.set(candidate.targetTree, [candidate]);
         }
     });
-    const candidates = Array.from(candidatesByTree.values())
+    const rankedCandidates = Array.from(candidatesByTree.values())
         .flatMap((group) => rankDiagnosisCandidates(group)
             .sort(compareDiagnosisCandidates)
             .slice(0, config.maxTopCandidates))
         .sort(compareDiagnosisCandidates);
-    // 范围建议：同序列同类型(缺轮/伪轮)的最终候选若聚集成小窗（跨度 <= suggestedRangeMaxWidth），
+    // 每次只建议最近的一处编辑：仅当同序列确有**多处“强”编辑建议**（分处于多个区域）时，
+    // 才只保留最新（最靠树皮）那一处、隐藏更早的——处理它并重新诊断后，下一处会自然浮现（逐个向树心）。
+    // 只在有 COFECHA 输出时生效：COFECHA 驱动的候选会紧密聚在 flagged 小窗内（~7 年），多个窗=多处真实编辑；
+    // 无 COFECHA 时候选过于零散、不可靠，不做收窄以免误删单处编辑的真值。
+    const editCutoffByTree = new Map<string, number>();
+    if (cofechaHints) {
+        const acceptanceThreshold = CrossdateConfig.evaluationV2.acceptanceThreshold;
+        const strongEditYearsByTree = new Map<string, number[]>();
+        rankedCandidates.forEach((candidate) => {
+            if (candidate.targetYear === undefined) return;
+            if (candidate.operationType !== "INSERT_MISSING_RING" && candidate.operationType !== "DELETE_FALSE_RING") return;
+            // 仅“高置信”的编辑才算作一处真实编辑区域，避免单处编辑旁的杂散强候选被误判成第二处而误删真值。
+            if (candidate.score < acceptanceThreshold || candidate.ambiguous || candidate.confidenceLevel !== "high") return;
+            const years = strongEditYearsByTree.get(candidate.targetTree) ?? [];
+            years.push(candidate.targetYear);
+            strongEditYearsByTree.set(candidate.targetTree, years);
+        });
+        strongEditYearsByTree.forEach((years, tree) => {
+            const sorted = Array.from(new Set(years)).sort((a, b) => b - a); // 新→老
+            const regions: number[][] = [];
+            sorted.forEach((year) => {
+                const last = regions[regions.length - 1];
+                if (last && Math.abs(last[last.length - 1] - year) <= CrossdateConfig.suggestedRangeMaxWidth) last.push(year);
+                else regions.push([year]);
+            });
+            if (regions.length < 2) return; // 只有一处强编辑：保持原样，不隐藏（避免单处编辑被杂散候选误删真值）
+            // 确有多处强编辑：只保留最新那一处及其窗口，隐藏更早处（处理后复诊会浮现下一处）。
+            const cutoff = Math.min(...regions[0]) - CrossdateConfig.suggestedRangeMaxWidth;
+            editCutoffByTree.set(tree, cutoff);
+        });
+    }
+    const candidates = rankedCandidates.filter((candidate) => {
+        if (candidate.targetYear === undefined) return true;
+        if (candidate.operationType !== "INSERT_MISSING_RING" && candidate.operationType !== "DELETE_FALSE_RING") return true;
+        const cutoff = editCutoffByTree.get(candidate.targetTree);
+        return cutoff === undefined || candidate.targetYear >= cutoff;
+    });
+    // 范围建议：同序列同类型(缺轮/伪轮)保留下来的候选若聚集成小窗（跨度 <= suggestedRangeMaxWidth），
     // 标注 suggestedRange——保证真值落在其内、且窗口远小于 COFECHA 段，供人工复核（用户的伪轮口径）。
     const rangeYears = new Map<string, number[]>();
     candidates.forEach((candidate) => {

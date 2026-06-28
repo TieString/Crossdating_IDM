@@ -153,6 +153,67 @@
     }
 }
 
+/* 诊断"建议范围"：用一个连续的绿色框把整段年份框在一起（而非每格独立）。
+   关键是 ::before 向左右各延伸一段，跨过格子之间 5px 的 gap，让相邻格的上下边接成一条线；
+   段首/段尾收回延伸并补上竖边 + 圆角，形成封闭的框。再叠一层呼吸发光让它更醒目。 */
+.width-grid.suggested-range {
+    --sr-color: #16a34a;
+    --sr-color-bright: #22c55e;
+    z-index: 2;
+    background-color: rgba(34, 197, 94, 0.12);
+}
+
+.width-grid.suggested-range::before {
+    content: "";
+    position: absolute;
+    top: -3px;
+    bottom: -3px;
+    left: -6px;
+    right: -6px;
+    border-top: 2px solid var(--sr-color);
+    border-bottom: 2px solid var(--sr-color);
+    pointer-events: none;
+    z-index: 1;
+    animation: suggested-range-glow 1.8s ease-in-out infinite;
+}
+
+/* 段首：左侧收回到格子边缘，补左竖边和左圆角 */
+.width-grid.suggested-range.suggested-range-start::before {
+    left: -1px;
+    border-left: 2px solid var(--sr-color);
+    border-top-left-radius: 8px;
+    border-bottom-left-radius: 8px;
+}
+
+/* 段尾：右侧收回，补右竖边和右圆角 */
+.width-grid.suggested-range.suggested-range-end::before {
+    right: -1px;
+    border-right: 2px solid var(--sr-color);
+    border-top-right-radius: 8px;
+    border-bottom-right-radius: 8px;
+}
+
+.width-grid.suggested-range.missing {
+    background-color: rgba(34, 197, 94, 0.1);
+}
+
+@keyframes suggested-range-glow {
+    0%, 100% {
+        border-color: var(--sr-color);
+        box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+    }
+    50% {
+        border-color: var(--sr-color-bright);
+        box-shadow: 0 0 9px 0 rgba(34, 197, 94, 0.55);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .width-grid.suggested-range::before {
+        animation: none;
+    }
+}
+
 .width-grid.dragging {
     z-index: 3;
     cursor: grabbing;

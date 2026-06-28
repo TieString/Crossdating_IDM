@@ -21,6 +21,9 @@ export type PersistedCofechaState = {
     cofechaResult?: SerializedCofechaResult;
     cofechaVersion: CofechaVersion;
     selectedPart: string;
+    // 该 .OUT 对应数据的签名（hashRwlSiteData）。恢复后据此判断 .OUT 是否仍与当前数据匹配——
+    // 匹配则可直接把 COFECHA 文本用于诊断（无需先重跑），不匹配则视为过期。
+    cofechaInputSignature?: string;
 };
 
 export type PersistedReferenceState = {
@@ -84,6 +87,7 @@ export const persistCofechaState = (
     cofechaResult: ICofechaResult | undefined,
     cofechaVersion: CofechaVersion,
     selectedPart: string,
+    cofechaInputSignature?: string,
 ) => {
     try {
         window.localStorage.setItem(
@@ -95,6 +99,7 @@ export const persistCofechaState = (
                 cofechaResult: cofechaResult ? serializeCofechaResult(cofechaResult) : undefined,
                 cofechaVersion,
                 selectedPart,
+                cofechaInputSignature,
             } satisfies PersistedCofechaState),
         );
     } catch (error) {

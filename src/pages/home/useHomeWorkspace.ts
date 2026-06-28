@@ -145,7 +145,8 @@ export function useHomeWorkspace() {
     const diagnosisRequestIdRef = useRef(0);
     const diagnosisWorkerRef = useRef<Worker | null>(null);
     const referenceOperationCounterRef = useRef(0);
-    const lastCofechaValidationRef = useRef<{ input: string; version: CofechaVersion } | null>(null);
+    // COFECHA .OUT 对应数据的签名 + 引擎版本。用于判断当前 .OUT 是否仍与编辑数据匹配（新鲜）。
+    const lastCofechaValidationRef = useRef<{ inputSignature: string; version: CofechaVersion } | null>(null);
     const latestDiagnosisCandidatesRef = useRef<DiagnosisCandidateOperation[]>([]);
     const latestDynamicReferenceConfigRef = useRef<ReferenceSeriesConfig | null>(null);
 
@@ -296,6 +297,7 @@ export function useHomeWorkspace() {
             cofechaResult,
             cofechaVersion,
             selectedPart,
+            lastCofechaValidationRef.current?.inputSignature,
         );
     }, [cofechaResult, cofechaVersion, outFileContent, selectedPart]);
 
@@ -349,8 +351,9 @@ export function useHomeWorkspace() {
             });
             logCofechaReferenceComparison(nextResult.masterDatingSeries, dynamicReferenceConfig);
 
+            const cofechaInputSignature = hashRwlSiteData(rwlEditorRef.current.getData());
             lastCofechaValidationRef.current = {
-                input: rwlEditorRef.current.exportAsRwlString(),
+                inputSignature: cofechaInputSignature,
                 version,
             };
             latestDynamicReferenceConfigRef.current = dynamicReferenceConfig;
@@ -365,6 +368,7 @@ export function useHomeWorkspace() {
                 nextResult,
                 version,
                 selectedPartForPersistence,
+                cofechaInputSignature,
             );
         } finally {
             setIsCofechaRunning(false);
@@ -454,6 +458,14 @@ export function useHomeWorkspace() {
                 setPossibleProblemsDetail(restoredResult?.possibleProblemsDetail ?? new Map());
                 setCofechaParts(splitReportByParts(persistedCofecha.outFileContent));
                 setSelectedPart(restoredSelectedPart);
+                // 恢复 .OUT 对应数据的签名：使打开已定年文件时，若 .OUT 仍匹配当前数据，
+                // 诊断可立即用上 COFECHA（无需先重跑一次）。
+                if (persistedCofecha.cofechaInputSignature) {
+                    lastCofechaValidationRef.current = {
+                        inputSignature: persistedCofecha.cofechaInputSignature,
+                        version: persistedCofecha.cofechaVersion,
+                    };
+                }
             } else {
                 setOutFileContent("");
                 setCofechaResult(undefined);
@@ -1101,10 +1113,18 @@ export function useHomeWorkspace() {
                 console.warn("内部诊断 worker 运行失败:", event.message);
             };
 
+            // COFECHA 新鲜度门控：仅当 .OUT 对应的输入与当前编辑数据一致时，才把 COFECHA 文本传给诊断
+            // （驱动 [A] 段级 lag 候选）。编辑中、COFECHA 尚未重跑时不用过期的 .OUT，回退到内部诊断。
+            const lastValidation = lastCofechaValidationRef.current;
+            const cofechaFresh = Boolean(outFileContent)
+                && lastValidation !== null
+                && lastValidation.inputSignature === hashRwlSiteData(rwlEditorRef.current.getData());
+
             worker.postMessage({
                 id: requestId,
                 siteData,
                 referenceConfig: dynamicReferenceConfig,
+                cofechaText: cofechaFresh ? outFileContent : undefined,
             } satisfies DiagnosisWorkerRequest);
         };
 
@@ -1134,7 +1154,9 @@ export function useHomeWorkspace() {
                 diagnosisWorkerRef.current = null;
             }
         };
-    }, [dynamicReferenceConfig, historyAnimation?.id, siteData]);
+        // outFileContent 加入依赖：COFECHA 重跑（保存后）更新 .OUT 时重新诊断，使 COFECHA 驱动候选与
+        // 逐个（bark-to-pith）迭代工作流生效。
+    }, [dynamicReferenceConfig, historyAnimation?.id, siteData, outFileContent]);
 
     useEffect(() => {
         latestDiagnosisCandidatesRef.current = crossdatingDiagnosis.candidates;
@@ -1153,7 +1175,7 @@ export function useHomeWorkspace() {
         }
 
         return lastValidation.version !== cofechaVersion
-            || lastValidation.input !== rwlEditorRef.current.exportAsRwlString();
+            || lastValidation.inputSignature !== hashRwlSiteData(rwlEditorRef.current.getData());
     }, [cofechaResult, cofechaVersion, deletionMarkers, siteData]);
     const crossdatingValidationSummary = useMemo(() => (
         buildCrossdatingValidationSummary({

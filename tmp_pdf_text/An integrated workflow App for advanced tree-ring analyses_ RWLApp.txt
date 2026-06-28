@@ -1,0 +1,388 @@
+                                                                          Dendrochronologia 98 (2026) 126550
+
+
+                                                                       Contents lists available at ScienceDirect
+
+
+                                                                           Dendrochronologia
+                                                            journal homepage: www.elsevier.com/locate/dendro
+
+
+
+
+An integrated workflow App for advanced tree-ring analyses: RWLApp
+Zulfiyor Bakhtiyorov a,b,c,* , Alberto Arzac a,d , Alper Kaan Kadioglu a,e , Charles Norman a ,
+Tatiana Bebchuk a,f , Peter Santarius a, Elena Buermann a , Sharifjon Habibulloev b,c , Hui Tao b,
+Feng Chen g,h,i, Paul J. Krusic j, Alexander V. Kirdyanov d,k , Ulf Büntgen a,l,m
+a
+  Department of Geography, University of Cambridge, Cambridge CB2 3EN, UK
+b
+  Xinjiang Institute of Ecology and Geography, Chinese Academy of Sciences, Urumqi 830011, China
+c
+  Khujand Science Center, National Academy of Sciences of the Republic of Tajikistan, Khujand 735714, Tajikistan
+d
+  Siberian Federal University, 79 Svobodnii, Krasnoyarsk 660041, Russia
+e
+  Faculty of Forestry, Department of Forest Botany, Istanbul University-Cerrahpasa, Istanbul 34473, Türkiye
+f
+  Department of Classics, Cornell University, Ithaca 14850, USA
+g
+  Yunnan Key Laboratory of International Rivers and Transboundary Eco-Security, Institute of International Rivers and Eco-Security, Yunnan University, Kunming
+650500, China
+h
+  Southwest United Graduate School, Yunnan University, Kunming 650500, China
+i
+  Key Laboratory of Tree-ring Physical and Chemical Research of the Chinese Meteorological Administration/Xinjiang Laboratory of Tree-ring Ecology, Institute of Desert
+Meteorology, Chinese Meteorological Administration, Urumqi 830002, China
+j
+  Department of History, Stockholm University, Stockholm SE-106 91, Sweden
+k
+  V.N. Sukachev Institute of Forest SB RAS, Federal Research Center “Krasnoyarsk Science Center SB RAS”, Krasnoyarsk 660036, Russia
+l
+  Global Change Research Institute, Czech Academy of Sciences, Brno 603 00, Czech Republic
+m
+   Department of Geography, Faculty of Science, Masaryk University, Brno 611 37, Czech Republic
+
+
+
+
+A R T I C L E I N F O                                        A B S T R A C T
+
+Keywords:                                                    Tree-ring data processing often remains operationally fragmented, with file conversion, crossdating evaluation,
+Automation                                                   and chronology aggregation distributed across independent software tools. To address this work-intensive and
+Dendrochronology                                             error-prone analytical separation, we present an integrated Python-based desktop workflow for dendrochrono­
+Software
+                                                             logical data processing comprising four applications: RWLUpdaterApp (Ring Width Length Updater), pos2­
+Chronology
+                                                             rwlApp, converterApp, and RWLStatsApp. These tools support: i) conversion of POS (CooRecorder coordinate)
+Crossdating
+COFECHA                                                      files to the Tucson ring-width list (RWL) format; ii) multi-format chronology conversion and diagnostics; iii)
+Workflow                                                     COFECHA (a widely used crossdating quality-control program)-assisted crossdating checks; iv) interactive
+                                                             correction of problematic series; and v) automated updating and screening of a combined master chronology. The
+                                                             central component, RWLUpdaterApp, provides folder monitoring, duplicate prevention, live editing tools, and an
+                                                             audit trail of chronology changes. Available as ready-to-run executables for both Windows and macOS, the
+                                                             workflow fills an operational gap in traceable, end-to-end chronology management. Rather than replacing
+                                                             established tools, the workflow connects them into a coherent sequence, reducing repetitive manual effort,
+                                                             lowering file-handling errors, and improving transparency and reproducibility of iterative chronology revision.
+
+
+
+
+1. Introduction                                                                                     chronology construction, and statistical standardization, providing a
+                                                                                                    significant part of the computational basis of modern tree-ring research.
+    The reliability of dendrochronological interpretations depends                                  Tool efficiency directly affects scientific quality: laborious or poorly
+fundamentally on measurement accuracy, crossdating certainty, and                                   integrated steps increase file-management time, reduce interpretation
+reproducible data processing throughout the workflow from raw ring                                  time, raise the risk of undetected errors, and lower reproducibility.
+width measurements to final chronologies. Over the last several decades,                                Among these tools, COFECHA has played a prominent role in
+computer-based tools have become central to this work, particularly for                             dendrochronology. Holmes (1983) introduced this computer-assisted
+tree-ring width (TRW) measurement, crossdating diagnostics,                                         system for quality control in tree-ring dating and measurement,
+
+
+
+    * Corresponding author at: Department of Geography, University of Cambridge, Cambridge CB2 3EN, UK.
+      E-mail address: zb308@cam.ac.uk (Z. Bakhtiyorov).
+
+https://doi.org/10.1016/j.dendro.2026.126550
+Received 13 April 2026; Received in revised form 25 May 2026; Accepted 1 June 2026
+Available online 2 June 2026
+1125-7865/Crown Copyright © 2026 Published by Elsevier GmbH. This                                              is    an    open     access     article    under      the   CC   BY   license
+(http://creativecommons.org/licenses/by/4.0/).
+Z. Bakhtiyorov et al.                                                                                                        Dendrochronologia 98 (2026) 126550
+
+
+analyzing whether patterns of wide and narrow rings have been                    Table 1
+correctly matched across different tree samples from a common site.              Overview of the four applications included in the tree-ring data-processing
+Later, the software was successfully updated and implemented in the              module.
+Dendrochronological Program Library (DPL), available at https://www.              Module            Primary role    Main      Main           Key functions
+geog.cam.ac.uk/research/projects/dendrosoftware/.          Grissino-Mayer                                           inputs    outputs
+(2001) provided a widely used tutorial for interpreting its diagnostics           pos2rwlApp        Strict POS to   POS       RWL            Series ID
+and improving crossdating accuracy. More recently, statistical cross­                               RWL                                      generation;
+dating concepts closely associated with COFECHA have been imple­                                    conversion                               youngest-year
+                                                                                                                                             handling;
+mented in open environments such as the package “dplR” (Bunn, 2008,
+                                                                                                                                             missing-run
+2010) in R (R Core Team, 2020; Post Team, 2023), allowing users to read                                                                      splitting; fixed-
+standard tree-ring formats (e.g., Tucson-format RWL, Heidelberg),                                                                            width Tucson
+perform detrending, build chronologies, compute descriptive statistics,                                                                      export
+and generate publication-quality figures. Independently, ARSTAN (Cook             converterApp      Multi-format    POS,      RWL, WID,      Encoding
+                                                                                                    conversion      RWL,      MAS            handling;
+and Krusic, 2005) has remained a widely used program for standardi­                                 and             WID,                     column
+zation and chronology construction, particularly in climate reconstruc­                             diagnostics     MAS,                     selection;
+tion contexts.                                                                                                      CSV,                     grouped export;
+    Advances in imaging technology have propelled the initial TRW                                                   Excel                    negative-code
+                                                                                                                                             scans; value
+measurement stage toward image-based workflows. CooRecorder and
+                                                                                                                                             replacement
+CDendro (Cybis Elektronik & Data AB, Sweden) support digital TRW                  RWLUpdaterApp     Integrated      POS,      Updated        Folder watcher;
+measurement, date assignment, preliminary crossdating, insertion of                                 chronology      RWL       combined       POS auto-
+missing or locally absent rings, earlywood–latewood boundary delin­                                 management                RWL            conversion;
+eation, exclusion of cracks, and metadata management (Maxwell and                                                             chronology     COFECHA
+                                                                                                                                             integration; Live
+Larsson, 2021). Measurements from these tools are typically exported
+                                                                                                                                             Editor; Folder
+in POS format, a widely used file structure for storing raw ring-width                                                                       Browser; audit
+series with associated metadata.                                                                                                             log; crossdating
+    Despite these developments, practical laboratory workflows often                                                                         tools
+                                                                                  RWLStatsApp       Rapid           RWL       Tables and     Min/mean/max
+remain fragmented. In many cases, users still move repeatedly between
+                                                                                                    descriptive               histograms     width; quantile-
+separate software for converting POS files to Tucson-format RWL (RWL                                screening                                based narrow/
+stands for ring-width list and is the standard input for COFECHA and                                                                         wide periods;
+many chronology-building programs), chronology aggregation, COFE­                                                                            histogram
+CHA runs, inspection of output, chronology correction, and repeated                                                                          outputs
+
+export of updated files. Schwartz (2025) highlighted that running
+COFECHA repeatedly for undated series remain cumbersome enough to                datasets. Ultimately, by streamlining these operational steps, the
+justify external automation, a clear indication of the persistence of this       workflow allows researchers to devote more effort to scientific inter­
+operational bottleneck. This fragmentation is not merely an inconve­             pretation and less to file management—making dendrochronological
+nience: it creates real risks of versioning errors, undocumented changes,        practice not only faster but more rigorous and reproducible.
+and inconsistencies between what is recorded and what is actually
+analyzed. By improving efficiency in routine processing, the field can           2. System overview and architecture
+redirect attention toward the interpretive and scientific questions that
+ultimately determine the quality of dendrochronological research.                    A dedicated tree-ring data-processing module was developed in Py­
+    The software suite presented here was developed to address this gap.         thon 3.11.5 to support the conversion, updating, quality control, and
+It combines four complementary desktop applications—RWLU                         preliminary statistical screening of dendrochronological measurement
+pdaterApp, pos2rwlApp, converterApp, and RWLStatsApp—into a                      series. The module consisted of four desktop applications: RWLUpda­
+continuous workflow linking conversion, chronology updating, quality             terApp, pos2rwlApp, converterApp, and RWLStatsApp. Together, these
+control, interactive correction, and summary screening. pos2rwlApp               programs formed a linked workflow connecting raw measurement files,
+(strict POS-to-RWL conversion), converterApp (multi-format chronol­              chronology conversion, combined-file management, and generation of
+ogy conversion and diagnostics), RWLUpdaterApp (integrated chronol­              summary statistics. The suite is designed around a modular architecture
+ogy management and crossdating), and RWLStatsApp (descriptive                    in which each component can be used independently or as part of the
+statistical screening; see Table 1 for a full overview). RWLUpdaterApp is        integrated pipeline, with RWLUpdaterApp serving as the central oper­
+the central contribution, integrating file monitoring, POS auto-                 ational hub. A comprehensive user guide, including installation in­
+conversion, combined chronology management, COFECHA-assisted                     structions, interface descriptions, and recommended operating
+checking, live editing, crossdating support, and edit tracking within a          sequences, is provided in the Supplementary Materials (S2–S3).
+single operational environment. Pre-compiled, ready-to-run executables               The software was designed to work primarily with POS and Tucson
+for both Windows and macOS are provided alongside the source code,               RWL files, while also supporting WID, MAS, CSV, and Excel chronology
+lowering the barrier to adoption for users who prefer not to manage              inputs. Within the workflow, pos2rwlApp handles POS-to-RWL con­
+Python dependencies directly (see Data and software availability). The           version, converterApp manages general multi-format conversion and
+complete software suite is open-source and freely available in a public          preprocessing, RWLUpdaterApp oversees combined chronology man­
+repository at https://github.com/zulfiyor/RWLUpdater/tree/main. A                agement and COFECHA-supported correction, and RWLStatsApp pro­
+detailed step-by-step user guide covering installation, all application          vides descriptive screening of processed RWL files.
+interfaces, and recommended operating sequences is provided in the                   All applications are intended for use on both Windows and macOS.
+Supplementary Materials (S1–S7).                                                 Graphical interfaces were built primarily with Tkinter, while data
+    The aim of this study is to present an integrated processing frame­          handling relied on pandas and NumPy, and graphical summaries were
+work for tree-ring data management and crossdating support. The                  produced with matplotlib. The modular structure allows the applica­
+practical objective is to reduce repetitive manual work, lower the risk of       tions to be used either independently or as parts of an integrated
+chronology versioning and file-handling errors, and improve trans­               chronology-processing workflow.
+parency during iterative revision of actively developing tree-ring
+
+                                                                             2
+Z. Bakhtiyorov et al.                                                                                                           Dendrochronologia 98 (2026) 126550
+
+
+3. Functional workflow steps                                                       enter the main chronology-management environment (see Supplemen­
+                                                                                   tary S5).
+   Together, these four applications form a continuous workflow from                   RWLUpdaterApp is the central contribution of this software suite.
+raw measurement files to updated and quality-checked combined                      Rather than operating as a simple file updater, it functions as an inte­
+chronologies. This integrated architecture, which is centered on                   grated chronology-management environment that links incoming files,
+RWLUpdaterApp, is summarized in Fig. 1.                                            combined chronology maintenance, COFECHA diagnostics, live editing,
+                                                                                   and revision tracking.
+                                                                                       The application monitors selected folders for newly created or
+3.1. POS-to-RWL conversion and data cleansing
+                                                                                   modified files, waits for them to stabilize, prevents duplicate processing
+                                                                                   of unchanged files, and then routes them into the chronology workflow.
+    The dedicated POS-to-RWL converter application, pos2rwlApp,
+                                                                                   Incoming POS files are automatically converted to RWL using built-in
+provides strict conversion of Cybis/CooRecorder POS files into Tucson-
+                                                                                   conversion routines and are then incorporated into the combined
+format RWL. The script follows fixed-width Tucson conventions, using
+                                                                                   chronology, whereas incoming RWL files are added directly after vali­
+an 8-character series identifier, a 4-character year field, and 6-character
+                                                                                   dation (see Supplementary S3.2).
+value fields, with decade-based line grouping, and a terminal missing-
+                                                                                       A two-pane Live Editor forms the operational core of the interface
+value code consistent with the measurement precision.
+                                                                                   (Fig. 2; Supplementary S3.3). The left pane displays the combined
+    In practical use, pos2rwlApp reads POS coordinates, calculates TRW
+                                                                                   chronology alongside series-level COFECHA-derived metrics, while the
+sequences, extracts dating metadata, and writes chronology values in a
+                                                                                   right pane presents a folder-based browser of external RWL files and
+format directly compatible with standard tree-ring workflows. Optional
+                                                                                   series. Within this same environment, users can perform a full range of
+handling of missing ring runs allows problematic sequences to be either
+                                                                                   chronology-maintenance operations without leaving the application or
+retained or split into multiple series segments, depending on user set­
+                                                                                   manually editing text files: deleting selected series, removing specific
+tings. Batch conversion, recursive folder scanning, and filename-based
+                                                                                   year intervals, shifting start years, applying targeted value corrections,
+filtering make the script suitable for larger input sets, including large
+                                                                                   exporting master WID chronologies in three modes (all series, clean
+multi-series datasets. A companion diagnostic scan for negative codes
+                                                                                   series only, or a manually selected subset), testing external or undated
+helps identify conversion anomalies before files enter the main chro­
+                                                                                   series against the combined master chronology, and importing selected
+nology workflow (see Supplementary S4 for a full interface description).
+                                                                                   content directly into the combined file. This tight integration substan­
+                                                                                   tially reduces the risk of formatting errors or inadvertent changes that
+3.2. Automated chronology management and folder watching                           occur when edits are made in external text editors.
+
+   Beyond POS-specific conversion, converterApp extends the work­
+flow by acting as a general interchange layer among RWL, WID, MAS,                 3.3. Interactive crossdating and multi-series editing
+CSV, and Excel chronology inputs. The application allows users to
+convert between common file types, preview and select columns in                       The “Crossdating” tab further extends this functionality by allowing
+spreadsheet inputs, and export grouped subsets as needed.                          users to compare a selected series against a master chronology or a single
+   The program also plays an important diagnostic role. It handles                 reference series, inspect running correlations, scan for alternative off­
+multiple text encodings, scans for negative or placeholder codes during            sets, and write chronology shifts back into the combined file (Fig. 2;
+POS-to-RWL validation runs, and supports fixed-width value replace­                Supplementary S3.7). Direct one-year-level editing supports ring
+ment in RWL outputs. This makes it useful not only for data trans­                 removal, insertion of locally absent rings, value merging, and immediate
+formation but also for preliminary cleaning and validation before files            re-checking after correction.
+
+
+
+
+Fig. 1. Integrated workflow of RWLUpdaterApp for tree-ring data processing and crossdating. The figure summarizes the input routes, internal modules, and major
+outputs of the proposed software environment.
+
+                                                                               3
+Z. Bakhtiyorov et al.                                                                                                            Dendrochronologia 98 (2026) 126550
+
+
+
+
+Fig. 2. Live Editor interface of RWLUpdaterApp showing the combined chronology table, folder-based series browser, selected series preview, and editing controls.
+
+
+    Crucially, the crossdating environment integrates visual inspection             addresses an operational gap that has received less attention: the frag­
+with direct editing: after identifying a potential offset or anomalous ring         mented sequence of file conversion, chronology aggregation, repeated
+in the correlation plot, the user can open a Year Edit dialog, apply a ring         crossdating checks, interactive correction, and revision tracking that
+removal, insertion, or value correction, and immediately observe the                characterizes many laboratory workflows. Fig. 3 situates this workflow
+effect on the running correlation—all within the same interface (Sup­               relative to commonly used tools and the traditional processing sequence.
+plementary S3.7). This eliminates the traditional cycle of exporting a                   To demonstrate the benefits of the proposed approach and software,
+file, editing it externally, reimporting, and rerunning COFECHA. The                it is useful to consider how labor has historically been divided among
+Year Edit dialog supports ring or year removal, insertion of zero rings             dendrochronological software. COFECHA emerged as a computer-
+(locally absent rings), multiple merge behaviors for removed values,                assisted quality-control system for tree-ring dating and measurement,
+count-based repetition of actions, and direction-based control for multi-           with later tutorials refining the interpretation of its diagnostics for
+ring edits. After applying an edit, a review helper dialog allows the user          evaluating the crossdating accuracy and identifying problematic seg­
+to undo the last change, test an alternative merge behavior, or confirm             ments (Grissino-Mayer, 2001; Holmes, 1983). dplR later extended
+the result. This tight feedback loop is particularly valuable when cor­             dendrochronological computing into an open statistical environment by
+recting subtle crossdating errors, where the visual consequence of each             enabling import of standard tree-ring formats, detrending, chronology
+edit is not always predictable in advance.                                          construction, descriptive statistics, and statistical and visual crossdating
+    Together with the audit log and replay functions, these tools trans­            tools (Bunn, 2008, 2010). CooRecorder and CDendro (Cybis Elektronik
+form RWLUpdaterApp into a persistent environment for iterative chro­                & Data AB, Sweden) were designed as an image-based measurement
+nology development rather than a one-step file utility.                             environment supporting TRW measurement, date assignment, pre­
+                                                                                    liminary crossdating, exclusion of cracks, missing rings, and metadata
+3.4. Statistical screening of processed RWL files                                   management (Maxwell and Larsson, 2021). ARSTAN (Cook and Krusic,
+                                                                                    2005) has provided standardization and chronology construction ca­
+    RWLStatsApp provides a compact summary layer for processed RWL                  pabilities, particularly for climate reconstruction contexts. More
+datasets. The application analyzes Tucson-format RWL files, re­                     recently, Schwartz (2025) demonstrated that even routine tasks, such as
+constructs per-series tables, and calculates descriptive statistics                 repeated COFECHA runs for undated series, remain sufficiently manual,
+including minimum, mean, and maximum TRW, the years of these                        and supported external automation, a telling indicator of persistent
+extrema, and series length.                                                         operational friction. One might reasonably ask whether this iterative
+    In addition, the program identifies narrow- and wide-ring periods               and repetitive nature of the work is itself scientifically productive, since
+using user-defined quantile thresholds and generates summary tables                 repeated manual inspection can uncover subtle errors. We argue that the
+and histogram-based outputs. This makes it suitable for rapid screening             two are not in conflict: the present suite automates file-handling steps,
+of updated chronology sets before more detailed downstream analysis                 not scientific judgment. The researcher retains full control over every
+(see Supplementary S6).                                                             editing decision; what is reduced is the overhead of file conversion,
+                                                                                    export, and re-import between each decision.
+4. Workflow enhancements and traceability                                                In this regard, the present suite is aimed at addressing the opera­
+                                                                                    tional gap between file creating, format conversion, chronology aggre­
+   The software suite presented here occupies a specific niche within               gation, iterative COFECHA checking, chronology repair, and revision
+the broader landscape of dendrochronological tools. Rather than                     tracking. While previous key dendrochronological tools advanced
+competing with established analytical or measurement systems, it                    measurement precision, statistical rigor, and formal crossdating, the
+
+                                                                                4
+Z. Bakhtiyorov et al.                                                                                                         Dendrochronologia 98 (2026) 126550
+
+
+
+
+Fig. 3. Traditional versus integrated workflow for tree-ring chronology processing. The figure emphasizes the operational integration provided by the proposed
+RWLUpdaterApp-centered environment compared with a fragmented manual sequence of conversion, checking, correction, and repeated export.
+
+
+present software suite centers on workflow integration. This orientation          what offset. This capability directly addresses the bottleneck identified
+is most evident in RWLUpdaterApp, which consolidates folder moni­                 by Schwartz (2025) and gives the researcher both quantitative (COFE­
+toring, file-stability control, duplicate protection, combined chronology         CHA-derived correlation statistics) and visual (rolling-correlation plot)
+management, POS auto-conversion, COFECHA-assisted diagnostics,                    evidence for or against a proposed dating assignment. The result is a
+interactive troubleshooting, and audit-based traceability within a single         more methodologically defensible workflow in which additions to the
+environment. By improving efficiency, this suite enables researchers to           master chronology are evaluated rather than assumed.
+improve effectiveness—returning time and cognitive resources to the                   At the same time, a balanced assessment requires acknowledging the
+scientific interpretation of chronology data.                                     suite’s limitations. First, it does not replicate analytical ecosystems such
+    A principal strength of this design lies in the elimination of the            as dplR for advanced chronology statistics, detrending, or climate-
+traditional separation between diagnosis and correction. In conven­               growth analysis. Second, COFECHA integration still depends on an
+tional workflows, users repeatedly moved between tools, exporting or              external executable, and some output parsing is necessarily heuristic, as
+converting files, running COFECHA, inspecting its output externally,              COFECHA formats can vary across versions and run modes. Third, as a
+returning to the chronology file to make edits, and then repeating the            desktop Python workflow, deployment is more accessible to users
+cycle. In the current implementation, combined-file operations such as            comfortable with local software installation than to those relying on
+deleting a series, removing a selected year range, shifting the start year,       fully web-based or centrally managed environments. The provision of
+exporting a master chronology, and applying value corrections can be              pre-compiled executables for both operating systems (see Data and
+performed directly within the same environment in which the chro­                 software availability) substantially mitigates this third limitation.
+nology is stored and checked. This integration reduces repetitive manual              The present software suite is therefore best understood as a com­
+handling and improves continuity during iterative chronology revision.            plementary infrastructure contribution. Its novelty lies in embedding
+Furthermore, the integrated visual–edit cycle in the Crossdating                  and connecting the routine chronology-handling tasks into a coherent
+tab—where correlation plots, year-level values, and direct editing con­           desktop workflow, but in a lesser extent in introducing new dendro­
+trols are available simultaneously—can surface errors more readily than           chronological algorithms. For laboratories or projects that manage a
+the traditional export-and-inspect approach, since the researcher sees            steady influx of new series and undergo repeated chronology revisions,
+the effect of each edit immediately rather than after a separate reimport         such operational integration may substantially reduce manual effort and
+step.                                                                             mitigate the risk of file-handling or chronology-versioning errors.
+    A second important advantage is improved traceability. Manual
+chronology correction is often poorly documented, particularly when               5. Conclusions
+multiple revisions occur over time. The JSONL-based audit and replay
+functions represent a substantial improvement over the undocumented                   The software suite presented here provides an integrated operational
+replacement of master chronology files, not by providing full prove­              framework for tree-ring data processing, linking file conversion, chro­
+nance control in the broader computational-reproducibility sense, but             nology updating, quality control, interactive correction, and summary
+by preserving an explicit operational record of chronology edits. In this         screening into a single workflow. Its primary contribution lies not in
+respect, the present software complements open analytical environ­                replacing established dendrochronological programs such as COFECHA,
+ments such as dplR at the chronology-maintenance stage.                           CooRecorder, or analytical environments such as dplR and ARSTAN, but
+    A third practical advantage is the ability to screen incoming                 in creating a practical layer that connects these traditionally separate
+series—including those whose dating is uncertain—against an existing              stages of work.
+master chronology before committing them to the combined file. The                    The central question for any new computational tool in dendro­
+undated-versus-dated workflow in RWLUpdaterApp allows a user to test              chronology is whether it makes the science better. We argue that this
+whether a new series can be crossdated against the master and, if so, at          suite does so in three concrete ways: it reduces the time spent on
+
+
+                                                                              5
+Z. Bakhtiyorov et al.                                                                                                               Dendrochronologia 98 (2026) 126550
+
+
+repetitive file-handling steps, freeing researchers for interpretation; it       [# 101118880; Synergy-Plague].
+lowers the probability of undetected versioning and formatting errors
+that can silently compromise chronology quality; and it provides an              Data and software availability
+audit trail that makes iterative revision transparent and, when needed,
+reversible. For laboratories managing a steady influx of new series and             The complete software suite is open-source and freely available in a
+repeated chronology revisions, these operational improvements trans­             public repository at https://github.com/zulfiyor/RWLUpdater/tree/
+late directly into more reliable and reproducible science.                       main. Pre-compiled, ready-to-run executables are available for Win­
+    Although some components still depend on external software and               dows and macOS at https://drive.google.com/drive/folders/1JRaZl
+certain functions remain sensitive to variation in external output for­          wMKvenIxU6BFpgWQGKVoPJgEg9M?usp=drive_link
+mats, the overall workflow demonstrates clear practical value. It is
+particularly well suited for laboratories handling repeated chronology           Appendix A. Supporting information
+updates, multiple incoming series, and iterative revision of combined
+master files. By reducing repetitive manual handling and improving                  Supplementary data associated with this article can be found in the
+operational traceability, the suite addresses an overlooked gap in the           online version at doi:10.1016/j.dendro.2026.126550.
+dendrochronological toolkit and offers a template for more integrated
+data management in future research.                                              Data availability
+
+CRediT authorship contribution statement                                             Data will be made available on request.
+
+   Zulfiyor Bakhtiyorov: Writing – review & editing, Software,                   References
+Methodology, Conceptualization. Ulf Büntgen: Writing – review &
+editing, Supervision, Funding acquisition. Alberto Arzac: Writing –              Bunn, A.G., 2008. A dendrochronology program library in R (dplR). Dendrochronologia
+review & editing. Alexander V. Kirdyanov: Writing – review & editing.                26, 115–124. https://doi.org/10.1016/j.dendro.2008.01.002.
+                                                                                 Bunn, A.G., 2010. Statistical and visual crossdating in R using the dplR library.
+Alper Kaan Kadioglu: Validation. Charles Norman: Validation.                         Dendrochronologia 28, 251–258. https://doi.org/10.1016/j.dendro.2009.12.001.
+Sharifjon Habibulloev: Validation. Hui Tao: Validation. Feng Chen:               Cook, E.R., Krusic, P.J., 2005. ARSTAN 4.1: A tree-ring standardization program based
+Validation. Paul J. Krusic: Writing – review & editing. Tatiana Beb­                 on detrending and autoregressive time series modeling with interactive data
+                                                                                     manipulation. Tree-Ring Laboratory, Lamont Doherty Earth Observatory, Columbia
+chuk: Validation. Peter Santarius: Validation. Buermann Elena:                       University, Palisades, NY.
+Validation.                                                                      Grissino-Mayer, H.D., 2001. Evaluating crossdating accuracy: a manual and tutorial for
+                                                                                     the computer program COFECHA. Tree-Ring Res. 57, 205–221. 〈http://hdl.handle.
+                                                                                     net/10150/251654〉.
+Declaration of Competing Interest                                                Holmes, R.L., 1983. Computer-assisted quality control in tree-ring dating and
+                                                                                     measurement. Tree-Ring Bull. 43, 69–78.
+    The authors declare that they have no known competing financial              Maxwell, R.S., Larsson, L.A., 2021. Measuring tree-ring widths using the CooRecorder
+                                                                                     software application. Dendrochronologia 67, 125841. https://doi.org/10.1016/j.
+interests or personal relationships that could have appeared to influence
+                                                                                     dendro.2021.125841.
+the work reported in this paper.                                                 R Core Team, 2020. R: A language and environment for statistical computing. R
+                                                                                     Foundation for Statistical Computing, Vienna. 〈https://www.R-project.org/〉.
+Acknowledgements                                                                 Schwartz, M.O., 2025. Automated crossdating with the dendrochronology program
+                                                                                     Cofecha. Tree-Ring Res. 81, 81–86. https://doi.org/10.3959/TRR2024-9.
+                                                                                 Team, Posit, 2023. RStudio: Integrated Development Environment for R. Posit Software.
+    This work was carried out with the support of the ERC Synergy Grant              PBC, Boston, MA. 〈https://www.posit.co/〉.
+
+
+
+
+                                                                             6
+

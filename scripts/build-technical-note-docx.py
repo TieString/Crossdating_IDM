@@ -7,9 +7,9 @@ reviewable as text in the repository while the DOCX is regenerated consistently.
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 from docx import Document
-from docx.enum.section import WD_SECTION_START
 from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.oxml import OxmlElement
@@ -79,6 +79,99 @@ def add_bottom_border(paragraph):
     p_pr.append(borders)
 
 
+def set_cell_shading(cell, fill):
+    tc_pr = cell._tc.get_or_add_tcPr()
+    shading = tc_pr.find(qn("w:shd"))
+    if shading is None:
+        shading = OxmlElement("w:shd")
+        tc_pr.append(shading)
+    shading.set(qn("w:fill"), fill)
+
+
+def set_cell_width(cell, width_dxa):
+    tc_pr = cell._tc.get_or_add_tcPr()
+    tc_w = tc_pr.find(qn("w:tcW"))
+    if tc_w is None:
+        tc_w = OxmlElement("w:tcW")
+        tc_pr.append(tc_w)
+    tc_w.set(qn("w:w"), str(width_dxa))
+    tc_w.set(qn("w:type"), "dxa")
+
+
+def set_cell_margins(cell, top=80, start=120, bottom=80, end=120):
+    tc_pr = cell._tc.get_or_add_tcPr()
+    tc_mar = tc_pr.find(qn("w:tcMar"))
+    if tc_mar is None:
+        tc_mar = OxmlElement("w:tcMar")
+        tc_pr.append(tc_mar)
+    for side, value in (("top", top), ("start", start), ("bottom", bottom), ("end", end)):
+        node = tc_mar.find(qn(f"w:{side}"))
+        if node is None:
+            node = OxmlElement(f"w:{side}")
+            tc_mar.append(node)
+        node.set(qn("w:w"), str(value))
+        node.set(qn("w:type"), "dxa")
+
+
+def set_table_geometry(table, widths):
+    """Apply fixed 9360-DXA geometry and the selected preset's cell margins."""
+    table.autofit = False
+    tbl = table._tbl
+    tbl_pr = tbl.tblPr
+    tbl_w = tbl_pr.find(qn("w:tblW"))
+    if tbl_w is None:
+        tbl_w = OxmlElement("w:tblW")
+        tbl_pr.append(tbl_w)
+    tbl_w.set(qn("w:w"), str(sum(widths)))
+    tbl_w.set(qn("w:type"), "dxa")
+    tbl_ind = tbl_pr.find(qn("w:tblInd"))
+    if tbl_ind is None:
+        tbl_ind = OxmlElement("w:tblInd")
+        tbl_pr.append(tbl_ind)
+    tbl_ind.set(qn("w:w"), "120")
+    tbl_ind.set(qn("w:type"), "dxa")
+    grid = tbl.tblGrid
+    for col, width in zip(grid.gridCol_lst, widths):
+        col.set(qn("w:w"), str(width))
+    for row in table.rows:
+        for cell, width in zip(row.cells, widths):
+            set_cell_width(cell, width)
+            set_cell_margins(cell)
+
+
+def add_markdown_table(doc, lines):
+    rows = []
+    for line in lines:
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if all(re.fullmatch(r":?-{3,}:?", cell.replace(" ", "")) for cell in cells):
+            continue
+        rows.append(cells)
+    if not rows:
+        return
+    column_count = len(rows[0])
+    rows = [row[:column_count] + [""] * max(0, column_count - len(row)) for row in rows]
+    widths = [2100, 3800, 3460] if column_count == 3 else [9360 // column_count] * column_count
+    if sum(widths) != 9360:
+        widths[-1] += 9360 - sum(widths)
+    table = doc.add_table(rows=len(rows), cols=column_count)
+    table.style = "Table Grid"
+    set_table_geometry(table, widths)
+    for row_index, row in enumerate(rows):
+        for col_index, value in enumerate(row):
+            cell = table.cell(row_index, col_index)
+            cell.text = ""
+            p = cell.paragraphs[0]
+            p.paragraph_format.space_before = Pt(0)
+            p.paragraph_format.space_after = Pt(0)
+            p.paragraph_format.line_spacing = 1.1
+            r = p.add_run(value)
+            set_run_font(r, 9.3, BLACK, bold=row_index == 0)
+            if row_index == 0:
+                set_cell_shading(cell, "F2F4F7")
+    after = doc.add_paragraph()
+    after.paragraph_format.space_after = Pt(4)
+
+
 def configure_document(doc):
     section = doc.sections[0]
     section.top_margin = Inches(1)
@@ -114,6 +207,10 @@ def configure_document(doc):
     code.font.size = Pt(9.5)
     code.paragraph_format.space_before = Pt(3)
     code.paragraph_format.space_after = Pt(6)
+
+    caption = doc.styles["Caption"]
+    set_style(caption, 9.5, MUTED, 4, 10, 1.1)
+    caption.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
     header = section.header
     p = header.paragraphs[0]
@@ -240,6 +337,21 @@ def build():
         if line.startswith("### "):
             heading = doc.add_paragraph(style="Heading 2")
             heading.add_run(line[4:])
+            continue
+        image_match = re.fullmatch(r"!\[[^\]]*\]\(([^)]+)\)", line)
+        if image_match:
+            image_path = SOURCE.parent / image_match.group(1)
+            doc.add_picture(str(image_path), width=Inches(6.22))
+            continue
+        if line.startswith("|") and line.endswith("|"):
+            table_lines = [line]
+            while i < len(lines) and lines[i].strip().startswith("|") and lines[i].strip().endswith("|"):
+                table_lines.append(lines[i].strip())
+                i += 1
+            add_markdown_table(doc, table_lines)
+            continue
+        if line.startswith("Fig. "):
+            add_text_paragraph(doc, line, "Caption")
             continue
         if line.startswith("**Keywords:**"):
             p = doc.add_paragraph(style="Technical Note Abstract")

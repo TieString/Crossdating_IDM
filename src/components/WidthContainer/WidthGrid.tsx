@@ -297,6 +297,9 @@ export type WidthGridProps = Omit<React.HTMLAttributes<HTMLSpanElement>, MotionR
     isSelected?: boolean;
     isJumpHighlighted?: boolean;
     jumpHighlightId?: number;
+    inSuggestedRange?: boolean;
+    isSuggestedRangeStart?: boolean;
+    isSuggestedRangeEnd?: boolean;
     isDragging?: boolean;
     dragYearOffset?: number;
     animationKind?: GridAnimationKind;
@@ -327,6 +330,9 @@ export default function WidthGrid({
     isSelected = false,
     isJumpHighlighted = false,
     jumpHighlightId,
+    inSuggestedRange = false,
+    isSuggestedRangeStart = false,
+    isSuggestedRangeEnd = false,
     isDragging = false,
     dragYearOffset = 0,
     animationKind,
@@ -558,7 +564,7 @@ export default function WidthGrid({
             onDoubleClick={isEditable && !isEditing ? handleDoubleClick : undefined}
             onMouseMove={handleMouseMove}
             onMouseLeave={handleMouseLeave}
-            className={`${style["width-grid"]} ${className} ${isMissing ? style["missing"] : ""} ${isInsertedZero ? style["inserted-zero"] : ""} ${isSelected ? style["selected"] : ""} ${isJumpHighlighted ? style["cofecha-jump-target"] : ""} ${isDragging ? style["dragging"] : ""} ${hasLeftDeletionMark ? style["has-left-deletion-mark"] : ""} ${hasRightDeletionMark ? style["has-right-deletion-mark"] : ""} ${animationKind ? style["motion-animated"] : ""} ${isEditable ? "" : style["disabled"]}`}
+            className={`${style["width-grid"]} ${className} ${isMissing ? style["missing"] : ""} ${isInsertedZero ? style["inserted-zero"] : ""} ${isSelected ? style["selected"] : ""} ${isJumpHighlighted ? style["cofecha-jump-target"] : ""} ${inSuggestedRange ? style["suggested-range"] : ""} ${inSuggestedRange && isSuggestedRangeStart ? style["suggested-range-start"] : ""} ${inSuggestedRange && isSuggestedRangeEnd ? style["suggested-range-end"] : ""} ${isDragging ? style["dragging"] : ""} ${hasLeftDeletionMark ? style["has-left-deletion-mark"] : ""} ${hasRightDeletionMark ? style["has-right-deletion-mark"] : ""} ${animationKind ? style["motion-animated"] : ""} ${isEditable ? "" : style["disabled"]}`}
             style={{
                 backgroundColor: getBackgroundColor(),
                 color: getTextColor(),

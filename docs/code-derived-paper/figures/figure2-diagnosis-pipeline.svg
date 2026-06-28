@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1160" viewBox="0 0 1800 1160" role="img" aria-labelledby="title desc">
+  <title id="title">Constrained diagnostic and correction pipeline</title>
+  <desc id="desc">Three-lane pipeline showing evidence construction, simulated correction testing, and user-confirmed execution for crossdating revision.</desc>
+  <defs>
+    <style>
+      .bg{fill:#fcfcfa}.title{font:700 36px Arial,Segoe UI,sans-serif;fill:#18202a}.sub{font:18px Arial,Segoe UI,sans-serif;fill:#596574}
+      .lane{stroke:#c6ccd6;stroke-width:2}.box{fill:#fff;stroke:#b9c2cf;stroke-width:2}.h{font:700 22px Arial,Segoe UI,sans-serif;fill:#18202a}
+      .lh{font:700 24px Arial,Segoe UI,sans-serif}.t{font:15px Arial,Segoe UI,sans-serif;fill:#596574}.foot{font:18px Arial,Segoe UI,sans-serif;fill:#18202a}
+      .arrow{stroke:#4e5967;stroke-width:3;fill:none;marker-end:url(#arrow)}
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4e5967"/></marker>
+  </defs>
+  <rect class="bg" width="1800" height="1160"/>
+  <text x="70" y="78" class="title">Constrained diagnostic and correction pipeline</text>
+  <text x="70" y="112" class="sub">Diagnostic evidence is translated only into interpretable missing-ring, false-ring, or range-movement corrections</text>
+  <rect x="80" y="170" width="440" height="840" rx="12" fill="#eef5ff" class="lane"/><text x="104" y="214" class="lh" fill="#2f6fed">Evidence construction</text>
+  <rect x="610" y="170" width="440" height="840" rx="12" fill="#f7f2ff" class="lane"/><text x="634" y="214" class="lh" fill="#7b4cc2">Counterfactual testing</text>
+  <rect x="1140" y="170" width="440" height="840" rx="12" fill="#fff4ec" class="lane"/><text x="1164" y="214" class="lh" fill="#c76f2b">Decision and execution</text>
+
+  <g transform="translate(120 245)"><rect class="box" width="360" height="145" rx="8"/><rect width="8" height="145" rx="8" fill="#2f6fed"/><text x="18" y="39" class="h">Master/reference</text><text x="18" y="70" class="t">Dynamic COFECHA master if fresh;</text><text x="18" y="91" class="t">otherwise selected or leave-one-out</text><text x="18" y="112" class="t">scoring master.</text></g>
+  <g transform="translate(120 425)"><rect class="box" width="360" height="145" rx="8"/><rect width="8" height="145" rx="8" fill="#2f6fed"/><text x="18" y="39" class="h">Segment lag scan</text><text x="18" y="70" class="t">50/25 and 30/15 windows, adaptive</text><text x="18" y="91" class="t">r/t thresholds, A-like and B-like</text><text x="18" y="112" class="t">segment labels.</text></g>
+  <g transform="translate(120 605)"><rect class="box" width="360" height="145" rx="8"/><rect width="8" height="145" rx="8" fill="#2f6fed"/><text x="18" y="39" class="h">Search sources</text><text x="18" y="70" class="t">Global sliding, propagation pattern,</text><text x="18" y="91" class="t">COFECHA PART 6 hints, and bounded</text><text x="18" y="112" class="t">local edit alignment.</text></g>
+  <g transform="translate(120 785)"><rect class="box" width="360" height="145" rx="8"/><rect width="8" height="145" rx="8" fill="#2f6fed"/><text x="18" y="39" class="h">Bayesian modules</text><text x="18" y="70" class="t">HMM lag path and Rust MCMC dating</text><text x="18" y="91" class="t">are implemented; recall injection is</text><text x="18" y="112" class="t">disabled by default.</text></g>
+
+  <g transform="translate(650 245)"><rect class="box" width="360" height="145" rx="8"/><rect width="8" height="145" rx="8" fill="#7b4cc2"/><text x="18" y="39" class="h">Draft generation</text><text x="18" y="70" class="t">Drafts keep year, side/shift, selected</text><text x="18" y="91" class="t">range, missing range, source, and</text><text x="18" y="112" class="t">local evidence.</text></g>
+  <g transform="translate(650 425)"><rect class="box" width="360" height="145" rx="8"/><rect width="8" height="145" rx="8" fill="#7b4cc2"/><text x="18" y="39" class="h">Simulate correction</text><text x="18" y="70" class="t">Each candidate is applied to a temporary</text><text x="18" y="91" class="t">copy of the working chronology before</text><text x="18" y="112" class="t">it can be ranked.</text></g>
+  <g transform="translate(650 605)"><rect class="box" width="360" height="145" rx="8"/><rect width="8" height="145" rx="8" fill="#7b4cc2"/><text x="18" y="39" class="h">Re-diagnose</text><text x="18" y="70" class="t">Before/after segment r, problem counts,</text><text x="18" y="91" class="t">dominant lags, boundary metrics, and</text><text x="18" y="112" class="t">COFECHA hints are recomputed.</text></g>
+  <g transform="translate(650 785)"><rect class="box" width="360" height="145" rx="8"/><rect width="8" height="145" rx="8" fill="#7b4cc2"/><text x="18" y="39" class="h">Hard gate</text><text x="18" y="70" class="t">Candidates must improve multiple</text><text x="18" y="91" class="t">independent metrics without creating</text><text x="18" y="112" class="t">a stronger new problem.</text></g>
+
+  <g transform="translate(1180 245)"><rect class="box" width="360" height="145" rx="8"/><rect width="8" height="145" rx="8" fill="#c76f2b"/><text x="18" y="39" class="h">Rank</text><text x="18" y="70" class="t">Softmax-like relative confidence ranks</text><text x="18" y="91" class="t">candidates within a series; probability</text><text x="18" y="112" class="t">is internal relative confidence.</text></g>
+  <g transform="translate(1180 425)"><rect class="box" width="360" height="145" rx="8"/><rect width="8" height="145" rx="8" fill="#c76f2b"/><text x="18" y="39" class="h">Limit action</text><text x="18" y="70" class="t">The UI applies one accepted candidate,</text><text x="18" y="91" class="t">then marks all older candidates stale</text><text x="18" y="112" class="t">and reruns diagnosis.</text></g>
+  <g transform="translate(1180 605)"><rect class="box" width="360" height="145" rx="8"/><rect width="8" height="145" rx="8" fill="#c76f2b"/><text x="18" y="39" class="h">Audit</text><text x="18" y="70" class="t">Operation log stores source, reason,</text><text x="18" y="91" class="t">affected years, before/after metrics,</text><text x="18" y="112" class="t">and snapshots.</text></g>
+  <g transform="translate(1180 785)"><rect class="box" width="360" height="145" rx="8"/><rect width="8" height="145" rx="8" fill="#c76f2b"/><text x="18" y="39" class="h">Scope</text><text x="18" y="70" class="t">Quick COFECHA-like diagnosis supports</text><text x="18" y="91" class="t">review; final validation still depends</text><text x="18" y="112" class="t">on external COFECHA output.</text></g>
+
+  <path class="arrow" d="M480 318 H650"/><path class="arrow" d="M480 498 H650"/><path class="arrow" d="M480 678 H650"/><path class="arrow" d="M480 858 H650"/>
+  <path class="arrow" d="M1010 318 H1180"/><path class="arrow" d="M1010 498 H1180"/><path class="arrow" d="M1010 678 H1180"/><path class="arrow" d="M1010 858 H1180"/>
+  <rect x="80" y="1040" width="1500" height="70" rx="8" fill="#fff" stroke="#c6ccd6" stroke-width="2"/>
+  <text x="110" y="1085" class="foot">The workflow separates evidence construction, candidate testing, and confirmed editing to prevent unsupported automatic correction.</text>
+</svg>

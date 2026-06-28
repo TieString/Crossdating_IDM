@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1180" viewBox="0 0 1800 1180" role="img" aria-labelledby="title desc">
+  <title id="title">Validation summary for sample chronologies</title>
+  <desc id="desc">Bar chart comparing internal raw and crossdated problem segment counts for eight sample sites, plus a table of direct COFECHA A/problem counts.</desc>
+  <defs>
+    <style>
+      .bg{fill:#fbfbf8}.title{font:700 36px Arial,Segoe UI,sans-serif;fill:#18202a}.sub{font:18px Arial,Segoe UI,sans-serif;fill:#596574}
+      .panel{fill:#fff;stroke:#ccd2da;stroke-width:2}.axis{stroke:#18202a;stroke-width:2}.grid{stroke:#e5e9ef;stroke-width:1}
+      .s{font:15px Arial,Segoe UI,sans-serif;fill:#596574}.t{font:18px Arial,Segoe UI,sans-serif;fill:#18202a}.h{font:700 24px Arial,Segoe UI,sans-serif;fill:#18202a}
+      .blue{fill:#4778d9}.green{fill:#43a16b}.ok{fill:#2f8b57}.bad{fill:#c94040}.orange{fill:#c76f2b}
+    </style>
+  </defs>
+  <rect class="bg" width="1800" height="1180"/>
+  <text x="70" y="78" class="title">Validation summary for sample chronologies</text>
+  <text x="70" y="112" class="sub">Internal problem-segment counts and direct COFECHA A/problem results for raw and crossdated sample files</text>
+  <rect x="80" y="150" width="1140" height="750" rx="10" class="panel"/>
+  <line x1="120" y1="820" x2="1180" y2="820" class="axis"/><line x1="120" y1="190" x2="120" y2="820" class="axis"/>
+  <text x="70" y="170" class="s">problem segments</text>
+  <g class="s">
+    <line x1="112" y1="820" x2="1180" y2="820" class="grid"/><text x="82" y="825">0</text>
+    <line x1="112" y1="694" x2="1180" y2="694" class="grid"/><text x="72" y="699">30</text>
+    <line x1="112" y1="568" x2="1180" y2="568" class="grid"/><text x="72" y="573">60</text>
+    <line x1="112" y1="442" x2="1180" y2="442" class="grid"/><text x="72" y="447">90</text>
+    <line x1="112" y1="316" x2="1180" y2="316" class="grid"/><text x="64" y="321">120</text>
+    <line x1="112" y1="190" x2="1180" y2="190" class="grid"/><text x="64" y="195">150</text>
+  </g>
+  <rect x="900" y="178" width="24" height="24" class="blue"/><text x="934" y="196" class="s">raw sample</text>
+  <rect x="900" y="212" width="24" height="24" class="green"/><text x="934" y="230" class="s">crossdated sample</text>
+  <g>
+    <rect x="165" y="223.6" width="42" height="596.4" class="blue"/><rect x="215" y="761.2" width="42" height="58.8" class="green"/><text x="168" y="848" class="s">EBD</text><text x="169" y="216" class="s">142</text><text x="219" y="754" class="s">14</text>
+    <rect x="297" y="425.2" width="42" height="394.8" class="blue"/><rect x="347" y="786.4" width="42" height="33.6" class="green"/><text x="300" y="848" class="s">EBM</text><text x="301" y="418" class="s">94</text><text x="351" y="779" class="s">8</text>
+    <rect x="429" y="387.4" width="42" height="432.6" class="blue"/><rect x="479" y="799" width="42" height="21" class="green"/><text x="432" y="848" class="s">EBU</text><text x="433" y="380" class="s">103</text><text x="483" y="792" class="s">5</text>
+    <rect x="561" y="412.6" width="42" height="407.4" class="blue"/><rect x="611" y="765.4" width="42" height="54.6" class="green"/><text x="564" y="848" class="s">RDD</text><text x="565" y="405" class="s">97</text><text x="615" y="758" class="s">13</text>
+    <rect x="693" y="345.4" width="42" height="474.6" class="blue"/><rect x="743" y="799" width="42" height="21" class="green"/><text x="696" y="848" class="s">RDM</text><text x="697" y="338" class="s">113</text><text x="747" y="792" class="s">5</text>
+    <rect x="825" y="404.2" width="42" height="415.8" class="blue"/><rect x="875" y="799" width="42" height="21" class="green"/><text x="828" y="848" class="s">RDU</text><text x="829" y="397" class="s">99</text><text x="879" y="792" class="s">5</text>
+    <rect x="957" y="605.8" width="42" height="214.2" class="blue"/><rect x="1007" y="815.8" width="42" height="4.2" class="green"/><text x="960" y="848" class="s">ZSD</text><text x="961" y="599" class="s">51</text><text x="1011" y="809" class="s">1</text>
+    <rect x="1089" y="488.2" width="42" height="331.8" class="blue"/><rect x="1139" y="815.8" width="42" height="4.2" class="green"/><text x="1092" y="848" class="s">ZSL</text><text x="1093" y="481" class="s">79</text><text x="1143" y="809" class="s">1</text>
+  </g>
+  <rect x="1280" y="150" width="440" height="750" rx="10" class="panel"/>
+  <text x="1310" y="205" class="h">Direct COFECHA sidecar check</text>
+  <text x="1310" y="235" class="s">crossdated samples, version=cofecha</text>
+  <text x="1310" y="285" class="s">site</text><text x="1390" y="285" class="s">A/problem</text><text x="1510" y="285" class="s">intercorr.</text>
+  <g class="t">
+    <text x="1310" y="332">EBD</text><text x="1415" y="332" class="bad">1</text><text x="1520" y="332">0.657</text>
+    <text x="1310" y="380">EBM</text><text x="1415" y="380" class="ok">0</text><text x="1520" y="380">0.726</text>
+    <text x="1310" y="428">EBU</text><text x="1415" y="428" class="ok">0</text><text x="1520" y="428">0.736</text>
+    <text x="1310" y="476">RDD</text><text x="1415" y="476" class="ok">0</text><text x="1520" y="476">0.677</text>
+    <text x="1310" y="524">RDM</text><text x="1415" y="524" class="ok">0</text><text x="1520" y="524">0.713</text>
+    <text x="1310" y="572">RDU</text><text x="1415" y="572" class="ok">0</text><text x="1520" y="572">0.756</text>
+    <text x="1310" y="620">ZSD</text><text x="1415" y="620" class="ok">0</text><text x="1520" y="620">0.794</text>
+    <text x="1310" y="668">ZSL</text><text x="1415" y="668" class="ok">0</text><text x="1520" y="668">0.723</text>
+  </g>
+  <rect x="80" y="940" width="1640" height="160" rx="10" class="panel"/>
+  <circle cx="109" cy="975" r="5" class="orange"/><text x="125" y="981" class="s">Internal diagnostics detected fewer problem segments in crossdated files than in raw files for all eight sample sites.</text>
+  <circle cx="109" cy="1006" r="5" class="orange"/><text x="125" y="1012" class="s">Controlled cases exercised missing-ring insertion, false-ring deletion, whole-series movement, partial-range movement, stale-candidate marking, and ranking states.</text>
+  <circle cx="109" cy="1037" r="5" class="orange"/><text x="125" y="1043" class="s">The COFECHA-derived reference demonstration classified five anchor-pass series and two flagged candidate series, producing 57 reference points.</text>
+  <circle cx="109" cy="1068" r="5" class="orange"/><text x="125" y="1074" class="s">Direct COFECHA validation retained one A/problem series in EBD (EBD011), while the other seven crossdated samples had none.</text>
+</svg>
