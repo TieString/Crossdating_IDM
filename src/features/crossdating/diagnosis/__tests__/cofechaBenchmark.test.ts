@@ -10,13 +10,15 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { diagnoseCrossdating } from "../engine";
 import { formatTucson } from "@/features/rwl/parsers/tucson";
 import type { RwlSiteData } from "@/features/rwl/types";
 import {
     DATA_FOLDERS,
+    applyInsertRestore,
     buildLeaveOneOutMaster,
+    buildMultiMissingCorrupted,
     buildSyntheticSite,
     createEndAnchoredFalseRingCase,
     dataFoldersAvailable,
@@ -28,6 +30,7 @@ import {
     pickSafeYear,
     pickStrongSignalYear,
     reconstructMissingFromZero,
+    sameSeries,
     sampleAcross,
     seriesToTreeData,
     zeroYearsOf,
@@ -74,6 +77,90 @@ const near = (year: number | undefined, target: number, tol = 1): boolean => (
 );
 
 d("COFECHA 驱动真实准确率基准", () => {
+    // 真实工作口径的多缺轮全场景：不筛选纳入所有含缺轮序列，逐个从树皮向树心复原；
+    // 每步实时跑 COFECHA，对比有/无 COFECHA 对"当前最靠树皮缺轮"逐步命中的影响。
+    it("多缺轮全场景 迭代复原：有 COFECHA vs 无（不筛选，每步实时跑 COFECHA）", () => {
+        let attempted = 0;
+        let totalMissing = 0;
+        let reconstructOk = 0;
+        const baseAcc = { steps: 0, fully: 0 };
+        const cofAcc = { steps: 0, fully: 0 };
+        const baseTolFully: Record<number, number> = { 1: 0, 2: 0, 3: 0, 5: 0 };
+        const cofTolFully: Record<number, number> = { 1: 0, 2: 0, 3: 0, 5: 0 };
+        const byCount = new Map<number, { series: number; missing: number; baseHits: number; cofHits: number }>();
+
+        DATA_FOLDERS.forEach((folder) => {
+            const data = loadDataFolder(folder);
+            if (!data) return;
+            const all = Array.from(data.crossdated.values());
+            all.forEach((series) => {
+                const zeros = zeroYearsOf(series);
+                if (zeros.length === 0) return; // 不筛长度/位置/缺轮数，仅纳入含缺轮的
+                const corrupted0 = buildMultiMissingCorrupted(series.valuesByYear, zeros);
+                const { site } = buildSyntheticSite(data.crossdated, series.id, corrupted0, { minReferences: 3, minOverlap: 60 });
+                if (!site) return;
+
+                attempted += 1;
+                totalMissing += zeros.length;
+                const k = zeros.length;
+                const bucket = byCount.get(k) ?? { series: 0, missing: 0, baseHits: 0, cofHits: 0 };
+                bucket.series += 1; bucket.missing += k;
+
+                let corrupted = corrupted0;
+                const remaining = [...zeros];
+                let baseHits = 0;
+                let cofHits = 0;
+                let basePerfect = true;
+                let cofPerfect = true;
+                const baseTol: Record<number, boolean> = { 1: true, 2: true, 3: true, 5: true };
+                const cofTol: Record<number, boolean> = { 1: true, 2: true, 3: true, 5: true };
+
+                while (remaining.length > 0) {
+                    const zTop = remaining[remaining.length - 1];
+                    const stepSite = new Map(site);
+                    stepSite.set(series.id, new Map(corrupted));
+                    const cofechaText = runCofecha(stepSite);
+
+                    const distOf = (useCofecha: boolean): number => {
+                        const cands = diagnoseCrossdating(stepSite, { referenceConfig: null, cofechaText: useCofecha ? (cofechaText ?? undefined) : undefined })
+                            .candidates.filter((c) => c.targetTree === series.id);
+                        const t = cands[0];
+                        return t?.operationType === "INSERT_MISSING_RING" ? Math.abs((t.targetYear ?? 0) - zTop) : Infinity;
+                    };
+                    const dBase = distOf(false);
+                    const dCof = cofechaText ? distOf(true) : Infinity;
+                    [1, 2, 3, 5].forEach((tol) => { if (dBase > tol) baseTol[tol] = false; if (dCof > tol) cofTol[tol] = false; });
+                    if (dBase <= 1) baseHits += 1; else basePerfect = false;
+                    if (dCof <= 1) cofHits += 1; else cofPerfect = false;
+
+                    corrupted = applyInsertRestore(corrupted, zTop);
+                    remaining.pop();
+                }
+
+                if (sameSeries(corrupted, series.valuesByYear)) reconstructOk += 1;
+                baseAcc.steps += baseHits; cofAcc.steps += cofHits;
+                if (basePerfect) baseAcc.fully += 1;
+                if (cofPerfect) cofAcc.fully += 1;
+                [1, 2, 3, 5].forEach((tol) => { if (baseTol[tol]) baseTolFully[tol] += 1; if (cofTol[tol]) cofTolFully[tol] += 1; });
+                bucket.baseHits += baseHits; bucket.cofHits += cofHits;
+                byCount.set(k, bucket);
+            });
+        });
+
+        const pct = (n: number, denom: number) => denom ? (n / denom).toFixed(3) : "-";
+        // eslint-disable-next-line no-console
+        console.log(`COFECHA MULTI-ALL 序列=${attempted} 缺轮总数=${totalMissing} 自检=${reconstructOk}/${attempted}`);
+        // eslint-disable-next-line no-console
+        console.log(`  无COFECHA: 完全复原(±1)=${pct(baseAcc.fully, attempted)} 单步命中(±1)=${pct(baseAcc.steps, totalMissing)} 完全±5=${pct(baseTolFully[5], attempted)}`);
+        // eslint-disable-next-line no-console
+        console.log(`  有COFECHA: 完全复原(±1)=${pct(cofAcc.fully, attempted)} 单步命中(±1)=${pct(cofAcc.steps, totalMissing)} 完全±5=${pct(cofTolFully[5], attempted)}`);
+        const counts = Array.from(byCount.keys()).sort((a, b) => a - b);
+        // eslint-disable-next-line no-console
+        console.log(`  按缺轮数(单步 无→有COFECHA): ${counts.map((c) => { const b = byCount.get(c)!; return `${c}个[${b.series}条 ${pct(b.baseHits, b.missing)}→${pct(b.cofHits, b.missing)}]`; }).join(" ")}`);
+
+        expect(reconstructOk).toBe(attempted);
+    }, 1800000);
+
     it("缺轮 top5/top1：有 COFECHA vs 无 COFECHA", () => {
         let attempted = 0;
         const base = { top5: 0, top1: 0 };

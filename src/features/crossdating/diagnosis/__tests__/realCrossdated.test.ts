@@ -12,10 +12,13 @@ import { describe, expect, it } from "vitest";
 import { diagnoseCrossdating } from "../engine";
 import {
     DATA_FOLDERS,
+    applyInsertRestore,
+    buildMultiMissingCorrupted,
     buildSyntheticSite,
     dataFoldersAvailable,
     loadDataFolder,
     reconstructMissingFromZero,
+    sameSeries,
     zeroYearsOf,
     type RwlSeries,
 } from "./rdmFixture";
@@ -95,4 +98,85 @@ d("真实 crossdated 缺轮召回（专家 ground truth）", () => {
             expect(top1Rate).toBeGreaterThanOrEqual(0.30);
         }
     });
+
+    // 真实工作口径：不筛选——所有含缺轮序列（单缺轮/多缺轮/短序列/端点缺轮）全部纳入，
+    // 多缺轮按人工流程逐个处理：每步诊断取首位建议，对当前最靠树皮缺轮判命中，按真值复原后继续向树心。
+    it("全部含缺轮序列 迭代逐个复原（含多缺轮/短序列/端点，不筛选）", () => {
+        let attempted = 0;
+        let skippedNoRef = 0;       // 参考不足无法建 master（物理上无法交叉定年）
+        let totalMissing = 0;
+        let stepHits = 0;           // 单步命中（±1）累计
+        let fullyRestored = 0;      // 全程每步 ±1 命中的序列数
+        let reconstructOk = 0;      // 端锚重建/复原自检通过数
+        const fracs: number[] = [];
+        const tolFully: Record<number, number> = { 1: 0, 2: 0, 3: 0, 5: 0 };
+        const byCount = new Map<number, { series: number; missing: number; hits: number; fully: number }>();
+
+        DATA_FOLDERS.forEach((folder) => {
+            const data = loadDataFolder(folder);
+            if (!data) return;
+            const all = Array.from(data.crossdated.values());
+            all.forEach((series) => {
+                const zeros = zeroYearsOf(series);
+                if (zeros.length === 0) return; // 只测含缺轮的；不再筛长度/位置/缺轮数
+                const corrupted0 = buildMultiMissingCorrupted(series.valuesByYear, zeros);
+                // 唯一物理必需：能建起 master（有足够重叠参考）。门槛放宽以尽量纳入短序列。
+                const { site } = buildSyntheticSite(data.crossdated, series.id, corrupted0, { minReferences: 3, minOverlap: 60 });
+                if (!site) { skippedNoRef += 1; return; }
+
+                attempted += 1;
+                totalMissing += zeros.length;
+                const k = zeros.length;
+                const bucket = byCount.get(k) ?? { series: 0, missing: 0, hits: 0, fully: 0 };
+                bucket.series += 1; bucket.missing += k;
+
+                let corrupted = corrupted0;
+                const remaining = [...zeros]; // 升序，每次取最大（最靠树皮）
+                let hits = 0;
+                let perfect = true;
+                const tolPerfect: Record<number, boolean> = { 1: true, 2: true, 3: true, 5: true };
+
+                while (remaining.length > 0) {
+                    const zTop = remaining[remaining.length - 1];
+                    const stepSite = new Map(site);
+                    stepSite.set(series.id, new Map(corrupted));
+                    let cands;
+                    try {
+                        cands = diagnoseCrossdating(stepSite, { referenceConfig: null }).candidates.filter((c) => c.targetTree === series.id);
+                    } catch { perfect = false; break; }
+                    const t = cands[0];
+                    const isInsert = t?.operationType === "INSERT_MISSING_RING";
+                    const dist = isInsert ? Math.abs((t.targetYear ?? 0) - zTop) : Infinity;
+                    [1, 2, 3, 5].forEach((tol) => { if (dist > tol) tolPerfect[tol] = false; });
+                    if (dist <= 1) hits += 1; else perfect = false;
+                    corrupted = applyInsertRestore(corrupted, zTop);
+                    remaining.pop();
+                }
+
+                if (sameSeries(corrupted, series.valuesByYear)) reconstructOk += 1;
+                stepHits += hits;
+                bucket.hits += hits;
+                fracs.push(hits / zeros.length);
+                if (perfect) { fullyRestored += 1; bucket.fully += 1; }
+                [1, 2, 3, 5].forEach((tol) => { if (tolPerfect[tol]) tolFully[tol] += 1; });
+                byCount.set(k, bucket);
+            });
+        });
+
+        const pct = (n: number, denom: number) => denom ? (n / denom).toFixed(3) : "-";
+        const meanFrac = fracs.length ? (fracs.reduce((s, v) => s + v, 0) / fracs.length).toFixed(3) : "-";
+        // eslint-disable-next-line no-console
+        console.log(`REAL ALL-missing 迭代复原: 序列=${attempted} 缺轮总数=${totalMissing} 参考不足跳过=${skippedNoRef} 自检=${reconstructOk}/${attempted}`);
+        // eslint-disable-next-line no-console
+        console.log(`  完全复原(全程±1)=${pct(fullyRestored, attempted)} 单步命中(±1)=${pct(stepHits, totalMissing)} 平均每序列复原比例=${meanFrac}`);
+        // eslint-disable-next-line no-console
+        console.log(`  完全复原多容差: ±1=${pct(tolFully[1], attempted)} ±2=${pct(tolFully[2], attempted)} ±3=${pct(tolFully[3], attempted)} ±5=${pct(tolFully[5], attempted)}`);
+        const counts = Array.from(byCount.keys()).sort((a, b) => a - b);
+        // eslint-disable-next-line no-console
+        console.log(`  按缺轮数: ${counts.map((c) => { const b = byCount.get(c)!; return `${c}个[${b.series}条 单步${pct(b.hits, b.missing)} 全复原${pct(b.fully, b.series)}]`; }).join(" ")}`);
+
+        // 端锚重建/复原逻辑必须自检全过（否则后续命中判定的对齐假设不成立）。
+        expect(reconstructOk).toBe(attempted);
+        expect(attempted).toBeGreaterThan(0);
+    }, 300000);
 });

@@ -14,7 +14,7 @@ import { describe, it } from "vitest";
 import { diagnoseCrossdating } from "../engine";
 import { formatTucson } from "@/features/rwl/parsers/tucson";
 import type { RwlSiteData, RwlTreeData } from "@/features/rwl/types";
-import { reconstructMissingFromZero } from "./rdmFixture";
+import { applyInsertRestore, buildMultiMissingCorrupted, reconstructMissingFromZero, sameSeries } from "./rdmFixture";
 
 const ITRDB_DIR = fileURLToPath(new URL("../../../../../笔记/数据/itrdb/measurements/", import.meta.url));
 const COF_DIR = fileURLToPath(new URL("../../../../../笔记/数据/", import.meta.url));
@@ -84,41 +84,6 @@ const overlap = (a: Series, b: Series): number => {
     return n;
 };
 
-/**
- * 多缺轮端锚重建：把含 n 个 0 的真实序列里所有 0 移除，得到"专家校正前、缺 n 环"的原始测量。
- * endYear（树皮端）固定；某真实年份 y 的值，其上方（更新一侧）每有一个缺轮就把它向树皮顶一年，
- * 故当前年份 = y + (#zeros > y)。结果年份仍连续，长度 = 非零值个数。
- */
-const buildMultiMissingCorrupted = (valuesByYear: Map<number, number>, zeros: number[]): Map<number, number> => {
-    const corrupted = new Map<number, number>();
-    valuesByYear.forEach((v, y) => {
-        if (v === 0) return;
-        const above = zeros.reduce((n, z) => n + (z > y ? 1 : 0), 0);
-        corrupted.set(y + above, v);
-    });
-    return corrupted;
-};
-
-/**
- * 端锚复原一处缺轮（reconstructMissingFromZero 的逆）：在 insertYear 处插 0，
- * insertYear 及更老一侧整体下移一年回到正确年份，endYear 不变，老端补回一年。
- */
-const applyInsertRestore = (corrupted: Map<number, number>, insertYear: number): Map<number, number> => {
-    const result = new Map<number, number>();
-    result.set(insertYear, 0);
-    corrupted.forEach((v, y) => {
-        if (y > insertYear) result.set(y, v);
-        else result.set(y - 1, v);
-    });
-    return result;
-};
-
-/** 两个 year→value Map 是否完全一致（自检端锚重建/复原逻辑）。 */
-const sameSeries = (a: Map<number, number>, b: Map<number, number>): boolean => {
-    if (a.size !== b.size) return false;
-    for (const [y, v] of a) { if (b.get(y) !== v) return false; }
-    return true;
-};
 
 const enabled = process.env.RUN_ITRDB_BENCH === "1" && existsSync(ITRDB_DIR);
 const d = enabled ? describe : describe.skip;
