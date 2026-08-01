@@ -36,4 +36,6 @@ target-codex-check/
 
 notes
 
-*.tmp*src-tauri/bin/current-event-*-sidecar-*.exe
+*.tmp*
+
+src-tauri/bin/current-event-*-sidecar-*.exe
