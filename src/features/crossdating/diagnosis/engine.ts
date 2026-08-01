@@ -4,8 +4,10 @@
  */
 import {
     deleteYearWithMode,
+    getSeriesMoveConflicts,
     insertMissingYearAtSide,
     moveSeriesTailByOffset,
+    RwlMoveConflictError,
 } from "@/features/rwl/edit";
 import type { RwlSiteData, RwlTreeData } from "@/features/rwl/types";
 import { CrossdateConfig, getConfig } from "./config";
@@ -13,6 +15,7 @@ import {
     buildMasterNarrowYears,
     buildScoringMaster,
     correlationForSegment,
+    createSeriesPreprocessCache,
     getRangeForSeries,
     preprocessSeries,
     toNumericSeries,
@@ -29,6 +32,13 @@ import { makeBayesianRecallDrafts } from "./candidateRecallExpansion";
 import { evaluateDraft } from "./evaluation";
 import { parseCofechaHints } from "./cofechaHints";
 import {
+    INTERNAL_EVENT_ENSEMBLE_OPTIONS,
+    makeDiagnosisEvents,
+} from "./eventEnsemble";
+import {
+    isAutomaticPartialShift,
+} from "./partialMoveSemantics";
+import {
     compareDiagnosisCandidates,
     dedupeDiagnosisCandidates,
     rankDiagnosisCandidates,
@@ -37,6 +47,7 @@ import type {
     CrossdatingDiagnosis,
     DiagnosisCandidateOperation,
     DiagnosisConfidence,
+    DiagnosisEvent,
     DiagnosisOptions,
     LocalCrossdatingSimulation,
     LocalSimulationOperationType,
@@ -48,6 +59,7 @@ export {
     getDiagnosisCandidateLabel,
     isActionableDiagnosisCandidate,
     markCandidatesStale,
+    markDiagnosisEventsStale,
     rankDiagnosisCandidates,
     selectSafeDiagnosisCandidateBatch,
 } from "./candidateUtils";
@@ -57,10 +69,19 @@ export function diagnoseCrossdating(
     options: DiagnosisOptions = {},
 ): CrossdatingDiagnosis {
     const config = getConfig(options);
+    const preprocessCache = createSeriesPreprocessCache();
     const cofechaHints = options.cofechaText ? parseCofechaHints(options.cofechaText) : null;
-    const treeCodes = Array.from(siteData.keys());
+    const treeCodes = options.targetTrees === undefined
+        ? Array.from(siteData.keys())
+        : Array.from(new Set(options.targetTrees)).filter((tree) => siteData.has(tree));
     const seriesDiagnoses = treeCodes
-        .map((tree) => diagnoseSeriesCore(siteData, tree, config))
+        .map((tree) => diagnoseSeriesCore(
+            siteData,
+            tree,
+            config,
+            preprocessSeries,
+            preprocessCache,
+        ))
         .filter((diagnosis): diagnosis is SeriesCoreDiagnosis => diagnosis !== null);
     const segments = seriesDiagnoses.flatMap((diagnosis) => diagnosis.segments);
     const propagationPatterns = seriesDiagnoses.flatMap((diagnosis) => diagnosis.propagationPatterns);
@@ -87,7 +108,9 @@ export function diagnoseCrossdating(
         candidateDrafts
             .map((draft) => {
                 const before = seriesDiagnoses.find((diagnosis) => diagnosis.targetTree === draft.targetTree);
-                return before ? evaluateDraft(siteData, before, draft, config, cofechaHints) : null;
+                return before
+                    ? evaluateDraft(siteData, before, draft, config, cofechaHints, preprocessCache)
+                    : null;
             })
             .filter((candidate): candidate is DiagnosisCandidateOperation => candidate !== null)
             // AR 兜底候选（无 COFECHA 时）只保留 z-score 评估判为 strong 的：AR 预白化对 clean 噪声过敏感，
@@ -174,8 +197,19 @@ export function diagnoseCrossdating(
         const range = suggestedRangeByGroup.get(`${candidate.targetTree}:${candidate.operationType}`);
         if (range) candidate.suggestedRange = range;
     });
+    const events = makeDiagnosisEvents(
+        siteData,
+        seriesDiagnoses,
+        candidates,
+        config,
+        INTERNAL_EVENT_ENSEMBLE_OPTIONS,
+    );
     const candidateCountByTree = candidates.reduce((counts, candidate) => {
         counts.set(candidate.targetTree, (counts.get(candidate.targetTree) ?? 0) + 1);
+        return counts;
+    }, new Map<string, number>());
+    const eventCountByTree = events.reduce((counts, event) => {
+        counts.set(event.seriesId, (counts.get(event.seriesId) ?? 0) + 1);
         return counts;
     }, new Map<string, number>());
 
@@ -184,6 +218,7 @@ export function diagnoseCrossdating(
         seriesCount: treeCodes.length,
         problemSegmentCount: segments.filter((segment) => segment.flagged).length,
         candidateCount: candidates.length,
+        eventCount: events.length,
         segmentLength: config.segmentLength,
         overlap: config.overlap,
         lagRange: { min: config.lagMin, max: config.lagMax },
@@ -191,11 +226,17 @@ export function diagnoseCrossdating(
         summaries: seriesDiagnoses.map((diagnosis) => createSeriesSummary(
             diagnosis,
             candidateCountByTree.get(diagnosis.targetTree) ?? 0,
+            eventCountByTree.get(diagnosis.targetTree) ?? 0,
         )),
         segments,
         propagationPatterns,
         globalSlidingMatches,
-        masterNarrowYears: buildMasterNarrowYears(siteData, config.referenceConfig, config),
+        // Targeted worker runs no longer expose the legacy narrow-year surface, so avoid building
+        // another whole-site chronology that cannot affect event or candidate results.
+        masterNarrowYears: options.targetTrees === undefined
+            ? buildMasterNarrowYears(siteData, config.referenceConfig, config)
+            : [],
+        events,
         candidates,
     };
 }
@@ -206,9 +247,11 @@ const createLocalSimulationOption = (
     currentCorrelation: number | null,
     simulatedCorrelation: number | null,
     reason: string,
-    extra: Pick<LocalSimulationOption, "side" | "shift"> = {},
+    extra: Pick<LocalSimulationOption, "side" | "shift" | "conflictYears"> = {},
 ): LocalSimulationOption => {
-    const delta = simulatedCorrelation === null ? null : simulatedCorrelation - (currentCorrelation ?? -1);
+    const delta = simulatedCorrelation === null || currentCorrelation === null
+        ? null
+        : simulatedCorrelation - currentCorrelation;
     const confidence: DiagnosisConfidence = delta === null || delta < 0.08
         ? "low"
         : delta >= 0.25
@@ -227,22 +270,57 @@ const createLocalSimulationOption = (
     };
 };
 
-export function simulateLocalCrossdating(
+export function applyLocalCrossdatingOption(
+    treeData: RwlTreeData,
+    simulation: Pick<
+        LocalCrossdatingSimulation,
+        "year" | "selectedStartYear" | "selectedEndYear"
+    >,
+    option: LocalSimulationOption,
+): RwlTreeData {
+    if (option.operationType === "INSERT_MISSING_RING") {
+        return insertMissingYearAtSide(treeData, simulation.year, option.side ?? "right");
+    }
+    if (option.operationType === "DELETE_FALSE_RING") {
+        return deleteYearWithMode(treeData, simulation.year, "direct", option.side ?? "right");
+    }
+    if (option.operationType === "SHIFT_RANGE" && option.shift) {
+        const conflicts = getSeriesMoveConflicts(
+            treeData,
+            simulation.selectedStartYear,
+            simulation.selectedEndYear,
+            option.shift,
+        );
+        if (conflicts.length > 0) throw new RwlMoveConflictError(conflicts);
+        return moveSeriesTailByOffset(
+            treeData,
+            simulation.selectedStartYear,
+            simulation.selectedEndYear,
+            option.shift,
+        );
+    }
+    return new Map(treeData);
+}
+
+export function simulateDiagnosisEventPreview(
     siteData: RwlSiteData,
-    targetTree: string,
-    year: number,
+    event: DiagnosisEvent,
     options: DiagnosisOptions = {},
 ): LocalCrossdatingSimulation | null {
+    if (event.stale || event.eventType === "wholeSeriesMove") return null;
     const config = getConfig(options);
+    const targetTree = event.seriesId;
     const treeData = siteData.get(targetTree);
     if (!treeData) return null;
 
     const rawTarget = toNumericSeries(treeData);
     const targetRange = getRangeForSeries(rawTarget);
     if (!targetRange) return null;
+    const year = event.rankedYears[0]?.year;
+    if (year === undefined) return null;
+    if (year < targetRange.startYear || year > targetRange.endYear) return null;
 
     const master = buildScoringMaster(siteData, targetTree, config.referenceConfig);
-    if (master.data.size === 0) return null;
 
     const halfWindow = Math.floor(config.fineWindowLength / 2);
     const segmentStartYear = Math.max(targetRange.startYear, year - halfWindow);
@@ -256,51 +334,80 @@ export function simulateLocalCrossdating(
         config.minPairsForCorrelation,
     );
     const current = measure(treeData);
-    const simulatedOptions = [
-        createLocalSimulationOption(
+    const selectedStartYear = targetRange.startYear;
+    const selectedEndYear = event.eventType === "partialMove" ? year - 1 : year;
+    let simulatedTreeData: RwlTreeData;
+    let previewOption: LocalSimulationOption;
+
+    if (event.eventType === "missingRing") {
+        simulatedTreeData = insertMissingYearAtSide(treeData, year, "right");
+        previewOption = createLocalSimulationOption(
             "INSERT_MISSING_RING",
             "插入缺轮",
             current.correlation,
-            measure(insertMissingYearAtSide(treeData, year, "right")).correlation,
-            "点击候选按钮生成正式 evidence；此处仅保留兼容接口。",
+            measure(simulatedTreeData).correlation,
+            `自动诊断：在 ${year} 年插入缺轮，并将该年及较老侧向老年份移动 1 年。`,
             { side: "right" },
-        ),
-        createLocalSimulationOption(
+        );
+    } else if (event.eventType === "falseRing") {
+        simulatedTreeData = deleteYearWithMode(treeData, year, "direct", "right");
+        previewOption = createLocalSimulationOption(
             "DELETE_FALSE_RING",
             "删除伪轮",
             current.correlation,
-            measure(deleteYearWithMode(treeData, year, "direct", "right")).correlation,
-            "点击候选按钮生成正式 evidence；此处仅保留兼容接口。",
+            measure(simulatedTreeData).correlation,
+            `自动诊断：删除 ${year} 年，并将较老侧向新年份移动 1 年。`,
             { side: "right" },
-        ),
-        createLocalSimulationOption(
-            "SHIFT_RANGE",
-            "分段移动 -1 年",
-            current.correlation,
-            measure(moveSeriesTailByOffset(treeData, targetRange.startYear, year, -1)).correlation,
-            "点击候选按钮生成正式 evidence；此处仅保留兼容接口。",
-            { shift: -1 },
-        ),
-    ];
-    const bestOption = simulatedOptions
-        .filter((option) => option.simulatedCorrelation !== null)
-        .sort((a, b) => (b.delta ?? -Infinity) - (a.delta ?? -Infinity))[0]
-        ?? createLocalSimulationOption(
-            "NO_ACTION",
-            "暂无建议",
-            current.correlation,
-            current.correlation,
-            "样本对不足或无明显改善",
         );
+    } else {
+        if (event.shiftSide !== "older"
+            || !isAutomaticPartialShift(event.shiftYears, {
+                maxPartialGapYears: config.maxPartialGapYears,
+                lagMin: config.lagMin,
+            })
+            || selectedEndYear < selectedStartYear) {
+            return null;
+        }
+        const shift = event.shiftYears;
+        const conflictYears = getSeriesMoveConflicts(
+            treeData,
+            selectedStartYear,
+            selectedEndYear,
+            shift,
+        );
+        if (conflictYears.length > 0) return null;
+        simulatedTreeData = moveSeriesTailByOffset(
+            treeData,
+            selectedStartYear,
+            selectedEndYear,
+            shift,
+        );
+        previewOption = createLocalSimulationOption(
+            "SHIFT_RANGE",
+            `断点 ${year} · 较老侧移动 ${shift} 年`,
+            current.correlation,
+            measure(simulatedTreeData).correlation,
+            `自动诊断：断点 ${year}，${year} 年起保持不动；${selectedStartYear}-${selectedEndYear} 年向老年份移动 ${Math.abs(shift)} 年。`,
+            { shift },
+        );
+    }
+    previewOption = {
+        ...previewOption,
+        confidence: event.confidenceLevel,
+    };
 
     return {
         targetTree,
+        sourceEventId: event.id,
         year,
+        displayYear: year,
+        selectedStartYear,
+        selectedEndYear,
         segmentStartYear,
         segmentEndYear,
         samplePairs: current.samplePairs,
         currentCorrelation: current.correlation,
-        bestOption,
-        options: simulatedOptions,
+        bestOption: previewOption,
+        options: [previewOption],
     };
 }

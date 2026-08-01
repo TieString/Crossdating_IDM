@@ -1,0 +1,100 @@
+{
+  "records": [
+    {
+      "bytes": 1292178965,
+      "candidate_rows": 137940,
+      "dataset": "old200",
+      "excluded_series": 2,
+      "path": "D:\\Code\\Crossdating_py_rankdiag_v1\\artifacts\\inputs\\v1_top500_old200\\sequential_multi_zero_series.jsonl",
+      "round_groups": 602,
+      "series_used": 198,
+      "sha256": "e095a76fccc03e0552f9db62b42dd2959e56ddcec7303652a81c513fdf4d52b1"
+    },
+    {
+      "bytes": 1122061188,
+      "candidate_rows": 116314,
+      "dataset": "newsrc200",
+      "excluded_series": 10,
+      "path": "D:\\Code\\Crossdating_py_rankdiag_v1\\artifacts\\inputs\\v1_top500_newsrc200\\sequential_multi_zero_series.jsonl",
+      "round_groups": 585,
+      "series_used": 190,
+      "sha256": "a6f37da9dc4970fd83b9cd5c50c3efd8be5bc86b0b77edf96c0b91dcf8b844d2"
+    },
+    {
+      "bytes": 1382309394,
+      "candidate_rows": 149519,
+      "dataset": "diverse400",
+      "excluded_series": 0,
+      "path": "D:\\Code\\Crossdating_py_rankdiag_v1\\artifacts\\reports\\parserclean_diverse_train_top500_features_400\\sequential_multi_zero_series.jsonl",
+      "round_groups": 805,
+      "series_used": 395,
+      "sha256": "7bfa23c8ebf0c4c6d857ed150ff05bfbb1c3727ca6dcd1ee07ad81d06efcb10a"
+    },
+    {
+      "bytes": 377301556,
+      "candidate_rows": 40762,
+      "dataset": "regional140",
+      "excluded_series": 0,
+      "path": "D:\\Code\\Crossdating_py_rankdiag_v1\\artifacts\\reports\\parserclean_regional_train_top500_features_140\\sequential_multi_zero_series.jsonl",
+      "round_groups": 225,
+      "series_used": 140,
+      "sha256": "c4ad1edc58a70d7a088e596fd1182ac56b11aefab59258e951abf3e446dfcc09"
+    },
+    {
+      "name": "external194",
+      "path": "D:\\Code\\Crossdating_py_rankdiag_v1\\artifacts\\reports\\external_parserclean_top500_features_194\\sequential_multi_zero_series.jsonl",
+      "rounds": 414,
+      "series": 193,
+      "sha256": "d69004a707f97123dbb8254b2e510fd11853902cf5fce40a80b498abe61f1969",
+      "skipped_series": 1,
+      "source_files": 119,
+      "wall_seconds": 32.95398450000357
+    },
+    {
+      "name": "confirmation1",
+      "path": "D:\\Code\\Crossdating_py_rankdiag_v1\\artifacts\\reports\\fresh_confirmation_top500_features_203\\sequential_multi_zero_series.jsonl",
+      "rounds": 404,
+      "series": 200,
+      "sha256": "5a4a5124cdd49f79aab92a4a7d3f949837d3603fea1c348b125c73b9d8e4eb7a",
+      "skipped_series": 3,
+      "source_files": 118,
+      "wall_seconds": 32.5844550000038
+    },
+    {
+      "name": "confirmation2",
+      "path": "D:\\Code\\Crossdating_py_rankdiag_v1\\artifacts\\reports\\fresh_confirmation2_top500_features_218\\sequential_multi_zero_series.jsonl",
+      "rounds": 433,
+      "series": 216,
+      "sha256": "17c2b3ebd960451425fd7b6d22b02727f572c4cc2903fdc49256192c5d720d88",
+      "skipped_series": 3,
+      "source_files": 119,
+      "wall_seconds": 33.87726950000069
+    },
+    {
+      "name": "confirmation3",
+      "path": "D:\\Code\\Crossdating_py_rankdiag_v1\\artifacts\\reports\\fresh_confirmation3_top500_features_212\\sequential_multi_zero_series.jsonl",
+      "rounds": 405,
+      "series": 211,
+      "sha256": "916cf104cf362116f63c8dd95ca7f9e9459a48a8a6c5d53364da86057bd497c0",
+      "skipped_series": 1,
+      "source_files": 119,
+      "wall_seconds": 32.81110899999476
+    },
+    {
+      "name": "confirmation4",
+      "path": "D:\\Code\\Crossdating_py_rankdiag_v1\\artifacts\\reports\\fresh_confirmation4_top500_features_212\\sequential_multi_zero_series.jsonl",
+      "rounds": 426,
+      "series": 212,
+      "sha256": "50e2f50a7ff9ecf4f93b621d77060866ee1ee6a7835a2a750a1a00614739c1bb",
+      "skipped_series": 0,
+      "source_files": 120,
+      "wall_seconds": 32.30223339999793
+    }
+  ],
+  "timings": {
+    "ranker_fit_seconds": 7.3697618000005605,
+    "selector_scoring_and_fit_seconds": 101.5765537000043,
+    "total_seconds": 315.92983250000543,
+    "training_matrix_seconds": 140.77882660000614
+  }
+}

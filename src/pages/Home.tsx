@@ -3,7 +3,10 @@ import { createPortal } from "react-dom";
 import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { AnimatePresence } from "motion/react";
 import { TreeChartManager } from "@/components/Chart/TreeChartManager";
-import { DiagnosisCandidatePanel } from "@/components/DiagnosisCandidates/DiagnosisCandidatePanel";
+import { CurrentEventSuggestionPanel } from "@/components/DiagnosisCandidates/CurrentEventSuggestionPanel";
+import { DiagnosisEventPanel } from "@/components/DiagnosisCandidates/DiagnosisEventPanel";
+import type { DiagnosisEvent } from "@/features/crossdating/diagnosis";
+import { hashRwlSiteData } from "@/features/crossdating/reference";
 import WidthContainer, { WidthGridSkeleton } from "@/components/WidthContainer/WidthContainer";
 import ContextMenu, { type ContextMenuItem } from "@/components/ContextMenu/ContextMenu";
 import { FloatingScrollArea } from "@/components/FloatingScrollArea/FloatingScrollArea";
@@ -11,6 +14,7 @@ import { FloatingScrollbar } from "@/components/FloatingScrollbar/FloatingScroll
 import { FindReplaceBar, type FindReplaceMode } from "@/components/FindReplace/FindReplaceBar";
 import { openSettingsWindow } from "@/pages/settings/openSettingsWindow";
 import { stopMarker } from "@/shared/constants";
+import { CURRENT_EVENT_PYTHON_MODELS_ENABLED } from "@/shared/featureFlags";
 import style from "./Home.module.css";
 import {
     ALL_OPTION_VALUE,
@@ -75,6 +79,7 @@ import {
 } from "./home/workspaceWindowBridge";
 import { useResizablePanels } from "./useResizablePanels";
 import { publishConsoleDataExport } from "./home/consoleDataExport";
+import type { CurrentEventSuggestion } from "@/services/currentEventRanker/types";
 
 const isTreeBoundary = (value: string | undefined) => (
     value === undefined || !/[A-Za-z0-9_]/.test(value)
@@ -325,6 +330,7 @@ export default function Home() {
     const [replaceValue, setReplaceValue] = useState("");
     const [findMatchIndex, setFindMatchIndex] = useState(0);
     const [problemTab, setProblemTab] = useState<"problems" | "candidates">("problems");
+    const [focusedCurrentEventSuggestion, setFocusedCurrentEventSuggestion] = useState<CurrentEventSuggestion | null>(null);
     const {
         applyRawRwlText,
         applyRawRwlTextForTree,
@@ -333,6 +339,11 @@ export default function Home() {
         cofechaVersion,
         crossdatingValidationSummary,
         crossdatingDiagnosis,
+        currentEventRankerSession,
+        currentEventModels,
+        activeCurrentEventModelId,
+        currentEventModelCatalogError,
+        cancelCurrentEventRanker,
         deletionMarkers,
         diagnosisBatchResult,
         dynamicReferenceConfig,
@@ -348,8 +359,11 @@ export default function Home() {
         handleMoveSeriesTailByOffset,
         handleApplyDiagnosisCandidate,
         handleApplyDiagnosisCandidateBatch,
+        handleApplyDiagnosisEvent,
+        handleApplyCurrentEventConfirmedYears,
         handleApplyBayesianStartYear,
         handleApplyLocalSimulation,
+        handleConfirmCurrentEventYear,
         handleReferenceConfigChange,
         handleResetReferenceToDynamic,
         handleRedo,
@@ -357,9 +371,11 @@ export default function Home() {
         handleResetToRawData,
         handleRestoreDeletion,
         handleRunCofechaValidation,
+        handleRunCurrentEventRanker,
         handleSave: handleStructuredSave,
         handleSaveAs: handleStructuredSaveAs,
         handleTreeSelectionChange,
+        handleUndoCurrentEventConfirmation,
         handleUndo,
         handleUndoOperationLogEntry,
         hasChart,
@@ -367,7 +383,9 @@ export default function Home() {
         historyStatus,
         isCofechaOutdated,
         isCofechaRunning,
+        isEventDiagnosisRunning,
         isFileLoading,
+        isModified,
         operationLog,
         possibleProblemsDetail,
         problemTextColor,
@@ -380,6 +398,8 @@ export default function Home() {
         selectedTree,
         setCofechaVersion,
         setSelectedPart,
+        selectCurrentEventModel,
+        retryCurrentEventRanker,
         shouldShowProcessing,
         shouldShowWelcome,
         siteData,
@@ -391,23 +411,78 @@ export default function Home() {
         publishConsoleDataExport(fileName, siteData, cofechaResult);
     }, [cofechaResult, fileName, siteData]);
 
-    const selectedTreeCandidates = useMemo(
-        () => crossdatingDiagnosis.candidates.filter((candidate) => candidate.targetTree === selectedTree),
+    const selectedTreeEvents = useMemo(
+        () => crossdatingDiagnosis.events.filter((event) => (
+            event.seriesId === selectedTree && !event.stale
+        )),
         [crossdatingDiagnosis, selectedTree],
     );
+    const currentSiteHash = useMemo(() => hashRwlSiteData(siteData), [siteData]);
+    const visibleCurrentEventSession = useMemo(() => {
+        const context = currentEventRankerSession.context;
+        if (!context || (
+            context.rwlPath === fileName
+            && context.targetSeriesId === selectedTree
+            && context.sourceHash === currentSiteHash
+        )) {
+            return currentEventRankerSession;
+        }
+        return {
+            ...currentEventRankerSession,
+            status: "stale" as const,
+            requestId: null,
+            context: null,
+            confirmedYears: [],
+            result: null,
+            error: null,
+            staleReason: "旧模型结果不属于当前文件、序列或数据版本，已停止显示。",
+        };
+    }, [currentEventRankerSession, currentSiteHash, fileName, selectedTree]);
+    useEffect(() => {
+        setFocusedCurrentEventSuggestion(null);
+    }, [visibleCurrentEventSession.requestId, selectedTree]);
     const suggestedRangeHighlights = useMemo(
-        () => crossdatingDiagnosis.candidates.flatMap((candidate) => (
-            candidate.suggestedRange
+        () => [
+            ...crossdatingDiagnosis.events.flatMap((event) => (
+                !event.stale && event.eventType !== "wholeSeriesMove"
+                    ? [{
+                        tree: event.seriesId,
+                        startYear: event.startYear,
+                        endYear: event.endYear,
+                    }]
+                    : []
+            )),
+            ...(CURRENT_EVENT_PYTHON_MODELS_ENABLED
+                && (visibleCurrentEventSession.status === "advice"
+                || visibleCurrentEventSession.status === "range_advice")
+                && visibleCurrentEventSession.result?.eventRange
+                && selectedTree !== ALL_OPTION_VALUE
                 ? [{
-                    tree: candidate.targetTree,
-                    startYear: candidate.suggestedRange.startYear,
-                    endYear: candidate.suggestedRange.endYear,
+                    tree: selectedTree,
+                    startYear: visibleCurrentEventSession.result.eventRange.startYear,
+                    endYear: visibleCurrentEventSession.result.eventRange.endYear,
                 }]
-                : []
-        )),
-        [crossdatingDiagnosis],
+                : []),
+            ...(CURRENT_EVENT_PYTHON_MODELS_ENABLED
+                && focusedCurrentEventSuggestion
+                && selectedTree !== ALL_OPTION_VALUE
+                ? [{
+                    tree: selectedTree,
+                    startYear: focusedCurrentEventSuggestion.rangeStart,
+                    endYear: focusedCurrentEventSuggestion.rangeEnd,
+                }]
+                : []),
+        ],
+        [crossdatingDiagnosis, focusedCurrentEventSuggestion, selectedTree, visibleCurrentEventSession],
     );
-    const candidateTabAvailable = selectedTreeCandidates.length > 0;
+    const currentEventTabAvailable = CURRENT_EVENT_PYTHON_MODELS_ENABLED
+        && Boolean(fileName && selectedTree !== ALL_OPTION_VALUE);
+    const currentEventSuggestionCount = visibleCurrentEventSession.status === "advice"
+        ? visibleCurrentEventSession.result?.suggestions.length ?? 0
+        : 0;
+    const candidateTabAvailable = currentEventTabAvailable
+        || selectedTreeEvents.length > 0
+        || isEventDiagnosisRunning;
     const problemTabAvailable = Boolean(selectedProblemText);
     const showProblemsPanel = problemTabAvailable || candidateTabAvailable;
     const activeProblemTab: "problems" | "candidates" = problemTab === "candidates" && candidateTabAvailable
@@ -506,6 +581,17 @@ export default function Home() {
             year,
         });
     }, [handleTreeSelectionChange, selectedTree, siteData]);
+
+    const handleFocusDiagnosisEvent = useCallback((event: DiagnosisEvent, selectedYear?: number) => {
+        if (event.eventType === "wholeSeriesMove") {
+            handleCofechaCellReferenceClick({ tree: event.seriesId });
+            return;
+        }
+        const preferredYear = selectedYear
+            ?? event.rankedYears[0]?.year
+            ?? Math.round((event.startYear + event.endYear) / 2);
+        handleCofechaCellReferenceClick({ tree: event.seriesId, year: preferredYear });
+    }, [handleCofechaCellReferenceClick]);
 
     const linkedReport = useMemo(() => (
         renderCofechaHtmlWithLinks(reportText, treeOptions, cofechaPart6JumpTarget?.tree ?? null)
@@ -1318,17 +1404,51 @@ export default function Home() {
                                                     disabled={!candidateTabAvailable}
                                                     onClick={() => setProblemTab("candidates")}
                                                 >
-                                                    定年建议{candidateTabAvailable ? ` ${selectedTreeCandidates.length}` : ""}
+                                                    定年建议
+                                                    {currentEventTabAvailable
+                                                        ? visibleCurrentEventSession.status === "running"
+                                                            ? " · 模型计算中"
+                                                            : ` · 模型 ${currentEventSuggestionCount}`
+                                                        : ""}
+                                                    {selectedTreeEvents.length > 0 ? ` · 事件 ${selectedTreeEvents.length}` : ""}
+                                                    {isEventDiagnosisRunning ? " · 计算中" : ""}
                                                 </button>
                                             </div>
 
                                             <FloatingScrollArea className={style["problem-tab-body"]}>
                                                 {activeProblemTab === "candidates" ? (
-                                                    <DiagnosisCandidatePanel
-                                                        candidates={selectedTreeCandidates}
-                                                        diagnosisBatchResult={diagnosisBatchResult}
-                                                        onApplyDiagnosisCandidate={handleApplyDiagnosisCandidate}
-                                                    />
+                                                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                                        {currentEventTabAvailable ? (
+                                                            <CurrentEventSuggestionPanel
+                                                                session={visibleCurrentEventSession}
+                                                                models={currentEventModels}
+                                                                activeModelId={activeCurrentEventModelId}
+                                                                modelCatalogError={currentEventModelCatalogError}
+                                                                targetSeriesId={selectedTree}
+                                                                isFileModified={isModified}
+                                                                onAnalyze={handleRunCurrentEventRanker}
+                                                                onConfirmYear={handleConfirmCurrentEventYear}
+                                                                onUndoConfirmation={handleUndoCurrentEventConfirmation}
+                                                                onApplyConfirmedYears={handleApplyCurrentEventConfirmedYears}
+                                                                onCancel={cancelCurrentEventRanker}
+                                                                onRetry={retryCurrentEventRanker}
+                                                                onFocusSuggestion={setFocusedCurrentEventSuggestion}
+                                                                onSelectModel={selectCurrentEventModel}
+                                                            />
+                                                        ) : null}
+                                                        {selectedTreeEvents.length > 0 ? (
+                                                            <DiagnosisEventPanel
+                                                                events={selectedTreeEvents}
+                                                                onFocusEvent={handleFocusDiagnosisEvent}
+                                                                onApplyEvent={handleApplyDiagnosisEvent}
+                                                            />
+                                                        ) : null}
+                                                        {isEventDiagnosisRunning && selectedTreeEvents.length === 0 ? (
+                                                            <div style={{ padding: "8px 6px", color: "#6b7280", fontSize: 12 }}>
+                                                                正在计算当前序列的事件级诊断...
+                                                            </div>
+                                                        ) : null}
+                                                    </div>
                                                 ) : (
                                                     <p className={style["potential-problems"]}>
                                                         {selectedProblemText}

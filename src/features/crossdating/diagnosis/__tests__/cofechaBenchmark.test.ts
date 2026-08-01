@@ -28,7 +28,7 @@ import {
     loadDataFolder,
     loadRdmFixture,
     pickSafeYear,
-    pickStrongSignalYear,
+    pickExploratoryStrongSignalYear,
     reconstructMissingFromZero,
     sameSeries,
     sampleAcross,
@@ -76,7 +76,7 @@ const near = (year: number | undefined, target: number, tol = 1): boolean => (
     year !== undefined && Math.abs(year - target) <= tol
 );
 
-d("COFECHA 驱动真实准确率基准", () => {
+d("COFECHA 驱动的探索性强信号上限", () => {
     // 真实工作口径的多缺轮全场景：不筛选纳入所有含缺轮序列，逐个从树皮向树心复原；
     // 每步实时跑 COFECHA，对比有/无 COFECHA 对"当前最靠树皮缺轮"逐步命中的影响。
     it("多缺轮全场景 迭代复原：有 COFECHA vs 无（不筛选，每步实时跑 COFECHA）", () => {
@@ -243,7 +243,7 @@ d("COFECHA 驱动真实准确率基准", () => {
         const markerYearFor = (series: RwlSeries): number | null => {
             const loo = buildLeaveOneOutMaster(fixture.series, series.id);
             if (loo.skipped) return pickSafeYear(series);
-            return pickStrongSignalYear(series, loo.masterValuesByYear);
+            return pickExploratoryStrongSignalYear(series, loo.masterValuesByYear);
         };
 
         let attempted = 0;

@@ -10,7 +10,7 @@ import {
 import type { RwlSiteData, RwlTreeData } from "@/features/rwl/types";
 import { CrossdateConfig } from "./config";
 import { diagnoseSeriesCore } from "./segments";
-import { cloneSiteData, preprocessSeries } from "./series";
+import { preprocessSeries, type SeriesPreprocessCache } from "./series";
 import { getLagSupportingSegments } from "./rangeMove";
 import { uniqueAlgorithmSources } from "./candidateUtils";
 import {
@@ -77,7 +77,7 @@ const applyDraftToSiteData = (
     const updatedTree = applyDraftToTree(treeData, draft);
     if (!updatedTree) return null;
 
-    const next = cloneSiteData(siteData);
+    const next = new Map(siteData);
     next.set(draft.targetTree, updatedTree);
     return next;
 };
@@ -228,11 +228,21 @@ export const evaluateDraft = (
     draft: CandidateDraft,
     config: EffectiveDiagnosisConfig,
     cofechaHints?: CofechaHints | null,
+    preprocessCache?: SeriesPreprocessCache,
 ): DiagnosisCandidateOperation | null => {
     const nextData = applyDraftToSiteData(siteData, draft);
     if (!nextData) return null;
 
-    const afterDiagnosis = diagnoseSeriesCore(nextData, draft.targetTree, config);
+    const afterDiagnosis = diagnoseSeriesCore(
+        nextData,
+        draft.targetTree,
+        config,
+        preprocessSeries,
+        preprocessCache,
+        draft.operationType === "SHIFT_RANGE" && draft.mode === "wholeSeriesMove"
+            ? undefined
+            : beforeDiagnosis.master,
+    );
     if (!afterDiagnosis) return null;
 
     const affectedRange = getAffectedRange(draft);

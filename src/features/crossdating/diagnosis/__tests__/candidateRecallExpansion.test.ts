@@ -14,14 +14,14 @@ import {
     getEligibleSeriesForSyntheticTests,
     groupEligibleSeries,
     loadRdmFixture,
-    pickStrongSignalYear,
+    pickExploratoryStrongSignalYear,
     sampleAcross,
 } from "./rdmFixture";
 
 const fixture = loadRdmFixture();
 const d = fixture.available ? describe : describe.skip;
 
-d("makeBayesianRecallDrafts", () => {
+d("探索性强信号 makeBayesianRecallDrafts", () => {
     it("缺轮：贝叶斯召回在真值附近产出带后验的 insert 候选（recall）", () => {
         const eligible = getEligibleSeriesForSyntheticTests(fixture.series);
         const longSeries = groupEligibleSeries(eligible).eligibleLongSeries;
@@ -34,7 +34,7 @@ d("makeBayesianRecallDrafts", () => {
         targets.forEach((series) => {
             const loo = buildLeaveOneOutMaster(fixture.series, series.id);
             if (loo.skipped) return;
-            const year = pickStrongSignalYear(series, loo.masterValuesByYear);
+            const year = pickExploratoryStrongSignalYear(series, loo.masterValuesByYear);
             if (year === null) return;
             const { corrupted } = createEndAnchoredMissingRingCase(series, year);
             const { site } = buildSyntheticSite(fixture.series, series.id, corrupted);

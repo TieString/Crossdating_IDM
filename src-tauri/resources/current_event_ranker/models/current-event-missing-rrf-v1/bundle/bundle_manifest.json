@@ -1,0 +1,73 @@
+{
+  "automatic_writeback": false,
+  "bundle_version": "current-event-range-v1.0.0",
+  "diagnostic_only": true,
+  "files": {
+    "candidate_binary_model": {
+      "bytes": 8313995,
+      "path": "candidate_binary_model.json",
+      "sha256": "afb3153f6d231fad8b3d37a6f3931e2b6c93a75b7c6f813e2c9ece7ce2d893bc"
+    },
+    "candidate_compression_model": {
+      "bytes": 3691304,
+      "path": "candidate_compression_model.json",
+      "sha256": "73f011fe851ac5dc3fdc4bdfc1718f962f4869b89e9532f828a4c7db185de5a8"
+    },
+    "feature_schema": {
+      "bytes": 28302,
+      "path": "feature_schema.json",
+      "sha256": "92ff44eaba0dbb71e096d4c116c768b33c6994b04919fa3f47557b0b919acc38"
+    },
+    "integration_guide": {
+      "bytes": 5038,
+      "path": "CURRENT_EVENT_TAURI_INTEGRATION.md",
+      "sha256": "037a053fbb7a3a9e8358f739ce607fef066e0de8d056c1603977205070713918"
+    },
+    "prediction_reference": {
+      "bytes": 1301841,
+      "path": "prediction_reference.json",
+      "sha256": "4db82e96ebc17f10ff7d203bbdf053fada4b42d70f6bfe229bc0736ae03f69ea"
+    },
+    "ranker": {
+      "bytes": 566814,
+      "path": "current_event_ranker.joblib",
+      "sha256": "b4dde9c04fd1c76a5ded86f14024dad6e99e783a218cd7a1f61bf48bbdcbb7c6"
+    },
+    "reliability_schema": {
+      "bytes": 869,
+      "path": "reliability_schema.json",
+      "sha256": "738f051670290df17c33b95d9f7326cf668c99e91a11660e6a9681d92f01be4c"
+    },
+    "request_schema": {
+      "bytes": 1540,
+      "path": "current_event_request.schema.json",
+      "sha256": "be8ae92f9446e0cf51bb440112862f9143bc1e426c6cbe8c781d84fcbf8cc30c"
+    },
+    "response_schema": {
+      "bytes": 1951,
+      "path": "current_event_response.schema.json",
+      "sha256": "881f23e1ba55284854955ef535cc7f1ec201ca785a46a93a2b03919102a79101"
+    },
+    "runtime_config": {
+      "bytes": 3974,
+      "path": "runtime_config.json",
+      "sha256": "4ee1a2c10d621ebf5bbb4f7aecca1f77485dcacb34de9538ebab4cf15d0267ab"
+    },
+    "selector": {
+      "bytes": 2041,
+      "path": "reliability_selector.joblib",
+      "sha256": "ea23b77fa3c02c90afaa46608557029821e9a499d18dfbd271438c026ad30896"
+    },
+    "training_log": {
+      "bytes": 4045,
+      "path": "training_log.json",
+      "sha256": "15fd3bca2afb7f452c70a2766b6990574996455888bfdafb933e314d321716bb"
+    },
+    "training_manifest": {
+      "bytes": 38889,
+      "path": "training_manifest.json",
+      "sha256": "5bc10f499bd5d8d89a69fb88bb3314885b51ae402224d49248a709980611ea5b"
+    }
+  },
+  "protocol_version": "crossdating.current-event.v1"
+}

@@ -1,0 +1,190 @@
+{
+  "automatic_writeback": false,
+  "base_bundle_version": "current-event-adaptive-range-v1.2.0",
+  "bundle_version": "current-event-adaptive-range-gate-v1.3.0",
+  "capabilities": [
+    "single_newest_event_range_adaptive_max_width_15",
+    "independent_range_and_year_reliability_gates",
+    "range_only_advice_state",
+    "soft_range_exact_top5"
+  ],
+  "diagnostic_only": true,
+  "files": {
+    "adaptive_range_diagnostic_summary": {
+      "bytes": 11066,
+      "path": "adaptive_range_diagnostic_summary.json",
+      "sha256": "0383509a857d407ebf53de31f96693d16ff07839c4c911c998b2b65c4893b17f"
+    },
+    "bundle_assembly_log": {
+      "bytes": 957,
+      "path": "bundle_assembly_log.json",
+      "sha256": "19a9198f039d7c523e31f185ceba784da43ffb4b2310ee413ecb0085a0bc0427"
+    },
+    "candidate_binary_model": {
+      "bytes": 8313995,
+      "path": "candidate_binary_model.json",
+      "sha256": "afb3153f6d231fad8b3d37a6f3931e2b6c93a75b7c6f813e2c9ece7ce2d893bc"
+    },
+    "candidate_compression_model": {
+      "bytes": 3691304,
+      "path": "candidate_compression_model.json",
+      "sha256": "73f011fe851ac5dc3fdc4bdfc1718f962f4869b89e9532f828a4c7db185de5a8"
+    },
+    "dual_gate_raw_prediction_reference": {
+      "bytes": 17535,
+      "path": "dual_gate_raw_prediction_reference.json",
+      "sha256": "7bf6c573d2b43b082ced2f56440e6c5ef4ac1887452e51e512363a99d5c81772"
+    },
+    "feature_schema": {
+      "bytes": 28302,
+      "path": "feature_schema.json",
+      "sha256": "92ff44eaba0dbb71e096d4c116c768b33c6994b04919fa3f47557b0b919acc38"
+    },
+    "integration_guide": {
+      "bytes": 6874,
+      "path": "CURRENT_EVENT_TAURI_INTEGRATION.md",
+      "sha256": "bd4efb476dd6db612c5882c56efd0b9a589cc22a279ac19f4f09e0e2f049fe70"
+    },
+    "prediction_reference": {
+      "bytes": 1301841,
+      "path": "prediction_reference.json",
+      "sha256": "4db82e96ebc17f10ff7d203bbdf053fada4b42d70f6bfe229bc0736ae03f69ea"
+    },
+    "range_artifact_verification": {
+      "bytes": 742,
+      "path": "current_event_range_artifact_verification.json",
+      "sha256": "beb8413d2c65146f4ff7ac113797f055f85d480131037fc9f85df8c80333e600"
+    },
+    "range_feature_schema": {
+      "bytes": 12302,
+      "path": "current_event_range_feature_schema.json",
+      "sha256": "7f3c55747479502729508fbb248fea3dac2be9a5968d19ddec31ffc486373b40"
+    },
+    "range_localizer": {
+      "bytes": 545057,
+      "path": "current_event_range_localizer.joblib",
+      "sha256": "e88d58904901cb88ac12aaaa6322acc86db2cf2a2ff478e485d86b809f9dec3e"
+    },
+    "range_manifest": {
+      "bytes": 34989,
+      "path": "current_event_range_manifest.json",
+      "sha256": "f57329db79b5a9c250fbb874d1306975d89765a09c997e3c6a5c1afd44510cf5"
+    },
+    "range_prediction_reference": {
+      "bytes": 1924799,
+      "path": "range_prediction_reference.json",
+      "sha256": "374edd2d6dd94f3a1da7cace44406d732cef7ed39fc869c5c5d5e681286deef3"
+    },
+    "range_reliability_bootstrap_summary": {
+      "bytes": 5778,
+      "path": "current_event_range_reliability_bootstrap_summary.json",
+      "sha256": "9432a1f8a6ae1d41f72b5add7e894beeb423d14810f331fb368c011f45068577"
+    },
+    "range_reliability_environment_manifest": {
+      "bytes": 189,
+      "path": "current_event_range_reliability_environment_manifest.json",
+      "sha256": "62745310e934a1d143d37ac610596d54d33fc3dd9a7ec094d3f80b6a6080fa2a"
+    },
+    "range_reliability_feature_schema": {
+      "bytes": 20789,
+      "path": "current_event_range_reliability_feature_schema.json",
+      "sha256": "bd4989f10c6adccc6a452bf3e1d287e3c2491ea494535dae6de1257df08338d7"
+    },
+    "range_reliability_gate_spec": {
+      "bytes": 2745,
+      "path": "CURRENT_EVENT_RANGE_RELIABILITY_GATE_SPEC.md",
+      "sha256": "a218ff298f38eb418e40f150541e007b1f261987727838b38d37a8c80c7e046c"
+    },
+    "range_reliability_manifest": {
+      "bytes": 6396,
+      "path": "current_event_range_reliability_manifest.json",
+      "sha256": "469e5534e5e519b8d71cb125552ee3e10e249b603d1cc882377641562de1b31c"
+    },
+    "range_reliability_pareto_points": {
+      "bytes": 18342,
+      "path": "current_event_range_reliability_pareto_points.csv",
+      "sha256": "185b5ec3906f66dc83ad02839353edb0467ad5976539aee4351ad36a84140273"
+    },
+    "range_reliability_per_fold_metrics": {
+      "bytes": 67598,
+      "path": "current_event_range_reliability_per_fold_metrics.csv",
+      "sha256": "8641e98ca0a6282bdd45a7c776c2bd2dcbf9ed77835aef3fb0177745e2a7cdf2"
+    },
+    "range_reliability_prediction_reference": {
+      "bytes": 194263,
+      "path": "current_event_range_reliability_prediction_reference.json",
+      "sha256": "06a2be08e5f8fd376cde61dd64005f5f83086a3233c24d41a89e2c194086f15b"
+    },
+    "range_reliability_selection_checkpoint": {
+      "bytes": 13755,
+      "path": "current_event_range_reliability_selection_checkpoint.json",
+      "sha256": "de5304b704cb787aba41b2bec6b9bfd8844c67949761e259d6f94f6d97596010"
+    },
+    "range_reliability_selector": {
+      "bytes": 289812,
+      "path": "current_event_range_reliability_selector.joblib",
+      "sha256": "de7d1b4ff8ef26cb1f30117940553e76433e02d6f9e35bcf6ce2cb9b2f82910d"
+    },
+    "range_reliability_summary": {
+      "bytes": 23646,
+      "path": "current_event_range_reliability_summary.json",
+      "sha256": "bcdcefe16977fff5daa7fb40ef066e971aab21830c4cde581b1c595eb9744111"
+    },
+    "range_reliability_training_manifest": {
+      "bytes": 17243,
+      "path": "current_event_range_reliability_training_manifest.json",
+      "sha256": "e8ff711d125d0e7c23f8d898aedd6d57bc31c24ace98ec3b5f3406d1203d9d07"
+    },
+    "range_training_summary": {
+      "bytes": 263373,
+      "path": "current_event_range_training_summary.json",
+      "sha256": "d174dc9cd340b3b7f15dc452628194a899c9af57f564e07841efd50702601626"
+    },
+    "ranker": {
+      "bytes": 566814,
+      "path": "current_event_ranker.joblib",
+      "sha256": "b4dde9c04fd1c76a5ded86f14024dad6e99e783a218cd7a1f61bf48bbdcbb7c6"
+    },
+    "reliability_schema": {
+      "bytes": 869,
+      "path": "reliability_schema.json",
+      "sha256": "738f051670290df17c33b95d9f7326cf668c99e91a11660e6a9681d92f01be4c"
+    },
+    "request_schema": {
+      "bytes": 1796,
+      "path": "current_event_request.schema.json",
+      "sha256": "fcb1c1f1922e0100ac0019dafa7a56d096196fac39cd36a25270f2ab0b220da0"
+    },
+    "response_schema": {
+      "bytes": 4415,
+      "path": "current_event_response.schema.json",
+      "sha256": "f78eb46702fe735cfd0e231a8995897ec00bae5535b9010f0defd2b43b02a620"
+    },
+    "runtime_config": {
+      "bytes": 5372,
+      "path": "runtime_config.json",
+      "sha256": "358306cfee9324aac509a816f29d27e0a40b17fcedf45427cb080b7d79d4e9fe"
+    },
+    "selector": {
+      "bytes": 2041,
+      "path": "reliability_selector.joblib",
+      "sha256": "ea23b77fa3c02c90afaa46608557029821e9a499d18dfbd271438c026ad30896"
+    },
+    "single_range_spec": {
+      "bytes": 5813,
+      "path": "CURRENT_EVENT_SINGLE_RANGE_SPEC.md",
+      "sha256": "fab0c1b0a5d8f27f24c7572b1d672f0fa5420c37dead4ab608bad18943b4c8f1"
+    },
+    "training_log": {
+      "bytes": 4045,
+      "path": "training_log.json",
+      "sha256": "15fd3bca2afb7f452c70a2766b6990574996455888bfdafb933e314d321716bb"
+    },
+    "training_manifest": {
+      "bytes": 38889,
+      "path": "training_manifest.json",
+      "sha256": "5bc10f499bd5d8d89a69fb88bb3314885b51ae402224d49248a709980611ea5b"
+    }
+  },
+  "protocol_version": "crossdating.current-event.v1"
+}

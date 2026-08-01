@@ -1,0 +1,482 @@
+{
+  "adaptive_window": {
+    "enabled": true,
+    "mass_threshold": 0.8,
+    "min_core_width": 5,
+    "padding_years": 2,
+    "peak_gate": 0.2,
+    "temperature": 1.0
+  },
+  "center_feature_count": 36,
+  "center_feature_names": [
+    "feat_targetValueAfterCandidate",
+    "feat_distanceToNearestExistingZero",
+    "compression_score",
+    "distance_to_previous_corrected_year",
+    "feat_localGlkAfter_51",
+    "feat_targetNarrowRunLength",
+    "feat_rankByWholeSeriesRDelta",
+    "feat_masterNarrownessScoreMarginToNextYear",
+    "candidate_year_position_percentile",
+    "feat_targetValueBeforeCandidate",
+    "feat_scoreMarginToNextYear",
+    "raw_is_rank1",
+    "feat_localGlkBefore_51",
+    "feat_candidateYearRelativeToEnd",
+    "feat_distanceToBestEvaluationCandidate",
+    "feat_localRAfter_11",
+    "feat_targetNeighborContrast",
+    "feat_candidateScoreMinusClusterMean",
+    "feat_localRDelta_11",
+    "feat_localRDelta_21LocalPeakGap_2",
+    "feat_candidatePositionRatio",
+    "feat_localGlkDelta_31",
+    "feat_masterNarrownessScoreLocalPeakGap_2",
+    "round_compression_score_z",
+    "feat_masterNarrownessScoreMarginToPreviousYear",
+    "feat_masterPercentileAtCandidateYear",
+    "feat_localRBefore_51",
+    "feat_localRAfter_51",
+    "feat_wholeSeriesRDeltaLocalPeakGap_5",
+    "feat_masterLeftRightContrast",
+    "feat_targetWidthPercentileNearYear",
+    "compression_rank",
+    "feat_localGlkAfter_31",
+    "feat_masterValueAtCandidateYear",
+    "round_selected_score_gap_to_next_rank",
+    "feat_masterNarrownessScoreDistanceToBestCandidate"
+  ],
+  "dtype": "float32",
+  "feature_count": 70,
+  "feature_names": [
+    {
+      "dtype": "float32",
+      "index": 0,
+      "name": "profile_center_position_ratio",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 1,
+      "name": "profile_center_rank",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 2,
+      "name": "profile_center_rank_inv",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 3,
+      "name": "profile_center_rank_log_inv",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 4,
+      "name": "profile_center_score",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 5,
+      "name": "profile_center_score_z",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 6,
+      "name": "profile_interval_centroid_offset",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 7,
+      "name": "profile_interval_count",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 8,
+      "name": "profile_interval_rank_best",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 9,
+      "name": "profile_interval_rank_log_support",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 10,
+      "name": "profile_interval_rank_recip_support",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 11,
+      "name": "profile_interval_score_max",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 12,
+      "name": "profile_interval_score_max_gap_global",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 13,
+      "name": "profile_interval_score_mean",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 14,
+      "name": "profile_interval_score_std",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 15,
+      "name": "profile_interval_score_sum",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 16,
+      "name": "profile_interval_softmax_mass_t05",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 17,
+      "name": "profile_interval_softmax_mass_t10",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 18,
+      "name": "profile_interval_softmax_mass_t20",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 19,
+      "name": "profile_interval_softmax_spread",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 20,
+      "name": "profile_interval_top10_count",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 21,
+      "name": "profile_interval_top120_count",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 22,
+      "name": "profile_interval_top1_count",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 23,
+      "name": "profile_interval_top20_count",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 24,
+      "name": "profile_interval_top3_count",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 25,
+      "name": "profile_interval_top50_count",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 26,
+      "name": "profile_interval_top5_count",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 27,
+      "name": "profile_interval_vs_adjacent_max",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 28,
+      "name": "profile_interval_vs_left_max",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 29,
+      "name": "profile_interval_vs_right_max",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 30,
+      "name": "profile_left_score_max",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 31,
+      "name": "profile_left_score_mean",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 32,
+      "name": "profile_right_score_max",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 33,
+      "name": "profile_right_score_mean",
+      "source": "score_profile"
+    },
+    {
+      "dtype": "float32",
+      "index": 34,
+      "name": "center_feat_targetValueAfterCandidate",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 35,
+      "name": "center_feat_distanceToNearestExistingZero",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 36,
+      "name": "center_compression_score",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 37,
+      "name": "center_distance_to_previous_corrected_year",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 38,
+      "name": "center_feat_localGlkAfter_51",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 39,
+      "name": "center_feat_targetNarrowRunLength",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 40,
+      "name": "center_feat_rankByWholeSeriesRDelta",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 41,
+      "name": "center_feat_masterNarrownessScoreMarginToNextYear",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 42,
+      "name": "center_candidate_year_position_percentile",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 43,
+      "name": "center_feat_targetValueBeforeCandidate",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 44,
+      "name": "center_feat_scoreMarginToNextYear",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 45,
+      "name": "center_raw_is_rank1",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 46,
+      "name": "center_feat_localGlkBefore_51",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 47,
+      "name": "center_feat_candidateYearRelativeToEnd",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 48,
+      "name": "center_feat_distanceToBestEvaluationCandidate",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 49,
+      "name": "center_feat_localRAfter_11",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 50,
+      "name": "center_feat_targetNeighborContrast",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 51,
+      "name": "center_feat_candidateScoreMinusClusterMean",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 52,
+      "name": "center_feat_localRDelta_11",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 53,
+      "name": "center_feat_localRDelta_21LocalPeakGap_2",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 54,
+      "name": "center_feat_candidatePositionRatio",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 55,
+      "name": "center_feat_localGlkDelta_31",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 56,
+      "name": "center_feat_masterNarrownessScoreLocalPeakGap_2",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 57,
+      "name": "center_round_compression_score_z",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 58,
+      "name": "center_feat_masterNarrownessScoreMarginToPreviousYear",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 59,
+      "name": "center_feat_masterPercentileAtCandidateYear",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 60,
+      "name": "center_feat_localRBefore_51",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 61,
+      "name": "center_feat_localRAfter_51",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 62,
+      "name": "center_feat_wholeSeriesRDeltaLocalPeakGap_5",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 63,
+      "name": "center_feat_masterLeftRightContrast",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 64,
+      "name": "center_feat_targetWidthPercentileNearYear",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 65,
+      "name": "center_compression_rank",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 66,
+      "name": "center_feat_localGlkAfter_31",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 67,
+      "name": "center_feat_masterValueAtCandidateYear",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 68,
+      "name": "center_round_selected_score_gap_to_next_rank",
+      "source": "candidate_feature"
+    },
+    {
+      "dtype": "float32",
+      "index": 69,
+      "name": "center_feat_masterNarrownessScoreDistanceToBestCandidate",
+      "source": "candidate_feature"
+    }
+  ],
+  "forbidden_runtime_inputs": [
+    "candidate_year label",
+    "zero_count",
+    "remaining_event_count",
+    "true missing year",
+    "raw source_file identity"
+  ],
+  "profile_feature_count": 34,
+  "schema_version": "current-event-adaptive-range-v1"
+}

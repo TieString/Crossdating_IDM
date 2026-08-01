@@ -17,7 +17,7 @@ import {
 } from 'chart.js'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import WidthGridContextMenu from '@/components/WidthContainer/WidthGridContextMenu'
-import type { LocalCrossdatingSimulation } from '@/features/crossdating/diagnosis'
+import type { DiagnosisEventType, LocalCrossdatingSimulation } from '@/features/crossdating/diagnosis'
 import type { ReferenceSeries } from '@/features/crossdating/reference'
 import { REFERENCE_SERIES_LABEL } from '@/features/crossdating/reference'
 import type { DeleteMode, DeleteShift, MissingInsertSide } from '@/features/rwl/edit'
@@ -97,6 +97,20 @@ const SAMPLE_SIZE_COLOR = 'rgba(104, 110, 120, 0.62)'
 const DYNAMIC_REFERENCE_LABEL = 'COFECHA-pass'
 const DYNAMIC_REFERENCE_COLOR = 'rgba(35, 99, 68, 0.9)'
 const MISSING_RING_COLOR = '#2ecc71'
+
+export type ChartDiagnosisEventRange = {
+  id: string
+  tree: string
+  eventType: Exclude<DiagnosisEventType, 'wholeSeriesMove'>
+  startYear: number
+  endYear: number
+}
+
+const DIAGNOSIS_EVENT_COLORS: Record<ChartDiagnosisEventRange['eventType'], { fill: string; stroke: string }> = {
+  missingRing: { fill: 'rgba(54, 137, 69, 0.12)', stroke: 'rgba(54, 137, 69, 0.58)' },
+  falseRing: { fill: 'rgba(191, 105, 34, 0.11)', stroke: 'rgba(170, 80, 20, 0.58)' },
+  partialMove: { fill: 'rgba(47, 105, 168, 0.10)', stroke: 'rgba(47, 105, 168, 0.55)' },
+}
 
 // Y 轴视觉缩放（Shift + 滚轮）：只缩放 Y 轴显示范围，不改变原始数据/年份/算法结果。
 // 倍率 M = 基准范围 / 当前显示范围；每档 ±0.1，限制在 [MIN, MAX]。
@@ -402,6 +416,63 @@ const chartBoxBorderPlugin: Plugin<'line'> = {
     ctx.lineWidth = 1.5
     ctx.strokeRect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top)
     ctx.restore()
+  }
+}
+
+type DiagnosisEventBandsState = {
+  ranges: readonly ChartDiagnosisEventRange[]
+  highlightedTree: string | null
+}
+
+function makeDiagnosisEventBandsPlugin(): Plugin<'line'> & DiagnosisEventBandsState {
+  return {
+    id: 'diagnosisEventBands',
+    ranges: [],
+    highlightedTree: null,
+
+    beforeDatasetsDraw(chart) {
+      const visibleRanges = this.highlightedTree
+        ? this.ranges.filter((range) => range.tree === this.highlightedTree)
+        : this.ranges
+      if (visibleRanges.length === 0) return
+
+      const { ctx, chartArea, data, scales } = chart
+      const xScale = scales.x
+      if (!xScale) return
+      const yearToIndex = new Map<number, number>()
+      data.labels?.forEach((label, index) => yearToIndex.set(Number(label), index))
+
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top)
+      ctx.clip()
+
+      visibleRanges.forEach((range) => {
+        const startIndex = yearToIndex.get(range.startYear)
+        const endIndex = yearToIndex.get(range.endYear)
+        if (startIndex === undefined || endIndex === undefined) return
+        const startX = xScale.getPixelForValue(startIndex)
+        const endX = xScale.getPixelForValue(endIndex)
+        const previousX = startIndex > 0 ? xScale.getPixelForValue(startIndex - 1) : startX
+        const nextX = endIndex < (data.labels?.length ?? 0) - 1
+          ? xScale.getPixelForValue(endIndex + 1)
+          : endX
+        const left = startIndex > 0 ? (previousX + startX) / 2 : chartArea.left
+        const right = endIndex < (data.labels?.length ?? 0) - 1
+          ? (endX + nextX) / 2
+          : chartArea.right
+        const colors = DIAGNOSIS_EVENT_COLORS[range.eventType]
+
+        ctx.fillStyle = colors.fill
+        ctx.fillRect(left, chartArea.top, Math.max(1, right - left), chartArea.bottom - chartArea.top)
+        ctx.strokeStyle = colors.stroke
+        ctx.lineWidth = 1
+        ctx.setLineDash([4, 3])
+        ctx.strokeRect(left, chartArea.top, Math.max(1, right - left), chartArea.bottom - chartArea.top)
+      })
+
+      ctx.restore()
+    },
   }
 }
 
@@ -726,6 +797,7 @@ function makeYearIndicatorPlugin(): Plugin<'line'> & { activeIndex: number | nul
 
 type Props = {
   data: Map<string, Map<number, number>>
+  diagnosisEventRanges?: readonly ChartDiagnosisEventRange[]
   missingRingYears?: ReadonlyMap<string, readonly number[]>
   sampleSizeData?: ReadonlyMap<string, ReadonlyMap<number, number | null>>
   referenceSeries?: ReferenceSeries | null
@@ -735,6 +807,7 @@ type Props = {
   hoverSimulation?: LocalCrossdatingSimulation | null
   highlightedTreeCode?: string | null
   onHighlightedTreeCodeChange?: (treeCode: string | null) => void
+  onLinePointClick?: (target: { tree: string; year: number }) => void
   onHoverTargetChange?: (target: { tree: string; year: number } | null) => void
   zoomWindow?: { min: number; max: number } | null
   onZoomWindowChange?: (zoomWindow: { min: number; max: number } | null) => void
@@ -760,6 +833,7 @@ const CHART_FONT_FAMILY = "'Arial', 'Helvetica', sans-serif"
 
 export function MultiLineChart({
   data,
+  diagnosisEventRanges = [],
   missingRingYears,
   sampleSizeData,
   referenceSeries,
@@ -769,6 +843,7 @@ export function MultiLineChart({
   hoverSimulation,
   highlightedTreeCode = null,
   onHighlightedTreeCodeChange,
+  onLinePointClick,
   onHoverTargetChange,
   zoomWindow = null,
   onZoomWindowChange,
@@ -786,6 +861,7 @@ export function MultiLineChart({
   const yearIndicatorPlugin = useMemo(() => makeYearIndicatorPlugin(), [])
   const markerLinesPlugin = useMemo(() => makeMarkerLinesPlugin(), [])
   const missingRingLinesPlugin = useMemo(() => makeMissingRingLinesPlugin(), [])
+  const diagnosisEventBandsPlugin = useMemo(() => makeDiagnosisEventBandsPlugin(), [])
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tree: string; year: number } | null>(null)
   const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number; tree: string; year: number } | null>(null)
   const [showSampleSize, setShowSampleSize] = useState(true)
@@ -995,6 +1071,12 @@ export function MultiLineChart({
     missingRingLinesPlugin.highlightedTree = highlightedTreeCode
     chartRef.current?.draw()
   }, [missingRingLinesPlugin, missingRingYears, highlightedTreeCode])
+
+  useEffect(() => {
+    diagnosisEventBandsPlugin.ranges = diagnosisEventRanges
+    diagnosisEventBandsPlugin.highlightedTree = highlightedTreeCode
+    chartRef.current?.draw()
+  }, [diagnosisEventBandsPlugin, diagnosisEventRanges, highlightedTreeCode])
 
   // 键盘左右键移动当前高亮折线。
   useEffect(() => {
@@ -1466,8 +1548,15 @@ export function MultiLineChart({
     })
 
     if (closestIndex >= 0) {
-      // 命中折线：只高亮，不动标记线
-      onHighlightedTreeCodeChange?.(treeCodes[closestIndex] ?? null)
+      // 命中折线：高亮并固定这个日历年，交给上层生成非破坏性局部预览。
+      const tree = chart.data.datasets[closestIndex]?.label
+      const year = allYears[dataIndex]
+      if (typeof tree === 'string' && data.has(tree)) {
+        onHighlightedTreeCodeChange?.(tree)
+        if (year !== undefined) onLinePointClick?.({ tree, year })
+      } else {
+        onHighlightedTreeCodeChange?.(null)
+      }
     } else {
       // 未命中折线：切换标记线，清除高亮
       onHighlightedTreeCodeChange?.(null)
@@ -1547,7 +1636,7 @@ export function MultiLineChart({
   const simulationTooltip = hoverPoint
     && hoverSimulation
     && hoverSimulation.targetTree === hoverPoint.tree
-    && hoverSimulation.year === hoverPoint.year ? (
+    && hoverSimulation.displayYear === hoverPoint.year ? (
     <div
       style={{
         position: 'absolute',
@@ -1569,7 +1658,7 @@ export function MultiLineChart({
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 5 }}>
         <strong style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {hoverSimulation.targetTree} · {hoverSimulation.year}
+          {hoverSimulation.targetTree} · {hoverSimulation.displayYear}
         </strong>
         <span style={{ color: '#667084', flex: '0 0 auto' }}>
           n={hoverSimulation.samplePairs}
@@ -1697,7 +1786,7 @@ export function MultiLineChart({
         ref={chartRef}
         data={chartData}
         options={chartOptions}
-        plugins={[fixedChartAreaPlugin, referenceGridPlugin, markerLinesPlugin, missingRingLinesPlugin, chartBoxBorderPlugin, xAxisLabelsPlugin, ...(showPersistentTooltip ? [tooltipPlugin] : []), yearIndicatorPlugin]}
+        plugins={[fixedChartAreaPlugin, referenceGridPlugin, diagnosisEventBandsPlugin, markerLinesPlugin, missingRingLinesPlugin, chartBoxBorderPlugin, xAxisLabelsPlugin, ...(showPersistentTooltip ? [tooltipPlugin] : []), yearIndicatorPlugin]}
         onClick={(event) =>
           handleLineChartClick(event, chartRef.current)
         }

@@ -2,7 +2,7 @@
  * 基于 RDM.rwl 所有合格序列的批量 synthetic 测试：
  * 缺轮 / 伪轮 / 整条移动 / 部分移动 / clean negative。
  *
- * 真实算法用 all eligible RDM series 评估，RDM151/RDM192 仅作 smoke。
+ * 探索性强信号上限测试使用 all eligible RDM series，RDM151/RDM192 仅作 smoke。
  * fixture 缺失时整组 skip（核心 pure unit tests 不依赖 fixture）。
  *
  * 关于命中率阈值：
@@ -10,7 +10,7 @@
  * 在真实单站数据 RDM.rwl 上，单个缺/伪轮要精确定位到 ±1 年存在固有上限——
  * 树轮宽度自相关高、部分序列在某些年代与 master 一致性弱，这些年代的环位本就
  * 无法可靠定位（无论算法好坏，这也是真实交叉定年中需人工确认的原因）。
- * 因此这里的阈值取“当前算法在 RDM.rwl 上确定性达到的水平”，作为回归护栏：
+ * 因此这里的阈值只作为强信号区回归护栏，不得作为任意年份准确率：
  * 验证算法能产出正确类型、落在合理区域的候选，且 clean 序列几乎不误报。
  *
  * 当前实测：缺轮 top5≈0.83/top1≈0.67，伪轮 top5≈0.58/top1≈0.50，
@@ -39,16 +39,16 @@ import {
     groupEligibleSeries,
     loadRdmFixture,
     pickSafeYear,
-    pickStrongSignalYear,
+    pickExploratoryStrongSignalYear,
     sampleAcross,
     type RwlSeries,
 } from "./rdmFixture";
 
-// 在目标自身“强交叉定年区”选编辑年：只有样本与 master 高度一致的区段，缺/伪轮才可被可靠定位。
+// 探索性上限：主动选目标自身的强交叉定年区，不能用于正式准确率。
 const markerYearFor = (series: RwlSeries): number | null => {
     const loo = buildLeaveOneOutMaster(fixture.series, series.id);
     if (loo.skipped) return pickSafeYear(series);
-    return pickStrongSignalYear(series, loo.masterValuesByYear);
+    return pickExploratoryStrongSignalYear(series, loo.masterValuesByYear);
 };
 
 const MAX_RDM_SYNTHETIC_CASES = 12;
@@ -65,7 +65,10 @@ const longSeries = groups.eligibleLongSeries.length >= 5 ? groups.eligibleLongSe
 const candidatesForTarget = (
     site: Parameters<typeof diagnoseCrossdating>[0],
     targetId: string,
-): DiagnosisCandidateOperation[] => diagnoseCrossdating(site, { referenceConfig: null })
+): DiagnosisCandidateOperation[] => diagnoseCrossdating(site, {
+    referenceConfig: null,
+    targetTrees: [targetId],
+})
     .candidates.filter((c) => c.targetTree === targetId);
 
 const near = (year: number | undefined, target: number, tol = 1): boolean => (
@@ -79,8 +82,8 @@ if (fixture.available) {
         + `withZeros=${groups.eligibleWithZeros.length}`);
 }
 
-d("批量 synthetic missing-ring", () => {
-    it("缺轮 top5 >= 0.75, top1 >= 0.58（真实数据回归基线）", () => {
+d("探索性强信号 synthetic missing-ring", () => {
+    it("缺轮 top5 >= 0.75, top1 >= 0.58（强信号上限护栏，不计入正式准确率）", () => {
         const targets = sampleAcross(longSeries, 5).slice(0, MAX_RDM_SYNTHETIC_CASES);
         let attempted = 0;
         let top1 = 0;
@@ -129,8 +132,8 @@ d("批量 synthetic missing-ring", () => {
     });
 });
 
-d("批量 synthetic false-ring", () => {
-    it("伪轮 top5 >= 0.50, top1 >= 0.40（真实数据回归基线）", () => {
+d("探索性强信号 synthetic false-ring", () => {
+    it("伪轮 top5 >= 0.50, top1 >= 0.40（强信号上限护栏，不计入正式准确率）", () => {
         const targets = sampleAcross(longSeries, 5).slice(0, MAX_RDM_SYNTHETIC_CASES);
         const modes = ["average", "moderate", "splitLike"] as const;
         let attempted = 0;
@@ -211,8 +214,8 @@ d("批量 wholeSeriesMove", () => {
     });
 });
 
-d("批量 partialRangeMove", () => {
-    it("部分移动 top5 >= 0.55（候选 + 边界接近）", () => {
+d("探索性强信号 partialRangeMove", () => {
+    it("部分移动 top5 >= 0.55（强信号上限护栏，不计入正式准确率）", () => {
         const targets = sampleAcross(longSeries, 4).slice(0, MAX_RDM_SYNTHETIC_CASES);
         let attempted = 0;
         let top5 = 0;
@@ -225,25 +228,40 @@ d("批量 partialRangeMove", () => {
             const midLo = series.startYear + 50;
             const midHi = series.endYear - 50;
             if (midHi <= midLo) return;
-            const boundaryYear = (loo.skipped
+            const firstFixedYear = (loo.skipped
                 ? Math.round((series.startYear + series.endYear) / 2)
-                : pickStrongSignalYear(series, loo.masterValuesByYear, { lo: midLo, hi: midHi }))
+                : pickExploratoryStrongSignalYear(
+                    series,
+                    loo.masterValuesByYear,
+                    { lo: midLo, hi: midHi },
+                ))
                 ?? Math.round((series.startYear + series.endYear) / 2);
-            if (boundaryYear - series.startYear < 50 || series.endYear - boundaryYear < 50) return;
-            const lag = index % 2 === 0 ? 1 : -1;
-            const { corrupted } = createPartialRangeMoveCase(series, boundaryYear, lag);
+            if (firstFixedYear - series.startYear < 50
+                || series.endYear - firstFixedYear < 50) return;
+            const gapYears = ([2, 3, 4, 5] as const)[index % 4];
+            const { corrupted } = createPartialRangeMoveCase(
+                series,
+                firstFixedYear,
+                gapYears,
+            );
             const { site } = buildSyntheticSite(fixture.series, series.id, corrupted);
             if (!site) return;
             attempted += 1;
             const candidates = candidatesForTarget(site, series.id);
-            // 部分移动可能被等价地表达为靠近 boundary 的插/删年（单年偏移），都算命中。
             const hit = candidates.some((c) => (
-                (c.mode === "partialRangeMove" && near(c.selectedRange?.endYear, boundaryYear, 3))
-                || near(c.targetYear, boundaryYear, 3)
+                c.mode === "partialRangeMove"
+                && c.deltaYears === -gapYears
+                && near(
+                    c.selectedRange
+                        ? c.selectedRange.endYear + 1
+                        : c.anchorYear,
+                    firstFixedYear,
+                    3,
+                )
             ));
             if (hit) top5 += 1;
             if (!hit) {
-                failures.push(`${series.id} partial@${boundaryYear}/${lag} top=${candidates.slice(0, 3).map((c) => `${c.operationType}/${c.mode ?? ""}@${c.selectedRange?.endYear ?? c.targetYear}`).join(",")}`);
+                failures.push(`${series.id} partial@${firstFixedYear}/-${gapYears} top=${candidates.slice(0, 3).map((c) => `${c.operationType}/${c.mode ?? ""}@${c.selectedRange ? c.selectedRange.endYear + 1 : c.targetYear}`).join(",")}`);
             }
         });
 

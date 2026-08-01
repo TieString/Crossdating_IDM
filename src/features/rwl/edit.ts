@@ -564,6 +564,40 @@ const editableEntries = (rwlData: RwlTreeData) => (
     Array.from(rwlData.entries()).filter(([, value]) => !isStopMarkerValue(value))
 );
 
+export const getSeriesMoveConflicts = (
+    rwlData: RwlTreeData,
+    selectedStartYear: number,
+    selectedEndYear: number,
+    yearOffset: number,
+): number[] => {
+    if (yearOffset === 0) return [];
+    const selectedStart = Math.min(selectedStartYear, selectedEndYear);
+    const selectedEnd = Math.max(selectedStartYear, selectedEndYear);
+    const selectedYears = new Set(
+        editableEntries(rwlData)
+            .filter(([year]) => year >= selectedStart && year <= selectedEnd)
+            .map(([year]) => year),
+    );
+    return Array.from(selectedYears)
+        .map((year) => year + yearOffset)
+        .filter((destinationYear) => (
+            !selectedYears.has(destinationYear)
+            && rwlData.has(destinationYear)
+            && !isStopMarkerValue(rwlData.get(destinationYear))
+        ))
+        .sort((left, right) => left - right);
+};
+
+export class RwlMoveConflictError extends Error {
+    readonly conflictYears: number[];
+
+    constructor(conflictYears: number[]) {
+        super(`移动目标年份已有数据：${conflictYears.join("、")}`);
+        this.name = "RwlMoveConflictError";
+        this.conflictYears = [...conflictYears];
+    }
+}
+
 export function insertMissingYearAtSide(
     rwlData: RwlTreeData,
     currentYear: number,
@@ -610,7 +644,7 @@ export function moveSeriesTailByOffset(
         }
     });
 
-    // Moved selected values intentionally overwrite any fixed values at target years.
+    // The editor and interactive callers reject fixed-range collisions before this transform.
     selectedEntries.forEach(([year, width]) => {
         next.set(year + yearOffset, width);
     });
@@ -975,8 +1009,8 @@ export class RwlEditor {
         return !siteDataEquals(this.rwlData, this.rawData) || !deletionMarkersEmpty(this.deletionMarkers);
     }
 
-    commitCurrentDataAsRawBaseline(): void {
-        this.rawData = cloneSiteData(this.rwlData);
+    commitCurrentDataAsRawBaseline(savedData: RwlSiteData = this.rwlData): void {
+        this.rawData = cloneSiteData(savedData);
         this.rawReadOptions = cloneReadOptions(this.readOptions);
         this.rawFormat = this.format;
     }
@@ -1172,13 +1206,19 @@ export class RwlEditor {
     ): void {
         if (yearOffset === 0) return;
         if (!this.rwlData.has(tree)) return;
+        const treeData = this.rwlData.get(tree)!;
+        const conflicts = getSeriesMoveConflicts(
+            treeData,
+            selectedStartYear,
+            selectedEndYear,
+            yearOffset,
+        );
+        if (conflicts.length > 0) throw new RwlMoveConflictError(conflicts);
 
         const operation: RwlEditOperation = { type: "move-selection", tree, selectedStartYear, selectedEndYear, yearOffset };
         const beforeState = this.captureTreeLogState(tree);
         this.saveToUndoStack(operation);
         this.redoStack = [];
-
-        let treeData = this.rwlData.get(tree)!;
 
         this.shiftDeletionMarkersForMove(tree, selectedStartYear, selectedEndYear, yearOffset);
         let updatedTree = moveSeriesTailByOffset(treeData, selectedStartYear, selectedEndYear, yearOffset);

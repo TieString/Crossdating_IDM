@@ -3,7 +3,7 @@
 ## 文档信息
 
 - 读者：开发者、维护者、需要理解数据流的使用者
-- 最后更新：2026-06-19
+- 最后更新：2026-07-25
 - 维护人：项目维护者
 - 适用版本：1.0.0
 
@@ -44,7 +44,8 @@ npm run build-storybook
 - `src/features/rwl/index.ts`：RWL 格式识别、解析和格式处理器注册表。
 - `src/features/rwl/edit.ts`：RWL 编辑器、历史状态和操作日志。
 - `src/features/crossdating/reference.ts`：手动参考序列、COFECHA-pass 动态参考序列、PART 6 分类和 COFECHA-style 标准化。
-- `src/features/crossdating/diagnosis.ts`：内部诊断和候选生成。
+- `src/features/crossdating/diagnosis.ts`：最新 JS 事件级诊断入口。
+- `src/components/DiagnosisCandidates/DiagnosisEventPanel.tsx`：操作、窄位置窗口和精确年份选择，以及应用前预览与确认。
 - `src/services/cofecha/runner.ts`：COFECHA sidecar 执行和 OUT 文件读取。
 - `src-tauri/src/commands.rs`：前端可调用的 Tauri 命令。
 
@@ -56,8 +57,10 @@ npm run build-storybook
 4. `RwlEditor` 管理 raw baseline、working data、历史快照、删除标记和操作日志。
 5. `WidthContainer` 渲染可编辑宽度网格，`TreeChartManager` 渲染折线图和参考序列相关交互。
 6. `reference.ts` 支持两类 derived reference series：用户手动选择序列时按年份直接均值；COFECHA 运行后默认用 PART 6 无 A flag 样芯生成 COFECHA-pass 动态参考序列。
-7. 保存和 COFECHA 运行会通过 `services/cofecha/runner.ts` 写入工作目录、运行 sidecar 并读取 `VERYCOF.OUT`。
-8. COFECHA 结果由 `src/features/cofecha/formatter.ts` 解析，再由工作区按文件路径持久化最近结果。
+7. 用户触发诊断后，JS 事件级管线只诊断当前序列，并输出缺轮、伪轮、局部移动或整体移动的窄复核窗口；同站其它序列仍参与参考序列。
+8. 每个独立事件只显示一个 5/7/9/11/13 年主窗口，不显示操作或位置备选。定位器先在高召回粗区间内选择唯一 13 年模式，再用逐参考芯反事实、lag 转移和局部边界证据决定是否收窄；不会用 17 年窗连接远峰。局部移动在内部联合搜索 `-2..-100`，UI 只显示最终 `firstFixedYear + shiftYears`；点击诊断窗口内折线会直接预览这一建议，不显示内部假设列表。应用复用 `RwlEditor` 的撤销栈和操作日志，随后旧建议失效并重新诊断。
+9. 保存和 COFECHA 运行会通过 `services/cofecha/runner.ts` 写入工作目录、运行 sidecar 并读取 `VERYCOF.OUT`。
+10. COFECHA 结果由 `src/features/cofecha/formatter.ts` 解析，再由工作区按文件路径持久化最近结果。
 
 ## COFECHA-pass 动态参考序列
 
@@ -78,6 +81,8 @@ npm run build-storybook
 - [开发指南](docs/development.md)
 - [核心组件文档](docs/components.md)
 - [COFECHA-pass 参考序列](docs/cofecha-reference.md)
+- [JS 内部诊断事件窗口基准](docs/js-internal-diagnosis-events-report.md) — 信号无关采样、开发/盲测、混合事件、已有零值与性能
+- [Current-event V1 多模型切换与桌面端接入](docs/current-event-ranker-integration.md)
 - [文档维护规则](docs/maintenance.md)
 - API 文档输出目录：`docs/api`，通过 `npm run docs:api` 生成。
 
@@ -89,6 +94,12 @@ npm run validate:samples
 npm run validate:workspace-windows
 npm run validate:auto-crossdating
 npm run validate:cofecha-reference
+npm run validate:current-event-ranker
+npm run smoke:current-event-ranker
+npm run test:current-event-ranker
 ```
 
-`validate` 是样例解析、工作区窗口 smoke、自动交叉定年算法验证和 COFECHA-pass reference 验证的聚合入口。
+`validate` 是样例解析、工作区窗口 smoke、自动交叉定年算法验证、COFECHA-pass reference
+和 Current-event V1 资源/协议验证的聚合入口。当前定年建议 UI 只显示最新 JS 事件级诊断；三个 Python
+模型的代码、发布资源和开发验证命令仍保留，但模型 UI、目录查询和 sidecar 调用由 feature flag 暂时关闭。
+`test:current-event-ranker` 仅用于维护被隐藏模块的协议、资源和 sidecar 回归，不代表它参与当前 JS 诊断。

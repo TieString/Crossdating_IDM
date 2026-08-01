@@ -115,8 +115,9 @@ const simulateDelete = (series: NumericSeries, deleteYear: number): NumericSerie
 
 /**
  * 模拟插入缺轮（end-anchored，匹配 edit.ts insertMissingYearAtSide side="right"）。
+ * 数值诊断会把 RWL 中的 0 视为 absent ring，因此这里不把占位 0 加入序列。
  */
-const simulateInsert = (series: NumericSeries, insertYear: number, value = 0): NumericSeries => {
+const simulateInsert = (series: NumericSeries, insertYear: number): NumericSeries => {
     const result = new Map<number, number>();
     series.forEach((current, year) => {
         if (year <= insertYear) {
@@ -125,7 +126,6 @@ const simulateInsert = (series: NumericSeries, insertYear: number, value = 0): N
             result.set(year, current);
         }
     });
-    result.set(insertYear, value);
     return result;
 };
 
@@ -257,13 +257,26 @@ const residualMisalignment = (
  * 次级信号（同残留时打破平台、定位到 ±1）：一阶差分相关高通（对错位一年敏感）、
  * master 窄轮先验（仅插年）、COFECHA [C] 风格年际异常（仅删年）、离传播边界的轻微距离惩罚。
  */
-const prescanEditYears = (
+export type EditYearScanEvidence = {
+    year: number;
+    quality: number;
+    residualMisalignment: number;
+    boundaryStrength: number;
+    localContrast: number;
+    boundarySharpness: number;
+    markerStrength: number;
+    narrowBonus: number;
+    anomalyStrength: number;
+    boundaryDistance: number;
+};
+
+const scoreEditYears = (
     diagnosis: SeriesCoreDiagnosis,
     candidateYears: number[],
     editType: "insert" | "delete",
     config: EffectiveDiagnosisConfig,
     boundaryYear: number,
-): number[] => {
+): EditYearScanEvidence[] => {
     const extremeYears = editType === "delete"
         ? findExtremeChangeYears(preprocessSeries(diagnosis.rawTarget), 3.0)
         : new Map<number, number>();
@@ -291,24 +304,51 @@ const prescanEditYears = (
             // 逐点边界分类：比窗口相关在 ±1 处更锐利。insert 用它精确定位；
             // delete 不用（伪轮额外值占一个模糊点，逐点分类反而误导，实测降召回）。
             const split = editType === "insert"
-                ? boundaryAlignmentSharpness(z, master, year, shiftLag, W) * 1.5
+                ? boundaryAlignmentSharpness(z, master, year, shiftLag, W)
                 : 0;
             // 缺轮多发于局部窄轮（指针）年：在残留错位平台上，用局部 marker 强度把候选拉到指针年。
-            const marker = editType === "insert" ? Math.max(0, localMarkerStrength(master, year)) * 0.5 : 0;
-            const narrow = editType === "insert" ? masterNarrowBonus(diagnosis, year, config) * 0.2 : 0;
-            const anomaly = editType === "delete" ? (extremeYears.get(year) ?? 0) * 0.05 : 0;
-            const boundaryPenalty = Math.abs(year - boundaryYear) * 0.001;
+            const marker = editType === "insert" ? Math.max(0, localMarkerStrength(master, year)) : 0;
+            const narrow = editType === "insert" ? masterNarrowBonus(diagnosis, year, config) : 0;
+            const anomaly = editType === "delete" ? (extremeYears.get(year) ?? 0) : 0;
+            const boundaryDistance = Math.abs(year - boundaryYear);
             // 残留错位定位粗区段；边界强度/对比/逐点分类在平台上精确到边界年。
             const quality = -residual * 2.5
                 + boundaryStrength * 1.8
                 + localContrast * 0.5
-                + split
-                + marker + narrow + anomaly - boundaryPenalty;
-            return { year, quality };
+                + split * 1.5
+                + marker * 0.5
+                + narrow * 0.2
+                + anomaly * 0.05
+                - boundaryDistance * 0.001;
+            return {
+                year,
+                quality,
+                residualMisalignment: residual,
+                boundaryStrength,
+                localContrast,
+                boundarySharpness: split,
+                markerStrength: marker,
+                narrowBonus: narrow,
+                anomalyStrength: anomaly,
+                boundaryDistance,
+            };
         })
         .sort((a, b) => b.quality - a.quality)
-        .map((entry) => entry.year);
 };
+
+const prescanEditYears = (
+    diagnosis: SeriesCoreDiagnosis,
+    candidateYears: number[],
+    editType: "insert" | "delete",
+    config: EffectiveDiagnosisConfig,
+    boundaryYear: number,
+): number[] => scoreEditYears(
+    diagnosis,
+    candidateYears,
+    editType,
+    config,
+    boundaryYear,
+).map((entry) => entry.year);
 
 export const pickSingleYearAnchor = (
     diagnosis: SeriesCoreDiagnosis,
@@ -339,6 +379,21 @@ export const prescanEditYearsInRegion = (
         .filter((year) => year >= start && year <= end);
     if (existingYears.length === 0) return [];
     return prescanEditYears(diagnosis, existingYears, editType, config, boundaryYear).slice(0, topN);
+};
+
+export const scoreEditYearsInRegion = (
+    diagnosis: SeriesCoreDiagnosis,
+    editType: "insert" | "delete",
+    regionStart: number,
+    regionEnd: number,
+    boundaryYear: number,
+    config: EffectiveDiagnosisConfig,
+): EditYearScanEvidence[] => {
+    const start = Math.max(diagnosis.targetRange.startYear, regionStart);
+    const end = Math.min(diagnosis.targetRange.endYear, regionEnd);
+    const existingYears = Array.from(diagnosis.rawTarget.keys())
+        .filter((year) => year >= start && year <= end);
+    return scoreEditYears(diagnosis, existingYears, editType, config, boundaryYear);
 };
 
 /**

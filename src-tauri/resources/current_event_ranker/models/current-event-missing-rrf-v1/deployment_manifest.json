@@ -1,0 +1,365 @@
+{
+  "diagnostic_only": true,
+  "environment": {
+    "packages": {
+      "joblib": "1.5.3",
+      "lightgbm": "4.6.0",
+      "numpy": "2.2.4",
+      "scikit-learn": "1.7.2"
+    },
+    "platform": "Windows-10-10.0.26200-SP0",
+    "python": "3.10.6 (tags/v3.10.6:9c7b4bd, Aug  1 2022, 21:53:49) [MSC v.1932 64 bit (AMD64)]"
+  },
+  "generated_at_utc": "2026-07-19T22:58:38.397666+00:00",
+  "implementation": {
+    "git_branch": "codex/false-ring-synthetic-research",
+    "git_commit": "87c36e00b35574713b374b75dbb5c330fad90efb",
+    "git_dirty": true,
+    "repository": "D:\\Code\\Crossdating_py_false_ring",
+    "route_files": {
+      "docs/CURRENT_EVENT_RRF_DEPLOYMENT_CANDIDATE.md": {
+        "bytes": 7336,
+        "path": "D:\\Code\\Crossdating_py_false_ring\\docs\\CURRENT_EVENT_RRF_DEPLOYMENT_CANDIDATE.md",
+        "sha256": "844e23a3a70fde518ca70523bbbaf847e9c3228e3a53c6e742d149b753911376"
+      },
+      "protocol/current_event_rrf_request.schema.json": {
+        "bytes": 1485,
+        "path": "D:\\Code\\Crossdating_py_false_ring\\protocol\\current_event_rrf_request.schema.json",
+        "sha256": "61cc23052c29340f5068ab8e85bfbb5c77cece6843355e1d72cb5db196053c54"
+      },
+      "protocol/current_event_rrf_response.schema.json": {
+        "bytes": 2447,
+        "path": "D:\\Code\\Crossdating_py_false_ring\\protocol\\current_event_rrf_response.schema.json",
+        "sha256": "67ef5c1820123d53d690f8aa4894a2383542c738b7a86f188bf556f846c67223"
+      },
+      "scripts/build_current_event_rrf_deployment_manifest.py": {
+        "bytes": 9478,
+        "path": "D:\\Code\\Crossdating_py_false_ring\\scripts\\build_current_event_rrf_deployment_manifest.py",
+        "sha256": "9b7adbf73f50d471a2d34f94b9731258fc9109d4c9d112f0a3eb4a5097dedeba"
+      },
+      "scripts/build_current_event_rrf_sidecar.ps1": {
+        "bytes": 981,
+        "path": "D:\\Code\\Crossdating_py_false_ring\\scripts\\build_current_event_rrf_sidecar.ps1",
+        "sha256": "650881cf90175ff3a79ebeee22bf47bb72c41c8eae5fc602662e206a9ef19335"
+      },
+      "scripts/current_event_rrf_sidecar.py": {
+        "bytes": 2615,
+        "path": "D:\\Code\\Crossdating_py_false_ring\\scripts\\current_event_rrf_sidecar.py",
+        "sha256": "f43d3de6d94fcfc8342eee645f438cc778aba85989fe9ec5fb392a8621f22a22"
+      },
+      "scripts/verify_current_event_rrf_sidecar.py": {
+        "bytes": 5982,
+        "path": "D:\\Code\\Crossdating_py_false_ring\\scripts\\verify_current_event_rrf_sidecar.py",
+        "sha256": "9b3a0a8525860fceb17b9b04f9afb8519fd149c460c0c527f4480a4ec3cba986"
+      },
+      "src/missing_ring_ranker/current_event_rrf_service.py": {
+        "bytes": 12796,
+        "path": "D:\\Code\\Crossdating_py_false_ring\\src\\missing_ring_ranker\\current_event_rrf_service.py",
+        "sha256": "11ad0666d878559268da9daa5b989c64126481190f23bd928970f3ada9da2b9c"
+      }
+    },
+    "sidecar_executable": {
+      "bytes": 77243967,
+      "path": "D:\\Code\\Crossdating_py_false_ring\\artifacts\\deployment\\current-event-rrf-sidecar-slim\\current-event-rrf-sidecar.exe",
+      "sha256": "f3c48133091f886ea5372235e0db520682a5a939bb9cdb2c10b03fe7be83a4a8"
+    }
+  },
+  "limitations": [
+    "validated only for true missing-ring sequential advice",
+    "global shift, local shift, false ring, and unified operation routing are not deployment-qualified",
+    "advice requires expert confirmation and never writes RWL automatically",
+    "zero_count greater than 6 remains out of scope"
+  ],
+  "manifest_version": "current-event-rrf-deployment-candidate-v1",
+  "model_bundle": {
+    "all_declared_hashes_verified": true,
+    "bundle_version": "current-event-range-v1.0.0",
+    "directory": "D:\\Code\\Crossdating_py_rankdiag_tauri_deploy\\artifacts\\exports\\current_event_tauri_bundle_v1_20260716\\bundle",
+    "files": {
+      "candidate_binary_model": {
+        "bytes": 8313995,
+        "path": "D:\\Code\\Crossdating_py_rankdiag_tauri_deploy\\artifacts\\exports\\current_event_tauri_bundle_v1_20260716\\bundle\\candidate_binary_model.json",
+        "sha256": "afb3153f6d231fad8b3d37a6f3931e2b6c93a75b7c6f813e2c9ece7ce2d893bc"
+      },
+      "candidate_compression_model": {
+        "bytes": 3691304,
+        "path": "D:\\Code\\Crossdating_py_rankdiag_tauri_deploy\\artifacts\\exports\\current_event_tauri_bundle_v1_20260716\\bundle\\candidate_compression_model.json",
+        "sha256": "73f011fe851ac5dc3fdc4bdfc1718f962f4869b89e9532f828a4c7db185de5a8"
+      },
+      "feature_schema": {
+        "bytes": 28302,
+        "path": "D:\\Code\\Crossdating_py_rankdiag_tauri_deploy\\artifacts\\exports\\current_event_tauri_bundle_v1_20260716\\bundle\\feature_schema.json",
+        "sha256": "92ff44eaba0dbb71e096d4c116c768b33c6994b04919fa3f47557b0b919acc38"
+      },
+      "integration_guide": {
+        "bytes": 5038,
+        "path": "D:\\Code\\Crossdating_py_rankdiag_tauri_deploy\\artifacts\\exports\\current_event_tauri_bundle_v1_20260716\\bundle\\CURRENT_EVENT_TAURI_INTEGRATION.md",
+        "sha256": "037a053fbb7a3a9e8358f739ce607fef066e0de8d056c1603977205070713918"
+      },
+      "prediction_reference": {
+        "bytes": 1301841,
+        "path": "D:\\Code\\Crossdating_py_rankdiag_tauri_deploy\\artifacts\\exports\\current_event_tauri_bundle_v1_20260716\\bundle\\prediction_reference.json",
+        "sha256": "4db82e96ebc17f10ff7d203bbdf053fada4b42d70f6bfe229bc0736ae03f69ea"
+      },
+      "ranker": {
+        "bytes": 566814,
+        "path": "D:\\Code\\Crossdating_py_rankdiag_tauri_deploy\\artifacts\\exports\\current_event_tauri_bundle_v1_20260716\\bundle\\current_event_ranker.joblib",
+        "sha256": "b4dde9c04fd1c76a5ded86f14024dad6e99e783a218cd7a1f61bf48bbdcbb7c6"
+      },
+      "reliability_schema": {
+        "bytes": 869,
+        "path": "D:\\Code\\Crossdating_py_rankdiag_tauri_deploy\\artifacts\\exports\\current_event_tauri_bundle_v1_20260716\\bundle\\reliability_schema.json",
+        "sha256": "738f051670290df17c33b95d9f7326cf668c99e91a11660e6a9681d92f01be4c"
+      },
+      "request_schema": {
+        "bytes": 1540,
+        "path": "D:\\Code\\Crossdating_py_rankdiag_tauri_deploy\\artifacts\\exports\\current_event_tauri_bundle_v1_20260716\\bundle\\current_event_request.schema.json",
+        "sha256": "be8ae92f9446e0cf51bb440112862f9143bc1e426c6cbe8c781d84fcbf8cc30c"
+      },
+      "response_schema": {
+        "bytes": 1951,
+        "path": "D:\\Code\\Crossdating_py_rankdiag_tauri_deploy\\artifacts\\exports\\current_event_tauri_bundle_v1_20260716\\bundle\\current_event_response.schema.json",
+        "sha256": "881f23e1ba55284854955ef535cc7f1ec201ca785a46a93a2b03919102a79101"
+      },
+      "runtime_config": {
+        "bytes": 3974,
+        "path": "D:\\Code\\Crossdating_py_rankdiag_tauri_deploy\\artifacts\\exports\\current_event_tauri_bundle_v1_20260716\\bundle\\runtime_config.json",
+        "sha256": "4ee1a2c10d621ebf5bbb4f7aecca1f77485dcacb34de9538ebab4cf15d0267ab"
+      },
+      "selector": {
+        "bytes": 2041,
+        "path": "D:\\Code\\Crossdating_py_rankdiag_tauri_deploy\\artifacts\\exports\\current_event_tauri_bundle_v1_20260716\\bundle\\reliability_selector.joblib",
+        "sha256": "ea23b77fa3c02c90afaa46608557029821e9a499d18dfbd271438c026ad30896"
+      },
+      "training_log": {
+        "bytes": 4045,
+        "path": "D:\\Code\\Crossdating_py_rankdiag_tauri_deploy\\artifacts\\exports\\current_event_tauri_bundle_v1_20260716\\bundle\\training_log.json",
+        "sha256": "15fd3bca2afb7f452c70a2766b6990574996455888bfdafb933e314d321716bb"
+      },
+      "training_manifest": {
+        "bytes": 38889,
+        "path": "D:\\Code\\Crossdating_py_rankdiag_tauri_deploy\\artifacts\\exports\\current_event_tauri_bundle_v1_20260716\\bundle\\training_manifest.json",
+        "sha256": "5bc10f499bd5d8d89a69fb88bb3314885b51ae402224d49248a709980611ea5b"
+      }
+    },
+    "manifest": {
+      "bytes": 2618,
+      "path": "D:\\Code\\Crossdating_py_rankdiag_tauri_deploy\\artifacts\\exports\\current_event_tauri_bundle_v1_20260716\\bundle\\bundle_manifest.json",
+      "sha256": "cda3c17af39d8a6964bf1d7ca410675919bfa0dfe0b49496569f2ba678796d3d"
+    },
+    "protocol_version": "crossdating.current-event.v1"
+  },
+  "production_model_exported": false,
+  "route": {
+    "automatic_writeback": false,
+    "candidate_bases": [
+      "latest_offset_path",
+      "unshifted"
+    ],
+    "existing_zero_policy": "remove",
+    "fusion": "1/path_rank + 1/none_rank",
+    "offset_evidence": {
+      "breakpoint_score_tolerance": 2.0,
+      "jump_penalty": 0.45,
+      "max_segments": 6,
+      "min_overlap": 18,
+      "offset_max": 30,
+      "offset_min": -30,
+      "step_years": 10,
+      "transition_penalty": 2.2,
+      "window_sizes": [
+        31,
+        51,
+        71
+      ]
+    },
+    "operation_scope": [
+      "insert_missing"
+    ],
+    "range_radius": 3,
+    "reliability_gate": {
+      "refit": false,
+      "rejected_response": "evidence_insufficient with empty suggestions",
+      "source": "bundle frozen none-list selector",
+      "threshold": 0.6697964597119709
+    },
+    "route_version": "missing-current-event-rrf0-range3-v1",
+    "score_semantics": {
+      "ranking_score": "reciprocal-rank fusion score; not probability",
+      "reliability_score": "round-level frozen selector output; not candidate-year probability"
+    },
+    "spatial_suppression_radius": 0,
+    "top_k": 5,
+    "workflow": "remove_all_zero_markers_then_expert_confirm_newest_to_oldest_and_recompute"
+  },
+  "selected_mainline_replaced": false,
+  "validation": {
+    "all_rounds": {
+      "micro": {
+        "candidate_coverage": 0.9832402234636871,
+        "rounds": 179,
+        "top1": 0.553072625698324,
+        "top20": 0.9273743016759777,
+        "top5": 0.8435754189944135,
+        "top5_within_1": 0.8938547486033519,
+        "top5_within_3": 0.9329608938547486
+      },
+      "series_all_rounds_top5": 0.725,
+      "series_all_rounds_top5_within_3": 0.8875,
+      "source_cluster_bootstrap": {
+        "cluster": "source_file",
+        "micro": {
+          "top1": {
+            "p2_5": 0.47271890686001117,
+            "p50": 0.5542168674698795,
+            "p97_5": 0.6309613997113996
+          },
+          "top5": {
+            "p2_5": 0.777223781295327,
+            "p50": 0.8432432432432433,
+            "p97_5": 0.9023054818744473
+          },
+          "top5_within_1": {
+            "p2_5": 0.8363609782030834,
+            "p50": 0.8941176470588236,
+            "p97_5": 0.9415274296853244
+          },
+          "top5_within_3": {
+            "p2_5": 0.8829721565537169,
+            "p50": 0.9336875634231593,
+            "p97_5": 0.9732620320855615
+          }
+        },
+        "samples": 2000,
+        "seed": 19,
+        "source_macro": {
+          "top1": {
+            "p2_5": 0.4449895833333333,
+            "p50": 0.5377083333333333,
+            "p97_5": 0.6229166666666666
+          },
+          "top5": {
+            "p2_5": 0.7433229166666667,
+            "p50": 0.8195833333333333,
+            "p97_5": 0.8858333333333333
+          },
+          "top5_within_1": {
+            "p2_5": 0.79,
+            "p50": 0.8641666666666665,
+            "p97_5": 0.9225104166666667
+          },
+          "top5_within_3": {
+            "p2_5": 0.8741666666666668,
+            "p50": 0.9304166666666667,
+            "p97_5": 0.9737500000000001
+          }
+        }
+      },
+      "source_file_thresholds": {
+        "top5_gte_0.5": 0.8875,
+        "top5_gte_0.7": 0.75,
+        "top5_gte_0.8": 0.75,
+        "top5_gte_0.9": 0.725,
+        "top5_gte_1.0": 0.725
+      },
+      "source_macro": {
+        "candidate_coverage": 0.985,
+        "top1": 0.5356249999999999,
+        "top20": 0.9231250000000001,
+        "top5": 0.81875,
+        "top5_within_1": 0.8629166666666667,
+        "top5_within_3": 0.9279166666666667
+      }
+    },
+    "evidence_files": {
+      "combined": {
+        "bytes": 53473,
+        "path": "D:\\Code\\Crossdating_py_false_ring\\artifacts\\reports\\offset_plan_candidate_recall_v2\\sequential_rrf_combined80_summary\\summary.json",
+        "sha256": "235e54086769a910c8fb64d5000782d174ed4d5ad8f4c7e0f5a627f02e3de9bd"
+      },
+      "selector": {
+        "bytes": 35076,
+        "path": "D:\\Code\\Crossdating_py_false_ring\\artifacts\\reports\\offset_plan_candidate_recall_v2\\sequential_rrf_combined80_frozen_selector\\summary.json",
+        "sha256": "aec9c43f99fe860f882ca235f7b7974d6e7a00bf5214605094d589421ba61417"
+      }
+    },
+    "frozen_gate": {
+      "metrics": {
+        "acceptance_rate": 0.8156424581005587,
+        "accepted": 146,
+        "accepted_top1": 0.6232876712328768,
+        "accepted_top5": 0.8904109589041096,
+        "accepted_top5_within_1": 0.9246575342465754,
+        "accepted_top5_within_3": 0.9452054794520548,
+        "all_top5": 0.8435754189944135,
+        "rejection_rate": 0.1843575418994413,
+        "rounds": 179,
+        "selector_score_mean": 0.7917796464995022
+      },
+      "source_cluster_bootstrap": {
+        "cluster": "source_file",
+        "intervals": {
+          "acceptance_rate": {
+            "p2_5": 0.753082788671024,
+            "p50": 0.8162162162162162,
+            "p97_5": 0.871925478290755
+          },
+          "accepted_top1": {
+            "p2_5": 0.5266666666666666,
+            "p50": 0.625,
+            "p97_5": 0.7134364111498256
+          },
+          "accepted_top5": {
+            "p2_5": 0.8148148148148148,
+            "p50": 0.891156462585034,
+            "p97_5": 0.9515175953079179
+          },
+          "accepted_top5_within_1": {
+            "p2_5": 0.8682058427830098,
+            "p50": 0.9259259259259259,
+            "p97_5": 0.9690005706948208
+          },
+          "accepted_top5_within_3": {
+            "p2_5": 0.8959537572254336,
+            "p50": 0.9466666666666667,
+            "p97_5": 0.9854041045170845
+          }
+        },
+        "samples": 2000,
+        "seed": 17
+      },
+      "source_file_macro": {
+        "acceptance_rate": 0.7920833333333334
+      }
+    },
+    "packaged_sidecar_smoke": {
+      "checks": {
+        "accepted_elapsed_ms": 3195.297,
+        "accepted_selector_score": 0.9036325974955477,
+        "accepted_top5": [
+          1896,
+          1902,
+          1897,
+          1895,
+          1901
+        ],
+        "default_existing_zero_policy": "remove",
+        "invalid_contract_error": "INVALID_REQUEST",
+        "rejected_elapsed_ms": 1201.954,
+        "rejected_selector_score": 0.598981360480577,
+        "route_version": "missing-current-event-rrf0-range3-v1"
+      },
+      "report": {
+        "bytes": 8665,
+        "path": "D:\\Code\\Crossdating_py_false_ring\\artifacts\\reports\\offset_plan_candidate_recall_v2\\current_event_rrf_deployment_candidate_v1\\sidecar_smoke.json",
+        "sha256": "7d5ac3afcb476a6d806a5124bf16ee303adcc2ebda0d693b6c96eb8e5b25f499"
+      },
+      "stderr_empty": true,
+      "wall_seconds": 11.745287000012468
+    },
+    "rounds": 179,
+    "source_file_disjoint_batches": 2,
+    "source_files": 80,
+    "truth_use": "current truth used only for evaluation; previous truths used only as expert-confirmation oracle"
+  }
+}

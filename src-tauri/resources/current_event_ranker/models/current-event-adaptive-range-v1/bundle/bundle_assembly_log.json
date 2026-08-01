@@ -1,0 +1,10 @@
+{
+  "adaptive_report": "D:\\Code\\Crossdating_py_eventrange\\artifacts\\reports\\current_event_adaptive_range_w15_diagnostic",
+  "base_bundle": "D:\\Code\\Crossdating_py_eventrange\\artifacts\\exports\\current_event_adaptive_range_tauri_bundle_v1_20260718\\bundle",
+  "created_at_utc": "2026-07-18T13:48:14.441140+00:00",
+  "output_bundle": "D:\\Code\\Crossdating_py_eventrange_gate\\artifacts\\exports\\current_event_adaptive_range_gate_tauri_bundle_v1_20260718\\bundle",
+  "range_gate_report": "D:\\Code\\Crossdating_py_eventrange_gate\\artifacts\\reports\\current_event_range_reliability_sourcebalanced_full",
+  "range_report": "D:\\Code\\Crossdating_py_eventrange\\artifacts\\reports\\current_event_single_range_w15_final_diagnostic",
+  "reference_cache": "D:\\Code\\Crossdating_py_eventrange\\artifacts\\reports\\current_event_single_range_w15_final_diagnostic\\cache\\dev\\external194",
+  "wall_seconds_before_manifest": 47.59916859999976
+}

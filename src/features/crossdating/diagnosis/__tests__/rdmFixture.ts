@@ -106,13 +106,16 @@ export const loadRdmFixture = (): RdmFixture => {
 export const DATA_FOLDERS = ["EBD", "EBM", "EBU", "RDD", "RDM", "RDU", "ZSD", "ZSL"] as const;
 
 const DATA_DIR_CANDIDATES = [
+    process.env.CROSSDATING_TEST_DATA_DIR,
+    "D:/软件测试/数据/",
     fileURLToPath(new URL("../../../../../笔记/数据/", import.meta.url)),
     fileURLToPath(new URL("../../../../../notes/data/", import.meta.url)),
-];
+].filter((candidate): candidate is string => Boolean(candidate));
 
 const dataDir = (): string | null => {
     for (const dir of DATA_DIR_CANDIDATES) {
-        if (existsSync(dir)) return dir;
+        const normalized = dir.endsWith("/") || dir.endsWith("\\") ? dir : `${dir}/`;
+        if (existsSync(normalized)) return normalized;
     }
     return null;
 };
@@ -619,32 +622,113 @@ export const createWholeSeriesMoveCase = (series: RwlSeries, lag: number): Whole
 
 export type PartialMoveCase = {
     targetId: string;
-    boundaryYear: number;
-    lag: number;
+    firstFixedYear: number;
+    gapYears: number;
     corrupted: Map<number, number>;
 };
 
+export type PiecewiseLagEventSpec = {
+    eventType: "missingRing" | "falseRing" | "partialMove";
+    year: number;
+    /** Correction. For partialMove, `year` is firstFixedYear and shiftYears is <= -2. */
+    shiftYears: number;
+    falseMode?: FalseRingMode;
+};
+
+export type PiecewiseLagMixedCase = {
+    targetId: string;
+    events: PiecewiseLagEventSpec[];
+    wholeSeriesLag: number;
+    corrupted: Map<number, number>;
+};
+
+const falseValueAt = (
+    correct: Map<number, number>,
+    sourceYear: number,
+    mode: FalseRingMode,
+): number => {
+    const neighborhood: number[] = [];
+    for (let year = sourceYear - 3; year <= sourceYear + 3; year += 1) {
+        const value = correct.get(year);
+        if (value !== undefined && value > 0) neighborhood.push(value);
+    }
+    const left = correct.get(sourceYear - 1) ?? correct.get(sourceYear) ?? 1;
+    const right = correct.get(sourceYear + 1) ?? correct.get(sourceYear) ?? 1;
+    if (mode === "average") return Math.max(1, Math.round((left + right) / 2));
+    if (mode === "moderate") return Math.max(1, Math.round(median(neighborhood)));
+    const localMean = neighborhood.length
+        ? neighborhood.reduce((sum, value) => sum + value, 0) / neighborhood.length
+        : (left + right) / 2;
+    return Math.max(1, Math.round(localMean * 0.45));
+};
+
 /**
- * 部分移动：较新一侧（> boundaryYear）保持正确，boundaryYear 及更老一侧整体偏移 lag。
+ * Build multiple events in one immutable calendar frame.
+ *
+ * For each displayed year y, `target[y] = correct[y + lag(y)]`. Crossing an event from newer
+ * to older adds its corrective shift to lag(y). This avoids sequential insert/delete drift:
+ * every supplied event year remains a truth coordinate in the final corrupted series.
+ */
+export const createPiecewiseLagMixedCase = (
+    series: RwlSeries,
+    events: PiecewiseLagEventSpec[],
+    wholeSeriesLag = 0,
+): PiecewiseLagMixedCase => {
+    const ordered = [...events].sort((a, b) => b.year - a.year);
+    const corrupted = new Map<number, number>();
+    for (let year = series.startYear; year <= series.endYear; year += 1) {
+        const active = ordered.filter((event) => (
+            event.eventType === "partialMove"
+                ? year < event.year
+                : year <= event.year
+        ));
+        const lag = wholeSeriesLag + active.reduce((sum, event) => sum + event.shiftYears, 0);
+        const sourceYear = year + lag;
+        const falseEvent = active.find((event) => (
+            event.eventType === "falseRing" && event.year === year
+        ));
+        if (falseEvent) {
+            corrupted.set(
+                year,
+                falseValueAt(series.valuesByYear, sourceYear, falseEvent.falseMode ?? "moderate"),
+            );
+            continue;
+        }
+        const value = series.valuesByYear.get(sourceYear);
+        if (value !== undefined) corrupted.set(year, value);
+    }
+    return {
+        targetId: series.id,
+        events: ordered,
+        wholeSeriesLag,
+        corrupted,
+    };
+};
+
+/**
+ * Physical unmeasured block: firstFixedYear and newer dates stay correct, while every older
+ * displayed value belongs `gapYears` earlier. The correcting partial move is `-gapYears`.
  */
 export const createPartialRangeMoveCase = (
     series: RwlSeries,
-    boundaryYear: number,
-    lag: number,
+    firstFixedYear: number,
+    gapYears: number,
 ): PartialMoveCase => {
+    if (!Number.isInteger(gapYears) || gapYears < 2) {
+        throw new Error("partial missing block must be at least two years");
+    }
     const correct = series.valuesByYear;
     const corrupted = new Map<number, number>();
     correct.forEach((value, year) => {
-        if (year > boundaryYear) {
+        if (year >= firstFixedYear) {
             corrupted.set(year, value);
         }
     });
-    // 较老一侧：target[y] = correct[y - lag] → 较老一侧 bestLag = -lag。
-    for (let year = series.startYear; year <= boundaryYear; year += 1) {
-        const value = correct.get(year - lag);
+    for (let year = series.startYear; year < firstFixedYear; year += 1) {
+        const value = correct.get(year - gapYears);
         if (value !== undefined) corrupted.set(year, value);
     }
-    return { targetId: series.id, boundaryYear, lag, corrupted };
+    return { targetId: series.id, firstFixedYear, gapYears, corrupted };
 };
 
 /**
@@ -713,14 +797,166 @@ const windowPearson = (
     return den === 0 ? null : num / den;
 };
 
+const stableUnsignedHash = (value: string): number => {
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+};
+
+export type BenchmarkPositionStratum =
+    | "olderEdge"
+    | "olderInterior"
+    | "middle"
+    | "newerInterior"
+    | "newerEdge";
+
+export type StratifiedCalendarYear = {
+    year: number;
+    positionStratum: BenchmarkPositionStratum;
+    normalizedPosition: number;
+    olderContextYears: number;
+    newerContextYears: number;
+};
+
+export type MixedEventCalendarAnchors = {
+    old: number;
+    middle: number;
+    newer: number;
+    adjacent: number;
+};
+
+const BENCHMARK_POSITION_STRATA: BenchmarkPositionStratum[] = [
+    "olderEdge",
+    "olderInterior",
+    "middle",
+    "newerInterior",
+    "newerEdge",
+];
+
 /**
- * 选一个位于目标自身“强交叉定年区”的编辑年：在安全范围内滑动窗口测 target 与
- * leave-one-out master 的相关，取相关最强窗口的中心年。
- *
- * 这是现实约束：只有在样本自身与 master 高度一致的区段，缺/伪轮才可被可靠定位；
- * 落在样本自身低信号区的环位本就无法定位（无论算法好坏）。该选法测“信号支持时算法能否找到”。
+ * Pick an existing calendar year without inspecting ring widths or the reference chronology.
+ * Bounds may depend on event mechanics, but the selection within them is driven only by `seed`.
  */
-export const pickStrongSignalYear = (
+export const pickCalendarYearIndependentOfSignal = (
+    series: RwlSeries,
+    seed: string,
+    bounds: { lo: number; hi: number },
+): number | null => {
+    const lo = Math.max(series.startYear, Math.ceil(bounds.lo));
+    const hi = Math.min(series.endYear, Math.floor(bounds.hi));
+    if (hi < lo) return null;
+    const years: number[] = [];
+    for (let year = lo; year <= hi; year += 1) {
+        if (series.valuesByYear.has(year)) years.push(year);
+    }
+    if (years.length === 0) return null;
+    return years[stableUnsignedHash(seed) % years.length];
+};
+
+/**
+ * Deterministic, value-independent benchmark sampling across five calendar-position strata.
+ * The index balances strata; the seed randomizes the year within the assigned stratum.
+ */
+export const pickStratifiedCalendarYear = (
+    series: RwlSeries,
+    sampleIndex: number,
+    seed: string,
+    minContextYears = 18,
+    asymmetricContext: {
+        olderContextYears?: number;
+        newerContextYears?: number;
+    } = {},
+): StratifiedCalendarYear | null => {
+    const lo = series.startYear
+        + (asymmetricContext.olderContextYears ?? minContextYears);
+    const hi = series.endYear
+        - (asymmetricContext.newerContextYears ?? minContextYears);
+    if (hi < lo) return null;
+    const stratumIndex = (
+        (Math.floor(sampleIndex) % BENCHMARK_POSITION_STRATA.length)
+        + BENCHMARK_POSITION_STRATA.length
+    ) % BENCHMARK_POSITION_STRATA.length;
+    const availableCount = hi - lo + 1;
+    const binLo = lo + Math.floor(availableCount * stratumIndex / BENCHMARK_POSITION_STRATA.length);
+    const binHi = stratumIndex === BENCHMARK_POSITION_STRATA.length - 1
+        ? hi
+        : lo + Math.floor(
+            availableCount * (stratumIndex + 1) / BENCHMARK_POSITION_STRATA.length,
+        ) - 1;
+    const year = pickCalendarYearIndependentOfSignal(series, seed, {
+        lo: binLo,
+        hi: binHi,
+    });
+    if (year === null) return null;
+    const totalSpan = Math.max(1, series.endYear - series.startYear);
+    return {
+        year,
+        positionStratum: BENCHMARK_POSITION_STRATA[stratumIndex],
+        normalizedPosition: (year - series.startYear) / totalSpan,
+        olderContextYears: year - series.startYear,
+        newerContextYears: series.endYear - year,
+    };
+};
+
+/**
+ * Pick separated and nearby mixed-event anchors without reading ring widths or a reference.
+ * The fixed calendar-position bands make mixed cases reproducible while retaining endpoint context.
+ */
+export const pickMixedEventCalendarAnchors = (
+    series: RwlSeries,
+    seed: string,
+    endpointContextYears = 24,
+): MixedEventCalendarAnchors | null => {
+    const safeStart = series.startYear + endpointContextYears;
+    const safeEnd = series.endYear - endpointContextYears;
+    if (safeEnd - safeStart < 54) return null;
+    const span = safeEnd - safeStart;
+    const old = pickCalendarYearIndependentOfSignal(series, `${seed}:old`, {
+        lo: safeStart,
+        hi: Math.floor(safeStart + span * 0.24),
+    });
+    const middle = pickCalendarYearIndependentOfSignal(series, `${seed}:middle`, {
+        lo: Math.ceil(safeStart + span * 0.38),
+        hi: Math.floor(safeStart + span * 0.52),
+    });
+    if (old === null || middle === null) return null;
+    const adjacent = pickCalendarYearIndependentOfSignal(series, `${seed}:adjacent`, {
+        lo: middle + 8,
+        hi: middle + 12,
+    });
+    const newer = pickCalendarYearIndependentOfSignal(series, `${seed}:newer`, {
+        lo: Math.max(middle + 20, Math.ceil(safeStart + span * 0.72)),
+        hi: safeEnd,
+    });
+    if (adjacent === null || newer === null) return null;
+    if (!(old < middle && middle < adjacent && adjacent < newer)) return null;
+    return { old, middle, newer, adjacent };
+};
+
+/** Measure local crossdating support after a benchmark year has already been selected. */
+export const measureLocalSignalStrength = (
+    series: RwlSeries,
+    master: Map<number, number>,
+    year: number,
+    halfWindow = 15,
+): number | null => windowPearson(
+    series.valuesByYear,
+    master,
+    year - halfWindow,
+    year + halfWindow,
+);
+
+/**
+ * Exploratory oracle picker: deliberately chooses the easiest high-correlation location.
+ *
+ * This can estimate an upper bound when local signal is already known to be strong, but it
+ * systematically overstates arbitrary-year performance. Never use it for formal accuracy,
+ * abstention, false-positive, mixed-event, or holdout reporting.
+ */
+export const pickExploratoryStrongSignalYear = (
     series: RwlSeries,
     master: Map<number, number>,
     bounds?: { lo: number; hi: number },

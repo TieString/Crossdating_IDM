@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "crossdating.current-event.v1.request",
+  "title": "Current-event sidecar request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocolVersion", "requestId", "method"],
+  "properties": {
+    "protocolVersion": {"const": "crossdating.current-event.v1"},
+    "requestId": {"type": "string", "minLength": 1, "maxLength": 128},
+    "method": {
+      "enum": ["health", "describe", "rank_current_event", "shutdown"]
+    },
+    "params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rwlPath", "targetSeriesId"],
+      "properties": {
+        "rwlPath": {"type": "string", "minLength": 1},
+        "targetSeriesId": {"type": "string", "minLength": 1, "maxLength": 64},
+        "existingZeroPolicy": {"enum": ["preserve", "remove"], "default": "preserve"},
+        "confirmedInsertions": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["year"],
+            "properties": {"year": {"type": "integer", "minimum": -12000, "maximum": 3000}}
+          }
+        },
+        "topK": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5},
+        "rangeRadius": {"type": "integer", "minimum": 0, "maximum": 5, "default": 1}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"method": {"const": "rank_current_event"}}},
+      "then": {"required": ["params"]}
+    }
+  ]
+}

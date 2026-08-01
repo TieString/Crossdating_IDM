@@ -1,5 +1,5 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChartZoomWindow, MultiLineChart, colorPalette } from './MultiLineChart.tsx'
+import { ChartZoomWindow, MultiLineChart, colorPalette, type ChartDiagnosisEventRange } from './MultiLineChart.tsx'
 import { FloatingScrollArea } from '@/components/FloatingScrollArea/FloatingScrollArea'
 import {
   buildReferenceSeries,
@@ -7,10 +7,14 @@ import {
   type ReferenceSeriesConfig,
 } from '@/features/crossdating/reference'
 import {
+    applyLocalCrossdatingOption,
+    simulateDiagnosisEventPreview,
   type CrossdatingDiagnosis,
   type DiagnosisBatchApplyResult,
   type DiagnosisCandidateOperation,
+  type LocalCrossdatingSimulation,
   type LocalSimulationApplyRequest,
+  type LocalSimulationOption,
 } from '@/features/crossdating/diagnosis'
 import { RwlSiteData } from '@/features/rwl'
 import type { DeleteMode, DeleteShift, MissingInsertSide } from '@/features/rwl/edit'
@@ -39,6 +43,12 @@ const readStoredPickerHeight = () => {
   return Number.isFinite(parsed) ? clampPickerHeight(parsed) : PICKER_DEFAULT_HEIGHT
 }
 
+const localOptionKey = (option: LocalSimulationOption | null) => (
+  option
+    ? `${option.operationType}:${option.side ?? ''}:${option.shift ?? ''}`
+    : ''
+)
+
 type Props = {
   fullData: RwlSiteData
   variant?: 'panel' | 'expanded'
@@ -64,6 +74,7 @@ function TreeChartManagerBase({
   referenceConfig = null,
   dynamicReferenceConfig = null,
   diagnosis,
+  onApplyLocalSimulation,
   onReferenceConfigChange,
   onResetReferenceToDynamic: _onResetReferenceToDynamic,
   onInsertMissingYearAtSide,
@@ -80,6 +91,9 @@ function TreeChartManagerBase({
   const [showDynamicReference, setShowDynamicReference] = useState(false)
   const [pickerHeight, setPickerHeight] = useState<number>(readStoredPickerHeight)
   const [isResizingPicker, setIsResizingPicker] = useState(false)
+  const [localSimulation, setLocalSimulation] = useState<LocalCrossdatingSimulation | null>(null)
+  const [selectedLocalOption, setSelectedLocalOption] = useState<LocalSimulationOption | null>(null)
+  const [isConfirmingLocalApply, setIsConfirmingLocalApply] = useState(false)
   const pickerHeightRef = useRef(pickerHeight)
 
   useEffect(() => {
@@ -197,6 +211,69 @@ function TreeChartManagerBase({
   ), [isReferenceMode, referenceDraftTrees, selectedTrees])
   const allTreeCodes = useMemo(() => Array.from(fullData.keys()), [fullData])
 
+  const clearLocalSimulation = useCallback(() => {
+    setLocalSimulation(null)
+    setSelectedLocalOption(null)
+    setIsConfirmingLocalApply(false)
+  }, [])
+
+  const handleLinePointClick = useCallback((target: { tree: string; year: number }) => {
+    const sourceYear = target.year - (treeOffsets.get(target.tree) ?? 0)
+    const matchingEvent = diagnosis?.events
+      .filter((event) => (
+        !event.stale
+        && event.seriesId === target.tree
+        && event.eventType !== 'wholeSeriesMove'
+        && sourceYear >= event.startYear
+        && sourceYear <= event.endYear
+      ))
+      .sort((left, right) => {
+        const leftDistance = Math.abs((left.rankedYears[0]?.year ?? sourceYear) - sourceYear)
+        const rightDistance = Math.abs((right.rankedYears[0]?.year ?? sourceYear) - sourceYear)
+        return leftDistance - rightDistance || right.evidence.score - left.evidence.score
+      })[0]
+    if (!matchingEvent) {
+      clearLocalSimulation()
+      return
+    }
+    const simulation = simulateDiagnosisEventPreview(fullData, matchingEvent, {
+      referenceConfig,
+    })
+    if (!simulation) {
+      clearLocalSimulation()
+      return
+    }
+
+    setLocalSimulation({
+      ...simulation,
+      displayYear: simulation.year + (treeOffsets.get(target.tree) ?? 0),
+    })
+    setSelectedLocalOption(simulation.bestOption)
+    setIsConfirmingLocalApply(false)
+  }, [clearLocalSimulation, diagnosis, fullData, referenceConfig, treeOffsets])
+
+  useEffect(() => {
+    if (localSimulation && !visibleTrees.includes(localSimulation.targetTree)) {
+      clearLocalSimulation()
+    }
+  }, [clearLocalSimulation, localSimulation, visibleTrees])
+
+  const localPreviewTreeData = useMemo(() => {
+    if (
+      !localSimulation
+      || !selectedLocalOption
+      || selectedLocalOption.operationType === 'NO_ACTION'
+    ) {
+      return null
+    }
+    const treeData = fullData.get(localSimulation.targetTree)
+    if (!treeData) return null
+    return {
+      tree: localSimulation.targetTree,
+      data: applyLocalCrossdatingOption(treeData, localSimulation, selectedLocalOption),
+    }
+  }, [fullData, localSimulation, selectedLocalOption])
+
   const referenceSeries = useMemo(() => (
     referenceConfig?.mode === 'dynamic' ? null : buildReferenceSeries(fullData, referenceConfig)
   ), [fullData, referenceConfig])
@@ -246,15 +323,26 @@ function TreeChartManagerBase({
     return null
   }, [allTreeCodes.length, referenceConfig, referenceSeries, referenceSummary])
 
-  const diagnosisByTree = useMemo(() => (
-    new Map((diagnosis?.summaries ?? []).map((summary) => [summary.tree, summary]))
-  ), [diagnosis])
+  const diagnosisEventCountByTree = useMemo(() => {
+    const counts = new Map<string, number>()
+    diagnosis?.events.forEach((event) => {
+      if (event.stale) return
+      counts.set(event.seriesId, (counts.get(event.seriesId) ?? 0) + 1)
+    })
+    return counts
+  }, [diagnosis])
+
+  const activeDiagnosisEventCount = useMemo(() => (
+    Array.from(diagnosisEventCountByTree.values()).reduce((sum, count) => sum + count, 0)
+  ), [diagnosisEventCountByTree])
 
   const filteredData = useMemo(() => {
     const nextData = new Map<string, Map<number, number>>()
 
     visibleTrees.forEach(treeCode => {
-      const treeData = fullData.get(treeCode)
+      const treeData = localPreviewTreeData?.tree === treeCode
+        ? localPreviewTreeData.data
+        : fullData.get(treeCode)
       if (treeData) {
         const numericData = new Map<number, number>()
         const yearOffset = treeOffsets.get(treeCode) ?? 0
@@ -274,7 +362,7 @@ function TreeChartManagerBase({
     })
 
     return nextData
-  }, [fullData, treeOffsets, visibleTrees])
+  }, [fullData, localPreviewTreeData, treeOffsets, visibleTrees])
 
   // 收集每条折线中插入的缺失年轮（0 值）所在年份。这些 0 值被 filteredData 过滤掉，
   // 在折线上表现为断点，交给图表用绿色竖线标记。
@@ -282,7 +370,9 @@ function TreeChartManagerBase({
     const result = new Map<string, number[]>()
 
     visibleTrees.forEach(treeCode => {
-      const treeData = fullData.get(treeCode)
+      const treeData = localPreviewTreeData?.tree === treeCode
+        ? localPreviewTreeData.data
+        : fullData.get(treeCode)
       if (!treeData) return
       const yearOffset = treeOffsets.get(treeCode) ?? 0
       const years: number[] = []
@@ -295,7 +385,27 @@ function TreeChartManagerBase({
     })
 
     return result
-  }, [fullData, treeOffsets, visibleTrees])
+  }, [fullData, localPreviewTreeData, treeOffsets, visibleTrees])
+
+  const diagnosisEventRanges = useMemo<ChartDiagnosisEventRange[]>(() => (
+    (diagnosis?.events ?? []).flatMap((event) => {
+      if (
+        event.stale
+        || event.eventType === 'wholeSeriesMove'
+        || !visibleTrees.includes(event.seriesId)
+      ) {
+        return []
+      }
+      const yearOffset = treeOffsets.get(event.seriesId) ?? 0
+      return [{
+        id: event.id,
+        tree: event.seriesId,
+        eventType: event.eventType,
+        startYear: event.startYear + yearOffset,
+        endYear: event.endYear + yearOffset,
+      }]
+    })
+  ), [diagnosis, treeOffsets, visibleTrees])
 
   const filteredTreeCodes = useMemo(() =>
     search.trim() === '' ? allTreeCodes : allTreeCodes.filter(c => c.toLowerCase().includes(search.toLowerCase())),
@@ -327,17 +437,14 @@ function TreeChartManagerBase({
   }, [activeSelection, fullData])
 
   const selectedDiagnosisStats = useMemo(() => {
-    let flaggedSegmentCount = 0
-    let candidateCount = 0
+    let eventCount = 0
 
     activeSelection.forEach((treeCode) => {
-      const summary = diagnosisByTree.get(treeCode)
-      flaggedSegmentCount += summary?.flaggedSegmentCount ?? 0
-      candidateCount += summary?.candidateCount ?? 0
+      eventCount += diagnosisEventCountByTree.get(treeCode) ?? 0
     })
 
-    return { flaggedSegmentCount, candidateCount }
-  }, [activeSelection, diagnosisByTree])
+    return { eventCount }
+  }, [activeSelection, diagnosisEventCountByTree])
 
   const selectLongestTrees = useCallback(() => {
     const longest = allTreeCodes
@@ -418,25 +525,225 @@ function TreeChartManagerBase({
     ...btnBase, background: '#f4f4f4', color: '#c0c0c0', cursor: 'default', border: '1px solid #e4e4e4',
   }
 
+  const matchingLocalEvent = localSimulation
+    ? diagnosis?.events.find((event) => (
+      !event.stale
+      && event.seriesId === localSimulation.targetTree
+      && (localSimulation.sourceEventId
+        ? event.id === localSimulation.sourceEventId
+        : localSimulation.year >= event.startYear
+          && localSimulation.year <= event.endYear)
+    ))
+    : undefined
+  const localYearStatus = !matchingLocalEvent
+    ? '诊断事件'
+    : matchingLocalEvent.rankedYears[0]?.year === localSimulation?.year
+      ? matchingLocalEvent.eventType === 'partialMove' ? '首选断点' : '首选年份'
+      : '位于诊断窗口'
+  const selectedOptionIsRecommended = !!selectedLocalOption
+    && localSimulation?.bestOption.operationType !== 'NO_ACTION'
+    && localOptionKey(selectedLocalOption) === localOptionKey(localSimulation?.bestOption ?? null)
+  const formatLocalCorrelation = (value: number | null) => (
+    value === null ? '-' : value.toFixed(2)
+  )
+  const localApplyDescription = localSimulation && selectedLocalOption
+    ? selectedLocalOption.operationType === 'INSERT_MISSING_RING'
+      ? `${localSimulation.year} 年插入缺轮，较老侧左移 1 年`
+      : selectedLocalOption.operationType === 'DELETE_FALSE_RING'
+        ? `${localSimulation.year} 年删除伪轮，较老侧右移 1 年`
+        : selectedLocalOption.operationType === 'SHIFT_RANGE'
+          ? `${localSimulation.selectedStartYear}-${localSimulation.selectedEndYear} 年移动 ${selectedLocalOption.shift && selectedLocalOption.shift > 0 ? '+' : ''}${selectedLocalOption.shift ?? 0} 年`
+          : '保持原状'
+    : ''
+
+  const applySelectedLocalSimulation = () => {
+    if (
+      !localSimulation
+      || !selectedLocalOption
+      || selectedLocalOption.operationType === 'NO_ACTION'
+      || !onApplyLocalSimulation
+    ) {
+      return
+    }
+    onApplyLocalSimulation({
+      simulation: localSimulation,
+      option: selectedLocalOption,
+    })
+    clearLocalSimulation()
+  }
 
   const chartNode = filteredData.size > 0 || referenceSeries || (showDynamicReference && dynamicReferenceSeries) ? (
-    <MultiLineChart
-      data={filteredData}
-      missingRingYears={missingRingYears}
-      sampleSizeData={fullData}
-      referenceSeries={referenceSeries}
-      dynamicReferenceSeries={dynamicReferenceSeries}
-      showDynamicReference={showDynamicReference}
-      showPersistentTooltip={showPersistentTooltip}
-      highlightedTreeCode={highlightedTreeCode}
-      onHighlightedTreeCodeChange={setHighlightedTreeCode}
-      zoomWindow={zoomWindow}
-      onZoomWindowChange={setZoomWindow}
-      onShiftHighlightedTree={shiftHighlightedTree}
-      onInsertMissingYearAtSide={onInsertMissingYearAtSide}
-      onDeleteYearWithMode={onDeleteYearWithMode}
-      onDeleteSeries={onDeleteSeries}
-    />
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      minWidth: 0,
+      minHeight: 0,
+      height: '100%',
+      fontFamily: 'Segoe UI, system-ui, sans-serif',
+    }}>
+      <div
+        role="toolbar"
+        aria-label="建议预览"
+        style={{
+          flex: '0 0 auto',
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 6,
+          minHeight: 31,
+          padding: '4px 7px',
+          borderBottom: '1px solid #e5e7eb',
+          background: localSimulation ? '#f7faf8' : '#fafafa',
+          color: '#374151',
+          fontSize: 11,
+          lineHeight: 1.3,
+        }}
+      >
+        <strong style={{ color: '#24352a', fontSize: 12 }}>建议预览</strong>
+        {!localSimulation || !selectedLocalOption ? (
+          <span style={{ color: '#7b8490' }}>未预览建议</span>
+        ) : (
+          <>
+            <span style={{ fontWeight: 650 }}>
+              {localSimulation.targetTree} · {localSimulation.displayYear}
+            </span>
+            <span
+              title={matchingLocalEvent
+                ? `当前年份位于 ${matchingLocalEvent.startYear}-${matchingLocalEvent.endYear} 诊断窗口`
+                : '当前预览未关联有效诊断事件'}
+              style={{
+                padding: '1px 6px',
+                border: '1px solid #cbd5cf',
+                borderRadius: 8,
+                background: '#fff',
+                color: matchingLocalEvent ? '#315d36' : '#697386',
+                fontWeight: 650,
+              }}
+            >
+              {localYearStatus}
+            </span>
+            <span
+              title={selectedLocalOption.reason}
+              style={{
+                padding: '2px 7px',
+                border: '1px solid #397342',
+                borderRadius: 5,
+                background: '#dcefdc',
+                color: '#244d2b',
+                fontWeight: 700,
+              }}
+            >
+              {selectedLocalOption.label}
+            </span>
+            {matchingLocalEvent ? (
+              <span
+                title={`证据分 ${matchingLocalEvent.evidence.score.toFixed(3)}；来源 ${matchingLocalEvent.evidence.algorithmSources.join('、') || '-'}`}
+                style={{ color: '#45694a', fontWeight: 650 }}
+              >
+                置信 {matchingLocalEvent.confidenceLevel === 'high'
+                  ? '高'
+                  : matchingLocalEvent.confidenceLevel === 'medium'
+                    ? '中'
+                    : '低'}
+              </span>
+            ) : null}
+            <span
+              title="相关性变化是最终事件的反事实预览证据，不是正确概率"
+              style={{ color: selectedOptionIsRecommended ? '#315d36' : '#667084' }}
+            >
+              r {formatLocalCorrelation(selectedLocalOption.currentCorrelation)}
+              {' → '}
+              {formatLocalCorrelation(selectedLocalOption.simulatedCorrelation)}
+              {selectedLocalOption.delta === null
+                ? ''
+                : ` (${selectedLocalOption.delta >= 0 ? '+' : ''}${selectedLocalOption.delta.toFixed(2)})`}
+            </span>
+            {localSimulation.bestOption.operationType === 'NO_ACTION' ? (
+              <span style={{ color: '#8a5a21' }}>算法未发现明确改善</span>
+            ) : null}
+            <span style={{ flex: '1 1 auto' }} />
+            {isConfirmingLocalApply ? (
+              <>
+                <span style={{ color: '#7a2e0e', fontWeight: 650 }}>{localApplyDescription}</span>
+                <button
+                  type="button"
+                  onClick={() => setIsConfirmingLocalApply(false)}
+                  style={{ ...btnBase, padding: '2px 8px', fontSize: 11 }}
+                >
+                  返回
+                </button>
+                <button
+                  type="button"
+                  onClick={applySelectedLocalSimulation}
+                  style={{
+                    ...btnBase,
+                    padding: '2px 8px',
+                    fontSize: 11,
+                    borderColor: '#397342',
+                    background: '#397342',
+                    color: '#fff',
+                    fontWeight: 700,
+                  }}
+                >
+                  确认应用
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={clearLocalSimulation}
+                  style={{ ...btnBase, padding: '2px 8px', fontSize: 11 }}
+                >
+                  取消预览
+                </button>
+                <button
+                  type="button"
+                  disabled={!onApplyLocalSimulation || selectedLocalOption.operationType === 'NO_ACTION'}
+                  onClick={() => setIsConfirmingLocalApply(true)}
+                  style={!onApplyLocalSimulation || selectedLocalOption.operationType === 'NO_ACTION'
+                    ? { ...btnDisabled, padding: '2px 8px', fontSize: 11 }
+                    : {
+                      ...btnBase,
+                      padding: '2px 8px',
+                      fontSize: 11,
+                      borderColor: '#397342',
+                      color: '#315d36',
+                      fontWeight: 700,
+                    }}
+                >
+                  应用
+                </button>
+              </>
+            )}
+          </>
+        )}
+      </div>
+      <div style={{ flex: '1 1 auto', minHeight: 0 }}>
+        <MultiLineChart
+          data={filteredData}
+          diagnosisEventRanges={diagnosisEventRanges}
+          missingRingYears={missingRingYears}
+          sampleSizeData={fullData}
+          referenceSeries={referenceSeries}
+          dynamicReferenceSeries={dynamicReferenceSeries}
+          showDynamicReference={showDynamicReference}
+          showPersistentTooltip={showPersistentTooltip}
+          hoverSimulation={localSimulation && selectedLocalOption
+            ? { ...localSimulation, bestOption: selectedLocalOption }
+            : localSimulation}
+          highlightedTreeCode={highlightedTreeCode}
+          onHighlightedTreeCodeChange={setHighlightedTreeCode}
+          onLinePointClick={handleLinePointClick}
+          zoomWindow={zoomWindow}
+          onZoomWindowChange={setZoomWindow}
+          onShiftHighlightedTree={shiftHighlightedTree}
+          onInsertMissingYearAtSide={onInsertMissingYearAtSide}
+          onDeleteYearWithMode={onDeleteYearWithMode}
+          onDeleteSeries={onDeleteSeries}
+        />
+      </div>
+    </div>
   ) : (
     <div style={{
       height: '100%',
@@ -512,36 +819,19 @@ function TreeChartManagerBase({
         </span>
         {diagnosis ? (
           <span
-            title="内部轻量诊断：problem segments / candidates"
+            title="最新 JS 事件级诊断的有效复核窗口数"
             style={{
               fontSize: 11,
-              color: diagnosis.problemSegmentCount > 0 ? '#7a2e0e' : '#236344',
-              background: diagnosis.problemSegmentCount > 0 ? '#fff3e4' : '#e9f6ef',
-              border: `1px solid ${diagnosis.problemSegmentCount > 0 ? '#f2c79a' : '#b7dec7'}`,
+              color: activeDiagnosisEventCount > 0 ? '#7a2e0e' : '#236344',
+              background: activeDiagnosisEventCount > 0 ? '#fff3e4' : '#e9f6ef',
+              border: `1px solid ${activeDiagnosisEventCount > 0 ? '#f2c79a' : '#b7dec7'}`,
               borderRadius: 10,
               padding: '1px 8px',
               fontWeight: 600,
               whiteSpace: 'nowrap',
             }}
           >
-            诊断 {diagnosis.problemSegmentCount} / {diagnosis.candidateCount}
-          </span>
-        ) : null}
-        {diagnosis && diagnosis.masterNarrowYears.length > 0 ? (
-          <span
-            title={diagnosis.masterNarrowYears.slice(0, 12).map((item) => `${item.year} (${item.masterValue.toFixed(2)}, n=${item.sampleDepth})`).join(' · ')}
-            style={{
-              fontSize: 11,
-              color: '#244a63',
-              background: '#eef7fc',
-              border: '1px solid #c9dfeb',
-              borderRadius: 10,
-              padding: '1px 8px',
-              fontWeight: 600,
-              whiteSpace: 'nowrap',
-            }}
-          >
-            窄年 {diagnosis.masterNarrowYears.length}
+            事件 {activeDiagnosisEventCount}
           </span>
         ) : null}
       </div>
@@ -649,8 +939,7 @@ function TreeChartManagerBase({
           <span>跨度 {selectedStats.yearSpan}</span>
           <span>匹配 {filteredTreeCodes.length}</span>
           <span>偏移 {treeOffsets.size}</span>
-          <span>问题段 {selectedDiagnosisStats.flaggedSegmentCount}</span>
-          <span>候选 {selectedDiagnosisStats.candidateCount}</span>
+          <span>事件窗口 {selectedDiagnosisStats.eventCount}</span>
         </div>
       ) : null}
 
@@ -678,7 +967,7 @@ function TreeChartManagerBase({
             const referenceChecked = referenceDraftTrees.includes(treeCode)
             const activeChecked = isReferenceMode ? referenceChecked : checked
             const isReferenceSource = referenceSourceSet.has(treeCode)
-            const diagnosisSummary = diagnosisByTree.get(treeCode)
+            const diagnosisEventCount = diagnosisEventCountByTree.get(treeCode) ?? 0
             const seriesColor = seriesColorMap.get(treeCode)
             return (
               <button
@@ -697,9 +986,9 @@ function TreeChartManagerBase({
                 }}
               >
                 {treeCode}
-                {diagnosisSummary && diagnosisSummary.flaggedSegmentCount > 0 ? (
+                {diagnosisEventCount > 0 ? (
                   <span
-                    title={`${diagnosisSummary.flaggedSegmentCount} 个诊断问题段`}
+                    title={`${diagnosisEventCount} 个事件级诊断窗口`}
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
@@ -716,7 +1005,7 @@ function TreeChartManagerBase({
                       lineHeight: 1,
                     }}
                   >
-                    !{diagnosisSummary.flaggedSegmentCount}
+                    E{diagnosisEventCount}
                   </span>
                 ) : null}
                 {activeChecked && (

@@ -3,14 +3,19 @@
  * 调整窗口、阈值或评分权重时，优先改这里，再考虑算法实现。
  */
 import type { DiagnosisOptions, EffectiveDiagnosisConfig } from "./types";
+import {
+    DEFAULT_MAX_PARTIAL_GAP_YEARS,
+    getEffectiveMaxPartialGapYears,
+} from "./partialMoveSemantics";
 
 export const CrossdateConfig = {
     windowLength: 50,
     overlap: 25,
     fineWindowLength: 30,
     fineOverlap: 15,
-    lagMin: -10,
+    lagMin: -DEFAULT_MAX_PARTIAL_GAP_YEARS,
     lagMax: 10,
+    maxPartialGapYears: DEFAULT_MAX_PARTIAL_GAP_YEARS,
     lowCorrelationThreshold: 0.32,
     bestLagImprovementThreshold: 0.08,
     narrowYearThreshold: -1.0,
@@ -175,6 +180,8 @@ export const getConfig = (options: DiagnosisOptions): EffectiveDiagnosisConfig =
     const overlap = Math.max(0, Math.min(segmentLength - 1, Math.floor(options.overlap ?? CrossdateConfig.overlap)));
     const fineWindowLength = Math.max(10, Math.floor(options.fineWindowLength ?? CrossdateConfig.fineWindowLength));
     const fineOverlap = Math.max(0, Math.min(fineWindowLength - 1, Math.floor(options.fineOverlap ?? CrossdateConfig.fineOverlap)));
+    const lagMin = Math.floor(options.lagMin ?? CrossdateConfig.lagMin);
+    const lagMax = Math.floor(options.lagMax ?? CrossdateConfig.lagMax);
 
     return {
         referenceConfig: options.referenceConfig ?? null,
@@ -182,8 +189,12 @@ export const getConfig = (options: DiagnosisOptions): EffectiveDiagnosisConfig =
         overlap,
         fineWindowLength,
         fineOverlap,
-        lagMin: Math.floor(options.lagMin ?? CrossdateConfig.lagMin),
-        lagMax: Math.floor(options.lagMax ?? CrossdateConfig.lagMax),
+        lagMin,
+        lagMax,
+        maxPartialGapYears: getEffectiveMaxPartialGapYears({
+            maxPartialGapYears: options.maxPartialGapYears ?? CrossdateConfig.maxPartialGapYears,
+            lagMin,
+        }),
         lowCorrelationThreshold: options.lowCorrelationThreshold ?? CrossdateConfig.lowCorrelationThreshold,
         lagImprovementThreshold: options.lagImprovementThreshold ?? CrossdateConfig.bestLagImprovementThreshold,
         narrowYearThreshold: options.narrowYearThreshold ?? CrossdateConfig.narrowYearThreshold,

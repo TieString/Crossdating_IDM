@@ -9,6 +9,7 @@ import type {
     DiagnosisBatchSelection,
     DiagnosisCandidateOperation,
     DiagnosisConfidence,
+    DiagnosisEvent,
 } from "./types";
 
 export const uniqueAlgorithmSources = (
@@ -175,6 +176,12 @@ export const markCandidatesStale = (
     candidates: DiagnosisCandidateOperation[],
 ): DiagnosisCandidateOperation[] => (
     candidates.map((candidate) => ({ ...candidate, status: "stale" as const }))
+);
+
+export const markDiagnosisEventsStale = (
+    events: DiagnosisEvent[],
+): DiagnosisEvent[] => (
+    events.map((event) => ({ ...event, stale: true }))
 );
 
 export const selectSafeDiagnosisCandidateBatch = (

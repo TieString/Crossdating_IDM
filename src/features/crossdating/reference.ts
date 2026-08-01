@@ -245,6 +245,69 @@ const applyCubicSmoothingSplineMatrix = (length: number, lambda: number, vector:
     return result;
 };
 
+/**
+ * Solves `(I + lambda * D'D) trend = values` in O(n). `D'D` is symmetric
+ * pentadiagonal, so a bandwidth-two Cholesky factor is sufficient and avoids
+ * repeating full-array conjugate-gradient passes for every reference core.
+ */
+const solveCubicSmoothingSplineBanded = (
+    values: readonly number[],
+    lambda: number,
+): number[] | null => {
+    const length = values.length;
+    const diagonal = new Array<number>(length).fill(1);
+    const lowerOne = new Array<number>(length).fill(0);
+    const lowerTwo = new Array<number>(length).fill(0);
+
+    for (let index = 0; index <= length - 3; index += 1) {
+        diagonal[index] += lambda;
+        diagonal[index + 1] += 4 * lambda;
+        diagonal[index + 2] += lambda;
+        lowerOne[index + 1] -= 2 * lambda;
+        lowerOne[index + 2] -= 2 * lambda;
+        lowerTwo[index + 2] += lambda;
+    }
+
+    const factorDiagonal = new Array<number>(length).fill(0);
+    const factorLowerOne = new Array<number>(length).fill(0);
+    const factorLowerTwo = new Array<number>(length).fill(0);
+    for (let row = 0; row < length; row += 1) {
+        if (row >= 2) {
+            factorLowerTwo[row] = lowerTwo[row] / factorDiagonal[row - 2];
+        }
+        if (row >= 1) {
+            const overlap = row >= 2
+                ? factorLowerTwo[row] * factorLowerOne[row - 1]
+                : 0;
+            factorLowerOne[row] = (lowerOne[row] - overlap) / factorDiagonal[row - 1];
+        }
+        const pivot = diagonal[row]
+            - factorLowerOne[row] ** 2
+            - factorLowerTwo[row] ** 2;
+        if (!Number.isFinite(pivot) || pivot <= 1e-18) return null;
+        factorDiagonal[row] = Math.sqrt(pivot);
+    }
+
+    const forward = new Array<number>(length).fill(0);
+    for (let row = 0; row < length; row += 1) {
+        forward[row] = (
+            values[row]
+            - (row >= 1 ? factorLowerOne[row] * forward[row - 1] : 0)
+            - (row >= 2 ? factorLowerTwo[row] * forward[row - 2] : 0)
+        ) / factorDiagonal[row];
+    }
+
+    const result = new Array<number>(length).fill(0);
+    for (let row = length - 1; row >= 0; row -= 1) {
+        result[row] = (
+            forward[row]
+            - (row + 1 < length ? factorLowerOne[row + 1] * result[row + 1] : 0)
+            - (row + 2 < length ? factorLowerTwo[row + 2] * result[row + 2] : 0)
+        ) / factorDiagonal[row];
+    }
+    return result;
+};
+
 const solveCubicSmoothingSplineTrend = (
     values: readonly number[],
     options: CofechaReferenceOptions,
@@ -257,6 +320,13 @@ const solveCubicSmoothingSplineTrend = (
         options.splineRigidityYears,
         options.splineFrequencyResponse,
     );
+    const bandedSolution = solveCubicSmoothingSplineBanded(values, lambda);
+    if (bandedSolution) {
+        return bandedSolution.map((value) => Math.max(1e-6, value));
+    }
+
+    // The matrix is positive definite for valid options, so this is only a
+    // defensive fallback for unexpected numerical input.
     const maxIterations = Math.max(40, Math.min(2500, values.length * 8));
     const tolerance = 1e-10 * Math.max(1, varianceAroundZero(values));
 

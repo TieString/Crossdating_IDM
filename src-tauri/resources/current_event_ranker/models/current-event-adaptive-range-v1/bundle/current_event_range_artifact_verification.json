@@ -1,0 +1,21 @@
+{
+  "all_checks_passed": true,
+  "artifact": "D:\\Code\\Crossdating_py_eventrange\\artifacts\\reports\\current_event_single_range_w15_final_diagnostic\\current_event_range_localizer_diagnostic.joblib",
+  "artifact_sha256": "e88d58904901cb88ac12aaaa6322acc86db2cf2a2ff478e485d86b809f9dec3e",
+  "checks": {
+    "deterministic_prediction": true,
+    "diagnostic_only": true,
+    "feature_schema_match": true,
+    "group_set_match": true,
+    "prediction_match": true,
+    "range_width_at_most_15": true
+  },
+  "deterministic_max_abs_delta": 0.0,
+  "extra_groups": [],
+  "feature_count": 70,
+  "groups": 831,
+  "max_width": 15,
+  "method": "profile_plus_center_softmax_blend_75",
+  "mismatches": [],
+  "missing_groups": []
+}

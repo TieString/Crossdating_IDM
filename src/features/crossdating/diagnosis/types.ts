@@ -6,6 +6,71 @@ import type { ReferenceSeriesConfig } from "../reference";
 import type { DeleteShift, MissingInsertSide } from "@/features/rwl/edit";
 
 export type DiagnosisConfidence = "high" | "medium" | "low";
+
+export type DiagnosisEventType =
+    | "missingRing"
+    | "falseRing"
+    | "partialMove"
+    | "wholeSeriesMove";
+
+export type DiagnosisEventShiftSide = "older" | "newer";
+
+export type DiagnosisRankedYear = {
+    year: number;
+    rank: number;
+    score: number;
+    evidenceTags: string[];
+};
+
+export type DiagnosisEventEvidence = {
+    algorithmSources: string[];
+    score: number;
+    scoreMargin: number;
+    baselineCorrelation: number | null;
+    correctedCorrelation: number | null;
+    correlationGain: number | null;
+    lagBefore: number | null;
+    lagAfter: number | null;
+    samplePairs: number;
+    candidateIds: string[];
+    notes: string[];
+};
+
+export type DiagnosisEventLocationAlternative = {
+    rank: number;
+    startYear: number;
+    endYear: number;
+    reviewCoreRange?: { startYear: number; endYear: number };
+    rankedYears: DiagnosisRankedYear[];
+    evidenceScore: number;
+    scoreMargin: number;
+    algorithmSource: string;
+    shiftYears?: number;
+    shiftSide?: DiagnosisEventShiftSide;
+};
+
+/**
+ * 人工复核事件。用户选定窗口内年份并确认后，事件会转换成受约束的 RWL 编辑；
+ * whole-series 事件仍必须复用通过 before/after hard gate 的原始 candidate。
+ */
+export type DiagnosisEvent = {
+    id: string;
+    seriesId: string;
+    eventType: DiagnosisEventType;
+    startYear: number;
+    endYear: number;
+    reviewCoreRange?: { startYear: number; endYear: number };
+    rankedYears: DiagnosisRankedYear[];
+    confidenceLevel: DiagnosisConfidence;
+    evidence: DiagnosisEventEvidence;
+    alternativeTypes: DiagnosisEventType[];
+    locationAlternatives?: DiagnosisEventLocationAlternative[];
+    operationAlternatives?: DiagnosisEvent[];
+    shiftYears?: number;
+    shiftSide?: DiagnosisEventShiftSide;
+    seriesRange?: YearRange;
+    stale?: boolean;
+};
 export type CandidateRankingConfidence = DiagnosisConfidence | "ambiguous";
 
 export type DiagnosisCandidateOperationType =
@@ -32,6 +97,8 @@ export type CandidateAlgorithmSource =
     | "bayesian_lag_path"
     | "cofecha_segment_lag"
     | "ar_prewhiten_recall"
+    | "piecewise_lag_path"
+    | "dense_lag_profile"
     | "candidate_ranking";
 
 export type CandidateStrength = "strong" | "weak" | "rejected";
@@ -343,6 +410,7 @@ export type SeriesDiagnosisSummary = {
     meanCorrelation: number | null;
     worstCorrelation: number | null;
     candidateCount: number;
+    eventCount: number;
     propagationPatternCount: number;
 };
 
@@ -359,6 +427,7 @@ export type CrossdatingDiagnosis = {
     seriesCount: number;
     problemSegmentCount: number;
     candidateCount: number;
+    eventCount: number;
     segmentLength: number;
     overlap: number;
     lagRange: { min: number; max: number };
@@ -368,6 +437,7 @@ export type CrossdatingDiagnosis = {
     propagationPatterns: PropagationPattern[];
     globalSlidingMatches: GlobalSlidingMatch[];
     masterNarrowYears: ScoringMasterYear[];
+    events: DiagnosisEvent[];
     candidates: DiagnosisCandidateOperation[];
 };
 
@@ -386,12 +456,22 @@ export type LocalSimulationOption = {
     confidence: DiagnosisConfidence;
     side?: MissingInsertSide | DeleteShift;
     shift?: number;
+    /** Fixed-side destination years that would be overwritten by this manual move. */
+    conflictYears?: number[];
     reason: string;
 };
 
 export type LocalCrossdatingSimulation = {
     targetTree: string;
+    /** Final automatic event represented by this preview. */
+    sourceEventId?: string;
+    /** Calendar year in the underlying RWL data. */
     year: number;
+    /** Calendar year shown in the chart after any temporary whole-series visual offset. */
+    displayYear: number;
+    /** Exact range that preview and apply will move for SHIFT_RANGE. */
+    selectedStartYear: number;
+    selectedEndYear: number;
     segmentStartYear: number;
     segmentEndYear: number;
     samplePairs: number;
@@ -407,12 +487,16 @@ export type LocalSimulationApplyRequest = {
 
 export type DiagnosisOptions = {
     referenceConfig?: ReferenceSeriesConfig | null;
+    /** Restrict expensive diagnosis to these targets; all other series remain available as references. */
+    targetTrees?: readonly string[];
     segmentLength?: number;
     overlap?: number;
     fineWindowLength?: number;
     fineOverlap?: number;
     lagMin?: number;
     lagMax?: number;
+    /** Largest contiguous unmeasured block considered by automatic partial-move diagnosis. */
+    maxPartialGapYears?: number;
     lowCorrelationThreshold?: number;
     lagImprovementThreshold?: number;
     narrowYearThreshold?: number;
@@ -430,7 +514,7 @@ export type DiagnosisOptions = {
 
 export type NumericSeries = Map<number, number>;
 
-export type EffectiveDiagnosisConfig = Required<Omit<DiagnosisOptions, "referenceConfig" | "cofechaText">> & {
+export type EffectiveDiagnosisConfig = Required<Omit<DiagnosisOptions, "referenceConfig" | "cofechaText" | "targetTrees">> & {
     referenceConfig: ReferenceSeriesConfig | null;
     minPairsForCorrelation: number;
 };

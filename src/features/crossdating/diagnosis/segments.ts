@@ -14,6 +14,7 @@ import {
     preprocessSeries,
     tLikeFromR,
     toNumericSeries,
+    type SeriesPreprocessCache,
 } from "./series";
 import type {
     EffectiveDiagnosisConfig,
@@ -24,6 +25,7 @@ import type {
     SegmentDiagnosis,
     SeriesCoreDiagnosis,
     SeriesDiagnosisSummary,
+    ScoringMaster,
     YearRange,
 } from "./types";
 import type { RwlSiteData } from "@/features/rwl/types";
@@ -232,12 +234,20 @@ export const diagnoseSeriesCore = (
     targetTree: string,
     config: EffectiveDiagnosisConfig,
     preprocess: (series: NumericSeries) => NumericSeries = preprocessSeries,
+    preprocessCache?: SeriesPreprocessCache,
+    masterOverride?: ScoringMaster,
 ): SeriesCoreDiagnosis | null => {
     const rawTarget = toNumericSeries(siteData.get(targetTree));
     const targetRange = getRangeForSeries(rawTarget);
     if (!targetRange) return null;
 
-    const master = buildScoringMaster(siteData, targetTree, config.referenceConfig, preprocess);
+    const master = masterOverride ?? buildScoringMaster(
+        siteData,
+        targetTree,
+        config.referenceConfig,
+        preprocess,
+        preprocessCache,
+    );
     if (master.data.size === 0) return null;
 
     const target = preprocess(rawTarget);
@@ -268,6 +278,7 @@ export const diagnoseSeriesCore = (
 export const createSeriesSummary = (
     diagnosis: SeriesCoreDiagnosis,
     candidateCount: number,
+    eventCount: number = 0,
 ): SeriesDiagnosisSummary => {
     const validCorrelations = diagnosis.segments
         .map((segment) => segment.r0)
@@ -294,6 +305,7 @@ export const createSeriesSummary = (
             : null,
         worstCorrelation: validCorrelations.length ? Math.min(...validCorrelations) : null,
         candidateCount,
+        eventCount,
         propagationPatternCount: diagnosis.propagationPatterns.length,
     };
 };

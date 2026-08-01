@@ -7,6 +7,11 @@ import type { RwlSiteData, RwlTreeData } from "@/features/rwl/types";
 import { stopMarker } from "@/shared/constants";
 import type { EffectiveDiagnosisConfig, NumericSeries, ScoringMaster, ScoringMasterYear, YearRange } from "./types";
 
+export type SeriesPreprocess = (series: NumericSeries) => NumericSeries;
+export type SeriesPreprocessCache = Map<SeriesPreprocess, WeakMap<RwlTreeData, NumericSeries>>;
+
+export const createSeriesPreprocessCache = (): SeriesPreprocessCache => new Map();
+
 const isUsableWidth = (value: number | null | undefined): value is number => (
     typeof value === "number"
     && Number.isFinite(value)
@@ -40,6 +45,25 @@ const zScoreSeries = (series: NumericSeries): NumericSeries => {
 };
 
 export const preprocessSeries = (series: NumericSeries): NumericSeries => zScoreSeries(series);
+
+const preprocessTree = (
+    treeData: RwlTreeData | undefined,
+    preprocess: SeriesPreprocess,
+    cache: SeriesPreprocessCache | undefined,
+): NumericSeries => {
+    if (!treeData) return new Map();
+    if (!cache) return preprocess(toNumericSeries(treeData));
+    let byTree = cache.get(preprocess);
+    if (!byTree) {
+        byTree = new WeakMap();
+        cache.set(preprocess, byTree);
+    }
+    const existing = byTree.get(treeData);
+    if (existing) return existing;
+    const result = preprocess(toNumericSeries(treeData));
+    byTree.set(treeData, result);
+    return result;
+};
 
 /**
  * AR(1) 预白化（COFECHA 标准做法之一）：拟合 lag-1 自相关系数 phi，取残差 v[t]-phi*v[t-1] 再 z-score。
@@ -190,19 +214,48 @@ export const correlationForSegment = (
     lag: number,
     minPairs: number,
 ) => {
-    const pairs: Array<[number, number]> = [];
+    let samplePairs = 0;
+    let targetSum = 0;
+    let masterSum = 0;
 
     for (let year = startYear; year <= endYear; year += 1) {
         const targetValue = target.get(year);
         const masterValue = master.get(year + lag);
         if (targetValue !== undefined && masterValue !== undefined) {
-            pairs.push([targetValue, masterValue]);
+            samplePairs += 1;
+            targetSum += targetValue;
+            masterSum += masterValue;
         }
     }
 
+    if (samplePairs < minPairs) {
+        return { correlation: null, samplePairs };
+    }
+
+    const targetMean = targetSum / samplePairs;
+    const masterMean = masterSum / samplePairs;
+    let numerator = 0;
+    let targetDenominator = 0;
+    let masterDenominator = 0;
+    for (let year = startYear; year <= endYear; year += 1) {
+        const targetValue = target.get(year);
+        const masterValue = master.get(year + lag);
+        if (targetValue === undefined || masterValue === undefined) continue;
+        const targetDelta = targetValue - targetMean;
+        const masterDelta = masterValue - masterMean;
+        numerator += targetDelta * masterDelta;
+        targetDenominator += targetDelta * targetDelta;
+        masterDenominator += masterDelta * masterDelta;
+    }
+
+    const denominator = Math.sqrt(targetDenominator * masterDenominator);
+    const correlation = Number.isFinite(denominator) && denominator !== 0
+        ? numerator / denominator
+        : null;
+
     return {
-        correlation: pearson(pairs, minPairs),
-        samplePairs: pairs.length,
+        correlation,
+        samplePairs,
     };
 };
 
@@ -259,7 +312,8 @@ export const buildScoringMaster = (
     siteData: RwlSiteData,
     targetTree: string | null,
     referenceConfig: ReferenceSeriesConfig | null,
-    preprocess: (series: NumericSeries) => NumericSeries = preprocessSeries,
+    preprocess: SeriesPreprocess = preprocessSeries,
+    preprocessCache?: SeriesPreprocessCache,
 ): ScoringMaster => {
     if (referenceConfig?.mode === "dynamic" && referenceConfig.cofechaPassReference) {
         const data = new Map<number, number>();
@@ -279,19 +333,28 @@ export const buildScoringMaster = (
 
     const sourceTrees = getReferenceSourceTrees(siteData, targetTree, referenceConfig);
 
-    // 相关性加权 chronology：每条参考按其与 target 的整体相关度加权（高相关，如同株姊妹岩芯，
-    // 权重更大；低相关树降权）。这是标准树轮做法，能降低生物学噪声、锐化定位信号。
+    // 相关性加权 chronology：参考质量允许一个很小的整体 lag。目标中一旦存在缺轮或局部
+    // 移动，固定 lag=0 会把真正相关的参考降权，恰好削弱待检测事件附近的 master。
+    // 权重只用于选择参考质量；chronology 本身仍严格按原日历年聚合，不会被整体平移。
     // targetTree 为空（如可视化窄轮）时退回等权平均。
-    const targetZ = targetTree ? preprocess(toNumericSeries(siteData.get(targetTree))) : null;
+    const targetZ = targetTree
+        ? preprocessTree(siteData.get(targetTree), preprocess, preprocessCache)
+        : null;
     const refWeight = (refZ: NumericSeries): number => {
         if (!targetZ) return 1;
-        const pairs: Array<[number, number]> = [];
-        targetZ.forEach((v, y) => { const rv = refZ.get(y); if (rv !== undefined) pairs.push([v, rv]); });
-        const r = pearson(pairs, 20);
-        if (r === null) return 0.1; // 重叠不足：保留较小权重
+        let bestR: number | null = null;
+        for (let lag = -3; lag <= 3; lag += 1) {
+            const pairs: Array<[number, number]> = [];
+            targetZ.forEach((value, year) => {
+                const referenceValue = refZ.get(year + lag);
+                if (referenceValue !== undefined) pairs.push([value, referenceValue]);
+            });
+            const r = pearson(pairs, 20);
+            if (r !== null && (bestR === null || r > bestR)) bestR = r;
+        }
+        if (bestR === null) return 0.1; // 重叠不足：保留较小权重
         // 温和线性加权：高相关树（同株姊妹岩芯）权重大，低相关树降权但不至于消失。
-        // 实测此为最佳平衡（伪轮 top1 0.33→0.50、整条移动→1.00、缺轮保持，clean 仍 0）。
-        return Math.max(0, r) + 0.15;
+        return Math.max(0, bestR) + 0.15;
     };
 
     const weightedSumByYear = new Map<number, number>();
@@ -299,7 +362,7 @@ export const buildScoringMaster = (
     const countByYear = new Map<number, number>();
 
     sourceTrees.forEach((tree) => {
-        const refZ = preprocess(toNumericSeries(siteData.get(tree)));
+        const refZ = preprocessTree(siteData.get(tree), preprocess, preprocessCache);
         const w = refWeight(refZ);
         refZ.forEach((value, year) => {
             weightedSumByYear.set(year, (weightedSumByYear.get(year) ?? 0) + value * w);

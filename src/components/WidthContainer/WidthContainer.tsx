@@ -2380,6 +2380,18 @@ function WidthContainer({
                     })
                 : [];
 
+            if (overwrittenYears.length > 0) {
+                window.alert(
+                    `无法移动：目标年份已有固定数据（${overwrittenYears.join("、")}）。请先调整片段范围或移动方向。`,
+                );
+                setSelection(normalizeSelection(
+                    interaction.tree,
+                    interaction.startYear,
+                    interaction.endYear,
+                ));
+                return;
+            }
+
             flushSync(() => {
                 onMoveSeriesTailByOffset?.(interaction.tree, interaction.startYear, interaction.endYear, interaction.yearOffset);
                 setSelection(targetSelection);

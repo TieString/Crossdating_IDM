@@ -1,0 +1,490 @@
+{
+  "bundle_version": "current-event-adaptive-range-gate-v1.3.0",
+  "protocol_version": "crossdating.current-event.v1",
+  "reference_version": "current-event-dual-gate-raw-reference-v1",
+  "rows": [
+    {
+      "caseId": "range_only",
+      "expectedResult": {
+        "automaticWriteback": false,
+        "diagnosticOnly": true,
+        "diagnostics": {
+          "baselineCorrelation": 0.27142573325072933,
+          "candidateCount": 277,
+          "eventRangeCandidateCount": 120,
+          "events": [
+            {
+              "centerYear": 1364,
+              "confidence": 0.7745714035906129,
+              "endYear": 1379,
+              "eventId": "E01",
+              "score": 0.37389698224828744,
+              "startYear": 1349,
+              "type": "mixed_derived_transition"
+            },
+            {
+              "centerYear": 1476,
+              "confidence": 0.7250839649731857,
+              "endYear": 1491,
+              "eventId": "E02",
+              "score": 0.17566435337611544,
+              "startYear": 1461,
+              "type": "mixed_derived_transition"
+            },
+            {
+              "centerYear": 1478,
+              "confidence": 0.6314758484028812,
+              "endYear": 1493,
+              "eventId": "E03",
+              "score": 0.007478810682075621,
+              "startYear": 1463,
+              "type": "mixed_derived_transition"
+            },
+            {
+              "centerYear": 1920,
+              "confidence": 0.6128905322110427,
+              "endYear": 1935,
+              "eventId": "E04",
+              "score": 0.004550448633056758,
+              "startYear": 1905,
+              "type": "mixed_derived_transition"
+            },
+            {
+              "centerYear": 2004,
+              "confidence": 0.5669242678183561,
+              "endYear": 2019,
+              "eventId": "E05",
+              "score": 0.027085771217643467,
+              "startYear": 1989,
+              "type": "mixed_derived_transition"
+            },
+            {
+              "centerYear": 1916,
+              "confidence": 0.5060044816616359,
+              "endYear": 1931,
+              "eventId": "E06",
+              "score": 0.022305813298829188,
+              "startYear": 1901,
+              "type": "mixed_derived_transition"
+            },
+            {
+              "centerYear": 1906,
+              "confidence": 0.41738106643618483,
+              "endYear": 1921,
+              "eventId": "E07",
+              "score": 0.007152227928599375,
+              "startYear": 1891,
+              "type": "mixed_derived_transition"
+            },
+            {
+              "centerYear": 1390,
+              "confidence": 0.65,
+              "endYear": 1405,
+              "eventId": "E08",
+              "score": 0.5748568003922513,
+              "startYear": 1375,
+              "type": "negative_lag_window"
+            },
+            {
+              "centerYear": 1406,
+              "confidence": 0.65,
+              "endYear": 1421,
+              "eventId": "E09",
+              "score": 0.5120409041992415,
+              "startYear": 1391,
+              "type": "negative_lag_window"
+            }
+          ],
+          "hasNegativeLagSignal": true,
+          "overlapYearCount": 697,
+          "referenceSeriesCount": 173
+        },
+        "eventRange": {
+          "adaptive": true,
+          "baseCenterRank": 4,
+          "candidateCenterCount": 120,
+          "centerYear": 1477,
+          "endYear": 1484,
+          "evidenceMass": 1.0,
+          "evidencePeak": 0.18747748300612865,
+          "intervalSoftmaxMass": 0.2989390214471802,
+          "learnedScore": 1.8757162686323388,
+          "localizerScore": 2.1281133537281365,
+          "maxEnvelopeEnd": 1484,
+          "maxEnvelopeStart": 1470,
+          "scope": "newest_unresolved_event",
+          "scoreSemantics": "相对区间排序分数，不是概率",
+          "shrunk": false,
+          "startYear": 1470,
+          "width": 15,
+          "windowPolicy": "local_score_mass"
+        },
+        "message": "事件范围可供重点检查，但精确年份证据不足",
+        "rangeReliability": {
+          "accepted": true,
+          "independentFromYearGate": true,
+          "score": 0.7944605603191404,
+          "semantics": "唯一事件范围是否值得展示的可靠性分数，不是真实概率",
+          "threshold": 0.33853178198144895
+        },
+        "reasonCode": "YEAR_RELIABILITY_BELOW_THRESHOLD",
+        "reliability": {
+          "accepted": false,
+          "score": 0.5472852997967739,
+          "semantics": "精确年份建议可靠性分数，不是真实概率",
+          "threshold": 0.6697964597119709
+        },
+        "scoreSemantics": "rankingScore 是相对排序分数，不是概率",
+        "state": {
+          "confirmedInsertionsApplied": [],
+          "existingZeroPolicy": "remove",
+          "requestRangeRadiusIgnored": null,
+          "roundIndex": 1,
+          "rwlPath": "D:\\Code\\Crossdating_py\\itrdb\\measurements\\northamerica\\usa\\ak222.rwl",
+          "targetEnd": 2022,
+          "targetSeriesId": "HMH-M04B",
+          "targetStart": 1327
+        },
+        "status": "range_advice",
+        "suggestions": [],
+        "yearReliability": {
+          "accepted": false,
+          "score": 0.5472852997967739,
+          "semantics": "精确年份建议可靠性分数，不是真实概率",
+          "threshold": 0.6697964597119709
+        }
+      },
+      "params": {
+        "confirmedInsertions": [],
+        "existingZeroPolicy": "remove",
+        "rwlPath": "D:\\Code\\Crossdating_py\\itrdb\\measurements\\northamerica\\usa\\ak222.rwl",
+        "targetSeriesId": "HMH-M04B",
+        "topK": 5
+      }
+    },
+    {
+      "caseId": "full_advice",
+      "expectedResult": {
+        "automaticWriteback": false,
+        "diagnosticOnly": true,
+        "diagnostics": {
+          "baselineCorrelation": 0.40153714846337535,
+          "candidateCount": 126,
+          "eventRangeCandidateCount": 120,
+          "events": [
+            {
+              "centerYear": 1964,
+              "confidence": 0.76616323218548,
+              "endYear": 1979,
+              "eventId": "E01",
+              "score": 0.293248108661026,
+              "startYear": 1949,
+              "type": "mixed_derived_transition"
+            },
+            {
+              "centerYear": 1960,
+              "confidence": 0.5823280978005406,
+              "endYear": 1975,
+              "eventId": "E02",
+              "score": 0.3566826588729337,
+              "startYear": 1945,
+              "type": "mixed_derived_transition"
+            },
+            {
+              "centerYear": 1878,
+              "confidence": 0.5919672236762725,
+              "endYear": 1893,
+              "eventId": "E03",
+              "score": 0.39196722367627246,
+              "startYear": 1863,
+              "type": "negative_lag_window"
+            }
+          ],
+          "hasNegativeLagSignal": true,
+          "overlapYearCount": 133,
+          "referenceSeriesCount": 103
+        },
+        "eventRange": {
+          "adaptive": true,
+          "baseCenterRank": 10,
+          "candidateCenterCount": 120,
+          "centerYear": 1987,
+          "endYear": 1994,
+          "evidenceMass": 0.843790475574293,
+          "evidencePeak": 0.23133943034513363,
+          "intervalSoftmaxMass": 0.5100518100576799,
+          "learnedScore": 3.8195297080250152,
+          "localizerScore": 2.977660317720019,
+          "maxEnvelopeEnd": 1994,
+          "maxEnvelopeStart": 1980,
+          "scope": "newest_unresolved_event",
+          "scoreSemantics": "相对区间排序分数，不是概率",
+          "shrunk": false,
+          "startYear": 1980,
+          "width": 15,
+          "windowPolicy": "local_score_mass"
+        },
+        "message": "请先检查唯一事件范围，再结合样芯、序列折线和参考年表确认精确年份",
+        "rangeReliability": {
+          "accepted": true,
+          "independentFromYearGate": true,
+          "score": 0.9440763229153316,
+          "semantics": "唯一事件范围是否值得展示的可靠性分数，不是真实概率",
+          "threshold": 0.33853178198144895
+        },
+        "reasonCode": null,
+        "reliability": {
+          "accepted": true,
+          "score": 0.8464731739896861,
+          "semantics": "精确年份建议可靠性分数，不是真实概率",
+          "threshold": 0.6697964597119709
+        },
+        "scoreSemantics": "rankingScore 是相对排序分数，不是概率",
+        "state": {
+          "confirmedInsertionsApplied": [],
+          "existingZeroPolicy": "remove",
+          "requestRangeRadiusIgnored": 1,
+          "roundIndex": 1,
+          "rwlPath": "D:\\Code\\Crossdating_py\\itrdb\\measurements\\southamerica\\arg155.rwl",
+          "targetEnd": 1994,
+          "targetSeriesId": "rhn06a",
+          "targetStart": 1863
+        },
+        "status": "advice",
+        "suggestions": [
+          {
+            "baseRank": 1,
+            "centerYear": 1992,
+            "compressionRank": 1,
+            "evidence": {
+              "localCorrelationDelta21": 0.13387233181840497,
+              "localGlkDelta21": 0.08333333333333326,
+              "masterNarrownessScore": 1.119284071675229,
+              "wholeSeriesCorrelationDelta": 0.13040247088789014
+            },
+            "legacyBinaryRank": 3,
+            "rangeEnd": 1994,
+            "rangePromoted": true,
+            "rangeStart": 1980,
+            "rank": 1,
+            "rankingScore": 2.978650036362542
+          },
+          {
+            "baseRank": 2,
+            "centerYear": 1994,
+            "compressionRank": 8,
+            "evidence": {
+              "localCorrelationDelta21": 0.12235531556625723,
+              "localGlkDelta21": 0.09999999999999998,
+              "masterNarrownessScore": 0.7620382818653447,
+              "wholeSeriesCorrelationDelta": 0.1294684975867194
+            },
+            "legacyBinaryRank": 104,
+            "rangeEnd": 1994,
+            "rangePromoted": true,
+            "rangeStart": 1980,
+            "rank": 2,
+            "rankingScore": 1.9267622095756973
+          },
+          {
+            "baseRank": 3,
+            "centerYear": 1991,
+            "compressionRank": 5,
+            "evidence": {
+              "localCorrelationDelta21": 0.0703187253612455,
+              "localGlkDelta21": 0.07692307692307698,
+              "masterNarrownessScore": 0.4949492017347052,
+              "wholeSeriesCorrelationDelta": 0.12979105312863687
+            },
+            "legacyBinaryRank": 73,
+            "rangeEnd": 1994,
+            "rangePromoted": true,
+            "rangeStart": 1980,
+            "rank": 3,
+            "rankingScore": 1.1478205224871256
+          },
+          {
+            "baseRank": 5,
+            "centerYear": 1981,
+            "compressionRank": 3,
+            "evidence": {
+              "localCorrelationDelta21": 0.24609073101161105,
+              "localGlkDelta21": 0.2,
+              "masterNarrownessScore": 1.2335710580786854,
+              "wholeSeriesCorrelationDelta": 0.13007668637102054
+            },
+            "legacyBinaryRank": 2,
+            "rangeEnd": 1994,
+            "rangePromoted": true,
+            "rangeStart": 1980,
+            "rank": 4,
+            "rankingScore": 0.936105609985304
+          },
+          {
+            "baseRank": 4,
+            "centerYear": 1979,
+            "compressionRank": 2,
+            "evidence": {
+              "localCorrelationDelta21": 0.21287768745006969,
+              "localGlkDelta21": 0.14999999999999997,
+              "masterNarrownessScore": 1.2603884974709756,
+              "wholeSeriesCorrelationDelta": 0.1301089268270455
+            },
+            "legacyBinaryRank": 1,
+            "rangeEnd": 1994,
+            "rangePromoted": false,
+            "rangeStart": 1980,
+            "rank": 5,
+            "rankingScore": 1.016825095936731
+          }
+        ],
+        "yearReliability": {
+          "accepted": true,
+          "score": 0.8464731739896861,
+          "semantics": "精确年份建议可靠性分数，不是真实概率",
+          "threshold": 0.6697964597119709
+        }
+      },
+      "params": {
+        "confirmedInsertions": [],
+        "existingZeroPolicy": "remove",
+        "rangeRadius": 1,
+        "rwlPath": "D:\\Code\\Crossdating_py\\itrdb\\measurements\\southamerica\\arg155.rwl",
+        "targetSeriesId": "rhn06a",
+        "topK": 5
+      }
+    },
+    {
+      "caseId": "range_rejected",
+      "expectedResult": {
+        "automaticWriteback": false,
+        "diagnosticOnly": true,
+        "diagnostics": {
+          "baselineCorrelation": 0.3047612283601536,
+          "candidateCount": 214,
+          "eventRangeCandidateCount": 120,
+          "events": [
+            {
+              "centerYear": 1782,
+              "confidence": 0.8445611365118971,
+              "endYear": 1794,
+              "eventId": "E01",
+              "score": 0.2217548199388082,
+              "startYear": 1770,
+              "type": "transition_missing"
+            },
+            {
+              "centerYear": 1918,
+              "confidence": 0.7752883979442922,
+              "endYear": 1930,
+              "eventId": "E02",
+              "score": 0.007731326539105049,
+              "startYear": 1906,
+              "type": "transition_missing"
+            },
+            {
+              "centerYear": 1902,
+              "confidence": 0.7745325388435343,
+              "endYear": 1914,
+              "eventId": "E03",
+              "score": 0.0010910172587382527,
+              "startYear": 1890,
+              "type": "transition_missing"
+            },
+            {
+              "centerYear": 1753,
+              "confidence": 0.5645315224963241,
+              "endYear": 1768,
+              "eventId": "E04",
+              "score": 0.36453152249632403,
+              "startYear": 1738,
+              "type": "negative_lag_window"
+            },
+            {
+              "centerYear": 1767,
+              "confidence": 0.5112955066130838,
+              "endYear": 1782,
+              "eventId": "E05",
+              "score": 0.3112955066130838,
+              "startYear": 1752,
+              "type": "negative_lag_window"
+            },
+            {
+              "centerYear": 1782,
+              "confidence": 0.7080580026874417,
+              "endYear": 1797,
+              "eventId": "E06",
+              "score": 0.2377555743183264,
+              "startYear": 1767,
+              "type": "uncertain_deepening"
+            },
+            {
+              "centerYear": 1790,
+              "confidence": 0.5670864746601457,
+              "endYear": 1805,
+              "eventId": "E07",
+              "score": 0.15629691235248827,
+              "startYear": 1775,
+              "type": "uncertain_deepening"
+            },
+            {
+              "centerYear": 1792,
+              "confidence": 0.45135094789246655,
+              "endYear": 1807,
+              "eventId": "E08",
+              "score": 0.1420840012087451,
+              "startYear": 1777,
+              "type": "uncertain_deepening"
+            }
+          ],
+          "hasNegativeLagSignal": true,
+          "overlapYearCount": 270,
+          "referenceSeriesCount": 55
+        },
+        "eventRange": null,
+        "message": "当前证据不足，不建议显示可采纳事件范围",
+        "rangeReliability": {
+          "accepted": false,
+          "independentFromYearGate": true,
+          "score": 0.26985186932973143,
+          "semantics": "唯一事件范围是否值得展示的可靠性分数，不是真实概率",
+          "threshold": 0.33853178198144895
+        },
+        "reasonCode": "RANGE_RELIABILITY_BELOW_THRESHOLD",
+        "reliability": {
+          "accepted": true,
+          "score": 0.7511087392761474,
+          "semantics": "精确年份建议可靠性分数，不是真实概率",
+          "threshold": 0.6697964597119709
+        },
+        "scoreSemantics": "rankingScore 是相对排序分数，不是概率",
+        "state": {
+          "confirmedInsertionsApplied": [],
+          "existingZeroPolicy": "remove",
+          "requestRangeRadiusIgnored": 1,
+          "roundIndex": 1,
+          "rwlPath": "D:\\Code\\Crossdating_py\\itrdb\\measurements\\southamerica\\arge043.rwl",
+          "targetEnd": 1983,
+          "targetSeriesId": "LEF12B",
+          "targetStart": 1715
+        },
+        "status": "evidence_insufficient",
+        "suggestions": [],
+        "yearReliability": {
+          "accepted": true,
+          "score": 0.7511087392761474,
+          "semantics": "精确年份建议可靠性分数，不是真实概率",
+          "threshold": 0.6697964597119709
+        }
+      },
+      "params": {
+        "confirmedInsertions": [],
+        "existingZeroPolicy": "remove",
+        "rangeRadius": 1,
+        "rwlPath": "D:\\Code\\Crossdating_py\\itrdb\\measurements\\southamerica\\arge043.rwl",
+        "targetSeriesId": "LEF12B",
+        "topK": 5
+      }
+    }
+  ]
+}

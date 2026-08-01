@@ -5,9 +5,15 @@ import { createServer } from "vite";
 
 const strictInternal = process.argv.includes("--strict-internal");
 const explicitRoot = process.argv.slice(2).find((arg) => !arg.startsWith("--"));
+const defaultSampleRoots = [
+  process.env.CROSSDATING_SAMPLE_ROOT,
+  "D:/软件测试/数据",
+  path.join(process.cwd(), "笔记", "数据"),
+].filter(Boolean);
 const sampleRoot = explicitRoot
   ? path.resolve(process.cwd(), explicitRoot)
-  : path.join(process.cwd(), "笔记", "数据");
+  : defaultSampleRoots.find((candidate) => existsSync(candidate))
+    ?? defaultSampleRoots[defaultSampleRoots.length - 1];
 
 const formatCount = (value) => String(value).padStart(4, " ");
 

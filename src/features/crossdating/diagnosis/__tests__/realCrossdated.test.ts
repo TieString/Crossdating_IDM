@@ -1,12 +1,12 @@
 /**
- * 真实 RAW/crossdated 验证（专家 ground truth）。
+ * 已隐藏 legacy candidate 层的真实 RAW/crossdated 验证（专家 ground truth）。
  *
  * crossdated.rwl 里专家插入的 0 宽度年 = 真实确认的缺轮位置。对每条含缺轮的 crossdated 序列，
  * 移除该 0 重建“校正前缺这一环”的序列，针对同站点其它已正确定年的 crossdated 序列做诊断，
- * 检验算法能否把这条真实缺轮召回（top5，人工确认口径）并尽量排到 top1。
+ * 检验旧 `diagnoseCrossdating().candidates` 能否把这条真实缺轮召回并排到 top1。
  *
- * 这是比合成测试更可信的现实评估：缺轮年是专家实际定出的（多在指针年），跨 8 个站点聚合。
- * 数据缺失则 skip。
+ * 该结果只保留为旧候选算法回归，不代表当前 UI 使用的 `DiagnosisEvent`。当前事件级现实
+ * 指标由 itrdbBenchmark 的“真实缺轮事件窗口”测试报告。数据缺失则 skip。
  */
 import { describe, expect, it } from "vitest";
 import { diagnoseCrossdating } from "../engine";
@@ -36,8 +36,8 @@ const overlapWithOthers = (series: RwlSeries, others: RwlSeries[]): number => {
     return count;
 };
 
-d("真实 crossdated 缺轮召回（专家 ground truth）", () => {
-    it("跨站点真实缺轮 top5/top1", () => {
+d("已隐藏 legacy candidate 的真实缺轮回归", () => {
+    it("旧候选层跨站点真实缺轮 top5/top1", () => {
         let attempted = 0;
         let top5 = 0;
         let top1 = 0;
@@ -67,7 +67,10 @@ d("真实 crossdated 缺轮召回（专家 ground truth）", () => {
                 if (!site) return;
 
                 attempted += 1; fAtt += 1;
-                const cands = diagnoseCrossdating(site, { referenceConfig: null })
+                const cands = diagnoseCrossdating(site, {
+                    referenceConfig: null,
+                    targetTrees: [series.id],
+                })
                     .candidates.filter((c) => c.targetTree === series.id);
                 const inserts = cands.filter((c) => c.operationType === "INSERT_MISSING_RING");
                 const hit5 = inserts.some((c) => Math.abs((c.targetYear ?? 0) - zeroYear) <= 1);
@@ -85,7 +88,7 @@ d("真实 crossdated 缺轮召回（专家 ground truth）", () => {
         const top5Rate = attempted ? top5 / attempted : 0;
         const top1Rate = attempted ? top1 / attempted : 0;
         // eslint-disable-next-line no-console
-        console.log(`REAL missing (expert ground truth): attempted=${attempted} top5=${top5} (${top5Rate.toFixed(2)}) top1=${top1} (${top1Rate.toFixed(2)})`);
+        console.log(`LEGACY CANDIDATE missing: attempted=${attempted} top5=${top5} (${top5Rate.toFixed(2)}) top1=${top1} (${top1Rate.toFixed(2)})`);
         // eslint-disable-next-line no-console
         console.log(perFolder.join(" | "));
         if (failures.length) console.log(`  failures: ${failures.slice(0, 20).join(" | ")}`);
@@ -101,7 +104,7 @@ d("真实 crossdated 缺轮召回（专家 ground truth）", () => {
 
     // 真实工作口径：不筛选——所有含缺轮序列（单缺轮/多缺轮/短序列/端点缺轮）全部纳入，
     // 多缺轮按人工流程逐个处理：每步诊断取首位建议，对当前最靠树皮缺轮判命中，按真值复原后继续向树心。
-    it("全部含缺轮序列 迭代逐个复原（含多缺轮/短序列/端点，不筛选）", () => {
+    it("旧候选层全部含缺轮序列迭代复原（不筛选）", () => {
         let attempted = 0;
         let skippedNoRef = 0;       // 参考不足无法建 master（物理上无法交叉定年）
         let totalMissing = 0;
@@ -142,7 +145,10 @@ d("真实 crossdated 缺轮召回（专家 ground truth）", () => {
                     stepSite.set(series.id, new Map(corrupted));
                     let cands;
                     try {
-                        cands = diagnoseCrossdating(stepSite, { referenceConfig: null }).candidates.filter((c) => c.targetTree === series.id);
+                        cands = diagnoseCrossdating(stepSite, {
+                            referenceConfig: null,
+                            targetTrees: [series.id],
+                        }).candidates.filter((c) => c.targetTree === series.id);
                     } catch { perfect = false; break; }
                     const t = cands[0];
                     const isInsert = t?.operationType === "INSERT_MISSING_RING";
@@ -166,7 +172,7 @@ d("真实 crossdated 缺轮召回（专家 ground truth）", () => {
         const pct = (n: number, denom: number) => denom ? (n / denom).toFixed(3) : "-";
         const meanFrac = fracs.length ? (fracs.reduce((s, v) => s + v, 0) / fracs.length).toFixed(3) : "-";
         // eslint-disable-next-line no-console
-        console.log(`REAL ALL-missing 迭代复原: 序列=${attempted} 缺轮总数=${totalMissing} 参考不足跳过=${skippedNoRef} 自检=${reconstructOk}/${attempted}`);
+        console.log(`LEGACY CANDIDATE ALL-missing: 序列=${attempted} 缺轮总数=${totalMissing} 参考不足跳过=${skippedNoRef} 自检=${reconstructOk}/${attempted}`);
         // eslint-disable-next-line no-console
         console.log(`  完全复原(全程±1)=${pct(fullyRestored, attempted)} 单步命中(±1)=${pct(stepHits, totalMissing)} 平均每序列复原比例=${meanFrac}`);
         // eslint-disable-next-line no-console

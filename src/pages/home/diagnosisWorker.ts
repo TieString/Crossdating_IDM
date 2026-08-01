@@ -11,6 +11,7 @@ export type DiagnosisWorkerRequest = {
     id: number;
     siteData: RwlSiteData;
     referenceConfig: ReferenceSeriesConfig | null;
+    targetTree?: string;
     // 当前 COFECHA .OUT 原始文本（仅当其与当前数据一致/新鲜时传入）。驱动 COFECHA [A] 段级 lag 候选生成。
     cofechaText?: string;
 };
@@ -19,6 +20,7 @@ export type DiagnosisWorkerResponse =
     | {
         id: number;
         diagnosis: CrossdatingDiagnosis;
+        elapsedMs: number;
       }
     | {
         id: number;
@@ -28,17 +30,23 @@ export type DiagnosisWorkerResponse =
 const ctx = self as DedicatedWorkerGlobalScope;
 
 ctx.addEventListener("message", (event: MessageEvent<DiagnosisWorkerRequest>) => {
-    const { id, siteData, referenceConfig, cofechaText } = event.data;
+    const { id, siteData, referenceConfig, targetTree, cofechaText } = event.data;
 
     try {
+        const startedAt = performance.now();
         ctx.postMessage({
             id,
-            diagnosis: diagnoseCrossdating(siteData, { referenceConfig, cofechaText }),
+            diagnosis: diagnoseCrossdating(siteData, {
+                referenceConfig,
+                targetTrees: targetTree ? [targetTree] : [],
+                cofechaText,
+            }),
+            elapsedMs: performance.now() - startedAt,
         } satisfies DiagnosisWorkerResponse);
     } catch (error) {
         ctx.postMessage({
             id,
-            error: error instanceof Error ? error.message : String(error),
+            error: error instanceof Error ? error.stack ?? error.message : String(error),
         } satisfies DiagnosisWorkerResponse);
     }
 });

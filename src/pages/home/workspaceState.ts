@@ -10,6 +10,7 @@ export const createEmptyCrossdatingDiagnosis = (): CrossdatingDiagnosis => ({
     seriesCount: 0,
     problemSegmentCount: 0,
     candidateCount: 0,
+    eventCount: 0,
     segmentLength: 0,
     overlap: 0,
     lagRange: { min: 0, max: 0 },
@@ -19,6 +20,7 @@ export const createEmptyCrossdatingDiagnosis = (): CrossdatingDiagnosis => ({
     propagationPatterns: [],
     globalSlidingMatches: [],
     masterNarrowYears: [],
+    events: [],
     candidates: [],
 });
 

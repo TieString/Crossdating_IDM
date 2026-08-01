@@ -1,12 +1,12 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Crossdating-IDM",
-  "version": "1.2.0",
+  "version": "1.4.0",
   "identifier": "com.crossdating.app",
   "build": {
     "beforeDevCommand": "yarn dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "yarn build",
+    "beforeBuildCommand": "node scripts/clean-current-event-release-resources.mjs && yarn build && node scripts/validate-current-event-integration.mjs",
     "frontendDist": "../dist"
   },
   "app": {
@@ -26,13 +26,6 @@
   },
   "bundle": {
     "active": true,
-
-
- 
-    
-
-
-    
     "targets": [
       "nsis"
     ],
@@ -47,7 +40,13 @@
     "externalBin":[
       "bin/cofecha",
       "bin/cofecha12k",
-      "bin/cofechawin"
-    ]
+      "bin/cofechawin",
+      "bin/current-event-ranker-sidecar",
+      "bin/current-event-adaptive-range-sidecar",
+      "bin/current-event-rrf-sidecar"
+    ],
+    "resources": {
+      "resources/current_event_ranker": "current_event_ranker"
+    }
   }
 }

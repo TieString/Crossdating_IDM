@@ -1,0 +1,1271 @@
+{
+  "dtype": "float64",
+  "explicitly_excluded": [
+    "candidate_year",
+    "candidate_year_from_target_start",
+    "candidate_year_to_target_end",
+    "zero_count",
+    "remaining_event_count",
+    "local_neighbor_*"
+  ],
+  "feature_count": 251,
+  "feature_names": [
+    {
+      "dtype": "float64",
+      "index": 0,
+      "name": "best_event_confidence"
+    },
+    {
+      "dtype": "float64",
+      "index": 1,
+      "name": "best_event_score"
+    },
+    {
+      "dtype": "float64",
+      "index": 2,
+      "name": "binary_score"
+    },
+    {
+      "dtype": "float64",
+      "index": 3,
+      "name": "candidate_year_gap_to_next_candidate"
+    },
+    {
+      "dtype": "float64",
+      "index": 4,
+      "name": "candidate_year_gap_to_prev_candidate"
+    },
+    {
+      "dtype": "float64",
+      "index": 5,
+      "name": "candidate_year_min_neighbor_gap"
+    },
+    {
+      "dtype": "float64",
+      "index": 6,
+      "name": "candidate_year_position_percentile"
+    },
+    {
+      "dtype": "float64",
+      "index": 7,
+      "name": "compression_rank"
+    },
+    {
+      "dtype": "float64",
+      "index": 8,
+      "name": "compression_rank_inv"
+    },
+    {
+      "dtype": "float64",
+      "index": 9,
+      "name": "compression_score"
+    },
+    {
+      "dtype": "float64",
+      "index": 10,
+      "name": "detected_event_count"
+    },
+    {
+      "dtype": "float64",
+      "index": 11,
+      "name": "distance_to_best_event_center"
+    },
+    {
+      "dtype": "float64",
+      "index": 12,
+      "name": "distance_to_previous_corrected_year"
+    },
+    {
+      "dtype": "float64",
+      "index": 13,
+      "name": "feat_bestLagNearCandidate"
+    },
+    {
+      "dtype": "float64",
+      "index": 14,
+      "name": "feat_bestLagNearCandidate__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 15,
+      "name": "feat_bestLagRNearCandidate"
+    },
+    {
+      "dtype": "float64",
+      "index": 16,
+      "name": "feat_bestLagRNearCandidate__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 17,
+      "name": "feat_candidatePositionRatio"
+    },
+    {
+      "dtype": "float64",
+      "index": 18,
+      "name": "feat_candidatePositionRatio__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 19,
+      "name": "feat_candidateScoreMinusClusterMean"
+    },
+    {
+      "dtype": "float64",
+      "index": 20,
+      "name": "feat_candidateYearRelativeToEnd"
+    },
+    {
+      "dtype": "float64",
+      "index": 21,
+      "name": "feat_candidateYearRelativeToEnd__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 22,
+      "name": "feat_candidateYearRelativeToStart"
+    },
+    {
+      "dtype": "float64",
+      "index": 23,
+      "name": "feat_candidateYearRelativeToStart__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 24,
+      "name": "feat_clusterCandidateCount"
+    },
+    {
+      "dtype": "float64",
+      "index": 25,
+      "name": "feat_clusterEntropy"
+    },
+    {
+      "dtype": "float64",
+      "index": 26,
+      "name": "feat_cofechaA_candidateInInferredWindow"
+    },
+    {
+      "dtype": "float64",
+      "index": 27,
+      "name": "feat_cofechaA_candidateInInferredWindow__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 28,
+      "name": "feat_cofechaA_distanceToInferredWindowCenter"
+    },
+    {
+      "dtype": "float64",
+      "index": 29,
+      "name": "feat_cofechaA_distanceToInferredWindowCenter__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 30,
+      "name": "feat_cofechaA_distanceToLatestNegativeSegmentEnd"
+    },
+    {
+      "dtype": "float64",
+      "index": 31,
+      "name": "feat_cofechaA_distanceToLatestNegativeSegmentEnd__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 32,
+      "name": "feat_cofechaA_dominantLag"
+    },
+    {
+      "dtype": "float64",
+      "index": 33,
+      "name": "feat_cofechaA_dominantLagSupport"
+    },
+    {
+      "dtype": "float64",
+      "index": 34,
+      "name": "feat_cofechaA_dominantLagSupport__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 35,
+      "name": "feat_cofechaA_dominantLag__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 36,
+      "name": "feat_cofechaA_eventIndex"
+    },
+    {
+      "dtype": "float64",
+      "index": 37,
+      "name": "feat_cofechaA_eventIndex__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 38,
+      "name": "feat_cofechaA_expectedCumulativeMissingBeforeCandidate"
+    },
+    {
+      "dtype": "float64",
+      "index": 39,
+      "name": "feat_cofechaA_expectedCumulativeMissingBeforeCandidate__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 40,
+      "name": "feat_cofechaA_hasMixedPositiveLag"
+    },
+    {
+      "dtype": "float64",
+      "index": 41,
+      "name": "feat_cofechaA_hasMixedPositiveLag__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 42,
+      "name": "feat_cofechaA_hasNegativeLag"
+    },
+    {
+      "dtype": "float64",
+      "index": 43,
+      "name": "feat_cofechaA_hasNegativeLag__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 44,
+      "name": "feat_cofechaA_lagConsistency"
+    },
+    {
+      "dtype": "float64",
+      "index": 45,
+      "name": "feat_cofechaA_lagConsistency__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 46,
+      "name": "feat_cofechaA_latestNegativeSegmentEnd"
+    },
+    {
+      "dtype": "float64",
+      "index": 47,
+      "name": "feat_cofechaA_latestNegativeSegmentEnd__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 48,
+      "name": "feat_cofechaA_latestNegativeSegmentStart"
+    },
+    {
+      "dtype": "float64",
+      "index": 49,
+      "name": "feat_cofechaA_latestNegativeSegmentStart__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 50,
+      "name": "feat_cofechaA_maxMissingCount"
+    },
+    {
+      "dtype": "float64",
+      "index": 51,
+      "name": "feat_cofechaA_maxMissingCount__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 52,
+      "name": "feat_cofechaA_minHighLag"
+    },
+    {
+      "dtype": "float64",
+      "index": 53,
+      "name": "feat_cofechaA_minHighLag__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 54,
+      "name": "feat_cofechaA_negativeLagSegmentCount"
+    },
+    {
+      "dtype": "float64",
+      "index": 55,
+      "name": "feat_cofechaA_negativeLagSegmentCount__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 56,
+      "name": "feat_cofechaA_windowMeanImprovement"
+    },
+    {
+      "dtype": "float64",
+      "index": 57,
+      "name": "feat_cofechaA_windowMeanImprovement__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 58,
+      "name": "feat_cofechaA_windowSupportSegmentCount"
+    },
+    {
+      "dtype": "float64",
+      "index": 59,
+      "name": "feat_cofechaA_windowSupportSegmentCount__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 60,
+      "name": "feat_cofechaAvailable"
+    },
+    {
+      "dtype": "float64",
+      "index": 61,
+      "name": "feat_cofechaAvailable__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 62,
+      "name": "feat_cofechaFailed"
+    },
+    {
+      "dtype": "float64",
+      "index": 63,
+      "name": "feat_cofechaFailed__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 64,
+      "name": "feat_cofechaTargetBlockMissing"
+    },
+    {
+      "dtype": "float64",
+      "index": 65,
+      "name": "feat_cofechaTargetBlockMissing__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 66,
+      "name": "feat_distanceToBestEvaluationCandidate"
+    },
+    {
+      "dtype": "float64",
+      "index": 67,
+      "name": "feat_distanceToLagBoundaryPeak"
+    },
+    {
+      "dtype": "float64",
+      "index": 68,
+      "name": "feat_distanceToLagBoundaryPeak__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 69,
+      "name": "feat_distanceToNearestExistingZero"
+    },
+    {
+      "dtype": "float64",
+      "index": 70,
+      "name": "feat_distanceToNearestExistingZero__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 71,
+      "name": "feat_insertLagSupport"
+    },
+    {
+      "dtype": "float64",
+      "index": 72,
+      "name": "feat_insertLagSupport__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 73,
+      "name": "feat_lag0RNearCandidate"
+    },
+    {
+      "dtype": "float64",
+      "index": 74,
+      "name": "feat_lag0RNearCandidate__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 75,
+      "name": "feat_lagConcentrationNearCandidate"
+    },
+    {
+      "dtype": "float64",
+      "index": 76,
+      "name": "feat_lagConcentrationNearCandidate__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 77,
+      "name": "feat_lagEntropyNearCandidate"
+    },
+    {
+      "dtype": "float64",
+      "index": 78,
+      "name": "feat_lagEntropyNearCandidate__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 79,
+      "name": "feat_lagImprovementNearCandidate"
+    },
+    {
+      "dtype": "float64",
+      "index": 80,
+      "name": "feat_lagImprovementNearCandidate__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 81,
+      "name": "feat_localGlkAfter_11"
+    },
+    {
+      "dtype": "float64",
+      "index": 82,
+      "name": "feat_localGlkAfter_11__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 83,
+      "name": "feat_localGlkAfter_21"
+    },
+    {
+      "dtype": "float64",
+      "index": 84,
+      "name": "feat_localGlkAfter_21__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 85,
+      "name": "feat_localGlkAfter_31"
+    },
+    {
+      "dtype": "float64",
+      "index": 86,
+      "name": "feat_localGlkAfter_31__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 87,
+      "name": "feat_localGlkAfter_51"
+    },
+    {
+      "dtype": "float64",
+      "index": 88,
+      "name": "feat_localGlkAfter_51__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 89,
+      "name": "feat_localGlkBefore_11"
+    },
+    {
+      "dtype": "float64",
+      "index": 90,
+      "name": "feat_localGlkBefore_11__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 91,
+      "name": "feat_localGlkBefore_21"
+    },
+    {
+      "dtype": "float64",
+      "index": 92,
+      "name": "feat_localGlkBefore_21__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 93,
+      "name": "feat_localGlkBefore_31"
+    },
+    {
+      "dtype": "float64",
+      "index": 94,
+      "name": "feat_localGlkBefore_31__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 95,
+      "name": "feat_localGlkBefore_51"
+    },
+    {
+      "dtype": "float64",
+      "index": 96,
+      "name": "feat_localGlkBefore_51__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 97,
+      "name": "feat_localGlkDelta_11"
+    },
+    {
+      "dtype": "float64",
+      "index": 98,
+      "name": "feat_localGlkDelta_11__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 99,
+      "name": "feat_localGlkDelta_21"
+    },
+    {
+      "dtype": "float64",
+      "index": 100,
+      "name": "feat_localGlkDelta_21DistanceToBestCandidate"
+    },
+    {
+      "dtype": "float64",
+      "index": 101,
+      "name": "feat_localGlkDelta_21IsLocalPeak_2"
+    },
+    {
+      "dtype": "float64",
+      "index": 102,
+      "name": "feat_localGlkDelta_21IsLocalPeak_5"
+    },
+    {
+      "dtype": "float64",
+      "index": 103,
+      "name": "feat_localGlkDelta_21LocalPeakGap_2"
+    },
+    {
+      "dtype": "float64",
+      "index": 104,
+      "name": "feat_localGlkDelta_21LocalPeakGap_5"
+    },
+    {
+      "dtype": "float64",
+      "index": 105,
+      "name": "feat_localGlkDelta_21MarginToNextYear"
+    },
+    {
+      "dtype": "float64",
+      "index": 106,
+      "name": "feat_localGlkDelta_21MarginToPreviousYear"
+    },
+    {
+      "dtype": "float64",
+      "index": 107,
+      "name": "feat_localGlkDelta_21__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 108,
+      "name": "feat_localGlkDelta_31"
+    },
+    {
+      "dtype": "float64",
+      "index": 109,
+      "name": "feat_localGlkDelta_31__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 110,
+      "name": "feat_localGlkDelta_51"
+    },
+    {
+      "dtype": "float64",
+      "index": 111,
+      "name": "feat_localGlkDelta_51__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 112,
+      "name": "feat_localRAfter_11"
+    },
+    {
+      "dtype": "float64",
+      "index": 113,
+      "name": "feat_localRAfter_11__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 114,
+      "name": "feat_localRAfter_21"
+    },
+    {
+      "dtype": "float64",
+      "index": 115,
+      "name": "feat_localRAfter_21__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 116,
+      "name": "feat_localRAfter_31"
+    },
+    {
+      "dtype": "float64",
+      "index": 117,
+      "name": "feat_localRAfter_31__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 118,
+      "name": "feat_localRAfter_51"
+    },
+    {
+      "dtype": "float64",
+      "index": 119,
+      "name": "feat_localRAfter_51__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 120,
+      "name": "feat_localRBefore_11"
+    },
+    {
+      "dtype": "float64",
+      "index": 121,
+      "name": "feat_localRBefore_11__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 122,
+      "name": "feat_localRBefore_21"
+    },
+    {
+      "dtype": "float64",
+      "index": 123,
+      "name": "feat_localRBefore_21__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 124,
+      "name": "feat_localRBefore_31"
+    },
+    {
+      "dtype": "float64",
+      "index": 125,
+      "name": "feat_localRBefore_31__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 126,
+      "name": "feat_localRBefore_51"
+    },
+    {
+      "dtype": "float64",
+      "index": 127,
+      "name": "feat_localRBefore_51__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 128,
+      "name": "feat_localRDelta_11"
+    },
+    {
+      "dtype": "float64",
+      "index": 129,
+      "name": "feat_localRDelta_11DistanceToBestCandidate"
+    },
+    {
+      "dtype": "float64",
+      "index": 130,
+      "name": "feat_localRDelta_11IsLocalPeak_2"
+    },
+    {
+      "dtype": "float64",
+      "index": 131,
+      "name": "feat_localRDelta_11IsLocalPeak_5"
+    },
+    {
+      "dtype": "float64",
+      "index": 132,
+      "name": "feat_localRDelta_11LocalPeakGap_2"
+    },
+    {
+      "dtype": "float64",
+      "index": 133,
+      "name": "feat_localRDelta_11LocalPeakGap_5"
+    },
+    {
+      "dtype": "float64",
+      "index": 134,
+      "name": "feat_localRDelta_11MarginToNextYear"
+    },
+    {
+      "dtype": "float64",
+      "index": 135,
+      "name": "feat_localRDelta_11MarginToPreviousYear"
+    },
+    {
+      "dtype": "float64",
+      "index": 136,
+      "name": "feat_localRDelta_11__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 137,
+      "name": "feat_localRDelta_21"
+    },
+    {
+      "dtype": "float64",
+      "index": 138,
+      "name": "feat_localRDelta_21DistanceToBestCandidate"
+    },
+    {
+      "dtype": "float64",
+      "index": 139,
+      "name": "feat_localRDelta_21IsLocalPeak_2"
+    },
+    {
+      "dtype": "float64",
+      "index": 140,
+      "name": "feat_localRDelta_21IsLocalPeak_5"
+    },
+    {
+      "dtype": "float64",
+      "index": 141,
+      "name": "feat_localRDelta_21LocalPeakGap_2"
+    },
+    {
+      "dtype": "float64",
+      "index": 142,
+      "name": "feat_localRDelta_21LocalPeakGap_5"
+    },
+    {
+      "dtype": "float64",
+      "index": 143,
+      "name": "feat_localRDelta_21MarginToNextYear"
+    },
+    {
+      "dtype": "float64",
+      "index": 144,
+      "name": "feat_localRDelta_21MarginToPreviousYear"
+    },
+    {
+      "dtype": "float64",
+      "index": 145,
+      "name": "feat_localRDelta_21__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 146,
+      "name": "feat_localRDelta_31"
+    },
+    {
+      "dtype": "float64",
+      "index": 147,
+      "name": "feat_localRDelta_31DistanceToBestCandidate"
+    },
+    {
+      "dtype": "float64",
+      "index": 148,
+      "name": "feat_localRDelta_31IsLocalPeak_2"
+    },
+    {
+      "dtype": "float64",
+      "index": 149,
+      "name": "feat_localRDelta_31IsLocalPeak_5"
+    },
+    {
+      "dtype": "float64",
+      "index": 150,
+      "name": "feat_localRDelta_31LocalPeakGap_2"
+    },
+    {
+      "dtype": "float64",
+      "index": 151,
+      "name": "feat_localRDelta_31LocalPeakGap_5"
+    },
+    {
+      "dtype": "float64",
+      "index": 152,
+      "name": "feat_localRDelta_31MarginToNextYear"
+    },
+    {
+      "dtype": "float64",
+      "index": 153,
+      "name": "feat_localRDelta_31MarginToPreviousYear"
+    },
+    {
+      "dtype": "float64",
+      "index": 154,
+      "name": "feat_localRDelta_31__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 155,
+      "name": "feat_localRDelta_51"
+    },
+    {
+      "dtype": "float64",
+      "index": 156,
+      "name": "feat_localRDelta_51__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 157,
+      "name": "feat_masterIsStrongNarrowYear"
+    },
+    {
+      "dtype": "float64",
+      "index": 158,
+      "name": "feat_masterIsStrongNarrowYear__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 159,
+      "name": "feat_masterLeftRightContrast"
+    },
+    {
+      "dtype": "float64",
+      "index": 160,
+      "name": "feat_masterLeftRightContrast__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 161,
+      "name": "feat_masterLocalMinimumRank"
+    },
+    {
+      "dtype": "float64",
+      "index": 162,
+      "name": "feat_masterLocalMinimumRank__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 163,
+      "name": "feat_masterNarrownessScore"
+    },
+    {
+      "dtype": "float64",
+      "index": 164,
+      "name": "feat_masterNarrownessScoreDistanceToBestCandidate"
+    },
+    {
+      "dtype": "float64",
+      "index": 165,
+      "name": "feat_masterNarrownessScoreIsLocalPeak_2"
+    },
+    {
+      "dtype": "float64",
+      "index": 166,
+      "name": "feat_masterNarrownessScoreIsLocalPeak_5"
+    },
+    {
+      "dtype": "float64",
+      "index": 167,
+      "name": "feat_masterNarrownessScoreLocalPeakGap_2"
+    },
+    {
+      "dtype": "float64",
+      "index": 168,
+      "name": "feat_masterNarrownessScoreLocalPeakGap_5"
+    },
+    {
+      "dtype": "float64",
+      "index": 169,
+      "name": "feat_masterNarrownessScoreMarginToNextYear"
+    },
+    {
+      "dtype": "float64",
+      "index": 170,
+      "name": "feat_masterNarrownessScoreMarginToPreviousYear"
+    },
+    {
+      "dtype": "float64",
+      "index": 171,
+      "name": "feat_masterNarrownessScore__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 172,
+      "name": "feat_masterPercentileAtCandidateYear"
+    },
+    {
+      "dtype": "float64",
+      "index": 173,
+      "name": "feat_masterPercentileAtCandidateYear__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 174,
+      "name": "feat_masterRollingMeanNearby"
+    },
+    {
+      "dtype": "float64",
+      "index": 175,
+      "name": "feat_masterRollingMeanNearby__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 176,
+      "name": "feat_masterValueAtCandidateYear"
+    },
+    {
+      "dtype": "float64",
+      "index": 177,
+      "name": "feat_masterValueAtCandidateYear__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 178,
+      "name": "feat_masterZAtCandidateYear"
+    },
+    {
+      "dtype": "float64",
+      "index": 179,
+      "name": "feat_masterZAtCandidateYear__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 180,
+      "name": "feat_rankByCofechaEvidence"
+    },
+    {
+      "dtype": "float64",
+      "index": 181,
+      "name": "feat_rankByLocalGlkDelta_21"
+    },
+    {
+      "dtype": "float64",
+      "index": 182,
+      "name": "feat_rankByLocalRDelta_21"
+    },
+    {
+      "dtype": "float64",
+      "index": 183,
+      "name": "feat_rankByWholeSeriesRDelta"
+    },
+    {
+      "dtype": "float64",
+      "index": 184,
+      "name": "feat_scoreMarginToNextYear"
+    },
+    {
+      "dtype": "float64",
+      "index": 185,
+      "name": "feat_scoreMarginToPreviousYear"
+    },
+    {
+      "dtype": "float64",
+      "index": 186,
+      "name": "feat_siteReplicationCount"
+    },
+    {
+      "dtype": "float64",
+      "index": 187,
+      "name": "feat_siteReplicationCount__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 188,
+      "name": "feat_targetAbruptChangeScore"
+    },
+    {
+      "dtype": "float64",
+      "index": 189,
+      "name": "feat_targetAbruptChangeScore__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 190,
+      "name": "feat_targetLeftSlope"
+    },
+    {
+      "dtype": "float64",
+      "index": 191,
+      "name": "feat_targetLeftSlope__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 192,
+      "name": "feat_targetLength"
+    },
+    {
+      "dtype": "float64",
+      "index": 193,
+      "name": "feat_targetLength__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 194,
+      "name": "feat_targetLocalMinimumNearYear"
+    },
+    {
+      "dtype": "float64",
+      "index": 195,
+      "name": "feat_targetLocalMinimumNearYear__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 196,
+      "name": "feat_targetLocalVariance"
+    },
+    {
+      "dtype": "float64",
+      "index": 197,
+      "name": "feat_targetLocalVariance__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 198,
+      "name": "feat_targetNarrowRunLength"
+    },
+    {
+      "dtype": "float64",
+      "index": 199,
+      "name": "feat_targetNarrowRunLength__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 200,
+      "name": "feat_targetNeighborContrast"
+    },
+    {
+      "dtype": "float64",
+      "index": 201,
+      "name": "feat_targetNeighborContrast__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 202,
+      "name": "feat_targetRightSlope"
+    },
+    {
+      "dtype": "float64",
+      "index": 203,
+      "name": "feat_targetRightSlope__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 204,
+      "name": "feat_targetValueAfterCandidate"
+    },
+    {
+      "dtype": "float64",
+      "index": 205,
+      "name": "feat_targetValueAfterCandidate__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 206,
+      "name": "feat_targetValueBeforeCandidate"
+    },
+    {
+      "dtype": "float64",
+      "index": 207,
+      "name": "feat_targetValueBeforeCandidate__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 208,
+      "name": "feat_targetWidthPercentileNearYear"
+    },
+    {
+      "dtype": "float64",
+      "index": 209,
+      "name": "feat_targetWidthPercentileNearYear__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 210,
+      "name": "feat_wholeSeriesRAfter"
+    },
+    {
+      "dtype": "float64",
+      "index": 211,
+      "name": "feat_wholeSeriesRAfter__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 212,
+      "name": "feat_wholeSeriesRBefore"
+    },
+    {
+      "dtype": "float64",
+      "index": 213,
+      "name": "feat_wholeSeriesRBefore__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 214,
+      "name": "feat_wholeSeriesRDelta"
+    },
+    {
+      "dtype": "float64",
+      "index": 215,
+      "name": "feat_wholeSeriesRDeltaDistanceToBestCandidate"
+    },
+    {
+      "dtype": "float64",
+      "index": 216,
+      "name": "feat_wholeSeriesRDeltaIsLocalPeak_2"
+    },
+    {
+      "dtype": "float64",
+      "index": 217,
+      "name": "feat_wholeSeriesRDeltaIsLocalPeak_5"
+    },
+    {
+      "dtype": "float64",
+      "index": 218,
+      "name": "feat_wholeSeriesRDeltaLocalPeakGap_2"
+    },
+    {
+      "dtype": "float64",
+      "index": 219,
+      "name": "feat_wholeSeriesRDeltaLocalPeakGap_5"
+    },
+    {
+      "dtype": "float64",
+      "index": 220,
+      "name": "feat_wholeSeriesRDeltaMarginToNextYear"
+    },
+    {
+      "dtype": "float64",
+      "index": 221,
+      "name": "feat_wholeSeriesRDeltaMarginToPreviousYear"
+    },
+    {
+      "dtype": "float64",
+      "index": 222,
+      "name": "feat_wholeSeriesRDelta__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 223,
+      "name": "feat_zeroCountInTarget"
+    },
+    {
+      "dtype": "float64",
+      "index": 224,
+      "name": "feat_zeroCountInTarget__missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 225,
+      "name": "has_negative_lag_signal"
+    },
+    {
+      "dtype": "float64",
+      "index": 226,
+      "name": "point_count"
+    },
+    {
+      "dtype": "float64",
+      "index": 227,
+      "name": "previous_corrected_year_missing"
+    },
+    {
+      "dtype": "float64",
+      "index": 228,
+      "name": "raw_is_expanded"
+    },
+    {
+      "dtype": "float64",
+      "index": 229,
+      "name": "raw_is_fallback"
+    },
+    {
+      "dtype": "float64",
+      "index": 230,
+      "name": "raw_is_peak"
+    },
+    {
+      "dtype": "float64",
+      "index": 231,
+      "name": "raw_is_rank1"
+    },
+    {
+      "dtype": "float64",
+      "index": 232,
+      "name": "raw_is_rank2"
+    },
+    {
+      "dtype": "float64",
+      "index": 233,
+      "name": "raw_is_rank3"
+    },
+    {
+      "dtype": "float64",
+      "index": 234,
+      "name": "raw_is_rolling_transition"
+    },
+    {
+      "dtype": "float64",
+      "index": 235,
+      "name": "round_candidate_count"
+    },
+    {
+      "dtype": "float64",
+      "index": 236,
+      "name": "round_compression_score_mean"
+    },
+    {
+      "dtype": "float64",
+      "index": 237,
+      "name": "round_compression_score_std"
+    },
+    {
+      "dtype": "float64",
+      "index": 238,
+      "name": "round_compression_score_z"
+    },
+    {
+      "dtype": "float64",
+      "index": 239,
+      "name": "round_index"
+    },
+    {
+      "dtype": "float64",
+      "index": 240,
+      "name": "round_selected_rank_percentile"
+    },
+    {
+      "dtype": "float64",
+      "index": 241,
+      "name": "round_selected_score_gap_to_best"
+    },
+    {
+      "dtype": "float64",
+      "index": 242,
+      "name": "round_selected_score_gap_to_next_rank"
+    },
+    {
+      "dtype": "float64",
+      "index": 243,
+      "name": "round_selected_score_gap_to_prev_rank"
+    },
+    {
+      "dtype": "float64",
+      "index": 244,
+      "name": "round_selected_score_mean"
+    },
+    {
+      "dtype": "float64",
+      "index": 245,
+      "name": "round_selected_score_std"
+    },
+    {
+      "dtype": "float64",
+      "index": 246,
+      "name": "round_selected_score_z"
+    },
+    {
+      "dtype": "float64",
+      "index": 247,
+      "name": "run_count"
+    },
+    {
+      "dtype": "float64",
+      "index": 248,
+      "name": "selected_rank"
+    },
+    {
+      "dtype": "float64",
+      "index": 249,
+      "name": "selected_rank_inv"
+    },
+    {
+      "dtype": "float64",
+      "index": 250,
+      "name": "selected_score"
+    }
+  ],
+  "feature_variant": "deployable_no_missing_count",
+  "schema_version": "current-event-deployable-v1"
+}
