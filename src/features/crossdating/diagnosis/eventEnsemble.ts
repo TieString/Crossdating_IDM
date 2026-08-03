@@ -1510,6 +1510,7 @@ export const keepSingleMainWindow = (event: DiagnosisEvent): DiagnosisEvent => {
     };
     delete primary.locationAlternatives;
     delete primary.operationAlternatives;
+    delete primary.reviewCoreRange;
     return primary;
 };
 
@@ -1522,6 +1523,7 @@ const stripDiagnosisEventAlternatives = (
     };
     delete primary.locationAlternatives;
     delete primary.operationAlternatives;
+    delete primary.reviewCoreRange;
     return primary;
 };
 
@@ -1546,6 +1548,16 @@ const preserveJointLagStateWindows = (
         && newestTransition?.evidence.lagAfter !== null
         && newestTransition?.evidence.lagAfter
             === wholeSeriesEvent.evidence.lagBefore;
+    const hasWholeUnitBoundary = wholeSeriesEvent !== undefined
+        && stateTransitions.length === 1
+        && (
+            stateTransitions[0].eventType === "missingRing"
+            || stateTransitions[0].eventType === "falseRing"
+        )
+        && Math.abs(
+            (stateTransitions[0].evidence.lagAfter ?? 0)
+            - (stateTransitions[0].evidence.lagBefore ?? 0),
+        ) === 1;
     const hasStrongWholeLocalBoundary = wholeSeriesEvent !== undefined
         && stateTransitions.some((event) => (
             event.evidence.algorithmSources.includes("unique_repeated_block_boundary")
@@ -1561,6 +1573,7 @@ const preserveJointLagStateWindows = (
     const hasJointLocalPath = stateTransitions.length >= 2
         && hasCoherentLagChain(stateTransitions);
     if (!hasWholeSeriesBaseline
+        && !hasWholeUnitBoundary
         && !hasStrongWholeLocalBoundary
         && !representsSingleBoundaryAlternatives
         && !hasJointLocalPath) {
@@ -1611,6 +1624,7 @@ export const makeDiagnosisEvents = (
                     maxPartialGapYears: effectiveConfig.maxPartialGapYears,
                     ...options.eventOperationRecoveryConfig,
                 },
+                siteData,
             )
             : detectedBeforeFusion;
         const endpointRefined = options.enableEndpointResidualWindow === true
@@ -1658,6 +1672,7 @@ export const makeDiagnosisEvents = (
                         })
                     )
                 ))
+                .map(stripDiagnosisEventAlternatives)
                 .map((event) => ({
                     ...event,
                     seriesRange: { ...diagnosis.targetRange },
@@ -1711,6 +1726,7 @@ export const makeDiagnosisEvents = (
                     maxPartialGapYears: effectiveConfig.maxPartialGapYears,
                     ...options.eventOperationRecoveryConfig,
                 },
+                siteData,
             )[0] ?? firstLocated;
             if (
                 operationRefined.eventType === firstLocated.eventType

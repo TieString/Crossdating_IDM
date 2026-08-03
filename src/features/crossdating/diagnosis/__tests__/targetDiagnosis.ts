@@ -9,7 +9,16 @@ import {
 } from "../eventEnsemble";
 import { evaluateDraft } from "../evaluation";
 import { diagnoseSeriesCore } from "../segments";
-import type { DiagnosisCandidateOperation, DiagnosisEvent, SeriesCoreDiagnosis } from "../types";
+import type {
+    DiagnosisCandidateOperation,
+    DiagnosisEvent,
+    DiagnosisOptions,
+    SeriesCoreDiagnosis,
+} from "../types";
+
+export type TargetDiagnosisOptions = DiagnosisEventEnsembleOptions & {
+    diagnosisOptions?: Omit<DiagnosisOptions, "referenceConfig">;
+};
 
 export type TargetDiagnosisBundle = {
     diagnosis: SeriesCoreDiagnosis;
@@ -21,23 +30,27 @@ export type TargetDiagnosisBundle = {
 export const diagnoseTargetEvents = (
     siteData: RwlSiteData,
     targetTree: string,
-    options: DiagnosisEventEnsembleOptions = {},
+    options: TargetDiagnosisOptions = {},
 ): DiagnosisEvent[] => diagnoseTargetBundle(siteData, targetTree, options)?.events ?? [];
 
 export const diagnoseTargetBundle = (
     siteData: RwlSiteData,
     targetTree: string,
-    options: DiagnosisEventEnsembleOptions = {},
+    options: TargetDiagnosisOptions = {},
 ): TargetDiagnosisBundle | null => {
+    const { diagnosisOptions, ...eventOverrides } = options;
     const eventOptions = {
         ...INTERNAL_EVENT_ENSEMBLE_OPTIONS,
-        ...options,
+        ...eventOverrides,
         eventOperationRecoveryConfig: {
             ...INTERNAL_EVENT_ENSEMBLE_OPTIONS.eventOperationRecoveryConfig,
-            ...options.eventOperationRecoveryConfig,
+            ...eventOverrides.eventOperationRecoveryConfig,
         },
     };
-    const config = getConfig({ referenceConfig: null });
+    const config = getConfig({
+        referenceConfig: null,
+        ...diagnosisOptions,
+    });
     const diagnosis = diagnoseSeriesCore(siteData, targetTree, config);
     if (!diagnosis) return null;
     const drafts = [

@@ -185,12 +185,20 @@ const collectFiles = (dir: string, acc: string[]) => {
     }
 };
 
-const sampleFiles = (allFiles: string[], sampleCount: number, offset = 0): string[] => {
+const sampleFiles = (
+    allFiles: string[],
+    sampleCount: number,
+    offset = 0,
+    skipCount = 0,
+): string[] => {
     const stride = Math.max(1, Math.floor(allFiles.length / sampleCount));
     const normalizedOffset = ((Math.floor(offset) % stride) + stride) % stride;
     return allFiles
         .filter((_, index) => index >= normalizedOffset && (index - normalizedOffset) % stride === 0)
-        .slice(0, sampleCount);
+        .slice(
+            Math.max(0, Math.floor(skipCount)),
+            Math.max(0, Math.floor(skipCount)) + sampleCount,
+        );
 };
 
 type BenchmarkFileSplit = "train" | "calibration" | "validation";
@@ -215,8 +223,29 @@ const inBenchmarkFileSplit = (
         relativePath.replace(/\\/g, "/").toLowerCase(),
     ) % 10;
     if (split === "train") return bucket <= 5;
-    if (split === "calibration") return bucket <= 7;
+    // Keep model fitting, calibration, and final validation file-disjoint.
+    if (split === "calibration") return bucket >= 6 && bucket <= 7;
     return bucket >= 8;
+};
+
+const normalizedBenchmarkRelativePath = (file: string): string => (
+    (file.startsWith(ITRDB_DIR) ? file.slice(ITRDB_DIR.length) : file)
+        .replace(/\\/g, "/")
+        .replace(/^\/+/, "")
+        .toLowerCase()
+);
+
+const readFrozenFileManifest = (manifestPath: string | undefined): Set<string> | null => {
+    if (!manifestPath) return null;
+    const text = readFileSync(manifestPath, "utf8");
+    const trimmed = text.trim();
+    const values = trimmed.startsWith("[")
+        ? JSON.parse(trimmed) as unknown
+        : trimmed.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+    if (!Array.isArray(values) || values.some((value) => typeof value !== "string")) {
+        throw new Error("ITRDB_FROZEN_FILE_MANIFEST must contain a JSON string array or one path per line");
+    }
+    return new Set(values.map((value) => normalizedBenchmarkRelativePath(value)));
 };
 
 const overlap = (a: Series, b: Series): number => {
@@ -531,9 +560,23 @@ d("ITRDB 大规模缺轮基准", () => {
         const splitFiles = fileSplit
             ? allFiles.filter((file) => inBenchmarkFileSplit(file, fileSplit))
             : allFiles;
-        const sampledFiles = sampleFiles(splitFiles, sampleCount, offset);
+        const frozenFileManifestPath = process.env.ITRDB_FROZEN_FILE_MANIFEST;
+        const frozenFileManifest = readFrozenFileManifest(frozenFileManifestPath);
+        const eligibleFiles = frozenFileManifest
+            ? splitFiles.filter((file) => (
+                    frozenFileManifest.has(normalizedBenchmarkRelativePath(file))
+                ))
+            : splitFiles;
+        const sampledFiles = sampleFiles(
+            eligibleFiles,
+            sampleCount,
+            offset,
+            Number(process.env.ITRDB_FROZEN_FILE_SKIP ?? 0),
+        );
         const fileFilter = process.env.ITRDB_FROZEN_FILE_FILTER?.toLowerCase();
-        const files = sampledFiles;
+        const files = fileFilter
+            ? sampledFiles.filter((file) => file.toLowerCase().includes(fileFilter))
+            : sampledFiles;
         const maxCases = Number(process.env.ITRDB_FROZEN_CASES ?? 120);
         const minimumContextYears = Number(
             process.env.ITRDB_FROZEN_MIN_CONTEXT_YEARS ?? 18,
@@ -645,6 +688,9 @@ d("ITRDB 大规模缺轮基准", () => {
             primaryPredictionShiftYears: number | null;
             matchedPrimaryTopYear: number | null;
             selectedTopYear: number | null;
+            primaryTruthRank: number | null;
+            primaryTopYearError: number | null;
+            primaryTopYearCenterOffset: number | null;
         };
         type CleanCaseOutcome = {
             context: BenchmarkCaseContext;
@@ -1644,6 +1690,10 @@ d("ITRDB 大规模缺轮基准", () => {
                     eventType,
                     olderLag,
                     window,
+                    {
+                        includeBoundaryLocal:
+                            process.env.ITRDB_FIXED_WINDOW_BOUNDARY_LOCAL !== "0",
+                    },
                 ),
             }));
             fixedWindowCounterfactualCases.push({
@@ -1775,6 +1825,11 @@ d("ITRDB 大规模缺轮基准", () => {
             const selectedTopYear = matchedAlternative?.rankedYears[0]?.year
                 ?? (match?.locationRank === 0 ? primaryTopYear : undefined);
             const primaryMatched = match?.locationRank === 0;
+            const primaryTruthRank = primaryMatched
+                ? match.prediction.rankedYears.find(
+                        (row) => row.year === truth.year,
+                    )?.rank ?? null
+                : null;
             if (primaryMatched) aggregate.primaryMatched += 1;
             if (match && match.locationRank > 0) aggregate.alternativeRecovered += 1;
             if (match) aggregate.locationRanks.push(match.locationRank);
@@ -1816,6 +1871,14 @@ d("ITRDB 大规模缺轮基准", () => {
                 primaryPredictionShiftYears: primaryPrediction?.shiftYears ?? null,
                 matchedPrimaryTopYear: primaryTopYear ?? null,
                 selectedTopYear: selectedTopYear ?? null,
+                primaryTruthRank,
+                primaryTopYearError: primaryPrediction?.rankedYears[0]
+                    ? primaryPrediction.rankedYears[0].year - truth.year
+                    : null,
+                primaryTopYearCenterOffset: primaryPrediction?.rankedYears[0]
+                    ? primaryPrediction.rankedYears[0].year
+                        - (primaryPrediction.startYear + primaryPrediction.endYear) / 2
+                    : null,
             });
             result.matches.forEach((match) => {
                 const primaryTopYear = match.prediction.rankedYears[0]?.year;
@@ -2702,12 +2765,25 @@ d("ITRDB 大规模缺轮基准", () => {
                 );
                 const locatorAudits: CounterfactualLocatorAuditRow[] = [];
                 const stopObserving = collectCounterfactualLocatorAudit
-                    ? observeCounterfactualLocator((row) => locatorAudits.push(row))
+                    ? observeCounterfactualLocator(
+                            (row) => locatorAudits.push(row),
+                            {
+                                includeCoarseCandidateCounterfactuals:
+                                    process.env.ITRDB_COARSE_CANDIDATE_CF_AUDIT
+                                        === "1",
+                            },
+                        )
                     : null;
                 const bundleStarted = performance.now();
                 const bundle = (() => {
                     try {
                         return site ? diagnoseTargetBundle(site, target.id, {
+                            ...(process.env.ITRDB_UNIT_EVENTS_ONLY === "1" ? {
+                                diagnosisOptions: {
+                                    lagMin: -1,
+                                    maxPartialGapYears: 1,
+                                },
+                            } : {}),
                             eventPathConfig,
                             enableDecisiveJointOperationFusion: !lightweight,
                             enableCounterfactualEventLocator: !lightweight,
@@ -2745,9 +2821,14 @@ d("ITRDB 大规模缺轮基准", () => {
                         || process.env.ITRDB_RECOVERY_LOCATIONS_PER_SIGNAL
                         || process.env.ITRDB_RECOVERY_OPERATION_ALTERNATIVES
                         || process.env.ITRDB_RECOVERY_MAX_LOCATION_ALTERNATIVES
-                        || process.env.ITRDB_RECOVERY_SINGLE_MAIN
-                    ) ? {
-                        eventOperationRecoveryConfig: {
+                         || process.env.ITRDB_RECOVERY_SINGLE_MAIN
+                         || process.env.ITRDB_DYNAMIC_JOINT_MIN_SCORE
+                         || process.env.ITRDB_UNIT_EVENTS_ONLY === "1"
+                     ) ? {
+                         eventOperationRecoveryConfig: {
+                            ...(process.env.ITRDB_UNIT_EVENTS_ONLY === "1"
+                                ? { maxPartialGapYears: 1 }
+                                : {}),
                             ...(process.env.ITRDB_RECOVERY_MIN_SIDE
                                 ? {
                                     minimumSideYears: Number(
@@ -2817,6 +2898,13 @@ d("ITRDB 大规模缺轮基准", () => {
                                 ? {
                                     outputSingleMainWindow:
                                         process.env.ITRDB_RECOVERY_SINGLE_MAIN === "1",
+                                }
+                                : {}),
+                            ...(process.env.ITRDB_DYNAMIC_JOINT_MIN_SCORE
+                                ? {
+                                    dynamicJointMinimumScore: Number(
+                                        process.env.ITRDB_DYNAMIC_JOINT_MIN_SCORE,
+                                    ),
                                 }
                                 : {}),
                         },
@@ -4116,26 +4204,56 @@ d("ITRDB 大规模缺轮基准", () => {
             return "strong";
         };
         const summarizeOutcomeRows = (rows: EventCaseOutcome[]) => {
+            const answeredRows = rows.filter((row) => row.answered);
             const matchedRows = rows.filter((row) => row.matched);
             const primaryMatchedRows = rows.filter((row) => row.primaryMatched);
             const alternativeRecoveredRows = rows.filter((row) => (
                 row.locationRank !== null && row.locationRank > 0
             ));
             const predictionCount = rows.reduce((sum, row) => sum + row.predictions, 0);
+            const primaryTruthRanks = primaryMatchedRows
+                .map((row) => row.primaryTruthRank)
+                .filter((rank): rank is number => rank !== null);
+            const primaryTopYearCenterOffsets = answeredRows
+                .map((row) => row.primaryTopYearCenterOffset)
+                .filter((offset): offset is number => offset !== null);
             return {
                 cases: rows.length,
-                responseRate: rows.filter((row) => row.answered).length
-                    / Math.max(1, rows.length),
+                answered: answeredRows.length,
+                responseRate: answeredRows.length / Math.max(1, rows.length),
+                abstentionRate: 1 - answeredRows.length / Math.max(1, rows.length),
                 recall: matchedRows.length / Math.max(1, rows.length),
                 primaryWindowRecall: primaryMatchedRows.length / Math.max(1, rows.length),
                 alternativeRecoveryRate: alternativeRecoveredRows.length
                     / Math.max(1, rows.length),
                 precision: matchedRows.length / Math.max(1, predictionCount),
                 complete: rows.filter((row) => row.complete).length / Math.max(1, rows.length),
+                completeAnswered: rows.filter((row) => row.complete).length
+                    / Math.max(1, answeredRows.length),
+                operationAccuracy: rows.filter((row) => row.operationMatched).length
+                    / Math.max(1, rows.length),
+                selectableOperationAccuracy: rows
+                    .filter((row) => row.selectableOperationMatched).length
+                    / Math.max(1, rows.length),
+                operationRecoveryApplyRate: rows
+                    .filter((row) => row.operationRecoveryApplied).length
+                    / Math.max(1, rows.length),
+                multiplePredictionRate: rows.filter((row) => row.totalPredictions > 1).length
+                    / Math.max(1, rows.length),
                 predictions: predictionCount,
                 medianWidth: median(rows
                     .map((row) => row.width)
                     .filter((width): width is number => width !== null)),
+                widthHistogram: Object.fromEntries(
+                    Array.from(new Set(rows
+                        .map((row) => row.width)
+                        .filter((width): width is number => width !== null)))
+                        .sort((left, right) => left - right)
+                        .map((width) => [
+                            width,
+                            rows.filter((row) => row.width === width).length,
+                        ]),
+                ),
                 primaryTop1ExactAll: primaryMatchedRows.filter((row) => row.top1Exact).length
                     / Math.max(1, rows.length),
                 primaryTop1ExactCovered: primaryMatchedRows.filter((row) => row.top1Exact).length
@@ -4149,6 +4267,23 @@ d("ITRDB 大规模缺轮基准", () => {
                 primaryTop1WithinOneCovered: primaryMatchedRows
                     .filter((row) => row.top1WithinOne).length
                     / Math.max(1, primaryMatchedRows.length),
+                primaryTop3All: primaryTruthRanks.filter((rank) => rank <= 3).length
+                    / Math.max(1, rows.length),
+                primaryTop3Covered: primaryTruthRanks.filter((rank) => rank <= 3).length
+                    / Math.max(1, primaryMatchedRows.length),
+                primaryMedianTruthRankCovered: median(primaryTruthRanks),
+                primaryMrrAll: primaryTruthRanks.reduce(
+                    (sum, rank) => sum + 1 / rank,
+                    0,
+                ) / Math.max(1, rows.length),
+                primaryMrrCovered: primaryTruthRanks.reduce(
+                    (sum, rank) => sum + 1 / rank,
+                    0,
+                ) / Math.max(1, primaryMatchedRows.length),
+                primaryMeanTopYearCenterOffset: primaryTopYearCenterOffsets.reduce(
+                    (sum, offset) => sum + offset,
+                    0,
+                ) / Math.max(1, primaryTopYearCenterOffsets.length),
                 selectedTop1WithinOneAll: matchedRows
                     .filter((row) => row.selectedTop1WithinOne).length
                     / Math.max(1, rows.length),
@@ -4163,6 +4298,32 @@ d("ITRDB 大规模缺轮基准", () => {
                 / Math.max(1, rows.length),
             predictions: rows.reduce((sum, row) => sum + row.predictions, 0),
         });
+        const baselineCleanContexts = caseContexts.filter(
+            (context) => context.baselineFlagged === false,
+        );
+        const baselineCleanEventOutcomes = eventCaseOutcomes.filter(
+            (row) => row.context.baselineFlagged === false,
+        );
+        const baselineCleanCleanOutcomes = cleanCaseOutcomes.filter(
+            (row) => row.context.baselineFlagged === false,
+        );
+        const formalEventSummary = (eventType: EventCaseOutcome["eventType"]) => (
+            summarizeOutcomeRows(baselineCleanEventOutcomes.filter(
+                (row) => row.eventType === eventType,
+            ))
+        );
+        const formalCleanSummary = summarizeCleanRows(baselineCleanCleanOutcomes);
+        const allSampledAuditSummary = {
+            attempted,
+            missingRing: summarize(aggregates.missingRing),
+            falseRing: summarize(aggregates.falseRing),
+            partialMove: summarize(aggregates.partialMove),
+            partialMoveByShift,
+            clean: {
+                cases: cleanCases,
+                falsePositiveRate: cleanFalsePositiveRate,
+            },
+        };
         const eventTypes: EventCaseOutcome["eventType"][] = [
             "missingRing",
             "falseRing",
@@ -4734,16 +4895,15 @@ d("ITRDB 大规模缺轮基准", () => {
             fileSplit,
             splitPoolFiles: splitFiles.length,
             offset,
-            attempted,
-            missingRing: summarize(aggregates.missingRing),
-            falseRing: summarize(aggregates.falseRing),
-            partialMove: summarize(aggregates.partialMove),
-            partialMoveByShift,
+            attempted: baselineCleanContexts.length,
+            excludedBaselineFlaggedCases: attempted - baselineCleanContexts.length,
+            missingRing: formalEventSummary("missingRing"),
+            falseRing: formalEventSummary("falseRing"),
+            partialMove: formalEventSummary("partialMove"),
+            partialMoveByShift: baselineCleanPartialMoveByShift,
             baselineCleanPartialMoveByShift,
-            clean: {
-                cases: cleanCases,
-                falsePositiveRate: cleanFalsePositiveRate,
-            },
+            clean: formalCleanSummary,
+            allSampledAudit: allSampledAuditSummary,
             stratifiedBenchmarkSummary,
             ...(piecewiseChangePointSummary ? { piecewiseChangePointSummary } : {}),
             ...(referenceChangePointSummary ? { referenceChangePointSummary } : {}),
@@ -4840,9 +5000,16 @@ d("ITRDB 大规模缺轮基准", () => {
                 partialGapYears,
                 fileSplit,
                 splitPoolFiles: splitFiles.length,
+                eligiblePoolFiles: eligibleFiles.length,
+                ...(frozenFileManifestPath
+                    ? { frozenFileManifestPath }
+                    : {}),
                 offset,
-                attempted,
-                cases: windowRankCases,
+                attempted: baselineCleanContexts.length,
+                excludedBaselineFlaggedCases: attempted - baselineCleanContexts.length,
+                cases: windowRankCases.filter(
+                    (row) => row.context.baselineFlagged === false,
+                ),
             }), "utf8");
         }
         if (process.env.ITRDB_AUDIT_DATA_PATH) {
@@ -4856,22 +5023,23 @@ d("ITRDB 大规模缺轮基准", () => {
                 splitPoolFiles: splitFiles.length,
                 offset,
                 files: files.length,
-                attempted,
+                attempted: baselineCleanContexts.length,
+                excludedBaselineFlaggedCases: attempted - baselineCleanContexts.length,
                 summary: {
-                    missingRing: summarize(aggregates.missingRing),
-                    falseRing: summarize(aggregates.falseRing),
-                    partialMove: summarize(aggregates.partialMove),
-                    partialMoveByShift,
-                    clean: {
-                        cases: cleanCases,
-                        falsePositiveRate: cleanFalsePositives / Math.max(1, cleanCases),
-                    },
+                    missingRing: formalEventSummary("missingRing"),
+                    falseRing: formalEventSummary("falseRing"),
+                    partialMove: formalEventSummary("partialMove"),
+                    partialMoveByShift: baselineCleanPartialMoveByShift,
+                    clean: formalCleanSummary,
                 },
+                allSampledSummary: allSampledAuditSummary,
                 failures,
                 rankingCases,
                 caseContexts,
                 eventCaseOutcomes,
                 cleanCaseOutcomes,
+                formalEventCaseOutcomes: baselineCleanEventOutcomes,
+                formalCleanCaseOutcomes: baselineCleanCleanOutcomes,
                 stratifiedBenchmarkSummary,
                 ...(usePiecewiseChangePoint
                     ? { piecewiseChangePointCases, piecewiseChangePointSummary }

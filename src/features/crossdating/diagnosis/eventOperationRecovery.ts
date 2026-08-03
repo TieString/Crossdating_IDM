@@ -23,6 +23,7 @@ import {
     selectDynamicUnitOperation,
     selectJointCounterfactualOperation,
 } from "./jointOperationSelector";
+import { scoreFalseRingReferenceConsensusRecovery } from "./unitReferenceConsensusRecovery";
 import {
     DEFAULT_MAX_PARTIAL_GAP_YEARS,
     firstFixedYearFromLastMovedYear,
@@ -617,26 +618,98 @@ export const applyDecisiveJointOperationFusion = (
     events: DiagnosisEvent[],
     diagnosis: SeriesCoreDiagnosis,
     overrides: Partial<EventOperationRecoveryConfig> = {},
+    siteData?: RwlSiteData,
 ): DiagnosisEvent[] => {
     const config = {
         ...DEFAULT_EVENT_OPERATION_RECOVERY_CONFIG,
         ...overrides,
     };
-    // A physical gap is the lag change between the two sides, so its operation grid always
-    // keeps the newer side at zero. A separately detected whole-series event is retained by
-    // fusion, but must not turn a true -10 gap into a residual -35/-40 operation.
-    const baselineLag = 0;
-    return fuseDecisiveJointOperationScores(
+    const wholeSeriesBaseline = events.some(
+        (event) => event.eventType === "wholeSeriesMove",
+    );
+    const localUnitEvents = events.filter((event) => (
+        event.eventType === "missingRing" || event.eventType === "falseRing"
+    ));
+    // Unit corrections are relative to the newer fixed side. With a whole-series offset that
+    // side is not lag zero in the observed calendar, so a zero baseline reverses the operation.
+    // Partial gaps keep their separate zero-relative search until that pipeline is revised.
+    const baselineLag = wholeSeriesBaseline && localUnitEvents.length === 1
+        ? localUnitEvents[0].evidence.lagAfter ?? 0
+        : 0;
+    const operations = getJointCounterfactualOperationScores(
+        diagnosis,
+        15,
+        config.maxPartialGapYears,
+        baselineLag,
+    );
+    const fused = fuseDecisiveJointOperationScores(
         events,
         diagnosis,
-        getJointCounterfactualOperationScores(
-            diagnosis,
-            15,
-            config.maxPartialGapYears,
-            baselineLag,
-        ),
+        operations,
         config,
     );
+    if (events.length === 0 && fused.length === 0 && siteData) {
+        const consensus = scoreFalseRingReferenceConsensusRecovery(
+            diagnosis,
+            siteData,
+            operations,
+        );
+        if (consensus) {
+            const operation = {
+                ...consensus.operation,
+                bestYear: consensus.centerYear,
+            };
+            const recovered = jointEventFromOperation(
+                operation,
+                null,
+                diagnosis,
+                consensus.referenceSummary.remoteCombinedMargin,
+                null,
+                config,
+            );
+            return [{
+                ...recovered,
+                evidence: {
+                    ...recovered.evidence,
+                    algorithmSources: Array.from(new Set([
+                        ...recovered.evidence.algorithmSources,
+                        "per_reference_counterfactual_evidence",
+                        "reference_consensus_unit_recovery",
+                        "decisive_joint_operation_fusion",
+                    ])).sort(),
+                    notes: [
+                        ...recovered.evidence.notes,
+                        "operation_fusion=reference_consensus_false_ring_recovery",
+                        `reference_consensus_center_source=${consensus.centerSource}`,
+                        `reference_consensus_center_year=${consensus.centerYear}`,
+                        `reference_consensus_master_score=${consensus.masterScore.toFixed(6)}`,
+                        `reference_consensus_count=${
+                            consensus.referenceSummary.referenceCount
+                        }`,
+                        `reference_consensus_combined_gain=${
+                            consensus.referenceSummary.bestCombinedGain.toFixed(6)
+                        }`,
+                        `reference_consensus_type_margin=${(
+                            consensus.referenceSummary.bestCombinedGain
+                            - consensus.oppositeReferenceSummary.bestCombinedGain
+                        ).toFixed(6)}`,
+                        `reference_consensus_positive_difference_fraction=${
+                            consensus.referenceSummary
+                                .positiveDifferenceGainFraction.toFixed(6)
+                        }`,
+                        `reference_consensus_positive_whitened_fraction=${
+                            consensus.referenceSummary
+                                .positiveWhitenedGainFraction.toFixed(6)
+                        }`,
+                        `reference_consensus_remote_margin=${
+                            consensus.referenceSummary.remoteCombinedMargin.toFixed(6)
+                        }`,
+                    ],
+                },
+            }];
+        }
+    }
+    return fused;
 };
 
 const boundedWindow = (

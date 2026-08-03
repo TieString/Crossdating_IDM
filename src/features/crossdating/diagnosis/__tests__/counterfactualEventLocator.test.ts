@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+    selectCorroboratedFalseRingCurrentCandidateIndex,
     selectCounterfactualCoarseCandidateIndex,
     selectFalseRingCoarseCandidateIndex,
 } from "../counterfactualEventLocator";
@@ -88,4 +89,42 @@ describe("counterfactual coarse-mode selection", () => {
         expect(familyCandidates[index].startYear).toBeGreaterThanOrEqual(1913);
         expect(familyCandidates[index].startYear).toBeLessThanOrEqual(1915);
     });
+
+    it("keeps a corroborated false-ring current mode over a remote transition", () => {
+        const familyCandidates = [
+            {
+                startYear: 1946,
+                endYear: 1970,
+                source: "lag_transition",
+            },
+            {
+                startYear: 1923,
+                endYear: 1947,
+                source: "current_event",
+            },
+        ];
+
+        expect(selectCorroboratedFalseRingCurrentCandidateIndex({
+            candidates: familyCandidates,
+            selectedIndex: 0,
+            currentPrimaryYear: 1935,
+            candidateTopYear: 1936,
+            candidateTopMargin: 0.2,
+        })).toBe(1);
+        expect(selectCorroboratedFalseRingCurrentCandidateIndex({
+            candidates: familyCandidates,
+            selectedIndex: 0,
+            currentPrimaryYear: 1935,
+            candidateTopYear: 1958,
+            candidateTopMargin: 0.2,
+        })).toBe(0);
+        expect(selectCorroboratedFalseRingCurrentCandidateIndex({
+            candidates: familyCandidates,
+            selectedIndex: 0,
+            currentPrimaryYear: 1935,
+            candidateTopYear: 1936,
+            candidateTopMargin: 0.05,
+        })).toBe(0);
+    });
+
 });

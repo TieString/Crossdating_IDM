@@ -132,6 +132,25 @@ const huberSimilarity = (
         : null;
 };
 
+const localHuberSimilarity = (
+    target: NumericSeries,
+    reference: NumericSeries,
+    startYear: number,
+    endYear: number,
+    minimumPairs = 2,
+): number | null => {
+    let loss = 0;
+    let pairs = 0;
+    for (let year = startYear; year <= endYear; year += 1) {
+        const targetValue = target.get(year);
+        const referenceValue = reference.get(year);
+        if (targetValue === undefined || referenceValue === undefined) continue;
+        loss += huberLoss(targetValue - referenceValue);
+        pairs += 1;
+    }
+    return pairs >= minimumPairs ? -loss / pairs : null;
+};
+
 const signAgreement = (
     target: NumericSeries,
     reference: NumericSeries,
@@ -246,6 +265,7 @@ const fitReferencePredictor = (
     trainingEndYear: number,
     excludedStartYear: number,
     excludedEndYear: number,
+    minimumPairs = 30,
 ): ReferencePredictor | null => {
     const pairs: Array<[number, number]> = [];
     for (let year = trainingStartYear; year <= trainingEndYear; year += 1) {
@@ -255,7 +275,7 @@ const fitReferencePredictor = (
         if (targetValue === undefined || referenceValue === undefined) continue;
         pairs.push([referenceValue, targetValue]);
     }
-    if (pairs.length < 30) return null;
+    if (pairs.length < minimumPairs) return null;
     const referenceMean = mean(pairs.map(([value]) => value));
     const targetMean = mean(pairs.map(([, value]) => value));
     let covariance = 0;
@@ -291,6 +311,37 @@ const fitReferencePredictor = (
                 / Math.max(0.1, residualMeanSquare),
         ),
     };
+};
+
+const fixedNewerSidePredictiveViews = (
+    context: FixedWindowCounterfactualContext,
+    window: { startYear: number; endYear: number },
+): PredictiveViews => {
+    const trainingStartYear = window.endYear + 5;
+    const trainingEndYear = Math.min(
+        context.diagnosis.targetRange.endYear,
+        trainingStartYear + 179,
+    );
+    return Object.fromEntries(
+        (["raw", "difference", "whitened"] as const).map((viewName) => [
+            viewName,
+            context.references
+                .map((reference) => fitReferencePredictor(
+                    context.baseline[viewName],
+                    reference.views[viewName],
+                    trainingStartYear,
+                    trainingEndYear,
+                    1,
+                    0,
+                    12,
+                ))
+                .filter((predictor): predictor is ReferencePredictor => (
+                    predictor !== null
+                ))
+                .sort((left, right) => right.weight - left.weight)
+                .slice(0, 8),
+        ]),
+    ) as PredictiveViews;
 };
 
 const predictiveViews = (
@@ -345,6 +396,7 @@ const predictiveSimilarities = (
     predictors: ReferencePredictor[],
     startYear: number,
     endYear: number,
+    minimumPairs?: number,
 ): { ensemble: number; median: number; weighted: number } => {
     let ensembleLoss = 0;
     let ensemblePairs = 0;
@@ -359,7 +411,10 @@ const predictiveSimilarities = (
             loss += huberLoss(targetValue - predicted);
             pairs += 1;
         }
-        return pairs >= Math.max(6, Math.floor((endYear - startYear + 1) * 0.45))
+        return pairs >= (
+            minimumPairs
+            ?? Math.max(6, Math.floor((endYear - startYear + 1) * 0.45))
+        )
             ? [{ value: -loss / pairs, weight: predictor.weight }]
             : [];
     });
@@ -378,15 +433,93 @@ const predictiveSimilarities = (
         ensembleLoss += huberLoss(targetValue - predicted);
         ensemblePairs += 1;
     }
-    const enoughPairs = ensemblePairs >= Math.max(
-        6,
-        Math.floor((endYear - startYear + 1) * 0.45),
+    const enoughPairs = ensemblePairs >= (
+        minimumPairs
+        ?? Math.max(6, Math.floor((endYear - startYear + 1) * 0.45))
     );
     return {
         ensemble: enoughPairs ? -ensembleLoss / ensemblePairs : -10,
         median: median(individual.map((row) => row.value)),
         weighted: weightedMean(individual),
     };
+};
+
+const addPredictiveBoundaryFeatures = (
+    features: Record<string, number>,
+    corrected: PreparedViews,
+    context: FixedWindowCounterfactualContext,
+    predictors: PredictiveViews,
+    candidateYear: number,
+) => {
+    ([1, 2, 3] as const).forEach((radius) => {
+        const width = radius * 2 + 1;
+        (["raw", "difference", "whitened"] as const).forEach((viewName) => {
+            const addRange = (
+                label: "Edge" | "Older" | "Newer",
+                startYear: number,
+                endYear: number,
+                minimumPairs: number,
+            ) => {
+                const after = predictiveSimilarities(
+                    corrected[viewName],
+                    predictors[viewName],
+                    startYear,
+                    endYear,
+                    minimumPairs,
+                );
+                const before = predictiveSimilarities(
+                    context.baseline[viewName],
+                    predictors[viewName],
+                    startYear,
+                    endYear,
+                    minimumPairs,
+                );
+                (["ensemble", "median", "weighted"] as const).forEach((name) => {
+                    const prefix = `${viewName}Predictive${
+                        name[0].toUpperCase()
+                    }${name.slice(1)}Huber${label}${width}`;
+                    features[prefix] = after[name];
+                    features[`${prefix}Gain`] = after[name] - before[name];
+                });
+                return after;
+            };
+            const edge = addRange(
+                "Edge",
+                candidateYear - radius,
+                candidateYear + radius,
+                Math.max(2, radius * 2),
+            );
+            const older = addRange(
+                "Older",
+                candidateYear - radius,
+                candidateYear - 1,
+                Math.max(1, radius - 1),
+            );
+            const newer = addRange(
+                "Newer",
+                candidateYear + 1,
+                candidateYear + radius,
+                Math.max(1, radius - 1),
+            );
+            (["ensemble", "median", "weighted"] as const).forEach((name) => {
+                const prefix = `${viewName}Predictive${
+                    name[0].toUpperCase()
+                }${name.slice(1)}Huber`;
+                features[`${prefix}SideMinimum${width}`] = Math.min(
+                    older[name],
+                    newer[name],
+                );
+                features[`${prefix}SideMean${width}`] = mean([
+                    older[name],
+                    newer[name],
+                ]);
+                features[`${prefix}EdgeVsSide${width}`] = edge[name] - mean([
+                    older[name],
+                    newer[name],
+                ]);
+            });
+        });
+    });
 };
 
 const addViewFeatures = (
@@ -450,11 +583,66 @@ const addViewFeatures = (
     }
 };
 
+const addBoundaryLocalFeatures = (
+    features: Record<string, number>,
+    corrected: PreparedViews,
+    context: FixedWindowCounterfactualContext,
+    candidateYear: number,
+    radius: number,
+) => {
+    const suffix = `Boundary${radius * 2 + 1}`;
+    (["raw", "difference", "whitened"] as const).forEach((viewName) => {
+        const baselineOlder = localHuberSimilarity(
+            context.baseline[viewName],
+            context.master[viewName],
+            candidateYear - radius,
+            candidateYear - 1,
+        );
+        const correctedOlder = localHuberSimilarity(
+            corrected[viewName],
+            context.master[viewName],
+            candidateYear - radius,
+            candidateYear - 1,
+        );
+        const baselineNewer = localHuberSimilarity(
+            context.baseline[viewName],
+            context.master[viewName],
+            candidateYear + 1,
+            candidateYear + radius,
+        );
+        const correctedNewer = localHuberSimilarity(
+            corrected[viewName],
+            context.master[viewName],
+            candidateYear + 1,
+            candidateYear + radius,
+        );
+        const olderGain = correctedOlder !== null && baselineOlder !== null
+            ? correctedOlder - baselineOlder
+            : -10;
+        const newerGain = correctedNewer !== null && baselineNewer !== null
+            ? correctedNewer - baselineNewer
+            : -10;
+        features[`${viewName}OlderHuber${suffix}`] = correctedOlder ?? -10;
+        features[`${viewName}NewerHuber${suffix}`] = correctedNewer ?? -10;
+        features[`${viewName}OlderHuberGain${suffix}`] = olderGain;
+        features[`${viewName}NewerHuberGain${suffix}`] = newerGain;
+        features[`${viewName}SideMinimumGain${suffix}`] = Math.min(
+            olderGain,
+            newerGain,
+        );
+        features[`${viewName}SideMeanGain${suffix}`] = mean([
+            olderGain,
+            newerGain,
+        ]);
+    });
+};
+
 export const scoreFixedWindowCounterfactual = (
     context: FixedWindowCounterfactualContext,
     eventType: FixedWindowCounterfactualEventType,
     shiftYears: number,
     window: { startYear: number; endYear: number },
+    options: { includeBoundaryLocal?: boolean } = {},
 ): FixedWindowCounterfactualScore[] => {
     const centerYear = Math.round((window.startYear + window.endYear) / 2);
     const widths = [21, 31, 61];
@@ -468,6 +656,9 @@ export const scoreFixedWindowCounterfactual = (
         shiftYears,
         window,
     );
+    const boundaryPredictors = options.includeBoundaryLocal
+        ? fixedNewerSidePredictiveViews(context, window)
+        : null;
     const rows: FixedWindowCounterfactualScore[] = [];
     for (let year = window.startYear; year <= window.endYear; year += 1) {
         const cacheKey = `${eventType}:${shiftYears}:${year}`;
@@ -525,6 +716,56 @@ export const scoreFixedWindowCounterfactual = (
                     predictive.weighted;
             });
         });
+        if (options.includeBoundaryLocal) [2, 3, 4, 6].forEach((radius) => {
+            const localRange = boundedRange(
+                year,
+                radius * 2 + 1,
+                context.diagnosis,
+            );
+            (["raw", "difference", "whitened"] as const).forEach((viewName) => {
+                const after: Record<string, number> = {};
+                const before: Record<string, number> = {};
+                addViewFeatures(
+                    after,
+                    viewName,
+                    corrected[viewName],
+                    context,
+                    localRange.startYear,
+                    localRange.endYear,
+                    "",
+                );
+                addViewFeatures(
+                    before,
+                    viewName,
+                    context.baseline[viewName],
+                    context,
+                    localRange.startYear,
+                    localRange.endYear,
+                    "",
+                );
+                Object.entries(after).forEach(([name, value]) => {
+                    const suffix = `Boundary${radius * 2 + 1}`;
+                    features[`${name}${suffix}`] = value;
+                    features[`${name}Gain${suffix}`] = value - (before[name] ?? value);
+                });
+            });
+            addBoundaryLocalFeatures(
+                features,
+                corrected,
+                context,
+                year,
+                radius,
+            );
+        });
+        if (options.includeBoundaryLocal) {
+            addPredictiveBoundaryFeatures(
+                features,
+                corrected,
+                context,
+                boundaryPredictors!,
+                year,
+            );
+        }
         rows.push({ year, features });
     }
     return rows;

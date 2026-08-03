@@ -61,7 +61,10 @@ describe("single main diagnosis window", () => {
     });
 
     it("removes every user-visible alternative without changing the primary", () => {
-        const primary = event();
+        const primary = {
+            ...event(),
+            reviewCoreRange: { startYear: 1901, endYear: 1905 },
+        };
         const result = keepSingleMainWindow(primary);
 
         expect(result).toMatchObject({
@@ -73,8 +76,10 @@ describe("single main diagnosis window", () => {
         });
         expect(result.locationAlternatives).toBeUndefined();
         expect(result.operationAlternatives).toBeUndefined();
+        expect(result.reviewCoreRange).toBeUndefined();
         expect(primary.locationAlternatives).toHaveLength(1);
         expect(primary.operationAlternatives).toHaveLength(1);
+        expect(primary.reviewCoreRange).toEqual({ startYear: 1901, endYear: 1905 });
     });
 
     it("narrows a unique repeated-block boundary only in the final main window", () => {
