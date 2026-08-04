@@ -1082,7 +1082,11 @@ d("ITRDB 大规模缺轮基准", () => {
             currentHit: boolean,
         ) => {
             if (!usePiecewiseChangePoint || !diagnosis) return;
-            const scores = scorePiecewiseChangePoints(diagnosis, cofechaDiagnosis);
+            const scores = scorePiecewiseChangePoints(
+                diagnosis,
+                cofechaDiagnosis,
+                { lags: [expectedLag] },
+            );
             const tolerance = eventType === "partialMove" ? 4 : 3;
             const tops = Object.fromEntries(piecewiseScoreNames.map((scoreName) => {
                 const top = [...scores]
@@ -2416,6 +2420,9 @@ d("ITRDB 大规模缺轮基准", () => {
                     ? getJointCounterfactualOperationScores(
                         run.diagnosis,
                         jointOperationEdgeYears,
+                        process.env.ITRDB_UNIT_EVENTS_ONLY === "1"
+                            ? 1
+                            : undefined,
                     )
                     : scoreJointCounterfactualOperations(
                         run.diagnosis,
@@ -2975,6 +2982,8 @@ d("ITRDB 大规模缺轮基准", () => {
                 process.env.ITRDB_PARTIAL_GRID_ONLY === "1";
             const unitEventsOnly =
                 process.env.ITRDB_UNIT_EVENTS_ONLY === "1";
+            const falseOnly = process.env.ITRDB_FALSE_ONLY === "1";
+            const missingOnly = process.env.ITRDB_MISSING_ONLY === "1";
             const cleanRun = run(target.valuesByYear, partialGridOnly, "clean");
             const skippedRun: ReturnType<typeof run> = {
                 events: [],
@@ -2994,7 +3003,7 @@ d("ITRDB 大规模缺轮基准", () => {
                 eventType: "missingRing",
                 year,
             };
-            const missingRun = partialGridOnly
+            const missingRun = partialGridOnly || falseOnly
                 ? skippedRun
                 : run(missing.corrupted);
             if (collectCounterfactualLocatorAudit) {
@@ -3256,7 +3265,7 @@ d("ITRDB 大规模缺轮基准", () => {
                 eventType: "falseRing",
                 year,
             };
-            const falseRun = partialGridOnly
+            const falseRun = partialGridOnly || missingOnly
                 ? skippedRun
                 : run(falseRing.corrupted);
             if (collectCounterfactualLocatorAudit) {
@@ -3271,6 +3280,7 @@ d("ITRDB 大规模缺轮基准", () => {
                             truthYear: year,
                             truthCorrectionYears: 1,
                             ...row,
+                            falseRingMode: falseRing.mode,
                         })),
                 );
             }

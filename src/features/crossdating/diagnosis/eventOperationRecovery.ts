@@ -467,8 +467,21 @@ export const selectDecisiveJointOperationFusion = (
             operations,
             firstFixedYear,
         );
+        const globallyConfirmedDynamicShift = dynamicSelection !== null
+            && initialGridSelection !== null
+            && initialGridSelection.operation.eventType === "partialMove"
+            && initialGridSelection.operation.shiftYears
+                === dynamicSelection.operation.shiftYears
+            && initialGridSelection.score >= config.dynamicJointMinimumScore
+            && (initialGridSelection.shiftScoreMargin ?? 0)
+                >= config.dynamicJointPartialShiftMinimumMargin
+            && initialGridSelection.scoreMargin
+                >= config.dynamicJointPartialOverUnitMinimumMargin
+            && dynamicSelection.scoreMargin
+                >= config.dynamicJointPartialShiftMinimumMargin;
         if (
             dynamicSelection
+            && globallyConfirmedDynamicShift
             && dynamicSelection.operation.shiftYears !== currentEvent.shiftYears
             && Math.abs(dynamicSelection.operation.shiftYears)
                 > Math.abs(currentEvent.shiftYears ?? 0)
@@ -480,7 +493,7 @@ export const selectDecisiveJointOperationFusion = (
                 selectorProbability: dynamicSelection.probabilityLike,
                 selectorMargin: dynamicSelection.scoreMargin,
                 presenceProbability: null,
-                presenceThreshold: null,
+                presenceThreshold: config.dynamicJointMinimumScore,
             };
         }
         return null;
@@ -614,6 +627,102 @@ export const fuseDecisiveJointOperationScores = (
     ];
 };
 
+export const selectSubtleFalseRingEmptyRecovery = (
+    operations: readonly JointCounterfactualOperationScore[],
+): JointCounterfactualOperationScore | null => {
+    const falseRing = operations.find((operation) => (
+        operation.eventType === "falseRing" && operation.shiftYears === 1
+    ));
+    const missingRing = operations.find((operation) => (
+        operation.eventType === "missingRing" && operation.shiftYears === -1
+    ));
+    if (!falseRing || !missingRing || falseRing.baselineLag !== 0) return null;
+
+    const hasLocalizedBoundary = (
+        falseRing.topThreeDifferenceGain >= 0.02
+        && falseRing.bestDifferenceGain >= 0.025
+        && falseRing.sideStepRemoteMargin >= 0.15
+        && falseRing.bestCorrectedSideSupport >= 0.2
+        && falseRing.bestSideMinimumAdvantage <= 0
+        && missingRing.bestCorrectedSideSupport < 0
+        && Math.abs(falseRing.sideStepBestYear - falseRing.bestYear) <= 12
+    );
+    return hasLocalizedBoundary ? falseRing : null;
+};
+
+export const recoverSubtleFalseRingEmptySuggestion = (
+    events: DiagnosisEvent[],
+    diagnosis: SeriesCoreDiagnosis,
+    operations: readonly JointCounterfactualOperationScore[],
+    overrides: Partial<EventOperationRecoveryConfig> = {},
+): DiagnosisEvent[] => {
+    if (events.length > 0) return events;
+    const operation = selectSubtleFalseRingEmptyRecovery(operations);
+    if (!operation) return events;
+
+    const config = {
+        ...DEFAULT_EVENT_OPERATION_RECOVERY_CONFIG,
+        ...overrides,
+        unitWindowYears: 13,
+    };
+    const centeredOperation = {
+        ...operation,
+        bestYear: operation.sideStepBestYear,
+    };
+    const recovered = jointEventFromOperation(
+        centeredOperation,
+        null,
+        diagnosis,
+        operation.sideStepRemoteMargin,
+        null,
+        config,
+    );
+    const window = {
+        startYear: recovered.startYear,
+        endYear: recovered.endYear,
+    };
+    return [{
+        ...recovered,
+        rankedYears: rankedYears(
+            window,
+            operation.rows.map((row) => ({
+                year: row.year,
+                score: row.sideStepScore,
+            })),
+            "subtle_false_ring_boundary_evidence",
+        ),
+        evidence: {
+            ...recovered.evidence,
+            algorithmSources: Array.from(new Set([
+                ...recovered.evidence.algorithmSources,
+                "subtle_false_ring_empty_recovery",
+                "subtle_false_ring_boundary_evidence",
+            ])).sort(),
+            notes: [
+                ...recovered.evidence.notes,
+                "operation_fusion=subtle_false_ring_empty_recovery",
+                `subtle_false_ring_center_year=${operation.sideStepBestYear}`,
+                `subtle_false_ring_best_year=${operation.bestYear}`,
+                `subtle_false_ring_best_side_minimum_advantage=${
+                    operation.bestSideMinimumAdvantage.toFixed(6)
+                }`,
+                `subtle_false_ring_corrected_side_support=${
+                    operation.bestCorrectedSideSupport.toFixed(6)
+                }`,
+                `subtle_false_ring_opposite_corrected_side_support=${
+                    operations.find((candidate) => (
+                        candidate.eventType === "missingRing"
+                        && candidate.shiftYears === -1
+                    ))?.bestCorrectedSideSupport.toFixed(6)
+                }`,
+                `subtle_false_ring_side_step_remote_margin=${
+                    operation.sideStepRemoteMargin.toFixed(6)
+                }`,
+            ],
+        },
+    }];
+};
+
 export const applyDecisiveJointOperationFusion = (
     events: DiagnosisEvent[],
     diagnosis: SeriesCoreDiagnosis,
@@ -648,66 +757,74 @@ export const applyDecisiveJointOperationFusion = (
         operations,
         config,
     );
-    if (events.length === 0 && fused.length === 0 && siteData) {
-        const consensus = scoreFalseRingReferenceConsensusRecovery(
-            diagnosis,
-            siteData,
-            operations,
-        );
-        if (consensus) {
-            const operation = {
-                ...consensus.operation,
-                bestYear: consensus.centerYear,
-            };
-            const recovered = jointEventFromOperation(
-                operation,
-                null,
+    if (events.length === 0 && fused.length === 0) {
+        if (siteData) {
+            const consensus = scoreFalseRingReferenceConsensusRecovery(
                 diagnosis,
-                consensus.referenceSummary.remoteCombinedMargin,
-                null,
-                config,
+                siteData,
+                operations,
             );
-            return [{
-                ...recovered,
-                evidence: {
-                    ...recovered.evidence,
-                    algorithmSources: Array.from(new Set([
-                        ...recovered.evidence.algorithmSources,
-                        "per_reference_counterfactual_evidence",
-                        "reference_consensus_unit_recovery",
-                        "decisive_joint_operation_fusion",
-                    ])).sort(),
-                    notes: [
-                        ...recovered.evidence.notes,
-                        "operation_fusion=reference_consensus_false_ring_recovery",
-                        `reference_consensus_center_source=${consensus.centerSource}`,
-                        `reference_consensus_center_year=${consensus.centerYear}`,
-                        `reference_consensus_master_score=${consensus.masterScore.toFixed(6)}`,
-                        `reference_consensus_count=${
-                            consensus.referenceSummary.referenceCount
-                        }`,
-                        `reference_consensus_combined_gain=${
-                            consensus.referenceSummary.bestCombinedGain.toFixed(6)
-                        }`,
-                        `reference_consensus_type_margin=${(
-                            consensus.referenceSummary.bestCombinedGain
-                            - consensus.oppositeReferenceSummary.bestCombinedGain
-                        ).toFixed(6)}`,
-                        `reference_consensus_positive_difference_fraction=${
-                            consensus.referenceSummary
-                                .positiveDifferenceGainFraction.toFixed(6)
-                        }`,
-                        `reference_consensus_positive_whitened_fraction=${
-                            consensus.referenceSummary
-                                .positiveWhitenedGainFraction.toFixed(6)
-                        }`,
-                        `reference_consensus_remote_margin=${
-                            consensus.referenceSummary.remoteCombinedMargin.toFixed(6)
-                        }`,
-                    ],
-                },
-            }];
+            if (consensus) {
+                const operation = {
+                    ...consensus.operation,
+                    bestYear: consensus.centerYear,
+                };
+                const recovered = jointEventFromOperation(
+                    operation,
+                    null,
+                    diagnosis,
+                    consensus.referenceSummary.remoteCombinedMargin,
+                    null,
+                    config,
+                );
+                return [{
+                    ...recovered,
+                    evidence: {
+                        ...recovered.evidence,
+                        algorithmSources: Array.from(new Set([
+                            ...recovered.evidence.algorithmSources,
+                            "per_reference_counterfactual_evidence",
+                            "reference_consensus_unit_recovery",
+                            "decisive_joint_operation_fusion",
+                        ])).sort(),
+                        notes: [
+                            ...recovered.evidence.notes,
+                            "operation_fusion=reference_consensus_false_ring_recovery",
+                            `reference_consensus_center_source=${consensus.centerSource}`,
+                            `reference_consensus_center_year=${consensus.centerYear}`,
+                            `reference_consensus_master_score=${consensus.masterScore.toFixed(6)}`,
+                            `reference_consensus_count=${
+                                consensus.referenceSummary.referenceCount
+                            }`,
+                            `reference_consensus_combined_gain=${
+                                consensus.referenceSummary.bestCombinedGain.toFixed(6)
+                            }`,
+                            `reference_consensus_type_margin=${(
+                                consensus.referenceSummary.bestCombinedGain
+                                - consensus.oppositeReferenceSummary.bestCombinedGain
+                            ).toFixed(6)}`,
+                            `reference_consensus_positive_difference_fraction=${
+                                consensus.referenceSummary
+                                    .positiveDifferenceGainFraction.toFixed(6)
+                            }`,
+                            `reference_consensus_positive_whitened_fraction=${
+                                consensus.referenceSummary
+                                    .positiveWhitenedGainFraction.toFixed(6)
+                            }`,
+                            `reference_consensus_remote_margin=${
+                                consensus.referenceSummary.remoteCombinedMargin.toFixed(6)
+                            }`,
+                        ],
+                    },
+                }];
+            }
         }
+        return recoverSubtleFalseRingEmptySuggestion(
+            fused,
+            diagnosis,
+            operations,
+            config,
+        );
     }
     return fused;
 };

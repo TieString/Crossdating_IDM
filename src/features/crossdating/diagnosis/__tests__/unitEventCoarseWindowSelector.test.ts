@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
     buildUnitEventCoarseCandidateFeatures,
+    selectMissingRingCoarseRecoveryCandidateIndex,
     selectUnitEventCoarseWindow,
     type UnitEventCoarseCandidate,
 } from "../unitEventCoarseWindowSelector";
@@ -109,4 +110,61 @@ describe("file-grouped unit-event coarse selector", () => {
             candidates: [],
         })).toBeNull();
     });
+
+    it("recovers a separated older-side missing-ring mode", () => {
+        const recoveryCandidates: UnitEventCoarseCandidate[] = [
+            {
+                startYear: 1923,
+                endYear: 1947,
+                source: "current_event",
+                aggregateScore: 0.9,
+                overlapConsensus: 0.7,
+            },
+            {
+                startYear: 1882,
+                endYear: 1906,
+                source: "profile:cumulativeCombined",
+                aggregateScore: 0.8,
+                overlapConsensus: 0.5,
+            },
+            {
+                startYear: 1894,
+                endYear: 1918,
+                source: "lag_transition",
+                aggregateScore: 0.7,
+                overlapConsensus: 0.5,
+            },
+        ];
+        expect(selectMissingRingCoarseRecoveryCandidateIndex({
+            eventType: "missingRing",
+            years,
+            ranks,
+            candidates: recoveryCandidates,
+            currentPrimaryYear: 1935,
+            operationEvidence: {
+                bestYear: 1935,
+                sideStepBestYear: 1895,
+                bestDifferenceGain: 0.13,
+            },
+        }, 0)).toBe(1);
+    });
+
+    it("keeps the learned mode when remote-side evidence is not calibrated", () => {
+        expect(selectMissingRingCoarseRecoveryCandidateIndex({
+            ...input,
+            operationEvidence: {
+                ...input.operationEvidence,
+                bestDifferenceGain: 0.2,
+            },
+        }, 0)).toBeNull();
+        expect(selectMissingRingCoarseRecoveryCandidateIndex({
+            ...input,
+            eventType: "falseRing",
+            operationEvidence: {
+                ...input.operationEvidence,
+                bestDifferenceGain: 0.1,
+            },
+        }, 0)).toBeNull();
+    });
+
 });

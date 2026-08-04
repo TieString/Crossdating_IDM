@@ -188,7 +188,7 @@ def build_case(
     if not current_range:
         return None
     current_center = (current_range[0] + current_range[1]) / 2
-    current_start, current_end = bounded_window(current_center, coarse)
+    current_start, current_end = map(int, current_range)
     current_top = source.get("primaryTopYear")
     operation_top = source.get("operationBestYear")
     side_top = source.get("sideStepBestYear")

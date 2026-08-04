@@ -7,6 +7,7 @@ const includeRows = process.env.MODE_INCLUDE_ROWS === "1";
 const requireCoarseHit = process.env.MODE_REQUIRE_COARSE_HIT !== "0";
 const requireZeroDevelopmentLoss =
     process.env.MODE_REQUIRE_ZERO_DEVELOPMENT_LOSS === "1";
+const searchScope = process.env.MODE_SEARCH_SCOPE ?? "coarse";
 if (paths.length === 0) {
     throw new Error("pass one or more locator audit JSON paths");
 }
@@ -29,6 +30,17 @@ const FAMILY_PROFILES = {
         "pairPeakKernel5",
         "pairPeakKernel9",
     ],
+    localSide: [
+        "localSideOlderAdvantage11",
+        "localSideNewerAdvantage11",
+        "localSideStepScore11",
+        "localSideOlderAdvantage21",
+        "localSideNewerAdvantage21",
+        "localSideStepScore21",
+        "localSideOlderAdvantage31",
+        "localSideNewerAdvantage31",
+        "localSideStepScore31",
+    ],
     reference: [
         "reference:rankMean",
         "reference:rankMedian",
@@ -40,6 +52,13 @@ const FAMILY_PROFILES = {
         "reference:weightedWindowVote25",
     ],
 };
+const requestedProfiles = (process.env.MODE_PROFILES ?? "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
+if (requestedProfiles.length > 0) {
+    FAMILY_PROFILES.custom = requestedProfiles;
+}
 
 const datasetName = (path) => {
     const name = path.toLowerCase();
@@ -55,6 +74,10 @@ const datasetName = (path) => {
     if (name.includes("holdout-v3")) return "holdout3";
     if (name.includes("holdout-v4")) return "holdout4";
     if (name.includes("holdout-v5")) return "holdout5";
+    if (name.includes("holdout-v6")) return "holdout6";
+    if (name.includes("holdout-v7")) return "holdout7";
+    if (name.includes("holdout-v9")) return "holdout9";
+    if (name.includes("holdout-v10")) return "holdout10";
     if (name.includes("train0")) return "train0";
     if (name.includes("train8")) return "train8";
     if (name.includes("cal0")) return "cal0";
@@ -89,9 +112,15 @@ const contains = (window, year) => (
 
 const prepare = (row, dataset) => {
     const starts = [];
+    const searchWindow = searchScope === "series"
+        ? {
+                startYear: row.years[0],
+                endYear: row.years[row.years.length - 1],
+            }
+        : row.coarseWindow;
     for (
-        let start = row.coarseWindow.startYear;
-        start <= row.coarseWindow.endYear - 12;
+        let start = searchWindow.startYear;
+        start <= searchWindow.endYear - 12;
         start += 1
     ) starts.push(start);
     if (starts.length === 0) return null;
@@ -355,4 +384,18 @@ for (const eventType of ["missingRing", "falseRing"]) {
     });
 }
 
-console.log(JSON.stringify({ reports }, null, 2));
+const payload = { reports };
+if (process.env.MODE_OUTPUT) {
+    fs.writeFileSync(process.env.MODE_OUTPUT, JSON.stringify(payload, null, 2));
+    console.log(JSON.stringify({
+        output: process.env.MODE_OUTPUT,
+        selected: reports.map((report) => ({
+            eventType: report.eventType,
+            method: report.method,
+            selected: report.selected,
+            datasets: report.datasets,
+        })),
+    }, null, 2));
+} else {
+    console.log(JSON.stringify(payload, null, 2));
+}

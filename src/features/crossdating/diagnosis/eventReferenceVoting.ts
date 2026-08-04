@@ -100,6 +100,8 @@ const MAX_REFERENCES = 16;
 const MISSING_GAIN_GATE = 0.01;
 const FALSE_GAIN_GATE = 0.05;
 const PARTIAL_GAIN_GATE = 0.019;
+const PARTIAL_RECOVERY_MINIMUM_GAIN = 0.1;
+const PARTIAL_RECOVERY_MINIMUM_REMOTE_MARGIN = 0.004;
 const FALSE_OVER_PARTIAL_MAXIMUM_GAIN_DEFICIT = 0.03;
 const FALSE_OVER_PARTIAL_MAXIMUM_PARTIAL_MARGIN = 0.003;
 const FALSE_OVER_PARTIAL_MINIMUM_FALSE_GAIN = 0.02;
@@ -717,13 +719,19 @@ const gainGate = (eventType: VoteKind): number => (
         : eventType === "falseRing" ? FALSE_GAIN_GATE : PARTIAL_GAIN_GATE
 );
 
-const passesRecoveryGate = (peak: VotePeak): boolean => {
+export const passesReferenceRecoveryGate = (
+    peak: ReferenceRecoveryPeakSummary,
+): boolean => {
     if (peak.eventType === "missingRing") {
         return peak.gain >= MISSING_GAIN_GATE
             && (peak.gain >= 0.1 || peak.remoteMargin <= 0.01);
     }
     if (peak.eventType === "falseRing") return peak.gain >= 0.1;
-    return peak.gain >= 0.03;
+    // A large year-by-shift grid produces attractive peaks even on clean series. Require the
+    // winning gap to separate from all remote years and alternative shifts before recovering
+    // an otherwise empty result. This gate is magnitude-neutral: -2 and -100 use the same rule.
+    return peak.gain >= PARTIAL_RECOVERY_MINIMUM_GAIN
+        && peak.remoteMargin >= PARTIAL_RECOVERY_MINIMUM_REMOTE_MARGIN;
 };
 
 const replaceWindow = (
@@ -1159,7 +1167,7 @@ export const refineEventsWithReferenceVoting = (
     const scored = auditedPeaks
         .filter((row): row is { scores: VoteScore[]; peak: VotePeak } => (
             row.peak.gain >= gainGate(row.peak.eventType)
-            && passesRecoveryGate(row.peak)
+            && passesReferenceRecoveryGate(row.peak)
         ))
         .sort((a, b) => b.peak.gain - a.peak.gain);
     const selectedType = selectReferenceRecoveryEventType(

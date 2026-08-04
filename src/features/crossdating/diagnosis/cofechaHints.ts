@@ -289,7 +289,7 @@ export const getCofechaSegmentLagSupport = (
 };
 
 export type CofechaFlaggedRegion = {
-    /** 编辑类型：highLag<0 → 缺轮(insert)；highLag>0 → 伪轮(delete)。 */
+    /** lag 方向；仅 |highLag|=1 直接映射为缺轮/伪轮，负向大 lag 映射为 partialMove。 */
     editType: "insert" | "delete";
     /** 主导 lag 符号绝对值（通常为 1；多个累积时可能更大）。 */
     lag: number;
@@ -303,7 +303,8 @@ export type CofechaFlaggedRegion = {
 /**
  * 从 COFECHA [A] 段级 lag 表提取某序列**最新**的 flagged 区域（人工定年流程：从较近年份处理）。
  *
- * COFECHA 的 [A] 表对真实缺/伪轮给出极干净的 highLag（如全段 -1=缺轮 / +1=伪轮，相关从 ~0 跳到 .7+）。
+ * COFECHA 的 [A] 表对真实缺/伪轮给出极干净的 highLag（如全段 -1=缺轮 / +1=伪轮，相关从 ~0 跳到 .7+）；
+ * 负向大 lag 保留为连续缺测的局部移动幅度。
  * 真编辑点在"最新一段非零 highLag 段"的较新边界附近（更老段同号只是错位向更老传播）。
  * 这里取该序列中 highLag 同号、|highLag|>=1 的 segment 里 **endYear 最大** 的那一段作为待处理区域，
  * 其 highLag 符号决定编辑类型。无 flagged 段返回 null。

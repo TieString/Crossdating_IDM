@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { RwlSiteData } from "@/features/rwl/types";
 import {
     FALSE_RING_COUNTERFACTUAL_PROFILES,
     FALSE_RING_REFERENCE_COUNTERFACTUAL_PROFILES,
@@ -71,8 +72,17 @@ suite("false-ring coarse counterfactual", () => {
         expect(production.map((row) => row.year)).toEqual(
             experiment.map((row) => row.year),
         );
+        const experimentProfiles = [
+            ...FALSE_RING_COUNTERFACTUAL_PROFILES,
+            "rawMasterR31",
+            "differenceMasterR21",
+            "differenceMasterR31",
+            "whitenedMasterR31",
+            "differenceReferenceWeightedR21",
+            "differenceReferenceWeightedR31",
+        ] as const;
         production.forEach((row, index) => {
-            FALSE_RING_COUNTERFACTUAL_PROFILES.forEach((profile) => {
+            experimentProfiles.forEach((profile) => {
                 expect(row.profiles[profile]).toBeCloseTo(
                     experiment[index]?.features[profile] ?? Number.NaN,
                     10,
@@ -91,4 +101,49 @@ suite("false-ring coarse counterfactual", () => {
             expect(Math.max(...values)).toBeGreaterThan(Math.min(...values));
         });
     });
+
+    it("makes merge-older evidence peak at the physical split year", () => {
+        expect(series).not.toBeNull();
+        const selected = series!;
+        const truthYear = pickStratifiedCalendarYear(
+            selected,
+            3,
+            "false-coarse-merge-older",
+            45,
+        )?.year;
+        expect(truthYear).toBeDefined();
+        const synthetic = createEndAnchoredFalseRingCase(
+            selected,
+            truthYear!,
+            "splitLike",
+        );
+        const site: RwlSiteData = new Map();
+        for (let index = 0; index < 5; index += 1) {
+            site.set(`exact-reference-${index}`, new Map(selected.valuesByYear));
+        }
+        site.set(selected.id, new Map(synthetic.corrupted));
+        const diagnosis = diagnoseSeriesCore(
+            site,
+            selected.id,
+            getConfig({ referenceConfig: null }),
+        );
+        expect(diagnosis).not.toBeNull();
+        const rows = scoreFalseRingCoarseCounterfactual(
+            diagnosis!,
+            site,
+            { startYear: truthYear! - 12, endYear: truthYear! + 12 },
+        );
+        const best = [...rows].sort((left, right) => (
+            (right.profiles.falseMergeOlderRawMasterR31 ?? -1)
+                - (left.profiles.falseMergeOlderRawMasterR31 ?? -1)
+            || left.year - right.year
+        ))[0];
+
+        expect(best?.year).toBe(truthYear);
+        expect(
+            rows.find((row) => row.year === truthYear)?.profiles
+                .falseMergeOlderRawMasterR31Advantage,
+        ).toBeGreaterThan(0);
+    });
+
 });

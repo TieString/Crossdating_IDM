@@ -556,6 +556,19 @@ const median = (values: number[]): number => {
     return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 };
 
+const splitFalseRingParts = (
+    sourceValue: number,
+): { falseValue: number; retainedValue: number } => {
+    const normalized = Math.max(1, Math.round(sourceValue));
+    const falseValue = normalized <= 1
+        ? 1
+        : Math.max(1, Math.min(normalized - 1, Math.round(normalized * 0.45)));
+    return {
+        falseValue,
+        retainedValue: Math.max(0, normalized - falseValue),
+    };
+};
+
 /**
  * 制造 end-anchored 伪轮 target：在 falseYear 处插入一个额外环（非极端值），
  * 较老一侧的值整体向较老年份偏移一年（=较老一侧 bestLag +1），endYear 固定。
@@ -580,14 +593,18 @@ export const createEndAnchoredFalseRingCase = (
     }
 
     let falseValue: number;
+    let splitRemainderValue: number | null = null;
     if (mode === "average") {
         falseValue = Math.round((left + right) / 2);
     } else if (mode === "moderate") {
         falseValue = Math.round(median(neighborhood));
     } else {
-        // splitLike：取局部均值的一半左右，模拟把一个环掰成两个较小值。
-        const localMean = neighborhood.length ? neighborhood.reduce((s, v) => s + v, 0) / neighborhood.length : (left + right) / 2;
-        falseValue = Math.max(1, Math.round(localMean * 0.45));
+        const localMean = neighborhood.length
+            ? neighborhood.reduce((sum, value) => sum + value, 0) / neighborhood.length
+            : (left + right) / 2;
+        const split = splitFalseRingParts(correct.get(falseYear) ?? localMean);
+        falseValue = split.falseValue;
+        splitRemainderValue = split.retainedValue;
     }
 
     const corrupted = new Map<number, number>();
@@ -597,6 +614,8 @@ export const createEndAnchoredFalseRingCase = (
             if (v !== undefined) corrupted.set(year, v);
         } else if (year === falseYear) {
             corrupted.set(year, falseValue);
+        } else if (year === falseYear - 1 && splitRemainderValue !== null) {
+            corrupted.set(year, splitRemainderValue);
         } else {
             const v = correct.get(year + 1);
             if (v !== undefined) corrupted.set(year, v);
@@ -659,7 +678,7 @@ const falseValueAt = (
     const localMean = neighborhood.length
         ? neighborhood.reduce((sum, value) => sum + value, 0) / neighborhood.length
         : (left + right) / 2;
-    return Math.max(1, Math.round(localMean * 0.45));
+    return splitFalseRingParts(correct.get(sourceYear) ?? localMean).falseValue;
 };
 
 /**
@@ -675,6 +694,30 @@ export const createPiecewiseLagMixedCase = (
     wholeSeriesLag = 0,
 ): PiecewiseLagMixedCase => {
     const ordered = [...events].sort((a, b) => b.year - a.year);
+    const splitPartsByEventYear = new Map<number, {
+        sourceYear: number;
+        falseValue: number;
+        retainedValue: number;
+    }>();
+    ordered.forEach((event) => {
+        if (event.eventType !== "falseRing" || event.falseMode !== "splitLike") return;
+        const active = ordered.filter((candidate) => (
+            candidate.eventType === "partialMove"
+                ? event.year < candidate.year
+                : event.year <= candidate.year
+        ));
+        const lag = wholeSeriesLag + active.reduce(
+            (sum, candidate) => sum + candidate.shiftYears,
+            0,
+        );
+        const sourceYear = event.year + lag - 1;
+        const sourceValue = series.valuesByYear.get(sourceYear);
+        if (sourceValue === undefined) return;
+        splitPartsByEventYear.set(event.year, {
+            sourceYear,
+            ...splitFalseRingParts(sourceValue),
+        });
+    });
     const corrupted = new Map<number, number>();
     for (let year = series.startYear; year <= series.endYear; year += 1) {
         const active = ordered.filter((event) => (
@@ -688,10 +731,20 @@ export const createPiecewiseLagMixedCase = (
             event.eventType === "falseRing" && event.year === year
         ));
         if (falseEvent) {
+            const split = splitPartsByEventYear.get(falseEvent.year);
             corrupted.set(
                 year,
-                falseValueAt(series.valuesByYear, sourceYear, falseEvent.falseMode ?? "moderate"),
+                split?.falseValue ?? falseValueAt(
+                    series.valuesByYear,
+                    sourceYear,
+                    falseEvent.falseMode ?? "moderate",
+                ),
             );
+            continue;
+        }
+        const newerSplit = splitPartsByEventYear.get(year + 1);
+        if (newerSplit?.sourceYear === sourceYear) {
+            corrupted.set(year, newerSplit.retainedValue);
             continue;
         }
         const value = series.valuesByYear.get(sourceYear);

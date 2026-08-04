@@ -9,7 +9,15 @@ import type { RwlSiteData } from "@/features/rwl/types";
 import { scoreBoundaryLocalCounterfactual } from "./boundaryLocalCounterfactual";
 import { selectCalibratedEventWindow } from "./calibratedEventWindow";
 import { scoreFalseRingCoarseCounterfactual } from "./falseRingCoarseCounterfactual";
+import {
+    selectFalseRingDirectConsensusRecenter,
+    selectFalseRingMergeOlderRecenter,
+} from "./falseRingPhysicalRecenter";
 import { scoreMissingRingCoarseCounterfactual } from "./missingRingCoarseCounterfactual";
+import {
+    selectMissingRingPhysicalRecenter,
+    type MissingRingPhysicalRecenterRule,
+} from "./missingRingPhysicalRecenter";
 import { rankUnitEventWindows } from "./unitEventWindowRanker";
 import { selectUnitEventShortWindow } from "./unitEventShortWindowSelector";
 import { rankUnitEventYears } from "./unitEventYearRanking";
@@ -51,6 +59,15 @@ type ProfileName =
     | "sideStepScore"
     | "sideMinimumAdvantage"
     | "correctedSideSupport"
+    | "localSideOlderAdvantage11"
+    | "localSideNewerAdvantage11"
+    | "localSideStepScore11"
+    | "localSideOlderAdvantage21"
+    | "localSideNewerAdvantage21"
+    | "localSideStepScore21"
+    | "localSideOlderAdvantage31"
+    | "localSideNewerAdvantage31"
+    | "localSideStepScore31"
     | "piecewiseCombinedObjective"
     | "cumulativeCombined"
     | "cumulativeCombinedCusum"
@@ -77,9 +94,21 @@ type ProfileName =
     | "cumulativeReferenceVoteContrast"
     | "transitionSplitGain"
     | "pairDifferenceWeighted"
+    | "pairDifferenceGainWeighted"
     | "pairWhitenedMean"
+    | "pairPositiveSideStepFraction"
     | "pairPeakKernel5"
     | "pairPeakKernel9"
+    | "pairLagStepWeighted"
+    | "pairLagStepMedian"
+    | "pairLagStepPositiveFraction"
+    | "pairLagStepPeakKernel5"
+    | "pairLagStepPeakKernel9"
+    | "pairFixedLagStepWeighted"
+    | "pairFixedLagStepMedian"
+    | "pairFixedLagStepPositiveFraction"
+    | "pairFixedLagStepPeakKernel5"
+    | "pairFixedLagStepPeakKernel9"
     | `partialBoundary:${
         | "raw31"
         | "difference31"
@@ -148,6 +177,11 @@ export type CounterfactualLocatorAuditRow = {
         year: number;
         profiles: Record<string, number>;
     }>;
+    unitExactYearProfiles?: Record<string, number[]>;
+    unitLocalCorrectionRanks?: number[];
+    unitFinalYearScores?: number[];
+    unitPreEventPolicyScores?: number[];
+    unitYearRankingProfileNames?: string[];
     candidates: Array<InternalWindow & {
         aggregateScore: number;
         overlapConsensus: number;
@@ -156,9 +190,11 @@ export type CounterfactualLocatorAuditRow = {
     coarseRuleSelectedIndex: number;
     coarseSelectedIndex: number;
     coarseModelSelectedIndex?: number;
+    coarseRecoveryRule?: "missing_remote_side_consensus";
     coarseModelScore?: number;
     coarseModelMargin?: number;
     coarseModelScores?: Array<{ index: number; score: number }>;
+    missingPhysicalRecenterRule?: MissingRingPhysicalRecenterRule;
     coarseCandidateCounterfactuals?: Array<{
         candidateIndex: number;
         source: string;
@@ -510,6 +546,17 @@ const correctionFor = (event: DiagnosisEvent): number | null => {
         : null;
 };
 
+const evidenceNoteNumber = (
+    event: DiagnosisEvent,
+    prefix: string,
+): number | undefined => {
+    const note = [...event.evidence.notes]
+        .reverse()
+        .find((value) => value.startsWith(prefix));
+    const value = Number(note?.slice(prefix.length));
+    return Number.isFinite(value) ? value : undefined;
+};
+
 const valueForCumulative = (
     row: CumulativeLagChangePointScore,
     profile: ProfileName,
@@ -706,7 +753,6 @@ export const refineEventWithCounterfactualLocator = (
             row.splitGain,
         ])),
     );
-
     const jointOperations = getJointCounterfactualOperationScores(
         diagnosis,
         edgeYears,
@@ -716,6 +762,21 @@ export const refineEventWithCounterfactualLocator = (
     const selectedOperation = jointOperations.find(
         (operation) => operation.shiftYears === correctionYears,
     );
+    const partialReferenceVoteYear = evidenceNoteNumber(
+        event,
+        "partial_reference_vote_year=",
+    );
+    const decisivePartialBoundaryYear = event.eventType === "partialMove"
+        && selectedOperation
+        && partialReferenceVoteYear === selectedOperation.sideStepBestYear
+        && Math.abs(
+            selectedOperation.sideStepBestYear - selectedOperation.bestYear,
+        ) <= 2
+        && selectedOperation.sideStepRemoteMargin >= 0.04
+        && selectedOperation.bestSideMinimumAdvantage >= 0.08
+        && selectedOperation.bestCorrectedSideSupport >= 0.12
+        ? selectedOperation.sideStepBestYear
+        : undefined;
     const alternativeDifferenceByYear = new Map<number, number>();
     jointOperations
         .filter((operation) => operation.shiftYears !== correctionYears)
@@ -795,6 +856,25 @@ export const refineEventWithCounterfactualLocator = (
             row.correctedSideSupport,
         ]) ?? []),
     );
+    ([
+        "localSideOlderAdvantage11",
+        "localSideNewerAdvantage11",
+        "localSideStepScore11",
+        "localSideOlderAdvantage21",
+        "localSideNewerAdvantage21",
+        "localSideStepScore21",
+        "localSideOlderAdvantage31",
+        "localSideNewerAdvantage31",
+        "localSideStepScore31",
+    ] as const).forEach((profile) => {
+        values.set(
+            profile,
+            new Map(selectedOperation?.rows.map((row) => [
+                row.year,
+                row[profile],
+            ]) ?? []),
+        );
+    });
     if (event.eventType === "partialMove") {
         const boundaryRows = scoreNegativePartialMoveBoundaries(
             diagnosis,
@@ -862,10 +942,24 @@ export const refineEventWithCounterfactualLocator = (
         ])),
     );
     values.set(
+        "pairDifferenceGainWeighted",
+        new Map(pairRows.map((row) => [
+            publicYear(row.year),
+            row.differenceGainWeighted,
+        ])),
+    );
+    values.set(
         "pairWhitenedMean",
         new Map(pairRows.map((row) => [
             publicYear(row.year),
             row.whitenedMean,
+        ])),
+    );
+    values.set(
+        "pairPositiveSideStepFraction",
+        new Map(pairRows.map((row) => [
+            publicYear(row.year),
+            row.positiveSideStepFraction,
         ])),
     );
     values.set(
@@ -880,6 +974,76 @@ export const refineEventWithCounterfactualLocator = (
         new Map(pairRows.map((row) => [
             publicYear(row.year),
             row.peakKernel9,
+        ])),
+    );
+    values.set(
+        "pairLagStepWeighted",
+        new Map(pairRows.map((row) => [
+            publicYear(row.year),
+            row.lagStepWeighted,
+        ])),
+    );
+    values.set(
+        "pairLagStepMedian",
+        new Map(pairRows.map((row) => [
+            publicYear(row.year),
+            row.lagStepMedian,
+        ])),
+    );
+    values.set(
+        "pairLagStepPositiveFraction",
+        new Map(pairRows.map((row) => [
+            publicYear(row.year),
+            row.lagStepPositiveFraction,
+        ])),
+    );
+    values.set(
+        "pairLagStepPeakKernel5",
+        new Map(pairRows.map((row) => [
+            publicYear(row.year),
+            row.lagStepPeakKernel5,
+        ])),
+    );
+    values.set(
+        "pairLagStepPeakKernel9",
+        new Map(pairRows.map((row) => [
+            publicYear(row.year),
+            row.lagStepPeakKernel9,
+        ])),
+    );
+    values.set(
+        "pairFixedLagStepWeighted",
+        new Map(pairRows.map((row) => [
+            publicYear(row.year),
+            row.fixedLagStepWeighted,
+        ])),
+    );
+    values.set(
+        "pairFixedLagStepMedian",
+        new Map(pairRows.map((row) => [
+            publicYear(row.year),
+            row.fixedLagStepMedian,
+        ])),
+    );
+    values.set(
+        "pairFixedLagStepPositiveFraction",
+        new Map(pairRows.map((row) => [
+            publicYear(row.year),
+            row.fixedLagStepPositiveFraction,
+        ])),
+    );
+    values.set(
+        "pairFixedLagStepPeakKernel5",
+        new Map(pairRows.map((row) => [
+            publicYear(row.year),
+            row.fixedLagStepPeakKernel5,
+        ])),
+    );
+    values.set(
+        "pairFixedLagStepPeakKernel9",
+        new Map(pairRows.map((row) => [
+            publicYear(row.year),
+            row.fixedLagStepPeakKernel9,
         ])),
     );
     const referenceRows = scoreReferenceTransitionConsensus(
@@ -1045,6 +1209,8 @@ export const refineEventWithCounterfactualLocator = (
                     operationEvidence: {
                         bestYear: selectedOperation.bestYear,
                         sideStepBestYear: selectedOperation.sideStepBestYear,
+                        bestDifferenceGain:
+                            selectedOperation.bestDifferenceGain,
                     },
                 } : {}),
             })
@@ -1171,6 +1337,10 @@ export const refineEventWithCounterfactualLocator = (
                 internalCandidates: rankerCandidates,
                 currentPrimaryYear,
                 coarseWindow,
+                coarseSource: selected.source,
+                ...(learnedCoarseSelection?.recoveryRule ? {
+                    coarseRecoveryRule: learnedCoarseSelection.recoveryRule,
+                } : {}),
                 ...(corroboratedFalseRingModeCenterYear === undefined
                     ? {}
                     : { corroboratedFalseRingModeCenterYear }),
@@ -1258,23 +1428,37 @@ export const refineEventWithCounterfactualLocator = (
                             selectedOperation.sideStepRemoteMargin,
                     },
                 } : {}),
-                ...(event.eventType === "partialMove"
-                    && fixedSideBaselineLag !== 0
-                    && selectedOperation
-                    && selectedOperation.topThreeDifferenceGain >= 0.2
-                    && selectedOperation.remoteDifferenceMargin >= 0.01
-                    ? { decisiveYear: selectedOperation.bestYear }
-                    : {}),
+                ...(decisivePartialBoundaryYear !== undefined
+                    ? { decisiveYear: decisivePartialBoundaryYear }
+                    : event.eventType === "partialMove"
+                        && fixedSideBaselineLag !== 0
+                        && selectedOperation
+                        && selectedOperation.topThreeDifferenceGain >= 0.2
+                        && selectedOperation.remoteDifferenceMargin >= 0.01
+                        ? { decisiveYear: selectedOperation.bestYear }
+                        : {}),
             });
     const shortUnitWindow = (
         unitEventType
         && learnedUnitWindow
-        && independentCalibratedWindow
+        && (
+            independentCalibratedWindow
+            || event.evidence.algorithmSources.includes(
+                "subtle_false_ring_empty_recovery",
+            )
+        )
     ) ? selectUnitEventShortWindow({
             eventType: unitEventType,
             learnedWindow: learnedUnitWindow,
-            independentWindow: independentCalibratedWindow,
+            ...(independentCalibratedWindow
+                ? { independentWindow: independentCalibratedWindow }
+                : {}),
+            subtleFalseRingRecovery: event.evidence.algorithmSources.includes(
+                "subtle_false_ring_empty_recovery",
+            ),
             currentPrimaryYear,
+            years,
+            ranks: ranks as ReadonlyMap<string, readonly number[]>,
             ...(selectedOperation
                 ? { operationEvidence: selectedOperation }
                 : {}),
@@ -1283,17 +1467,83 @@ export const refineEventWithCounterfactualLocator = (
         ? null
         : independentCalibratedWindow;
     if (!learnedUnitWindow && !calibratedWindow) return null;
-    const finalWindow = shortUnitWindow?.window
+    let finalWindow = shortUnitWindow?.window
         ?? learnedUnitWindow?.window
         ?? calibratedWindow!.window;
-    const finalCalibratedWidth = shortUnitWindow?.recommendedWidth
+    let finalCalibratedWidth = shortUnitWindow?.recommendedWidth
         ?? learnedUnitWindow?.recommendedWidth
         ?? calibratedWindow?.width;
-    const finalCalibrationRule = shortUnitWindow
+    const preliminaryCalibrationRule = shortUnitWindow
         ? `unit_event_short_window_${shortUnitWindow.rule}`
         : learnedUnitWindow
             ? `unit_event_window_ranker_${learnedUnitWindow.recommendedWidth}`
             : calibratedWindow?.calibrationRule;
+    const missingPhysicalRecenter = unitEventType === "missingRing"
+        && missingCounterfactualRows
+        && learnedUnitWindow
+        ? selectMissingRingPhysicalRecenter({
+                years,
+                ranks: ranks as ReadonlyMap<string, readonly number[]>,
+                currentWindow: finalWindow,
+                coarseWindow,
+                coarseSource: selected.source,
+                candidates: rankerCandidates,
+                ...(preliminaryCalibrationRule
+                    ? { calibrationRule: preliminaryCalibrationRule }
+                    : {}),
+                windowCenteringRule:
+                    learnedUnitWindow.windowCenteringRule,
+                learnedWindowMargin: learnedUnitWindow.margin,
+                learnedWindowRemoteMargin: learnedUnitWindow.remoteMargin,
+                nineYearSafety: learnedUnitWindow.nineYearSafety,
+                nineYearSafetyThreshold: learnedUnitWindow.widthThreshold,
+                ...(learnedCoarseSelection
+                    ? { coarseModelMargin: learnedCoarseSelection.margin }
+                    : {}),
+                ...(selectedOperation
+                    ? { operationEvidence: selectedOperation }
+                    : {}),
+                counterfactualRows: missingCounterfactualRows,
+            })
+        : null;
+    if (missingPhysicalRecenter) {
+        finalWindow = missingPhysicalRecenter.window;
+        finalCalibratedWidth =
+            finalWindow.endYear - finalWindow.startYear + 1;
+    }
+    const physicalFalseRingRecenter = unitEventType === "falseRing"
+        && falseCounterfactualRows
+        ? selectFalseRingMergeOlderRecenter(
+                falseCounterfactualRows,
+                finalWindow,
+            )
+        : null;
+    if (physicalFalseRingRecenter) {
+        finalWindow = physicalFalseRingRecenter.window;
+    }
+    const directFalseRingRecenter = unitEventType === "falseRing"
+        && falseCounterfactualRows
+        && !physicalFalseRingRecenter
+        ? selectFalseRingDirectConsensusRecenter(
+                falseCounterfactualRows,
+                finalWindow,
+                [
+                    currentPrimaryYear,
+                    selectedOperation?.bestYear,
+                    selectedOperation?.sideStepBestYear,
+                ],
+            )
+        : null;
+    if (directFalseRingRecenter) {
+        finalWindow = directFalseRingRecenter.window;
+    }
+    const finalCalibrationRule = missingPhysicalRecenter
+        ? `unit_event_missing_${missingPhysicalRecenter.rule}`
+        : physicalFalseRingRecenter
+            ? "unit_event_false_merge_older_physical_recenter"
+            : directFalseRingRecenter
+                ? "unit_event_false_direct_consensus_recenter"
+                : preliminaryCalibrationRule;
     const finalYears = Array.from(
         {
             length:
@@ -1301,30 +1551,49 @@ export const refineEventWithCounterfactualLocator = (
         },
         (_, index) => finalWindow.startYear + index,
     );
+    const usesModeRankingWindow = !missingPhysicalRecenter
+        && !physicalFalseRingRecenter
+        && !directFalseRingRecenter && (
+        shortUnitWindow?.rule === "missing_concentrated_profile_9"
+        || shortUnitWindow?.rule === "false_concentrated_profile_9"
+        || shortUnitWindow?.rule === "false_subtle_empty_recovery_9"
+    );
+    const unitRankingWindow = usesModeRankingWindow
+        ? learnedUnitWindow!.modeWindow
+        : finalWindow;
+    const unitRankingYears = Array.from(
+        {
+            length:
+                unitRankingWindow.endYear - unitRankingWindow.startYear + 1,
+        },
+        (_, index) => unitRankingWindow.startYear + index,
+    );
     const scoreByYear = calibratedWindow?.scoreByYear
         ?? new Map(finalYears.map((year) => [year, 0]));
     const localCorrectionRanking = event.eventType === "missingRing"
         ? scoreUnitEventLocalCorrectionRanks(
             diagnosis,
             event.eventType,
-            finalYears,
+            unitRankingYears,
         )
         : null;
     const exactYearEvidence = (
         event.eventType === "missingRing"
         || event.eventType === "falseRing"
-    ) ? scoreUnitEventExactYearEvidence(
+        ) ? scoreUnitEventExactYearEvidence(
             diagnosis,
             siteData,
             event.eventType,
-            finalYears,
+            unitRankingYears,
+            auditObserver !== null,
         ) : null;
     const unitYearRanking = (
         event.eventType === "missingRing"
         || event.eventType === "falseRing"
     ) ? rankUnitEventYears({
             eventType: event.eventType,
-            years: finalYears,
+            years: unitRankingYears,
+            fixedWindowYears: finalYears,
             allYears: years,
             ranks,
             ...(currentPrimaryYear === undefined
@@ -1338,6 +1607,7 @@ export const refineEventWithCounterfactualLocator = (
             } : {}),
             ...(localCorrectionRanking ? { localCorrectionRanking } : {}),
             ...(exactYearEvidence ? { exactYearEvidence } : {}),
+            ...(falseCounterfactualRows ? { falseCounterfactualRows } : {}),
         }) : null;
     const rankingScoreByYear = unitYearRanking?.scoreByYear ?? scoreByYear;
     const scoredValues = [...rankingScoreByYear.values()];
@@ -1351,15 +1621,20 @@ export const refineEventWithCounterfactualLocator = (
         },
         (_, index) => {
             const year = finalWindow.startYear + index;
+            const partialRankingYear = decisivePartialBoundaryYear
+                ?? selectedOperation?.bestYear;
             const isJointBest = event.eventType === "partialMove"
-                && selectedOperation?.bestYear === year;
+                && partialRankingYear === year;
+            const rankingRemoteMargin = decisivePartialBoundaryYear !== undefined
+                ? selectedOperation?.sideStepRemoteMargin ?? 0
+                : selectedOperation?.remoteDifferenceMargin ?? 0;
             const jointBestBonus = isJointBest && selectedOperation
                 ? Math.max(
                     0,
                     Math.min(
                         0.75,
                         (
-                            selectedOperation.remoteDifferenceMargin - 0.015
+                            rankingRemoteMargin - 0.015
                         ) / 0.055 * 0.75,
                     ),
                 )
@@ -1377,6 +1652,9 @@ export const refineEventWithCounterfactualLocator = (
                         : []),
                     ...(isJointBest
                         ? ["joint_operation_best_year"]
+                        : []),
+                    ...(decisivePartialBoundaryYear === year
+                        ? ["partial_side_step_boundary"]
                         : []),
                 ],
             };
@@ -1408,12 +1686,42 @@ export const refineEventWithCounterfactualLocator = (
                     }
                 : {}
         ),
+        ...(unitYearRanking?.preEventPolicyScoreByYear ? {
+            unitPreEventPolicyScores: finalYears.map(
+                (year) => unitYearRanking.preEventPolicyScoreByYear?.get(year)
+                    ?? 0,
+            ),
+            unitYearRankingProfileNames: [...unitYearRanking.profileNames],
+        } : {}),
+        ...(exactYearEvidence?.diagnosticProfiles ? {
+            unitExactYearProfiles: Object.fromEntries(
+                [...exactYearEvidence.diagnosticProfiles.entries()].map(
+                    ([name, scores]) => [
+                        name,
+                        finalYears.map((year) => scores.get(year) ?? -1),
+                    ],
+                ),
+            ),
+        } : {}),
+        ...(localCorrectionRanking ? {
+            unitLocalCorrectionRanks: finalYears.map(
+                (year) => localCorrectionRanking.rankByYear.get(year) ?? 0,
+            ),
+        } : {}),
+        ...(unitYearRanking ? {
+            unitFinalYearScores: finalYears.map(
+                (year) => unitYearRanking.scoreByYear.get(year) ?? 0,
+            ),
+        } : {}),
         candidates: rankerCandidates,
         coarseDensitySelectedIndex: densitySelectedIndex,
         coarseRuleSelectedIndex: ruleSelectedIndex,
         coarseSelectedIndex: selectedIndex,
         ...(learnedCoarseSelection ? {
-            coarseModelSelectedIndex: learnedCoarseSelection.index,
+            coarseModelSelectedIndex: learnedCoarseSelection.modelIndex,
+            ...(learnedCoarseSelection.recoveryRule ? {
+                coarseRecoveryRule: learnedCoarseSelection.recoveryRule,
+            } : {}),
             coarseModelScore: learnedCoarseSelection.score,
             coarseModelMargin: learnedCoarseSelection.margin,
             coarseModelScores: learnedCoarseSelection.scoredCandidates.map(
@@ -1430,6 +1738,9 @@ export const refineEventWithCounterfactualLocator = (
         coarseWindow,
         coarseSource: selected.source,
         finalWindow,
+        ...(missingPhysicalRecenter ? {
+            missingPhysicalRecenterRule: missingPhysicalRecenter.rule,
+        } : {}),
         calibratedWidth: finalCalibratedWidth,
         calibrationRule: finalCalibrationRule,
         modeWindow: learnedUnitWindow?.modeWindow
@@ -1441,8 +1752,20 @@ export const refineEventWithCounterfactualLocator = (
                 learnedUnitWindow.preFalseCurrentAnchorModeWindow,
             preDirectModeWindow: learnedUnitWindow.preDirectModeWindow,
             learnedRecommendedWidth: learnedUnitWindow.recommendedWidth,
-            windowCenteringRule: learnedUnitWindow.windowCenteringRule,
-            widthSelectionRule: learnedUnitWindow.widthSelectionRule,
+            windowCenteringRule: missingPhysicalRecenter
+                ? `missing_physical_recenter_${missingPhysicalRecenter.rule}`
+                : physicalFalseRingRecenter
+                    ? "false_merge_older_physical_recenter"
+                    : directFalseRingRecenter
+                        ? "false_direct_consensus_recenter"
+                        : learnedUnitWindow.windowCenteringRule,
+            widthSelectionRule: missingPhysicalRecenter
+                ? `missing_physical_recenter_${missingPhysicalRecenter.rule}`
+                : physicalFalseRingRecenter
+                    ? "false_merge_older_physical_recenter"
+                    : directFalseRingRecenter
+                        ? "false_direct_consensus_recenter"
+                        : learnedUnitWindow.widthSelectionRule,
             widthFallbackRule: learnedUnitWindow.widthFallbackRule,
             learnedWindowScore: learnedUnitWindow.score,
             learnedWindowMargin: learnedUnitWindow.margin,
@@ -1494,6 +1817,15 @@ export const refineEventWithCounterfactualLocator = (
                 algorithmSources: Array.from(new Set([
                     ...event.evidence.algorithmSources,
                     "full_interval_counterfactual_locator",
+                    ...(missingPhysicalRecenter
+                        ? ["missing_ring_physical_recenter"]
+                        : []),
+                    ...(physicalFalseRingRecenter
+                        ? ["false_ring_merge_older_physical_recenter"]
+                        : []),
+                    ...(directFalseRingRecenter
+                        ? ["false_ring_direct_consensus_recenter"]
+                        : []),
                 ])).sort(),
                 notes: [
                     ...event.evidence.notes,
@@ -1521,10 +1853,49 @@ export const refineEventWithCounterfactualLocator = (
                         }`,
                     ] : []),
                     `counterfactual_internal_candidates=${uniqueCandidates.length}`,
+                    ...(decisivePartialBoundaryYear === undefined ? [] : [
+                        `partial_side_step_decisive_year=${decisivePartialBoundaryYear}`,
+                        `partial_side_step_remote_margin=${
+                            selectedOperation!.sideStepRemoteMargin.toFixed(6)
+                        }`,
+                        `partial_side_step_reference_vote_year=${
+                            partialReferenceVoteYear
+                        }`,
+                    ]),
                     `counterfactual_main_window=${finalWindow.startYear}-${finalWindow.endYear}`,
                     `counterfactual_main_window_width=${
                         finalWindow.endYear - finalWindow.startYear + 1
                     }`,
+                    ...(missingPhysicalRecenter ? [
+                        `missing_physical_recenter_rule=${
+                            missingPhysicalRecenter.rule
+                        }`,
+                        `missing_physical_recenter_support_count=${
+                            missingPhysicalRecenter.supportCount
+                        }`,
+                    ] : []),
+                    ...(physicalFalseRingRecenter ? [
+                        `false_merge_older_advantage=${
+                            physicalFalseRingRecenter.mergeAdvantage.toFixed(6)
+                        }`,
+                        `false_merge_older_remote_margin=${
+                            physicalFalseRingRecenter.remoteMargin.toFixed(6)
+                        }`,
+                    ] : []),
+                    ...(directFalseRingRecenter ? [
+                        `false_direct_consensus_candidate_year=${
+                            directFalseRingRecenter.candidateYear
+                        }`,
+                        `false_direct_consensus_count=${
+                            directFalseRingRecenter.consensusCount
+                        }`,
+                        `false_direct_consensus_anchor_count=${
+                            directFalseRingRecenter.anchorCount
+                        }`,
+                        `false_direct_consensus_shift_years=${
+                            directFalseRingRecenter.shiftYears
+                        }`,
+                    ] : []),
                     `counterfactual_mode_window=${
                         (
                             learnedUnitWindow?.modeWindow

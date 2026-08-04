@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+    passesReferenceRecoveryGate,
     selectReferenceRecoveryEventType,
     type ReferenceRecoveryPeakSummary,
 } from "../eventReferenceVoting";
@@ -42,5 +43,22 @@ describe("selectReferenceRecoveryEventType", () => {
             [partial],
             [partial, peak("falseRing", 0.02, 0.005)],
         )).toBe("partialMove");
+    });
+});
+
+describe("passesReferenceRecoveryGate", () => {
+    it("rejects a high-gain partial when the year-by-shift winner is not separated", () => {
+        expect(passesReferenceRecoveryGate(
+            peak("partialMove", 0.2, 0),
+        )).toBe(false);
+        expect(passesReferenceRecoveryGate(
+            peak("partialMove", 0.0999, 0.02),
+        )).toBe(false);
+        expect(passesReferenceRecoveryGate(
+            peak("partialMove", 0.1, 0.0039),
+        )).toBe(false);
+        expect(passesReferenceRecoveryGate(
+            peak("partialMove", 0.1, 0.004),
+        )).toBe(true);
     });
 });

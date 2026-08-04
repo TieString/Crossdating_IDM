@@ -48,13 +48,18 @@ def anchor(method: str, source: dict[str, Any]) -> float | None:
     return None
 
 
-def prepare(source: dict[str, Any], method: str) -> dict[str, Any] | None:
+def prepare(
+    source: dict[str, Any],
+    method: str,
+    bounds_field: str,
+) -> dict[str, Any] | None:
     selected_anchor = anchor(method, source)
     if selected_anchor is None:
         return None
     current = tuple(map(int, source["primaryRange"]))
     current_center = sum(current) / 2
-    selected = bounded_window(float(selected_anchor), source["coarseRange"])
+    bounds = source.get(bounds_field) or source["coarseRange"]
+    selected = bounded_window(float(selected_anchor), bounds)
     if selected == current:
         return None
     selected_center = sum(selected) / 2
@@ -72,6 +77,7 @@ def prepare(source: dict[str, Any], method: str) -> dict[str, Any] | None:
         "file": source["file"],
         "target": source["target"],
         "truth": int(source["truthYear"]),
+        "sourceRule": source.get("windowCenteringRule"),
         "current": current,
         "selected": selected,
         "distance": abs(selected[0] - current[0]),
@@ -175,6 +181,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", required=True)
     parser.add_argument("--report", required=True)
+    parser.add_argument("--bounds", choices=("coarse", "series"), default="coarse")
     args = parser.parse_args()
     raw = json.loads(Path(args.dataset).read_text(encoding="utf-8"))
     datasets = sorted({str(row["split"]) for row in raw})
@@ -182,13 +189,24 @@ def main() -> None:
     for event_type in EVENT_TYPES:
         sources = [row for row in raw if row["eventType"] == event_type]
         candidates = []
-        for method in (
-            "current", "operation", "side", "anchorMedian", "operationSideMedian"
+        source_rules = sorted({str(row.get("windowCenteringRule")) for row in sources})
+        for method, source_rule in itertools.product(
+            (
+                "current", "operation", "side", "anchorMedian",
+                "operationSideMedian",
+            ),
+            (None, *source_rules),
         ):
-            rows = [
-                row for source in sources
-                if (row := prepare(source, method))
-            ]
+            rows = [row for source in sources if (
+                (source_rule is None or source.get("windowCenteringRule") == source_rule)
+                and (
+                    row := prepare(
+                        source,
+                        method,
+                        "seriesRange" if args.bounds == "series" else "coarseRange",
+                    )
+                )
+            )]
             for gate in gates(method):
                 total = metrics(rows, gate)
                 if total["newHits"] <= total["oldHits"]:
@@ -209,6 +227,7 @@ def main() -> None:
                 )
                 candidates.append({
                     "method": method,
+                    "sourceRule": source_rule,
                     "gate": gate,
                     "supportDatasets": support,
                     "total": total,
@@ -225,7 +244,22 @@ def main() -> None:
         if selected:
             rows = [
                 row for source in sources
-                if (row := prepare(source, selected["method"]))
+                if (
+                    (
+                        selected["sourceRule"] is None
+                        or source.get("windowCenteringRule")
+                            == selected["sourceRule"]
+                    )
+                    and (
+                        row := prepare(
+                            source,
+                            selected["method"],
+                            "seriesRange"
+                                if args.bounds == "series"
+                                else "coarseRange",
+                        )
+                    )
+                )
             ]
             changes = [{
                 **row,

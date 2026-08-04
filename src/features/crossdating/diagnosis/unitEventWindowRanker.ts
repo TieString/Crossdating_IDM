@@ -20,8 +20,26 @@ import {
 } from "./missingRingLocalRecenter";
 import { selectMissingRingMode } from "./missingRingModeSelector";
 import { selectMissingRingPredictiveMode } from "./missingRingPredictiveModeSelector";
+import { correctUnitEventModeSide } from "./unitEventModeSideCorrector";
+import {
+    selectFalseRingOperationModeRecovery,
+    selectMissingRingCurrentAnchorRecovery,
+    selectUnitEventEvidenceModeArbitration,
+    shouldRejectMissingFamilyRemoteMode,
+} from "./unitEventOperationModeRecovery";
 import { selectUnitEventPointWindow } from "./unitEventPointWindowSelector";
 import { selectFalseRingCounterfactualMassWindow } from "./unitCounterfactualMassSelector";
+import {
+    selectFalseRingPhysicalProfileMode,
+    selectMissingRingPhysicalProfileMode,
+} from "./unitEventPhysicalProfileModeRecovery";
+import {
+    selectFalseRingFinalEvidenceModeRecovery,
+    selectMissingRingFinalEvidenceModeRecovery,
+    selectMissingRingFamilyProfileModeRecovery,
+    selectUnitEventEvidenceModeRecovery,
+    shouldRestoreUnitEventModeWidth,
+} from "./unitEventEvidenceModeRecovery";
 
 export type UnitEventWindowType = "missingRing" | "falseRing";
 
@@ -58,6 +76,8 @@ export type UnitEventWindowRankerInput = {
     internalCandidates: readonly UnitEventRankerCandidate[];
     currentPrimaryYear?: number;
     coarseWindow?: UnitEventRankerWindow;
+    coarseSource?: string;
+    coarseRecoveryRule?: "missing_remote_side_consensus";
     corroboratedFalseRingModeCenterYear?: number;
     operationEvidence?: UnitEventRankerOperationEvidence;
     missingCounterfactualRows?: readonly MissingRingCoarseCounterfactualRow[];
@@ -86,6 +106,15 @@ export type UnitEventWindowRankerResult = {
         | "missing_boundary_feature_recenter"
         | "missing_boundary_anchor_recenter"
         | "missing_adjacent_mode_recenter"
+        | "missing_mode_side_corrector"
+        | "missing_current_anchor_recovery"
+        | "missing_boundary_operation_reversion"
+        | "missing_remote_side_reversion"
+        | "missing_operation_evidence_reversion"
+        | "missing_coarse_remote_side_mode"
+        | "missing_physical_profile_mode"
+        | "missing_evidence_profile_mode"
+        | "missing_family_profile_mode"
         | "false_current_candidate_consensus"
         | "false_point_mode"
         | "false_point_narrow_mode"
@@ -94,7 +123,17 @@ export type UnitEventWindowRankerResult = {
         | "false_family_remote_mode"
         | "false_current_anchor_consensus"
         | "false_side_step_mode"
-        | "false_current_remote_mode";
+        | "false_current_remote_mode"
+        | "false_operation_mode_recovery"
+        | "false_point_evidence_reversion"
+        | "false_operation_evidence_reversion"
+        | "false_family_anchor_reversion"
+        | "false_difference_profile_mode"
+        | "false_physical_profile_mode"
+        | "false_evidence_profile_mode"
+        | "false_reference_median_mode"
+        | "false_boundary_evidence_mode"
+        | "false_mode_side_corrector";
     widthFallbackRule:
         | "none"
         | "remote_side_evidence"
@@ -115,6 +154,7 @@ export type UnitEventWindowRankerResult = {
         | "false_current_remote_mode"
         | "missing_high_confidence_narrow"
         | "missing_anchor_wide"
+        | "missing_mode_flank_wide"
         | "missing_coarse_operation_conflict"
         | "missing_open_flank_wide"
         | "missing_direct_mode_ranker"
@@ -126,7 +166,29 @@ export type UnitEventWindowRankerResult = {
         | "missing_boundary_feature_recenter"
         | "missing_boundary_anchor_recenter"
         | "missing_adjacent_mode_recenter"
-        | "missing_anchor_edge_wide";
+        | "missing_mode_side_corrector"
+        | "missing_current_anchor_recovery"
+        | "missing_boundary_operation_reversion"
+        | "missing_remote_side_reversion"
+        | "missing_operation_evidence_reversion"
+        | "missing_coarse_remote_side_mode"
+        | "missing_physical_profile_mode"
+        | "missing_evidence_profile_mode"
+        | "missing_family_profile_mode"
+        | "missing_anchor_consensus_uncertain_13"
+        | "missing_anchor_edge_wide"
+        | "false_operation_mode_recovery"
+        | "false_point_evidence_reversion"
+        | "false_operation_evidence_reversion"
+        | "false_family_anchor_reversion"
+        | "false_difference_profile_mode"
+        | "false_physical_profile_mode"
+        | "false_evidence_profile_mode"
+        | "false_reference_median_mode"
+        | "false_boundary_evidence_mode"
+        | "false_mode_side_corrector"
+        | "false_point_narrow_evidence_wide"
+        | "false_minimum_calibrated_width";
     score: number;
     margin: number;
     remoteMargin: number;
@@ -165,6 +227,37 @@ export const shouldRejectNarrowForRemoteSideEvidence = (input: {
     );
     return Math.abs(input.sideStepBestYear - input.centerYear) > 2 * coarseSpan;
 };
+
+export const isMissingRingAnchorConsensusUncertain = (input: {
+    recommendedWidth: 5 | 7 | 9 | 13;
+    modeWindow: UnitEventRankerWindow;
+    currentPrimaryYear?: number;
+    operationEvidence?: UnitEventRankerOperationEvidence;
+}): boolean => {
+    if (input.recommendedWidth !== 13) return false;
+    const operation = input.operationEvidence;
+    const anchors = [
+        input.currentPrimaryYear,
+        operation?.bestYear,
+        operation?.sideStepBestYear,
+    ];
+    if (anchors.some((year) => year === undefined)) return false;
+    const center = windowCenter(input.modeWindow);
+    return anchors.every((year) => Math.abs(year! - center) <= 4)
+        && (operation?.bestDifferenceGain ?? 0) >= 0.3
+        && (operation?.remoteDifferenceMargin ?? 0) >= 0.05
+        && (operation?.sideStepRemoteMargin ?? 0) >= 0.1;
+};
+
+export const shouldNarrowSurvivingMissingPredictiveMode = (input: {
+    recommendedWidth: 5 | 7 | 9 | 13;
+    windowCenteringRule: UnitEventWindowRankerResult["windowCenteringRule"];
+    widthSelectionRule: UnitEventWindowRankerResult["widthSelectionRule"];
+}): boolean => (
+    input.recommendedWidth === 13
+    && input.windowCenteringRule === "missing_predictive_remote_mode"
+    && input.widthSelectionRule === "missing_predictive_remote_mode"
+);
 
 const MISSING_RING_HIGH_CONFIDENCE_NARROW_THRESHOLD = 0.94;
 const MISSING_RING_ANCHOR_SIDE_GAP = 3;
@@ -300,6 +393,7 @@ export const selectRemoteCurrentPrimaryMode = (input: {
 };
 
 const FALSE_RING_CURRENT_ANCHOR_MINIMUM_IMPROVEMENT = 2;
+const FALSE_RING_CURRENT_ANCHOR_MAXIMUM_MODE_SHIFT = 6;
 
 /**
  * Keeps the pre-point 13-year mode when point refinement moves it away from
@@ -314,6 +408,10 @@ export const selectFalseRingCurrentAnchorMode = (input: {
         input.currentPrimaryYear === undefined
         || input.pointModeWindow.startYear
             === input.prePointModeWindow.startYear
+        || Math.abs(
+            input.pointModeWindow.startYear
+            - input.prePointModeWindow.startYear
+        ) > FALSE_RING_CURRENT_ANCHOR_MAXIMUM_MODE_SHIFT
     ) return null;
     const pointCenter = (
         input.pointModeWindow.startYear + input.pointModeWindow.endYear
@@ -1101,6 +1199,27 @@ export const rankUnitEventWindows = (
     let modeCenter = narrowCenter;
     let falseRingConsensusModeApplied = false;
     let validatedRemoteModeApplied = false;
+    let missingFamilyRemoteRejected = false;
+
+    const adoptRecoveredModeWindow = (
+        window: UnitEventRankerWindow,
+    ): void => {
+        modeCenter = windowCenter(window);
+        narrowCenter = modeCenter;
+        const recovered = scoredWindows.find((candidate) => (
+            candidate.startYear === window.startYear
+        )) ?? fineWindows.find((candidate) => (
+            candidate.startYear === window.startYear
+        ));
+        if (!recovered) return;
+        selected = recovered;
+        scoredWindows = [
+            recovered,
+            ...scoredWindows.filter((candidate) => (
+                candidate.startYear !== recovered.startYear
+            )),
+        ];
+    };
 
     if (input.eventType === "missingRing" && input.coarseWindow) {
         const selectorInput = {
@@ -1822,13 +1941,25 @@ export const rankUnitEventWindows = (
                 currentModeWindow,
             )
             : null;
-        const familyMode = predictiveMode
+        let familyMode = predictiveMode
             ? null
             : selectFalseRingFamilyMode(
                     input,
                     currentModeWindow,
                     "validatedRemote",
                 );
+        if (
+            input.eventType === "missingRing"
+            && familyMode
+            && shouldRejectMissingFamilyRemoteMode(
+                input,
+                currentModeWindow,
+                familyMode.window,
+            )
+        ) {
+            familyMode = null;
+            missingFamilyRemoteRejected = true;
+        }
         const remoteMode = predictiveMode ?? familyMode;
         if (remoteMode) {
             const byStart = new Map(preparedWindows.map((candidate) => [
@@ -1928,6 +2059,345 @@ export const rankUnitEventWindows = (
         widthFallbackRule = "remote_side_evidence";
     }
 
+    let missingAnchorRecovered = false;
+    if (input.eventType === "missingRing" && input.coarseWindow) {
+        const recovery = selectMissingRingCurrentAnchorRecovery(input, {
+            startYear: modeCenter - Math.floor(MODEL.windowWidth / 2),
+            endYear: modeCenter + Math.floor(MODEL.windowWidth / 2),
+        });
+        if (recovery) {
+            adoptRecoveredModeWindow(recovery);
+            recommendedWidth = 13;
+            nineYearSafety = 0;
+            widthThreshold = 1;
+            windowCenteringRule = "missing_current_anchor_recovery";
+            widthSelectionRule = "missing_current_anchor_recovery";
+            missingAnchorRecovered = true;
+        }
+    }
+
+    if (
+        input.eventType === "missingRing"
+        && input.coarseWindow
+        && !missingFamilyRemoteRejected
+        && !missingAnchorRecovered
+    ) {
+        const currentModeWindow = {
+            startYear: modeCenter - Math.floor(MODEL.windowWidth / 2),
+            endYear: modeCenter + Math.floor(MODEL.windowWidth / 2),
+        };
+        const currentFinalWindow = recommendedWidth === 13
+            ? currentModeWindow
+            : {
+                    startYear: Math.round(narrowCenter)
+                        - Math.floor(recommendedWidth / 2),
+                    endYear: Math.round(narrowCenter)
+                        + Math.floor(recommendedWidth / 2),
+                };
+        const currentRemote = scoredWindows.find((candidate) => (
+            candidate.endYear < selected.startYear
+            || candidate.startYear > selected.endYear
+        ));
+        const correction = correctUnitEventModeSide(input, {
+            modeWindow: currentModeWindow,
+            finalWindow: currentFinalWindow,
+            recommendedWidth,
+            learnedWindowScore: selected.score,
+            learnedWindowMargin:
+                selected.score - (scoredWindows[1]?.score ?? selected.score),
+            learnedWindowRemoteMargin:
+                selected.score - (currentRemote?.score ?? selected.score),
+            nineYearSafety,
+            nineYearSafetyThreshold: widthThreshold,
+            centeringRule: windowCenteringRule,
+        });
+        if (correction) {
+            adoptRecoveredModeWindow(correction.window);
+            recommendedWidth = 13;
+            nineYearSafety = 0;
+            widthThreshold = 1;
+            windowCenteringRule = "missing_mode_side_corrector";
+            widthSelectionRule = "missing_mode_side_corrector";
+        }
+    }
+
+    if (input.eventType === "falseRing" && input.coarseWindow) {
+        const recovery = selectFalseRingOperationModeRecovery(
+            input,
+            {
+                startYear: modeCenter - Math.floor(MODEL.windowWidth / 2),
+                endYear: modeCenter + Math.floor(MODEL.windowWidth / 2),
+            },
+            windowCenteringRule,
+        );
+        if (recovery) {
+            adoptRecoveredModeWindow(recovery.window);
+            recommendedWidth = 13;
+            nineYearSafety = 0;
+            widthThreshold = 1;
+            windowCenteringRule = "false_operation_mode_recovery";
+            widthSelectionRule = "false_operation_mode_recovery";
+        }
+    }
+
+    if (input.coarseWindow) {
+        const arbitration = selectUnitEventEvidenceModeArbitration(
+            input,
+            {
+                startYear: modeCenter - Math.floor(MODEL.windowWidth / 2),
+                endYear: modeCenter + Math.floor(MODEL.windowWidth / 2),
+            },
+            prePointModeWindow,
+            windowCenteringRule,
+        );
+        if (arbitration) {
+            adoptRecoveredModeWindow(arbitration.window);
+            recommendedWidth = 13;
+            nineYearSafety = 0;
+            widthThreshold = 1;
+            windowCenteringRule = arbitration.rule;
+            widthSelectionRule = arbitration.rule;
+        }
+    }
+
+    if (input.coarseWindow && recommendedWidth === 13) {
+        const currentModeWindow = {
+            startYear: modeCenter - Math.floor(MODEL.windowWidth / 2),
+            endYear: modeCenter + Math.floor(MODEL.windowWidth / 2),
+        };
+        const profileRecovery = input.eventType === "missingRing"
+            ? selectMissingRingPhysicalProfileMode(
+                    input,
+                    currentModeWindow,
+                    recommendedWidth,
+                    windowCenteringRule,
+                )
+            : selectFalseRingPhysicalProfileMode(
+                    input,
+                    currentModeWindow,
+                    recommendedWidth,
+                    windowCenteringRule,
+                );
+        if (profileRecovery) {
+            adoptRecoveredModeWindow(profileRecovery.window);
+            recommendedWidth = 13;
+            nineYearSafety = 0;
+            widthThreshold = 1;
+            windowCenteringRule = profileRecovery.rule;
+            widthSelectionRule = profileRecovery.rule;
+        }
+    }
+
+    if (input.coarseWindow && recommendedWidth === 13) {
+        const currentModeWindow = {
+            startYear: modeCenter - Math.floor(MODEL.windowWidth / 2),
+            endYear: modeCenter + Math.floor(MODEL.windowWidth / 2),
+        };
+        const evidenceRecovery = selectUnitEventEvidenceModeRecovery(
+            input,
+            currentModeWindow,
+            recommendedWidth,
+            windowCenteringRule,
+        );
+        if (evidenceRecovery) {
+            adoptRecoveredModeWindow(evidenceRecovery.window);
+            recommendedWidth = 13;
+            nineYearSafety = 0;
+            widthThreshold = 1;
+            windowCenteringRule = evidenceRecovery.rule;
+            widthSelectionRule = evidenceRecovery.rule;
+        }
+    }
+
+    if (input.eventType === "missingRing" && input.coarseWindow) {
+        const familyCurrentFinal = recommendedWidth === 13
+            ? {
+                    startYear: modeCenter - Math.floor(MODEL.windowWidth / 2),
+                    endYear: modeCenter + Math.floor(MODEL.windowWidth / 2),
+                }
+            : {
+                    startYear: Math.round(narrowCenter)
+                        - Math.floor(recommendedWidth / 2),
+                    endYear: Math.round(narrowCenter)
+                        + Math.floor(recommendedWidth / 2),
+                };
+        const familyRecovery = selectMissingRingFamilyProfileModeRecovery(
+            input,
+            {
+                startYear: modeCenter - Math.floor(MODEL.windowWidth / 2),
+                endYear: modeCenter + Math.floor(MODEL.windowWidth / 2),
+            },
+            windowCenteringRule,
+            familyCurrentFinal,
+        );
+        if (familyRecovery) {
+            adoptRecoveredModeWindow(familyRecovery.window);
+            recommendedWidth = familyRecovery.recommendedWidth ?? 13;
+            if (familyRecovery.finalWindow) {
+                narrowCenter = (
+                    familyRecovery.finalWindow.startYear
+                    + familyRecovery.finalWindow.endYear
+                ) / 2;
+            }
+            nineYearSafety = 0;
+            widthThreshold = 1;
+            windowCenteringRule = "missing_family_profile_mode";
+            widthSelectionRule = "missing_family_profile_mode";
+        }
+    }
+
+    if (
+        input.eventType === "missingRing"
+        && input.coarseWindow
+        && recommendedWidth === 13
+    ) {
+        const currentRemote = scoredWindows.find((candidate) => (
+            candidate.endYear < selected.startYear
+            || candidate.startYear > selected.endYear
+        ));
+        const finalRecovery = selectMissingRingFinalEvidenceModeRecovery(
+            input,
+            {
+                startYear: modeCenter - Math.floor(MODEL.windowWidth / 2),
+                endYear: modeCenter + Math.floor(MODEL.windowWidth / 2),
+            },
+            windowCenteringRule,
+            preFalseCurrentAnchorModeWindow,
+            {
+                learnedWindowMargin:
+                    selected.score
+                    - (scoredWindows[1]?.score ?? selected.score),
+                learnedWindowRemoteMargin:
+                    selected.score
+                    - (currentRemote?.score ?? selected.score),
+            },
+        );
+        if (finalRecovery) {
+            adoptRecoveredModeWindow(finalRecovery.window);
+            nineYearSafety = 0;
+            widthThreshold = 1;
+            windowCenteringRule = finalRecovery.rule;
+            widthSelectionRule = finalRecovery.rule;
+        }
+    }
+
+    if (
+        input.eventType === "falseRing"
+        && input.coarseWindow
+        && recommendedWidth === 13
+    ) {
+        const currentModeWindow = {
+            startYear: modeCenter - Math.floor(MODEL.windowWidth / 2),
+            endYear: modeCenter + Math.floor(MODEL.windowWidth / 2),
+        };
+        const currentRemote = scoredWindows.find((candidate) => (
+            candidate.endYear < selected.startYear
+            || candidate.startYear > selected.endYear
+        ));
+        const correction = correctUnitEventModeSide(input, {
+            modeWindow: currentModeWindow,
+            finalWindow: currentModeWindow,
+            recommendedWidth,
+            learnedWindowScore: selected.score,
+            learnedWindowMargin:
+                selected.score - (scoredWindows[1]?.score ?? selected.score),
+            learnedWindowRemoteMargin:
+                selected.score - (currentRemote?.score ?? selected.score),
+            nineYearSafety,
+            nineYearSafetyThreshold: widthThreshold,
+            centeringRule: windowCenteringRule,
+        });
+        if (correction) {
+            adoptRecoveredModeWindow(correction.window);
+            nineYearSafety = 0;
+            widthThreshold = 1;
+            windowCenteringRule = "false_mode_side_corrector";
+            widthSelectionRule = "false_mode_side_corrector";
+        }
+    }
+
+    if (
+        input.eventType === "falseRing"
+        && input.coarseWindow
+        && recommendedWidth === 13
+    ) {
+        const currentRemote = scoredWindows.find((candidate) => (
+            candidate.endYear < selected.startYear
+            || candidate.startYear > selected.endYear
+        ));
+        const finalMetrics = {
+            learnedWindowMargin:
+                selected.score
+                - (scoredWindows[1]?.score ?? selected.score),
+            learnedWindowRemoteMargin:
+                selected.score
+                - (currentRemote?.score ?? selected.score),
+        };
+        for (let pass = 0; pass < 2; pass += 1) {
+            const currentModeWindow = {
+                startYear: modeCenter - Math.floor(MODEL.windowWidth / 2),
+                endYear: modeCenter + Math.floor(MODEL.windowWidth / 2),
+            };
+            const finalRecovery = selectFalseRingFinalEvidenceModeRecovery(
+                input,
+                currentModeWindow,
+                windowCenteringRule,
+                preFalseCurrentAnchorModeWindow,
+                finalMetrics,
+            );
+            if (
+                !finalRecovery
+                || (
+                    finalRecovery.window.startYear
+                        === currentModeWindow.startYear
+                    && finalRecovery.window.endYear
+                        === currentModeWindow.endYear
+                )
+            ) break;
+            adoptRecoveredModeWindow(finalRecovery.window);
+            nineYearSafety = 0;
+            widthThreshold = 1;
+            windowCenteringRule = finalRecovery.rule;
+            widthSelectionRule = finalRecovery.rule;
+        }
+    }
+
+    const modeBeforeWidthRestoration = {
+        startYear: modeCenter - Math.floor(MODEL.windowWidth / 2),
+        endYear: modeCenter + Math.floor(MODEL.windowWidth / 2),
+    };
+    const finalBeforeWidthRestoration = recommendedWidth === 13
+        ? modeBeforeWidthRestoration
+        : {
+                startYear: Math.round(narrowCenter)
+                    - Math.floor(recommendedWidth / 2),
+                endYear: Math.round(narrowCenter)
+                    + Math.floor(recommendedWidth / 2),
+            };
+    const centeringRuleBeforeWidthRestoration = windowCenteringRule;
+    if (shouldRestoreUnitEventModeWidth({
+        eventType: input.eventType,
+        recommendedWidth,
+        sourceRule: centeringRuleBeforeWidthRestoration,
+        operationEvidence: input.operationEvidence,
+        modeWindow: modeBeforeWidthRestoration,
+        finalWindow: finalBeforeWidthRestoration,
+    })) {
+        recommendedWidth = 13;
+        nineYearSafety = 0;
+        widthThreshold = 1;
+        widthSelectionRule = input.eventType === "missingRing"
+            ? centeringRuleBeforeWidthRestoration === "mode_mass"
+                ? "missing_mode_flank_wide"
+                : "missing_boundary_anchor_recenter"
+            : "false_point_narrow_evidence_wide";
+    }
+
+    if (input.eventType === "falseRing" && recommendedWidth === 5) {
+        recommendedWidth = 7;
+        widthSelectionRule = "false_minimum_calibrated_width";
+    }
+
     if (
         input.eventType === "missingRing"
         && shouldWidenMissingRingFiveYear({
@@ -1941,14 +2411,41 @@ export const rankUnitEventWindows = (
         widthSelectionRule = "missing_anchor_edge_wide";
     }
 
+    const calibratedModeWindow = {
+        startYear: modeCenter - Math.floor(MODEL.windowWidth / 2),
+        endYear: modeCenter + Math.floor(MODEL.windowWidth / 2),
+    };
+    if (
+        input.eventType === "missingRing"
+        && isMissingRingAnchorConsensusUncertain({
+            recommendedWidth,
+            modeWindow: calibratedModeWindow,
+            currentPrimaryYear: input.currentPrimaryYear,
+            operationEvidence: input.operationEvidence,
+        })
+    ) {
+        recommendedWidth = 13;
+        nineYearSafety = 0;
+        widthThreshold = 1;
+        widthSelectionRule = "missing_anchor_consensus_uncertain_13";
+    }
+
+    if (
+        input.eventType === "missingRing"
+        && shouldNarrowSurvivingMissingPredictiveMode({
+            recommendedWidth,
+            windowCenteringRule,
+            widthSelectionRule,
+        })
+    ) {
+        recommendedWidth = 9;
+    }
+
     const remote = scoredWindows.find((candidate) => (
         candidate.endYear < selected.startYear
         || candidate.startYear > selected.endYear
     ));
-    const modeWindow = {
-        startYear: modeCenter - Math.floor(MODEL.windowWidth / 2),
-        endYear: modeCenter + Math.floor(MODEL.windowWidth / 2),
-    };
+    const modeWindow = calibratedModeWindow;
     const finalWindow = recommendedWidth === 13
         ? modeWindow
         : {

@@ -239,3 +239,29 @@ export const addDiagnosisReviewWindowPadding = (
         safeDirectionalExtraPadding,
     ));
 };
+
+/** Keeps an unlocalized false-ring fallback from exposing an uncalibrated 7-year window. */
+export const restoreUnlocalizedFalseRingReviewWindow = (
+    event: DiagnosisEvent,
+    targetRange: YearRange,
+): DiagnosisEvent => {
+    if (
+        event.eventType !== "falseRing"
+        || event.endYear - event.startYear + 1 !== 7
+    ) return event;
+    const restored = padEvent(event, targetRange, 3, 0);
+    return {
+        ...restored,
+        evidence: {
+            ...restored.evidence,
+            algorithmSources: Array.from(new Set([
+                ...restored.evidence.algorithmSources,
+                "unlocalized_false_ring_width_safety",
+            ])).sort(),
+            notes: Array.from(new Set([
+                ...restored.evidence.notes,
+                "unlocalized_false_ring_window_restored_to_13",
+            ])),
+        },
+    };
+};

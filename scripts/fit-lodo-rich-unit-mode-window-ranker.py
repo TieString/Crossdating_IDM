@@ -130,8 +130,7 @@ def fit(
 
 def bounded_current(case: Any) -> tuple[int, int]:
     source = case.source
-    center = sum(source["primaryRange"]) / 2
-    return BASE.bounded_window(center, source["coarseRange"])
+    return tuple(map(int, source["primaryRange"]))
 
 
 def predict(
@@ -141,7 +140,7 @@ def predict(
 ) -> list[dict[str, Any]]:
     result = []
     for case in cases:
-        scores = np.asarray(model.predict(case.features), dtype=float)
+        scores = np.asarray(model.booster_.predict(case.features), dtype=float)
         selected_index = max(
             range(len(scores)),
             key=lambda index: (scores[index], case.starts[index]),
@@ -181,7 +180,7 @@ def predict(
             "margin": margin,
             "remoteMargin": selected_score - max(remote, default=selected_score),
             "shift": abs(selected_start - current[0]),
-            "anchorVotes": anchor_votes,
+            "anchorVotes": int(anchor_votes),
         })
     return result
 
@@ -396,7 +395,10 @@ def main() -> None:
         model_feature_names = BASE.feature_names(point_names)
         importances = final_model.booster_.feature_importance(importance_type="gain")
         top_features = sorted(
-            zip(model_feature_names, importances),
+            (
+                (name, float(importance))
+                for name, importance in zip(model_feature_names, importances)
+            ),
             key=lambda row: row[1],
             reverse=True,
         )[:50]

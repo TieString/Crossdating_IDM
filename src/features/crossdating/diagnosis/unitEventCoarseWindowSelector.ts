@@ -15,6 +15,7 @@ export type UnitEventCoarseCandidate = {
 export type UnitEventCoarseOperationEvidence = {
     bestYear: number;
     sideStepBestYear?: number;
+    bestDifferenceGain?: number;
 };
 
 export type UnitEventCoarseSelectorInput = {
@@ -28,6 +29,8 @@ export type UnitEventCoarseSelectorInput = {
 
 export type UnitEventCoarseSelectorResult = {
     index: number;
+    modelIndex: number;
+    recoveryRule?: "missing_remote_side_consensus";
     score: number;
     margin: number;
     scoredCandidates: Array<{ index: number; score: number }>;
@@ -133,6 +136,68 @@ const maximumIndex = (values: readonly number[]): number => {
         if ((values[index] ?? 0) > (values[selected] ?? 0)) selected = index;
     }
     return selected;
+};
+
+const distanceFromWindow = (
+    candidate: Pick<UnitEventCoarseCandidate, "startYear" | "endYear">,
+    year: number,
+): number => (
+    year < candidate.startYear
+        ? candidate.startYear - year
+        : year > candidate.endYear
+            ? year - candidate.endYear
+            : 0
+);
+
+/**
+ * Recovers a separated older-side mode when the current and operation anchors
+ * agree but the weak insertion gain cannot decide between two regions.
+ */
+export const selectMissingRingCoarseRecoveryCandidateIndex = (
+    input: UnitEventCoarseSelectorInput,
+    selectedIndex: number,
+): number | null => {
+    if (input.eventType !== "missingRing") return null;
+    const selected = input.candidates[selectedIndex];
+    const currentYear = input.currentPrimaryYear;
+    const operationYear = input.operationEvidence?.bestYear;
+    const sideYear = input.operationEvidence?.sideStepBestYear;
+    const differenceGain = input.operationEvidence?.bestDifferenceGain;
+    if (
+        !selected
+        || currentYear === undefined
+        || operationYear === undefined
+        || sideYear === undefined
+        || differenceGain === undefined
+        || Math.abs(operationYear - currentYear) > 1
+        || differenceGain > 0.15
+        || sideYear >= selected.startYear
+    ) return null;
+
+    const sideDistance = currentYear - sideYear;
+    if (sideDistance < 15 || sideDistance > 45) return null;
+
+    const alternatives = input.candidates
+        .map((candidate, index) => ({ candidate, index }))
+        .filter(({ index, candidate }) => (
+            index !== selectedIndex
+            && distanceFromWindow(candidate, sideYear) <= 3
+        ))
+        .sort((left, right) => (
+            distanceFromWindow(left.candidate, sideYear)
+                - distanceFromWindow(right.candidate, sideYear)
+            || Math.abs(
+                (left.candidate.startYear + left.candidate.endYear) / 2
+                    - sideYear,
+            ) - Math.abs(
+                (right.candidate.startYear + right.candidate.endYear) / 2
+                    - sideYear,
+            )
+            || right.candidate.aggregateScore
+                - left.candidate.aggregateScore
+            || left.index - right.index
+        ));
+    return alternatives[0]?.index ?? null;
 };
 
 const sourceFamily = (source: string): typeof FAMILIES[number] => {
@@ -345,8 +410,16 @@ export const selectUnitEventCoarseWindow = (
     })).sort((left, right) => right.score - left.score || left.index - right.index);
     const selected = scoredCandidates[0];
     if (!selected) return null;
+    const recoveredIndex = selectMissingRingCoarseRecoveryCandidateIndex(
+        input,
+        selected.index,
+    );
     return {
-        index: selected.index,
+        index: recoveredIndex ?? selected.index,
+        modelIndex: selected.index,
+        ...(recoveredIndex === null ? {} : {
+            recoveryRule: "missing_remote_side_consensus" as const,
+        }),
         score: selected.score,
         margin: selected.score - (scoredCandidates[1]?.score ?? selected.score),
         scoredCandidates,

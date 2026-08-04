@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
     addDiagnosisReviewWindowPadding,
     REVIEW_EDGE_YEAR_TAG,
+    restoreUnlocalizedFalseRingReviewWindow,
 } from "../eventReviewWindow";
 import type { DiagnosisEvent } from "../types";
 
@@ -170,5 +171,29 @@ describe("diagnosis review-window edge padding", () => {
             { startYear: 1800, endYear: 2000 },
             Number.NaN,
         )[0]).toBe(local);
+    });
+
+    it("restores only an unlocalized 7-year false-ring fallback to 13 years", () => {
+        const fallback = event("falseRing", 1903, 1909);
+        const restored = restoreUnlocalizedFalseRingReviewWindow(
+            fallback,
+            { startYear: 1800, endYear: 2000 },
+        );
+        expect([restored.startYear, restored.endYear]).toEqual([1900, 1912]);
+        expect(restored.reviewCoreRange).toEqual({
+            startYear: 1903,
+            endYear: 1909,
+        });
+        expect(restored.rankedYears[0]?.year).toBe(1903);
+        expect(restored.evidence.algorithmSources).toContain(
+            "unlocalized_false_ring_width_safety",
+        );
+        expect(restored.evidence.notes).toContain(
+            "unlocalized_false_ring_window_restored_to_13",
+        );
+        expect(restoreUnlocalizedFalseRingReviewWindow(
+            event("missingRing", 1903, 1909),
+            { startYear: 1800, endYear: 2000 },
+        ).endYear).toBe(1909);
     });
 });

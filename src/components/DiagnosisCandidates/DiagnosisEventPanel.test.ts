@@ -45,7 +45,7 @@ describe("DiagnosisEventPanel", () => {
     expect(html).not.toContain("忽略");
   });
 
-  it("shows one final partial breakpoint and no alternative-year controls", () => {
+  it("offers every year in the partial-move main window as a breakpoint", () => {
     const event: DiagnosisEvent = {
       id: "event-apply",
       seriesId: "ABC01A",
@@ -84,13 +84,18 @@ describe("DiagnosisEventPanel", () => {
       onApplyEvent: () => true,
     }));
 
-    expect(html).toContain("首选断点");
-    expect(html).toContain("1881");
-    expect(html).not.toContain("aria-pressed=");
-    expect(html).not.toContain("#2 1880");
+    expect(html).toContain("断点选项");
+    expect(html).toContain("#1 1881");
+    expect(html).toContain("#2 1880");
+    expect(html).toContain("选择断点 1882");
+    expect(html).toContain("aria-pressed=\"true\"");
+    expect(html).toContain("aria-pressed=\"false\"");
     expect(html).toContain("较老侧向老年份移动 2 年");
     expect(html).toContain("年份证据 较一致");
     expect(html).toContain("应用");
+    expect(html).not.toContain("确认应用");
+    expect(html).not.toContain("role=\"alert\"");
+    expect(html).not.toContain("查看并确认所选年份的编辑操作");
   });
 
   it("renders only the main window when legacy location alternatives are present", () => {
@@ -207,6 +212,8 @@ describe("DiagnosisEventPanel", () => {
     expect(html).not.toContain("可能局部移动");
     expect(html).not.toContain("候选编辑操作");
     expect(html).not.toContain("role=\"tab\"");
-    expect(html).toContain("查看并确认所选年份的编辑操作");
+    expect(html).toContain("在 1903 年插入缺轮");
+    expect(html).not.toContain("确认应用");
+    expect(html).not.toContain("查看并确认所选年份的编辑操作");
   });
 });

@@ -67,6 +67,20 @@ def extract(path: Path, split: str) -> list[dict[str, Any]]:
         years = [int(row["year"]) for row in rows]
         if years != list(range(int(coarse["startYear"]), int(coarse["endYear"]) + 1)):
             continue
+        locator_years = [int(year) for year in locator.get("years", [])]
+        locator_indexes = {year: index for index, year in enumerate(locator_years)}
+        locator_ranks = {
+            name: values
+            for name, values in (locator.get("ranks") or {}).items()
+            if isinstance(values, list) and len(values) == len(locator_years)
+        }
+        for point in rows:
+            index = locator_indexes.get(int(point["year"]))
+            features = point.setdefault("features", {})
+            for name, values in locator_ranks.items():
+                features[f"locatorRank:{name}"] = (
+                    float(values[index]) if index is not None else 0.0
+                )
         context = locator.get("context", {})
         operation = locator.get("selectedOperation") or {}
         result.append({
@@ -85,6 +99,7 @@ def extract(path: Path, split: str) -> list[dict[str, Any]]:
             ),
             "windowCenteringRule": locator.get("windowCenteringRule"),
             "widthSelectionRule": locator.get("widthSelectionRule"),
+            "falseRingMode": locator.get("falseRingMode"),
             "primaryTopYear": locator.get("currentPrimaryYear"),
             "operationBestYear": operation.get("bestYear"),
             "operationBestRawGain": operation.get("bestRawGain"),

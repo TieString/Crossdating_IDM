@@ -19,6 +19,15 @@ export type FullIntervalUnitEditEvidenceRow = {
     sideMinimumAdvantage: number;
     sideStepScore: number;
     correctedSideSupport: number;
+    localSideOlderAdvantage11: number;
+    localSideNewerAdvantage11: number;
+    localSideStepScore11: number;
+    localSideOlderAdvantage21: number;
+    localSideNewerAdvantage21: number;
+    localSideStepScore21: number;
+    localSideOlderAdvantage31: number;
+    localSideNewerAdvantage31: number;
+    localSideStepScore31: number;
     olderSamplePairs: number;
     newerSamplePairs: number;
     olderDifferencePairs: number;
@@ -45,6 +54,12 @@ type Sufficient = {
 type Prefix = {
     startYear: number;
     rows: Sufficient[];
+};
+
+type SideEvidence = {
+    olderAdvantage: number;
+    newerAdvantage: number;
+    stepScore: number;
 };
 
 export type FullIntervalShiftEvidenceContext = {
@@ -207,6 +222,64 @@ const optionalCorrelation = (
     if (row.count < minPairs) return null;
     const value = correlation(row, minPairs);
     return value > -1 ? value : null;
+};
+
+const sideEvidence = (
+    rawOlderCorrected: Sufficient,
+    rawOlderBaseline: Sufficient,
+    rawNewerFixed: Sufficient,
+    rawNewerShifted: Sufficient,
+    differenceOlderCorrected: Sufficient,
+    differenceOlderBaseline: Sufficient,
+    differenceNewerFixed: Sufficient,
+    differenceNewerShifted: Sufficient,
+    minimumPairs: number,
+): SideEvidence => {
+    const correlations = [
+        optionalCorrelation(rawOlderCorrected, minimumPairs),
+        optionalCorrelation(rawOlderBaseline, minimumPairs),
+        optionalCorrelation(rawNewerFixed, minimumPairs),
+        optionalCorrelation(rawNewerShifted, minimumPairs),
+        optionalCorrelation(differenceOlderCorrected, minimumPairs),
+        optionalCorrelation(differenceOlderBaseline, minimumPairs),
+        optionalCorrelation(differenceNewerFixed, minimumPairs),
+        optionalCorrelation(differenceNewerShifted, minimumPairs),
+    ];
+    if (correlations.some((value) => value === null)) {
+        return {
+            olderAdvantage: Number.NEGATIVE_INFINITY,
+            newerAdvantage: Number.NEGATIVE_INFINITY,
+            stepScore: Number.NEGATIVE_INFINITY,
+        };
+    }
+    const [
+        rawOlderCorrectedCorrelation,
+        rawOlderBaselineCorrelation,
+        rawNewerFixedCorrelation,
+        rawNewerShiftedCorrelation,
+        differenceOlderCorrectedCorrelation,
+        differenceOlderBaselineCorrelation,
+        differenceNewerFixedCorrelation,
+        differenceNewerShiftedCorrelation,
+    ] = correlations as number[];
+    const olderAdvantage = (
+        rawOlderCorrectedCorrelation - rawOlderBaselineCorrelation
+    ) * 0.3 + (
+        differenceOlderCorrectedCorrelation
+        - differenceOlderBaselineCorrelation
+    ) * 0.7;
+    const newerAdvantage = (
+        rawNewerFixedCorrelation - rawNewerShiftedCorrelation
+    ) * 0.3 + (
+        differenceNewerFixedCorrelation
+        - differenceNewerShiftedCorrelation
+    ) * 0.7;
+    return {
+        olderAdvantage,
+        newerAdvantage,
+        stepScore: Math.min(olderAdvantage, newerAdvantage)
+            + (olderAdvantage + newerAdvantage) * 0.05,
+    };
 };
 
 export const scoreFullIntervalShiftEvidence = (
@@ -386,6 +459,56 @@ export const scoreFullIntervalShiftEvidence = (
                     + differenceNewerFixedCorrelation * 0.7,
             )
             : Number.NEGATIVE_INFINITY;
+        const localSideEvidence = (sideYears: number): SideEvidence => {
+            const minimumPairs = Math.max(5, Math.floor(sideYears * 0.55));
+            const rawOlderStart = Math.max(
+                olderStart,
+                olderEnd - sideYears + 1,
+            );
+            const rawNewerStart = year + 1;
+            const rawNewerEnd = Math.min(
+                endYear,
+                rawNewerStart + sideYears - 1,
+            );
+            const differenceOlderStart = Math.max(
+                startYear + 1,
+                olderEnd - sideYears + 1,
+            );
+            const differenceNewerEnd = Math.min(
+                endYear,
+                differenceNewerStart + sideYears - 1,
+            );
+            return sideEvidence(
+                range(rawOlder, rawOlderStart, olderEnd),
+                range(rawNewer, rawOlderStart, olderEnd),
+                range(rawNewer, rawNewerStart, rawNewerEnd),
+                range(rawOlder, rawNewerStart, rawNewerEnd),
+                range(
+                    differenceOlder,
+                    differenceOlderStart,
+                    olderEnd,
+                ),
+                range(
+                    differenceNewer,
+                    differenceOlderStart,
+                    olderEnd,
+                ),
+                range(
+                    differenceNewer,
+                    differenceNewerStart,
+                    differenceNewerEnd,
+                ),
+                range(
+                    differenceOlder,
+                    differenceNewerStart,
+                    differenceNewerEnd,
+                ),
+                minimumPairs,
+            );
+        };
+        const local11 = localSideEvidence(11);
+        const local21 = localSideEvidence(21);
+        const local31 = localSideEvidence(31);
         return {
             year,
             rawCorrelation,
@@ -402,6 +525,15 @@ export const scoreFullIntervalShiftEvidence = (
                     + Math.max(-0.25, correctedSideSupport) * 0.05
                 : Number.NEGATIVE_INFINITY,
             correctedSideSupport,
+            localSideOlderAdvantage11: local11.olderAdvantage,
+            localSideNewerAdvantage11: local11.newerAdvantage,
+            localSideStepScore11: local11.stepScore,
+            localSideOlderAdvantage21: local21.olderAdvantage,
+            localSideNewerAdvantage21: local21.newerAdvantage,
+            localSideStepScore21: local21.stepScore,
+            localSideOlderAdvantage31: local31.olderAdvantage,
+            localSideNewerAdvantage31: local31.newerAdvantage,
+            localSideStepScore31: local31.stepScore,
             olderSamplePairs: rawOlderCorrected.count,
             newerSamplePairs: rawNewerFixed.count,
             olderDifferencePairs: differenceOlderCorrected.count,

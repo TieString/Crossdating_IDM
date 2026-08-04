@@ -15,8 +15,26 @@ export const FALSE_RING_COUNTERFACTUAL_PROFILES = [
     "differenceMasterHuber21",
 ] as const;
 
+export const FALSE_RING_DIAGNOSTIC_COUNTERFACTUAL_PROFILES = [
+    "rawMasterR31",
+    "differenceMasterR21",
+    "differenceMasterR31",
+    "whitenedMasterR31",
+    "differenceReferenceWeightedR21",
+    "differenceReferenceWeightedR31",
+    "falseMergeOlderRawMasterR31",
+    "falseMergeOlderDifferenceMasterR31",
+    "falseMergeOlderDifferenceMasterHuber31",
+    "falseMergeOlderRawMasterR31Advantage",
+    "falseMergeOlderDifferenceMasterR31Advantage",
+] as const;
+
 export type FalseRingCounterfactualProfile = (
     typeof FALSE_RING_COUNTERFACTUAL_PROFILES[number]
+);
+
+export type FalseRingDiagnosticCounterfactualProfile = (
+    typeof FALSE_RING_DIAGNOSTIC_COUNTERFACTUAL_PROFILES[number]
 );
 
 export const FALSE_RING_REFERENCE_COUNTERFACTUAL_PROFILES = [
@@ -34,7 +52,11 @@ export type FalseRingReferenceCounterfactualProfile = (
 export type FalseRingCoarseCounterfactualRow = {
     year: number;
     profiles: Record<FalseRingCounterfactualProfile, number>
-        & Partial<Record<FalseRingReferenceCounterfactualProfile, number>>;
+        & Partial<Record<
+            FalseRingDiagnosticCounterfactualProfile
+                | FalseRingReferenceCounterfactualProfile,
+            number
+        >>;
 };
 
 type PreparedViews = Record<"raw" | "difference" | "whitened", NumericSeries>;
@@ -48,7 +70,7 @@ type Context = {
     diagnosis: SeriesCoreDiagnosis;
     master: PreparedViews;
     references: PreparedReference[];
-    correctedCache: Map<number, PreparedViews>;
+    correctedCache: Map<string, PreparedViews>;
     scoreCache: Map<string, FalseRingCoarseCounterfactualRow[]>;
 };
 
@@ -141,6 +163,32 @@ const huberSimilarity = (
         : null;
 };
 
+const correlationValue = (
+    target: NumericSeries,
+    reference: NumericSeries,
+    startYear: number,
+    endYear: number,
+): number | null => correlationForSegment(
+    target,
+    reference,
+    startYear,
+    endYear,
+    0,
+    Math.max(6, Math.floor((endYear - startYear + 1) * 0.5)),
+).correlation;
+
+const correlation = (
+    target: NumericSeries,
+    reference: NumericSeries,
+    startYear: number,
+    endYear: number,
+): number => correlationValue(
+    target,
+    reference,
+    startYear,
+    endYear,
+) ?? -1;
+
 const boundedRange = (
     centerYear: number,
     width: number,
@@ -166,11 +214,18 @@ const boundedRange = (
 const simulateFalseRingCorrection = (
     series: NumericSeries,
     year: number,
+    mode: "direct" | "mergeOlder" = "direct",
 ): NumericSeries => {
     const corrected = new Map<number, number>();
+    const deletedValue = mode === "mergeOlder" ? series.get(year) ?? 0 : 0;
     series.forEach((value, sourceYear) => {
         if (sourceYear !== year) {
-            corrected.set(sourceYear < year ? sourceYear + 1 : sourceYear, value);
+            corrected.set(
+                sourceYear < year ? sourceYear + 1 : sourceYear,
+                mode === "mergeOlder" && sourceYear === year - 1
+                    ? value + deletedValue
+                    : value,
+            );
         }
     });
     return corrected;
@@ -219,7 +274,7 @@ const getContext = (
         diagnosis,
         master: prepareViews(diagnosis.master.data),
         references,
-        correctedCache: new Map<number, PreparedViews>(),
+        correctedCache: new Map<string, PreparedViews>(),
         scoreCache: new Map<string, FalseRingCoarseCounterfactualRow[]>(),
     };
     bySite.set(siteData, context);
@@ -247,13 +302,24 @@ export const scoreFalseRingCoarseCounterfactual = (
         year <= coarseWindow.endYear;
         year += 1
     ) {
-        let corrected = context.correctedCache.get(year);
+        const directKey = `direct:${year}`;
+        let corrected = context.correctedCache.get(directKey);
         if (!corrected) {
             corrected = prepareViews(simulateFalseRingCorrection(
                 diagnosis.rawTarget,
                 year,
             ));
-            context.correctedCache.set(year, corrected);
+            context.correctedCache.set(directKey, corrected);
+        }
+        const mergeOlderKey = `mergeOlder:${year}`;
+        let mergeOlder = context.correctedCache.get(mergeOlderKey);
+        if (!mergeOlder) {
+            mergeOlder = prepareViews(simulateFalseRingCorrection(
+                diagnosis.rawTarget,
+                year,
+                "mergeOlder",
+            ));
+            context.correctedCache.set(mergeOlderKey, mergeOlder);
         }
         const referenceScores = context.references.map((reference) => (
             huberSimilarity(
@@ -269,9 +335,67 @@ export const scoreFalseRingCoarseCounterfactual = (
                 ? []
                 : [{ value, weight: context.references[index]?.weight ?? 0 }]
         ));
+        const referenceCorrelation = (
+            startYear: number,
+            endYear: number,
+        ) => context.references.flatMap((reference) => {
+            const value = correlationValue(
+                corrected!.difference,
+                reference.views.difference,
+                startYear,
+                endYear,
+            );
+            return value === null ? [] : [{ value, weight: reference.weight }];
+        });
+        const differenceReferenceWeightedR21 = weightedMean(
+            referenceCorrelation(range21.startYear, range21.endYear),
+        );
+        const differenceReferenceWeightedR31 = weightedMean(
+            referenceCorrelation(range31.startYear, range31.endYear),
+        );
+        const rawMasterR31 = correlation(
+            corrected.raw,
+            context.master.raw,
+            range31.startYear,
+            range31.endYear,
+        );
+        const differenceMasterR31 = correlation(
+            corrected.difference,
+            context.master.difference,
+            range31.startYear,
+            range31.endYear,
+        );
+        const falseMergeOlderRawMasterR31 = correlation(
+            mergeOlder.raw,
+            context.master.raw,
+            range31.startYear,
+            range31.endYear,
+        );
+        const falseMergeOlderDifferenceMasterR31 = correlation(
+            mergeOlder.difference,
+            context.master.difference,
+            range31.startYear,
+            range31.endYear,
+        );
         rows.push({
             year,
             profiles: {
+                rawMasterR31,
+                differenceMasterR21: correlation(
+                    corrected.difference,
+                    context.master.difference,
+                    range21.startYear,
+                    range21.endYear,
+                ),
+                differenceMasterR31,
+                whitenedMasterR31: correlation(
+                    corrected.whitened,
+                    context.master.whitened,
+                    range31.startYear,
+                    range31.endYear,
+                ),
+                differenceReferenceWeightedR21,
+                differenceReferenceWeightedR31,
                 differenceMasterHuber31: huberSimilarity(
                     corrected.difference,
                     context.master.difference,
@@ -292,6 +416,18 @@ export const scoreFalseRingCoarseCounterfactual = (
                     range21.startYear,
                     range21.endYear,
                 ) ?? -10,
+                falseMergeOlderRawMasterR31,
+                falseMergeOlderDifferenceMasterR31,
+                falseMergeOlderDifferenceMasterHuber31: huberSimilarity(
+                    mergeOlder.difference,
+                    context.master.difference,
+                    range31.startYear,
+                    range31.endYear,
+                ) ?? -10,
+                falseMergeOlderRawMasterR31Advantage:
+                    falseMergeOlderRawMasterR31 - rawMasterR31,
+                falseMergeOlderDifferenceMasterR31Advantage:
+                    falseMergeOlderDifferenceMasterR31 - differenceMasterR31,
                 differenceReferenceRankMean31: 0,
                 differenceReferenceRankMedian31: 0,
                 differenceReferencePeakKernel5: 0,

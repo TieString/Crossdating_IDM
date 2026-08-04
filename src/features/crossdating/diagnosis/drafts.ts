@@ -4,7 +4,7 @@
  */
 import { CrossdateConfig } from "./config";
 import { runLocalEditAlignment } from "./localEditAlignment";
-import { ar1WhitenSeries, preprocessSeries } from "./series";
+import { ar1WhitenSeries, correlationForSegment, preprocessSeries } from "./series";
 import { diagnoseSeriesCore } from "./segments";
 import { uniqueAlgorithmSources } from "./candidateUtils";
 import {
@@ -22,6 +22,10 @@ import {
     runSlidingMatchForRange,
 } from "./rangeMove";
 import { getNewestFlaggedCofechaSegment, type CofechaHints } from "./cofechaHints";
+import {
+    isAutomaticPartialShift,
+    partialMoveBreakpoint,
+} from "./partialMoveSemantics";
 import type { RwlSiteData } from "@/features/rwl/types";
 import type {
     CandidateDraft,
@@ -279,11 +283,34 @@ export const makePatternDrafts = (
     return drafts;
 };
 
+/** Distinguishes a long physical gap from a misleading COFECHA unit-lag segment. */
+export const shouldSuppressAliasedCofechaUnitDraft = ({
+    regionLagMagnitude,
+    globalLag,
+    globalGain,
+    newerAtZero,
+    newerAtGlobal,
+}: {
+    regionLagMagnitude: number;
+    globalLag: number;
+    globalGain: number;
+    newerAtZero: number | null;
+    newerAtGlobal: number | null;
+}): boolean => (
+    regionLagMagnitude === 1
+    && globalLag <= -2
+    && globalGain >= 0.08
+    && newerAtZero !== null
+    && (newerAtGlobal === null || newerAtZero - newerAtGlobal >= 0.12)
+);
+
 /**
  * COFECHA [A] 段级 lag 表驱动的候选生成（人工定年流程的核心：参考 COFECHA 输出，从最新 flagged 段处理）。
  *
  * 当用户提供 COFECHA 输出（cofechaText）时，COFECHA 已用样条+AR+log 给出极干净的段级 lag——
- * 真缺/伪轮在"最新 flagged 段"（highLag -1=缺轮 / +1=伪轮）。这里直接用该段确定**区域和编辑类型**，
+ * 真缺/伪轮在"最新 flagged 段"（highLag -1=缺轮 / +1=伪轮）。幅度不小于 2 的负 lag
+ * 表示较老侧连续缺测，必须保留其完整幅度并转成 partialRangeMove，不能压成一个缺轮。
+ * 这里直接用该段确定**区域和编辑类型**，
  * 在区域内用锐利 prescan 取多候选（topN）。这解决了内部分段在弱相关区检测不到真区域的召回问题
  * （伪轮 top5 区域召回尤其受益）。候选仍走统一 z-score evaluation 排序，clean 假阳性由 hard gate 控。
  */
@@ -295,6 +322,103 @@ export const makeCofechaDrivenDrafts = (
     if (!cofechaHints) return [];
     const region = getNewestFlaggedCofechaSegment(cofechaHints, diagnosis.targetTree);
     if (!region) return [];
+
+    if (region.lag === 1) {
+        const global = diagnosis.globalSlidingMatch;
+        const seriesLength = diagnosis.targetRange.endYear
+            - diagnosis.targetRange.startYear + 1;
+        const newerContextYears = Math.min(
+            32,
+            Math.max(18, Math.floor(seriesLength / 4)),
+        );
+        const newerStartYear = Math.max(
+            diagnosis.targetRange.startYear,
+            diagnosis.targetRange.endYear - newerContextYears + 1,
+        );
+        const minimumPairs = Math.max(10, Math.floor(newerContextYears * 0.65));
+        const newerAtZero = correlationForSegment(
+            diagnosis.rawTarget,
+            diagnosis.master.data,
+            newerStartYear,
+            diagnosis.targetRange.endYear,
+            0,
+            minimumPairs,
+        ).correlation;
+        const newerAtGlobal = correlationForSegment(
+            diagnosis.rawTarget,
+            diagnosis.master.data,
+            newerStartYear,
+            diagnosis.targetRange.endYear,
+            global.bestGlobalLag,
+            minimumPairs,
+        ).correlation;
+        const globalGain = global.bestGlobalR === null || global.currentR === null
+            ? 0
+            : global.bestGlobalR - global.currentR;
+        // COFECHA only searches +/-10 years. For a long physical gap it can report a unit lag
+        // inside one 50-year segment even though the older side has a much larger offset. When
+        // the newest side is demonstrably still at lag zero, keep the dynamic -2..-100 search
+        // authoritative instead of injecting a contradictory missing/false-ring draft.
+        if (shouldSuppressAliasedCofechaUnitDraft({
+            regionLagMagnitude: region.lag,
+            globalLag: global.bestGlobalLag,
+            globalGain,
+            newerAtZero,
+            newerAtGlobal,
+        })) {
+            return [];
+        }
+    }
+
+    if (region.lag >= 2) {
+        // 自动 partialMove 只有物理缺失对应的负向移动；正向大 lag 不转换为自动编辑。
+        if (region.editType !== "insert") return [];
+        const shiftYears = -region.lag;
+        if (!isAutomaticPartialShift(shiftYears, {
+            maxPartialGapYears: config.maxPartialGapYears,
+            lagMin: config.lagMin,
+            seriesLength:
+                diagnosis.targetRange.endYear - diagnosis.targetRange.startYear + 1,
+        })) return [];
+
+        const breakpoint = partialMoveBreakpoint(
+            region.endYear + 1,
+            diagnosis.targetRange.startYear,
+            diagnosis.targetRange.endYear,
+            shiftYears,
+        );
+        if (!breakpoint) return [];
+        const sourceSegment = getSegmentNearYear(
+            diagnosis.segments,
+            breakpoint.lastMovedYear,
+        );
+        if (!sourceSegment) return [];
+
+        return [{
+            targetTree: diagnosis.targetTree,
+            operationType: "SHIFT_RANGE",
+            candidateType: "batchMoveYears",
+            mode: "partialRangeMove",
+            anchorYear: breakpoint.firstFixedYear,
+            selectedRange: breakpoint.movedRange,
+            missingRange: breakpoint.missingRange,
+            deltaYears: shiftYears,
+            sourceSegment,
+            algorithmSource: uniqueAlgorithmSources([
+                "cofecha_segment_lag",
+                "segmented_diagnosis",
+            ]),
+            recallSourceTags: [
+                `cofecha_partial_shift:${shiftYears}`,
+                `cofecha_first_fixed_year:${breakpoint.firstFixedYear}`,
+            ],
+            partialRangeMoveEvidence: makePartialRangeEvidence(
+                diagnosis,
+                breakpoint.movedRange,
+                shiftYears,
+            ),
+        }];
+    }
 
     const editType: LocalEditType = region.editType === "insert" ? "insertMissingYear" : "deleteFalseYear";
     const editKind = region.editType;

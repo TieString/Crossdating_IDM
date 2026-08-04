@@ -5,9 +5,11 @@ import {
     DEFAULT_EVENT_OPERATION_RECOVERY_CONFIG,
     fuseDecisiveJointOperationScores,
     partitionVerifiedRecoveryHypotheses,
+    recoverSubtleFalseRingEmptySuggestion,
     rerankEventYearsByAnchorConsensus,
     rerankMissingRingByAnchorConsensus,
     selectDecisiveJointOperationFusion,
+    selectSubtleFalseRingEmptyRecovery,
 } from "../eventOperationRecovery";
 import type { JointCounterfactualOperationScore } from "../jointCounterfactualOperation";
 import type {
@@ -166,6 +168,7 @@ const jointOperation = (
     shiftYears: number,
     score: number,
     bestYear = 1904,
+    overrides: Partial<JointCounterfactualOperationScore> = {},
 ): JointCounterfactualOperationScore => ({
     eventType: shiftYears === -1
         ? "missingRing"
@@ -188,9 +191,11 @@ const jointOperation = (
     baselineLag: 0,
     rows: [{
         year: bestYear,
+        sideStepScore: score,
         differenceGain: score,
         combinedGain: score,
     }] as JointCounterfactualOperationScore["rows"],
+    ...overrides,
 });
 
 const partialEvent = (
@@ -715,6 +720,28 @@ describe("decisive dynamic operation fusion", () => {
         );
     });
 
+    it("does not amplify a local large-gap spike without global shift agreement", () => {
+        const existing = partialEvent(-3);
+        const result = fuseDecisiveJointOperationScores(
+            [existing],
+            fusionDiagnosis,
+            [
+                jointOperation(1, 0.05, 1900),
+                jointOperation(-2, 0.2, 1900),
+                jointOperation(-50, 0.01, 1900, {
+                    rows: [{
+                        year: 1900,
+                        sideStepScore: 0.9,
+                        differenceGain: 0.9,
+                        combinedGain: 0.9,
+                    }] as JointCounterfactualOperationScore["rows"],
+                }),
+            ],
+        );
+
+        expect(result).toEqual([existing]);
+    });
+
     it("does not let a local breakpoint rewrite a globally stable current gap", () => {
         const existing = partialEvent(-50);
         const result = fuseDecisiveJointOperationScores(
@@ -1153,5 +1180,82 @@ describe("decisive dynamic operation fusion", () => {
                 jointOperation(-100, 0.9, 1950),
             ],
         )).toBe(events);
+    });
+});
+
+describe("subtle false-ring empty recovery", () => {
+    const recoveryDiagnosis = {
+        targetTree: "TEST",
+        targetRange: { startYear: 1800, endYear: 2024 },
+        rawTarget: new Map(Array.from(
+            { length: 225 },
+            (_, index) => [1800 + index, index + 1],
+        )),
+    } as SeriesCoreDiagnosis;
+    const subtleOperations = (
+        overrides: Partial<JointCounterfactualOperationScore> = {},
+    ): JointCounterfactualOperationScore[] => [
+        jointOperation(-1, 0.01, 1872, {
+            bestCorrectedSideSupport: -0.18,
+        }),
+        jointOperation(1, 0.0221, 1870, {
+            bestDifferenceGain: 0.0284,
+            sideStepBestYear: 1880,
+            bestSideMinimumAdvantage: -0.0375,
+            bestCorrectedSideSupport: 0.2096,
+            sideStepRemoteMargin: 0.1803,
+            rows: Array.from({ length: 25 }, (_, index) => {
+                const year = 1868 + index;
+                return {
+                    year,
+                    sideStepScore: year === 1880 ? 0.2 : 0,
+                    differenceGain: year === 1870 ? 0.0284 : 0,
+                    combinedGain: year === 1870 ? 0.02 : 0,
+                };
+            }) as JointCounterfactualOperationScore["rows"],
+            ...overrides,
+        }),
+    ];
+
+    it("selects the calibrated false-ring boundary only when all signs agree", () => {
+        expect(selectSubtleFalseRingEmptyRecovery(subtleOperations()))
+            .toMatchObject({ eventType: "falseRing", shiftYears: 1 });
+        expect(selectSubtleFalseRingEmptyRecovery(subtleOperations({
+            bestSideMinimumAdvantage: 0.001,
+        }))).toBeNull();
+        const oppositeSupported = subtleOperations();
+        oppositeSupported[0] = {
+            ...oppositeSupported[0],
+            bestCorrectedSideSupport: 0,
+        };
+        expect(selectSubtleFalseRingEmptyRecovery(oppositeSupported)).toBeNull();
+    });
+
+    it("emits one 13-year window centered on the side-step year", () => {
+        const result = recoverSubtleFalseRingEmptySuggestion(
+            [],
+            recoveryDiagnosis,
+            subtleOperations(),
+        );
+
+        expect(result).toHaveLength(1);
+        expect(result[0]).toMatchObject({
+            eventType: "falseRing",
+            startYear: 1874,
+            endYear: 1886,
+        });
+        expect(result[0].rankedYears[0].year).toBe(1880);
+        expect(result[0].evidence.algorithmSources).toContain(
+            "subtle_false_ring_empty_recovery",
+        );
+    });
+
+    it("never replaces an existing suggestion", () => {
+        const existing = event(1874, 1886);
+        expect(recoverSubtleFalseRingEmptySuggestion(
+            [existing],
+            recoveryDiagnosis,
+            subtleOperations(),
+        )).toEqual([existing]);
     });
 });

@@ -141,14 +141,12 @@ const applyPreview = (event: DiagnosisEvent, selectedYear: number) => {
 
 export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Props) {
   const [selectedYears, setSelectedYears] = useState<Record<string, number>>({});
-  const [confirmingEventId, setConfirmingEventId] = useState<string | null>(null);
 
   useEffect(() => {
     const currentIds = new Set(events.map((event) => event.id));
     setSelectedYears((previous) => Object.fromEntries(
       Object.entries(previous).filter(([eventId]) => currentIds.has(eventId)),
     ));
-    setConfirmingEventId((previous) => previous && currentIds.has(previous) ? previous : null);
   }, [events]);
 
   if (events.length === 0) {
@@ -183,17 +181,29 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
       {events.map((event) => {
         const selectedEvent = event;
         const width = selectedEvent.endYear - selectedEvent.startYear + 1;
-        const preferredYear = selectedEvent.rankedYears[0]?.year;
         const savedYear = selectedYears[event.id];
-        const selectedYear = selectedEvent.eventType === "partialMove"
-          ? preferredYear
-            ?? Math.round((selectedEvent.startYear + selectedEvent.endYear) / 2)
-          : savedYear !== undefined
-          && selectedEvent.rankedYears.some((row) => row.year === savedYear)
+        const rankedYears = [...selectedEvent.rankedYears]
+          .filter((row, index, rows) => (
+            row.year >= selectedEvent.startYear
+            && row.year <= selectedEvent.endYear
+            && rows.findIndex((candidate) => candidate.year === row.year) === index
+          ))
+          .sort((a, b) => a.rank - b.rank);
+        const preferredYear = rankedYears[0]?.year;
+        const rankedYearSet = new Set(rankedYears.map((row) => row.year));
+        const selectableYears = selectedEvent.eventType === "partialMove"
+          ? [
+            ...rankedYears.map((row) => ({ year: row.year, rank: row.rank })),
+            ...Array.from({ length: Math.max(0, width) }, (_, index) => selectedEvent.startYear + index)
+              .filter((year) => !rankedYearSet.has(year))
+              .map((year) => ({ year, rank: null })),
+          ]
+          : rankedYears.map((row) => ({ year: row.year, rank: row.rank }));
+        const selectedYear = savedYear !== undefined
+          && selectableYears.some((row) => row.year === savedYear)
           ? savedYear
           : preferredYear
             ?? Math.round((selectedEvent.startYear + selectedEvent.endYear) / 2);
-        const rankedYears = [...selectedEvent.rankedYears].sort((a, b) => a.rank - b.rank);
         const shiftText = selectedEvent.eventType === "partialMove" && selectedEvent.shiftYears
           ? ` · 较老侧向老年份移动 ${Math.abs(selectedEvent.shiftYears)} 年`
           : "";
@@ -233,21 +243,15 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
                 </span>
               </div>
 
-              {selectedEvent.eventType === "partialMove" && preferredYear !== undefined ? (
+              {selectableYears.length > 0 ? (
                 <div
-                  title={`${preferredYear} 年起保持不动`}
-                  style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 4 }}
-                >
-                  <span>首选断点</span>
-                  <strong>{preferredYear}</strong>
-                </div>
-              ) : rankedYears.length > 0 ? (
-                <div
-                  title={rankedYears.map((row) => `#${row.rank} ${row.year}`).join(" · ")}
+                  title={selectableYears
+                    .map((row) => row.rank === null ? `${row.year}` : `#${row.rank} ${row.year}`)
+                    .join(" · ")}
                   style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4, marginTop: 4 }}
                 >
-                  <span>{selectedEvent.eventType === "partialMove" ? "优先断点" : "优先年份"}</span>
-                  {rankedYears.map((row) => {
+                  <span>{selectedEvent.eventType === "partialMove" ? "断点选项" : "优先年份"}</span>
+                  {selectableYears.map((row) => {
                     const selected = row.year === selectedYear;
                     return (
                       <button
@@ -262,7 +266,6 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
                             ...previous,
                             [event.id]: row.year,
                           }));
-                          setConfirmingEventId(null);
                         }}
                         style={{
                           ...yearButtonStyle,
@@ -271,7 +274,7 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
                           fontWeight: row.rank === 1 || selected ? 700 : 500,
                         }}
                       >
-                        #{row.rank} {row.year}
+                        {row.rank === null ? row.year : `#${row.rank} ${row.year}`}
                       </button>
                     );
                   })}
@@ -306,52 +309,17 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
               </button>
               {onApplyEvent ? (
                 <button
-                type="button"
-                disabled={selectedEvent.stale ?? event.stale}
-                title="查看并确认所选年份的编辑操作"
-                onClick={() => setConfirmingEventId(event.id)}
-                style={(selectedEvent.stale ?? event.stale) ? disabledButtonStyle : applyButtonStyle}
+                  type="button"
+                  disabled={selectedEvent.stale ?? event.stale}
+                  title={applyPreview(selectedEvent, selectedYear)}
+                  onClick={() => onApplyEvent(selectedEvent, selectedYear)}
+                  style={(selectedEvent.stale ?? event.stale) ? disabledButtonStyle : applyButtonStyle}
                 >
                   应用
                 </button>
               ) : null}
             </div>
 
-            {confirmingEventId === event.id ? (
-              <div
-                role="alert"
-                style={{
-                  gridColumn: "1 / -1",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 8,
-                  paddingTop: 6,
-                  borderTop: "1px solid #dbe8da",
-                }}
-              >
-                <span>{applyPreview(selectedEvent, selectedYear)}</span>
-                <div style={{ display: "flex", flexShrink: 0, gap: 4 }}>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmingEventId(null)}
-                    style={buttonStyle}
-                  >
-                    取消
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const applied = onApplyEvent?.(selectedEvent, selectedYear);
-                      if (applied !== false) setConfirmingEventId(null);
-                    }}
-                    style={applyButtonStyle}
-                  >
-                    确认应用
-                  </button>
-                </div>
-              </div>
-            ) : null}
           </article>
         );
       })}

@@ -10,6 +10,8 @@ import {
     selectRemoteCurrentPrimaryMode,
     selectFalseRingTransitionNarrowWindow,
     shouldRejectNarrowForRemoteSideEvidence,
+    isMissingRingAnchorConsensusUncertain,
+    shouldNarrowSurvivingMissingPredictiveMode,
     shouldUseCorroboratedPointPeak,
     shouldWidenMissingRingFiveYear,
 } from "../unitEventWindowRanker";
@@ -225,6 +227,11 @@ describe("unit event window ranker", () => {
             prePointModeWindow: { startYear: 1899, endYear: 1911 },
             currentPrimaryYear: 1904,
         })).toBeNull();
+        expect(selectFalseRingCurrentAnchorMode({
+            pointModeWindow: { startYear: 1900, endYear: 1912 },
+            prePointModeWindow: { startYear: 1907, endYear: 1919 },
+            currentPrimaryYear: 1913,
+        })).toBeNull();
     });
 
     it("keeps the pre-direct missing-ring mode when independent anchors agree", () => {
@@ -301,6 +308,33 @@ describe("unit event window ranker", () => {
             operationEvidence: {
                 bestYear: 1903,
                 sideStepBestYear: 1904,
+            },
+        })).toBe(false);
+    });
+
+    it("keeps the empirically under-covered anchor-consensus subgroup wide", () => {
+        expect(isMissingRingAnchorConsensusUncertain({
+            recommendedWidth: 13,
+            modeWindow: { startYear: 1900, endYear: 1912 },
+            currentPrimaryYear: 1906,
+            operationEvidence: {
+                bestYear: 1907,
+                sideStepBestYear: 1904,
+                bestDifferenceGain: 0.3,
+                remoteDifferenceMargin: 0.05,
+                sideStepRemoteMargin: 0.1,
+            },
+        })).toBe(true);
+        expect(isMissingRingAnchorConsensusUncertain({
+            recommendedWidth: 13,
+            modeWindow: { startYear: 1900, endYear: 1912 },
+            currentPrimaryYear: 1906,
+            operationEvidence: {
+                bestYear: 1907,
+                sideStepBestYear: 1911,
+                bestDifferenceGain: 0.3,
+                remoteDifferenceMargin: 0.05,
+                sideStepRemoteMargin: 0.1,
             },
         })).toBe(false);
     });
@@ -421,6 +455,24 @@ describe("unit event window ranker", () => {
         expect(result!.window.endYear - result!.window.startYear + 1)
             .toBe(result!.recommendedWidth);
         expect(result!.scoredWindows.length).toBeGreaterThan(0);
+    });
+
+    it("narrows only a predictive remote mode that survives recovery", () => {
+        expect(shouldNarrowSurvivingMissingPredictiveMode({
+            recommendedWidth: 13,
+            windowCenteringRule: "missing_predictive_remote_mode",
+            widthSelectionRule: "missing_predictive_remote_mode",
+        })).toBe(true);
+        expect(shouldNarrowSurvivingMissingPredictiveMode({
+            recommendedWidth: 13,
+            windowCenteringRule: "missing_operation_evidence_reversion",
+            widthSelectionRule: "missing_operation_evidence_reversion",
+        })).toBe(false);
+        expect(shouldNarrowSurvivingMissingPredictiveMode({
+            recommendedWidth: 13,
+            windowCenteringRule: "missing_predictive_remote_mode",
+            widthSelectionRule: "missing_anchor_consensus_uncertain_13",
+        })).toBe(false);
     });
 
     it("centers one wide false-ring mode on corroborated current evidence", () => {

@@ -13,6 +13,7 @@ import {
 import {
     ar1WhitenSeries,
     correlationForSegment,
+    preprocessSeries,
     toNumericSeries,
 } from "./series";
 import type { NumericSeries, SeriesCoreDiagnosis } from "./types";
@@ -26,8 +27,19 @@ export type PerReferenceCounterfactualRow = {
     whitenedGainMean: number;
     positiveDifferenceGainFraction: number;
     positiveWhitenedGainFraction: number;
+    positiveSideStepFraction: number;
     peakKernel5: number;
     peakKernel9: number;
+    lagStepWeighted: number;
+    lagStepMedian: number;
+    lagStepPositiveFraction: number;
+    lagStepPeakKernel5: number;
+    lagStepPeakKernel9: number;
+    fixedLagStepWeighted: number;
+    fixedLagStepMedian: number;
+    fixedLagStepPositiveFraction: number;
+    fixedLagStepPeakKernel5: number;
+    fixedLagStepPeakKernel9: number;
 };
 
 export type PerReferenceCounterfactualOptions = {
@@ -55,6 +67,7 @@ export type PerReferenceCounterfactualSummary = {
 
 type PreparedReference = {
     raw: NumericSeries;
+    difference: NumericSeries;
     whitened: NumericSeries;
     baselineLag: number;
     baselineCorrelation: number;
@@ -67,11 +80,29 @@ type ReferenceYearScore = {
     differenceGain: number;
     whitened: number;
     whitenedGain: number;
+    sideStep: number;
+    lagStepScore: number;
+    lagStepRank: number;
+    fixedLagStepScore: number;
+    fixedLagStepRank: number;
 };
 
 type ReferenceProfile = PreparedReference & {
     peakYear: number;
+    lagStepPeakYear: number;
+    fixedLagStepPeakYear: number;
     rows: ReferenceYearScore[];
+};
+
+type PreparedTarget = Pick<
+    PreparedReference,
+    "raw" | "difference" | "whitened"
+>;
+
+type MeanPrefix = {
+    startYear: number;
+    sums: number[];
+    counts: number[];
 };
 
 const CACHE = new WeakMap<
@@ -91,6 +122,93 @@ const mean = (values: number[]): number => values.reduce(
     (sum, value) => sum + value,
     0,
 ) / Math.max(1, values.length);
+
+const median = (values: number[]): number => {
+    if (values.length === 0) return 0;
+    const ordered = values.slice().sort((left, right) => left - right);
+    const middle = Math.floor(ordered.length / 2);
+    return ordered.length % 2 === 0
+        ? ((ordered[middle - 1] ?? 0) + (ordered[middle] ?? 0)) / 2
+        : ordered[middle] ?? 0;
+};
+
+const firstDifferences = (series: NumericSeries): NumericSeries => {
+    const entries = [...series.entries()].sort(
+        (left, right) => left[0] - right[0],
+    );
+    const result = new Map<number, number>();
+    for (let index = 1; index < entries.length; index += 1) {
+        const [year, value] = entries[index]!;
+        const [previousYear, previousValue] = entries[index - 1]!;
+        if (year === previousYear + 1) {
+            result.set(year, value - previousValue);
+        }
+    }
+    return preprocessSeries(result);
+};
+
+const percentileRanks = (values: readonly number[]): number[] => {
+    const ordered = values
+        .map((value, index) => ({ value, index }))
+        .sort((left, right) => left.value - right.value || left.index - right.index);
+    const result = new Array(values.length).fill(0);
+    for (let start = 0; start < ordered.length;) {
+        let end = start + 1;
+        while (
+            end < ordered.length
+            && ordered[end]?.value === ordered[start]?.value
+        ) end += 1;
+        const rank = (start + end - 1)
+            / (2 * Math.max(1, ordered.length - 1));
+        for (let index = start; index < end; index += 1) {
+            result[ordered[index]!.index] = rank;
+        }
+        start = end;
+    }
+    return result;
+};
+
+const huberLoss = (residual: number, transition = 1.5): number => {
+    const absolute = Math.abs(residual);
+    return absolute <= transition
+        ? 0.5 * residual * residual
+        : transition * (absolute - transition * 0.5);
+};
+
+const buildMeanPrefix = (
+    values: ReadonlyMap<number, number>,
+    startYear: number,
+    endYear: number,
+): MeanPrefix => {
+    const sums = [0];
+    const counts = [0];
+    for (let year = startYear; year <= endYear; year += 1) {
+        const value = values.get(year);
+        sums.push((sums[sums.length - 1] ?? 0) + (value ?? 0));
+        counts.push((counts[counts.length - 1] ?? 0) + Number(
+            value !== undefined,
+        ));
+    }
+    return { startYear, sums, counts };
+};
+
+const prefixMean = (
+    prefix: MeanPrefix,
+    startYear: number,
+    endYear: number,
+): { mean: number; count: number } => {
+    const maximumYear = prefix.startYear + prefix.sums.length - 2;
+    const start = Math.max(prefix.startYear, startYear);
+    const end = Math.min(maximumYear, endYear);
+    if (end < start) return { mean: 0, count: 0 };
+    const startIndex = start - prefix.startYear;
+    const endIndex = end - prefix.startYear + 1;
+    const sum = (prefix.sums[endIndex] ?? 0)
+        - (prefix.sums[startIndex] ?? 0);
+    const count = (prefix.counts[endIndex] ?? 0)
+        - (prefix.counts[startIndex] ?? 0);
+    return { mean: count > 0 ? sum / count : 0, count };
+};
 
 const combinedReferenceGain = (
     row: PerReferenceCounterfactualRow,
@@ -196,7 +314,8 @@ const prepareReferences = (
     const candidates = diagnosis.master.sourceTrees
         .map((tree) => toNumericSeries(siteData.get(tree)))
         .filter((reference) => reference.size >= 40)
-        .flatMap((raw): PreparedReference[] => {
+        .flatMap((source): PreparedReference[] => {
+            const raw = preprocessSeries(source);
             const baseline = bestBaselineLag(
                 diagnosis,
                 raw,
@@ -206,7 +325,8 @@ const prepareReferences = (
             if (!baseline || baseline.correlation <= -0.1) return [];
             return [{
                 raw,
-                whitened: ar1WhitenSeries(raw),
+                difference: firstDifferences(source),
+                whitened: ar1WhitenSeries(source),
                 baselineLag: baseline.lag,
                 baselineCorrelation: baseline.correlation,
                 weight: Math.max(0.05, baseline.correlation + 0.15),
@@ -265,13 +385,134 @@ const getPreparedReferences = (
     return prepared;
 };
 
-const scoreReference = (
+const scoreReferenceLagStep = (
     diagnosis: SeriesCoreDiagnosis,
-    whitenedDiagnosis: SeriesCoreDiagnosis,
+    target: PreparedTarget,
     reference: PreparedReference,
     shiftYears: number,
     edgeYears: number,
+    baselineLag = reference.baselineLag,
+): Map<number, number> => {
+    const pointPreferences = new Map<number, number>();
+    for (
+        let year = diagnosis.targetRange.startYear;
+        year <= diagnosis.targetRange.endYear;
+        year += 1
+    ) {
+        const viewPreferences = ([
+            ["raw", 0.25],
+            ["difference", 0.45],
+            ["whitened", 0.3],
+        ] as const).flatMap(([view, weight]) => {
+            const targetValue = target[view].get(year);
+            const fixed = reference[view].get(
+                year + baselineLag,
+            );
+            const shifted = reference[view].get(
+                year + baselineLag + shiftYears,
+            );
+            if (
+                targetValue === undefined
+                || fixed === undefined
+                || shifted === undefined
+            ) return [];
+            return [{
+                value: huberLoss(targetValue - fixed)
+                    - huberLoss(targetValue - shifted),
+                weight,
+            }];
+        });
+        const totalWeight = viewPreferences.reduce(
+            (sum, row) => sum + row.weight,
+            0,
+        );
+        if (totalWeight >= 0.5) {
+            pointPreferences.set(
+                year,
+                viewPreferences.reduce(
+                    (sum, row) => sum + row.value * row.weight,
+                    0,
+                ) / totalWeight,
+            );
+        }
+    }
+    const prefix = buildMeanPrefix(
+        pointPreferences,
+        diagnosis.targetRange.startYear,
+        diagnosis.targetRange.endYear,
+    );
+    const result = new Map<number, number>();
+    const localSideYears = 31;
+    for (
+        let year = diagnosis.targetRange.startYear + edgeYears;
+        year <= diagnosis.targetRange.endYear - edgeYears;
+        year += 1
+    ) {
+        const older = prefixMean(
+            prefix,
+            diagnosis.targetRange.startYear,
+            year,
+        );
+        const newer = prefixMean(
+            prefix,
+            year + 1,
+            diagnosis.targetRange.endYear,
+        );
+        const localOlder = prefixMean(
+            prefix,
+            year - localSideYears + 1,
+            year,
+        );
+        const localNewer = prefixMean(
+            prefix,
+            year + 1,
+            year + localSideYears,
+        );
+        if (
+            older.count < 15
+            || newer.count < 15
+            || localOlder.count < 10
+            || localNewer.count < 10
+        ) continue;
+        const olderAdvantage = older.mean;
+        const newerAdvantage = -newer.mean;
+        const localOlderAdvantage = localOlder.mean;
+        const localNewerAdvantage = -localNewer.mean;
+        const globalStep = Math.min(olderAdvantage, newerAdvantage)
+            + (olderAdvantage + newerAdvantage) * 0.1;
+        const localStep = Math.min(
+            localOlderAdvantage,
+            localNewerAdvantage,
+        ) + (localOlderAdvantage + localNewerAdvantage) * 0.1;
+        result.set(year, globalStep * 0.65 + localStep * 0.35);
+    }
+    return result;
+};
+
+const scoreReference = (
+    diagnosis: SeriesCoreDiagnosis,
+    whitenedDiagnosis: SeriesCoreDiagnosis,
+    target: PreparedTarget,
+    reference: PreparedReference,
+    shiftYears: number,
+    edgeYears: number,
+    fixedBaselineLag: number,
 ): ReferenceProfile | null => {
+    const lagStepByYear = scoreReferenceLagStep(
+        diagnosis,
+        target,
+        reference,
+        shiftYears,
+        edgeYears,
+    );
+    const fixedLagStepByYear = scoreReferenceLagStep(
+        diagnosis,
+        target,
+        reference,
+        shiftYears,
+        edgeYears,
+        fixedBaselineLag,
+    );
     const baseline = scoreFullIntervalBaselineEvidence(
         diagnosis,
         reference.raw,
@@ -301,6 +542,7 @@ const scoreReference = (
             !whitened
             || row.differencePairs < 30
             || whitened.samplePairs < 30
+            || !Number.isFinite(row.sideStepScore)
         ) {
             return [];
         }
@@ -312,19 +554,55 @@ const scoreReference = (
             whitened: whitened.rawCorrelation,
             whitenedGain:
                 whitened.rawCorrelation - whitenedBaseline.rawCorrelation,
+            sideStep: row.sideStepScore,
+            lagStepScore: lagStepByYear.get(row.year)
+                ?? Number.NEGATIVE_INFINITY,
+            lagStepRank: 0,
+            fixedLagStepScore: fixedLagStepByYear.get(row.year)
+                ?? Number.NEGATIVE_INFINITY,
+            fixedLagStepRank: 0,
         }];
     });
     if (rows.length < 15) return null;
-    const peak = rows.reduce((best, row) => {
+    const lagStepRanks = percentileRanks(rows.map((row) => row.lagStepScore));
+    const fixedLagStepRanks = percentileRanks(
+        rows.map((row) => row.fixedLagStepScore),
+    );
+    const rankedRows = rows.map((row, index) => ({
+        ...row,
+        lagStepRank: lagStepRanks[index] ?? 0,
+        fixedLagStepRank: fixedLagStepRanks[index] ?? 0,
+    }));
+    const peak = rankedRows.reduce((best, row) => {
         const score = row.differenceGain * 0.65 + row.whitenedGain * 0.35;
         const bestScore =
             best.differenceGain * 0.65 + best.whitenedGain * 0.35;
         return score > bestScore ? row : best;
-    }, rows[0]);
+    }, rankedRows[0]!);
+    const lagStepPeak = rankedRows.reduce((best, row) => (
+        row.lagStepRank > best.lagStepRank
+            || (
+                row.lagStepRank === best.lagStepRank
+                && row.lagStepScore > best.lagStepScore
+            )
+            ? row
+            : best
+    ), rankedRows[0]!);
+    const fixedLagStepPeak = rankedRows.reduce((best, row) => (
+        row.fixedLagStepRank > best.fixedLagStepRank
+            || (
+                row.fixedLagStepRank === best.fixedLagStepRank
+                && row.fixedLagStepScore > best.fixedLagStepScore
+            )
+            ? row
+            : best
+    ), rankedRows[0]!);
     return {
         ...reference,
         peakYear: peak.year,
-        rows,
+        lagStepPeakYear: lagStepPeak.year,
+        fixedLagStepPeakYear: fixedLagStepPeak.year,
+        rows: rankedRows,
     };
 };
 
@@ -361,6 +639,11 @@ export const scorePerReferenceCounterfactualEvidence = (
         rawTarget: ar1WhitenSeries(diagnosis.rawTarget),
     };
     WHITENED_DIAGNOSIS_CACHE.set(diagnosis, whitenedDiagnosis);
+    const target: PreparedTarget = {
+        raw: preprocessSeries(diagnosis.rawTarget),
+        difference: firstDifferences(diagnosis.rawTarget),
+        whitened: whitenedDiagnosis.rawTarget,
+    };
     const profiles = getPreparedReferences(
         diagnosis,
         siteData,
@@ -371,9 +654,11 @@ export const scorePerReferenceCounterfactualEvidence = (
         const profile = scoreReference(
             diagnosis,
             whitenedDiagnosis,
+            target,
             reference,
             shiftYears,
             edgeYears,
+            baselineLagCenter,
         );
         return profile ? [profile] : [];
     });
@@ -404,6 +689,17 @@ export const scorePerReferenceCounterfactualEvidence = (
                 -0.5 * ((year - item.profile.peakYear) / radius) ** 2,
             )),
         );
+        const lagStepKernel = (radius: number): number => mean(
+            available.map((item) => Math.exp(
+                -0.5 * ((year - item.profile.lagStepPeakYear) / radius) ** 2,
+            )),
+        );
+        const fixedLagStepKernel = (radius: number): number => mean(
+            available.map((item) => Math.exp(
+                -0.5
+                    * ((year - item.profile.fixedLagStepPeakYear) / radius) ** 2,
+            )),
+        );
         return [{
             year,
             referenceCount: available.length,
@@ -431,8 +727,39 @@ export const scorePerReferenceCounterfactualEvidence = (
             positiveWhitenedGainFraction: available.filter(
                 (item) => item.row.whitenedGain > 0,
             ).length / available.length,
+            positiveSideStepFraction: available.filter(
+                (item) => item.row.sideStep > 0,
+            ).length / available.length,
             peakKernel5: kernel(2.5),
             peakKernel9: kernel(4.5),
+            lagStepWeighted: available.reduce(
+                (sum, item) => (
+                    sum + item.row.lagStepRank * item.profile.weight
+                ),
+                0,
+            ) / totalWeight,
+            lagStepMedian: median(
+                available.map((item) => item.row.lagStepRank),
+            ),
+            lagStepPositiveFraction: available.filter(
+                (item) => item.row.lagStepScore > 0,
+            ).length / available.length,
+            lagStepPeakKernel5: lagStepKernel(2.5),
+            lagStepPeakKernel9: lagStepKernel(4.5),
+            fixedLagStepWeighted: available.reduce(
+                (sum, item) => (
+                    sum + item.row.fixedLagStepRank * item.profile.weight
+                ),
+                0,
+            ) / totalWeight,
+            fixedLagStepMedian: median(
+                available.map((item) => item.row.fixedLagStepRank),
+            ),
+            fixedLagStepPositiveFraction: available.filter(
+                (item) => item.row.fixedLagStepScore > 0,
+            ).length / available.length,
+            fixedLagStepPeakKernel5: fixedLagStepKernel(2.5),
+            fixedLagStepPeakKernel9: fixedLagStepKernel(4.5),
         }];
     });
     byKey.set(cacheKey, result);

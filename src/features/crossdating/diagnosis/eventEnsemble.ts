@@ -54,7 +54,10 @@ import {
     rerankEventYearsByAnchorConsensus,
     type EventOperationRecoveryConfig,
 } from "./eventOperationRecovery";
-import { addDiagnosisReviewWindowPadding } from "./eventReviewWindow";
+import {
+    addDiagnosisReviewWindowPadding,
+    restoreUnlocalizedFalseRingReviewWindow,
+} from "./eventReviewWindow";
 import { rerankMissingEventsNearExplicitZeros } from "./explicitZeroRanking";
 import {
     createEndpointResidualWindowCache,
@@ -1673,6 +1676,16 @@ export const makeDiagnosisEvents = (
                     )
                 ))
                 .map(stripDiagnosisEventAlternatives)
+                .map((event) => (
+                    event.evidence.algorithmSources.includes(
+                        "full_interval_counterfactual_locator",
+                    )
+                        ? event
+                        : restoreUnlocalizedFalseRingReviewWindow(
+                                event,
+                                diagnosis.targetRange,
+                            )
+                ))
                 .map((event) => ({
                     ...event,
                     seriesRange: { ...diagnosis.targetRange },
