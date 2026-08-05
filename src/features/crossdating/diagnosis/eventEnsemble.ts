@@ -8,6 +8,11 @@
 import type { RwlSiteData } from "@/features/rwl/types";
 import { cofechaStyleStandardize } from "../reference";
 import {
+    comparePartialMoveWithMissingStaircase,
+    supportsDiscreteMissingStaircase,
+    type MissingStaircaseCompetition,
+} from "./discreteMissingStaircaseCompetition";
+import {
     createLagPathCache,
     diagnoseLagPath,
     locateSequentialMissingHead,
@@ -1028,6 +1033,35 @@ const makeSequentialMissingHeadEvent = (
     };
 };
 
+const addExplicitStaircaseCompetitionEvidence = (
+    event: DiagnosisEvent,
+    competition: MissingStaircaseCompetition,
+    staircase: TwoStepMissingStaircase,
+): DiagnosisEvent => ({
+    ...event,
+    evidence: {
+        ...event.evidence,
+        algorithmSources: Array.from(new Set([
+            ...event.evidence.algorithmSources,
+            "explicit_partial_vs_missing_staircase",
+            "per_reference_intermediate_lag_consensus",
+        ])).sort(),
+        notes: [
+            ...event.evidence.notes,
+            `explicit_staircase_missing_years=${competition.missingYears.join(",")}`,
+            `explicit_staircase_span=${competition.missingSpanYears}`,
+            `explicit_staircase_master_margin=${competition.masterMargin.toFixed(6)}`,
+            `explicit_staircase_reference_support=${competition.referenceSupport}/${competition.referenceCount}`,
+            `explicit_staircase_reference_median=${competition.referenceMedianMargin.toFixed(6)}`,
+            `explicit_staircase_reference_q25=${competition.referenceLowerQuartileMargin.toFixed(6)}`,
+            `local_staircase_boundaries=${staircase.olderBoundaryYear}-${staircase.newerBoundaryYear}`,
+            `local_staircase_gain=${staircase.staircaseGain.toFixed(6)}`,
+            `local_staircase_reference_support=${staircase.referenceSupport}/${staircase.referenceCount}`,
+            `local_staircase_reference_median=${staircase.referenceMedianAdvantage.toFixed(6)}`,
+        ],
+    },
+});
+
 const recoverSequentialMissingHeadEvent = (
     detected: DiagnosisEvent[],
     diagnosis: SeriesCoreDiagnosis,
@@ -1052,20 +1086,65 @@ const recoverSequentialMissingHeadEvent = (
         },
         pathCache,
     );
-    // A true continuous gap is better explained by one direct breakpoint and has negative gain.
-    if (!head || head.gainOverDirect <= 0) return null;
+    // A true continuous gap is normally better explained by one direct breakpoint.
+    if (head && head.gainOverDirect > 0) {
+        const marker = selectSharedExplicitZeroMarker(
+            siteData,
+            diagnosis.targetTree,
+            head.year,
+        );
+        return makeSequentialMissingHeadEvent(
+            head,
+            marker,
+            detected,
+            diagnosis,
+            candidates,
+        );
+    }
+    const partial = detected.find((event) => (
+        event.eventType === "partialMove"
+        && event.shiftYears === -2
+        && event.evidence.lagBefore === -2
+        && event.evidence.lagAfter === 0
+    ));
+    if (!partial) return null;
+    const constrainedCache = createLagPathCache();
+    const constrainedHead = locateSequentialMissingHead(
+        cofechaDiagnosis,
+        siteData,
+        { minLag: -2, maxPartialGapYears: 2 },
+        constrainedCache,
+        0,
+    );
+    if (!constrainedHead) return null;
+    const staircase = locateTwoStepMissingStaircase(
+        cofechaDiagnosis,
+        siteData,
+        partial,
+        { minLag: -2, maxPartialGapYears: 2 },
+        constrainedCache,
+    );
+    const competition = comparePartialMoveWithMissingStaircase(
+        cofechaDiagnosis,
+        siteData,
+        partial,
+        true,
+        constrainedHead.year,
+    );
+    if (!supportsDiscreteMissingStaircase(competition, staircase)) return null;
     const marker = selectSharedExplicitZeroMarker(
         siteData,
         diagnosis.targetTree,
-        head.year,
+        constrainedHead.year,
+        2,
     );
-    return makeSequentialMissingHeadEvent(
-        head,
+    return addExplicitStaircaseCompetitionEvidence(makeSequentialMissingHeadEvent(
+        constrainedHead,
         marker,
         detected,
         diagnosis,
         candidates,
-    );
+    ), competition!, staircase!);
 };
 
 const recoverCollapsedMissingStaircaseHead = (

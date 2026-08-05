@@ -22,8 +22,10 @@ import { getConfig } from "@/features/crossdating/diagnosis/config";
 import {
     createLagPathCache,
     locateSequentialMissingHead,
+    locateTwoStepMissingStaircase,
 } from "@/features/crossdating/diagnosis/eventPath";
 import { scoreFullIntervalShiftEvidence } from "@/features/crossdating/diagnosis/fullIntervalUnitEditEvidence";
+import { comparePartialMoveWithMissingStaircase } from "@/features/crossdating/diagnosis/discreteMissingStaircaseCompetition";
 import { preprocessSeries } from "@/features/crossdating/diagnosis/series";
 import { diagnoseSeriesCore } from "@/features/crossdating/diagnosis/segments";
 import type { DiagnosisEvent } from "@/features/crossdating/diagnosis/types";
@@ -91,6 +93,21 @@ type SequentialHeadPreview = {
     pathStartLag: number;
 };
 
+type TwoStepStaircasePreview = {
+    olderBoundaryYear: number;
+    newerBoundaryYear: number;
+    staircaseGain: number;
+    middleMeanAdvantage: number;
+    middleSamplePairs: number;
+    referenceSupport: number;
+    referenceCount: number;
+    referenceMedianAdvantage: number;
+};
+
+type ExplicitStaircasePreview = NonNullable<ReturnType<
+    typeof comparePartialMoveWithMissingStaircase
+>>;
+
 type CaseRow = {
     caseId: string;
     seriesId: string;
@@ -126,6 +143,9 @@ type CaseRow = {
     missingCandidates: MissingCandidatePreview[];
     unitEvidenceTopYears: UnitEvidencePreview;
     sequentialHeads: Record<string, SequentialHeadPreview | null>;
+    constrainedSequentialHeads: Record<string, SequentialHeadPreview | null>;
+    twoStepStaircase: TwoStepStaircasePreview | null;
+    explicitStaircase: ExplicitStaircasePreview | null;
     predictions: EventPreview[];
 };
 
@@ -301,9 +321,14 @@ const executeCase = (
             localSideStepScore31: null,
         };
         let sequentialHeads: Record<string, SequentialHeadPreview | null> = {};
+        let constrainedSequentialHeads: Record<string, SequentialHeadPreview | null> = {};
+        let twoStepStaircase: TwoStepStaircasePreview | null = null;
+        let explicitStaircase: ExplicitStaircasePreview | null = null;
+        let cofechaDiagnosis: ReturnType<typeof diagnoseSeriesCore> = null;
+        let effectiveConfig: ReturnType<typeof getConfig> | null = null;
         if (includeProbes) {
-            const effectiveConfig = getConfig({ referenceConfig });
-            const cofechaDiagnosis = diagnoseSeriesCore(
+            effectiveConfig = getConfig({ referenceConfig });
+            cofechaDiagnosis = diagnoseSeriesCore(
                 siteData,
                 plan.target.id,
                 effectiveConfig,
@@ -371,6 +396,72 @@ const executeCase = (
             cofechaText: outText,
         });
         const ownEvents = events.events.filter((event) => event.seriesId === plan.target.id);
+        if (includeProbes && cofechaDiagnosis && effectiveConfig) {
+            const primaryPartial = ownEvents.find((event) => (
+                event.eventType === "partialMove"
+                && (event.shiftYears ?? 0) <= -2
+            ));
+            const cumulativeLag = primaryPartial?.shiftYears ?? null;
+            if (cumulativeLag !== null) {
+                const constrainedCache = createLagPathCache();
+                constrainedSequentialHeads = Object.fromEntries([
+                    0,
+                    0.05,
+                    0.1,
+                    0.25,
+                    0.5,
+                ].map((penalty) => {
+                    const head = locateSequentialMissingHead(
+                        cofechaDiagnosis!,
+                        siteData,
+                        {
+                            minLag: cumulativeLag,
+                            maxPartialGapYears: Math.abs(cumulativeLag),
+                        },
+                        constrainedCache,
+                        penalty,
+                    );
+                    return [String(penalty), head ? {
+                        year: head.year,
+                        gainOverDirect: head.gainOverDirect,
+                        transitionCount: head.transitionCount,
+                        headRunYears: head.headRunYears,
+                        headMeanAdvantage: head.headMeanAdvantage,
+                        fixedTailMeanAdvantage: head.fixedTailMeanAdvantage,
+                        pathStartLag: head.pathStartLag,
+                    } : null];
+                }));
+                explicitStaircase = comparePartialMoveWithMissingStaircase(
+                    cofechaDiagnosis,
+                    siteData,
+                    primaryPartial!,
+                    true,
+                    constrainedSequentialHeads["0"]?.year ?? null,
+                );
+                if (cumulativeLag === -2) {
+                    const staircase = locateTwoStepMissingStaircase(
+                        cofechaDiagnosis,
+                        siteData,
+                        primaryPartial!,
+                        {
+                            minLag: cumulativeLag,
+                            maxPartialGapYears: Math.abs(cumulativeLag),
+                        },
+                        constrainedCache,
+                    );
+                    twoStepStaircase = staircase ? {
+                        olderBoundaryYear: staircase.olderBoundaryYear,
+                        newerBoundaryYear: staircase.newerBoundaryYear,
+                        staircaseGain: staircase.staircaseGain,
+                        middleMeanAdvantage: staircase.middleMeanAdvantage,
+                        middleSamplePairs: staircase.middleSamplePairs,
+                        referenceSupport: staircase.referenceSupport,
+                        referenceCount: staircase.referenceCount,
+                        referenceMedianAdvantage: staircase.referenceMedianAdvantage,
+                    } : null;
+                }
+            }
+        }
         const missingCandidates = events.candidates
             .filter((candidate) => (
                 candidate.targetTree === plan.target.id
@@ -441,6 +532,9 @@ const executeCase = (
             missingCandidates,
             unitEvidenceTopYears,
             sequentialHeads,
+            constrainedSequentialHeads,
+            twoStepStaircase,
+            explicitStaircase,
             predictions,
         };
     } catch (error) {
@@ -477,6 +571,9 @@ const executeCase = (
                 localSideStepScore31: null,
             },
             sequentialHeads: {},
+            constrainedSequentialHeads: {},
+            twoStepStaircase: null,
+            explicitStaircase: null,
             predictions: [],
         };
     }

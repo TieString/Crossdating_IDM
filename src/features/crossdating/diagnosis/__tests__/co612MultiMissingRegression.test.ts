@@ -303,6 +303,50 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
         ))).toBe(false);
     }, 240_000);
 
+    bundledCofechaIt("recovers only reference-supported separated two-step gaps", () => {
+        const scenarios = [
+            { seriesId: "mon121", targetStep: 4 },
+            { seriesId: "mon162", targetStep: 3 },
+        ];
+        scenarios.forEach(({ seriesId, targetStep }) => {
+            const series = parsed.get(seriesId)!;
+            const truths = Array.from(series.valuesByYear)
+                .filter(([, value]) => value === 0)
+                .map(([year]) => year)
+                .sort((left, right) => right - left);
+            let corrupted = buildMultiMissingCorrupted(series.valuesByYear, truths);
+            truths.slice(0, targetStep - 1).forEach((year) => {
+                corrupted = applyInsertRestore(corrupted, year);
+            });
+            const truthYear = truths[targetStep - 1];
+            const site = new Map(cleanSite);
+            site.set(seriesId, corrupted);
+            const outText = runBundledCofecha(site);
+            const parts = splitReportByParts(outText);
+            const dynamicReference = createCofechaMasterReferenceConfig({
+                siteData: site,
+                flaggedAIds: extractPart6FlaggedASeriesIds(parts.get("PART 6") ?? ""),
+                cofechaRunId: `co612-separated-staircase-${seriesId}`,
+                rwlHash: `co612-separated-staircase-${seriesId}`,
+                masterDatingSeries: parseCofechaResult(outText).masterDatingSeries,
+            });
+            const events = diagnoseCrossdating(site, {
+                referenceConfig: dynamicReference,
+                targetTrees: [seriesId],
+                cofechaText: outText,
+            }).events.filter((event) => event.seriesId === seriesId);
+            const [event] = events;
+
+            expect(event?.eventType, JSON.stringify(summarize(events))).toBe("missingRing");
+            expect(event?.startYear, JSON.stringify(summarize(events)))
+                .toBeLessThanOrEqual(truthYear);
+            expect(event?.endYear, JSON.stringify(summarize(events)))
+                .toBeGreaterThanOrEqual(truthYear);
+            expect(event?.evidence.algorithmSources, JSON.stringify(summarize(events)))
+                .toContain("explicit_partial_vs_missing_staircase");
+        });
+    }, 240_000);
+
     it("keeps genuine two-year gaps as partial moves", () => {
         [1800, 1850].forEach((firstFixedYear) => {
             const partial = createPartialRangeMoveCase(target, firstFixedYear, 2);
@@ -318,6 +362,40 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
             ))).toBe(false);
         });
     }, 180_000);
+
+    it("keeps physical gaps from -2 through -100 at multiple boundaries", () => {
+        const gapYears = [2, 3, 4, 6, 10, 30, 50, 100];
+        const firstFixedYears = [1750, 1800, 1850];
+        const rows = firstFixedYears.flatMap((firstFixedYear) => (
+            gapYears.map((gap) => {
+                const partial = createPartialRangeMoveCase(
+                    target,
+                    firstFixedYear,
+                    gap,
+                );
+                const events = diagnose(partial.corrupted);
+                return { firstFixedYear, gap, events };
+            })
+        ));
+
+        expect(rows).toHaveLength(firstFixedYears.length * gapYears.length);
+        rows.forEach(({ firstFixedYear, gap, events }) => {
+            const matching = events.find((event) => (
+                event.eventType === "partialMove"
+                && event.shiftYears === -gap
+                && event.startYear <= firstFixedYear
+                && event.endYear >= firstFixedYear
+            ));
+            expect(matching, JSON.stringify({
+                firstFixedYear,
+                gap,
+                events: summarize(events),
+            })).toBeDefined();
+            expect(events.some((event) => event.evidence.algorithmSources.includes(
+                "explicit_partial_vs_missing_staircase",
+            ))).toBe(false);
+        });
+    }, 360_000);
 
     it("keeps a sequential-missing path weaker than genuine physical gaps", () => {
         const effectiveConfig = getConfig({ referenceConfig });
