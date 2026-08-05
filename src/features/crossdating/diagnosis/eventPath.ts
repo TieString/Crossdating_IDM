@@ -159,6 +159,60 @@ export type LagPathDiagnosis = {
     newestLagPairs: number;
 };
 
+export type SequentialMissingHead = {
+    year: number;
+    score: number;
+    directScore: number;
+    gainOverDirect: number;
+    transitionCount: number;
+    headRunYears: number;
+    headMeanAdvantage: number;
+    fixedTailMeanAdvantage: number;
+    pathStartLag: number;
+};
+
+export type SharedExplicitZeroMarker = {
+    year: number;
+    support: number;
+    distanceFromHead: number;
+    weightedSupport: number;
+};
+
+/** Select a nearby absent-ring marker shared by other cores without consulting the target. */
+export const selectSharedExplicitZeroMarker = (
+    siteData: RwlSiteData,
+    targetTree: string,
+    headYear: number,
+    radius = 6,
+): SharedExplicitZeroMarker | null => {
+    const maximumDistance = Math.max(0, Math.floor(radius));
+    const rows: SharedExplicitZeroMarker[] = [];
+    for (
+        let year = headYear - maximumDistance;
+        year <= headYear + maximumDistance;
+        year += 1
+    ) {
+        let support = 0;
+        siteData.forEach((treeData, tree) => {
+            if (tree !== targetTree && treeData.get(year) === 0) support += 1;
+        });
+        if (support === 0) continue;
+        const distanceFromHead = Math.abs(year - headYear);
+        rows.push({
+            year,
+            support,
+            distanceFromHead,
+            weightedSupport: support / (1 + distanceFromHead),
+        });
+    }
+    return rows.sort((left, right) => (
+        right.weightedSupport - left.weightedSupport
+        || left.distanceFromHead - right.distanceFromHead
+        || right.support - left.support
+        || right.year - left.year
+    ))[0] ?? null;
+};
+
 export type LagTransitionScanRow = {
     year: number;
     olderLag: number;
@@ -594,6 +648,295 @@ const newestLagDiagnosis = (
 const meanScore = (value: { score: number; count: number }): number => (
     value.count > 0 ? value.score / value.count : Number.NEGATIVE_INFINITY
 );
+
+/**
+ * Fits the physical lag path created by several discrete missing rings. From pith to bark the
+ * state may stay unchanged or advance by exactly one year, so a real staircase can beat a
+ * single abrupt partial-move breakpoint without exposing all intermediate events to the UI.
+ */
+export const locateSequentialMissingHead = (
+    diagnosis: SeriesCoreDiagnosis,
+    siteData: RwlSiteData,
+    overrides: Partial<EventPathConfig> = {},
+    cache?: LagPathCache,
+    transitionPenalty = 0.5,
+): SequentialMissingHead | null => {
+    const config = { ...DEFAULT_EVENT_PATH_CONFIG, ...overrides };
+    const evidence = cachedLagEvidence(diagnosis, siteData, config, cache);
+    if (evidence.years.length < 12) return null;
+    const stateRows = evidence.states
+        .map((state, evidenceIndex) => ({ state, evidenceIndex }))
+        .filter(({ state }) => state <= 0 && state >= config.minLag)
+        .sort((left, right) => left.state - right.state);
+    const zeroIndex = stateRows.findIndex(({ state }) => state === 0);
+    if (zeroIndex < 1) return null;
+
+    const yearCount = evidence.years.length;
+    const stateCount = stateRows.length;
+    let previous = stateRows.map(({ evidenceIndex }) => (
+        evidence.emissions[0][evidenceIndex]
+    ));
+    const backPointers: number[][] = [new Array(stateCount).fill(-1)];
+    for (let yearIndex = 1; yearIndex < yearCount; yearIndex += 1) {
+        const current = new Array(stateCount).fill(Number.NEGATIVE_INFINITY);
+        const from = new Array(stateCount).fill(-1);
+        stateRows.forEach(({ state, evidenceIndex }, stateIndex) => {
+            let selectedScore = previous[stateIndex];
+            let selectedFrom = stateIndex;
+            const lower = stateRows[stateIndex - 1];
+            if (lower?.state === state - 1) {
+                const stepScore = previous[stateIndex - 1] - transitionPenalty;
+                if (stepScore > selectedScore) {
+                    selectedScore = stepScore;
+                    selectedFrom = stateIndex - 1;
+                }
+            }
+            current[stateIndex] = selectedScore
+                + evidence.emissions[yearIndex][evidenceIndex];
+            from[stateIndex] = selectedFrom;
+        });
+        previous = current;
+        backPointers.push(from);
+    }
+
+    const score = previous[zeroIndex];
+    if (!Number.isFinite(score)) return null;
+    const path = new Array<number>(yearCount).fill(0);
+    let stateIndex = zeroIndex;
+    for (let yearIndex = yearCount - 1; yearIndex >= 0; yearIndex -= 1) {
+        path[yearIndex] = stateRows[stateIndex]?.state ?? 0;
+        if (yearIndex > 0) stateIndex = backPointers[yearIndex][stateIndex];
+        if (stateIndex < 0 && yearIndex > 0) return null;
+    }
+    const runs = runsForPath(path);
+    const zeroRun = runs[runs.length - 1];
+    const headRun = runs[runs.length - 2];
+    if (
+        zeroRun?.state !== 0
+        || headRun?.state !== -1
+        || runs.length < 3
+    ) return null;
+    const transitionCount = runs.length - 1;
+
+    let directScore = Math.max(...stateRows.map(({ state }) => (
+        segmentScore(evidence, state, 0, yearCount - 1).score
+    )));
+    for (let boundaryIndex = 1; boundaryIndex < yearCount - 2; boundaryIndex += 1) {
+        const fixed = segmentScore(evidence, 0, boundaryIndex + 1, yearCount - 1);
+        stateRows.forEach(({ state }) => {
+            if (state >= -1) return;
+            directScore = Math.max(
+                directScore,
+                segmentScore(evidence, state, 0, boundaryIndex).score
+                    + fixed.score
+                    - transitionPenalty,
+            );
+        });
+    }
+
+    const head = segmentScore(
+        evidence,
+        -1,
+        headRun.startIndex,
+        headRun.endIndex,
+    );
+    const headAlternatives = [0, -2]
+        .filter((state) => evidence.states.includes(state))
+        .map((state) => segmentScore(
+            evidence,
+            state,
+            headRun.startIndex,
+            headRun.endIndex,
+        ));
+    const headMeanAdvantage = meanScore(head) - Math.max(
+        ...headAlternatives.map(meanScore),
+    );
+    const fixed = segmentScore(
+        evidence,
+        0,
+        zeroRun.startIndex,
+        zeroRun.endIndex,
+    );
+    const shiftedFixed = segmentScore(
+        evidence,
+        -1,
+        zeroRun.startIndex,
+        zeroRun.endIndex,
+    );
+    return {
+        year: evidence.years[headRun.endIndex],
+        score,
+        directScore,
+        gainOverDirect: score - directScore,
+        transitionCount,
+        headRunYears: headRun.endIndex - headRun.startIndex + 1,
+        headMeanAdvantage,
+        fixedTailMeanAdvantage: meanScore(fixed) - meanScore(shiftedFixed),
+        pathStartLag: path[0],
+    };
+};
+
+export type TwoStepMissingStaircase = {
+    olderBoundaryYear: number;
+    newerBoundaryYear: number;
+    staircaseScore: number;
+    directScore: number;
+    staircaseGain: number;
+    middleMeanAdvantage: number;
+    middleSamplePairs: number;
+    referenceSupport: number;
+    referenceCount: number;
+    referenceMedianAdvantage: number;
+};
+
+/**
+ * Tests whether a local -2 -> 0 jump contains a short, otherwise smoothed-away -1 run.
+ * The fixed local context keeps older unresolved events from dominating this comparison.
+ */
+export const locateTwoStepMissingStaircase = (
+    diagnosis: SeriesCoreDiagnosis,
+    siteData: RwlSiteData,
+    event: DiagnosisEvent,
+    overrides: Partial<EventPathConfig> = {},
+    cache?: LagPathCache,
+): TwoStepMissingStaircase | null => {
+    if (
+        event.eventType !== "partialMove"
+        || event.evidence.lagBefore !== -2
+        || event.evidence.lagAfter !== 0
+    ) return null;
+    const config = { ...DEFAULT_EVENT_PATH_CONFIG, ...overrides };
+    const evidence = cachedLagEvidence(diagnosis, siteData, config, cache);
+    if (![0, -1, -2].every((state) => evidence.states.includes(state))) return null;
+    const firstYear = evidence.years[0];
+    const lastYear = evidence.years[evidence.years.length - 1];
+    if (firstYear === undefined || lastYear === undefined) return null;
+    const indexForYear = (year: number): number => Math.max(
+        0,
+        Math.min(evidence.years.length - 1, year - firstYear),
+    );
+    const newerStart = Math.max(firstYear + 20, event.startYear - 3);
+    const newerEnd = Math.min(lastYear - 20, event.endYear + 3);
+    if (newerEnd < newerStart) return null;
+    const maximumGapYears = 17;
+    const contextStart = indexForYear(newerStart - maximumGapYears - 20);
+    const contextEnd = indexForYear(newerEnd + 20);
+    const scoreDirect = (boundaryYear: number): number => {
+        const boundary = indexForYear(boundaryYear);
+        return segmentScore(evidence, -2, contextStart, boundary).score
+            + segmentScore(evidence, 0, boundary + 1, contextEnd).score;
+    };
+    let directScore = Number.NEGATIVE_INFINITY;
+    for (let year = newerStart; year <= newerEnd; year += 1) {
+        directScore = Math.max(directScore, scoreDirect(year));
+    }
+
+    let best: Pick<
+        TwoStepMissingStaircase,
+        | "olderBoundaryYear"
+        | "newerBoundaryYear"
+        | "staircaseScore"
+        | "middleMeanAdvantage"
+        | "middleSamplePairs"
+    > | null = null;
+    for (let newerYear = newerStart; newerYear <= newerEnd; newerYear += 1) {
+        const newerIndex = indexForYear(newerYear);
+        for (
+            let olderYear = Math.max(firstYear + 20, newerYear - maximumGapYears);
+            olderYear <= newerYear - 2;
+            olderYear += 1
+        ) {
+            const olderIndex = indexForYear(olderYear);
+            const older = segmentScore(evidence, -2, contextStart, olderIndex);
+            const middle = segmentScore(evidence, -1, olderIndex + 1, newerIndex);
+            const newer = segmentScore(evidence, 0, newerIndex + 1, contextEnd);
+            if (middle.count < 4) continue;
+            const staircaseScore = older.score + middle.score + newer.score;
+            const middleAsOlder = segmentScore(evidence, -2, olderIndex + 1, newerIndex);
+            const middleAsNewer = segmentScore(evidence, 0, olderIndex + 1, newerIndex);
+            const middleMeanAdvantage = (
+                middle.score - Math.max(middleAsOlder.score, middleAsNewer.score)
+            ) / middle.count;
+            if (
+                !best
+                || staircaseScore > best.staircaseScore
+                || (
+                    staircaseScore === best.staircaseScore
+                    && middleMeanAdvantage > best.middleMeanAdvantage
+                )
+            ) {
+                best = {
+                    olderBoundaryYear: olderYear,
+                    newerBoundaryYear: newerYear,
+                    staircaseScore,
+                    middleMeanAdvantage,
+                    middleSamplePairs: middle.count,
+                };
+            }
+        }
+    }
+    if (!best || !Number.isFinite(directScore)) return null;
+    const target = config.useCofechaStandardization
+        ? new Map(cofechaStyleStandardize(diagnosis.rawTarget).map((point) => [
+            point.year,
+            point.value,
+        ]))
+        : preprocessSeries(diagnosis.rawTarget);
+    const targetDiff = firstDifferences(target);
+    const referenceAdvantages = diagnosis.master.sourceTrees.flatMap((tree) => {
+        const rawReference = toNumericSeries(siteData.get(tree));
+        if (rawReference.size === 0) return [];
+        const reference = config.useCofechaStandardization
+            ? new Map(cofechaStyleStandardize(rawReference).map((point) => [
+                point.year,
+                point.value,
+            ]))
+            : preprocessSeries(rawReference);
+        const referenceDiff = firstDifferences(reference);
+        const totals = [-2, -1, 0].map((lag) => {
+            let score = 0;
+            let count = 0;
+            for (
+                let year = best.olderBoundaryYear + 1;
+                year <= best.newerBoundaryYear;
+                year += 1
+            ) {
+                const emission = emissionFor(
+                    target,
+                    targetDiff,
+                    reference,
+                    referenceDiff,
+                    year,
+                    lag,
+                );
+                score += emission.score;
+                count += emission.count;
+            }
+            return { lag, score, count };
+        });
+        const middle = totals[1];
+        if (middle.count < 4) return [];
+        return [(
+            middle.score - Math.max(totals[0].score, totals[2].score)
+        ) / middle.count];
+    }).sort((left, right) => left - right);
+    const referenceSupport = referenceAdvantages.filter((value) => value > 0).length;
+    const middleIndex = Math.floor(referenceAdvantages.length / 2);
+    const referenceMedianAdvantage = referenceAdvantages.length % 2 === 0
+        ? (
+            (referenceAdvantages[middleIndex - 1] ?? 0)
+            + (referenceAdvantages[middleIndex] ?? 0)
+        ) / 2
+        : referenceAdvantages[middleIndex] ?? 0;
+    return {
+        ...best,
+        directScore,
+        staircaseGain: best.staircaseScore - directScore,
+        referenceSupport,
+        referenceCount: referenceAdvantages.length,
+        referenceMedianAdvantage,
+    };
+};
 
 /**
  * Scores every usable calendar boundary for every bounded older-side lag transition.

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { DiagnosisEvent } from "../types";
-import { pruneUnsupportedFalseRingPathSupplements } from "../eventEnsemble";
+import {
+    projectSequentialUnitChainHead,
+    pruneUnsupportedFalseRingPathSupplements,
+    unitEventCompetesWithWholeAtNewerEndpoint,
+    unitEventExplainsWholeSeriesCandidate,
+    wholeSeriesEventIsLocalUnitAlias,
+} from "../eventEnsemble";
 
 const falseRingEvent = (
     startYear: number,
@@ -29,6 +35,19 @@ const falseRingEvent = (
     },
 });
 
+const wholeSeriesEvent = (lag: number): DiagnosisEvent => ({
+    ...falseRingEvent(1800, true),
+    id: `whole-${lag}`,
+    eventType: "wholeSeriesMove",
+    startYear: 1800,
+    endYear: 2023,
+    evidence: {
+        ...falseRingEvent(1800, true).evidence,
+        lagBefore: lag,
+        lagAfter: 0,
+    },
+});
+
 describe("pruneUnsupportedFalseRingPathSupplements", () => {
     it("removes a remote path-only duplicate when one event has edit support", () => {
         const supported = falseRingEvent(1900, true);
@@ -48,5 +67,145 @@ describe("pruneUnsupportedFalseRingPathSupplements", () => {
             [first, second],
             false,
         )).toEqual([first, second]);
+    });
+});
+
+describe("wholeSeriesEventIsLocalUnitAlias", () => {
+    it("rejects a global lag that the local unit transition returns to zero", () => {
+        expect(wholeSeriesEventIsLocalUnitAlias(
+            wholeSeriesEvent(1),
+            [falseRingEvent(2014, true)],
+        )).toBe(true);
+    });
+
+    it("keeps a true non-zero whole-series baseline under a local unit event", () => {
+        const localOnWholeBaseline = falseRingEvent(2014, true);
+        localOnWholeBaseline.evidence.lagBefore = 2;
+        localOnWholeBaseline.evidence.lagAfter = 1;
+
+        expect(wholeSeriesEventIsLocalUnitAlias(
+            wholeSeriesEvent(1),
+            [localOnWholeBaseline],
+        )).toBe(false);
+    });
+
+    it("recognizes matching bounded-search metadata as one counterfactual explanation", () => {
+        const whole = wholeSeriesEvent(-1);
+        whole.evidence.lagAfter = -98;
+        whole.evidence.score = 24.7;
+        const local = falseRingEvent(2014, true);
+        local.eventType = "missingRing";
+        local.evidence.lagBefore = -1;
+        local.evidence.lagAfter = -98;
+        local.evidence.score = 24.3;
+
+        expect(unitEventExplainsWholeSeriesCandidate(whole, local)).toBe(true);
+    });
+
+    it("prefers a competitive unit correction when only lag-after metadata differs", () => {
+        const whole = wholeSeriesEvent(-1);
+        whole.evidence.score = 26.6;
+        const local = falseRingEvent(2014, true);
+        local.eventType = "missingRing";
+        local.evidence.lagBefore = -1;
+        local.evidence.lagAfter = -1;
+        local.evidence.score = 26;
+
+        expect(unitEventExplainsWholeSeriesCandidate(whole, local)).toBe(true);
+    });
+
+    it("does not replace a materially stronger whole-series explanation", () => {
+        const whole = wholeSeriesEvent(-1);
+        whole.evidence.lagAfter = -98;
+        whole.evidence.score = 24;
+        const weakLocal = falseRingEvent(2014, true);
+        weakLocal.eventType = "missingRing";
+        weakLocal.evidence.lagBefore = -1;
+        weakLocal.evidence.lagAfter = -98;
+        weakLocal.evidence.score = 18;
+
+        expect(unitEventExplainsWholeSeriesCandidate(whole, weakLocal)).toBe(false);
+    });
+
+    it("sends only a score-competitive matching unit event to endpoint arbitration", () => {
+        const whole = wholeSeriesEvent(1);
+        whole.evidence.score = 24;
+        const competitive = falseRingEvent(1980, true);
+        competitive.evidence.score = 18;
+        competitive.evidence.lagAfter = 1;
+        expect(unitEventCompetesWithWholeAtNewerEndpoint(
+            whole,
+            competitive,
+        )).toBe(true);
+
+        competitive.evidence.score = 17.9;
+        expect(unitEventCompetesWithWholeAtNewerEndpoint(
+            whole,
+            competitive,
+        )).toBe(false);
+        competitive.evidence.score = 23;
+        competitive.eventType = "missingRing";
+        expect(unitEventCompetesWithWholeAtNewerEndpoint(
+            whole,
+            competitive,
+        )).toBe(false);
+    });
+});
+
+describe("projectSequentialUnitChainHead", () => {
+    const partialEvent = (withStaircaseEvidence: boolean): DiagnosisEvent => ({
+        ...falseRingEvent(1775, true),
+        id: "partial-1775",
+        eventType: "partialMove",
+        endYear: 1783,
+        rankedYears: [{
+            year: 1779,
+            rank: 1,
+            score: 2,
+            evidenceTags: ["negative_partial_multiview_consensus"],
+        }],
+        shiftYears: -2,
+        shiftSide: "older",
+        evidence: {
+            ...falseRingEvent(1775, true).evidence,
+            lagBefore: -2,
+            lagAfter: 0,
+            algorithmSources: withStaircaseEvidence
+                ? ["piecewise_lag_path", "compressed_missing_staircase_evidence"]
+                : ["piecewise_lag_path"],
+        },
+    });
+
+    it("projects a supported compressed -2 jump to the newest missing ring", () => {
+        const [projected] = projectSequentialUnitChainHead([
+            partialEvent(true),
+        ]);
+
+        expect(projected.eventType).toBe("missingRing");
+        expect(projected.rankedYears[0]?.year).toBe(1778);
+        expect(projected.evidence.lagBefore).toBe(-1);
+        expect(projected.evidence.lagAfter).toBe(0);
+        expect(projected.shiftYears).toBeUndefined();
+    });
+
+    it("keeps a genuine -2 partial move without staircase evidence", () => {
+        expect(projectSequentialUnitChainHead([
+            partialEvent(false),
+        ])[0]).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -2,
+        });
+    });
+
+    it("keeps the projected missing year when Top1 is at the window edge", () => {
+        const partial = partialEvent(true);
+        partial.startYear = 1779;
+        partial.endYear = 1787;
+
+        const [projected] = projectSequentialUnitChainHead([partial]);
+
+        expect(projected.startYear).toBe(1778);
+        expect(projected.endYear).toBe(1786);
+        expect(projected.rankedYears[0]?.year).toBe(1778);
     });
 });

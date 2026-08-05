@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+    selectLocalConsensusBoundaryShift,
     selectCorroboratedFalseRingCurrentCandidateIndex,
     selectCounterfactualCoarseCandidateIndex,
     selectFalseRingCoarseCandidateIndex,
@@ -125,6 +126,45 @@ describe("counterfactual coarse-mode selection", () => {
             candidateTopYear: 1936,
             candidateTopMargin: 0.05,
         })).toBe(0);
+    });
+
+    it("minimally shifts a window toward a compact consensus just outside its edge", () => {
+        expect(selectLocalConsensusBoundaryShift({
+            window: { startYear: 1948, endYear: 1960 },
+            evidenceYears: [1946, 1946, 1947, 1958],
+            minimumYear: 1900,
+            maximumYear: 2000,
+        })).toEqual({
+            window: { startYear: 1946, endYear: 1958 },
+            centerYear: 1946,
+            supportCount: 3,
+            shiftYears: -2,
+        });
+    });
+
+    it("does not shift for a distant, divided, or already-contained consensus", () => {
+        const base = {
+            window: { startYear: 1948, endYear: 1960 },
+            minimumYear: 1900,
+            maximumYear: 2000,
+        };
+        expect(selectLocalConsensusBoundaryShift({
+            ...base,
+            evidenceYears: [1940, 1940, 1941, 1958],
+        })).toBeNull();
+        expect(selectLocalConsensusBoundaryShift({
+            ...base,
+            evidenceYears: [1946, 1955, 1963, 1970],
+        })).toBeNull();
+        expect(selectLocalConsensusBoundaryShift({
+            ...base,
+            evidenceYears: [1950, 1951, 1952, 1970],
+        })).toBeNull();
+        expect(selectLocalConsensusBoundaryShift({
+            ...base,
+            evidenceYears: [1946, 1946, 1947, 1958],
+            anchorYear: 1955,
+        })).toBeNull();
     });
 
 });

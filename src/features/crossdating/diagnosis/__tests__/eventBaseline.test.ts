@@ -214,4 +214,33 @@ d("deployed JS DiagnosisEvent value-independent RDM baseline", () => {
         expect(metrics.partialMove.truth).toBeGreaterThanOrEqual(5);
         expect(metrics.wholeSeriesMove.truth).toBeGreaterThanOrEqual(5);
     });
+
+    it("keeps a true two-year physical gap as a partial move", () => {
+        const series = sampleAcross(longSeries, 5)[0];
+        const boundary = series
+            ? markerYearFor(
+                series,
+                2,
+                `rdm-baseline:${series.id}:partial`,
+                50,
+            )
+            : null;
+        expect(series).toBeDefined();
+        expect(boundary).not.toBeNull();
+        const partial = createPartialRangeMoveCase(series!, boundary!, 2);
+        const site = buildSyntheticSite(
+            fixture.series,
+            series!.id,
+            partial.corrupted,
+        ).site;
+        expect(site).not.toBeNull();
+        const predictions = ownEvents(site!, series!.id);
+
+        expect(predictions.some((event) => (
+            event.eventType === "partialMove" && event.shiftYears === -2
+        ))).toBe(true);
+        expect(predictions.some((event) => event.evidence.algorithmSources.includes(
+            "compressed_missing_staircase_projection",
+        ))).toBe(false);
+    });
 });

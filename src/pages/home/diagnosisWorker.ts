@@ -1,9 +1,7 @@
 /// <reference lib="webworker" />
 
-import {
-    diagnoseCrossdating,
-    type CrossdatingDiagnosis,
-} from "@/features/crossdating/diagnosis";
+import { diagnoseCrossdating } from "@/features/crossdating/diagnosis/engine";
+import type { CrossdatingDiagnosis } from "@/features/crossdating/diagnosis/types";
 import type { ReferenceSeriesConfig } from "@/features/crossdating/reference";
 import type { RwlSiteData } from "@/features/rwl/types";
 

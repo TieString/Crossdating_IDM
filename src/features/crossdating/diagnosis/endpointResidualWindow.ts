@@ -25,6 +25,17 @@ const REFERENCE_LIMIT = 24;
 const MIN_REFERENCE_COUNT = 5;
 const MIN_REFERENCE_OVERLAP = 80;
 const ENDPOINT_MARGIN_YEARS = 15;
+const SERIES_ENDPOINT_MIN_DISTANCE = 2;
+const SERIES_ENDPOINT_MAX_DISTANCE = 14;
+const SERIES_ENDPOINT_ALIAS_MAX_DISTANCE = 29;
+const AMBIGUOUS_ENDPOINT_MODE_MIN_MASS_RATIO = 1;
+const FALSE_RING_REMOTE_POSTERIOR_MIN_JUMP = 16;
+const FALSE_RING_PREVIOUS_MODE_RADIUS = 8;
+const NEWER_ENDPOINT_LOCATION_EVIDENCE_PREFIXES = [
+    "scan_top_year=",
+    "candidate_top_year=",
+    "reference_vote_year=",
+] as const;
 const CORE_WINDOW_WIDTH = 7;
 const VIEW_WEIGHTS = {
     difference: 0.3,
@@ -53,6 +64,11 @@ const FALSE_RING_TOP_YEAR_EVIDENCE_PREFIXES = [
     "direct_transition_year=",
     "paired_breakpoint_year=",
     ...FALSE_RING_NEWER_EDGE_EVIDENCE_PREFIXES,
+] as const;
+const FALSE_RING_PREVIOUS_MODE_EVIDENCE_PREFIXES = [
+    "scan_top_year=",
+    "candidate_top_year=",
+    "paired_breakpoint_year=",
 ] as const;
 
 type ResidualViewName = keyof typeof VIEW_WEIGHTS;
@@ -433,6 +449,56 @@ const noteYear = (event: DiagnosisEvent, prefix: string): number | null => {
     return Number.isInteger(year) ? year : null;
 };
 
+export type EndpointConsensusBoundaryShift = {
+    window: { startYear: number; endYear: number };
+    centerYear: number;
+    supportCount: number;
+    shiftYears: number;
+};
+
+export const selectEndpointConsensusBoundaryShift = (input: {
+    event: DiagnosisEvent;
+    window: { startYear: number; endYear: number };
+    previousTopYear: number;
+    posteriorTopYear: number;
+    currentTopYear: number;
+}): EndpointConsensusBoundaryShift | null => {
+    const evidenceYears = [
+        noteYear(input.event, "paired_breakpoint_year="),
+        noteYear(input.event, "reference_vote_year="),
+        input.previousTopYear,
+        input.posteriorTopYear,
+    ].filter((year): year is number => year !== null);
+    if (evidenceYears.length < 3) return null;
+    const ordered = [...evidenceYears].sort((left, right) => left - right);
+    const centerYear = ordered[Math.floor((ordered.length - 1) / 2)];
+    const supportCount = evidenceYears.filter(
+        (year) => Math.abs(year - centerYear) <= 5,
+    ).length;
+    if (
+        supportCount < 3
+        || Math.abs(input.currentTopYear - centerYear) > 7
+    ) return null;
+    const distance = centerYear < input.window.startYear
+        ? input.window.startYear - centerYear
+        : centerYear > input.window.endYear
+            ? centerYear - input.window.endYear
+            : 0;
+    if (distance < 1 || distance > 4) return null;
+    const shiftYears = centerYear < input.window.startYear
+        ? -distance
+        : distance;
+    return {
+        window: {
+            startYear: input.window.startYear + shiftYears,
+            endYear: input.window.endYear + shiftYears,
+        },
+        centerYear,
+        supportCount,
+        shiftYears,
+    };
+};
+
 export const shouldTrimFalseRingNewerEdge = (
     event: DiagnosisEvent,
     window: { startYear: number; endYear: number },
@@ -488,6 +554,24 @@ export const shouldPromoteFalseRingPosteriorYear = (
     return candidateExact >= 6
         && candidateExact >= currentExact
         && candidateNear > currentNear;
+};
+
+export const shouldRejectFalseRingRemotePosterior = (
+    event: DiagnosisEvent,
+    previousTopYear: number,
+    posteriorTopYear: number,
+): boolean => {
+    if (
+        event.eventType !== "falseRing"
+        || Math.abs(posteriorTopYear - previousTopYear)
+            < FALSE_RING_REMOTE_POSTERIOR_MIN_JUMP
+    ) return false;
+    return FALSE_RING_PREVIOUS_MODE_EVIDENCE_PREFIXES.every((prefix) => {
+        const year = noteYear(event, prefix);
+        return year !== null
+            && Math.abs(year - previousTopYear)
+                <= FALSE_RING_PREVIOUS_MODE_RADIUS;
+    });
 };
 
 const promoteRankedYear = (
@@ -568,6 +652,99 @@ const hasExplicitZeroNearEvent = (
     return false;
 };
 
+type SeriesEndpointSide = "older" | "newer";
+
+export type NewerEndpointModeSelection = {
+    selectedMode: "endpoint" | "interior";
+    endpointMass: number;
+    interiorMass: number;
+    massRatio: number;
+};
+
+export const selectAmbiguousNewerEndpointMode = (input: {
+    endpointMass: number;
+    interiorMass: number;
+}): NewerEndpointModeSelection => {
+    const massRatio = input.endpointMass / Math.max(input.interiorMass, 1e-12);
+    return {
+        selectedMode: massRatio >= AMBIGUOUS_ENDPOINT_MODE_MIN_MASS_RATIO
+            ? "endpoint"
+            : "interior",
+        endpointMass: input.endpointMass,
+        interiorMass: input.interiorMass,
+        massRatio,
+    };
+};
+
+const primaryEventYear = (event: DiagnosisEvent): number => (
+    event.rankedYears[0]?.year
+    ?? Math.round((event.startYear + event.endYear) / 2)
+);
+
+const hasNewerEndpointAlias = (event: DiagnosisEvent): boolean => (
+    event.evidence.algorithmSources.includes(
+        "newer_endpoint_unit_alias_of_global_lag",
+    )
+);
+
+const touchesNewerEndpointRange = (
+    event: DiagnosisEvent,
+    diagnosis: SeriesCoreDiagnosis,
+): boolean => (
+    Math.max(0, diagnosis.targetRange.endYear - event.endYear)
+        <= SERIES_ENDPOINT_MAX_DISTANCE
+);
+
+export const isAutomaticOlderEndpointUnitEvent = (
+    event: DiagnosisEvent,
+    diagnosis: SeriesCoreDiagnosis,
+): boolean => (
+    (event.eventType === "missingRing" || event.eventType === "falseRing")
+    && primaryEventYear(event) - diagnosis.targetRange.startYear
+        <= SERIES_ENDPOINT_MAX_DISTANCE
+);
+
+export const hasOlderConsensusBeyondNewerEndpointRange = (
+    event: DiagnosisEvent,
+    diagnosis: SeriesCoreDiagnosis,
+): boolean => {
+    const endpointStart = diagnosis.targetRange.endYear
+        - SERIES_ENDPOINT_MAX_DISTANCE;
+    const locationYears = [
+        primaryEventYear(event),
+        ...NEWER_ENDPOINT_LOCATION_EVIDENCE_PREFIXES
+            .map((prefix) => noteYear(event, prefix))
+            .filter((year): year is number => year !== null),
+    ];
+    return locationYears.filter((year) => year < endpointStart).length >= 3;
+};
+
+const seriesEndpointSide = (
+    event: DiagnosisEvent,
+    diagnosis: SeriesCoreDiagnosis,
+): SeriesEndpointSide | null => {
+    const { startYear, endYear } = diagnosis.targetRange;
+    const eventYear = primaryEventYear(event);
+    const olderGap = Math.max(0, eventYear - startYear);
+    // The older side has an explicit Top1-based exclusion boundary. The newer side remains
+    // recall-oriented: a review window touching the endpoint range is enough to keep it.
+    const newerGap = Math.max(0, endYear - event.endYear);
+    const hasNearbyNewerAlias = hasNewerEndpointAlias(event)
+        && newerGap <= SERIES_ENDPOINT_ALIAS_MAX_DISTANCE;
+    const hasForcedNewerCompetitor = event.evidence.algorithmSources.includes(
+        "newer_endpoint_unit_competitor_of_global_lag",
+    );
+    const olderAdjacent = olderGap <= SERIES_ENDPOINT_MAX_DISTANCE;
+    const newerAdjacent = hasForcedNewerCompetitor || hasNearbyNewerAlias || (
+        newerGap <= SERIES_ENDPOINT_MAX_DISTANCE
+        && !hasOlderConsensusBeyondNewerEndpointRange(event, diagnosis)
+    );
+    if (!olderAdjacent && !newerAdjacent) return null;
+    return olderAdjacent && (!newerAdjacent || olderGap <= newerGap)
+        ? "older"
+        : "newer";
+};
+
 export const refineUnitEventWithEndpointResidualWindow = (
     event: DiagnosisEvent,
     diagnosis: SeriesCoreDiagnosis,
@@ -579,8 +756,38 @@ export const refineUnitEventWithEndpointResidualWindow = (
     }
     const targetSource = siteData.get(diagnosis.targetTree);
     if (!targetSource || hasExplicitZeroNearEvent(event, targetSource)) return event;
-    const candidateStart = diagnosis.targetRange.startYear + ENDPOINT_MARGIN_YEARS;
-    const candidateEnd = diagnosis.targetRange.endYear - ENDPOINT_MARGIN_YEARS;
+    const endpointSide = seriesEndpointSide(event, diagnosis);
+    const ambiguousNewerEndpoint = endpointSide === null && (
+        touchesNewerEndpointRange(event, diagnosis)
+        || hasNewerEndpointAlias(event)
+    );
+    const olderEndpointCalendarAdjustment = endpointSide === "older"
+        ? event.eventType === "missingRing" ? -1 : 1
+        : 0;
+    const interiorStart = diagnosis.targetRange.startYear + ENDPOINT_MARGIN_YEARS;
+    const interiorEnd = diagnosis.targetRange.endYear - ENDPOINT_MARGIN_YEARS;
+    const newerEndpointStart = diagnosis.targetRange.endYear
+        - SERIES_ENDPOINT_MAX_DISTANCE;
+    const newerEndpointEnd = diagnosis.targetRange.endYear
+        - SERIES_ENDPOINT_MIN_DISTANCE;
+    const candidateStart = ambiguousNewerEndpoint
+        ? interiorStart
+        : endpointSide === "older"
+        ? diagnosis.targetRange.startYear
+            + SERIES_ENDPOINT_MIN_DISTANCE
+            + olderEndpointCalendarAdjustment
+        : endpointSide === "newer"
+            ? newerEndpointStart
+            : interiorStart;
+    const candidateEnd = ambiguousNewerEndpoint
+        ? newerEndpointEnd
+        : endpointSide === "older"
+        ? diagnosis.targetRange.startYear
+            + SERIES_ENDPOINT_MAX_DISTANCE
+            + olderEndpointCalendarAdjustment
+        : endpointSide === "newer"
+            ? newerEndpointEnd
+            : interiorEnd;
     if (candidateEnd - candidateStart + 1 < CORE_WINDOW_WIDTH) return event;
 
     const targetViews = cachedViews(diagnosis.targetTree, targetSource, cache);
@@ -615,19 +822,60 @@ export const refineUnitEventWithEndpointResidualWindow = (
     const temperature = event.eventType === "missingRing" ? 0.25 : 1;
     const posterior = posteriorByYear(combined, temperature);
     if (posterior.size === 0) return event;
-    const coreWindow = bestWindow(
-        posterior,
-        candidateStart,
-        candidateEnd,
-        CORE_WINDOW_WIDTH,
-    );
-    const expandedWindow = expandTowardPreviousWindow(
-        coreWindow,
-        event,
-        posterior,
-        candidateStart,
-        candidateEnd,
-    );
+    const ambiguousMode = ambiguousNewerEndpoint
+        ? selectAmbiguousNewerEndpointMode({
+            endpointMass: bestWindow(
+                posterior,
+                newerEndpointStart,
+                newerEndpointEnd,
+                CORE_WINDOW_WIDTH,
+            ).mass,
+            interiorMass: bestWindow(
+                posterior,
+                interiorStart,
+                interiorEnd,
+                CORE_WINDOW_WIDTH,
+            ).mass,
+        })
+        : null;
+    const selectedEndpointSide = ambiguousMode?.selectedMode === "endpoint"
+        ? "newer"
+        : endpointSide;
+    const selectedCandidateStart = selectedEndpointSide === "newer"
+        ? newerEndpointStart
+        : selectedEndpointSide === "older"
+            ? candidateStart
+            : interiorStart;
+    const selectedCandidateEnd = selectedEndpointSide === "newer"
+        ? newerEndpointEnd
+        : selectedEndpointSide === "older"
+            ? candidateEnd
+            : interiorEnd;
+    const coreWindow = selectedEndpointSide
+        ? {
+            startYear: selectedCandidateStart,
+            endYear: selectedCandidateEnd,
+            mass: posteriorMass(
+                posterior,
+                selectedCandidateStart,
+                selectedCandidateEnd,
+            ),
+        }
+        : bestWindow(
+            posterior,
+            selectedCandidateStart,
+            selectedCandidateEnd,
+            CORE_WINDOW_WIDTH,
+        );
+    const expandedWindow = selectedEndpointSide
+        ? coreWindow
+        : expandTowardPreviousWindow(
+            coreWindow,
+            event,
+            posterior,
+            selectedCandidateStart,
+            selectedCandidateEnd,
+        );
     const previousTop = event.rankedYears[0]?.year
         ?? Math.round((event.startYear + event.endYear) / 2);
     const expandedPosteriorTop = [...posterior.entries()]
@@ -642,12 +890,13 @@ export const refineUnitEventWithEndpointResidualWindow = (
         .filter((year): year is number => (
             year !== null && year >= expandedWindow.endYear
         )).length;
-    const trimUnsupportedNewerEdge = shouldTrimFalseRingNewerEdge(
-        event,
-        expandedWindow,
-        expandedRanking[0]?.year ?? expandedWindow.endYear,
-        expandedPosteriorTop,
-    );
+    const trimUnsupportedNewerEdge = selectedEndpointSide === null
+        && shouldTrimFalseRingNewerEdge(
+            event,
+            expandedWindow,
+            expandedRanking[0]?.year ?? expandedWindow.endYear,
+            expandedPosteriorTop,
+        );
     const window = trimUnsupportedNewerEdge
         ? {
             startYear: expandedWindow.startYear,
@@ -665,42 +914,105 @@ export const refineUnitEventWithEndpointResidualWindow = (
             .sort((left, right) => right[1] - left[1] || right[0] - left[0])[0]?.[0]
             ?? previousTop
         : expandedPosteriorTop;
+    if (shouldRejectFalseRingRemotePosterior(
+        event,
+        previousTop,
+        posteriorTop,
+    )) {
+        return {
+            ...event,
+            evidence: {
+                ...event.evidence,
+                algorithmSources: Array.from(new Set([
+                    ...event.evidence.algorithmSources,
+                    "false_ring_remote_posterior_rejected",
+                ])).sort(),
+                notes: [
+                    ...event.evidence.notes,
+                    "window_refinement=false_ring_remote_posterior_rejected",
+                    `endpoint_residual_rejected_previous_top_year=${previousTop}`,
+                    `endpoint_residual_rejected_posterior_top_year=${posteriorTop}`,
+                    `endpoint_residual_rejected_jump_years=${
+                        Math.abs(posteriorTop - previousTop)
+                    }`,
+                ],
+            },
+        };
+    }
     const windowRanking = trimUnsupportedNewerEdge
         ? rankedYears(event, window, posterior)
         : expandedRanking;
-    const promotePosteriorTop = shouldPromoteFalseRingPosteriorYear(
+    const endpointConsensusBoundaryShift = selectEndpointConsensusBoundaryShift({
         event,
         window,
-        windowRanking[0]?.year ?? previousTop,
+        previousTopYear: previousTop,
+        posteriorTopYear: posteriorTop,
+        currentTopYear: windowRanking[0]?.year ?? previousTop,
+    });
+    const finalWindow = endpointConsensusBoundaryShift
+        ? {
+            ...endpointConsensusBoundaryShift.window,
+            mass: posteriorMass(
+                posterior,
+                endpointConsensusBoundaryShift.window.startYear,
+                endpointConsensusBoundaryShift.window.endYear,
+            ),
+        }
+        : window;
+    const finalWindowRanking = endpointConsensusBoundaryShift
+        ? rankedYears(event, finalWindow, posterior)
+        : windowRanking;
+    const promotePosteriorTop = shouldPromoteFalseRingPosteriorYear(
+        event,
+        finalWindow,
+        finalWindowRanking[0]?.year ?? previousTop,
         posteriorTop,
     );
     const ranking = promotePosteriorTop
-        ? promoteRankedYear(windowRanking, posteriorTop)
-        : windowRanking;
+        ? promoteRankedYear(finalWindowRanking, posteriorTop)
+        : finalWindowRanking;
     return {
         ...event,
-        id: `${event.id}-endpoint-residual-${window.startYear}-${window.endYear}`,
-        startYear: window.startYear,
-        endYear: window.endYear,
+        id: `${event.id}-endpoint-residual-${finalWindow.startYear}-${finalWindow.endYear}`,
+        startYear: finalWindow.startYear,
+        endYear: finalWindow.endYear,
         rankedYears: ranking,
         evidence: {
             ...event.evidence,
             algorithmSources: Array.from(new Set([
                 ...event.evidence.algorithmSources,
                 "endpoint_residual_posterior",
+                ...(selectedEndpointSide ? ["series_endpoint_review_window"] : []),
+                ...(ambiguousMode ? ["newer_endpoint_mode_competition"] : []),
                 ...(promotePosteriorTop
                     ? ["false_ring_endpoint_consensus"]
+                    : []),
+                ...(endpointConsensusBoundaryShift
+                    ? ["endpoint_consensus_boundary_shift"]
                     : []),
             ])).sort(),
             notes: [
                 ...event.evidence.notes,
                 "window_refinement=endpoint_residual_posterior",
+                ...(selectedEndpointSide ? [
+                    `series_endpoint_side=${selectedEndpointSide}`,
+                    `series_endpoint_calendar_adjustment=${
+                        olderEndpointCalendarAdjustment
+                    }`,
+                    "window_refinement=series_endpoint_single_sided_13_year",
+                ] : []),
+                ...(ambiguousMode ? [
+                    `newer_endpoint_mode_selected=${ambiguousMode.selectedMode}`,
+                    `newer_endpoint_mode_endpoint_mass=${ambiguousMode.endpointMass.toFixed(6)}`,
+                    `newer_endpoint_mode_interior_mass=${ambiguousMode.interiorMass.toFixed(6)}`,
+                    `newer_endpoint_mode_mass_ratio=${ambiguousMode.massRatio.toFixed(6)}`,
+                ] : []),
                 `endpoint_residual_previous_range=${event.startYear}-${event.endYear}`,
                 `endpoint_residual_previous_top_year=${previousTop}`,
                 `endpoint_residual_core_range=${coreWindow.startYear}-${coreWindow.endYear}`,
                 `endpoint_residual_posterior_top_year=${posteriorTop}`,
                 `endpoint_residual_top_year=${ranking[0]?.year ?? previousTop}`,
-                `endpoint_residual_window_mass=${window.mass.toFixed(6)}`,
+                `endpoint_residual_window_mass=${finalWindow.mass.toFixed(6)}`,
                 `endpoint_residual_reference_count=${references.length}`,
                 ...(trimUnsupportedNewerEdge ? [
                     "window_refinement=false_ring_unsupported_newer_edge_trim",
@@ -708,6 +1020,18 @@ export const refineUnitEventWithEndpointResidualWindow = (
                 ] : []),
                 ...(promotePosteriorTop ? [
                     "year_ranking_refinement=false_ring_endpoint_consensus",
+                ] : []),
+                ...(endpointConsensusBoundaryShift ? [
+                    "window_refinement=endpoint_consensus_boundary_shift",
+                    `endpoint_consensus_boundary_center_year=${
+                        endpointConsensusBoundaryShift.centerYear
+                    }`,
+                    `endpoint_consensus_boundary_support_count=${
+                        endpointConsensusBoundaryShift.supportCount
+                    }`,
+                    `endpoint_consensus_boundary_shift_years=${
+                        endpointConsensusBoundaryShift.shiftYears
+                    }`,
                 ] : []),
             ],
         },

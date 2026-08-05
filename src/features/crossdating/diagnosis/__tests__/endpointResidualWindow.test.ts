@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { RwlSiteData, RwlTreeData } from "@/features/rwl/types";
 import {
+    hasOlderConsensusBeyondNewerEndpointRange,
+    isAutomaticOlderEndpointUnitEvent,
     refineUnitEventWithEndpointResidualWindow,
+    selectAmbiguousNewerEndpointMode,
+    selectEndpointConsensusBoundaryShift,
     shouldPromoteFalseRingPosteriorYear,
+    shouldRejectFalseRingRemotePosterior,
     shouldTrimFalseRingNewerEdge,
 } from "../endpointResidualWindow";
 import type {
@@ -115,6 +120,17 @@ const fixture = (referenceCount = 8) => {
 };
 
 describe("endpoint residual single-main-window refinement", () => {
+    it("selects the stronger mode when endpoint and interior evidence compete", () => {
+        expect(selectAmbiguousNewerEndpointMode({
+            endpointMass: 0.42,
+            interiorMass: 0.31,
+        }).selectedMode).toBe("endpoint");
+        expect(selectAmbiguousNewerEndpointMode({
+            endpointMass: 0.29,
+            interiorMass: 0.47,
+        }).selectedMode).toBe("interior");
+    });
+
     it("moves one strong missing-ring event to one compact window containing the truth", () => {
         const { site, diagnosis } = fixture();
         const refined = refineUnitEventWithEndpointResidualWindow(
@@ -226,6 +242,67 @@ describe("endpoint residual single-main-window refinement", () => {
         )).toBe(false);
     });
 
+    it("rejects only a remote false-ring posterior opposed by all location anchors", () => {
+        const original = event();
+        original.eventType = "falseRing";
+        original.evidence.notes = [
+            "scan_top_year=1984",
+            "candidate_top_year=1985",
+            "paired_breakpoint_year=1978",
+        ];
+
+        expect(shouldRejectFalseRingRemotePosterior(
+            original,
+            1985,
+            2009,
+        )).toBe(true);
+        expect(shouldRejectFalseRingRemotePosterior(
+            original,
+            1985,
+            1999,
+        )).toBe(false);
+        original.evidence.notes = original.evidence.notes.slice(0, 2);
+        expect(shouldRejectFalseRingRemotePosterior(
+            original,
+            1985,
+            2009,
+        )).toBe(false);
+        original.eventType = "missingRing";
+        original.evidence.notes.push("paired_breakpoint_year=1978");
+        expect(shouldRejectFalseRingRemotePosterior(
+            original,
+            1985,
+            2009,
+        )).toBe(false);
+    });
+
+    it("minimally shifts an endpoint window toward a compact boundary consensus", () => {
+        const original = event();
+        original.evidence.notes = [
+            "paired_breakpoint_year=1993",
+            "reference_vote_year=2008",
+        ];
+        expect(selectEndpointConsensusBoundaryShift({
+            event: original,
+            window: { startYear: 2009, endYear: 2021 },
+            previousTopYear: 2008,
+            posteriorTopYear: 2009,
+            currentTopYear: 2012,
+        })).toEqual({
+            window: { startYear: 2008, endYear: 2020 },
+            centerYear: 2008,
+            supportCount: 3,
+            shiftYears: -1,
+        });
+        expect(selectEndpointConsensusBoundaryShift({
+            event: original,
+            window: { startYear: 2009, endYear: 2021 },
+            previousTopYear: 2004,
+            posteriorTopYear: 2005,
+            currentTopYear: 2012,
+        })).toBeNull();
+    });
+
     it("does not override a window that already contains an explicit zero", () => {
         const { site, diagnosis } = fixture();
         const target = site.get("TGT01a");
@@ -238,5 +315,144 @@ describe("endpoint residual single-main-window refinement", () => {
         );
 
         expect(refined).toBe(original);
+    });
+
+    it("excludes only unit events whose primary year is within 14 years of the older end", () => {
+        const { diagnosis } = fixture();
+        const older = event();
+        older.startYear = diagnosis.targetRange.startYear + 2;
+        older.endYear = older.startYear + 6;
+        older.rankedYears = [2, 3, 4, 5, 6, 7, 8].map((distance, index) => ({
+            year: diagnosis.targetRange.startYear + distance,
+            rank: index + 1,
+            score: 7 - index,
+            evidenceTags: ["fixture"],
+        }));
+        const retained = {
+            ...older,
+            rankedYears: older.rankedYears.map((rankedYear, index) => ({
+                ...rankedYear,
+                year: diagnosis.targetRange.startYear + 15 + index,
+            })),
+        };
+        const newer = {
+            ...older,
+            rankedYears: older.rankedYears.map((rankedYear, index) => ({
+                ...rankedYear,
+                year: diagnosis.targetRange.endYear - 2 - index,
+            })),
+        };
+        const whole = {
+            ...older,
+            eventType: "wholeSeriesMove" as const,
+        };
+
+        expect(isAutomaticOlderEndpointUnitEvent(older, diagnosis)).toBe(true);
+        expect(isAutomaticOlderEndpointUnitEvent(retained, diagnosis)).toBe(false);
+        expect(isAutomaticOlderEndpointUnitEvent(newer, diagnosis)).toBe(false);
+        expect(isAutomaticOlderEndpointUnitEvent(whole, diagnosis)).toBe(false);
+    });
+
+    it("keeps a newer endpoint window when its Top1 drifts beyond 14 years", () => {
+        const { site, diagnosis } = fixture();
+        const newer = event();
+        newer.startYear = diagnosis.targetRange.endYear - 10;
+        newer.endYear = diagnosis.targetRange.endYear - 2;
+        newer.rankedYears = Array.from({ length: 9 }, (_, index) => ({
+            year: diagnosis.targetRange.endYear - 18 - index,
+            rank: index + 1,
+            score: 9 - index,
+            evidenceTags: ["fixture"],
+        }));
+
+        const refined = refineUnitEventWithEndpointResidualWindow(
+            newer,
+            diagnosis,
+            site,
+        );
+
+        expect([refined.startYear, refined.endYear]).toEqual([
+            diagnosis.targetRange.endYear - 14,
+            diagnosis.targetRange.endYear - 2,
+        ]);
+        expect(refined.evidence.algorithmSources).toContain(
+            "series_endpoint_review_window",
+        );
+        expect(refined.evidence.notes).toContain("series_endpoint_side=newer");
+    });
+
+    it("uses ordinary localization when three independent years point outside the newer endpoint range", () => {
+        const { site, diagnosis } = fixture();
+        const outside = diagnosis.targetRange.endYear - 18;
+        const newer = event();
+        newer.startYear = diagnosis.targetRange.endYear - 10;
+        newer.endYear = diagnosis.targetRange.endYear - 2;
+        newer.rankedYears = [{
+            year: outside,
+            rank: 1,
+            score: 1,
+            evidenceTags: ["fixture"],
+        }];
+        newer.evidence.notes = [
+            `scan_top_year=${outside + 1}`,
+            `candidate_top_year=${outside}`,
+            `reference_vote_year=${outside - 1}`,
+        ];
+
+        expect(hasOlderConsensusBeyondNewerEndpointRange(
+            newer,
+            diagnosis,
+        )).toBe(true);
+
+        const refined = refineUnitEventWithEndpointResidualWindow(
+            newer,
+            diagnosis,
+            site,
+        );
+
+        expect(refined.evidence.algorithmSources).not.toContain(
+            "series_endpoint_review_window",
+        );
+    });
+
+    it("does not let a remote whole-lag alias force an internal event to the newer endpoint", () => {
+        const { site, diagnosis } = fixture();
+        const internal = event();
+        internal.evidence.algorithmSources.push(
+            "newer_endpoint_unit_alias_of_global_lag",
+        );
+
+        const refined = refineUnitEventWithEndpointResidualWindow(
+            internal,
+            diagnosis,
+            site,
+        );
+
+        expect(diagnosis.targetRange.endYear - internal.endYear).toBeGreaterThan(29);
+        expect(refined.evidence.algorithmSources).not.toContain(
+            "series_endpoint_review_window",
+        );
+    });
+
+    it("tests a score-competitive unit explanation in the newer endpoint range", () => {
+        const { site, diagnosis } = fixture();
+        const competitor = event();
+        competitor.evidence.algorithmSources.push(
+            "newer_endpoint_unit_competitor_of_global_lag",
+        );
+
+        const refined = refineUnitEventWithEndpointResidualWindow(
+            competitor,
+            diagnosis,
+            site,
+        );
+
+        expect([refined.startYear, refined.endYear]).toEqual([
+            diagnosis.targetRange.endYear - 14,
+            diagnosis.targetRange.endYear - 2,
+        ]);
+        expect(refined.evidence.algorithmSources).toContain(
+            "series_endpoint_review_window",
+        );
     });
 });

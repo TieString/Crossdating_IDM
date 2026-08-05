@@ -338,6 +338,71 @@ const boundedWindow = (
     };
 };
 
+export type LocalConsensusBoundaryShift = {
+    window: { startYear: number; endYear: number };
+    centerYear: number;
+    supportCount: number;
+    shiftYears: number;
+};
+
+export const selectLocalConsensusBoundaryShift = (input: {
+    window: { startYear: number; endYear: number };
+    evidenceYears: Array<number | null | undefined>;
+    anchorYear?: number;
+    minimumYear: number;
+    maximumYear: number;
+}): LocalConsensusBoundaryShift | null => {
+    const evidenceYears = input.evidenceYears.filter(
+        (year): year is number => Number.isInteger(year),
+    );
+    if (evidenceYears.length < 3) return null;
+    // Calendar-year hypotheses are discrete. The lower median also counters the
+    // measured tendency for unit-event windows to drift toward newer years.
+    const centerYear = Math.floor(median(evidenceYears));
+    const supportCount = evidenceYears.filter(
+        (year) => Math.abs(year - centerYear) <= 5,
+    ).length;
+    if (supportCount < 3) return null;
+    if (
+        input.anchorYear !== undefined
+        && Math.abs(input.anchorYear - centerYear) > 5
+    ) return null;
+    const distance = centerYear < input.window.startYear
+        ? input.window.startYear - centerYear
+        : centerYear > input.window.endYear
+            ? centerYear - input.window.endYear
+            : 0;
+    if (distance < 1 || distance > 6) return null;
+    const shiftYears = centerYear < input.window.startYear
+        ? -distance
+        : distance;
+    const width = input.window.endYear - input.window.startYear + 1;
+    const window = boundedWindow(
+        input.window.startYear + shiftYears,
+        width,
+        input.minimumYear,
+        input.maximumYear,
+    );
+    if (window.startYear === input.window.startYear) return null;
+    return {
+        window,
+        centerYear,
+        supportCount,
+        shiftYears: window.startYear - input.window.startYear,
+    };
+};
+
+const evidenceNoteYear = (
+    event: DiagnosisEvent,
+    prefix: string,
+): number | null => {
+    const note = [...event.evidence.notes]
+        .reverse()
+        .find((value) => value.startsWith(prefix));
+    const year = Number(note?.slice(prefix.length));
+    return Number.isInteger(year) ? year : null;
+};
+
 const windowOverlapRatio = (
     left: Pick<InternalWindow, "startYear" | "endYear">,
     right: Pick<InternalWindow, "startYear" | "endYear">,
@@ -1537,13 +1602,34 @@ export const refineEventWithCounterfactualLocator = (
     if (directFalseRingRecenter) {
         finalWindow = directFalseRingRecenter.window;
     }
+    const localConsensusBoundaryShift = unitEventType
+        ? selectLocalConsensusBoundaryShift({
+                window: finalWindow,
+                evidenceYears: [
+                    currentPrimaryYear,
+                    evidenceNoteYear(event, "scan_top_year="),
+                    evidenceNoteYear(event, "candidate_top_year="),
+                    evidenceNoteYear(event, "paired_breakpoint_year="),
+                ],
+                ...(currentPrimaryYear === undefined
+                    ? {}
+                    : { anchorYear: currentPrimaryYear }),
+                minimumYear,
+                maximumYear,
+            })
+        : null;
+    if (localConsensusBoundaryShift) {
+        finalWindow = localConsensusBoundaryShift.window;
+    }
     const finalCalibrationRule = missingPhysicalRecenter
         ? `unit_event_missing_${missingPhysicalRecenter.rule}`
         : physicalFalseRingRecenter
             ? "unit_event_false_merge_older_physical_recenter"
             : directFalseRingRecenter
                 ? "unit_event_false_direct_consensus_recenter"
-                : preliminaryCalibrationRule;
+                : localConsensusBoundaryShift
+                    ? "unit_event_local_consensus_boundary_shift"
+                    : preliminaryCalibrationRule;
     const finalYears = Array.from(
         {
             length:
@@ -1551,7 +1637,8 @@ export const refineEventWithCounterfactualLocator = (
         },
         (_, index) => finalWindow.startYear + index,
     );
-    const usesModeRankingWindow = !missingPhysicalRecenter
+    const usesModeRankingWindow = !localConsensusBoundaryShift
+        && !missingPhysicalRecenter
         && !physicalFalseRingRecenter
         && !directFalseRingRecenter && (
         shortUnitWindow?.rule === "missing_concentrated_profile_9"
@@ -1826,6 +1913,9 @@ export const refineEventWithCounterfactualLocator = (
                     ...(directFalseRingRecenter
                         ? ["false_ring_direct_consensus_recenter"]
                         : []),
+                    ...(localConsensusBoundaryShift
+                        ? ["local_consensus_boundary_shift"]
+                        : []),
                 ])).sort(),
                 notes: [
                     ...event.evidence.notes,
@@ -1894,6 +1984,17 @@ export const refineEventWithCounterfactualLocator = (
                         }`,
                         `false_direct_consensus_shift_years=${
                             directFalseRingRecenter.shiftYears
+                        }`,
+                    ] : []),
+                    ...(localConsensusBoundaryShift ? [
+                        `local_consensus_boundary_center_year=${
+                            localConsensusBoundaryShift.centerYear
+                        }`,
+                        `local_consensus_boundary_support_count=${
+                            localConsensusBoundaryShift.supportCount
+                        }`,
+                        `local_consensus_boundary_shift_years=${
+                            localConsensusBoundaryShift.shiftYears
                         }`,
                     ] : []),
                     `counterfactual_mode_window=${

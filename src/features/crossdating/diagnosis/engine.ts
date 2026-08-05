@@ -202,7 +202,12 @@ export function diagnoseCrossdating(
         seriesDiagnoses,
         candidates,
         config,
-        INTERNAL_EVENT_ENSEMBLE_OPTIONS,
+        {
+            ...INTERNAL_EVENT_ENSEMBLE_OPTIONS,
+            cofechaFlaggedSeriesIds:
+                options.referenceConfig?.classification?.candidateFlaggedIds
+                ?? [],
+        },
     );
     const candidateCountByTree = candidates.reduce((counts, candidate) => {
         counts.set(candidate.targetTree, (counts.get(candidate.targetTree) ?? 0) + 1);

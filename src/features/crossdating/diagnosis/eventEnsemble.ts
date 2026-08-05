@@ -10,9 +10,15 @@ import { cofechaStyleStandardize } from "../reference";
 import {
     createLagPathCache,
     diagnoseLagPath,
+    locateSequentialMissingHead,
+    locateTwoStepMissingStaircase,
+    selectSharedExplicitZeroMarker,
     type EventPathConfig,
     type LagPathCache,
     type LagPathDiagnosis,
+    type SequentialMissingHead,
+    type SharedExplicitZeroMarker,
+    type TwoStepMissingStaircase,
 } from "./eventPath";
 import { makeDiagnosisEventsFromCandidates } from "./events";
 import {
@@ -61,9 +67,11 @@ import {
 import { rerankMissingEventsNearExplicitZeros } from "./explicitZeroRanking";
 import {
     createEndpointResidualWindowCache,
+    isAutomaticOlderEndpointUnitEvent,
     refineUnitEventWithEndpointResidualWindow,
 } from "./endpointResidualWindow";
 import { refineEventWithCounterfactualLocator } from "./counterfactualEventLocator";
+import { refineEventWithAdjacentBoundaryConsensus } from "./eventBoundaryConsensus";
 import {
     isAutomaticPartialShift,
 } from "./partialMoveSemantics";
@@ -115,6 +123,8 @@ export type DiagnosisEventEnsembleOptions = {
     reviewWindowPaddingYears?: number;
     reviewWindowDirectionalExtraYears?: number;
     enableCounterfactualEventLocator?: boolean;
+    /** Latest COFECHA PART 6 targets; used only to gate cumulative missing-ring recovery. */
+    cofechaFlaggedSeriesIds?: readonly string[];
 };
 
 export const INTERNAL_EVENT_ENSEMBLE_OPTIONS: DiagnosisEventEnsembleOptions = {
@@ -518,12 +528,70 @@ const coherentTargetedFalseVerification = (
     );
 };
 
+export const unitEventExplainsWholeSeriesCandidate = (
+    whole: DiagnosisEvent,
+    event: DiagnosisEvent,
+): boolean => {
+    const wholeLag = whole.evidence.lagBefore;
+    if (whole.eventType !== "wholeSeriesMove" || wholeLag === null || wholeLag === 0) {
+        return false;
+    }
+    const isUnit = event.eventType === "missingRing" || event.eventType === "falseRing";
+    const operationMatchesLag = event.eventType === "missingRing"
+        ? wholeLag === -1
+        : event.eventType === "falseRing" && wholeLag === 1;
+    if (!isUnit || !operationMatchesLag || event.evidence.lagBefore !== wholeLag) {
+        return false;
+    }
+    const returnsToZero = event.evidence.lagAfter === 0;
+    const competitiveUnitCounterfactual = event.evidence.score
+        >= whole.evidence.score - Math.max(
+            1,
+            Math.abs(whole.evidence.score) * 0.12,
+        );
+    return returnsToZero || competitiveUnitCounterfactual;
+};
+
+export const unitEventCompetesWithWholeAtNewerEndpoint = (
+    whole: DiagnosisEvent,
+    event: DiagnosisEvent,
+): boolean => {
+    const wholeLag = whole.evidence.lagBefore;
+    if (
+        whole.eventType !== "wholeSeriesMove"
+        || (wholeLag !== -1 && wholeLag !== 1)
+        || event.evidence.lagBefore !== wholeLag
+    ) return false;
+    const operationMatchesLag = event.eventType === "missingRing"
+        ? wholeLag === -1
+        : event.eventType === "falseRing" && wholeLag === 1;
+    if (!operationMatchesLag) return false;
+    return event.evidence.score >= whole.evidence.score - Math.max(
+        2,
+        Math.abs(whole.evidence.score) * 0.25,
+    );
+};
+
+export const wholeSeriesEventIsLocalUnitAlias = (
+    whole: DiagnosisEvent,
+    unitEvents: DiagnosisEvent[],
+): boolean => {
+    return unitEvents.some((event) => (
+        unitEventExplainsWholeSeriesCandidate(whole, event)
+    ));
+};
+
 const keepWholeSeriesEvent = (
     whole: DiagnosisEvent | undefined,
     partialEvents: DiagnosisEvent[],
+    unitEvents: DiagnosisEvent[],
     pathDiagnosis: LagPathDiagnosis,
 ): DiagnosisEvent[] => {
     if (!whole) return [];
+    // A local unit error can make its long older side dominate the global lag. A matching unit
+    // correction that returns to zero or remains score-competitive is one boundary explanation,
+    // not an independent whole-series move.
+    if (wholeSeriesEventIsLocalUnitAlias(whole, unitEvents)) return [];
     if (pathDiagnosis.newestLag === 0 && pathDiagnosis.newestLagMargin >= 1) return [];
     if (partialEvents.length === 0) return [whole];
     // A partial transition that returns to lag 0 explains a local move without a whole-series
@@ -554,6 +622,525 @@ const hasCoherentLagChain = (events: DiagnosisEvent[]): boolean => {
             && event.evidence.lagAfter !== null
             && (!older || event.evidence.lagBefore === older.evidence.lagAfter);
     });
+};
+
+const isDirectedUnitTransition = (
+    event: DiagnosisEvent,
+    eventType: "missingRing" | "falseRing",
+): boolean => {
+    const before = event.evidence.lagBefore;
+    const after = event.evidence.lagAfter;
+    if (before === null || after === null) return false;
+    if (event.eventType !== eventType) return false;
+    return eventType === "missingRing"
+        ? after - before === 1 && after <= 0
+        : before - after === 1 && after >= 0;
+};
+
+const supportsCompressedMissingStaircase = (
+    staircase: TwoStepMissingStaircase | null,
+): staircase is TwoStepMissingStaircase => {
+    if (!staircase) return false;
+    const supportRatio = staircase.referenceCount > 0
+        ? staircase.referenceSupport / staircase.referenceCount
+        : 0;
+    const aggregateGainSupport = staircase.staircaseGain > 0
+        && staircase.referenceSupport >= 5
+        && supportRatio >= 0.25;
+    // A short real -1 run can lose slightly after averaging all references. Require a decisive
+    // per-core majority before accepting that exception; genuine physical -2 gaps lack it.
+    const perReferenceSupport = staircase.staircaseGain >= -0.5
+        && staircase.middleMeanAdvantage > 0
+        && staircase.referenceSupport >= 8
+        && supportRatio >= 0.65
+        && staircase.referenceMedianAdvantage >= 0.03;
+    return staircase.newerBoundaryYear - staircase.olderBoundaryYear >= 4
+        && (aggregateGainSupport || perReferenceSupport);
+};
+
+const addCompressedMissingStaircaseEvidence = (
+    event: DiagnosisEvent,
+    diagnosis: SeriesCoreDiagnosis,
+    siteData: RwlSiteData,
+    eventPathConfig: Partial<EventPathConfig>,
+    pathCache: LagPathCache,
+): DiagnosisEvent => {
+    const staircase = locateTwoStepMissingStaircase(
+        diagnosis,
+        siteData,
+        event,
+        eventPathConfig,
+        pathCache,
+    );
+    if (!supportsCompressedMissingStaircase(staircase)) return event;
+    return {
+        ...event,
+        evidence: {
+            ...event.evidence,
+            algorithmSources: Array.from(new Set([
+                ...event.evidence.algorithmSources,
+                "compressed_missing_staircase_evidence",
+            ])).sort(),
+            notes: [
+                ...event.evidence.notes,
+                `compressed_staircase_older_boundary=${staircase.olderBoundaryYear}`,
+                `compressed_staircase_newer_boundary=${staircase.newerBoundaryYear}`,
+                `compressed_staircase_gain=${staircase.staircaseGain.toFixed(6)}`,
+                `compressed_staircase_reference_support=${staircase.referenceSupport}/${staircase.referenceCount}`,
+                `compressed_staircase_reference_median=${staircase.referenceMedianAdvantage.toFixed(6)}`,
+            ],
+        },
+    };
+};
+
+/**
+ * Multiple absent rings form a monotone cumulative-lag staircase. The UI applies one edit and
+ * re-diagnoses, so expose only the bark-side unit transition that returns to the fixed lag 0.
+ * Deeper staircase states must not be presented as an independent whole/partial move.
+ */
+export const projectSequentialUnitChainHead = (
+    events: DiagnosisEvent[],
+): DiagnosisEvent[] => {
+    const compressedHeads = events.filter((event) => (
+        event.eventType === "partialMove"
+        && event.shiftYears === -2
+        && event.evidence.algorithmSources.includes(
+            "compressed_missing_staircase_evidence",
+        )
+    ));
+    if (compressedHeads.length > 0) {
+        const partial = compressedHeads.slice().sort((left, right) => (
+            right.endYear - left.endYear || right.evidence.score - left.evidence.score
+        ))[0];
+        const partialTop = partial.rankedYears.slice().sort((left, right) => (
+            left.rank - right.rank
+        ))[0];
+        const referenceVoteYear = evidenceNoteYear(
+            partial,
+            "partial_reference_vote_year=",
+        );
+        const missingYear = referenceVoteYear
+            ?? ((partialTop?.year
+                ?? Math.round((partial.startYear + partial.endYear) / 2)) - 1);
+        const width = partial.endYear - partial.startYear + 1;
+        const seriesStart = partial.seriesRange?.startYear ?? partial.startYear - 1;
+        const seriesEnd = partial.seriesRange?.endYear ?? partial.endYear;
+        if (missingYear < seriesStart || missingYear > seriesEnd) return events;
+        let startYear = partial.startYear;
+        if (missingYear < startYear) startYear = missingYear;
+        if (missingYear > startYear + width - 1) startYear = missingYear - width + 1;
+        startYear = Math.max(
+            seriesStart,
+            Math.min(startYear, seriesEnd - width + 1),
+        );
+        const endYear = startYear + width - 1;
+        const shiftedRankedYears = partial.rankedYears
+            .map((row) => ({ ...row, year: row.year - 1 }))
+            .filter((row) => row.year >= startYear && row.year <= endYear)
+            .filter((row) => row.year !== missingYear)
+            .sort((left, right) => left.rank - right.rank);
+        const rankedYears = [{
+                year: missingYear,
+                rank: 1,
+                score: partialTop?.score ?? partial.evidence.score,
+                evidenceTags: Array.from(new Set([
+                    ...(partialTop?.evidenceTags ?? []),
+                    "compressed_missing_staircase_projection",
+                ])),
+            }, ...shiftedRankedYears]
+            .map((row, index) => ({ ...row, rank: index + 1 }));
+        const projected: DiagnosisEvent = {
+            ...partial,
+            id: `${partial.id}-compressed-missing-head`,
+            eventType: "missingRing",
+            startYear,
+            endYear,
+            rankedYears,
+            evidence: {
+                ...partial.evidence,
+                algorithmSources: Array.from(new Set([
+                    ...partial.evidence.algorithmSources,
+                    "compressed_missing_staircase_projection",
+                ])).sort(),
+                lagBefore: -1,
+                lagAfter: 0,
+                notes: [
+                    ...partial.evidence.notes,
+                    "compressed_missing_staircase_projected_shift=-1",
+                    `compressed_missing_staircase_selected_year=${missingYear}`,
+                    `compressed_missing_staircase_selected_year_source=${
+                        referenceVoteYear === null ? "shifted_partial_top" : "partial_reference_vote"
+                    }`,
+                    `compressed_missing_staircase_deferred_events=${events.length - 1}`,
+                ],
+            },
+        };
+        delete projected.shiftYears;
+        delete projected.shiftSide;
+        return [projected];
+    }
+
+    const units = events.filter((event): event is DiagnosisEvent & {
+        eventType: "missingRing" | "falseRing";
+    } => event.eventType === "missingRing" || event.eventType === "falseRing");
+    if (units.length === 0) return events;
+    const eventType = units[0].eventType;
+    if (units.some((event) => event.eventType !== eventType)) return events;
+    if (!units.every((event) => isDirectedUnitTransition(event, eventType))) return events;
+
+    const partials = events.filter((event) => event.eventType === "partialMove");
+    if (eventType === "missingRing") {
+        const overlappingBoundaryUnits = partials.flatMap((partial) => {
+            const partialBefore = partial.evidence.lagBefore;
+            if (
+                partial.evidence.lagAfter !== 0
+                || partialBefore === null
+                || partialBefore > -2
+            ) return [];
+            return units.filter((unit) => (
+                unit.evidence.lagAfter === partialBefore
+                && unit.startYear <= partial.endYear
+                && partial.startYear <= unit.endYear
+            ));
+        });
+        if (overlappingBoundaryUnits.length > 0) {
+            const head = overlappingBoundaryUnits.slice().sort((left, right) => (
+                right.evidence.score - left.evidence.score
+                || right.endYear - left.endYear
+            ))[0];
+            return [{
+                ...head,
+                evidence: {
+                    ...head.evidence,
+                    algorithmSources: Array.from(new Set([
+                        ...head.evidence.algorithmSources,
+                        "overlapping_collapsed_boundary_projection",
+                    ])).sort(),
+                    notes: [
+                        ...head.evidence.notes,
+                        "overlapping_collapsed_boundary_type=missingRing",
+                        `overlapping_collapsed_boundary_deferred_events=${events.length - 1}`,
+                    ],
+                },
+            }];
+        }
+    }
+
+    const expectedHeadLag = eventType === "missingRing" ? -1 : 1;
+    const heads = units.filter((event) => (
+        event.evidence.lagBefore === expectedHeadLag
+        && event.evidence.lagAfter === 0
+    ));
+    if (heads.length !== 1) return events;
+    const head = heads[0];
+    const partialsFollowMissingDirection = partials.every((event) => {
+        const before = event.evidence.lagBefore;
+        const after = event.evidence.lagAfter;
+        return eventType === "missingRing"
+            && before !== null
+            && after !== null
+            && before < after
+            && after <= 0;
+    });
+    if (!partialsFollowMissingDirection) return events;
+    const wholeEvents = events.filter((event) => event.eventType === "wholeSeriesMove");
+    const wholeEventsFollowDirection = wholeEvents.every((event) => {
+        const lag = event.evidence.lagBefore;
+        return lag !== null && (eventType === "missingRing" ? lag < 0 : lag > 0);
+    });
+    if (!wholeEventsFollowDirection) return events;
+
+    const hasDeferredState = units.some((event) => (
+        event.id !== head.id
+        && Math.abs(event.evidence.lagBefore ?? 0) >= 2
+    )) || partials.some((event) => (
+        Math.abs(
+            (event.evidence.lagAfter ?? 0)
+            - (event.evidence.lagBefore ?? 0),
+        ) >= 2
+    )) || wholeEvents.some((event) => (
+        Math.abs(event.evidence.lagBefore ?? 0) >= 2
+    ));
+    if (!hasDeferredState) return events;
+    const otherUnitEnd = Math.max(
+        ...units.filter((event) => event.id !== head.id).map((event) => event.endYear),
+        Number.NEGATIVE_INFINITY,
+    );
+    if (head.endYear < otherUnitEnd) return events;
+
+    return [{
+        ...head,
+        evidence: {
+            ...head.evidence,
+            algorithmSources: Array.from(new Set([
+                ...head.evidence.algorithmSources,
+                "sequential_unit_chain_projection",
+            ])).sort(),
+            notes: [
+                ...head.evidence.notes,
+                `sequential_unit_chain_type=${eventType}`,
+                `sequential_unit_chain_deferred_events=${events.length - 1}`,
+            ],
+        },
+    }];
+};
+
+const isCofechaFlaggedSeries = (
+    seriesId: string,
+    flaggedSeriesIds: readonly string[] | undefined,
+): boolean => flaggedSeriesIds?.some((candidate) => (
+    candidate.toLowerCase() === seriesId.toLowerCase()
+)) ?? false;
+
+const boundedSequentialWindow = (
+    centerYear: number,
+    width: number,
+    range: { startYear: number; endYear: number },
+): { startYear: number; endYear: number } => {
+    const actualWidth = Math.min(
+        width,
+        range.endYear - range.startYear + 1,
+    );
+    let startYear = centerYear - Math.floor((actualWidth - 1) / 2);
+    startYear = Math.max(
+        range.startYear,
+        Math.min(startYear, range.endYear - actualWidth + 1),
+    );
+    return { startYear, endYear: startYear + actualWidth - 1 };
+};
+
+const sequentialWindowWidth = (
+    head: SequentialMissingHead,
+    marker: SharedExplicitZeroMarker | null,
+): 5 | 7 | 13 => {
+    if (!Number.isFinite(head.headMeanAdvantage)
+        || head.headMeanAdvantage < 0.05) return 13;
+    if (marker?.distanceFromHead === 0) return 5;
+    if ((marker?.distanceFromHead ?? Infinity) <= 2) return 7;
+    return 13;
+};
+
+const finiteNote = (value: number): string => (
+    Number.isFinite(value) ? value.toFixed(6) : "unavailable"
+);
+
+const makeSequentialMissingHeadEvent = (
+    head: SequentialMissingHead,
+    marker: SharedExplicitZeroMarker | null,
+    detected: DiagnosisEvent[],
+    diagnosis: SeriesCoreDiagnosis,
+    candidates: DiagnosisCandidateOperation[],
+): DiagnosisEvent => {
+    const width = sequentialWindowWidth(head, marker);
+    const selectedYear = marker?.year ?? head.year;
+    const windowCenterYear = marker && marker.distanceFromHead <= 2
+        ? head.year
+        : selectedYear;
+    const window = boundedSequentialWindow(
+        windowCenterYear,
+        width,
+        diagnosis.targetRange,
+    );
+    const rankedYears = Array.from(
+        { length: window.endYear - window.startYear + 1 },
+        (_, index) => {
+            const year = window.startYear + index;
+            const selected = year === selectedYear;
+            return {
+                year,
+                score: head.gainOverDirect
+                    - Math.abs(year - selectedYear) * 0.01
+                    - Math.abs(year - head.year) * 0.001,
+                evidenceTags: [
+                    "sequential_missing_staircase_head",
+                    ...(selected && marker
+                        ? ["shared_explicit_zero_marker"]
+                        : []),
+                ],
+            };
+        },
+    ).sort((left, right) => (
+        right.score - left.score || right.year - left.year
+    )).map((row, index) => ({ ...row, rank: index + 1 }));
+    const template = detected[0];
+    const candidateIds = candidates.filter((candidate) => (
+        candidate.targetTree === diagnosis.targetTree
+        && candidate.operationType === "INSERT_MISSING_RING"
+        && candidate.targetYear !== undefined
+        && candidate.targetYear >= window.startYear
+        && candidate.targetYear <= window.endYear
+    )).map((candidate) => candidate.id);
+    return {
+        id: `diagnosis-event-${diagnosis.targetTree}-sequential-missing-${
+            window.startYear
+        }-${window.endYear}`,
+        seriesId: diagnosis.targetTree,
+        eventType: "missingRing",
+        ...window,
+        rankedYears,
+        confidenceLevel: width === 5 ? "high" : width === 7 ? "medium" : "low",
+        evidence: {
+            algorithmSources: [
+                "sequential_missing_staircase_head",
+                ...(marker ? ["shared_explicit_zero_marker"] : []),
+            ].sort(),
+            score: head.gainOverDirect,
+            scoreMargin: Math.max(0, head.gainOverDirect),
+            baselineCorrelation:
+                template?.evidence.baselineCorrelation
+                ?? diagnosis.globalSlidingMatch.currentR,
+            correctedCorrelation:
+                template?.evidence.correctedCorrelation
+                ?? diagnosis.globalSlidingMatch.bestGlobalR,
+            correlationGain: template?.evidence.correlationGain ?? null,
+            lagBefore: -1,
+            lagAfter: 0,
+            samplePairs: diagnosis.rawTarget.size,
+            candidateIds,
+            notes: [
+                `sequential_missing_head_year=${head.year}`,
+                `sequential_missing_path_start_lag=${head.pathStartLag}`,
+                `sequential_missing_transition_count=${head.transitionCount}`,
+                `sequential_missing_head_run_years=${head.headRunYears}`,
+                `sequential_missing_gain_over_direct=${head.gainOverDirect.toFixed(6)}`,
+                `sequential_missing_head_mean_advantage=${finiteNote(
+                    head.headMeanAdvantage,
+                )}`,
+                `sequential_missing_fixed_tail_advantage=${finiteNote(
+                    head.fixedTailMeanAdvantage,
+                )}`,
+                ...(marker ? [
+                    `shared_zero_marker_year=${marker.year}`,
+                    `shared_zero_marker_support=${marker.support}`,
+                    `shared_zero_marker_distance=${marker.distanceFromHead}`,
+                    `shared_zero_marker_weighted_support=${marker.weightedSupport.toFixed(6)}`,
+                ] : ["shared_zero_marker=none_within_6_years"]),
+                `sequential_missing_window_width=${width}`,
+                `sequential_missing_window_center=${windowCenterYear}`,
+                `sequential_missing_replaced_types=${detected.map(
+                    (event) => event.eventType,
+                ).join(",") || "none"}`,
+                "sequential_missing_score_is_relative_not_probability",
+            ],
+        },
+        alternativeTypes: [],
+        seriesRange: { ...diagnosis.targetRange },
+    };
+};
+
+const recoverSequentialMissingHeadEvent = (
+    detected: DiagnosisEvent[],
+    diagnosis: SeriesCoreDiagnosis,
+    cofechaDiagnosis: SeriesCoreDiagnosis,
+    siteData: RwlSiteData,
+    candidates: DiagnosisCandidateOperation[],
+    effectiveConfig: EffectiveDiagnosisConfig,
+    options: DiagnosisEventEnsembleOptions,
+    pathCache: LagPathCache,
+): DiagnosisEvent | null => {
+    const allowedByCofecha = isCofechaFlaggedSeries(
+        diagnosis.targetTree,
+        options.cofechaFlaggedSeriesIds,
+    );
+    if (!allowedByCofecha) return null;
+    const head = locateSequentialMissingHead(
+        cofechaDiagnosis,
+        siteData,
+        {
+            minLag: effectiveConfig.lagMin,
+            maxPartialGapYears: effectiveConfig.maxPartialGapYears,
+        },
+        pathCache,
+    );
+    // A true continuous gap is better explained by one direct breakpoint and has negative gain.
+    if (!head || head.gainOverDirect <= 0) return null;
+    const marker = selectSharedExplicitZeroMarker(
+        siteData,
+        diagnosis.targetTree,
+        head.year,
+    );
+    return makeSequentialMissingHeadEvent(
+        head,
+        marker,
+        detected,
+        diagnosis,
+        candidates,
+    );
+};
+
+const recoverCollapsedMissingStaircaseHead = (
+    events: DiagnosisEvent[],
+    diagnosis: SeriesCoreDiagnosis,
+): DiagnosisEvent | null => {
+    if (events.length < 3) return null;
+    if (!events.some((event) => event.eventType === "missingRing")) return null;
+    if (events.some((event) => (
+        event.eventType === "falseRing"
+        || event.eventType === "wholeSeriesMove"
+        || event.evidence.lagBefore === null
+        || event.evidence.lagAfter === null
+        || event.evidence.lagBefore >= event.evidence.lagAfter
+        || event.evidence.lagAfter > 0
+    ))) return null;
+    const newest = events.slice().sort((left, right) => (
+        right.endYear - left.endYear || right.evidence.score - left.evidence.score
+    ))[0];
+    if (
+        newest.eventType !== "partialMove"
+        || newest.evidence.lagAfter !== 0
+        || (newest.evidence.lagBefore ?? 0) > -2
+    ) return null;
+
+    const ranked = newest.rankedYears.slice().sort((left, right) => left.rank - right.rank);
+    const partialFirstFixedYear = ranked[0]?.year
+        ?? Math.round((newest.startYear + newest.endYear) / 2);
+    const missingYear = partialFirstFixedYear - 1;
+    const width = newest.endYear - newest.startYear + 1;
+    let startYear = missingYear - Math.floor((width - 1) / 2);
+    startYear = Math.max(
+        diagnosis.targetRange.startYear,
+        Math.min(startYear, diagnosis.targetRange.endYear - width + 1),
+    );
+    const endYear = startYear + width - 1;
+    const projected: DiagnosisEvent = {
+        ...newest,
+        id: `${newest.id}-collapsed-missing-head`,
+        eventType: "missingRing",
+        startYear,
+        endYear,
+        rankedYears: newest.rankedYears
+            .map((row) => ({ ...row, year: row.year - 1 }))
+            .filter((row) => row.year >= startYear && row.year <= endYear)
+            .sort((left, right) => left.rank - right.rank)
+            .map((row, index) => ({ ...row, rank: index + 1 })),
+        evidence: {
+            ...newest.evidence,
+            algorithmSources: Array.from(new Set([
+                ...newest.evidence.algorithmSources,
+                "collapsed_missing_staircase_head",
+            ])).sort(),
+            lagBefore: -1,
+            lagAfter: 0,
+            notes: [
+                ...newest.evidence.notes,
+                `collapsed_staircase_lag_before=${newest.evidence.lagBefore}`,
+                "collapsed_staircase_lag_after=0",
+                `collapsed_staircase_transition_count=${events.length}`,
+                `collapsed_staircase_missing_year=${missingYear}`,
+            ],
+        },
+    };
+    delete projected.shiftYears;
+    delete projected.shiftSide;
+    return projected;
+};
+
+const isCollapsedNegativeHead = (events: DiagnosisEvent[]): boolean => {
+    if (events.length !== 1) return false;
+    const [event] = events;
+    return event.eventType === "partialMove"
+        && event.evidence.lagAfter === 0
+        && (event.evidence.lagBefore ?? 0) <= -2;
 };
 
 /**
@@ -812,7 +1399,44 @@ const eventsForSeriesPass = (
         eventPathConfig,
         pathCache,
     );
-    let pathEvents = pathDiagnosis.events;
+    let pathEvents = pathDiagnosis.events.map((event) => (
+        addCompressedMissingStaircaseEvidence(
+            event,
+            cofechaDiagnosis,
+            siteData,
+            eventPathConfig,
+            pathCache,
+        )
+    ));
+    const primaryCollapsedMissingHead = recoverCollapsedMissingStaircaseHead(
+        pathEvents,
+        diagnosis,
+    );
+    if (primaryCollapsedMissingHead) {
+        pathEvents = [primaryCollapsedMissingHead];
+    } else if (
+        isCollapsedNegativeHead(pathEvents)
+        || (
+            pathEvents.length === 0
+            && cofechaDiagnosis.globalSlidingMatch.bestGlobalLag <= -2
+        )
+    ) {
+        const relaxedPathEvents = diagnoseLagPath(cofechaDiagnosis, siteData, {
+            ...eventPathConfig,
+            transitionPenaltyUnit: Math.min(eventPathConfig.transitionPenaltyUnit ?? 6, 6),
+            transitionPenaltyBig: Math.min(eventPathConfig.transitionPenaltyBig ?? 7, 7),
+            transitionPenaltyPerYear: Math.min(
+                eventPathConfig.transitionPenaltyPerYear ?? 1,
+                1,
+            ),
+            minRunYears: Math.min(eventPathConfig.minRunYears ?? 10, 10),
+        }, pathCache).events;
+        const collapsedMissingHead = recoverCollapsedMissingStaircaseHead(
+            relaxedPathEvents,
+            diagnosis,
+        );
+        if (collapsedMissingHead) pathEvents = [collapsedMissingHead];
+    }
     const isUnitEvent = (event: DiagnosisEvent): boolean => (
         event.eventType === "missingRing" || event.eventType === "falseRing"
     );
@@ -981,14 +1605,44 @@ const eventsForSeriesPass = (
         missingEvents = missingEvents.filter(hasUnitTransition);
         falseEvents = falseEvents.filter(hasUnitTransition);
     }
+    const wholeCandidate = typeEvents(candidateEvents, "wholeSeriesMove")[0];
+    const unitEventsBeforeWholeSelection = [...missingEvents, ...falseEvents];
+    const wholeAliasUnitIds = new Set(
+        wholeCandidate
+            ? unitEventsBeforeWholeSelection
+                .filter((event) => unitEventExplainsWholeSeriesCandidate(
+                    wholeCandidate,
+                    event,
+                ))
+                .map((event) => event.id)
+            : [],
+    );
     const wholeEvents = keepWholeSeriesEvent(
-        typeEvents(candidateEvents, "wholeSeriesMove")[0],
+        wholeCandidate,
         partialEvents,
+        unitEventsBeforeWholeSelection,
         pathDiagnosis,
     );
     const hasOnlyUnitEvents = partialEvents.length === 0 && wholeEvents.length === 0;
     const refinedUnitEvents = refineUnitEventWindows(
-        [...missingEvents, ...falseEvents],
+        unitEventsBeforeWholeSelection.map((event) => (
+            wholeAliasUnitIds.has(event.id)
+                ? {
+                    ...event,
+                    evidence: {
+                        ...event.evidence,
+                        algorithmSources: Array.from(new Set([
+                            ...event.evidence.algorithmSources,
+                            "newer_endpoint_unit_alias_of_global_lag",
+                        ])).sort(),
+                        notes: [
+                            ...event.evidence.notes,
+                            "whole_series_candidate=local_unit_alias",
+                        ],
+                    },
+                }
+                : event
+        )),
         diagnosis,
         rawPathEvents,
         ownCandidates,
@@ -1630,21 +2284,54 @@ export const makeDiagnosisEvents = (
                 siteData,
             )
             : detectedBeforeFusion;
-        const endpointRefined = options.enableEndpointResidualWindow === true
-            && detected.length === 1
-            && (
-                detected[0].eventType === "missingRing"
-                || detected[0].eventType === "falseRing"
+        const retainedDetected = detected.filter((event) => (
+            !isAutomaticOlderEndpointUnitEvent(event, diagnosis)
+        ));
+        const endpointUnits = retainedDetected.filter((event) => (
+            event.eventType === "missingRing" || event.eventType === "falseRing"
+        ));
+        const endpointWhole = retainedDetected.find((event) => (
+            event.eventType === "wholeSeriesMove"
+        ));
+        const forcedEndpointUnitId = endpointUnits.length === 1
+            && endpointWhole
+            && unitEventCompetesWithWholeAtNewerEndpoint(
+                endpointWhole,
+                endpointUnits[0],
             )
-            ? [
-                refineUnitEventWithEndpointResidualWindow(
-                    detected[0],
-                    diagnosis,
-                    siteData,
-                    endpointCache,
-                ),
-            ]
-            : detected;
+            ? endpointUnits[0].id
+            : null;
+        const endpointRefined = options.enableEndpointResidualWindow === true
+            && endpointUnits.length === 1
+            && !endpointUnits[0].evidence.algorithmSources.includes(
+                "collapsed_missing_staircase_head",
+            )
+            ? retainedDetected.map((event) => (
+                event.id === endpointUnits[0].id
+                    ? refineUnitEventWithEndpointResidualWindow(
+                        event.id === forcedEndpointUnitId
+                            ? {
+                                ...event,
+                                evidence: {
+                                    ...event.evidence,
+                                    algorithmSources: Array.from(new Set([
+                                        ...event.evidence.algorithmSources,
+                                        "newer_endpoint_unit_competitor_of_global_lag",
+                                    ])).sort(),
+                                    notes: [
+                                        ...event.evidence.notes,
+                                        "endpoint_test=unit_competitor_of_global_lag",
+                                    ],
+                                },
+                            }
+                            : event,
+                        diagnosis,
+                        siteData,
+                        endpointCache,
+                    )
+                    : event
+            ))
+            : retainedDetected;
         const displayed = rerankMissingEventsNearExplicitZeros(
             addDiagnosisReviewWindowPadding(
                 endpointRefined,
@@ -1658,8 +2345,8 @@ export const makeDiagnosisEvents = (
                 ? stripDiagnosisEventAlternatives
                 : keepSingleMainWindow,
         );
-        const validAutomaticEvents = (events: DiagnosisEvent[]): DiagnosisEvent[] => (
-            events
+        const validAutomaticEvents = (events: DiagnosisEvent[]): DiagnosisEvent[] => {
+            const valid = events
                 .filter((event) => (
                     event.eventType !== "partialMove"
                     || (
@@ -1690,13 +2377,55 @@ export const makeDiagnosisEvents = (
                     ...event,
                     seriesRange: { ...diagnosis.targetRange },
                 }))
+                .map(refineEventWithAdjacentBoundaryConsensus);
+            const projected = projectSequentialUnitChainHead(valid);
+            const whole = projected.find((event) => (
+                event.eventType === "wholeSeriesMove"
+            ));
+            const endpointUnit = projected.find((event) => (
+                event.evidence.algorithmSources.includes(
+                    "series_endpoint_review_window",
+                )
+                && (
+                    event.eventType === "missingRing"
+                    || event.eventType === "falseRing"
+                )
+            ));
+            const wholeLag = whole?.evidence.lagBefore;
+            const operationMatchesWholeLag = endpointUnit?.eventType === "missingRing"
+                ? wholeLag === -1
+                : endpointUnit?.eventType === "falseRing" && wholeLag === 1;
+            if (!whole || !endpointUnit || !operationMatchesWholeLag) return projected;
+            const preferredUnit = {
+                ...endpointUnit,
+                evidence: {
+                    ...endpointUnit.evidence,
+                    algorithmSources: Array.from(new Set([
+                        ...endpointUnit.evidence.algorithmSources,
+                        "newer_endpoint_unit_preferred_over_global_lag",
+                    ])).sort(),
+                    notes: [
+                        ...endpointUnit.evidence.notes,
+                        "event_order=newer_endpoint_unit_before_global_lag",
+                    ],
+                },
+            };
+            return [
+                preferredUnit,
+                ...projected.filter((event) => event.id !== endpointUnit.id),
+            ];
+        };
+        const hasLocalEvent = displayed.some(
+            (event) => event.eventType !== "wholeSeriesMove",
+        );
+        const mayRecoverSequentialMissing = isCofechaFlaggedSeries(
+            diagnosis.targetTree,
+            options.cofechaFlaggedSeriesIds,
         );
         if (options.enableCounterfactualEventLocator !== true
-            || !displayed.some((event) => event.eventType !== "wholeSeriesMove")) {
+            || (!hasLocalEvent && !mayRecoverSequentialMissing)) {
             return validAutomaticEvents(displayed);
         }
-        const jointStateEvents = preserveJointLagStateWindows(displayed);
-        if (jointStateEvents) return validAutomaticEvents(jointStateEvents);
         const cofechaDiagnosis = diagnoseSeriesCore(
             siteData,
             diagnosis.targetTree,
@@ -1704,11 +2433,44 @@ export const makeDiagnosisEvents = (
             cofechaPreprocess,
         );
         if (!cofechaDiagnosis) return validAutomaticEvents(displayed);
+        if (mayRecoverSequentialMissing) {
+            const sequentialMissing = recoverSequentialMissingHeadEvent(
+                displayed,
+                diagnosis,
+                cofechaDiagnosis,
+                siteData,
+                candidates,
+                effectiveConfig,
+                options,
+                locatorPathCache,
+            );
+            if (sequentialMissing) {
+                return validAutomaticEvents([sequentialMissing]);
+            }
+        }
+        if (!hasLocalEvent) return validAutomaticEvents(displayed);
+        const jointStateEvents = preserveJointLagStateWindows(displayed);
+        if (jointStateEvents) return validAutomaticEvents(jointStateEvents);
         const hasWholeSeriesBaseline = displayed.some(
             (event) => event.eventType === "wholeSeriesMove",
         );
-        return validAutomaticEvents(displayed.map((event) => {
+        const locatorEventPathConfig = {
+            ...INTERNAL_EVENT_PATH_CONFIG,
+            maxPartialGapYears: effectiveConfig.maxPartialGapYears,
+            ...options.eventPathConfig,
+        };
+        const locatedEvents = displayed.map((event) => {
             if (event.eventType === "wholeSeriesMove") return event;
+            if (event.evidence.algorithmSources.includes(
+                "collapsed_missing_staircase_head",
+            )) {
+                return event;
+            }
+            if (event.evidence.algorithmSources.includes(
+                "series_endpoint_review_window",
+            )) {
+                return event;
+            }
             const fixedSideBaselineLag = hasWholeSeriesBaseline
                 ? event.evidence.lagAfter ?? 0
                 : 0;
@@ -1717,49 +2479,48 @@ export const makeDiagnosisEvents = (
                 diagnosis,
                 cofechaDiagnosis,
                 siteData,
-                {
-                    ...INTERNAL_EVENT_PATH_CONFIG,
-                    maxPartialGapYears: effectiveConfig.maxPartialGapYears,
-                    ...options.eventPathConfig,
-                },
+                locatorEventPathConfig,
                 locatorPathCache,
                 fixedSideBaselineLag,
             );
             const firstLocated = located?.event ?? event;
+            let finalLocated = firstLocated;
             if (
-                firstLocated.eventType !== "partialMove"
-                || hasWholeSeriesBaseline
+                firstLocated.eventType === "partialMove"
+                && !hasWholeSeriesBaseline
             ) {
-                return firstLocated;
+                const operationRefined = applyDecisiveJointOperationFusion(
+                    [firstLocated],
+                    diagnosis,
+                    {
+                        maxPartialGapYears: effectiveConfig.maxPartialGapYears,
+                        ...options.eventOperationRecoveryConfig,
+                    },
+                    siteData,
+                )[0] ?? firstLocated;
+                if (
+                    operationRefined.eventType !== firstLocated.eventType
+                    || operationRefined.shiftYears !== firstLocated.shiftYears
+                ) {
+                    finalLocated = refineEventWithCounterfactualLocator(
+                        operationRefined,
+                        diagnosis,
+                        cofechaDiagnosis,
+                        siteData,
+                        locatorEventPathConfig,
+                        locatorPathCache,
+                        fixedSideBaselineLag,
+                    )?.event ?? operationRefined;
+                }
             }
-            const operationRefined = applyDecisiveJointOperationFusion(
-                [firstLocated],
-                diagnosis,
-                {
-                    maxPartialGapYears: effectiveConfig.maxPartialGapYears,
-                    ...options.eventOperationRecoveryConfig,
-                },
-                siteData,
-            )[0] ?? firstLocated;
-            if (
-                operationRefined.eventType === firstLocated.eventType
-                && operationRefined.shiftYears === firstLocated.shiftYears
-            ) {
-                return firstLocated;
-            }
-            return refineEventWithCounterfactualLocator(
-                operationRefined,
-                diagnosis,
+            return addCompressedMissingStaircaseEvidence(
+                finalLocated,
                 cofechaDiagnosis,
                 siteData,
-                {
-                    ...INTERNAL_EVENT_PATH_CONFIG,
-                    maxPartialGapYears: effectiveConfig.maxPartialGapYears,
-                    ...options.eventPathConfig,
-                },
+                locatorEventPathConfig,
                 locatorPathCache,
-                fixedSideBaselineLag,
-            )?.event ?? operationRefined;
-        }));
+            );
+        });
+        return validAutomaticEvents(locatedEvents);
     });
 };
