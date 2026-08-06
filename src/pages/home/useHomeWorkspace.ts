@@ -4,6 +4,7 @@ import { extractPart6FlaggedASeriesIds, parseCofechaResult, splitReportByParts }
 import { getCofechaSeriesMapValue } from "@/features/cofecha/seriesId";
 import {
     type CrossdatingDiagnosis,
+    getDisplayedDiagnosisEvents,
     getDiagnosisCandidateLabel,
     isNegativePartialShift,
     markCandidatesStale,
@@ -45,6 +46,15 @@ import { CURRENT_EVENT_PYTHON_MODELS_ENABLED } from "@/shared/featureFlags";
 import { useSettings } from "@/features/settings/SettingsContext";
 import { ALL_OPTION_VALUE, CofechaVersion, formatTitle } from "./homeShared";
 import type { DiagnosisWorkerRequest, DiagnosisWorkerResponse } from "./diagnosisWorker";
+import {
+    createBreadthDiagnosisSuggestion,
+    createEmptyBreadthDiagnosisNavigator,
+    orderBreadthScanTargets,
+    sortBreadthDiagnosisSuggestions,
+    type BreadthDiagnosisNavigatorState,
+    type BreadthDiagnosisSuggestion,
+    type BreadthScanPauseReason,
+} from "./breadthDiagnosis";
 import { createSerialTaskQueue } from "./serialTaskQueue";
 import { useCurrentEventRanker } from "./useCurrentEventRanker";
 import {
@@ -70,12 +80,26 @@ export type WidthHistoryAnimation = RwlHistoryAnimation & { id: number };
 
 const HISTORY_SNAPSHOT_PERSIST_DELAY_MS = 250;
 const DIAGNOSIS_DEBOUNCE_MS = 40;
+const BREADTH_SCAN_DELAY_MS = 140;
 
 type DiagnosisResultCache = {
     siteData: RwlSiteData;
     referenceConfig: ReferenceSeriesConfig | null;
     cofechaText: string | undefined;
     results: Map<string, CrossdatingDiagnosis>;
+    reviewResults: Map<string, CrossdatingDiagnosis>;
+};
+
+type BreadthScanContext = {
+    generation: number;
+    siteData: RwlSiteData;
+    referenceConfig: ReferenceSeriesConfig | null;
+    cofechaText: string | undefined;
+    pending: string[];
+    scanned: Set<string>;
+    suggestions: Map<string, BreadthDiagnosisSuggestion>;
+    attempts: Map<string, number>;
+    totalCount: number;
 };
 
 type RunCofechaApplyOptions = {
@@ -181,6 +205,14 @@ export function useHomeWorkspace() {
     const historyPersistTimerRef = useRef<number | null>(null);
     const diagnosisRequestIdRef = useRef(0);
     const diagnosisWorkerRef = useRef<Worker | null>(null);
+    const breadthDiagnosisRequestIdRef = useRef(0);
+    const breadthDiagnosisWorkerRef = useRef<Worker | null>(null);
+    const breadthScanContextRef = useRef<BreadthScanContext | null>(null);
+    const breadthGenerationCounterRef = useRef(0);
+    const breadthFirstSeenOrderRef = useRef(0);
+    const breadthLastSuggestionBySeriesRef = useRef(new Map<string, BreadthDiagnosisSuggestion>());
+    const breadthFileNameRef = useRef<string | null>(null);
+    const saveOperationCountRef = useRef(0);
     const diagnosisResultCacheRef = useRef<DiagnosisResultCache | null>(null);
     const referenceOperationCounterRef = useRef(0);
     // COFECHA .OUT 对应数据的签名 + 引擎版本。用于判断当前 .OUT 是否仍与编辑数据匹配（新鲜）。
@@ -201,18 +233,24 @@ export function useHomeWorkspace() {
     const [crossdatingDiagnosis, setCrossdatingDiagnosis] = useState<CrossdatingDiagnosis>(() => createEmptyCrossdatingDiagnosis());
     const markCurrentDiagnosisStale = useCallback(() => {
         setCrossdatingDiagnosis((previous) => {
-            if (previous.candidates.length === 0 && previous.events.length === 0) {
+            if (previous.candidates.length === 0
+                && previous.events.length === 0
+                && (previous.reviewEvents?.length ?? 0) === 0) {
                 return previous;
             }
 
             const staleCandidates = markCandidatesStale(previous.candidates);
             const staleEvents = markDiagnosisEventsStale(previous.events);
+            const staleReviewEvents = previous.reviewEvents
+                ? markDiagnosisEventsStale(previous.reviewEvents)
+                : undefined;
             return {
                 ...previous,
                 candidateCount: staleCandidates.length,
                 eventCount: staleEvents.length,
                 candidates: staleCandidates,
                 events: staleEvents,
+                ...(staleReviewEvents ? { reviewEvents: staleReviewEvents } : {}),
             };
         });
     }, []);
@@ -233,6 +271,11 @@ export function useHomeWorkspace() {
     const [isFileLoading, setIsFileLoading] = useState(false);
     const [isCofechaRunning, setIsCofechaRunning] = useState(false);
     const [isEventDiagnosisRunning, setIsEventDiagnosisRunning] = useState(false);
+    const [isSaveRunning, setIsSaveRunning] = useState(false);
+    const [breadthScanGeneration, setBreadthScanGeneration] = useState(0);
+    const [breadthDiagnosisNavigator, setBreadthDiagnosisNavigator] = useState<BreadthDiagnosisNavigatorState>(
+        () => createEmptyBreadthDiagnosisNavigator(),
+    );
     const [diagnosisBatchResult, setDiagnosisBatchResult] = useState<DiagnosisBatchApplyResult | null>(null);
 
     const [dynamicReferenceConfig, setDynamicReferenceConfig] = useState<ReferenceSeriesConfig | null>(null);
@@ -285,6 +328,8 @@ export function useHomeWorkspace() {
     useEffect(() => () => {
         diagnosisWorkerRef.current?.terminate();
         diagnosisWorkerRef.current = null;
+        breadthDiagnosisWorkerRef.current?.terminate();
+        breadthDiagnosisWorkerRef.current = null;
     }, []);
 
     const syncEditor = useCallback((editor: RwlEditor) => {
@@ -616,7 +661,18 @@ export function useHomeWorkspace() {
     }, [replaceEditor, resetCurrentEventRanker, runCofechaAndApplyResult]);
 
     const enqueueSave = useCallback(<T,>(operation: () => Promise<T>): Promise<T> => {
-        return saveQueueRef.current.enqueue(operation);
+        return saveQueueRef.current.enqueue(async () => {
+            saveOperationCountRef.current += 1;
+            setIsSaveRunning(true);
+            try {
+                return await operation();
+            } finally {
+                saveOperationCountRef.current -= 1;
+                if (saveOperationCountRef.current === 0) {
+                    setIsSaveRunning(false);
+                }
+            }
+        });
     }, []);
 
     const markDataSnapshotAsSaved = useCallback((savedData: RwlSiteData) => {
@@ -1306,7 +1362,7 @@ export function useHomeWorkspace() {
             return;
         }
         if (simulation.sourceEventId) {
-            const sourceEvent = crossdatingDiagnosis?.events.find(
+            const sourceEvent = getDisplayedDiagnosisEvents(crossdatingDiagnosis).find(
                 (event) => event.id === simulation.sourceEventId && !event.stale,
             );
             if (sourceEvent) {
@@ -1658,6 +1714,7 @@ export function useHomeWorkspace() {
                 new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
             ))
     ), [fileName, operationLog]);
+    const diagnosisReferenceConfig = referenceConfig ?? dynamicReferenceConfig;
     useEffect(() => {
         let cancelled = false;
         let startTimer: number | null = null;
@@ -1682,15 +1739,18 @@ export function useHomeWorkspace() {
         const diagnosisCofechaText = cofechaFresh ? outFileContent : undefined;
         let resultCache = diagnosisResultCacheRef.current;
         if (resultCache?.siteData !== siteData
-            || resultCache.referenceConfig !== dynamicReferenceConfig
+            || resultCache.referenceConfig !== diagnosisReferenceConfig
             || resultCache.cofechaText !== diagnosisCofechaText) {
             resultCache = {
                 siteData,
-                referenceConfig: dynamicReferenceConfig,
+                referenceConfig: diagnosisReferenceConfig,
                 cofechaText: diagnosisCofechaText,
                 results: new Map(),
+                reviewResults: new Map(),
             };
             diagnosisResultCacheRef.current = resultCache;
+        } else if (!resultCache.reviewResults) {
+            resultCache.reviewResults = new Map();
         }
         const cachedDiagnosis = resultCache.results.get(targetTree);
         if (cachedDiagnosis) {
@@ -1739,6 +1799,7 @@ export function useHomeWorkspace() {
                 setIsEventDiagnosisRunning(false);
                 console.info(`[JS 事件诊断] ${targetTree} · ${Math.round(response.elapsedMs)} ms`);
                 resultCache.results.set(targetTree, response.diagnosis);
+                resultCache.reviewResults.set(targetTree, response.diagnosis);
                 startTransition(() => {
                     setCrossdatingDiagnosis(response.diagnosis);
                 });
@@ -1759,9 +1820,10 @@ export function useHomeWorkspace() {
             worker.postMessage({
                 id: requestId,
                 siteData,
-                referenceConfig: dynamicReferenceConfig,
+                referenceConfig: diagnosisReferenceConfig,
                 targetTree,
                 cofechaText: diagnosisCofechaText,
+                reviewWindowDisplayMode: "review",
             } satisfies DiagnosisWorkerRequest);
         };
 
@@ -1784,7 +1846,272 @@ export function useHomeWorkspace() {
         };
         // outFileContent 加入依赖：COFECHA 重跑（保存后）更新 .OUT 时重新诊断，使 COFECHA 驱动候选与
         // 逐个（bark-to-pith）迭代工作流生效。
-    }, [dynamicReferenceConfig, historyAnimation?.id, markCurrentDiagnosisStale, outFileContent, selectedTree, siteData, siteDataSignature]);
+    }, [diagnosisReferenceConfig, historyAnimation?.id, markCurrentDiagnosisStale, outFileContent, selectedTree, siteData, siteDataSignature]);
+
+    // Any data, reference, or fresh COFECHA change invalidates the file-level breadth view.
+    // The old rows are removed immediately; the low-priority worker then rebuilds one frontier
+    // per series while preserving FIFO age for unchanged windows.
+    useEffect(() => {
+        breadthDiagnosisWorkerRef.current?.terminate();
+        breadthDiagnosisWorkerRef.current = null;
+
+        if (breadthFileNameRef.current !== fileName) {
+            breadthFileNameRef.current = fileName;
+            breadthFirstSeenOrderRef.current = 0;
+            breadthLastSuggestionBySeriesRef.current.clear();
+        }
+
+        const lastValidation = lastCofechaValidationRef.current;
+        const cofechaFresh = Boolean(outFileContent)
+            && lastValidation !== null
+            && lastValidation.inputSignature === siteDataSignature;
+        const diagnosisCofechaText = cofechaFresh ? outFileContent : undefined;
+        const priorityTrees = [
+            ...(diagnosisReferenceConfig?.classification?.candidateFlaggedIds ?? []),
+            ...possibleProblemsDetail.keys(),
+        ];
+        const generation = ++breadthGenerationCounterRef.current;
+        const pending = orderBreadthScanTargets(Array.from(siteData.keys()), priorityTrees);
+
+        breadthScanContextRef.current = {
+            generation,
+            siteData,
+            referenceConfig: diagnosisReferenceConfig,
+            cofechaText: diagnosisCofechaText,
+            pending,
+            scanned: new Set(),
+            suggestions: new Map(),
+            attempts: new Map(),
+            totalCount: siteData.size,
+        };
+        setBreadthDiagnosisNavigator(siteData.size > 0
+            ? {
+                status: "stale",
+                scannedCount: 0,
+                totalCount: siteData.size,
+                suggestions: [],
+            }
+            : createEmptyBreadthDiagnosisNavigator());
+        setBreadthScanGeneration(generation);
+    }, [diagnosisReferenceConfig, fileName, outFileContent, possibleProblemsDetail, siteData, siteDataSignature]);
+
+    useEffect(() => {
+        const context = breadthScanContextRef.current;
+        if (!context || context.generation !== breadthScanGeneration || context.totalCount === 0) {
+            return undefined;
+        }
+
+        const pauseReason: BreadthScanPauseReason | undefined = isFileLoading
+            ? "file-load"
+            : isSaveRunning
+                ? "save"
+                : isCofechaRunning
+                    ? "cofecha"
+                    : isEventDiagnosisRunning
+                        ? "selected-diagnosis"
+                        : undefined;
+        const visibleSuggestions = () => sortBreadthDiagnosisSuggestions(
+            Array.from(context.suggestions.values()).filter((suggestion) => (
+                suggestion.seriesId !== selectedTree
+            )),
+        );
+        const scannedCount = () => {
+            const selectedDelegated = selectedTree !== ALL_OPTION_VALUE
+                && context.siteData.has(selectedTree)
+                && !context.scanned.has(selectedTree)
+                ? 1
+                : 0;
+            return Math.min(context.totalCount, context.scanned.size + selectedDelegated);
+        };
+        const publish = (
+            status: BreadthDiagnosisNavigatorState["status"],
+            nextPauseReason?: BreadthScanPauseReason,
+        ) => {
+            setBreadthDiagnosisNavigator({
+                status,
+                ...(nextPauseReason ? { pauseReason: nextPauseReason } : {}),
+                scannedCount: scannedCount(),
+                totalCount: context.totalCount,
+                suggestions: visibleSuggestions(),
+            });
+        };
+
+        if (pauseReason) {
+            publish("paused", pauseReason);
+            return undefined;
+        }
+
+        let cancelled = false;
+        let nextTimer: number | null = null;
+        let activeTarget: string | null = null;
+        let activeRequestId: number | null = null;
+
+        const processDiagnosis = (targetTree: string, diagnosis: CrossdatingDiagnosis) => {
+            context.scanned.add(targetTree);
+            const reviewEvent = diagnosis.reviewEvents?.find((event) => (
+                event.seriesId === targetTree && !event.stale
+            ));
+            if (reviewEvent) {
+                const previous = context.suggestions.get(targetTree)
+                    ?? breadthLastSuggestionBySeriesRef.current.get(targetTree);
+                const suggestion = createBreadthDiagnosisSuggestion(
+                    reviewEvent,
+                    previous,
+                    ++breadthFirstSeenOrderRef.current,
+                );
+                context.suggestions.set(targetTree, suggestion);
+                breadthLastSuggestionBySeriesRef.current.set(targetTree, suggestion);
+            } else {
+                context.suggestions.delete(targetTree);
+                breadthLastSuggestionBySeriesRef.current.delete(targetTree);
+            }
+            publish("scanning");
+        };
+
+        const scheduleNext = (callback: () => void, delay = BREADTH_SCAN_DELAY_MS) => {
+            nextTimer = window.setTimeout(() => {
+                nextTimer = null;
+                callback();
+            }, delay);
+        };
+
+        const scanNext = () => {
+            if (cancelled || breadthScanContextRef.current !== context) return;
+
+            const targetIndex = context.pending.findIndex((tree) => tree !== selectedTree);
+            if (targetIndex < 0) {
+                publish("complete");
+                console.info(
+                    `[JS 广度诊断] 完成 ${context.scanned.size}/${context.totalCount} · 待复核 ${visibleSuggestions().length}`,
+                );
+                return;
+            }
+
+            const [targetTree] = context.pending.splice(targetIndex, 1);
+            activeTarget = targetTree;
+            const currentCache = diagnosisResultCacheRef.current;
+            const cacheMatches = currentCache?.siteData === context.siteData
+                && currentCache.referenceConfig === context.referenceConfig
+                && currentCache.cofechaText === context.cofechaText;
+            const cachedDiagnosis = cacheMatches
+                ? currentCache.reviewResults?.get(targetTree)
+                : undefined;
+            if (cachedDiagnosis) {
+                activeTarget = null;
+                processDiagnosis(targetTree, cachedDiagnosis);
+                scheduleNext(scanNext, 0);
+                return;
+            }
+
+            const worker = breadthDiagnosisWorkerRef.current
+                ?? new Worker(new URL("./diagnosisWorker.ts", import.meta.url), { type: "module" });
+            breadthDiagnosisWorkerRef.current = worker;
+            const requestId = ++breadthDiagnosisRequestIdRef.current;
+            activeRequestId = requestId;
+
+            worker.onmessage = (event: MessageEvent<DiagnosisWorkerResponse>) => {
+                const response = event.data;
+                if (cancelled
+                    || breadthScanContextRef.current !== context
+                    || response.id !== activeRequestId
+                    || response.id !== breadthDiagnosisRequestIdRef.current) {
+                    return;
+                }
+
+                activeTarget = null;
+                activeRequestId = null;
+                if ("error" in response) {
+                    const attempts = (context.attempts.get(targetTree) ?? 0) + 1;
+                    context.attempts.set(targetTree, attempts);
+                    if (attempts < 2) {
+                        context.pending.push(targetTree);
+                    } else {
+                        context.scanned.add(targetTree);
+                        console.warn(`[JS 广度诊断] ${targetTree} 计算失败:`, response.error);
+                    }
+                    worker.terminate();
+                    if (breadthDiagnosisWorkerRef.current === worker) {
+                        breadthDiagnosisWorkerRef.current = null;
+                    }
+                    publish("scanning");
+                    scheduleNext(scanNext);
+                    return;
+                }
+
+                let resultCache = diagnosisResultCacheRef.current;
+                if (resultCache?.siteData !== context.siteData
+                    || resultCache.referenceConfig !== context.referenceConfig
+                    || resultCache.cofechaText !== context.cofechaText) {
+                    resultCache = {
+                        siteData: context.siteData,
+                        referenceConfig: context.referenceConfig,
+                        cofechaText: context.cofechaText,
+                        results: new Map(),
+                        reviewResults: new Map(),
+                    };
+                    diagnosisResultCacheRef.current = resultCache;
+                }
+                resultCache.reviewResults ??= new Map();
+                resultCache.reviewResults.set(targetTree, response.diagnosis);
+                resultCache.results.set(targetTree, response.diagnosis);
+                processDiagnosis(targetTree, response.diagnosis);
+                scheduleNext(scanNext);
+            };
+
+            worker.onerror = (event) => {
+                if (cancelled || breadthScanContextRef.current !== context) return;
+                const attempts = (context.attempts.get(targetTree) ?? 0) + 1;
+                context.attempts.set(targetTree, attempts);
+                activeTarget = null;
+                activeRequestId = null;
+                if (attempts < 2) {
+                    context.pending.push(targetTree);
+                } else {
+                    context.scanned.add(targetTree);
+                    console.warn(`[JS 广度诊断] ${targetTree} worker 失败:`, event.message);
+                }
+                worker.terminate();
+                if (breadthDiagnosisWorkerRef.current === worker) {
+                    breadthDiagnosisWorkerRef.current = null;
+                }
+                publish("scanning");
+                scheduleNext(scanNext);
+            };
+
+            publish("scanning");
+            worker.postMessage({
+                id: requestId,
+                siteData: context.siteData,
+                referenceConfig: context.referenceConfig,
+                targetTree,
+                cofechaText: context.cofechaText,
+                reviewWindowDisplayMode: "review",
+            } satisfies DiagnosisWorkerRequest);
+        };
+
+        scanNext();
+        return () => {
+            cancelled = true;
+            if (nextTimer !== null) {
+                window.clearTimeout(nextTimer);
+            }
+            if (activeTarget && !context.scanned.has(activeTarget)) {
+                context.pending.unshift(activeTarget);
+            }
+            const worker = breadthDiagnosisWorkerRef.current;
+            if (worker) {
+                worker.terminate();
+                breadthDiagnosisWorkerRef.current = null;
+            }
+        };
+    }, [
+        breadthScanGeneration,
+        isCofechaRunning,
+        isEventDiagnosisRunning,
+        isFileLoading,
+        isSaveRunning,
+        selectedTree,
+    ]);
 
     useEffect(() => {
         latestDiagnosisCandidatesRef.current = crossdatingDiagnosis.candidates;
@@ -1836,6 +2163,7 @@ export function useHomeWorkspace() {
     return {
         cofechaResult,
         cofechaVersion,
+        breadthDiagnosisNavigator,
         crossdatingValidationSummary,
         canResetToRawData,
         crossdatingDiagnosis,

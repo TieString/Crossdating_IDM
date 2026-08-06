@@ -263,6 +263,107 @@
     background: #fbfcfe;
 }
 
+.breadth-navigator {
+    grid-template-columns: minmax(170px, 0.7fr) minmax(0, 1.3fr);
+    align-items: center;
+}
+
+.breadth-summary strong {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+}
+
+.breadth-summary .breadth-count {
+    color: #245f46;
+    font-size: 15px;
+    font-variant-numeric: tabular-nums;
+}
+
+.breadth-progress-track {
+    position: relative;
+    display: block;
+    width: min(220px, 100%);
+    height: 3px;
+    overflow: hidden;
+    border-radius: 2px;
+    background: #dfe6e2;
+}
+
+.breadth-progress-value {
+    position: absolute;
+    inset: 0 auto 0 0;
+    display: block;
+    background: #4c8a69;
+    transition: width 160ms ease;
+}
+
+.breadth-suggestion-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.breadth-suggestion {
+    display: grid;
+    grid-template-columns: minmax(68px, 0.7fr) minmax(92px, 0.9fr) minmax(105px, 1fr);
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 26px;
+    padding: 3px 7px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: #34475d;
+    font: inherit;
+    letter-spacing: 0;
+    text-align: left;
+    cursor: pointer;
+}
+
+.breadth-suggestion:hover,
+.breadth-suggestion:focus-visible {
+    border-color: #b8d3c4;
+    background: rgba(255, 255, 255, 0.82);
+    outline: none;
+}
+
+.breadth-suggestion > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.breadth-series {
+    color: #234f3b !important;
+    font-weight: 700;
+}
+
+.breadth-window {
+    color: #4e6072 !important;
+    font-variant-numeric: tabular-nums;
+}
+
+.breadth-operation {
+    color: #80521a !important;
+}
+
+.breadth-more {
+    align-self: center;
+    color: #718094 !important;
+    font-size: 11px !important;
+}
+
+@media (max-width: 980px) {
+    .breadth-navigator {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+}
+
 .width-panels,
 .cofecha-panels {
     flex: 1 1 auto;

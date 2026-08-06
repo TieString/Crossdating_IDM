@@ -1,7 +1,10 @@
 /// <reference lib="webworker" />
 
 import { diagnoseCrossdating } from "@/features/crossdating/diagnosis/engine";
-import type { CrossdatingDiagnosis } from "@/features/crossdating/diagnosis/types";
+import type {
+    CrossdatingDiagnosis,
+    ReviewWindowDisplayMode,
+} from "@/features/crossdating/diagnosis/types";
 import type { ReferenceSeriesConfig } from "@/features/crossdating/reference";
 import type { RwlSiteData } from "@/features/rwl/types";
 
@@ -12,6 +15,8 @@ export type DiagnosisWorkerRequest = {
     targetTree?: string;
     // 当前 COFECHA .OUT 原始文本（仅当其与当前数据一致/新鲜时传入）。驱动 COFECHA [A] 段级 lag 候选生成。
     cofechaText?: string;
+    // 后台广度扫描与当前可见诊断都使用 review 门槛；严格自动结果仍保留在 diagnosis.events。
+    reviewWindowDisplayMode?: ReviewWindowDisplayMode;
 };
 
 export type DiagnosisWorkerResponse =
@@ -28,7 +33,14 @@ export type DiagnosisWorkerResponse =
 const ctx = self as DedicatedWorkerGlobalScope;
 
 ctx.addEventListener("message", (event: MessageEvent<DiagnosisWorkerRequest>) => {
-    const { id, siteData, referenceConfig, targetTree, cofechaText } = event.data;
+    const {
+        id,
+        siteData,
+        referenceConfig,
+        targetTree,
+        cofechaText,
+        reviewWindowDisplayMode,
+    } = event.data;
 
     try {
         const startedAt = performance.now();
@@ -38,6 +50,7 @@ ctx.addEventListener("message", (event: MessageEvent<DiagnosisWorkerRequest>) =>
                 referenceConfig,
                 targetTrees: targetTree ? [targetTree] : [],
                 cofechaText,
+                reviewWindowDisplayMode,
             }),
             elapsedMs: performance.now() - startedAt,
         } satisfies DiagnosisWorkerResponse);

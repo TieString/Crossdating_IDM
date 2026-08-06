@@ -8,6 +8,7 @@ import {
 } from '@/features/crossdating/reference'
 import {
     applyLocalCrossdatingOption,
+    getDisplayedDiagnosisEvents,
     simulateDiagnosisEventPreview,
   type CrossdatingDiagnosis,
   type DiagnosisBatchApplyResult,
@@ -123,6 +124,7 @@ function TreeChartManagerBase({
     : controlledSelectedTrees
   const selectedTreesRef = useRef(selectedTrees)
   const handledJumpIdRef = useRef<number | null>(null)
+  const diagnosisEvents = useMemo(() => getDisplayedDiagnosisEvents(diagnosis), [diagnosis])
 
   useEffect(() => {
     selectedTreesRef.current = selectedTrees
@@ -291,7 +293,7 @@ function TreeChartManagerBase({
 
   const handleLinePointClick = useCallback((target: { tree: string; year: number }) => {
     const sourceYear = target.year - (treeOffsets.get(target.tree) ?? 0)
-    const matchingEvent = diagnosis?.events
+    const matchingEvent = diagnosisEvents
       .filter((event) => (
         !event.stale
         && event.seriesId === target.tree
@@ -322,7 +324,7 @@ function TreeChartManagerBase({
     })
     setSelectedLocalOption(simulation.bestOption)
     setIsConfirmingLocalApply(false)
-  }, [clearLocalSimulation, diagnosis, fullData, referenceConfig, treeOffsets])
+  }, [clearLocalSimulation, diagnosisEvents, fullData, referenceConfig, treeOffsets])
 
   useEffect(() => {
     if (localSimulation && !visibleTrees.includes(localSimulation.targetTree)) {
@@ -409,12 +411,12 @@ function TreeChartManagerBase({
 
   const diagnosisEventCountByTree = useMemo(() => {
     const counts = new Map<string, number>()
-    diagnosis?.events.forEach((event) => {
+    diagnosisEvents.forEach((event) => {
       if (event.stale) return
       counts.set(event.seriesId, (counts.get(event.seriesId) ?? 0) + 1)
     })
     return counts
-  }, [diagnosis])
+  }, [diagnosisEvents])
 
   const activeDiagnosisEventCount = useMemo(() => (
     Array.from(diagnosisEventCountByTree.values()).reduce((sum, count) => sum + count, 0)
@@ -472,7 +474,7 @@ function TreeChartManagerBase({
   }, [fullData, localPreviewTreeData, treeOffsets, visibleTrees])
 
   const diagnosisEventRanges = useMemo<ChartDiagnosisEventRange[]>(() => (
-    (diagnosis?.events ?? []).flatMap((event) => {
+    diagnosisEvents.flatMap((event) => {
       if (
         event.stale
         || event.eventType === 'wholeSeriesMove'
@@ -489,7 +491,7 @@ function TreeChartManagerBase({
         endYear: event.endYear + yearOffset,
       }]
     })
-  ), [diagnosis, treeOffsets, visibleTrees])
+  ), [diagnosisEvents, treeOffsets, visibleTrees])
 
   const filteredTreeCodes = useMemo(() =>
     search.trim() === '' ? allTreeCodes : allTreeCodes.filter(c => c.toLowerCase().includes(search.toLowerCase())),
@@ -609,7 +611,7 @@ function TreeChartManagerBase({
   }
 
   const matchingLocalEvent = localSimulation
-    ? diagnosis?.events.find((event) => (
+    ? diagnosisEvents.find((event) => (
       !event.stale
       && event.seriesId === localSimulation.targetTree
       && (localSimulation.sourceEventId

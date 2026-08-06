@@ -22,6 +22,7 @@ export {
 export {
     eventAtLocationAlternative,
 } from "./diagnosis/eventLocationAlternatives";
+export { getDisplayedDiagnosisEvents } from "./diagnosis/eventDisplay";
 export {
     applyLocalCrossdatingOption,
     diagnoseCrossdating,

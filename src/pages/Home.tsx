@@ -6,7 +6,10 @@ import { AnimatePresence } from "motion/react";
 import { TreeChartManager } from "@/components/Chart/TreeChartManager";
 import { CurrentEventSuggestionPanel } from "@/components/DiagnosisCandidates/CurrentEventSuggestionPanel";
 import { DiagnosisEventPanel } from "@/components/DiagnosisCandidates/DiagnosisEventPanel";
-import type { DiagnosisEvent } from "@/features/crossdating/diagnosis";
+import {
+    getDisplayedDiagnosisEvents,
+    type DiagnosisEvent,
+} from "@/features/crossdating/diagnosis";
 import { hashRwlSiteData } from "@/features/crossdating/reference";
 import WidthContainer, { WidthGridSkeleton } from "@/components/WidthContainer/WidthContainer";
 import ContextMenu, { type ContextMenuItem } from "@/components/ContextMenu/ContextMenu";
@@ -48,6 +51,8 @@ import {
     WorkspaceWindowPlaceholder,
 } from "./home/HomePanelComponents";
 import { HomeTitleBarBridge } from "./home/HomeTitleBarBridge";
+import { BreadthDiagnosisNavigator } from "./home/BreadthDiagnosisNavigator";
+import type { BreadthDiagnosisSuggestion } from "./home/breadthDiagnosis";
 import { useHomeWorkspace } from "./home/useHomeWorkspace";
 import {
     COFECHA_ABSENT_RING_CONTINUATION_RE,
@@ -344,6 +349,7 @@ export default function Home() {
         canResetToRawData,
         cofechaResult,
         cofechaVersion,
+        breadthDiagnosisNavigator,
         crossdatingValidationSummary,
         crossdatingDiagnosis,
         currentEventRankerSession,
@@ -440,11 +446,15 @@ export default function Home() {
         publishConsoleDataExport(fileName, siteData, cofechaResult);
     }, [cofechaResult, fileName, siteData]);
 
+    const displayedDiagnosisEvents = useMemo(
+        () => getDisplayedDiagnosisEvents(crossdatingDiagnosis),
+        [crossdatingDiagnosis],
+    );
     const selectedTreeEvents = useMemo(
-        () => crossdatingDiagnosis.events.filter((event) => (
+        () => displayedDiagnosisEvents.filter((event) => (
             event.seriesId === selectedTree && !event.stale
         )),
-        [crossdatingDiagnosis, selectedTree],
+        [displayedDiagnosisEvents, selectedTree],
     );
     const currentSiteHash = useMemo(() => hashRwlSiteData(siteData), [siteData]);
     const visibleCurrentEventSession = useMemo(() => {
@@ -472,7 +482,7 @@ export default function Home() {
     }, [visibleCurrentEventSession.requestId, selectedTree]);
     const suggestedRangeHighlights = useMemo(
         () => [
-            ...crossdatingDiagnosis.events.flatMap((event) => (
+            ...displayedDiagnosisEvents.flatMap((event) => (
                 !event.stale && event.eventType !== "wholeSeriesMove"
                     ? [{
                         tree: event.seriesId,
@@ -502,7 +512,7 @@ export default function Home() {
                 }]
                 : []),
         ],
-        [crossdatingDiagnosis, focusedCurrentEventSuggestion, selectedTree, visibleCurrentEventSession],
+        [displayedDiagnosisEvents, focusedCurrentEventSuggestion, selectedTree, visibleCurrentEventSession],
     );
     const currentEventTabAvailable = CURRENT_EVENT_PYTHON_MODELS_ENABLED
         && Boolean(fileName && selectedTree !== ALL_OPTION_VALUE);
@@ -602,6 +612,44 @@ export default function Home() {
             handleOpenWorkspaceWindow("line-chart");
         }
     }, [externalWorkspaceWindows, handleOpenWorkspaceWindow, handleTreeSelectionChange, selectedTree, siteData]);
+
+    const handleBreadthSuggestionSelect = useCallback((suggestion: BreadthDiagnosisSuggestion) => {
+        if (!siteData.has(suggestion.seriesId)) return;
+
+        const year = suggestion.topYear;
+        setIsRawEditing(false);
+        setProblemTab("candidates");
+        if (selectedTree !== suggestion.seriesId) {
+            handleTreeSelectionChange(suggestion.seriesId);
+        }
+
+        cofechaCellJumpIdRef.current += 1;
+        setCofechaCellJumpTarget({
+            id: cofechaCellJumpIdRef.current,
+            tree: suggestion.seriesId,
+            year,
+        });
+        chartJumpIdRef.current += 1;
+        setChartSelectedTrees((previous) => (
+            previous.includes(suggestion.seriesId)
+                ? previous
+                : [...previous, suggestion.seriesId]
+        ));
+        setChartJumpTarget({
+            id: chartJumpIdRef.current,
+            tree: suggestion.seriesId,
+            year,
+        });
+        if (externalWorkspaceWindows["line-chart"]) {
+            handleOpenWorkspaceWindow("line-chart");
+        }
+    }, [
+        externalWorkspaceWindows,
+        handleOpenWorkspaceWindow,
+        handleTreeSelectionChange,
+        selectedTree,
+        siteData,
+    ]);
 
     const handleDeleteSeriesRequestHandled = useCallback((id: number) => {
         setDeleteSeriesRequest((request) => request?.id === id ? null : request);
@@ -1601,19 +1649,10 @@ export default function Home() {
                             </span>
                         </span>
                     </FloatingScrollArea>
-                    <div className={`${style["validation-summary"]} ${style[`validation-${crossdatingValidationSummary.severity}`]}`}>
-                        <div>
-                            <strong>{crossdatingValidationSummary.title}</strong>
-                            <span>{crossdatingValidationSummary.detail}</span>
-                        </div>
-                        {crossdatingValidationSummary.items.length > 0 ? (
-                            <ul>
-                                {crossdatingValidationSummary.items.slice(0, 3).map((item) => (
-                                    <li key={item}>{item}</li>
-                                ))}
-                            </ul>
-                        ) : null}
-                    </div>
+                    <BreadthDiagnosisNavigator
+                        navigator={breadthDiagnosisNavigator}
+                        onSelectSuggestion={handleBreadthSuggestionSelect}
+                    />
 
                     <div className={style["cofecha-panels"]} ref={rightPanelsRef}>
                         <div
