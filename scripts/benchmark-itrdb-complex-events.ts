@@ -9,7 +9,10 @@ import {
 import { availableParallelism } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { findAbsoluteUnidentifiableTruthYears } from "@/features/crossdating/diagnosis/bootstrapEvaluation";
+import {
+    findAbsoluteUnidentifiableTruthYears,
+    selectAutomaticBootstrapApplication,
+} from "@/features/crossdating/diagnosis/bootstrapEvaluation";
 import { planDiagnosisEventEdit } from "@/features/crossdating/diagnosis/eventApply";
 import type { DiagnosisEvent } from "@/features/crossdating/diagnosis/types";
 import {
@@ -640,15 +643,14 @@ const runAutomaticBootstrap = (
             target,
             result: diagnose(site, target.target),
         }));
-        const choices = diagnosed.flatMap(({ target, result }) => (
-            result.events[0] ? [{ target, result, event: result.events[0] }] : []
-        )).sort((left, right) => (
-            right.event.evidence.score - left.event.evidence.score
-            || right.event.evidence.scoreMargin - left.event.evidence.scoreMargin
-        ));
-        const selected = choices[0] ?? null;
-        if (!selected) {
-            stopReason = "no_suggestion";
+        const automaticSelection = selectAutomaticBootstrapApplication(
+            diagnosed.flatMap(({ result }) => result.events),
+            site,
+        );
+        if (!automaticSelection) {
+            stopReason = diagnosed.some(({ result }) => result.events.length > 0)
+                ? "no_executable_suggestion"
+                : "no_suggestion";
             const fallback = diagnosed[0];
             const fallbackTruths = remaining.get(fallback.target.target)!;
             const truthYear = fallbackTruths[fallbackTruths.length - 1];
@@ -664,10 +666,34 @@ const runAutomaticBootstrap = (
                 truthYears: fallback.target.truthYears,
                 absoluteIdentifiable: fallback.target.scoredTruthYears.includes(truthYear)
                     && !unidentifiable.has(truthYear),
-                diagnosis: fallback.result,
+                diagnosis: {
+                    events: [],
+                    elapsedMs: fallback.result.elapsedMs,
+                    error: stopReason,
+                },
             }));
             break;
         }
+        const selectedTarget = descriptorById.get(automaticSelection.event.seriesId);
+        if (!selectedTarget) {
+            stopReason = "selected_series_missing";
+            break;
+        }
+        const selectedResult = diagnosed.find(({ target }) => (
+            target.target === selectedTarget.target
+        ))?.result;
+        if (!selectedResult) {
+            stopReason = "selected_diagnosis_missing";
+            break;
+        }
+        const selected = {
+            target: selectedTarget,
+            result: {
+                ...selectedResult,
+                events: [automaticSelection.event],
+            },
+            event: automaticSelection.event,
+        };
         const selectedTruths = remaining.get(selected.target.target)!;
         const truthYear = selectedTruths[selectedTruths.length - 1];
         const row = makeRow({
@@ -685,7 +711,7 @@ const runAutomaticBootstrap = (
             diagnosis: selected.result,
         });
         rows.push(row);
-        const selectedYear = selected.event.rankedYears[0]?.year;
+        const selectedYear = automaticSelection.selectedYear;
         const exact = selected.event.eventType === "missingRing" && selectedYear === truthYear;
         if (exact) {
             site.set(
