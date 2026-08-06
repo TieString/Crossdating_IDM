@@ -48,6 +48,7 @@ import type {
     DiagnosisCandidateOperation,
     DiagnosisConfidence,
     DiagnosisEvent,
+    DiagnosisEventDecisionAudit,
     DiagnosisOptions,
     LocalCrossdatingSimulation,
     LocalSimulationOperationType,
@@ -74,14 +75,14 @@ export function diagnoseCrossdating(
     const treeCodes = options.targetTrees === undefined
         ? Array.from(siteData.keys())
         : Array.from(new Set(options.targetTrees)).filter((tree) => siteData.has(tree));
-    const seriesDiagnoses = treeCodes
-        .map((tree) => diagnoseSeriesCore(
+    const seriesDiagnosisResults = treeCodes.map((tree) => diagnoseSeriesCore(
             siteData,
             tree,
             config,
             preprocessSeries,
             preprocessCache,
-        ))
+        ));
+    const seriesDiagnoses = seriesDiagnosisResults
         .filter((diagnosis): diagnosis is SeriesCoreDiagnosis => diagnosis !== null);
     const segments = seriesDiagnoses.flatMap((diagnosis) => diagnosis.segments);
     const propagationPatterns = seriesDiagnoses.flatMap((diagnosis) => diagnosis.propagationPatterns);
@@ -197,6 +198,9 @@ export function diagnoseCrossdating(
         const range = suggestedRangeByGroup.get(`${candidate.targetTree}:${candidate.operationType}`);
         if (range) candidate.suggestedRange = range;
     });
+    const eventDecisionAudits = options.includeEventDecisionAudits
+        ? [] as DiagnosisEventDecisionAudit[]
+        : undefined;
     const events = makeDiagnosisEvents(
         siteData,
         seriesDiagnoses,
@@ -210,8 +214,60 @@ export function diagnoseCrossdating(
             sharedZeroMarkerMode:
                 options.sharedZeroMarkerMode
                 ?? INTERNAL_EVENT_ENSEMBLE_OPTIONS.sharedZeroMarkerMode,
+            ...(eventDecisionAudits ? { eventDecisionAudits } : {}),
         },
     );
+    if (eventDecisionAudits) {
+        const diagnosedTrees = new Set(seriesDiagnoses.map((diagnosis) => (
+            diagnosis.targetTree
+        )));
+        treeCodes.filter((tree) => !diagnosedTrees.has(tree)).forEach((tree) => {
+            const years = [...(siteData.get(tree)?.keys() ?? [])];
+            eventDecisionAudits.push({
+                seriesId: tree,
+                targetRange: years.length > 0 ? {
+                    startYear: Math.min(...years),
+                    endYear: Math.max(...years),
+                } : null,
+                cofechaFlagged:
+                    options.referenceConfig?.classification?.candidateFlaggedIds
+                        .some((seriesId) => (
+                            seriesId.trim().toUpperCase() === tree.trim().toUpperCase()
+                        ))
+                    ?? false,
+                referenceSourceCount: 0,
+                minimumReferenceDepth: 0,
+                medianReferenceDepth: 0,
+                candidateCount: 0,
+                candidateModeCount: 0,
+                candidates: [],
+                pass: {
+                    selectedReferencePass: "primary",
+                    cofechaDiagnosisAvailable: false,
+                    candidateEventCount: 0,
+                    lagPathEventCount: 0,
+                    rawLagPathEventCount: 0,
+                    assembledEventCount: 0,
+                    jointRefinedEventCount: 0,
+                    referenceVotedEventCount: 0,
+                    recoveredEventCount: 0,
+                    finalEventCount: 0,
+                },
+                detectedBeforeFusion: [],
+                detectedAfterFusion: [],
+                retainedAfterEndpointGuard: [],
+                displayedBeforeLocator: [],
+                finalEvents: [],
+                automaticSemanticsRejectedCount: 0,
+                finalReason: "insufficient_reference_depth",
+            });
+        });
+        const treeOrder = new Map(treeCodes.map((tree, index) => [tree, index]));
+        eventDecisionAudits.sort((left, right) => (
+            (treeOrder.get(left.seriesId) ?? Infinity)
+            - (treeOrder.get(right.seriesId) ?? Infinity)
+        ));
+    }
     const candidateCountByTree = candidates.reduce((counts, candidate) => {
         counts.set(candidate.targetTree, (counts.get(candidate.targetTree) ?? 0) + 1);
         return counts;
@@ -246,6 +302,7 @@ export function diagnoseCrossdating(
             : [],
         events,
         candidates,
+        ...(eventDecisionAudits ? { eventDecisionAudits } : {}),
     };
 }
 

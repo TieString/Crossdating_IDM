@@ -74,6 +74,77 @@ export type DiagnosisEvent = {
     seriesRange?: YearRange;
     stale?: boolean;
 };
+
+export type DiagnosisEventAuditSnapshot = {
+    eventType: DiagnosisEventType;
+    startYear: number;
+    endYear: number;
+    topYear: number | null;
+    shiftYears: number | null;
+    confidenceLevel: DiagnosisConfidence;
+    score: number;
+    scoreMargin: number;
+    lagBefore: number | null;
+    lagAfter: number | null;
+    algorithmSources: string[];
+    notes: string[];
+};
+
+export type DiagnosisCandidateAuditSnapshot = {
+    operationType: DiagnosisCandidateOperationType;
+    targetYear: number | null;
+    anchorYear: number;
+    shiftYears: number | null;
+    score: number;
+    confidenceLevel: CandidateRankingConfidence;
+    ambiguous: boolean;
+    algorithmSources: CandidateAlgorithmSource[];
+};
+
+export type DiagnosisEventPassAudit = {
+    selectedReferencePass: "primary" | "mixed";
+    cofechaDiagnosisAvailable: boolean;
+    candidateEventCount: number;
+    lagPathEventCount: number;
+    rawLagPathEventCount: number;
+    assembledEventCount: number;
+    jointRefinedEventCount: number;
+    referenceVotedEventCount: number;
+    recoveredEventCount: number;
+    finalEventCount: number;
+};
+
+export type DiagnosisEventDecisionReason =
+    | "emitted"
+    | "insufficient_reference_depth"
+    | "no_internal_hypothesis"
+    | "ensemble_gate_rejected"
+    | "operation_fusion_rejected"
+    | "older_endpoint_context"
+    | "display_projection_rejected"
+    | "automatic_semantics_conflict"
+    | "post_location_rejected";
+
+/** Optional signal-only trace used by benchmark and refusal analysis. */
+export type DiagnosisEventDecisionAudit = {
+    seriesId: string;
+    targetRange: YearRange | null;
+    cofechaFlagged: boolean;
+    referenceSourceCount: number;
+    minimumReferenceDepth: number;
+    medianReferenceDepth: number;
+    candidateCount: number;
+    candidateModeCount: number;
+    candidates: DiagnosisCandidateAuditSnapshot[];
+    pass: DiagnosisEventPassAudit;
+    detectedBeforeFusion: DiagnosisEventAuditSnapshot[];
+    detectedAfterFusion: DiagnosisEventAuditSnapshot[];
+    retainedAfterEndpointGuard: DiagnosisEventAuditSnapshot[];
+    displayedBeforeLocator: DiagnosisEventAuditSnapshot[];
+    finalEvents: DiagnosisEventAuditSnapshot[];
+    automaticSemanticsRejectedCount: number;
+    finalReason: DiagnosisEventDecisionReason;
+};
 export type CandidateRankingConfidence = DiagnosisConfidence | "ambiguous";
 
 export type DiagnosisCandidateOperationType =
@@ -442,6 +513,7 @@ export type CrossdatingDiagnosis = {
     masterNarrowYears: ScoringMasterYear[];
     events: DiagnosisEvent[];
     candidates: DiagnosisCandidateOperation[];
+    eventDecisionAudits?: DiagnosisEventDecisionAudit[];
 };
 
 export type LocalSimulationOperationType =
@@ -515,13 +587,19 @@ export type DiagnosisOptions = {
     cofechaText?: string;
     /** Internal ablation only; shared zero markers never become user-facing choices. */
     sharedZeroMarkerMode?: SharedZeroMarkerMode;
+    /** Benchmark/debug trace only; does not change diagnosis decisions. */
+    includeEventDecisionAudits?: boolean;
 };
 
 export type NumericSeries = Map<number, number>;
 
 export type EffectiveDiagnosisConfig = Required<Omit<
     DiagnosisOptions,
-    "referenceConfig" | "cofechaText" | "targetTrees" | "sharedZeroMarkerMode"
+    | "referenceConfig"
+    | "cofechaText"
+    | "targetTrees"
+    | "sharedZeroMarkerMode"
+    | "includeEventDecisionAudits"
 >> & {
     referenceConfig: ReferenceSeriesConfig | null;
     minPairsForCorrelation: number;

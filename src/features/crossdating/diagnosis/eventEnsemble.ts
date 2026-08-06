@@ -81,7 +81,12 @@ import {
     isAutomaticPartialShift,
 } from "./partialMoveSemantics";
 import type {
+    DiagnosisCandidateAuditSnapshot,
     DiagnosisCandidateOperation,
+    DiagnosisEventAuditSnapshot,
+    DiagnosisEventDecisionAudit,
+    DiagnosisEventDecisionReason,
+    DiagnosisEventPassAudit,
     DiagnosisEvent,
     DiagnosisEventType,
     EffectiveDiagnosisConfig,
@@ -133,7 +138,60 @@ export type DiagnosisEventEnsembleOptions = {
     cofechaFlaggedSeriesIds?: readonly string[];
     /** Shared zeros may only rerank a lag-derived head in production local2 mode. */
     sharedZeroMarkerMode?: SharedZeroMarkerMode;
+    /** Optional caller-owned sink. Recording must never affect event selection. */
+    eventDecisionAudits?: DiagnosisEventDecisionAudit[];
 };
+
+const emptyEventPassAudit = (): DiagnosisEventPassAudit => ({
+    selectedReferencePass: "primary",
+    cofechaDiagnosisAvailable: false,
+    candidateEventCount: 0,
+    lagPathEventCount: 0,
+    rawLagPathEventCount: 0,
+    assembledEventCount: 0,
+    jointRefinedEventCount: 0,
+    referenceVotedEventCount: 0,
+    recoveredEventCount: 0,
+    finalEventCount: 0,
+});
+
+const copyEventPassAudit = (
+    target: DiagnosisEventPassAudit,
+    source: DiagnosisEventPassAudit,
+    selectedReferencePass: DiagnosisEventPassAudit["selectedReferencePass"],
+): void => {
+    Object.assign(target, source, { selectedReferencePass });
+};
+
+const auditEvent = (event: DiagnosisEvent): DiagnosisEventAuditSnapshot => ({
+    eventType: event.eventType,
+    startYear: event.startYear,
+    endYear: event.endYear,
+    topYear: event.rankedYears.slice().sort((left, right) => (
+        left.rank - right.rank || right.year - left.year
+    ))[0]?.year ?? null,
+    shiftYears: event.shiftYears ?? null,
+    confidenceLevel: event.confidenceLevel,
+    score: event.evidence.score,
+    scoreMargin: event.evidence.scoreMargin,
+    lagBefore: event.evidence.lagBefore,
+    lagAfter: event.evidence.lagAfter,
+    algorithmSources: [...event.evidence.algorithmSources],
+    notes: [...event.evidence.notes],
+});
+
+const auditCandidate = (
+    candidate: DiagnosisCandidateOperation,
+): DiagnosisCandidateAuditSnapshot => ({
+    operationType: candidate.operationType,
+    targetYear: candidate.targetYear ?? null,
+    anchorYear: candidate.anchorYear,
+    shiftYears: candidate.deltaYears ?? candidate.shift ?? null,
+    score: candidate.score,
+    confidenceLevel: candidate.confidenceLevel,
+    ambiguous: candidate.ambiguous,
+    algorithmSources: [...candidate.algorithmSource],
+});
 
 export const INTERNAL_EVENT_ENSEMBLE_OPTIONS: DiagnosisEventEnsembleOptions = {
     enableGainGatedOperationRecovery: false,
@@ -1523,6 +1581,7 @@ const eventsForSeriesPass = (
     candidates: DiagnosisCandidateOperation[],
     effectiveConfig: EffectiveDiagnosisConfig,
     options: DiagnosisEventEnsembleOptions,
+    audit?: DiagnosisEventPassAudit,
 ): DiagnosisEvent[] => {
     const pathCache = createLagPathCache();
     const eventPathConfig = {
@@ -1536,13 +1595,18 @@ const eventsForSeriesPass = (
     };
     const ownCandidates = candidates.filter((candidate) => candidate.targetTree === diagnosis.targetTree);
     const candidateEvents = makeDiagnosisEventsFromCandidates([diagnosis], ownCandidates);
+    if (audit) audit.candidateEventCount = candidateEvents.length;
     const cofechaDiagnosis = diagnoseSeriesCore(
         siteData,
         diagnosis.targetTree,
         effectiveConfig,
         cofechaPreprocess,
     );
-    if (!cofechaDiagnosis) return candidateEvents;
+    if (!cofechaDiagnosis) {
+        if (audit) audit.finalEventCount = candidateEvents.length;
+        return candidateEvents;
+    }
+    if (audit) audit.cofechaDiagnosisAvailable = true;
     const pathDiagnosis = diagnoseLagPath(
         cofechaDiagnosis,
         siteData,
@@ -1610,11 +1674,13 @@ const eventsForSeriesPass = (
             pathEvents = adaptiveEvents;
         }
     }
+    if (audit) audit.lagPathEventCount = pathEvents.length;
     const rawPathEvents = diagnoseLagPath(diagnosis, siteData, {
         ...eventPathConfig,
         useCofechaStandardization: false,
         enablePulseScan: false,
     }, pathCache).events;
+    if (audit) audit.rawLagPathEventCount = rawPathEvents.length;
     const hasWholeCandidate = typeEvents(candidateEvents, "wholeSeriesMove").length > 0;
     let cachedReferenceVerifiedFallback: DiagnosisEvent[] | null = null;
     const referenceVerifiedFallback = (): DiagnosisEvent[] => {
@@ -1833,6 +1899,7 @@ const eventsForSeriesPass = (
         ...partialEvents,
         ...wholeEvents,
     ];
+    if (audit) audit.assembledEventCount = assembledEvents.length;
     const coherentAssembledEvents = options.enableIncoherentPartialPruning === true
         ? pruneIncoherentPartialSupplements(assembledEvents)
         : assembledEvents;
@@ -1842,6 +1909,7 @@ const eventsForSeriesPass = (
         siteData,
         options.jointEventRefinementConfig,
     );
+    if (audit) audit.jointRefinedEventCount = jointRefinedEvents.length;
     const localEvents = jointRefinedEvents.filter((event) => event.eventType !== "wholeSeriesMove");
     const canAlignWholeOffset = options.enableReferenceVoting !== false
         && wholeEvents.length === 1
@@ -1902,6 +1970,7 @@ const eventsForSeriesPass = (
                     siteData,
                     effectiveConfig.maxPartialGapYears,
                 );
+    if (audit) audit.referenceVotedEventCount = votedEvents.length;
     let operationRecoveredBeforeFallback = false;
     const recoveredEvents = votedEvents.length > 0
         ? votedEvents
@@ -1921,6 +1990,7 @@ const eventsForSeriesPass = (
                 return referenceVerifiedFallback();
             })()
             : referenceVerifiedFallback();
+    if (audit) audit.recoveredEventCount = recoveredEvents.length;
     const edgeGuardedEvents = wholeEvents.length > 0
         ? recoveredEvents
         : recoveredEvents
@@ -1962,6 +2032,7 @@ const eventsForSeriesPass = (
             siteData,
         )
         : neighborRankedEvents;
+    if (audit) audit.finalEventCount = eventsWithLocationAlternatives.length;
     return eventsWithLocationAlternatives.sort((a, b) => (
         b.endYear - a.endYear || b.evidence.score - a.evidence.score
     ));
@@ -1973,6 +2044,7 @@ const eventsForSeries = (
     candidates: DiagnosisCandidateOperation[],
     effectiveConfig: EffectiveDiagnosisConfig,
     options: DiagnosisEventEnsembleOptions,
+    audit?: DiagnosisEventPassAudit,
 ): DiagnosisEvent[] => {
     const keepStrongestPartialMove = (
         events: DiagnosisEvent[],
@@ -1994,19 +2066,28 @@ const eventsForSeries = (
         ...options,
         enableMixedReferenceSupplement: false,
     };
+    const primaryAudit = emptyEventPassAudit();
     const primary = eventsForSeriesPass(
         siteData,
         diagnosis,
         candidates,
         effectiveConfig,
         passOptions,
+        primaryAudit,
     );
     if (options.enableMixedReferenceSupplement !== true || primary.length === 0) {
-        return keepStrongestPartialMove(primary);
+        const selected = keepStrongestPartialMove(primary);
+        primaryAudit.finalEventCount = selected.length;
+        if (audit) copyEventPassAudit(audit, primaryAudit, "primary");
+        return selected;
     }
     if (!shouldRunMixedReferencePass(primary)) {
-        return keepStrongestPartialMove(primary);
+        const selected = keepStrongestPartialMove(primary);
+        primaryAudit.finalEventCount = selected.length;
+        if (audit) copyEventPassAudit(audit, primaryAudit, "primary");
+        return selected;
     }
+    const alternateAudit = emptyEventPassAudit();
     const alternate = eventsForSeriesPass(
         siteData,
         diagnosis,
@@ -2022,6 +2103,7 @@ const eventsForSeries = (
                 individualMasterWeight: 0.1,
             },
         },
+        alternateAudit,
     );
     const [primaryScore, alternateScore] = scoreDiagnosisEventSets(
         [primary, alternate],
@@ -2034,9 +2116,12 @@ const eventsForSeries = (
         primaryScore,
         alternateScore,
     )) {
-        return keepStrongestPartialMove(primary);
+        const selected = keepStrongestPartialMove(primary);
+        primaryAudit.finalEventCount = selected.length;
+        if (audit) copyEventPassAudit(audit, primaryAudit, "primary");
+        return selected;
     }
-    return keepStrongestPartialMove(alternate.map((event) => ({
+    const selected = keepStrongestPartialMove(alternate.map((event) => ({
         ...event,
         evidence: {
             ...event.evidence,
@@ -2046,6 +2131,9 @@ const eventsForSeries = (
             ],
         },
     })));
+    alternateAudit.finalEventCount = selected.length;
+    if (audit) copyEventPassAudit(audit, alternateAudit, "mixed");
+    return selected;
 };
 
 const PARTIAL_GAP_YEAR_PREFIXES = [
@@ -2416,12 +2504,21 @@ export const makeDiagnosisEvents = (
     const endpointCache = createEndpointResidualWindowCache();
     const locatorPathCache = createLagPathCache();
     return diagnoses.flatMap((diagnosis) => {
+        const passAudit = emptyEventPassAudit();
+        const ownCandidates = candidates.filter((candidate) => (
+            candidate.targetTree === diagnosis.targetTree
+        ));
+        const candidateEvents = makeDiagnosisEventsFromCandidates(
+            [diagnosis],
+            ownCandidates,
+        );
         const detectedBeforeFusion = eventsForSeries(
             siteData,
             diagnosis,
             candidates,
             effectiveConfig,
             options,
+            passAudit,
         );
         const detected = options.enableDecisiveJointOperationFusion === true
             ? applyDecisiveJointOperationFusion(
@@ -2495,23 +2592,24 @@ export const makeDiagnosisEvents = (
                 ? stripDiagnosisEventAlternatives
                 : keepSingleMainWindow,
         );
+        const isValidAutomaticEvent = (event: DiagnosisEvent): boolean => (
+            event.eventType !== "partialMove"
+            || (
+                event.shiftSide === "older"
+                && isAutomaticPartialShift(event.shiftYears, {
+                    maxPartialGapYears: effectiveConfig.maxPartialGapYears,
+                    lagMin: effectiveConfig.lagMin,
+                    seriesLength:
+                        diagnosis.targetRange.endYear
+                        - diagnosis.targetRange.startYear + 1,
+                    minimumSideYears:
+                        DEFAULT_EVENT_OPERATION_RECOVERY_CONFIG.minimumSideYears,
+                })
+            )
+        );
         const validAutomaticEvents = (events: DiagnosisEvent[]): DiagnosisEvent[] => {
             const valid = events
-                .filter((event) => (
-                    event.eventType !== "partialMove"
-                    || (
-                        event.shiftSide === "older"
-                        && isAutomaticPartialShift(event.shiftYears, {
-                            maxPartialGapYears: effectiveConfig.maxPartialGapYears,
-                            lagMin: effectiveConfig.lagMin,
-                            seriesLength:
-                                diagnosis.targetRange.endYear
-                                - diagnosis.targetRange.startYear + 1,
-                            minimumSideYears:
-                                DEFAULT_EVENT_OPERATION_RECOVERY_CONFIG.minimumSideYears,
-                        })
-                    )
-                ))
+                .filter(isValidAutomaticEvent)
                 .map(stripDiagnosisEventAlternatives)
                 .map((event) => (
                     event.evidence.algorithmSources.includes(
@@ -2565,6 +2663,71 @@ export const makeDiagnosisEvents = (
                 ...projected.filter((event) => event.id !== endpointUnit.id),
             ];
         };
+        const finalize = (sourceEvents: DiagnosisEvent[]): DiagnosisEvent[] => {
+            const automaticSemanticsRejectedCount = sourceEvents.filter(
+                (event) => !isValidAutomaticEvent(event),
+            ).length;
+            const finalEvents = validAutomaticEvents(sourceEvents);
+            let finalReason: DiagnosisEventDecisionReason = "post_location_rejected";
+            if (finalEvents.length > 0) {
+                finalReason = "emitted";
+            } else if (
+                ownCandidates.length === 0
+                && candidateEvents.length === 0
+                && passAudit.lagPathEventCount === 0
+                && passAudit.rawLagPathEventCount === 0
+            ) {
+                finalReason = "no_internal_hypothesis";
+            } else if (detectedBeforeFusion.length === 0) {
+                finalReason = "ensemble_gate_rejected";
+            } else if (detected.length === 0) {
+                finalReason = "operation_fusion_rejected";
+            } else if (retainedDetected.length === 0) {
+                finalReason = "older_endpoint_context";
+            } else if (displayed.length === 0) {
+                finalReason = "display_projection_rejected";
+            } else if (automaticSemanticsRejectedCount > 0) {
+                finalReason = "automatic_semantics_conflict";
+            }
+            if (options.eventDecisionAudits) {
+                const depths = [...diagnosis.master.sampleDepth]
+                    .filter(([year, depth]) => (
+                        year >= diagnosis.targetRange.startYear
+                        && year <= diagnosis.targetRange.endYear
+                        && depth > 0
+                    ))
+                    .map(([, depth]) => depth)
+                    .sort((left, right) => left - right);
+                options.eventDecisionAudits.push({
+                    seriesId: diagnosis.targetTree,
+                    targetRange: { ...diagnosis.targetRange },
+                    cofechaFlagged: isCofechaFlaggedSeries(
+                        diagnosis.targetTree,
+                        options.cofechaFlaggedSeriesIds,
+                    ),
+                    referenceSourceCount: diagnosis.master.sourceTrees.length,
+                    minimumReferenceDepth: depths[0] ?? 0,
+                    medianReferenceDepth: depths[Math.floor(depths.length / 2)] ?? 0,
+                    candidateCount: ownCandidates.length,
+                    candidateModeCount: candidateEvents.filter((event) => (
+                        event.eventType !== "wholeSeriesMove"
+                    )).length,
+                    candidates: ownCandidates
+                        .slice()
+                        .sort((left, right) => right.score - left.score)
+                        .map(auditCandidate),
+                    pass: { ...passAudit },
+                    detectedBeforeFusion: detectedBeforeFusion.map(auditEvent),
+                    detectedAfterFusion: detected.map(auditEvent),
+                    retainedAfterEndpointGuard: retainedDetected.map(auditEvent),
+                    displayedBeforeLocator: displayed.map(auditEvent),
+                    finalEvents: finalEvents.map(auditEvent),
+                    automaticSemanticsRejectedCount,
+                    finalReason,
+                });
+            }
+            return finalEvents;
+        };
         const hasLocalEvent = displayed.some(
             (event) => event.eventType !== "wholeSeriesMove",
         );
@@ -2574,7 +2737,7 @@ export const makeDiagnosisEvents = (
         );
         if (options.enableCounterfactualEventLocator !== true
             || (!hasLocalEvent && !mayRecoverSequentialMissing)) {
-            return validAutomaticEvents(displayed);
+            return finalize(displayed);
         }
         const cofechaDiagnosis = diagnoseSeriesCore(
             siteData,
@@ -2582,7 +2745,7 @@ export const makeDiagnosisEvents = (
             effectiveConfig,
             cofechaPreprocess,
         );
-        if (!cofechaDiagnosis) return validAutomaticEvents(displayed);
+        if (!cofechaDiagnosis) return finalize(displayed);
         if (mayRecoverSequentialMissing) {
             const sequentialMissing = recoverSequentialMissingHeadEvent(
                 displayed,
@@ -2595,12 +2758,12 @@ export const makeDiagnosisEvents = (
                 locatorPathCache,
             );
             if (sequentialMissing) {
-                return validAutomaticEvents([sequentialMissing]);
+                return finalize([sequentialMissing]);
             }
         }
-        if (!hasLocalEvent) return validAutomaticEvents(displayed);
+        if (!hasLocalEvent) return finalize(displayed);
         const jointStateEvents = preserveJointLagStateWindows(displayed);
-        if (jointStateEvents) return validAutomaticEvents(jointStateEvents);
+        if (jointStateEvents) return finalize(jointStateEvents);
         const hasWholeSeriesBaseline = displayed.some(
             (event) => event.eventType === "wholeSeriesMove",
         );
@@ -2671,6 +2834,6 @@ export const makeDiagnosisEvents = (
                 locatorPathCache,
             );
         });
-        return validAutomaticEvents(locatedEvents);
+        return finalize(locatedEvents);
     });
 };

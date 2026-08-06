@@ -34,6 +34,7 @@ describe("targeted crossdating diagnosis", () => {
         const targeted = diagnoseCrossdating(site, {
             referenceConfig: null,
             targetTrees: ["TARGET"],
+            includeEventDecisionAudits: true,
         });
 
         expect(targeted.seriesCount).toBe(1);
@@ -55,6 +56,23 @@ describe("targeted crossdating diagnosis", () => {
         expect(targeted.events).toEqual(
             full.events.filter((event) => event.seriesId === "TARGET"),
         );
+        expect(full.eventDecisionAudits).toBeUndefined();
+        expect(targeted.eventDecisionAudits).toHaveLength(1);
+        expect(targeted.eventDecisionAudits?.[0]).toMatchObject({
+            seriesId: "TARGET",
+            targetRange: { startYear: 1820, endYear: 1999 },
+            referenceSourceCount: 4,
+            candidateCount: targeted.candidates.length,
+            finalReason: targeted.events.length > 0
+                ? "emitted"
+                : expect.any(String),
+        });
+        expect(targeted.eventDecisionAudits?.[0].finalEvents.map((event) => (
+            event.eventType
+        ))).toEqual(targeted.events.map((event) => event.eventType));
+        expect(targeted.eventDecisionAudits?.[0].candidates.every((candidate) => (
+            candidate.targetYear === null || Number.isInteger(candidate.targetYear)
+        ))).toBe(true);
         expect(targeted.masterNarrowYears).toEqual([]);
     });
 });
