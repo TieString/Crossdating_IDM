@@ -91,6 +91,11 @@ const PHYSICAL_PARTIAL_CONSENSUS_PROFILES = [
     "reference:rankMean",
 ] as const;
 
+const PARTIAL_REFERENCE_MODE_PROFILES = [
+    "pairFixedLagStepWeighted",
+    "pairFixedLagStepMedian",
+] as const;
+
 const UNIT_EVENT_SHARP_PROFILES = [
     "differenceFull",
     "transitionSplitGain",
@@ -116,6 +121,7 @@ const FALSE_RING_INDEPENDENT_MODE_MINIMUM_OPERATION_MARGIN = 0.05;
 const FALSE_RING_INDEPENDENT_MODE_MINIMUM_NEWER_SHIFT = 2;
 const MISSING_DIFFUSE_MODE_MINIMUM_SHIFT = 2;
 const MISSING_SIDE_STEP_MINIMUM_REMOTE_MARGIN = 0.04;
+const PARTIAL_NINE_YEAR_MINIMUM_OPERATION_MARGIN = 0.015;
 
 const percentileRanks = (values: number[]): number[] => {
     const ordered = values
@@ -572,9 +578,17 @@ export const selectCalibratedEventWindow = (
     }
     const usesFalseRingCusumMode = input.eventType === "falseRing"
         && input.ranks.has("cumulativeCombinedCusum");
-    const modeProfileNames = usesFalseRingCusumMode
+    const baseModeProfileNames = usesFalseRingCusumMode
         ? FALSE_RING_CUSUM_MODE_PROFILES
         : MODE_PROFILES[input.eventType];
+    const modeProfileNames = input.eventType === "partialMove"
+        ? [
+            ...baseModeProfileNames,
+            ...PARTIAL_REFERENCE_MODE_PROFILES.filter((profile) => (
+                input.ranks.has(profile)
+            )),
+        ]
+        : baseModeProfileNames;
     const modeRows = profileRows(input, modeProfileNames);
     const evidenceModeWindow = input.eventType === "falseRing"
         ? kernelConsensusWindow(
@@ -866,6 +880,11 @@ export const selectCalibratedEventWindow = (
             narrow
             && narrow.score >= 2.96
             && profilePeak >= 0.9895540914026256
+            && (
+                operationEvidence === undefined
+                || operationEvidence.remoteDifferenceMargin
+                    >= PARTIAL_NINE_YEAR_MINIMUM_OPERATION_MARGIN
+            )
             && (
                 input.decisiveYear === undefined
                 || contains(narrow, input.decisiveYear)

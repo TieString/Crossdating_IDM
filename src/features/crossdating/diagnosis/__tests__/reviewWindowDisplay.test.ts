@@ -105,7 +105,7 @@ describe("lower review-window display gate", () => {
         expect(result.event).toBe(strict);
     });
 
-    it("does not expose a strict partial move as a review-window fallback", () => {
+    it("keeps a strict partial move in the display layer", () => {
         const partial = {
             ...strictEvent(),
             eventType: "partialMove" as const,
@@ -116,9 +116,48 @@ describe("lower review-window display gate", () => {
             snapshot("missingRing"),
         ]), [partial]);
         expect(result).toMatchObject({
-            status: "refused",
-            reason: "operation_type_conflict",
-            event: null,
+            status: "strict",
+            reason: "strict_event",
+            event: partial,
+        });
+    });
+
+    it("shows a local partial before its independent whole-series baseline", () => {
+        const partial = {
+            ...strictEvent(),
+            eventType: "partialMove" as const,
+            shiftYears: -4,
+            shiftSide: "older" as const,
+        };
+        const whole = {
+            ...strictEvent(),
+            id: "whole",
+            eventType: "wholeSeriesMove" as const,
+            startYear: 1800,
+            endYear: 2000,
+        };
+        const result = selectReviewWindowDisplay(audit([]), [whole, partial]);
+
+        expect(result).toMatchObject({
+            status: "strict",
+            reason: "strict_event",
+            event: partial,
+        });
+    });
+
+    it("does not hide a strict whole-series move because it has no narrow window", () => {
+        const whole = {
+            ...strictEvent(),
+            eventType: "wholeSeriesMove" as const,
+            startYear: 1800,
+            endYear: 2000,
+        };
+        const result = selectReviewWindowDisplay(audit([]), [whole]);
+
+        expect(result).toMatchObject({
+            status: "strict",
+            reason: "strict_event",
+            event: whole,
         });
     });
 

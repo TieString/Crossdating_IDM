@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { DiagnosisEvent } from "../types";
 import {
+    partialMoveExplainsWholeSeriesCandidate,
     projectSequentialUnitChainHead,
+    pruneWholeSeriesPartialAliases,
     pruneUnsupportedFalseRingPathSupplements,
     unitEventCompetesWithWholeAtNewerEndpoint,
     unitEventExplainsWholeSeriesCandidate,
@@ -46,6 +48,42 @@ const wholeSeriesEvent = (lag: number): DiagnosisEvent => ({
         lagBefore: lag,
         lagAfter: 0,
     },
+});
+
+const partialMoveEvent = (shiftYears: number, fixedSideLag = 0): DiagnosisEvent => ({
+    ...falseRingEvent(1800, true),
+    id: `partial-${shiftYears}-${fixedSideLag}`,
+    eventType: "partialMove",
+    shiftYears,
+    shiftSide: "older",
+    evidence: {
+        ...falseRingEvent(1800, true).evidence,
+        lagBefore: shiftYears + fixedSideLag,
+        lagAfter: fixedSideLag,
+    },
+});
+
+describe("pruneWholeSeriesPartialAliases", () => {
+    it("removes a global-lag alias when a local partial move returns to zero", () => {
+        const whole = wholeSeriesEvent(-9);
+        const partial = partialMoveEvent(-9);
+
+        expect(partialMoveExplainsWholeSeriesCandidate(whole, partial)).toBe(true);
+        const result = pruneWholeSeriesPartialAliases([whole, partial]);
+        expect(result).toHaveLength(1);
+        expect(result[0].eventType).toBe("partialMove");
+        expect(result[0].evidence.algorithmSources)
+            .toContain("partial_move_preferred_over_global_lag");
+    });
+
+    it("keeps a real whole-series baseline under a local partial move", () => {
+        const whole = wholeSeriesEvent(2);
+        const partial = partialMoveEvent(-4, 2);
+
+        expect(partialMoveExplainsWholeSeriesCandidate(whole, partial)).toBe(false);
+        expect(pruneWholeSeriesPartialAliases([whole, partial]))
+            .toEqual([whole, partial]);
+    });
 });
 
 describe("pruneUnsupportedFalseRingPathSupplements", () => {

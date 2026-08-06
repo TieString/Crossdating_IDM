@@ -348,6 +348,32 @@ describe("selectCalibratedEventWindow", () => {
         );
     });
 
+    it("keeps a low-margin partial move at 13 years around per-reference lag steps", () => {
+        const result = selectCalibratedEventWindow({
+            eventType: "partialMove",
+            years,
+            ranks: ranks({
+                differenceFull: peak(1918, 8),
+                whitenedFull: peak(1918, 6),
+                comboFull: peak(1918, 6),
+                pairFixedLagStepWeighted: peak(1924, 4),
+                pairFixedLagStepMedian: peak(1923, 4),
+            }),
+            coarseWindow,
+            internalCandidates: [],
+            currentPrimaryYear: 1918,
+            operationEvidence: {
+                bestYear: 1918,
+                remoteDifferenceMargin: 0.008,
+            },
+        });
+
+        expect(result?.width).toBe(13);
+        expect(result?.calibrationRule).toBe("calibrated_default_13");
+        expect(result!.window.startYear).toBeLessThanOrEqual(1924);
+        expect(result!.window.endYear).toBeGreaterThanOrEqual(1924);
+    });
+
     it("falls back to 13 years for weak partial-move peaks", () => {
         const result = selectCalibratedEventWindow({
             eventType: "partialMove",

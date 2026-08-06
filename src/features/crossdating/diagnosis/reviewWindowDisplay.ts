@@ -201,12 +201,17 @@ export const selectReviewWindowDisplay = (
     overrides: Partial<ReviewWindowDisplayConfig> = {},
 ): DiagnosisReviewWindowDecision => {
     const config = { ...DEFAULT_REVIEW_WINDOW_DISPLAY_CONFIG, ...overrides };
-    const strict = strictEvents.find((event) => (
+    const strictUnit = strictEvents.find((event) => (
         event.eventType === "missingRing" || event.eventType === "falseRing"
     )) ?? null;
+    const strictLocal = strictUnit ?? strictEvents.find((event) => (
+        event.eventType === "partialMove"
+    )) ?? null;
+    const strict = strictLocal ?? (strictEvents.length === 1 ? strictEvents[0] : null);
     if (strict) {
         const width = strict.endYear - strict.startYear + 1;
-        if (!config.allowedWindowWidths.includes(width)) {
+        if (strict.eventType !== "wholeSeriesMove"
+            && !config.allowedWindowWidths.includes(width)) {
             return refused(audit, "window_width_unsafe");
         }
         return {

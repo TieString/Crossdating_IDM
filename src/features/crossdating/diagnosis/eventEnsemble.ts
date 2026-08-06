@@ -652,6 +652,59 @@ export const wholeSeriesEventIsLocalUnitAlias = (
     ));
 };
 
+export const partialMoveExplainsWholeSeriesCandidate = (
+    whole: DiagnosisEvent,
+    event: DiagnosisEvent,
+): boolean => {
+    const wholeLag = whole.evidence.lagBefore;
+    return whole.eventType === "wholeSeriesMove"
+        && wholeLag !== null
+        && wholeLag !== 0
+        && event.eventType === "partialMove"
+        && event.shiftYears === wholeLag
+        && event.evidence.lagBefore === wholeLag
+        && event.evidence.lagAfter === 0;
+};
+
+export const pruneWholeSeriesPartialAliases = (
+    events: DiagnosisEvent[],
+): DiagnosisEvent[] => {
+    const wholeEvents = events.filter((event) => (
+        event.eventType === "wholeSeriesMove"
+    ));
+    const partialAliases = events.filter((event) => (
+        event.eventType === "partialMove"
+        && wholeEvents.some((whole) => (
+            partialMoveExplainsWholeSeriesCandidate(whole, event)
+        ))
+    ));
+    if (partialAliases.length === 0) return events;
+    const aliasIds = new Set(partialAliases.map((event) => event.id));
+    return events
+        .filter((event) => (
+            event.eventType !== "wholeSeriesMove"
+            || !partialAliases.some((partial) => (
+                partialMoveExplainsWholeSeriesCandidate(event, partial)
+            ))
+        ))
+        .map((event) => aliasIds.has(event.id)
+            ? {
+                ...event,
+                evidence: {
+                    ...event.evidence,
+                    algorithmSources: Array.from(new Set([
+                        ...event.evidence.algorithmSources,
+                        "partial_move_preferred_over_global_lag",
+                    ])).sort(),
+                    notes: [
+                        ...event.evidence.notes,
+                        "whole_series_candidate=local_partial_alias",
+                    ],
+                },
+            }
+            : event);
+};
+
 const keepWholeSeriesEvent = (
     whole: DiagnosisEvent | undefined,
     partialEvents: DiagnosisEvent[],
@@ -2612,7 +2665,7 @@ export const makeDiagnosisEvents = (
             options,
             passAudit,
         );
-        const detected = options.enableDecisiveJointOperationFusion === true
+        const fusedDetected = options.enableDecisiveJointOperationFusion === true
             ? applyDecisiveJointOperationFusion(
                 detectedBeforeFusion,
                 diagnosis,
@@ -2623,6 +2676,7 @@ export const makeDiagnosisEvents = (
                 siteData,
             )
             : detectedBeforeFusion;
+        const detected = pruneWholeSeriesPartialAliases(fusedDetected);
         const retainedDetected = detected.filter((event) => (
             !isAutomaticOlderEndpointUnitEvent(event, diagnosis)
         ));
