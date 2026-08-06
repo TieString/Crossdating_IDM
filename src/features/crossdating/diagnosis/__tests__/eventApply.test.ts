@@ -112,6 +112,12 @@ describe("planDiagnosisEventEdit", () => {
         expect(oneYear).toBeNull();
     });
 
+    it("does not turn a lower-threshold review window into a direct edit", () => {
+        expect(planDiagnosisEventEdit(event("missingRing", {
+            reviewOnly: true,
+        }), 1902, 1899, 1903)).toBeNull();
+    });
+
     it("applies the deterministic 1904 / -4 case without touching the fixed side", () => {
         const longSeries = new Map<number, number>(
             Array.from({ length: 225 }, (_, index) => {

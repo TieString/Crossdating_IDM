@@ -176,6 +176,10 @@ const auditEvent = (event: DiagnosisEvent): DiagnosisEventAuditSnapshot => ({
     scoreMargin: event.evidence.scoreMargin,
     lagBefore: event.evidence.lagBefore,
     lagAfter: event.evidence.lagAfter,
+    samplePairs: event.evidence.samplePairs,
+    baselineCorrelation: event.evidence.baselineCorrelation,
+    correctedCorrelation: event.evidence.correctedCorrelation,
+    correlationGain: event.evidence.correlationGain,
     algorithmSources: [...event.evidence.algorithmSources],
     notes: [...event.evidence.notes],
 });
@@ -2717,6 +2721,7 @@ export const makeDiagnosisEvents = (
                         .sort((left, right) => right.score - left.score)
                         .map(auditCandidate),
                     pass: { ...passAudit },
+                    candidateProjectedEvents: candidateEvents.map(auditEvent),
                     detectedBeforeFusion: detectedBeforeFusion.map(auditEvent),
                     detectedAfterFusion: detected.map(auditEvent),
                     retainedAfterEndpointGuard: retainedDetected.map(auditEvent),

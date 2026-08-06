@@ -35,6 +35,7 @@ describe("targeted crossdating diagnosis", () => {
             referenceConfig: null,
             targetTrees: ["TARGET"],
             includeEventDecisionAudits: true,
+            reviewWindowDisplayMode: "review",
         });
 
         expect(targeted.seriesCount).toBe(1);
@@ -72,6 +73,13 @@ describe("targeted crossdating diagnosis", () => {
         ))).toEqual(targeted.events.map((event) => event.eventType));
         expect(targeted.eventDecisionAudits?.[0].candidates.every((candidate) => (
             candidate.targetYear === null || Number.isInteger(candidate.targetYear)
+        ))).toBe(true);
+        expect(targeted.reviewWindowDecisions).toHaveLength(1);
+        expect(targeted.reviewEvents?.length).toBeLessThanOrEqual(1);
+        expect(targeted.reviewEvents?.every((event) => (
+            event.seriesId === "TARGET"
+            && event.locationAlternatives === undefined
+            && event.operationAlternatives === undefined
         ))).toBe(true);
         expect(targeted.masterNarrowYears).toEqual([]);
     });

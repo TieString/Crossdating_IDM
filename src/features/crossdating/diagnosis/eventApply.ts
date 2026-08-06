@@ -37,6 +37,7 @@ export const planDiagnosisEventEdit = (
     seriesEndYear: number,
 ): DiagnosisEventEditPlan | null => {
     if (event.stale
+        || event.reviewOnly
         || selectedYear < event.startYear
         || selectedYear > event.endYear
         || seriesStartYear > seriesEndYear) {

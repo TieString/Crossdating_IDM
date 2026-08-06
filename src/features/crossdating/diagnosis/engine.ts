@@ -38,6 +38,7 @@ import {
 import {
     isAutomaticPartialShift,
 } from "./partialMoveSemantics";
+import { buildReviewWindowDisplays } from "./reviewWindowDisplay";
 import {
     compareDiagnosisCandidates,
     dedupeDiagnosisCandidates,
@@ -199,6 +200,7 @@ export function diagnoseCrossdating(
         if (range) candidate.suggestedRange = range;
     });
     const eventDecisionAudits = options.includeEventDecisionAudits
+        || options.reviewWindowDisplayMode === "review"
         ? [] as DiagnosisEventDecisionAudit[]
         : undefined;
     const events = makeDiagnosisEvents(
@@ -253,6 +255,7 @@ export function diagnoseCrossdating(
                     recoveredEventCount: 0,
                     finalEventCount: 0,
                 },
+                candidateProjectedEvents: [],
                 detectedBeforeFusion: [],
                 detectedAfterFusion: [],
                 retainedAfterEndpointGuard: [],
@@ -268,6 +271,10 @@ export function diagnoseCrossdating(
             - (treeOrder.get(right.seriesId) ?? Infinity)
         ));
     }
+    const reviewWindowDisplay = options.reviewWindowDisplayMode === "review"
+        && eventDecisionAudits
+        ? buildReviewWindowDisplays(eventDecisionAudits, events)
+        : null;
     const candidateCountByTree = candidates.reduce((counts, candidate) => {
         counts.set(candidate.targetTree, (counts.get(candidate.targetTree) ?? 0) + 1);
         return counts;
@@ -302,7 +309,13 @@ export function diagnoseCrossdating(
             : [],
         events,
         candidates,
-        ...(eventDecisionAudits ? { eventDecisionAudits } : {}),
+        ...(options.includeEventDecisionAudits && eventDecisionAudits
+            ? { eventDecisionAudits }
+            : {}),
+        ...(reviewWindowDisplay ? {
+            reviewEvents: reviewWindowDisplay.events,
+            reviewWindowDecisions: reviewWindowDisplay.decisions,
+        } : {}),
     };
 }
 

@@ -72,6 +72,8 @@ export type DiagnosisEvent = {
     shiftYears?: number;
     shiftSide?: DiagnosisEventShiftSide;
     seriesRange?: YearRange;
+    /** Lower display-gate hint; excluded from direct automatic application. */
+    reviewOnly?: boolean;
     stale?: boolean;
 };
 
@@ -86,6 +88,10 @@ export type DiagnosisEventAuditSnapshot = {
     scoreMargin: number;
     lagBefore: number | null;
     lagAfter: number | null;
+    samplePairs: number;
+    baselineCorrelation: number | null;
+    correctedCorrelation: number | null;
+    correlationGain: number | null;
     algorithmSources: string[];
     notes: string[];
 };
@@ -137,6 +143,7 @@ export type DiagnosisEventDecisionAudit = {
     candidateModeCount: number;
     candidates: DiagnosisCandidateAuditSnapshot[];
     pass: DiagnosisEventPassAudit;
+    candidateProjectedEvents: DiagnosisEventAuditSnapshot[];
     detectedBeforeFusion: DiagnosisEventAuditSnapshot[];
     detectedAfterFusion: DiagnosisEventAuditSnapshot[];
     retainedAfterEndpointGuard: DiagnosisEventAuditSnapshot[];
@@ -145,6 +152,31 @@ export type DiagnosisEventDecisionAudit = {
     automaticSemanticsRejectedCount: number;
     finalReason: DiagnosisEventDecisionReason;
 };
+
+export type DiagnosisReviewWindowDecisionStatus = "strict" | "review" | "refused";
+
+export type DiagnosisReviewWindowDecisionReason =
+    | "strict_event"
+    | "lower_display_gate_passed"
+    | "cofecha_target_unflagged"
+    | "insufficient_reference_support"
+    | "no_unit_hypothesis"
+    | "lag_direction_conflict"
+    | "operation_type_conflict"
+    | "competing_remote_modes"
+    | "endpoint_context_insufficient"
+    | "window_width_unsafe";
+
+export type DiagnosisReviewWindowDecision = {
+    seriesId: string;
+    status: DiagnosisReviewWindowDecisionStatus;
+    reason: DiagnosisReviewWindowDecisionReason;
+    strictReason: DiagnosisEventDecisionReason;
+    sourceStage: "final" | "displayed" | "retained" | "fused" | "detected" | "candidate" | null;
+    event: DiagnosisEvent | null;
+};
+
+export type ReviewWindowDisplayMode = "strict" | "review";
 export type CandidateRankingConfidence = DiagnosisConfidence | "ambiguous";
 
 export type DiagnosisCandidateOperationType =
@@ -514,6 +546,8 @@ export type CrossdatingDiagnosis = {
     events: DiagnosisEvent[];
     candidates: DiagnosisCandidateOperation[];
     eventDecisionAudits?: DiagnosisEventDecisionAudit[];
+    reviewEvents?: DiagnosisEvent[];
+    reviewWindowDecisions?: DiagnosisReviewWindowDecision[];
 };
 
 export type LocalSimulationOperationType =
@@ -589,6 +623,8 @@ export type DiagnosisOptions = {
     sharedZeroMarkerMode?: SharedZeroMarkerMode;
     /** Benchmark/debug trace only; does not change diagnosis decisions. */
     includeEventDecisionAudits?: boolean;
+    /** Separate user-facing review threshold; strict automatic events remain unchanged. */
+    reviewWindowDisplayMode?: ReviewWindowDisplayMode;
 };
 
 export type NumericSeries = Map<number, number>;
@@ -600,6 +636,7 @@ export type EffectiveDiagnosisConfig = Required<Omit<
     | "targetTrees"
     | "sharedZeroMarkerMode"
     | "includeEventDecisionAudits"
+    | "reviewWindowDisplayMode"
 >> & {
     referenceConfig: ReferenceSeriesConfig | null;
     minPairsForCorrelation: number;
