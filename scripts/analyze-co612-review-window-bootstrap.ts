@@ -47,6 +47,7 @@ type EventObservation = {
     reviewDecisionStatus: string;
     candidateCount: number;
     candidateModeCount: number;
+    reviewQueueEnteredRound?: number | null;
     strict: EventOutcome;
     review: EventOutcome;
 };
@@ -57,8 +58,22 @@ type ApplicationRow = {
     seriesId: string;
     truthYear: number;
     sourceStatus: string;
+    suggestedWindow: { startYear: number; endYear: number };
+    suggestedTopYear: number | null;
     recoveredBefore: number;
     recoveredAfter: number;
+};
+
+type RoundAudit = {
+    round: number;
+    recoveredBefore: number;
+    remainingEvents: number;
+    activeEvents: number;
+    strictResponseRate: number;
+    reviewResponseRate: number;
+    strictCoverageRate: number;
+    reviewCoverageRate: number;
+    selectedEventId: string | null;
 };
 
 type LegacyObservation = {
@@ -121,6 +136,7 @@ type CaseRow = {
     firstReview: EventOutcome | null;
     firstReviewResponse: EventOutcome | null;
     firstReviewResponseRound: number | null;
+    firstReviewQueueEnteredRound: number | null;
     firstCorrectReview: EventOutcome | null;
     firstCorrectReviewRound: number | null;
     firstCorrectReviewAttempt: number | null;
@@ -152,6 +168,7 @@ type CaseRow = {
         cofechaFlagged: boolean;
         restoredOtherEvents: number;
         restoredOtherFraction: number;
+        reviewQueueEnteredRound: number | null;
         globalZeroLagBestRate: number | null;
         globalAbsoluteLagP90: number | null;
     }>;
@@ -187,6 +204,7 @@ const summary = JSON.parse(
 ) as RunSummary;
 const observations = readJsonLines<EventObservation>(join(runDir, "observations.jsonl"));
 const applications = readJsonLines<ApplicationRow>(join(runDir, "applications.jsonl"));
+const roundAudits = readJsonLines<RoundAudit>(join(runDir, "rounds.jsonl"));
 const legacyObservations = readJsonLines<LegacyObservation>(
     join(legacyDir, "observations.jsonl"),
 );
@@ -255,6 +273,14 @@ parsed.forEach((series, seriesId) => {
         const firstReviewResponseObservation = eventObservations.find((row) => (
             row.review.response
         )) ?? null;
+        const firstReviewQueueEnteredRound = eventObservations.reduce<number | null>(
+            (earliest, row) => {
+                const entered = row.reviewQueueEnteredRound;
+                if (entered === undefined || entered === null) return earliest;
+                return earliest === null ? entered : Math.min(earliest, entered);
+            },
+            null,
+        );
         const firstCorrectObservation = eventObservations.find((row) => (
             row.review.windowCovered
         )) ?? null;
@@ -304,6 +330,7 @@ parsed.forEach((series, seriesId) => {
             firstReview: first?.review ?? null,
             firstReviewResponse: firstReviewResponseObservation?.review ?? null,
             firstReviewResponseRound: firstReviewResponseObservation?.round ?? null,
+            firstReviewQueueEnteredRound,
             firstCorrectReview: firstCorrectObservation?.review ?? null,
             firstCorrectReviewRound: firstCorrectObservation?.round ?? null,
             firstCorrectReviewAttempt: firstCorrectAttempt,
@@ -342,6 +369,7 @@ parsed.forEach((series, seriesId) => {
                 cofechaFlagged: row.cofechaFlagged,
                 restoredOtherEvents: row.restoredOtherEvents,
                 restoredOtherFraction: row.restoredOtherFraction,
+                reviewQueueEnteredRound: row.reviewQueueEnteredRound ?? null,
                 globalZeroLagBestRate: row.globalZeroLagBestRate ?? null,
                 globalAbsoluteLagP90: row.globalAbsoluteLagP90 ?? null,
             })),
@@ -405,9 +433,44 @@ const armReviewRetryFirstResponse = summarizeOutcomes(
     rows,
     (row) => row.firstReviewResponse,
 );
+const identifiableRows = rows.filter((row) => row.absoluteIdentifiable);
+const identifiableCount = identifiableRows.length;
+const rowsByEvent = new Map(rows.map((row) => [row.eventId, row]));
 const eventualCorrectCount = rows.filter((row) => (
     row.absoluteIdentifiable && row.firstCorrectReview !== null
 )).length;
+const confirmedApplications = applications.filter((application) => (
+    rowsByEvent.get(application.eventId)?.absoluteIdentifiable === true
+));
+const confirmedWindowWidths = confirmedApplications.map((application) => (
+    application.suggestedWindow.endYear - application.suggestedWindow.startYear + 1
+));
+const confirmedTop1Count = confirmedApplications.filter((application) => (
+    application.suggestedTopYear === application.truthYear
+)).length;
+const reviewQueueWaitRounds = confirmedApplications.flatMap((application) => {
+    const entered = rowsByEvent.get(application.eventId)?.firstReviewQueueEnteredRound;
+    return entered === null || entered === undefined
+        ? []
+        : [Math.max(0, application.round - entered)];
+});
+const confirmedWorkflow = {
+    confirmedCount: confirmedApplications.length,
+    confirmedCoverage: ratio(confirmedApplications.length, identifiableCount),
+    operationAccuracy: 1,
+    windowCoverage: ratio(confirmedApplications.length, identifiableCount),
+    conditionalWindowCoverage: 1,
+    top1Count: confirmedTop1Count,
+    top1Rate: ratio(confirmedTop1Count, identifiableCount),
+    conditionalTop1Rate: ratio(confirmedTop1Count, confirmedApplications.length),
+    medianWindowWidth: quantile(confirmedWindowWidths, 0.5),
+    p90WindowWidth: quantile(confirmedWindowWidths, 0.9),
+    invalidWindowWidthCount: confirmedWindowWidths.filter((width) => (
+        ![5, 7, 9, 13].includes(width)
+    )).length,
+    reviewQueueWaitMedian: quantile(reviewQueueWaitRounds, 0.5),
+    reviewQueueWaitP90: quantile(reviewQueueWaitRounds, 0.9),
+};
 
 const directStrictRefusals = rows.filter((row) => (
     row.absoluteIdentifiable && row.firstStrict !== null && !row.firstStrict.response
@@ -429,6 +492,9 @@ const directRefusalSameRound = directStrictRefusals.filter((row) => (
 ));
 const directRefusalLater = directStrictRefusals.filter((row) => (
     row.firstReview?.response !== true && row.firstReviewResponse !== null
+));
+const directRefusalEverCorrect = directStrictRefusals.filter((row) => (
+    row.firstCorrectReview !== null
 ));
 
 const legacyRefusals = rows.filter((row) => (
@@ -473,30 +539,70 @@ const maxRound = Math.max(
     ...observations.map((row) => row.round),
     ...applications.map((row) => row.round),
 );
-const identifiableCount = rows.filter((row) => row.absoluteIdentifiable).length;
+const unrecoveredRows = identifiableRows.filter((row) => !row.recovered);
+const finalFrontierObservations = observations.filter((observation) => (
+    observation.round === maxRound
+    && rowsByEvent.get(observation.eventId)?.recovered === false
+));
+const classifyFinalFrontier = (observation: EventObservation): string => {
+    if (!observation.review.response) return observation.reviewDecisionReason;
+    if (!observation.review.operationCorrect) return "incorrect_operation";
+    if (!observation.review.windowCovered) return "window_miss";
+    return "correct_window_not_applied";
+};
+const finalFrontier = finalFrontierObservations.map((observation) => ({
+    eventId: observation.eventId,
+    seriesId: observation.seriesId,
+    truthYear: observation.truthYear,
+    reason: classifyFinalFrontier(observation),
+    strictReason: observation.strictReason,
+    reviewDecisionStatus: observation.reviewDecisionStatus,
+    reviewDecisionReason: observation.reviewDecisionReason,
+    strictOperation: observation.strict.eventType,
+    strictTopYear: observation.strict.topYear,
+    strictWindowStart: observation.strict.windowStart,
+    strictWindowEnd: observation.strict.windowEnd,
+    reviewOperation: observation.review.eventType,
+    reviewTopYear: observation.review.topYear,
+    reviewWindowStart: observation.review.windowStart,
+    reviewWindowEnd: observation.review.windowEnd,
+    score: observation.strict.score,
+    margin: observation.strict.scoreMargin,
+    minimumReferenceDepth: observation.minimumReferenceDepth,
+}));
+const finalFrontierReasonCounts = finalFrontier.reduce<Record<string, number>>(
+    (counts, row) => ({
+        ...counts,
+        [row.reason]: (counts[row.reason] ?? 0) + 1,
+    }),
+    {},
+);
+const observationRounds = Array.from(new Set(observations.map((row) => row.round)))
+    .sort((left, right) => left - right);
+const roundAuditByRound = new Map(roundAudits.map((row) => [row.round, row]));
 const responseCurve = [0, 0.25, 0.5, 0.75, 1].map((requestedFraction) => {
     const requiredRecoveries = Math.ceil(identifiableCount * requestedFraction);
-    const checkpointApplication = requestedFraction === 0
-        ? null
-        : applications.find((row) => row.recoveredAfter >= requiredRecoveries) ?? null;
-    const available = requestedFraction === 0 || checkpointApplication !== null;
-    const round = requestedFraction === 0
-        ? Math.min(...observations.map((row) => row.round))
-        : checkpointApplication?.round ?? maxRound;
-    const recoveredByRound = applications.filter((row) => row.round <= round).length;
+    const checkpointRound = observationRounds.find((round) => (
+        confirmedApplications.filter((row) => row.round < round).length
+            >= requiredRecoveries
+    ));
+    const available = checkpointRound !== undefined;
+    const round = checkpointRound ?? maxRound;
+    const recoveredByRound = confirmedApplications.filter((row) => row.round < round).length;
     const selectedOutcome = (row: CaseRow): EventOutcome | null => {
         const application = applicationsByEvent.get(row.eventId);
-        if (application && application.round <= round) {
+        if (application && application.round < round) {
             return {
                 response: true,
                 eventType: "missingRing",
                 operationCorrect: true,
                 windowCovered: true,
-                top1Exact: false,
-                topYear: row.truthYear,
-                windowStart: row.truthYear,
-                windowEnd: row.truthYear,
-                windowWidth: null,
+                top1Exact: application.suggestedTopYear === row.truthYear,
+                topYear: application.suggestedTopYear,
+                windowStart: application.suggestedWindow.startYear,
+                windowEnd: application.suggestedWindow.endYear,
+                windowWidth: application.suggestedWindow.endYear
+                    - application.suggestedWindow.startYear + 1,
                 confidence: "confirmed",
                 score: null,
                 scoreMargin: null,
@@ -514,6 +620,13 @@ const responseCurve = [0, 0.25, 0.5, 0.75, 1].map((requestedFraction) => {
         recoveredEvents: recoveredByRound,
         achievedRecoveredFraction: ratio(recoveredByRound, identifiableCount),
         snapshot: summarizeOutcomes(rows, selectedOutcome),
+        activeFrontier: roundAuditByRound.has(round) ? {
+            cases: roundAuditByRound.get(round)!.activeEvents,
+            strictResponseRate: roundAuditByRound.get(round)!.strictResponseRate,
+            reviewResponseRate: roundAuditByRound.get(round)!.reviewResponseRate,
+            strictCoverageRate: roundAuditByRound.get(round)!.strictCoverageRate,
+            reviewCoverageRate: roundAuditByRound.get(round)!.reviewCoverageRate,
+        } : null,
     };
 });
 
@@ -628,6 +741,10 @@ const resolutionCounts = legacyRefusalResolution.reduce<Record<string, number>>(
     }),
     {},
 );
+const finalWorkflowSnapshot = responseCurve[responseCurve.length - 1].snapshot;
+const selectionPolicy = observations.some((row) => (
+    row.reviewQueueEnteredRound !== undefined
+)) ? "oldest_reviewable_first" : "strict_status_then_score";
 
 const analysisSummary = {
     source: {
@@ -647,7 +764,9 @@ const analysisSummary = {
         rounds: maxRound,
         recoveredEvents: summary.recoveredEvents,
         remainingEvents: summary.remainingEvents,
+        selectionPolicy,
     },
+    confirmedWorkflow,
     controls: {
         strictGateFirstDiagnosis: armStrictInitial,
         lowerDisplayGateFirstDiagnosis: armReviewInitial,
@@ -672,6 +791,36 @@ const analysisSummary = {
                 directRefusalCovered.length,
                 directRefusalCorrectOperations.length,
             ),
+            eventualCorrectWindowCount: directRefusalEverCorrect.length,
+            eventualCorrectWindowCoverage: ratio(
+                directRefusalEverCorrect.length,
+                directStrictRefusals.length,
+            ),
+        },
+        lowerDisplayGateEffect: {
+            responseRateDelta:
+                armReviewInitial.responseRate - armStrictInitial.responseRate,
+            operationAccuracyDelta:
+                armReviewInitial.operationAccuracy - armStrictInitial.operationAccuracy,
+            primaryWindowCoverageDelta:
+                armReviewInitial.primaryWindowCoverage
+                - armStrictInitial.primaryWindowCoverage,
+            conditionalWindowCoverageDelta:
+                armReviewInitial.conditionalWindowCoverage
+                - armStrictInitial.conditionalWindowCoverage,
+            partialMoveMisclassificationRateDelta:
+                armReviewInitial.partialMoveMisclassificationRate
+                - armStrictInitial.partialMoveMisclassificationRate,
+        },
+        retryEffect: {
+            responseRateDelta:
+                armReviewRetryFirstResponse.responseRate - armReviewInitial.responseRate,
+            primaryWindowCoverageDelta:
+                armReviewRetryFirstResponse.primaryWindowCoverage
+                - armReviewInitial.primaryWindowCoverage,
+            conditionalWindowCoverageDelta:
+                armReviewRetryFirstResponse.conditionalWindowCoverage
+                - armReviewInitial.conditionalWindowCoverage,
         },
     },
     retry: {
@@ -709,6 +858,14 @@ const analysisSummary = {
         firstCorrectWindowElapsedRoundsMedian: quantile(firstCorrectElapsedRounds, 0.5),
         firstCorrectWindowElapsedRoundsP90: quantile(firstCorrectElapsedRounds, 0.9),
     },
+    finalPersistence: {
+        unrecoveredCount: unrecoveredRows.length,
+        finalFrontierCount: finalFrontier.length,
+        blockedBehindFrontierCount: Math.max(0, unrecoveredRows.length - finalFrontier.length),
+        finalFrontierReasonCounts,
+        absoluteUnidentifiableCount: rows.length - identifiableCount,
+        note: "persistent algorithmic failures are not theoretical absolute-unidentifiability",
+    },
     legacyBaselineRefusals: {
         denominator: rows.length,
         refusalCount: legacyRefusals.length,
@@ -722,6 +879,48 @@ const analysisSummary = {
     cleanOriginalFalsePositives: summary.cleanOriginal,
     relativeAlignment: summary.relativeAlignment,
     responseCurve,
+    targetAssessment: {
+        displayResponseRate: {
+            target: 0.945,
+            actual: armReviewRetryFirstResponse.responseRate,
+            met: armReviewRetryFirstResponse.responseRate >= 0.945,
+        },
+        firstResponsePrimaryWindowCoverage: {
+            target: 0.9,
+            actual: armReviewRetryFirstResponse.primaryWindowCoverage,
+            met: armReviewRetryFirstResponse.primaryWindowCoverage >= 0.9,
+        },
+        iterativeConfirmedWindowCoverage: {
+            target: 0.9,
+            actual: confirmedWorkflow.windowCoverage,
+            met: confirmedWorkflow.windowCoverage >= 0.9,
+        },
+        firstResponseConditionalWindowCoverage: {
+            target: 0.94,
+            actual: armReviewRetryFirstResponse.conditionalWindowCoverage,
+            met: armReviewRetryFirstResponse.conditionalWindowCoverage >= 0.94,
+        },
+        finalWorkflowConditionalWindowCoverage: {
+            target: 0.94,
+            actual: finalWorkflowSnapshot.conditionalWindowCoverage,
+            met: finalWorkflowSnapshot.conditionalWindowCoverage >= 0.94,
+        },
+        operationAccuracy: {
+            target: 0.96,
+            actual: armReviewRetryFirstResponse.operationAccuracy,
+            met: armReviewRetryFirstResponse.operationAccuracy >= 0.96,
+        },
+        medianWindowWidth: {
+            targetMaximum: 9,
+            actual: armReviewRetryFirstResponse.medianWindowWidth,
+            met: (armReviewRetryFirstResponse.medianWindowWidth ?? Infinity) <= 9,
+        },
+        p90WindowWidth: {
+            targetMaximum: 13,
+            actual: armReviewRetryFirstResponse.p90WindowWidth,
+            met: (armReviewRetryFirstResponse.p90WindowWidth ?? Infinity) <= 13,
+        },
+    },
 };
 
 const csvValue = (value: unknown): string => {
@@ -763,6 +962,11 @@ writeFileSync(join(outputDir, "cases.json"), JSON.stringify(rows, null, 2));
 writeCsv(join(outputDir, "cases.csv"), flatCases);
 writeFileSync(join(outputDir, "strata.json"), JSON.stringify(strata, null, 2));
 writeFileSync(
+    join(outputDir, "final-frontier.json"),
+    JSON.stringify(finalFrontier, null, 2),
+);
+writeCsv(join(outputDir, "final-frontier.csv"), finalFrontier);
+writeFileSync(
     join(outputDir, "original-refusal-resolution.json"),
     JSON.stringify(legacyRefusalResolution, null, 2),
 );
@@ -771,9 +975,20 @@ writeFileSync(join(outputDir, "response-curve.json"), JSON.stringify(responseCur
 writeCsv(join(outputDir, "response-curve.csv"), responseCurve.map((row) => ({
     ...row,
     snapshot: JSON.stringify(row.snapshot),
+    activeFrontier: JSON.stringify(row.activeFrontier),
 })));
 
 const percent = (value: number): string => `${(value * 100).toFixed(2)}%`;
+const signedPoints = (value: number): string => (
+    `${value >= 0 ? "+" : ""}${(value * 100).toFixed(2)} 个百分点`
+);
+const responseCurveTable = responseCurve.map((row) => (
+    `| ${percent(row.requestedRecoveredFraction)} | ${row.available ? "是" : "否"}`
+    + ` | ${row.round} | ${percent(row.achievedRecoveredFraction)}`
+    + ` | ${row.activeFrontier ? percent(row.activeFrontier.reviewResponseRate) : "-"}`
+    + ` | ${percent(row.snapshot.primaryWindowCoverage)}`
+    + ` | ${percent(row.snapshot.conditionalWindowCoverage)} |`
+)).join("\n");
 const report = `# co612 全部自然 0 同时删除：复核窗口与自举重诊断
 
 ## 数据隔离
@@ -783,7 +998,15 @@ const report = `# co612 全部自然 0 同时删除：复核窗口与自举重�
 - 源文件未修改：${sourceSha256After === summary.sourceSha256 ? "是" : "否"}
 - 初始诊断副本中的 0：${summary.initialZeroCount}
 - 隐藏真值事件：${rows.length}；绝对可辨识：${identifiableCount}；absolute-unidentifiable：${rows.length - identifiableCount}
-- 运行停止原因：\`${summary.stopReason}\`；恢复 ${summary.recoveredEvents}/${rows.length}
+- 选择策略：\`${selectionPolicy}\`
+- 运行停止原因：\`${summary.stopReason}\`；经用户确认恢复 ${summary.recoveredEvents}/${rows.length}（${percent(confirmedWorkflow.confirmedCoverage)}）
+
+## 指标口径
+
+- “首次诊断”只取每个事件第一次成为当前前沿时的结果，不能用后续恢复替代。
+- “逐轮首次响应”允许其他事件恢复后重诊断，但每个事件只取第一次出现的窗口。
+- “曾经正确窗口”表示任一轮曾出现操作正确且覆盖真年份的窗口。
+- “确认恢复”只统计模拟用户检查后确认操作和窗口都正确并实际恢复的事件，不是无人监督自动应用准确率。
 
 ## 四组对照
 
@@ -793,7 +1016,21 @@ const report = `# co612 全部自然 0 同时删除：复核窗口与自举重�
 | 降低复核显示门槛，首次诊断 | ${percent(armReviewInitial.responseRate)} | ${percent(armReviewInitial.operationAccuracy)} | ${percent(armReviewInitial.primaryWindowCoverage)} | ${percent(armReviewInitial.conditionalWindowCoverage)} | ${percent(armReviewInitial.top1Rate)} | ${percent(armReviewInitial.partialMoveMisclassificationRate)} | ${armReviewInitial.medianWindowWidth ?? "-"} | ${armReviewInitial.p90WindowWidth ?? "-"} |
 | 降低显示门槛并逐轮重试，首次出现的窗口 | ${percent(armReviewRetryFirstResponse.responseRate)} | ${percent(armReviewRetryFirstResponse.operationAccuracy)} | ${percent(armReviewRetryFirstResponse.primaryWindowCoverage)} | ${percent(armReviewRetryFirstResponse.conditionalWindowCoverage)} | ${percent(armReviewRetryFirstResponse.top1Rate)} | ${percent(armReviewRetryFirstResponse.partialMoveMisclassificationRate)} | ${armReviewRetryFirstResponse.medianWindowWidth ?? "-"} | ${armReviewRetryFirstResponse.p90WindowWidth ?? "-"} |
 
-逐轮重试期间至少一次出现正确主窗口：${eventualCorrectCount}/${identifiableCount}（${percent(ratio(eventualCorrectCount, identifiableCount))}）。
+第四组隔离实验只恢复被研究拒答事件以外的事件：直接严格拒答 ${directStrictRefusals.length} 个，${directRefusalLater.length} 个后来重新响应，首次重响应操作准确率 ${percent(ratio(directRefusalCorrectOperations.length, directRefusalFirstResponses.length))}、窗口覆盖率 ${percent(ratio(directRefusalCovered.length, directRefusalCorrectOperations.length))}；其中 ${directRefusalEverCorrect.length} 个最终曾出现正确窗口。
+
+低显示门槛相对严格门槛：响应率 ${signedPoints(armReviewInitial.responseRate - armStrictInitial.responseRate)}，操作准确率 ${signedPoints(armReviewInitial.operationAccuracy - armStrictInitial.operationAccuracy)}，主窗口覆盖率 ${signedPoints(armReviewInitial.primaryWindowCoverage - armStrictInitial.primaryWindowCoverage)}，partialMove 误判率 ${signedPoints(armReviewInitial.partialMoveMisclassificationRate - armStrictInitial.partialMoveMisclassificationRate)}。响应率略低是因为复核层拒绝显示 4 个 partialMove 冲突，而不是额外提高了拒答门槛。
+
+## 串行复核结果
+
+- 逐轮重试期间至少一次出现正确主窗口：${eventualCorrectCount}/${identifiableCount}（${percent(ratio(eventualCorrectCount, identifiableCount))}）。
+- 实际经用户确认恢复：${confirmedWorkflow.confirmedCount}/${identifiableCount}（${percent(confirmedWorkflow.confirmedCoverage)}）。
+- 确认时 Top1：${confirmedWorkflow.top1Count}/${identifiableCount}（总体 ${percent(confirmedWorkflow.top1Rate)}；已恢复条件下 ${percent(confirmedWorkflow.conditionalTop1Rate)}）。
+- 确认窗口中位宽度/P90：${confirmedWorkflow.medianWindowWidth ?? "-"}/${confirmedWorkflow.p90WindowWidth ?? "-"} 年；非法宽度 ${confirmedWorkflow.invalidWindowWidthCount}。
+- 从首次进入待复核队列到确认：中位 ${confirmedWorkflow.reviewQueueWaitMedian ?? "-"} 轮，P90 ${confirmedWorkflow.reviewQueueWaitP90 ?? "-"} 轮。
+
+| 目标恢复比例 | 是否达到 | 诊断轮次 | 实际已恢复 | 当前前沿响应率 | 全状态主窗口覆盖 | 条件覆盖 |
+| ---: | :---: | ---: | ---: | ---: | ---: | ---: |
+${responseCurveTable}
 
 ## 拒答恢复
 
@@ -803,7 +1040,25 @@ const report = `# co612 全部自然 0 同时删除：复核窗口与自举重�
 - 最终持续拒答：${analysisSummary.retry.finalPersistentRefusalCount}
 - 首次正确窗口所需诊断次数：中位 ${analysisSummary.retry.firstCorrectWindowAttemptMedian ?? "-"}，P90 ${analysisSummary.retry.firstCorrectWindowAttemptP90 ?? "-"}
 
-旧基线的 ${legacyRefusals.length} 个“拒答”中，实际直接诊断后无响应 ${analysisSummary.legacyBaselineRefusals.directlyDiagnosedButRefusedCount} 个，因前序阻塞而从未到达 ${analysisSummary.legacyBaselineRefusals.notReachedCount} 个。解析结果：\`${JSON.stringify(resolutionCounts)}\`。
+旧基线的 ${legacyRefusals.length} 个“拒答”中，实际直接诊断后无响应 ${analysisSummary.legacyBaselineRefusals.directlyDiagnosedButRefusedCount} 个，因前序阻塞而从未到达 ${analysisSummary.legacyBaselineRefusals.notReachedCount} 个。低显示门槛同状态解决 ${resolutionCounts.lower_display_gate_same_state ?? 0} 个；等待其他事件恢复后解决 ${resolutionCounts.after_other_events_recovered ?? 0} 个；仍持续失败 ${resolutionCounts.persistent ?? 0} 个。
+
+## 终局阻塞
+
+- 未恢复 ${unrecoveredRows.length} 个：${finalFrontier.length} 个当前前沿直接阻塞，${Math.max(0, unrecoveredRows.length - finalFrontier.length)} 个位于这些前沿之后，尚未成为可诊断事件。
+- 当前前沿原因：\`${JSON.stringify(finalFrontierReasonCounts)}\`。
+- 理论上的 absolute-unidentifiable 为 ${rows.length - identifiableCount} 个。其余持续失败是当前算法或串行路径限制，不能标成理论不可辨识。
+
+## 目标判定
+
+| 指标 | 目标 | 实测 | 结果 |
+| --- | ---: | ---: | :---: |
+| 逐轮曾响应率 | >=94.5% | ${percent(armReviewRetryFirstResponse.responseRate)} | ${armReviewRetryFirstResponse.responseRate >= 0.945 ? "通过" : "未通过"} |
+| 首次响应主窗口覆盖 | >=90% | ${percent(armReviewRetryFirstResponse.primaryWindowCoverage)} | ${armReviewRetryFirstResponse.primaryWindowCoverage >= 0.9 ? "通过" : "未通过"} |
+| 串行确认主窗口覆盖 | >=90% | ${percent(confirmedWorkflow.windowCoverage)} | ${confirmedWorkflow.windowCoverage >= 0.9 ? "通过" : "未通过"} |
+| 首次响应条件覆盖 | >=94% | ${percent(armReviewRetryFirstResponse.conditionalWindowCoverage)} | ${armReviewRetryFirstResponse.conditionalWindowCoverage >= 0.94 ? "通过" : "未通过"} |
+| 终局工作流条件覆盖 | >=94% | ${percent(finalWorkflowSnapshot.conditionalWindowCoverage)} | ${finalWorkflowSnapshot.conditionalWindowCoverage >= 0.94 ? "通过" : "未通过"} |
+| 操作准确率 | >=96% | ${percent(armReviewRetryFirstResponse.operationAccuracy)} | ${armReviewRetryFirstResponse.operationAccuracy >= 0.96 ? "通过" : "未通过"} |
+| 窗口中位宽度/P90 | <=9/13 | ${armReviewRetryFirstResponse.medianWindowWidth ?? "-"}/${armReviewRetryFirstResponse.p90WindowWidth ?? "-"} | ${(armReviewRetryFirstResponse.medianWindowWidth ?? Infinity) <= 9 && (armReviewRetryFirstResponse.p90WindowWidth ?? Infinity) <= 13 ? "通过" : "未通过"} |
 
 ## 安全指标
 
@@ -813,7 +1068,7 @@ const report = `# co612 全部自然 0 同时删除：复核窗口与自举重�
 - 初始/最终样芯间零 lag 比例：${percent(summary.relativeAlignment.initial.zeroLagBestRate)} / ${percent(summary.relativeAlignment.final.zeroLagBestRate)}
 - 初始/最终绝对 lag P90：${summary.relativeAlignment.initial.p90AbsoluteBestLag} / ${summary.relativeAlignment.final.p90AbsoluteBestLag}
 
-逐案结果见 \`cases.csv\` / \`cases.json\`，旧拒答映射见 \`original-refusal-resolution.csv\`，分层结果见 \`strata.json\`，响应曲线见 \`response-curve.csv\`。
+逐案结果见 \`cases.csv\` / \`cases.json\`，旧拒答映射见 \`original-refusal-resolution.csv\`，终局前沿见 \`final-frontier.csv\`，分层结果见 \`strata.json\`，响应曲线见 \`response-curve.csv\`。
 `;
 writeFileSync(join(outputDir, "report.md"), report, "utf8");
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RwlSiteData } from "@/features/rwl/types";
 import {
+    compareBootstrapReviewQueueCandidates,
     findAbsoluteUnidentifiableTruthYears,
     selectAutomaticBootstrapApplication,
 } from "../bootstrapEvaluation";
@@ -38,6 +39,37 @@ const diagnosisEvent = (
 });
 
 describe("bootstrap evaluation isolation", () => {
+    it("reviews the oldest visible event before newer high-score events", () => {
+        const candidates = [
+            {
+                seriesId: "NEW_HIGH",
+                reviewQueueEnteredRound: 20,
+                reviewStatus: "strict" as const,
+                score: 100,
+            },
+            {
+                seriesId: "OLD_LOW",
+                reviewQueueEnteredRound: 5,
+                reviewStatus: "review" as const,
+                score: 1,
+            },
+            {
+                seriesId: "OLD_STRICT",
+                reviewQueueEnteredRound: 5,
+                reviewStatus: "strict" as const,
+                score: 0.5,
+            },
+        ];
+
+        candidates.sort(compareBootstrapReviewQueueCandidates);
+
+        expect(candidates.map((candidate) => candidate.seriesId)).toEqual([
+            "OLD_STRICT",
+            "OLD_LOW",
+            "NEW_HIGH",
+        ]);
+    });
+
     it("selects an executable automatic action without accepting hidden truth", () => {
         const site: RwlSiteData = new Map([
             ["A", new Map(Array.from({ length: 101 }, (_, index) => [1900 + index, index + 1]))],

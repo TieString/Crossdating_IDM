@@ -11,7 +11,10 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import { findAbsoluteUnidentifiableTruthYears } from "@/features/crossdating/diagnosis/bootstrapEvaluation";
+import {
+    compareBootstrapReviewQueueCandidates,
+    findAbsoluteUnidentifiableTruthYears,
+} from "@/features/crossdating/diagnosis/bootstrapEvaluation";
 import {
     extractPart6FlaggedASeriesIds,
     splitReportByParts,
@@ -681,15 +684,17 @@ try {
         )).sort((left, right) => {
             const leftResult = bySeries.get(left.seriesId)!;
             const rightResult = bySeries.get(right.seriesId)!;
-            const statusWeight = (status: DiagnosisReviewWindowDecision["status"]) => (
-                status === "strict" ? 2 : status === "review" ? 1 : 0
-            );
-            return (left.reviewQueueEnteredRound ?? round)
-                - (right.reviewQueueEnteredRound ?? round)
-                || statusWeight(rightResult.reviewDecision.status)
-                - statusWeight(leftResult.reviewDecision.status)
-                || (right.review.score ?? -Infinity) - (left.review.score ?? -Infinity)
-                || left.seriesId.localeCompare(right.seriesId);
+            return compareBootstrapReviewQueueCandidates({
+                seriesId: left.seriesId,
+                reviewQueueEnteredRound: left.reviewQueueEnteredRound,
+                reviewStatus: leftResult.reviewDecision.status,
+                score: left.review.score,
+            }, {
+                seriesId: right.seriesId,
+                reviewQueueEnteredRound: right.reviewQueueEnteredRound,
+                reviewStatus: rightResult.reviewDecision.status,
+                score: right.review.score,
+            });
         });
         const selected = eligible[0] ?? null;
         const roundAudit = {

@@ -157,6 +157,8 @@
 - `npm run validate:cofecha-reference` — synthetic demo 验证 PART 6 A flag 分类、COFECHA-pass reference 生成、最终 master mean=0/sd=1 与 offset target set
 - `npm run validate:current-event-ranker` — 校验三套完整 bundle、RRF deployment/exe 哈希、251/70/10/109 特征协议、参考预测、双门控/RRF 状态、Tauri resource/externalBin 与禁止资源
 - `npm run analyze:unit-window-stability -- <audit.json> [...]` — 汇总单位事件的响应、粗区间、13 年模式和最终单窗口分层覆盖；输入需由 `ITRDB_COUNTERFACTUAL_LOCATOR_AUDIT=1` 生成
+- `npm run benchmark:co612-review-bootstrap -- --input <source-copy.rwl> --max-rounds 400 --workers 16 --run-id <id>` — 同时删除 co612 全部自然 0，以最早待复核窗口优先逐轮恢复一个经用户模拟确认的事件；隐藏真值不得进入诊断或参考
+- `npm run analyze:co612-review-bootstrap -- --run-dir <result-dir>` — 输出四组复核门槛/重试对照、逐案状态路径、拒答恢复、终局前沿、响应曲线与分层指标
 - `npm run trial:auto-crossdating` — 在临时目录对 RAW 样例应用自动诊断候选并跑 COFECHA 对比；每轮每条序列只应用一个候选，不修改源文件
 - `node scripts/profile-js-diagnosis.mjs <file.rwl> --target=<series>` — 测量单目标 JS 事件诊断解析与计算耗时
 - `npm run tauri`

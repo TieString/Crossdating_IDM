@@ -3,6 +3,13 @@ import type { RwlSiteData } from "@/features/rwl/types";
 import { planDiagnosisEventEdit } from "./eventApply";
 import type { DiagnosisEvent } from "./types";
 
+export type BootstrapReviewQueueCandidate = {
+    seriesId: string;
+    reviewQueueEnteredRound: number | null;
+    reviewStatus: "strict" | "review" | "refused";
+    score: number | null;
+};
+
 export type BootstrapAutomaticSelection = {
     event: DiagnosisEvent;
     selectedYear: number;
@@ -21,6 +28,22 @@ export const compareBootstrapEvents = (
     || right.evidence.score - left.evidence.score
     || (right.rankedYears[0]?.year ?? -Infinity)
         - (left.rankedYears[0]?.year ?? -Infinity)
+);
+
+const reviewStatusWeight = (
+    status: BootstrapReviewQueueCandidate["reviewStatus"],
+): number => status === "strict" ? 2 : status === "review" ? 1 : 0;
+
+/** Keeps a visible review window from being starved by newer high-score events. */
+export const compareBootstrapReviewQueueCandidates = (
+    left: BootstrapReviewQueueCandidate,
+    right: BootstrapReviewQueueCandidate,
+): number => (
+    (left.reviewQueueEnteredRound ?? Number.MAX_SAFE_INTEGER)
+        - (right.reviewQueueEnteredRound ?? Number.MAX_SAFE_INTEGER)
+    || reviewStatusWeight(right.reviewStatus) - reviewStatusWeight(left.reviewStatus)
+    || (right.score ?? -Infinity) - (left.score ?? -Infinity)
+    || left.seriesId.localeCompare(right.seriesId)
 );
 
 /**
