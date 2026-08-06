@@ -995,6 +995,7 @@ const legacySequentialWindowWidth = (
 const lagHeadSequentialWindowWidth = (
     head: SequentialMissingHead,
 ): 5 | 7 | 13 => {
+    if (head.headRunYears <= 2) return 13;
     if (!Number.isFinite(head.headMeanAdvantage)
         || head.headMeanAdvantage < 0.08) return 13;
     if (head.headMeanAdvantage < 0.4) return 7;
@@ -1005,7 +1006,9 @@ export type SequentialMissingPresentation = {
     marker: SharedExplicitZeroMarker | null;
     selectedYear: number;
     windowCenterYear: number;
-    width: 5 | 7 | 13;
+    width: 5 | 7 | 9 | 13;
+    candidateConsensusYear: number | null;
+    candidateWindowSupportYear: number | null;
 };
 
 /** Shared zeros can reorder only the local lag head; production windows stay lag-centered. */
@@ -1013,21 +1016,45 @@ export const resolveSequentialMissingPresentation = (
     head: SequentialMissingHead,
     candidateMarker: SharedExplicitZeroMarker | null,
     mode: SharedZeroMarkerMode,
+    candidateCenters: readonly number[] = [],
 ): SequentialMissingPresentation => {
     const marker = mode === "none"
         || (mode === "local2" && (candidateMarker?.distanceFromHead ?? 0) > 2)
         ? null
         : candidateMarker;
-    const selectedYear = marker?.year ?? head.year;
+    const candidateWindowSupportYear = mode === "legacy6"
+        ? null
+        : candidateCenters
+            .filter((year) => Math.abs(year - head.year) <= 13)
+            .sort((left, right) => (
+                Math.abs(left - head.year) - Math.abs(right - head.year)
+                || right - left
+            ))[0] ?? null;
+    const candidateConsensusYear = (marker?.support ?? 0) >= 10
+        ? null
+        : candidateWindowSupportYear;
+    const candidateDistance = candidateWindowSupportYear === null
+        ? null
+        : Math.abs(candidateWindowSupportYear - head.year);
+    const lagWidth = mode === "legacy6"
+        ? legacySequentialWindowWidth(head, marker)
+        : lagHeadSequentialWindowWidth(head);
+    const width = candidateDistance === null
+        ? lagWidth
+        : candidateDistance <= 2
+            ? Math.max(9, lagWidth) as 9 | 13
+            : 13;
+    const selectedYear = candidateConsensusYear ?? marker?.year ?? head.year;
     return {
         marker,
         selectedYear,
-        windowCenterYear: mode === "legacy6" && marker && marker.distanceFromHead > 2
-            ? selectedYear
-            : head.year,
-        width: mode === "legacy6"
-            ? legacySequentialWindowWidth(head, marker)
-            : lagHeadSequentialWindowWidth(head),
+        windowCenterYear: candidateConsensusYear
+            ?? (mode === "legacy6" && marker && marker.distanceFromHead > 2
+                ? selectedYear
+                : head.year),
+        width,
+        candidateConsensusYear,
+        candidateWindowSupportYear,
     };
 };
 
@@ -1057,14 +1084,26 @@ const makeSequentialMissingHeadEvent = (
     detected: DiagnosisEvent[],
     diagnosis: SeriesCoreDiagnosis,
     candidates: DiagnosisCandidateOperation[],
+    candidateEvents: DiagnosisEvent[],
     markerMode: SharedZeroMarkerMode,
 ): DiagnosisEvent => {
+    const candidateCenters = candidateEvents
+        .filter((event) => event.eventType === "partialMove")
+        .map((event) => event.rankedYears[0]?.year)
+        .filter((year): year is number => year !== undefined);
     const {
         marker,
         selectedYear,
         windowCenterYear,
         width,
-    } = resolveSequentialMissingPresentation(head, candidateMarker, markerMode);
+        candidateConsensusYear,
+        candidateWindowSupportYear,
+    } = resolveSequentialMissingPresentation(
+        head,
+        candidateMarker,
+        markerMode,
+        candidateCenters,
+    );
     const window = boundedSequentialWindow(
         windowCenterYear,
         width,
@@ -1111,6 +1150,9 @@ const makeSequentialMissingHeadEvent = (
         evidence: {
             algorithmSources: [
                 "sequential_missing_staircase_head",
+                ...(candidateConsensusYear !== null
+                    ? ["sequential_missing_candidate_consensus"]
+                    : []),
                 ...(marker ? ["shared_explicit_zero_marker"] : []),
             ].sort(),
             score: head.gainOverDirect,
@@ -1144,6 +1186,15 @@ const makeSequentialMissingHeadEvent = (
                     `shared_zero_marker_distance=${marker.distanceFromHead}`,
                     `shared_zero_marker_weighted_support=${marker.weightedSupport.toFixed(6)}`,
                 ] : [`shared_zero_marker=none_mode_${markerMode}`]),
+                ...(candidateConsensusYear !== null ? [
+                    `sequential_missing_candidate_consensus_year=${candidateConsensusYear}`,
+                    `sequential_missing_candidate_head_distance=${Math.abs(
+                        candidateConsensusYear - head.year,
+                    )}`,
+                ] : ["sequential_missing_candidate_consensus=none"]),
+                ...(candidateWindowSupportYear !== null ? [
+                    `sequential_missing_candidate_window_support_year=${candidateWindowSupportYear}`,
+                ] : []),
                 `shared_zero_marker_mode=${markerMode}`,
                 `sequential_missing_width_source=${
                     markerMode === "legacy6" ? "legacy_shared_zero" : "lag_head_advantage"
@@ -1196,6 +1247,7 @@ const recoverSequentialMissingHeadEvent = (
     cofechaDiagnosis: SeriesCoreDiagnosis,
     siteData: RwlSiteData,
     candidates: DiagnosisCandidateOperation[],
+    candidateEvents: DiagnosisEvent[],
     effectiveConfig: EffectiveDiagnosisConfig,
     options: DiagnosisEventEnsembleOptions,
     pathCache: LagPathCache,
@@ -1229,6 +1281,7 @@ const recoverSequentialMissingHeadEvent = (
             detected,
             diagnosis,
             candidates,
+            candidateEvents,
             markerMode,
         );
     }
@@ -1276,6 +1329,7 @@ const recoverSequentialMissingHeadEvent = (
         detected,
         diagnosis,
         candidates,
+        [],
         markerMode,
     ), competition!, staircase!);
 };
@@ -2758,6 +2812,7 @@ export const makeDiagnosisEvents = (
                 cofechaDiagnosis,
                 siteData,
                 candidates,
+                candidateEvents,
                 effectiveConfig,
                 options,
                 locatorPathCache,

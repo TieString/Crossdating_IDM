@@ -48,6 +48,7 @@ describe("shared explicit zero locality", () => {
                 selectedYear: 1902,
                 windowCenterYear: 1900,
                 width: 7,
+                candidateConsensusYear: null,
             });
         expect(resolveSequentialMissingPresentation(head, null, "local2").width)
             .toBe(local.width);
@@ -60,6 +61,61 @@ describe("shared explicit zero locality", () => {
                 windowCenterYear: 1900,
                 width: 5,
             });
+    });
+
+    it("uses a nearby independent partial locator to calibrate one consensus window", () => {
+        expect(resolveSequentialMissingPresentation(
+            head,
+            marker(1902),
+            "local2",
+            [1902],
+        )).toMatchObject({
+            selectedYear: 1902,
+            windowCenterYear: 1902,
+            width: 9,
+            candidateConsensusYear: 1902,
+            candidateWindowSupportYear: 1902,
+        });
+        expect(resolveSequentialMissingPresentation(
+            head,
+            null,
+            "local2",
+            [1911],
+        )).toMatchObject({
+            selectedYear: 1911,
+            windowCenterYear: 1911,
+            width: 13,
+            candidateConsensusYear: 1911,
+            candidateWindowSupportYear: 1911,
+        });
+    });
+
+    it("widens a one-year lag-head run without moving its center", () => {
+        expect(resolveSequentialMissingPresentation({
+            ...head,
+            headRunYears: 1,
+        }, null, "local2")).toMatchObject({
+            selectedYear: 1900,
+            windowCenterYear: 1900,
+            width: 13,
+            candidateConsensusYear: null,
+            candidateWindowSupportYear: null,
+        });
+    });
+
+    it("uses a strong shared zero to keep Top1 while candidate evidence only widens", () => {
+        expect(resolveSequentialMissingPresentation(
+            head,
+            { ...marker(1900), support: 20 },
+            "local2",
+            [1903],
+        )).toMatchObject({
+            selectedYear: 1900,
+            windowCenterYear: 1900,
+            width: 13,
+            candidateConsensusYear: null,
+            candidateWindowSupportYear: 1903,
+        });
     });
 
     it("keeps legacy recentering only for the explicit baseline ablation", () => {
