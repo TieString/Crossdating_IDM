@@ -555,6 +555,27 @@ if (resume && existsSync(checkpointPath) && existsSync(checkpointSitePath)) {
     });
 }
 
+if (resume) {
+    const retainCompletedRounds = (path: string) => {
+        if (!existsSync(path)) return;
+        const retained = readFileSync(path, "utf8")
+            .split(/\r?\n/)
+            .filter(Boolean)
+            .map((line) => JSON.parse(line) as { round: number })
+            .filter((row) => row.round < nextRound);
+        writeFileSync(
+            path,
+            retained.length > 0
+                ? `${retained.map((row) => JSON.stringify(row)).join("\n")}\n`
+                : "",
+            "utf8",
+        );
+    };
+    retainCompletedRounds(observationsPath);
+    retainCompletedRounds(applicationsPath);
+    retainCompletedRounds(roundsPath);
+}
+
 const initialVerificationSite = buildInitialSite();
 const initialZeroCount = zeroCount(initialVerificationSite);
 if (initialZeroCount !== 0) {
@@ -570,6 +591,10 @@ let stopReason = "max_rounds";
 try {
     for (let round = nextRound; round <= maxRounds; round += 1) {
         const roundStartedAt = Date.now();
+        const activeTargetIds = Array.from(states.values())
+            .filter((state) => state.remainingTruthYears.length > 0)
+            .map((state) => state.seriesId)
+            .sort();
         const label = join("rounds", String(round).padStart(4, "0"));
         const context = runCofechaState(label, siteData);
         const roundPairwiseAlignment = summarizePairwiseAlignment(siteData);
@@ -577,7 +602,7 @@ try {
             label: `round-${round}`,
             sitePath: context.sitePath,
             outPath: context.outPath,
-            targetIds,
+            targetIds: activeTargetIds,
             cofechaFlaggedIds: context.flaggedIds,
             pairwiseClusterIds: context.pairwiseClusterIds,
             usePairwiseBootstrap: context.usePairwiseBootstrap,
