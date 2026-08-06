@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ClipboardEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AnimatePresence } from "motion/react";
 import { TreeChartManager } from "@/components/Chart/TreeChartManager";
 import { CurrentEventSuggestionPanel } from "@/components/DiagnosisCandidates/CurrentEventSuggestionPanel";
@@ -80,6 +81,8 @@ import {
 import { useResizablePanels } from "./useResizablePanels";
 import { publishConsoleDataExport } from "./home/consoleDataExport";
 import type { CurrentEventSuggestion } from "@/services/currentEventRanker/types";
+import { hasCofechaSeriesMapValue } from "@/features/cofecha/seriesId";
+import type { ChartJumpTarget } from "@/components/Chart/chartNavigation";
 
 const isTreeBoundary = (value: string | undefined) => (
     value === undefined || !/[A-Za-z0-9_]/.test(value)
@@ -307,6 +310,7 @@ export default function Home() {
     const deleteSeriesRequestIdRef = useRef(0);
     const cofechaCellJumpIdRef = useRef(0);
     const cofechaPart6JumpIdRef = useRef(0);
+    const chartJumpIdRef = useRef(0);
     const handledCofechaPart6JumpIdRef = useRef<number | null>(null);
     const cofechaReportScrollRef = useRef<HTMLDivElement | null>(null);
     const editHighlightIdRef = useRef(0);
@@ -315,6 +319,7 @@ export default function Home() {
     const [deleteSeriesRequest, setDeleteSeriesRequest] = useState<DeleteSeriesRequest | null>(null);
     const [cofechaCellJumpTarget, setCofechaCellJumpTarget] = useState<CofechaCellJumpTarget | null>(null);
     const [cofechaPart6JumpTarget, setCofechaPart6JumpTarget] = useState<{ id: number; tree: string } | null>(null);
+    const [chartJumpTarget, setChartJumpTarget] = useState<ChartJumpTarget | null>(null);
     const [editHighlightTarget, setEditHighlightTarget] = useState<EditHighlightTarget | null>(null);
     const [isRawEditing, setIsRawEditing] = useState(false);
     const [legendContainer, setLegendContainer] = useState<HTMLElement | null>(null);
@@ -331,6 +336,8 @@ export default function Home() {
     const [findMatchIndex, setFindMatchIndex] = useState(0);
     const [problemTab, setProblemTab] = useState<"problems" | "candidates">("problems");
     const [focusedCurrentEventSuggestion, setFocusedCurrentEventSuggestion] = useState<CurrentEventSuggestion | null>(null);
+    const [chartSelectedTrees, setChartSelectedTrees] = useState<string[]>([]);
+    const chartSelectionFileRef = useRef<string | null>(null);
     const {
         applyRawRwlText,
         applyRawRwlTextForTree,
@@ -406,6 +413,28 @@ export default function Home() {
         treeOptions,
         windowTitle,
     } = useHomeWorkspace();
+
+    useEffect(() => {
+        const fileChanged = chartSelectionFileRef.current !== fileName;
+        chartSelectionFileRef.current = fileName;
+        if (fileChanged) {
+            setChartJumpTarget(null);
+        }
+        setChartSelectedTrees((previous) => {
+            const next = fileChanged
+                ? []
+                : previous.filter((tree) => siteData.has(tree));
+            return next.length === previous.length
+                && next.every((tree, index) => tree === previous[index])
+                ? previous
+                : next;
+        });
+    }, [fileName, siteData]);
+
+    const handleChartSelectedTreesChange = useCallback((trees: string[]) => {
+        const next = Array.from(new Set(trees.filter((tree) => siteData.has(tree))));
+        setChartSelectedTrees(next);
+    }, [siteData]);
 
     useEffect(() => {
         publishConsoleDataExport(fileName, siteData, cofechaResult);
@@ -557,6 +586,23 @@ export default function Home() {
         ];
     }, [panelContextMenu, externalWorkspaceWindows, handleOpenWorkspaceWindow]);
 
+    const handleJumpToChart = useCallback((tree: string, year: number) => {
+        const resolvedTree = resolveCofechaTreeCode(tree, siteData);
+        if (!siteData.has(resolvedTree) || !Number.isFinite(year)) return;
+
+        chartJumpIdRef.current += 1;
+        setChartSelectedTrees((previous) => (
+            previous.includes(resolvedTree) ? previous : [...previous, resolvedTree]
+        ));
+        if (selectedTree !== resolvedTree) {
+            handleTreeSelectionChange(resolvedTree);
+        }
+        setChartJumpTarget({ id: chartJumpIdRef.current, tree: resolvedTree, year });
+        if (externalWorkspaceWindows["line-chart"]) {
+            handleOpenWorkspaceWindow("line-chart");
+        }
+    }, [externalWorkspaceWindows, handleOpenWorkspaceWindow, handleTreeSelectionChange, selectedTree, siteData]);
+
     const handleDeleteSeriesRequestHandled = useCallback((id: number) => {
         setDeleteSeriesRequest((request) => request?.id === id ? null : request);
     }, []);
@@ -581,6 +627,42 @@ export default function Home() {
             year,
         });
     }, [handleTreeSelectionChange, selectedTree, siteData]);
+
+    const handleChartLocateWidth = useCallback((tree: string, year: number) => {
+        const resolvedTree = resolveCofechaTreeCode(tree, siteData);
+        if (!siteData.has(resolvedTree) || !Number.isFinite(year)) return;
+
+        cofechaCellJumpIdRef.current += 1;
+        setIsRawEditing(false);
+        if (selectedTree !== resolvedTree) {
+            handleTreeSelectionChange(resolvedTree);
+        }
+        setCofechaCellJumpTarget({
+            id: cofechaCellJumpIdRef.current,
+            tree: resolvedTree,
+            year,
+        });
+    }, [handleTreeSelectionChange, selectedTree, siteData]);
+
+    const handleOpenRawEditorForTree = useCallback((tree: string) => {
+        const resolvedTree = resolveCofechaTreeCode(tree, siteData);
+        if (!siteData.has(resolvedTree)) return;
+
+        // 明确使用菜单对应的序列，避免依赖尚未完成的 selectedTree 状态更新。
+        setFindReplaceOpen(false);
+        setCofechaCellJumpTarget(null);
+        setEditHighlightTarget(null);
+        if (selectedTree !== resolvedTree) {
+            handleTreeSelectionChange(resolvedTree);
+        }
+        setRawEditorTree(resolvedTree);
+        setRawEditorInitialText(getCurrentRwlText(resolvedTree));
+        setRawEditorError("");
+        setIsRawEditing(true);
+        setRawEditorRevision((revision) => revision + 1);
+        // 从独立折线图发起时，把已打开文本编辑器的主窗口带到前台。
+        void getCurrentWindow().setFocus();
+    }, [getCurrentRwlText, handleTreeSelectionChange, selectedTree, siteData]);
 
     const handleFocusDiagnosisEvent = useCallback((event: DiagnosisEvent, selectedYear?: number) => {
         if (event.eventType === "wholeSeriesMove") {
@@ -610,6 +692,7 @@ export default function Home() {
         }
         return trees;
     }, [cofechaPart6Text]);
+    const cofechaPart6TreeList = useMemo(() => Array.from(cofechaPart6Trees), [cofechaPart6Trees]);
 
     const handleJumpToCofechaPart6 = useCallback((tree: string) => {
         const resolvedTree = resolveCofechaTreeCode(tree, siteData);
@@ -624,6 +707,9 @@ export default function Home() {
         // 报告已弹出到独立窗口时，主窗口只剩占位符——聚焦独立窗口，让那边完成滚动。
         if (externalWorkspaceWindows.cofecha) {
             handleOpenWorkspaceWindow("cofecha");
+        } else {
+            // 从独立折线图发起且 COFECHA 留在主窗口时，将主窗口带到前台。
+            void getCurrentWindow().setFocus();
         }
     }, [externalWorkspaceWindows.cofecha, handleOpenWorkspaceWindow, selectedPart, setSelectedPart, siteData]);
 
@@ -693,12 +779,16 @@ export default function Home() {
         "line-chart": {
             kind: "line-chart",
             siteData: serializeRwlSiteData(siteData),
+            selectedTrees: chartSelectedTrees,
+            focusedTree: selectedTree === ALL_OPTION_VALUE ? null : selectedTree,
+            jumpTarget: chartJumpTarget ?? undefined,
             referenceConfig,
             dynamicReferenceConfig,
             diagnosis: crossdatingDiagnosis,
             diagnosisBatchResult,
+            cofechaPart6Trees: cofechaPart6TreeList,
         },
-    }), [canResetToRawData, cofechaPart6JumpTarget, cofechaResult, crossdatingDiagnosis, crossdatingValidationSummary, diagnosisBatchResult, dynamicReferenceConfig, fileName, isCofechaOutdated, isCofechaRunning, linkedReport, operationLog, referenceConfig, selectedPart, siteData]);
+    }), [canResetToRawData, chartJumpTarget, chartSelectedTrees, cofechaPart6JumpTarget, cofechaPart6TreeList, cofechaResult, crossdatingDiagnosis, crossdatingValidationSummary, diagnosisBatchResult, dynamicReferenceConfig, fileName, isCofechaOutdated, isCofechaRunning, linkedReport, operationLog, referenceConfig, selectedPart, selectedTree, siteData]);
 
     const handleCofechaTextClick = useCallback((event: MouseEvent<HTMLParagraphElement>) => {
         const target = event.target;
@@ -783,7 +873,15 @@ export default function Home() {
                 }
                 break;
             case "line-chart":
-                if (command.type === "set-reference") {
+                if (command.type === "set-selection") {
+                    handleChartSelectedTreesChange(command.trees);
+                } else if (command.type === "locate-width") {
+                    handleChartLocateWidth(command.tree, command.year);
+                } else if (command.type === "edit-as-text") {
+                    handleOpenRawEditorForTree(command.tree);
+                } else if (command.type === "locate-cofecha") {
+                    handleJumpToCofechaPart6(command.tree);
+                } else if (command.type === "set-reference") {
                     handleReferenceConfigChange(command.config);
                 } else if (command.type === "reset-reference-dynamic") {
                     handleResetReferenceToDynamic();
@@ -797,13 +895,17 @@ export default function Home() {
                     handleInsertMissingYearAtSideFromChart(command.tree, command.year, command.side);
                 } else if (command.type === "delete-year") {
                     handleDeleteYearWithModeFromChart(command.tree, command.year, command.mode, command.shift);
-                } else {
+                } else if (command.type === "delete-series") {
                     handleDeleteSeriesFromChart(command.tree);
                 }
                 break;
         }
     }, [
         handleCofechaCellReferenceClick,
+        handleChartLocateWidth,
+        handleChartSelectedTreesChange,
+        handleJumpToCofechaPart6,
+        handleOpenRawEditorForTree,
         handleDeleteSeriesFromChart,
         handleDeleteYearWithModeFromChart,
         handleApplyDiagnosisCandidate,
@@ -998,21 +1100,6 @@ export default function Home() {
     const getRawEditorText = useCallback(() => (
         rawEditorRef.current?.innerText ?? rawEditorInitialText
     ), [rawEditorInitialText]);
-
-    const handleOpenRawEditor = useCallback(() => {
-        // 进入文本编辑前清掉查找跳转/编辑高亮：退出时 WidthContainer 会重新挂载，
-        // 否则会重放上一次的查找跳转、高亮和选择（用户反馈的多余动画）。
-        setFindReplaceOpen(false);
-        setCofechaCellJumpTarget(null);
-        setEditHighlightTarget(null);
-        // 选中了某条序列时，只编辑这一条序列的文本；否则编辑整个文件。
-        const editTree = selectedTree !== ALL_OPTION_VALUE && siteData.has(selectedTree) ? selectedTree : null;
-        setRawEditorTree(editTree);
-        setRawEditorInitialText(getCurrentRwlText(editTree ?? undefined));
-        setRawEditorError("");
-        setIsRawEditing(true);
-        setRawEditorRevision((revision) => revision + 1);
-    }, [getCurrentRwlText, selectedTree, siteData]);
 
     const handleCancelRawEditor = useCallback(() => {
         setIsRawEditing(false);
@@ -1283,7 +1370,7 @@ export default function Home() {
                                     </option>
                                     {treeOptions.map((tree) => (
                                         <option key={tree} value={tree}>
-                                            {possibleProblemsDetail.has(tree) ? TREE_WARNING_MARK : TREE_NORMAL_MARK}{tree}
+                                            {hasCofechaSeriesMapValue(possibleProblemsDetail, tree) ? TREE_WARNING_MARK : TREE_NORMAL_MARK}{tree}
                                         </option>
                                     ))}
                                 </select>
@@ -1354,10 +1441,11 @@ export default function Home() {
                                                     onMarkYearRangeAsMissing={handleMarkYearRangeAsMissing}
                                                     onRestoreDeletion={handleRestoreDeletion}
                                                     onDeleteSeries={handleDeleteSeries}
-                                                    onEditAsText={handleOpenRawEditor}
+                                                    onEditAsText={handleOpenRawEditorForTree}
                                                     onDeleteSeriesRequestHandled={handleDeleteSeriesRequestHandled}
                                                     onReplaceTreeData={handleReplaceTreeData}
                                                     onApplyBayesianStartYear={handleApplyBayesianStartYear}
+                                                    onJumpToChart={handleJumpToChart}
                                                     onJumpToCofecha={handleJumpToCofechaPart6}
                                                     cofechaPart6Trees={cofechaPart6Trees}
                                                 />
@@ -1642,6 +1730,9 @@ export default function Home() {
                                             ) : (
                                                 <TreeChartManager
                                                     fullData={siteData}
+                                                    selectedTrees={chartSelectedTrees}
+                                                    focusedTree={selectedTree === ALL_OPTION_VALUE ? null : selectedTree}
+                                                    jumpTarget={chartJumpTarget}
                                                     referenceConfig={referenceConfig}
                                                     dynamicReferenceConfig={dynamicReferenceConfig}
                                                     diagnosis={crossdatingDiagnosis}
@@ -1654,6 +1745,11 @@ export default function Home() {
                                                     onInsertMissingYearAtSide={handleInsertMissingYearAtSideFromChart}
                                                     onDeleteYearWithMode={handleDeleteYearWithModeFromChart}
                                                     onDeleteSeries={handleDeleteSeriesFromChart}
+                                                    onSelectedTreesChange={handleChartSelectedTreesChange}
+                                                    onLocateWidth={handleChartLocateWidth}
+                                                    onEditAsText={handleOpenRawEditorForTree}
+                                                    onJumpToCofecha={handleJumpToCofechaPart6}
+                                                    cofechaPart6Trees={cofechaPart6TreeList}
                                                 />
                                             )}
                                         </div>

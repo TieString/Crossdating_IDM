@@ -1,5 +1,6 @@
 import { stopMarker } from "@/shared/constants";
 import type { RwlSiteData, RwlTreeData } from "@/features/rwl/types";
+import { normalizeCofechaSeriesId } from "@/features/cofecha/seriesId";
 
 export const REFERENCE_SERIES_LABEL = "Reference / Master-like series";
 export const COFECHA_PASS_REFERENCE_LABEL = "COFECHA-pass 参考序列";
@@ -155,8 +156,6 @@ const standardDeviation = (values: readonly number[]) => {
     return Math.sqrt(variance);
 };
 
-const normalizeSeriesId = (seriesId: string) => seriesId.trim().toUpperCase();
-
 export function createReferenceSeriesConfig(selectedTrees: string[]): ReferenceSeriesConfig | null {
     const uniqueTrees = Array.from(new Set(selectedTrees.filter(Boolean)));
     if (uniqueTrees.length === 0) {
@@ -178,13 +177,13 @@ export function classifyCofechaPart6Series(
     cofechaRunId: string,
 ): CofechaPart6Classification {
     const uniqueAllSeriesIds = Array.from(new Set(allSeriesIds.filter(Boolean)));
-    const flaggedSet = new Set(Array.from(flaggedAIds, normalizeSeriesId));
+    const flaggedSet = new Set(Array.from(flaggedAIds, normalizeCofechaSeriesId));
     const flaggedAIdSet = new Set<string>();
     const anchorPassIds: string[] = [];
     const candidateFlaggedIds: string[] = [];
 
     uniqueAllSeriesIds.forEach((seriesId) => {
-        if (flaggedSet.has(normalizeSeriesId(seriesId))) {
+        if (flaggedSet.has(normalizeCofechaSeriesId(seriesId))) {
             candidateFlaggedIds.push(seriesId);
             flaggedAIdSet.add(seriesId);
         } else {

@@ -14,6 +14,7 @@ import type { ReferenceSeriesConfig } from "@/features/crossdating/reference";
 import type { ICofechaResult } from "@/features/cofecha/types";
 import type { DeleteMode, DeleteShift, MissingInsertSide, RwlOperationLogEntry } from "@/features/rwl/edit";
 import type { RwlSiteData } from "@/features/rwl/types";
+import type { ChartJumpTarget } from "@/components/Chart/chartNavigation";
 import styles from "./WorkspacePages.module.css";
 
 const LazyTreeChartManager = lazy(async () => {
@@ -442,6 +443,9 @@ export function CofechaReportPage({
 
 type ExpandedChartPageProps = {
     siteData: RwlSiteData;
+    selectedTrees: readonly string[];
+    focusedTree: string | null;
+    jumpTarget?: ChartJumpTarget;
     referenceConfig: ReferenceSeriesConfig | null;
     dynamicReferenceConfig?: ReferenceSeriesConfig | null;
     diagnosis: CrossdatingDiagnosis;
@@ -455,11 +459,19 @@ type ExpandedChartPageProps = {
     onInsertMissingYearAtSide: (tree: string, year: number, side: MissingInsertSide) => void;
     onDeleteYearWithMode: (tree: string, year: number, mode: DeleteMode, shift?: DeleteShift) => void;
     onDeleteSeries: (tree: string) => void;
+    onSelectedTreesChange: (trees: string[]) => void;
+    onLocateWidth: (tree: string, year: number) => void;
+    onEditAsText: (tree: string) => void;
+    onJumpToCofecha: (tree: string) => void;
+    cofechaPart6Trees: readonly string[];
     onClose: () => void;
 };
 
 export function ExpandedChartPage({
     siteData,
+    selectedTrees,
+    focusedTree,
+    jumpTarget,
     referenceConfig,
     dynamicReferenceConfig = null,
     diagnosis,
@@ -473,6 +485,11 @@ export function ExpandedChartPage({
     onInsertMissingYearAtSide,
     onDeleteYearWithMode,
     onDeleteSeries,
+    onSelectedTreesChange,
+    onLocateWidth,
+    onEditAsText,
+    onJumpToCofecha,
+    cofechaPart6Trees,
     onClose,
 }: ExpandedChartPageProps) {
     const stats = useMemo(() => {
@@ -513,6 +530,9 @@ export function ExpandedChartPage({
                         variant="expanded"
                         showPersistentTooltip={showPersistentTooltip}
                         fullData={siteData}
+                        selectedTrees={selectedTrees}
+                        focusedTree={focusedTree}
+                        jumpTarget={jumpTarget}
                         referenceConfig={referenceConfig}
                         dynamicReferenceConfig={dynamicReferenceConfig}
                         diagnosis={diagnosis}
@@ -525,6 +545,11 @@ export function ExpandedChartPage({
                         onInsertMissingYearAtSide={onInsertMissingYearAtSide}
                         onDeleteYearWithMode={onDeleteYearWithMode}
                         onDeleteSeries={onDeleteSeries}
+                        onSelectedTreesChange={onSelectedTreesChange}
+                        onLocateWidth={onLocateWidth}
+                        onEditAsText={onEditAsText}
+                        onJumpToCofecha={onJumpToCofecha}
+                        cofechaPart6Trees={cofechaPart6Trees}
                     />
                 </Suspense>
             </div>

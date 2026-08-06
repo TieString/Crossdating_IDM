@@ -1,5 +1,6 @@
 import { exists, readTextFile } from "@tauri-apps/plugin-fs";
 import { ICofechaResult } from "./types";
+import { normalizeCofechaSeriesId } from "./seriesId";
 import { getCofechaWorkDir } from "@/services/fs/workspace";
 import { join } from "@tauri-apps/api/path";
 // COFECHA 输出解析模块。
@@ -147,7 +148,7 @@ function extractPart7SeriesStats(text: string): Part7SeriesStats {
     let match;
 
     while ((match = regex.exec(text)) !== null) {
-        const seriesId = match[1].toUpperCase();
+        const seriesId = normalizeCofechaSeriesId(match[1]);
         const flags = parseInt(match[2], 10);
         const correlation = parseFloat(match[3]);
         if (Number.isFinite(correlation)) {
@@ -209,7 +210,7 @@ export function extractPossibleProblemsDetail(text: string): Map<string, string>
         const headerMatch = lines[headerIndex].match(/^(\S+)\s+-?\d{3,4}\s+to\s+-?\d{3,4}\b/i);
         if (!headerMatch) continue;
 
-        const seriesID = headerMatch[1].toUpperCase();
+        const seriesID = normalizeCofechaSeriesId(headerMatch[1]);
         // PART 6 的同一序列块里，[B]/[C]/[D]/[E] 往往是解释 [A] 低相关的关键证据。
         // 保留完整块，序列列表仍以出现 [A] flagged segment 的序列作为 COFECHA problem。
         if (/\[A\]\s+Segment\b/.test(block)) {

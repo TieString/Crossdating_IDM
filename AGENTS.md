@@ -69,8 +69,13 @@
 
 **当前实现**：
 - [src/components/Chart/TreeChartManager.tsx](src/components/Chart/TreeChartManager.tsx)：维护参考选择模式，并把 reference config 上抛给 Home/workspace state。
-- [src/components/Chart/MultiLineChart.tsx](src/components/Chart/MultiLineChart.tsx)：以加粗虚线绘制 reference series，并在 tooltip 中显示 sample depth；会把当前可见序列的 flagged/problem segments 作为淡色背景带显示。
+- 图表进入参考选择模式后提供“可靠序列”，复用最新 COFECHA PART 6 分类的 `anchorPassIds` 填充参考草稿，再由用户确认生成手动参考；无分类结果时该操作禁用。
+- 折线图普通序列多选由 Home 统一持有，并通过 [src/pages/home/workspaceWindowBridge.ts](src/pages/home/workspaceWindowBridge.ts) 同步到独立折线图窗口；折线高亮只属于图表本地交互，不会直接切换宽度模块。选中折线后可在右键菜单按鼠标所在年份执行“在宽度模块中定位”；若尚未选中折线，在折线附近直接右键会先命中并高亮最近折线再打开菜单。序列按钮会显示 COFECHA PART 6 `[A]` 状态。
+- [src/components/Chart/MultiLineChart.tsx](src/components/Chart/MultiLineChart.tsx)：以加粗红色实线绘制手动 reference series，以绿色虚线绘制 COFECHA-pass 动态参考，并显式保留空缺年份断点、在 tooltip 中显示 sample depth；普通序列调色板不使用红色，当前可见序列的 flagged/problem segments 作为淡色背景带显示。
+- [src/components/WidthContainer/WidthGridContextMenu.tsx](src/components/WidthContainer/WidthGridContextMenu.tsx)：宽度元素右键“在图表中定位”会选中对应折线，以固定 50 年窗口定位到目标年份，并复用图表单击标记线显示该年份；标记状态保存日历年而非数组索引，独立折线图窗口复用同一跳转目标。
+- 宽度网格与折线图复用同一右键菜单：插入、删除、删除序列、文本编辑和可用时的 COFECHA PART 6 定位保持一致；宽度网格额外提供“在图表中定位”，折线图对应提供“在宽度模块中定位”。独立折线图通过窗口桥接把文本编辑和 COFECHA 定位命令交回主窗口执行。
 - [src/pages/home/useHomeWorkspace.ts](src/pages/home/useHomeWorkspace.ts)：按文件路径持久化 reference config 和参考辅助日志。
+- [src/pages/home/workspacePersistence.ts](src/pages/home/workspacePersistence.ts)：COFECHA、reference 与 RWL history 等大工作区状态保存到应用数据目录 `workspace-state-v1`；启动时安全迁移旧 localStorage 项，localStorage 只保留小型界面设置。
 - [src/pages/home/workspaceWindowBridge.ts](src/pages/home/workspaceWindowBridge.ts)：独立折线图窗口会同步 reference config，并把参考变更命令发回主窗口。
 - [src/features/crossdating/diagnosis.ts](src/features/crossdating/diagnosis.ts)：自动生成内部 problem segment count、A-like/B-like segment、propagation pattern、三类候选编辑与 before/after evidence；用户确认后可一次应用一个候选。
 - 内部诊断输出 `DiagnosisEvent` 人工复核窗口：每个独立事件只保留一个主窗口，不向 UI 暴露操作备选或位置备选。局部移动在内部联合扫描 `shiftYears=-2..-100`，最终只保留一个通过门槛的 `firstFixedYear + shiftYears`；`-1` 仍由缺轮表达，正向位移不得成为自动局部移动。事件保留 lag before/after、移动方向和证据来源，用户二次确认后才转换为受约束编辑。
@@ -134,6 +139,7 @@
 - [src/features/rwl/edit.ts](src/features/rwl/edit.ts)：`RwlEditor` 保留首次加载的 raw baseline，并在 history snapshot 中持久化 raw/working 数据、删除标记与 operation log；操作日志窗口的“回到原始”会走 `resetToRawData()`，不会依赖逐条反向猜测。
 - [src/pages/home/useHomeWorkspace.ts](src/pages/home/useHomeWorkspace.ts)：打开文件时若恢复了 working series，后续 COFECHA 运行使用 editor 当前导出的 working RWL；`Save As` 会切换当前文件路径，并把保存后的当前数据作为新文件的 raw baseline。
 - [src/components/WidthContainer/WidthContainer.tsx](src/components/WidthContainer/WidthContainer.tsx)：宽度网格顶部显示最近操作记录摘要，条目来自统一 workspace operation log；可定位到真实 series/year 的条目会复用主窗口跳转高亮逻辑。
+- 宽度模块的当前序列与折线图显示集合彼此独立；在宽度模块选择序列不会自动加入折线图，只有折线选择器或“在图表中定位”等显式操作会改变折线图显示集合。
 - [src/pages/home/WorkspacePages.tsx](src/pages/home/WorkspacePages.tsx)：独立操作日志窗口支持按文本、来源和状态筛选记录；批次摘要只展示当前筛选范围内的可审计批次。
 - [src/pages/home/workspaceWindowBridge.ts](src/pages/home/workspaceWindowBridge.ts)：独立窗口 request/closed 事件携带窗口 label，主窗口只接受匹配 label 的生命周期事件，避免旧窗口或重复关闭事件误改同步状态。
 

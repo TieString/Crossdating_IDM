@@ -19,6 +19,9 @@ import {
 import { RwlSiteData } from '@/features/rwl'
 import type { DeleteMode, DeleteShift, MissingInsertSide } from '@/features/rwl/edit'
 import { stopMarker } from '@/shared/constants'
+import { normalizeCofechaSeriesId } from '@/features/cofecha/seriesId'
+import type { ChartJumpTarget } from './chartNavigation'
+import { buildStableSeriesColorMap } from './seriesColors'
 
 // 树种图表管理器。
 // 这个组件负责把当前 RWL 数据拆成”可选树种列表 + 选中后的多折线图”两部分：
@@ -38,9 +41,13 @@ const clampPickerHeight = (value: number) => (
 
 const readStoredPickerHeight = () => {
   if (typeof window === 'undefined') return PICKER_DEFAULT_HEIGHT
-  const raw = window.localStorage.getItem(PICKER_HEIGHT_STORAGE_KEY)
-  const parsed = raw ? Number.parseFloat(raw) : Number.NaN
-  return Number.isFinite(parsed) ? clampPickerHeight(parsed) : PICKER_DEFAULT_HEIGHT
+  try {
+    const raw = window.localStorage.getItem(PICKER_HEIGHT_STORAGE_KEY)
+    const parsed = raw ? Number.parseFloat(raw) : Number.NaN
+    return Number.isFinite(parsed) ? clampPickerHeight(parsed) : PICKER_DEFAULT_HEIGHT
+  } catch {
+    return PICKER_DEFAULT_HEIGHT
+  }
 }
 
 const localOptionKey = (option: LocalSimulationOption | null) => (
@@ -53,6 +60,9 @@ type Props = {
   fullData: RwlSiteData
   variant?: 'panel' | 'expanded'
   showPersistentTooltip?: boolean
+  selectedTrees?: readonly string[]
+  focusedTree?: string | null
+  jumpTarget?: ChartJumpTarget | null
   referenceConfig?: ReferenceSeriesConfig | null
   dynamicReferenceConfig?: ReferenceSeriesConfig | null
   diagnosis?: CrossdatingDiagnosis
@@ -65,12 +75,20 @@ type Props = {
   onInsertMissingYearAtSide?: (tree: string, year: number, side: MissingInsertSide) => void
   onDeleteYearWithMode?: (tree: string, year: number, mode: DeleteMode, shift?: DeleteShift) => void
   onDeleteSeries?: (tree: string) => void
+  onSelectedTreesChange?: (trees: string[]) => void
+  onLocateWidth?: (tree: string, year: number) => void
+  onEditAsText?: (tree: string) => void
+  onJumpToCofecha?: (tree: string) => void
+  cofechaPart6Trees?: readonly string[]
 }
 
 function TreeChartManagerBase({
   fullData,
   variant = 'panel',
   showPersistentTooltip = false,
+  selectedTrees: controlledSelectedTrees,
+  focusedTree: controlledFocusedTree,
+  jumpTarget = null,
   referenceConfig = null,
   dynamicReferenceConfig = null,
   diagnosis,
@@ -80,11 +98,16 @@ function TreeChartManagerBase({
   onInsertMissingYearAtSide,
   onDeleteYearWithMode,
   onDeleteSeries,
+  onSelectedTreesChange,
+  onLocateWidth,
+  onEditAsText,
+  onJumpToCofecha,
+  cofechaPart6Trees,
 }: Props) {
-  const [selectedTrees, setSelectedTrees] = useState<string[]>([])
+  const [localSelectedTrees, setLocalSelectedTrees] = useState<string[]>([])
   const [isReferenceMode, setIsReferenceMode] = useState(false)
   const [referenceDraftTrees, setReferenceDraftTrees] = useState<string[]>([])
-  const [highlightedTreeCode, setHighlightedTreeCode] = useState<string | null>(null)
+  const [highlightedTreeCode, setHighlightedTreeCode] = useState<string | null>(controlledFocusedTree ?? null)
   const [treeOffsets, setTreeOffsets] = useState<Map<string, number>>(new Map())
   const [zoomWindow, setZoomWindow] = useState<ChartZoomWindow>(null)
   const [search, setSearch] = useState('')
@@ -95,11 +118,52 @@ function TreeChartManagerBase({
   const [selectedLocalOption, setSelectedLocalOption] = useState<LocalSimulationOption | null>(null)
   const [isConfirmingLocalApply, setIsConfirmingLocalApply] = useState(false)
   const pickerHeightRef = useRef(pickerHeight)
+  const selectedTrees = controlledSelectedTrees === undefined
+    ? localSelectedTrees
+    : controlledSelectedTrees
+  const selectedTreesRef = useRef(selectedTrees)
+  const handledJumpIdRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    selectedTreesRef.current = selectedTrees
+  }, [selectedTrees])
+
+  const updateSelectedTrees = useCallback((nextTrees: string[]) => {
+    const uniqueTrees = Array.from(new Set(nextTrees))
+    selectedTreesRef.current = uniqueTrees
+    if (controlledSelectedTrees === undefined) {
+      setLocalSelectedTrees(uniqueTrees)
+    }
+    onSelectedTreesChange?.(uniqueTrees)
+  }, [controlledSelectedTrees, onSelectedTreesChange])
+
+  useEffect(() => {
+    if (controlledFocusedTree !== undefined) {
+      setHighlightedTreeCode(controlledFocusedTree)
+    }
+  }, [controlledFocusedTree])
+
+  useEffect(() => {
+    if (!jumpTarget || handledJumpIdRef.current === jumpTarget.id) return
+    if (!fullData.has(jumpTarget.tree)) return
+
+    handledJumpIdRef.current = jumpTarget.id
+    if (!selectedTreesRef.current.includes(jumpTarget.tree)) {
+      updateSelectedTrees([...selectedTreesRef.current, jumpTarget.tree])
+    }
+    if (highlightedTreeCode !== jumpTarget.tree) {
+      setHighlightedTreeCode(jumpTarget.tree)
+    }
+  }, [fullData, highlightedTreeCode, jumpTarget, updateSelectedTrees])
 
   useEffect(() => {
     pickerHeightRef.current = pickerHeight
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem(PICKER_HEIGHT_STORAGE_KEY, String(pickerHeight))
+      try {
+        window.localStorage.setItem(PICKER_HEIGHT_STORAGE_KEY, String(pickerHeight))
+      } catch (error) {
+        console.warn('保存折线图序列选择器高度失败:', error)
+      }
     }
   }, [pickerHeight])
 
@@ -135,9 +199,17 @@ function TreeChartManagerBase({
   }, [])
 
   useEffect(() => {
-    setSelectedTrees((previous) => previous.filter((treeCode) => fullData.has(treeCode)))
+    if (controlledSelectedTrees === undefined) {
+      const filteredSelection = selectedTreesRef.current.filter((treeCode) => fullData.has(treeCode))
+      if (
+        filteredSelection.length !== selectedTreesRef.current.length
+        || filteredSelection.some((treeCode, index) => treeCode !== selectedTreesRef.current[index])
+      ) {
+        updateSelectedTrees(filteredSelection)
+      }
+    }
     setReferenceDraftTrees((previous) => previous.filter((treeCode) => fullData.has(treeCode)))
-  }, [fullData])
+  }, [controlledSelectedTrees, fullData, updateSelectedTrees])
 
   useEffect(() => {
     if (!isReferenceMode) {
@@ -170,14 +242,14 @@ function TreeChartManagerBase({
   }, [fullData])
 
   useEffect(() => {
-    setHighlightedTreeCode((previous) => (
-      previous && selectedTrees.includes(previous) ? previous : null
-    ))
+    if (highlightedTreeCode && !selectedTrees.includes(highlightedTreeCode)) {
+      setHighlightedTreeCode(null)
+    }
 
     if (selectedTrees.length === 0) {
       setZoomWindow(null)
     }
-  }, [selectedTrees])
+  }, [highlightedTreeCode, selectedTrees])
 
   const toggleTree = (treeCode: string) => {
     if (isReferenceMode) {
@@ -189,11 +261,11 @@ function TreeChartManagerBase({
       return
     }
 
-    setSelectedTrees(prev =>
-      prev.includes(treeCode)
-        ? prev.filter(code => code !== treeCode)
-        : [...prev, treeCode]
-    )
+    const previous = selectedTreesRef.current
+    const next = previous.includes(treeCode)
+      ? previous.filter(code => code !== treeCode)
+      : [...previous, treeCode]
+    updateSelectedTrees(next)
   }
 
   const shiftHighlightedTree = useCallback((treeCode: string, direction: -1 | 1) => {
@@ -286,6 +358,18 @@ function TreeChartManagerBase({
     new Set(referenceConfig?.selectedTrees ?? [])
   ), [referenceConfig])
   const dynamicReferenceSummary = dynamicReferenceSeries?.summary
+  const cofechaClassification = dynamicReferenceConfig?.classification
+    ?? referenceConfig?.classification
+  const cofechaFlaggedSourceSet = useMemo(() => new Set(
+    (cofechaClassification?.candidateFlaggedIds ?? [])
+      .map(normalizeCofechaSeriesId),
+  ), [cofechaClassification])
+  const cofechaNoATrees = useMemo(() => {
+    const anchorSet = new Set(
+      (cofechaClassification?.anchorPassIds ?? []).map(normalizeCofechaSeriesId),
+    )
+    return allTreeCodes.filter((treeCode) => anchorSet.has(normalizeCofechaSeriesId(treeCode)))
+  }, [allTreeCodes, cofechaClassification])
   const dynamicReferenceStatusLabel = useMemo(() => {
     if (!dynamicReferenceConfig) return null
     const total = dynamicReferenceConfig.classification?.allSeriesIds.length ?? allTreeCodes.length
@@ -464,18 +548,18 @@ function TreeChartManagerBase({
     if (isReferenceMode) {
       setReferenceDraftTrees(longest)
     } else {
-      setSelectedTrees(longest)
+      updateSelectedTrees(longest)
     }
-  }, [allTreeCodes, fullData, isReferenceMode])
+  }, [allTreeCodes, fullData, isReferenceMode, updateSelectedTrees])
 
   const invertSelection = useCallback(() => {
     const inverted = allTreeCodes.filter(treeCode => !activeSelection.includes(treeCode))
     if (isReferenceMode) {
       setReferenceDraftTrees(inverted)
     } else {
-      setSelectedTrees(inverted)
+      updateSelectedTrees(inverted)
     }
-  }, [activeSelection, allTreeCodes, isReferenceMode])
+  }, [activeSelection, allTreeCodes, isReferenceMode, updateSelectedTrees])
 
   const resetChartView = useCallback(() => {
     setTreeOffsets(new Map())
@@ -483,7 +567,7 @@ function TreeChartManagerBase({
   }, [])
 
   const beginReferenceSelection = useCallback(() => {
-    setReferenceDraftTrees(referenceConfig?.selectedTrees.length ? referenceConfig.selectedTrees : selectedTrees)
+    setReferenceDraftTrees(referenceConfig?.selectedTrees.length ? referenceConfig.selectedTrees : Array.from(selectedTrees))
     setIsReferenceMode(true)
   }, [referenceConfig, selectedTrees])
 
@@ -505,15 +589,14 @@ function TreeChartManagerBase({
     setIsReferenceMode(false)
   }, [onReferenceConfigChange])
 
-  const seriesColorMap = useMemo(() => {
-    const map = new Map<string, string>()
-    let idx = 0
-    filteredData.forEach((_, treeCode) => {
-      map.set(treeCode, colorPalette[idx % colorPalette.length])
-      idx++
-    })
-    return map
-  }, [filteredData])
+  const selectCofechaNoATrees = useCallback(() => {
+    setReferenceDraftTrees(cofechaNoATrees)
+  }, [cofechaNoATrees])
+
+  const seriesColorMap = useMemo(
+    () => buildStableSeriesColorMap(allTreeCodes, colorPalette),
+    [allTreeCodes],
+  )
 
   const btnBase: React.CSSProperties = {
     fontSize: 12, padding: '4px 12px', borderRadius: 5, cursor: 'pointer',
@@ -722,6 +805,7 @@ function TreeChartManagerBase({
       <div style={{ flex: '1 1 auto', minHeight: 0 }}>
         <MultiLineChart
           data={filteredData}
+          seriesColors={seriesColorMap}
           diagnosisEventRanges={diagnosisEventRanges}
           missingRingYears={missingRingYears}
           sampleSizeData={fullData}
@@ -735,6 +819,11 @@ function TreeChartManagerBase({
           highlightedTreeCode={highlightedTreeCode}
           onHighlightedTreeCodeChange={setHighlightedTreeCode}
           onLinePointClick={handleLinePointClick}
+          onJumpToWidth={onLocateWidth}
+          onEditAsText={onEditAsText}
+          onJumpToCofecha={onJumpToCofecha}
+          cofechaPart6Trees={cofechaPart6Trees}
+          jumpTarget={jumpTarget && visibleTrees.includes(jumpTarget.tree) ? jumpTarget : null}
           zoomWindow={zoomWindow}
           onZoomWindowChange={setZoomWindow}
           onShiftHighlightedTree={shiftHighlightedTree}
@@ -767,10 +856,33 @@ function TreeChartManagerBase({
         gap: 6,
         marginBottom: 6,
       }}>
-        <button onClick={() => isReferenceMode ? setReferenceDraftTrees(allTreeCodes) : setSelectedTrees(allTreeCodes)} disabled={allSelected}
+        <button onClick={() => isReferenceMode ? setReferenceDraftTrees(allTreeCodes) : updateSelectedTrees(allTreeCodes)} disabled={allSelected}
           style={allSelected ? btnDisabled : btnBase}>全选</button>
-        <button onClick={() => isReferenceMode ? setReferenceDraftTrees([]) : setSelectedTrees([])} disabled={activeSelection.length === 0}
+        <button onClick={() => {
+          if (isReferenceMode) {
+            setReferenceDraftTrees([])
+          } else {
+            updateSelectedTrees([])
+          }
+        }} disabled={activeSelection.length === 0}
           style={activeSelection.length === 0 ? btnDisabled : btnBase}>全不选</button>
+        {isReferenceMode ? (
+          <button
+            onClick={selectCofechaNoATrees}
+            disabled={cofechaNoATrees.length === 0}
+            title={cofechaClassification
+              ? `${dynamicReferenceConfig?.isStale ? '基于最近一次已过期的 COFECHA 结果；' : ''}选择 PART 6 中没有 A 标记的全部序列`
+              : '请先运行 COFECHA，以获得 PART 6 A 标记分类'}
+            style={cofechaNoATrees.length === 0 ? btnDisabled : {
+              ...btnBase,
+              borderColor: '#b7dec7',
+              color: '#236344',
+              fontWeight: 650,
+            }}
+          >
+            可靠序列{cofechaClassification ? ` (${cofechaNoATrees.length})` : ''}
+          </button>
+        ) : null}
         {isExpanded ? (
           <>
             <button onClick={invertSelection} disabled={allTreeCodes.length === 0}
@@ -967,6 +1079,7 @@ function TreeChartManagerBase({
             const referenceChecked = referenceDraftTrees.includes(treeCode)
             const activeChecked = isReferenceMode ? referenceChecked : checked
             const isReferenceSource = referenceSourceSet.has(treeCode)
+            const isCofechaFlagged = cofechaFlaggedSourceSet.has(normalizeCofechaSeriesId(treeCode))
             const diagnosisEventCount = diagnosisEventCountByTree.get(treeCode) ?? 0
             const seriesColor = seriesColorMap.get(treeCode)
             return (
@@ -986,6 +1099,28 @@ function TreeChartManagerBase({
                 }}
               >
                 {treeCode}
+                {isCofechaFlagged ? (
+                  <span
+                    title="COFECHA PART 6 [A] flagged"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      minWidth: 15,
+                      height: 15,
+                      marginLeft: 5,
+                      padding: '0 3px',
+                      borderRadius: 8,
+                      background: '#fee2e2',
+                      color: '#991b1b',
+                      fontSize: 9,
+                      fontWeight: 800,
+                      lineHeight: 1,
+                    }}
+                  >
+                    A
+                  </span>
+                ) : null}
                 {diagnosisEventCount > 0 ? (
                   <span
                     title={`${diagnosisEventCount} 个事件级诊断窗口`}

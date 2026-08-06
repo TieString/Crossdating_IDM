@@ -114,7 +114,11 @@ export function useResizablePanels() {
     const layoutRef = useRef<StoredLayout>(layout);
 
     useEffect(() => {
-        window.localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(layout));
+        try {
+            window.localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(layout));
+        } catch (error) {
+            console.warn("保存主界面布局失败:", error);
+        }
     }, [layout]);
 
     useEffect(() => {

@@ -18,6 +18,8 @@ export interface WidthGridContextMenuProps {
     onDeleteRange?: (tree: string, startYear: number, endYear: number) => void;
     onDeleteSeries?: (tree: string) => void;
     onEditAsText?: (tree: string) => void;
+    onJumpToWidth?: (tree: string, year: number) => void;
+    onJumpToChart?: (tree: string, year: number) => void;
     onJumpToCofecha?: (tree: string) => void;
     /** 该序列在 COFECHA PART 6 里有对应问题块，才显示“在 COFECHA 中定位”。 */
     canJumpToCofecha?: boolean;
@@ -69,6 +71,8 @@ export default function WidthGridContextMenu({
     onDeleteRange,
     onDeleteSeries,
     onEditAsText,
+    onJumpToWidth,
+    onJumpToChart,
     onJumpToCofecha,
     canJumpToCofecha,
     onPreviewYearChange,
@@ -583,6 +587,46 @@ export default function WidthGridContextMenu({
 
                 <div className={style["menu-separator"]} role="separator" />
 
+                {onJumpToWidth ? (
+                    <div
+                        className={style["menu-row"]}
+                        role="menuitem"
+                        title={`在宽度模块中定位 ${tree} ${defaultYear}`}
+                        onClick={() => {
+                            onJumpToWidth(tree, defaultYear);
+                            onClose();
+                        }}
+                    >
+                        <span className={style["menu-row-icon"]} aria-hidden="true">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M12 2v20"/><path d="M2 12h20"/>
+                                <circle cx="12" cy="12" r="4"/>
+                            </svg>
+                        </span>
+                        <span className={style["menu-row-label"]}>在宽度模块中定位</span>
+                    </div>
+                ) : null}
+
+                {onJumpToChart ? (
+                    <div
+                        className={style["menu-row"]}
+                        role="menuitem"
+                        title={`在折线图中定位 ${tree} ${defaultYear}`}
+                        onClick={() => {
+                            onJumpToChart(tree, defaultYear);
+                            onClose();
+                        }}
+                    >
+                        <span className={style["menu-row-icon"]} aria-hidden="true">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M3 17l5-5 4 3 6-8 3 2"/>
+                                <path d="M12 3v18"/><path d="M9 6h6"/>
+                            </svg>
+                        </span>
+                        <span className={style["menu-row-label"]}>在图表中定位</span>
+                    </div>
+                ) : null}
+
                 {canJumpToCofecha && onJumpToCofecha ? (
                     <div
                         className={style["menu-row"]}
@@ -604,22 +648,24 @@ export default function WidthGridContextMenu({
                     </div>
                 ) : null}
 
-                <div
-                    className={style["menu-row"]}
-                    role="menuitem"
-                    onClick={() => {
-                        onEditAsText?.(tree);
-                        onClose();
-                    }}
-                >
-                    <span className={style["menu-row-icon"]} aria-hidden="true">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
-                            <path d="m15 5 4 4"/>
-                        </svg>
-                    </span>
-                    <span className={style["menu-row-label"]}>转为文本编辑</span>
-                </div>
+                {onEditAsText ? (
+                    <div
+                        className={style["menu-row"]}
+                        role="menuitem"
+                        onClick={() => {
+                            onEditAsText(tree);
+                            onClose();
+                        }}
+                    >
+                        <span className={style["menu-row-icon"]} aria-hidden="true">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+                                <path d="m15 5 4 4"/>
+                            </svg>
+                        </span>
+                        <span className={style["menu-row-label"]}>转为文本编辑</span>
+                    </div>
+                ) : null}
 
                 <div className={style["menu-separator"]} role="separator" />
 

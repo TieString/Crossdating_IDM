@@ -1,6 +1,7 @@
 import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { extractPart6FlaggedASeriesIds, parseCofechaResult, splitReportByParts } from "@/features/cofecha/formatter";
+import { getCofechaSeriesMapValue } from "@/features/cofecha/seriesId";
 import {
     type CrossdatingDiagnosis,
     getDiagnosisCandidateLabel,
@@ -51,6 +52,7 @@ import {
     loadPersistedCofechaState,
     loadPersistedHistorySnapshot,
     loadPersistedReferenceState,
+    migrateLegacyWorkspaceStorage,
     persistCofechaState,
     persistHistorySnapshot,
     persistReferenceState,
@@ -250,6 +252,10 @@ export function useHomeWorkspace() {
     } = useCurrentEventRanker({ enabled: CURRENT_EVENT_PYTHON_MODELS_ENABLED });
 
     useEffect(() => {
+        void migrateLegacyWorkspaceStorage();
+    }, []);
+
+    useEffect(() => {
         if (dynamicReferenceConfig?.mode === "dynamic") {
             latestDynamicReferenceConfigRef.current = dynamicReferenceConfig;
         }
@@ -266,7 +272,7 @@ export function useHomeWorkspace() {
 
         historyPersistTimerRef.current = window.setTimeout(() => {
             historyPersistTimerRef.current = null;
-            persistHistorySnapshot(filePath, editor);
+            void persistHistorySnapshot(filePath, editor);
         }, HISTORY_SNAPSHOT_PERSIST_DELAY_MS);
     }, []);
 
@@ -355,7 +361,7 @@ export function useHomeWorkspace() {
 
     useEffect(() => {
         if (!filePathRef.current) return;
-        persistReferenceState(
+        void persistReferenceState(
             filePathRef.current,
             referenceConfig,
             dynamicReferenceConfig,
@@ -366,7 +372,7 @@ export function useHomeWorkspace() {
 
     useEffect(() => {
         if (!filePathRef.current || (!outFileContent && !cofechaResult)) return;
-        persistCofechaState(
+        void persistCofechaState(
             filePathRef.current,
             outFileContent,
             cofechaResult,
@@ -458,7 +464,7 @@ export function useHomeWorkspace() {
             setCofechaResult(nextResult);
             setPossibleProblemsDetail(nextResult.possibleProblemsDetail);
             setCofechaParts(nextParts);
-            persistCofechaState(
+            await persistCofechaState(
                 sourcePath,
                 nextOutText,
                 nextResult,
@@ -501,12 +507,14 @@ export function useHomeWorkspace() {
             let nextEditor = new RwlEditor(rwlData.data, rwlData.readOptions, rwlData.format);
             // 在恢复草稿前抓取磁盘内容快照，作为"已保存基线"。
             const diskBaseline = nextEditor.getData();
-            const persistedReference = loadPersistedReferenceState(filePath);
-            const persistedCofecha = loadPersistedCofechaState(filePath);
+            const [persistedReference, persistedCofecha, persistedHistory] = await Promise.all([
+                loadPersistedReferenceState(filePath),
+                loadPersistedCofechaState(filePath),
+                loadPersistedHistorySnapshot(filePath),
+            ]);
 
             // 恢复本地缓存草稿（操作日志快照）。草稿可能因未保存的编辑、或磁盘文件被外部
             // 改动而与磁盘内容不一致；不一致时弹框让用户选择载入哪一个，而不是默默套用草稿。
-            const persistedHistory = loadPersistedHistorySnapshot(filePath);
             if (persistedHistory) {
                 nextEditor.restorePersistedHistory(persistedHistory);
                 if (!rwlDataEquals(diskBaseline, nextEditor.getData())) {
@@ -866,14 +874,16 @@ export function useHomeWorkspace() {
                 setFileName(filePathToSave);
                 editor.setProjectId(filePathToSave);
                 editor.commitCurrentDataAsRawBaseline(savedData);
-                persistHistorySnapshot(filePathToSave, editor);
-                persistReferenceState(
-                    filePathToSave,
-                    referenceConfig,
-                    dynamicReferenceConfig,
-                    referenceOperationLog,
-                    referenceOperationCounterRef.current,
-                );
+                await Promise.all([
+                    persistHistorySnapshot(filePathToSave, editor),
+                    persistReferenceState(
+                        filePathToSave,
+                        referenceConfig,
+                        dynamicReferenceConfig,
+                        referenceOperationLog,
+                        referenceOperationCounterRef.current,
+                    ),
+                ]);
                 resetCurrentEventRanker();
                 return markDataSnapshotAsSaved(savedData);
             });
@@ -943,14 +953,16 @@ export function useHomeWorkspace() {
                 setFileName(filePathToSave);
                 editor.setProjectId(filePathToSave);
                 editor.commitCurrentDataAsRawBaseline(savedData);
-                persistHistorySnapshot(filePathToSave, editor);
-                persistReferenceState(
-                    filePathToSave,
-                    referenceConfig,
-                    dynamicReferenceConfig,
-                    referenceOperationLog,
-                    referenceOperationCounterRef.current,
-                );
+                await Promise.all([
+                    persistHistorySnapshot(filePathToSave, editor),
+                    persistReferenceState(
+                        filePathToSave,
+                        referenceConfig,
+                        dynamicReferenceConfig,
+                        referenceOperationLog,
+                        referenceOperationCounterRef.current,
+                    ),
+                ]);
                 resetCurrentEventRanker();
                 return markDataSnapshotAsSaved(savedData);
             });
@@ -1638,7 +1650,7 @@ export function useHomeWorkspace() {
         setSelectedTree(nextTree);
     }, [resetCurrentEventRanker, selectedTree]);
 
-    const selectedProblemText = possibleProblemsDetail.get(selectedTree);
+    const selectedProblemText = getCofechaSeriesMapValue(possibleProblemsDetail, selectedTree);
     const workspaceOperationLog = useMemo(() => (
         operationLog
             .map((entry) => normalizeWorkspaceOperationLogEntry(entry, filePathRef.current))

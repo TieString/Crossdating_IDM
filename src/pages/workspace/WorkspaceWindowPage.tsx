@@ -193,6 +193,9 @@ export default function WorkspaceWindowPage() {
     return (
         <ExpandedChartPage
             siteData={chartData}
+            selectedTrees={state.selectedTrees}
+            focusedTree={state.focusedTree}
+            jumpTarget={state.jumpTarget}
             showPersistentTooltip
             referenceConfig={state.referenceConfig}
             dynamicReferenceConfig={state.dynamicReferenceConfig}
@@ -222,6 +225,19 @@ export default function WorkspaceWindowPage() {
             onDeleteSeries={(tree: string) => {
                 void sendCommand({ kind: "line-chart", type: "delete-series", tree });
             }}
+            onSelectedTreesChange={(trees) => {
+                void sendCommand({ kind: "line-chart", type: "set-selection", trees });
+            }}
+            onLocateWidth={(tree, year) => {
+                void sendCommand({ kind: "line-chart", type: "locate-width", tree, year });
+            }}
+            onEditAsText={(tree) => {
+                void sendCommand({ kind: "line-chart", type: "edit-as-text", tree });
+            }}
+            onJumpToCofecha={(tree) => {
+                void sendCommand({ kind: "line-chart", type: "locate-cofecha", tree });
+            }}
+            cofechaPart6Trees={state.cofechaPart6Trees}
             onClose={closeWindow}
         />
     );

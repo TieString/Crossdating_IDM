@@ -21,7 +21,9 @@ import type { DiagnosisEventType, LocalCrossdatingSimulation } from '@/features/
 import type { ReferenceSeries } from '@/features/crossdating/reference'
 import { REFERENCE_SERIES_LABEL } from '@/features/crossdating/reference'
 import type { DeleteMode, DeleteShift, MissingInsertSide } from '@/features/rwl/edit'
+import { normalizeCofechaSeriesId } from '@/features/cofecha/seriesId'
 import { stopMarker } from '@/shared/constants'
+import { centerChartViewportOnYear, type ChartJumpTarget } from './chartNavigation'
 
 ChartJS.register(
   LineElement,
@@ -94,6 +96,7 @@ const SAMPLE_SIZE_AXIS_ID = 'sampleSize'
 const DYNAMIC_REFERENCE_AXIS_ID = 'dynamicReference'
 const SAMPLE_SIZE_LABEL = '样本量'
 const SAMPLE_SIZE_COLOR = 'rgba(104, 110, 120, 0.62)'
+const MANUAL_REFERENCE_COLOR = '#dc2626'
 const DYNAMIC_REFERENCE_LABEL = 'COFECHA-pass'
 const DYNAMIC_REFERENCE_COLOR = 'rgba(35, 99, 68, 0.9)'
 const MISSING_RING_COLOR = '#2ecc71'
@@ -622,18 +625,20 @@ export function makePersistentTooltipPlugin(): Plugin<'line'> & { activeIndex: n
   }
 }
 
-function makeMarkerLinesPlugin(): Plugin<'line'> & { markerIndex: number | null } {
+function makeMarkerLinesPlugin(): Plugin<'line'> & { markerYear: number | null } {
   return {
     id: 'markerLines',
-    markerIndex: null,
+    markerYear: null,
 
     afterDatasetsDraw(chart) {
-      if (this.markerIndex == null) return
-      const { ctx, chartArea, scales } = chart
+      if (this.markerYear == null) return
+      const { ctx, chartArea, data, scales } = chart
       const xScale = scales.x
       if (!xScale) return
+      const markerIndex = data.labels?.findIndex((label) => Number(label) === this.markerYear) ?? -1
+      if (markerIndex < 0) return
 
-      const x = xScale.getPixelForValue(this.markerIndex)
+      const x = xScale.getPixelForValue(markerIndex)
       ctx.save()
       ctx.beginPath()
       ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top)
@@ -649,15 +654,17 @@ function makeMarkerLinesPlugin(): Plugin<'line'> & { markerIndex: number | null 
     },
 
     afterDraw(chart) {
-      if (this.markerIndex == null) return
+      if (this.markerYear == null) return
       const { ctx, chartArea, scales, data } = chart
       const xScale = scales.x
       if (!xScale) return
+      const markerIndex = data.labels?.findIndex((label) => Number(label) === this.markerYear) ?? -1
+      if (markerIndex < 0) return
 
-      const label = data.labels?.[this.markerIndex] as string | undefined
+      const label = data.labels?.[markerIndex] as string | undefined
       if (!label) return
 
-      const x = xScale.getPixelForValue(this.markerIndex)
+      const x = xScale.getPixelForValue(markerIndex)
       ctx.save()
       ctx.font = `bold 13px ${CHART_FONT_FAMILY}`
       const metrics = ctx.measureText(label)
@@ -797,6 +804,7 @@ function makeYearIndicatorPlugin(): Plugin<'line'> & { activeIndex: number | nul
 
 type Props = {
   data: Map<string, Map<number, number>>
+  seriesColors?: ReadonlyMap<string, string>
   diagnosisEventRanges?: readonly ChartDiagnosisEventRange[]
   missingRingYears?: ReadonlyMap<string, readonly number[]>
   sampleSizeData?: ReadonlyMap<string, ReadonlyMap<number, number | null>>
@@ -809,6 +817,11 @@ type Props = {
   onHighlightedTreeCodeChange?: (treeCode: string | null) => void
   onLinePointClick?: (target: { tree: string; year: number }) => void
   onHoverTargetChange?: (target: { tree: string; year: number } | null) => void
+  onJumpToWidth?: (tree: string, year: number) => void
+  onEditAsText?: (tree: string) => void
+  onJumpToCofecha?: (tree: string) => void
+  cofechaPart6Trees?: readonly string[]
+  jumpTarget?: ChartJumpTarget | null
   zoomWindow?: { min: number; max: number } | null
   onZoomWindowChange?: (zoomWindow: { min: number; max: number } | null) => void
   onShiftHighlightedTree?: (treeCode: string, direction: -1 | 1) => void
@@ -823,16 +836,17 @@ export type ChartZoomWindow = {
 } | null
 
 export const colorPalette = [
-  '#c0392b', '#2e6da4', '#27825a', '#7d3c98', '#b9621e',
-  '#1a7a7a', '#7a4a1e', '#4a3a8a', '#6a7a2a', '#a03050',
-  '#2a5a7a', '#7a2a5a', '#3a6a2a', '#8a3a2a', '#2a4a8a',
-  '#6a5a1e', '#3a2a6a', '#5a7a3a', '#6a2a3a', '#2a6a5a',
+  '#2563eb', '#2e6da4', '#27825a', '#7d3c98', '#b9621e',
+  '#1a7a7a', '#7a4a1e', '#4a3a8a', '#6a7a2a', '#0088a9',
+  '#2a5a7a', '#7a2a5a', '#3a6a2a', '#5b5bd6', '#2a4a8a',
+  '#6a5a1e', '#3a2a6a', '#5a7a3a', '#39796b', '#2a6a5a',
 ]
 
 const CHART_FONT_FAMILY = "'Arial', 'Helvetica', sans-serif"
 
 export function MultiLineChart({
   data,
+  seriesColors,
   diagnosisEventRanges = [],
   missingRingYears,
   sampleSizeData,
@@ -845,6 +859,11 @@ export function MultiLineChart({
   onHighlightedTreeCodeChange,
   onLinePointClick,
   onHoverTargetChange,
+  onJumpToWidth,
+  onEditAsText,
+  onJumpToCofecha,
+  cofechaPart6Trees = [],
+  jumpTarget = null,
   zoomWindow = null,
   onZoomWindowChange,
   onShiftHighlightedTree,
@@ -867,6 +886,9 @@ export function MultiLineChart({
   const [showSampleSize, setShowSampleSize] = useState(true)
   const [lineHoverable, setLineHoverable] = useState(false)
   const treeCodes = useMemo(() => Array.from(data.keys()), [data])
+  const cofechaPart6TreeSet = useMemo(() => new Set(
+    cofechaPart6Trees.map(normalizeCofechaSeriesId),
+  ), [cofechaPart6Trees])
   const highlightedIndex = highlightedTreeCode ? treeCodes.indexOf(highlightedTreeCode) : -1
   const visibleDynamicReferenceSeries = showDynamicReference ? dynamicReferenceSeries : null
 
@@ -905,6 +927,10 @@ export function MultiLineChart({
       if (year < minYear) minYear = year
       if (year > maxYear) maxYear = year
     })
+    if (jumpTarget && Number.isFinite(jumpTarget.year)) {
+      if (jumpTarget.year < minYear) minYear = jumpTarget.year
+      if (jumpTarget.year > maxYear) maxYear = jumpTarget.year
+    }
     if (!Number.isFinite(minYear)) return []
     // 两端各扩展若干空年份，使折线端点不贴在 Y 轴上（这些年份无数据，取值为 null）
     const pad = Math.max(
@@ -914,7 +940,7 @@ export function MultiLineChart({
     const years: number[] = []
     for (let y = minYear - pad; y <= maxYear + pad; y++) years.push(y)
     return years
-  }, [data, referenceSeries, visibleDynamicReferenceSeries])
+  }, [data, jumpTarget, referenceSeries, visibleDynamicReferenceSeries])
 
   const sampleSize = useMemo(() => {
     let max = 0
@@ -952,7 +978,7 @@ export function MultiLineChart({
 
     data.forEach((yearMap, treeCode) => {
       const yData = allYears.map(year => yearMap.get(year) ?? null)
-      const color = colorPalette[colorIndex % colorPalette.length]
+      const color = seriesColors?.get(treeCode) ?? colorPalette[colorIndex % colorPalette.length]
       const isHighlighted = colorIndex === highlightedIndex
       const transparentColor = color + '99'
       nextDatasets.push({
@@ -975,11 +1001,11 @@ export function MultiLineChart({
       nextDatasets.push({
         label: referenceSeries.label,
         data: allYears.map(year => referenceDisplayData?.get(year) ?? referenceSeries.data.get(year) ?? null),
-        borderColor: '#111827',
-        backgroundColor: '#111827',
+        borderColor: MANUAL_REFERENCE_COLOR,
+        backgroundColor: MANUAL_REFERENCE_COLOR,
         fill: false,
         borderWidth: 3.25,
-        borderDash: [10, 5],
+        spanGaps: false,
         tension: 0.008,
         cubicInterpolationMode: 'default',
         pointRadius: 0,
@@ -1013,7 +1039,8 @@ export function MultiLineChart({
         backgroundColor: DYNAMIC_REFERENCE_COLOR,
         fill: false,
         borderWidth: 2,
-        borderDash: [3, 4],
+        borderDash: [6, 4],
+        spanGaps: false,
         tension: 0.008,
         cubicInterpolationMode: 'default',
         pointRadius: 0,
@@ -1057,7 +1084,7 @@ export function MultiLineChart({
     }
 
     return nextDatasets
-  }, [allYears, data, dynamicReferenceUsesWidthAxis, highlightedIndex, referenceDisplayData, referenceSeries, sampleSize, showSampleSize, visibleDynamicReferenceSeries])
+  }, [allYears, data, dynamicReferenceUsesWidthAxis, highlightedIndex, referenceDisplayData, referenceSeries, sampleSize, seriesColors, showSampleSize, visibleDynamicReferenceSeries])
 
   // 记忆化 chartData，避免每次渲染（含鼠标移动）都生成新引用导致 react-chartjs-2 重复 update 卡顿。
   const chartData: ChartData<'line'> = useMemo(() => ({
@@ -1098,6 +1125,7 @@ export function MultiLineChart({
   useEffect(() => { zoomWindowRef.current = zoomWindow }, [zoomWindow])
   // 标记「本次 zoomWindow 变化来自图表自身缩放/平移回传」，避免再把窗口重新套回图表造成来回跳动。
   const skipZoomRestoreRef = useRef(false)
+  const handledJumpIdRef = useRef<number | null>(null)
 
   // 数据/系列变化后，按当前缩放窗口恢复 X 轴范围。
   useEffect(() => {
@@ -1125,6 +1153,37 @@ export function MultiLineChart({
     scale.options.max = zoomWindow?.max
     chart.update('none')
   }, [zoomWindow])
+
+  // 外部跳转给出的是日历年份；在拥有完整标签列表的图表层换算为 CategoryScale 索引窗口。
+  useEffect(() => {
+    if (
+      !jumpTarget
+      || handledJumpIdRef.current === jumpTarget.id
+      || !onZoomWindowChange
+    ) {
+      return
+    }
+
+    const nextWindow = centerChartViewportOnYear(
+      jumpTarget.year,
+      allYears,
+    )
+    if (!nextWindow) return
+
+    handledJumpIdRef.current = jumpTarget.id
+    markerLinesPlugin.markerYear = jumpTarget.year
+    zoomWindowRef.current = nextWindow
+    skipZoomRestoreRef.current = false
+    onZoomWindowChange(nextWindow)
+
+    const chart = chartRef.current
+    const scale = chart?.scales['x']
+    if (chart && scale) {
+      scale.options.min = nextWindow.min
+      scale.options.max = nextWindow.max
+      chart.update('none')
+    }
+  }, [allYears, jumpTarget, markerLinesPlugin, onZoomWindowChange])
 
   // 根据当前数据计算 Y 轴范围，给曲线留出上下边距。
   const [yMin, yMax] = useMemo(() => {
@@ -1510,23 +1569,24 @@ export function MultiLineChart({
       return
     }
 
-    // 先判断是否命中折线
-    const elements = chart.getElementsAtEventForMode(
-      event as unknown as MouseEvent,
-      'index',
-      { intersect: false },
-      false
-    )
-    if (elements.length === 0) {
+    const { chartArea } = chart
+    const xScale = chart.scales['x']
+    if (clickX < chartArea.left || clickX > chartArea.right || !xScale) {
       onHighlightedTreeCodeChange?.(null)
       return
     }
 
-    const dataIndex = elements[0].index
+    const rawIndex = xScale.getValueForPixel(clickX)
+    if (rawIndex == null || !Number.isFinite(rawIndex)) {
+      onHighlightedTreeCodeChange?.(null)
+      return
+    }
+
+    // 直接从横轴解析点击年份，使当前列没有折线点时仍可使用年份标记线。
+    const dataIndex = Math.round(clamp(rawIndex, 0, (chart.data.labels?.length ?? 1) - 1))
     const yScale = chart.scales['y']
     let closestIndex = -1
     let closestDist = LINE_HIT_THRESHOLD_PX
-    const xScale = chart.scales['x']
 
     chart.data.datasets.forEach((ds, i) => {
       if (ds.yAxisID === SAMPLE_SIZE_AXIS_ID || (ds as { isReferenceDataset?: boolean }).isReferenceDataset || ds.label === REFERENCE_SERIES_LABEL) return
@@ -1560,15 +1620,10 @@ export function MultiLineChart({
     } else {
       // 未命中折线：切换标记线，清除高亮
       onHighlightedTreeCodeChange?.(null)
-      const { chartArea } = chart
-      if (clickX >= chartArea.left && clickX <= chartArea.right) {
-        const xScale = chart.scales['x']
-        const rawIdx = xScale.getValueForPixel(clickX)
-        if (rawIdx != null && Number.isFinite(rawIdx)) {
-          const idx = Math.round(clamp(rawIdx, 0, (chart.data.labels?.length ?? 1) - 1))
-          markerLinesPlugin.markerIndex = markerLinesPlugin.markerIndex === idx ? null : idx
-          chart.draw()
-        }
+      const markerYear = allYears[dataIndex]
+      if (markerYear !== undefined) {
+        markerLinesPlugin.markerYear = markerLinesPlugin.markerYear === markerYear ? null : markerYear
+        chart.draw()
       }
     }
   }
@@ -1578,6 +1633,7 @@ export function MultiLineChart({
     if (!chartRef.current) return
 
     const chart = chartRef.current
+    const nearbyTarget = getClosestTreeAtPoint(e, chart, HOVER_LINE_HIT_THRESHOLD_PX)
     const rect = chart.canvas.getBoundingClientRect()
     const mouseX = e.clientX - rect.left
     const mouseY = e.clientY - rect.top
@@ -1586,20 +1642,25 @@ export function MultiLineChart({
     if (mouseX < chartArea.left || mouseX > chartArea.right ||
         mouseY < chartArea.top || mouseY > chartArea.bottom) return
 
-    // 在绘图区内右键：阻止冒泡，避免触发外层面板的「在独立窗口中打开」菜单。
-    e.stopPropagation()
-
-    if (!highlightedTreeCode) return
-
     const xScale = chart.scales['x']
     const rawIdx = xScale.getValueForPixel(mouseX)
     if (rawIdx == null || !Number.isFinite(rawIdx)) return
 
     const yearIndex = Math.round(clamp(rawIdx, 0, allYears.length - 1))
-    const year = allYears[yearIndex]
-    if (year == null) return
+    const tree = nearbyTarget?.tree ?? highlightedTreeCode
+    const year = nearbyTarget?.year ?? allYears[yearIndex]
+    if (!tree || year == null) return
 
-    setContextMenu({ x: e.clientX, y: e.clientY, tree: highlightedTreeCode, year })
+    // 右键靠近折线时先在图表内部选中它，无需预先左键高亮。
+    if (nearbyTarget) {
+      onHighlightedTreeCodeChange?.(nearbyTarget.tree)
+      onLinePointClick?.(nearbyTarget)
+    }
+
+    // 只有真正打开图表菜单时才阻止冒泡；空白区域仍可使用外层面板菜单。
+    e.stopPropagation()
+
+    setContextMenu({ x: e.clientX, y: e.clientY, tree, year })
   }
 
   const handleChartMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -1810,6 +1871,10 @@ export function MultiLineChart({
             onDeleteSeries?.(tree)
             setContextMenu(null)
           }}
+          onJumpToWidth={onJumpToWidth}
+          onEditAsText={onEditAsText}
+          onJumpToCofecha={onJumpToCofecha}
+          canJumpToCofecha={cofechaPart6TreeSet.has(normalizeCofechaSeriesId(contextMenu.tree))}
           onClose={() => setContextMenu(null)}
         />
       )}

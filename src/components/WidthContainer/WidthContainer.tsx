@@ -715,7 +715,9 @@ export type WidthContainerProps = {
     /** Deletes an entire series. */
     onDeleteSeries?: (tree: string) => void,
     /** Opens text-edit mode for the active series. */
-    onEditAsText?: () => void,
+    onEditAsText?: (tree: string) => void,
+    /** Selects this series in the line chart and centres the chart on the year. */
+    onJumpToChart?: (tree: string, year: number) => void,
     /** Jumps to COFECHA details for the given series. */
     onJumpToCofecha?: (tree: string) => void,
     /** 拥有 PART 6 潜在问题块的序列集合（小写），决定是否显示“在 COFECHA 中定位”。 */
@@ -908,6 +910,7 @@ function WidthContainer({
     onRestoreDeletion,
     onDeleteSeries,
     onEditAsText,
+    onJumpToChart,
     onJumpToCofecha,
     cofechaPart6Trees,
     onDeleteSeriesRequestHandled,
@@ -2131,7 +2134,7 @@ function WidthContainer({
     const handleContextMenuEditAsText = useCallback((tree: string) => {
         setContextMenu(null);
         if (onEditAsText) {
-            onEditAsText();
+            onEditAsText(tree);
             return;
         }
         setTextEditTree(tree);
@@ -2141,6 +2144,11 @@ function WidthContainer({
         setContextMenu(null);
         onJumpToCofecha?.(tree);
     }, [onJumpToCofecha]);
+
+    const handleContextMenuJumpToChart = useCallback((tree: string, year: number) => {
+        setContextMenu(null);
+        onJumpToChart?.(tree, year);
+    }, [onJumpToChart]);
 
     const handleTextEditorClose = useCallback((tree: string, newText?: string) => {
         setTextEditTree(null);
@@ -2812,6 +2820,7 @@ function WidthContainer({
                 onDeleteRange={handleContextMenuDeleteRange}
                 onDeleteSeries={handleContextMenuDeleteSeries}
                 onEditAsText={handleContextMenuEditAsText}
+                onJumpToChart={onJumpToChart ? handleContextMenuJumpToChart : undefined}
                 onJumpToCofecha={onJumpToCofecha ? handleContextMenuJumpToCofecha : undefined}
                 canJumpToCofecha={Boolean(contextMenu && cofechaPart6Trees?.has(contextMenu.tree.toLowerCase()))}
                 onPreviewYearChange={handleContextMenuPreviewYearChange}
