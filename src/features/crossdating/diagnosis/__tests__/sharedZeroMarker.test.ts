@@ -118,6 +118,28 @@ describe("shared explicit zero locality", () => {
         });
     });
 
+    it("uses only previously confirmed target zeros to continue an older staircase", () => {
+        expect(resolveSequentialMissingPresentation(
+            head,
+            null,
+            "local2",
+            [],
+            [1892, 1894, 1930],
+        )).toMatchObject({
+            selectedYear: 1891,
+            windowCenterYear: 1891,
+            width: 13,
+            confirmedTargetStaircaseYear: 1891,
+        });
+        expect(resolveSequentialMissingPresentation(
+            head,
+            null,
+            "local2",
+            [],
+            [1894],
+        ).confirmedTargetStaircaseYear).toBeNull();
+    });
+
     it("keeps legacy recentering only for the explicit baseline ablation", () => {
         expect(resolveSequentialMissingPresentation(head, marker(1906), "local2"))
             .toMatchObject({
