@@ -105,6 +105,23 @@ describe("lower review-window display gate", () => {
         expect(result.event).toBe(strict);
     });
 
+    it("does not expose a strict partial move as a review-window fallback", () => {
+        const partial = {
+            ...strictEvent(),
+            eventType: "partialMove" as const,
+            shiftYears: -2,
+            shiftSide: "older" as const,
+        };
+        const result = selectReviewWindowDisplay(audit([
+            snapshot("missingRing"),
+        ]), [partial]);
+        expect(result).toMatchObject({
+            status: "refused",
+            reason: "operation_type_conflict",
+            event: null,
+        });
+    });
+
     it("recovers one review-only missing-ring window with no alternatives", () => {
         const result = selectReviewWindowDisplay(audit([
             snapshot("missingRing"),

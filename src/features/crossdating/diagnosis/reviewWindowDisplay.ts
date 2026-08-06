@@ -201,8 +201,14 @@ export const selectReviewWindowDisplay = (
     overrides: Partial<ReviewWindowDisplayConfig> = {},
 ): DiagnosisReviewWindowDecision => {
     const config = { ...DEFAULT_REVIEW_WINDOW_DISPLAY_CONFIG, ...overrides };
-    const strict = strictEvents[0] ?? null;
+    const strict = strictEvents.find((event) => (
+        event.eventType === "missingRing" || event.eventType === "falseRing"
+    )) ?? null;
     if (strict) {
+        const width = strict.endYear - strict.startYear + 1;
+        if (!config.allowedWindowWidths.includes(width)) {
+            return refused(audit, "window_width_unsafe");
+        }
         return {
             seriesId: audit.seriesId,
             status: "strict",
@@ -211,6 +217,9 @@ export const selectReviewWindowDisplay = (
             sourceStage: "final",
             event: strict,
         };
+    }
+    if (strictEvents.length > 0) {
+        return refused(audit, "operation_type_conflict");
     }
     if (audit.finalReason === "older_endpoint_context") {
         return refused(audit, "endpoint_context_insufficient");
