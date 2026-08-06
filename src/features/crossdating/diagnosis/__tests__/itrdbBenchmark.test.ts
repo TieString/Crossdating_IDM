@@ -220,7 +220,7 @@ const inBenchmarkFileSplit = (
         ? file.slice(ITRDB_DIR.length)
         : file;
     const bucket = stablePathHash(
-        relativePath.replace(/\\/g, "/").toLowerCase(),
+        relativePath.replace(/\\/g, "/").replace(/^\/+/, "").toLowerCase(),
     ) % 10;
     if (split === "train") return bucket <= 5;
     // Keep model fitting, calibration, and final validation file-disjoint.
@@ -581,6 +581,16 @@ d("ITRDB 大规模缺轮基准", () => {
         const minimumContextYears = Number(
             process.env.ITRDB_FROZEN_MIN_CONTEXT_YEARS ?? 18,
         );
+        const minimumOlderContextYears = Number(
+            process.env.ITRDB_FROZEN_MIN_OLDER_CONTEXT_YEARS
+                ?? minimumContextYears,
+        );
+        const minimumNewerContextYears = Number(
+            process.env.ITRDB_FROZEN_MIN_NEWER_CONTEXT_YEARS
+                ?? minimumContextYears,
+        );
+        const skipPartialTruth =
+            process.env.ITRDB_SKIP_PARTIAL_TRUTH === "1";
         const configuredPartialGaps = (
             process.env.ITRDB_PARTIAL_GAPS ?? "2,3,4,5,6,8"
         )
@@ -649,8 +659,11 @@ d("ITRDB 大规模缺轮基准", () => {
         type BenchmarkCaseContext = {
             groupId: string;
             file: string;
+            datasetGroup: string;
             target: string;
             year: number;
+            seriesLength: number;
+            naturalZeroCount: number;
             positionStratum: BenchmarkPositionStratum;
             normalizedPosition: number;
             olderContextYears: number;
@@ -666,7 +679,11 @@ d("ITRDB 大规模缺轮基准", () => {
         type EventCaseOutcome = {
             context: BenchmarkCaseContext;
             eventType: "missingRing" | "falseRing" | "partialMove";
+            systemResponded: boolean;
             answered: boolean;
+            primaryEventType: DiagnosisEvent["eventType"] | null;
+            primaryEventShiftYears: number | null;
+            partialMoveMisclassification: boolean;
             predictions: number;
             totalPredictions: number;
             matched: boolean;
@@ -1840,7 +1857,12 @@ d("ITRDB 大规模缺轮基准", () => {
             eventCaseOutcomes.push({
                 context,
                 eventType: truth.eventType as EventCaseOutcome["eventType"],
+                systemResponded: predictions.length > 0,
                 answered: typedPredictions.length > 0,
+                primaryEventType: predictions[0]?.eventType ?? null,
+                primaryEventShiftYears: predictions[0]?.shiftYears ?? null,
+                partialMoveMisclassification: truth.eventType !== "partialMove"
+                    && predictions[0]?.eventType === "partialMove",
                 predictions: result.predictionCount,
                 totalPredictions: predictions.length,
                 matched: result.matchedCount > 0,
@@ -1944,6 +1966,14 @@ d("ITRDB 大规模缺轮基准", () => {
             if (values.length === 0) return 0;
             const sorted = [...values].sort((a, b) => a - b);
             return sorted[Math.floor((sorted.length - 1) / 2)];
+        };
+        const percentile = (values: number[], probability: number) => {
+            if (values.length === 0) return 0;
+            const sorted = [...values].sort((a, b) => a - b);
+            return sorted[Math.min(
+                sorted.length - 1,
+                Math.ceil(sorted.length * probability) - 1,
+            )];
         };
         const collectWindowRankCase = (
             eventType: WindowRankCase["eventType"],
@@ -2699,18 +2729,24 @@ d("ITRDB 大规模缺轮基准", () => {
                 attempted,
                 `${offset}:${relativeFile}:${target.id}`,
                 minimumContextYears,
-            );
-            const partialSelection = pickStratifiedCalendarYear(
-                target,
-                attempted,
-                `${offset}:${relativeFile}:${target.id}:partial:${injectedShift}`,
-                minimumContextYears,
                 {
-                    olderContextYears:
-                        minimumContextYears + injectedShift,
-                    newerContextYears: minimumContextYears,
+                    olderContextYears: minimumOlderContextYears,
+                    newerContextYears: minimumNewerContextYears,
                 },
             );
+            const partialSelection = skipPartialTruth
+                ? selection
+                : pickStratifiedCalendarYear(
+                        target,
+                        attempted,
+                        `${offset}:${relativeFile}:${target.id}:partial:${injectedShift}`,
+                        minimumContextYears,
+                        {
+                            olderContextYears:
+                                minimumOlderContextYears + injectedShift,
+                            newerContextYears: minimumNewerContextYears,
+                        },
+                    );
             if (!selection || !partialSelection) continue;
             const year = selection.year;
             const referenceCount = Array.from(fixtureSeries.values()).filter((reference) => (
@@ -2735,7 +2771,12 @@ d("ITRDB 大规模缺轮基准", () => {
                 return {
                     groupId: relativeFile,
                     file: relativeFile,
+                    datasetGroup: relativeFile.replace(/\\/g, "/").includes("/")
+                        ? relativeFile.replace(/\\/g, "/").split("/").filter(Boolean)[0]
+                        : "root",
                     target: target.id,
+                    seriesLength: target.length,
+                    naturalZeroCount: target.zeroCount,
                     ...selected,
                     signalStrength: measureLocalSignalStrength(
                         target,
@@ -3520,7 +3561,7 @@ d("ITRDB 大规模缺轮基准", () => {
                 })),
             });
 
-            if (!unitEventsOnly) {
+            if (!unitEventsOnly && !skipPartialTruth) {
             const year = partialSelection.year;
             const context = partialContext;
             const partial = createPartialRangeMoveCase(target, year, injectedShift);
@@ -4214,9 +4255,11 @@ d("ITRDB 大规模缺轮基准", () => {
             return "strong";
         };
         const summarizeOutcomeRows = (rows: EventCaseOutcome[]) => {
+            const respondedRows = rows.filter((row) => row.systemResponded);
             const answeredRows = rows.filter((row) => row.answered);
             const matchedRows = rows.filter((row) => row.matched);
             const primaryMatchedRows = rows.filter((row) => row.primaryMatched);
+            const operationMatchedRows = rows.filter((row) => row.operationMatched);
             const alternativeRecoveredRows = rows.filter((row) => (
                 row.locationRank !== null && row.locationRank > 0
             ));
@@ -4227,13 +4270,20 @@ d("ITRDB 大规模缺轮基准", () => {
             const primaryTopYearCenterOffsets = answeredRows
                 .map((row) => row.primaryTopYearCenterOffset)
                 .filter((offset): offset is number => offset !== null);
+            const widths = rows
+                .map((row) => row.width)
+                .filter((width): width is number => width !== null);
             return {
                 cases: rows.length,
+                responded: respondedRows.length,
                 answered: answeredRows.length,
-                responseRate: answeredRows.length / Math.max(1, rows.length),
-                abstentionRate: 1 - answeredRows.length / Math.max(1, rows.length),
+                responseRate: respondedRows.length / Math.max(1, rows.length),
+                abstentionRate: 1 - respondedRows.length / Math.max(1, rows.length),
+                typedResponseRate: answeredRows.length / Math.max(1, rows.length),
                 recall: matchedRows.length / Math.max(1, rows.length),
                 primaryWindowRecall: primaryMatchedRows.length / Math.max(1, rows.length),
+                conditionalPrimaryWindowCoverage: primaryMatchedRows.length
+                    / Math.max(1, operationMatchedRows.length),
                 alternativeRecoveryRate: alternativeRecoveredRows.length
                     / Math.max(1, rows.length),
                 precision: matchedRows.length / Math.max(1, predictionCount),
@@ -4242,6 +4292,11 @@ d("ITRDB 大规模缺轮基准", () => {
                     / Math.max(1, answeredRows.length),
                 operationAccuracy: rows.filter((row) => row.operationMatched).length
                     / Math.max(1, rows.length),
+                operationAccuracyAnswered: operationMatchedRows.length
+                    / Math.max(1, respondedRows.length),
+                partialMoveMisclassificationRate: rows.filter(
+                    (row) => row.partialMoveMisclassification,
+                ).length / Math.max(1, rows.length),
                 selectableOperationAccuracy: rows
                     .filter((row) => row.selectableOperationMatched).length
                     / Math.max(1, rows.length),
@@ -4251,9 +4306,8 @@ d("ITRDB 大规模缺轮基准", () => {
                 multiplePredictionRate: rows.filter((row) => row.totalPredictions > 1).length
                     / Math.max(1, rows.length),
                 predictions: predictionCount,
-                medianWidth: median(rows
-                    .map((row) => row.width)
-                    .filter((width): width is number => width !== null)),
+                medianWidth: median(widths),
+                p90Width: percentile(widths, 0.9),
                 widthHistogram: Object.fromEntries(
                     Array.from(new Set(rows
                         .map((row) => row.width)
@@ -4359,10 +4413,21 @@ d("ITRDB 大规模缺轮基准", () => {
             "strong",
             "unavailable",
         ];
+        const datasetGroups = Array.from(new Set(
+            caseContexts.map((context) => context.datasetGroup),
+        )).sort();
+        const endpointStratumFor = (context: BenchmarkCaseContext) => {
+            if (context.newerContextYears <= 14) return "newer_2_14";
+            if (context.newerContextYears <= 29) return "newer_15_29";
+            if (context.olderContextYears <= 29) return "older_14_29";
+            return "interior_30_plus";
+        };
         const stratifiedBenchmarkSummary = {
             selection: {
                 method: "value-independent deterministic five-stratum calendar sampling",
                 minimumContextYears,
+                minimumOlderContextYears,
+                minimumNewerContextYears,
                 selectedCases: caseContexts.length,
                 normalizedPositionRange: caseContexts.length > 0
                     ? [
@@ -4383,6 +4448,33 @@ d("ITRDB 大规模缺轮基准", () => {
             bySignal: Object.fromEntries(signalStrata.map((stratum) => [
                 stratum,
                 summarizeStratum((context) => signalStratumFor(context) === stratum),
+            ])),
+            byDataset: Object.fromEntries(datasetGroups.map((datasetGroup) => [
+                datasetGroup,
+                summarizeStratum((context) => context.datasetGroup === datasetGroup),
+            ])),
+            bySeriesLength: {
+                years_150_199: summarizeStratum((context) => context.seriesLength < 200),
+                years_200_399: summarizeStratum((context) => (
+                    context.seriesLength >= 200 && context.seriesLength < 400
+                )),
+                years_400_plus: summarizeStratum((context) => context.seriesLength >= 400),
+            },
+            byReferenceDepth: {
+                refs_5_9: summarizeStratum((context) => context.referenceCount < 10),
+                refs_10_19: summarizeStratum((context) => (
+                    context.referenceCount >= 10 && context.referenceCount < 20
+                )),
+                refs_20_plus: summarizeStratum((context) => context.referenceCount >= 20),
+            },
+            byEndpointDistance: Object.fromEntries([
+                "older_14_29",
+                "interior_30_plus",
+                "newer_15_29",
+                "newer_2_14",
+            ].map((stratum) => [
+                stratum,
+                summarizeStratum((context) => endpointStratumFor(context) === stratum),
             ])),
             byBaselineStatus: {
                 clean: summarizeStratum((context) => context.baselineFlagged === false),
@@ -4900,6 +4992,9 @@ d("ITRDB 大规模缺轮基准", () => {
             sampling: "calendar-position-stratified-signal-independent",
             selectionUsesSignal: false,
             minimumContextYears,
+            minimumOlderContextYears,
+            minimumNewerContextYears,
+            skipPartialTruth,
             partialGapYears,
             files: files.length,
             fileSplit,
@@ -5007,6 +5102,9 @@ d("ITRDB 大规模缺轮基准", () => {
                 sampling: "calendar-position-stratified-signal-independent",
                 selectionUsesSignal: false,
                 minimumContextYears,
+                minimumOlderContextYears,
+                minimumNewerContextYears,
+                skipPartialTruth,
                 partialGapYears,
                 fileSplit,
                 splitPoolFiles: splitFiles.length,
@@ -5029,6 +5127,9 @@ d("ITRDB 大规模缺轮基准", () => {
                 sampling: "calendar-position-stratified-signal-independent",
                 selectionUsesSignal: false,
                 minimumContextYears,
+                minimumOlderContextYears,
+                minimumNewerContextYears,
+                skipPartialTruth,
                 fileSplit,
                 splitPoolFiles: splitFiles.length,
                 offset,
