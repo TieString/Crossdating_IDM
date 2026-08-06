@@ -29,9 +29,9 @@ const getPauseText = (navigator: BreadthDiagnosisNavigatorState) => {
 const getStatusText = (navigator: BreadthDiagnosisNavigatorState) => {
     switch (navigator.status) {
         case "idle":
-            return "打开 RWL 后开始全文件扫描";
+            return "保存后开始全文件扫描";
         case "stale":
-            return "结果已过期，等待重新扫描";
+            return "数据有变化，保存后重新扫描";
         case "paused":
             return getPauseText(navigator);
         case "scanning":
@@ -71,7 +71,8 @@ export function BreadthDiagnosisNavigator({ navigator, onSelectSuggestion }: Pro
                     <span className={styles["breadth-count"]}>{navigator.suggestions.length}</span>
                 </strong>
                 <span>{getStatusText(navigator)}</span>
-                {navigator.totalCount > 0 && navigator.status !== "complete" ? (
+                {navigator.totalCount > 0
+                    && (navigator.status === "scanning" || navigator.status === "paused") ? (
                     <span
                         className={styles["breadth-progress-track"]}
                         role="progressbar"

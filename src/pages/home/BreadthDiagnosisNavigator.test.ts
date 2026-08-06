@@ -65,7 +65,8 @@ describe("BreadthDiagnosisNavigator", () => {
             onSelectSuggestion: () => undefined,
         }));
 
-        expect(staleHtml).toContain("结果已过期，等待重新扫描");
+        expect(staleHtml).toContain("数据有变化，保存后重新扫描");
+        expect(staleHtml).not.toContain("role=\"progressbar\"");
         expect(completeHtml).toContain("暂未发现其他复核窗口");
     });
 });
