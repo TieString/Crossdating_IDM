@@ -183,7 +183,7 @@ export const selectSharedExplicitZeroMarker = (
     siteData: RwlSiteData,
     targetTree: string,
     headYear: number,
-    radius = 6,
+    radius = 2,
 ): SharedExplicitZeroMarker | null => {
     const maximumDistance = Math.max(0, Math.floor(radius));
     const rows: SharedExplicitZeroMarker[] = [];

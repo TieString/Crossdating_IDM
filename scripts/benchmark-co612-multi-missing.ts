@@ -28,7 +28,10 @@ import { scoreFullIntervalShiftEvidence } from "@/features/crossdating/diagnosis
 import { comparePartialMoveWithMissingStaircase } from "@/features/crossdating/diagnosis/discreteMissingStaircaseCompetition";
 import { preprocessSeries } from "@/features/crossdating/diagnosis/series";
 import { diagnoseSeriesCore } from "@/features/crossdating/diagnosis/segments";
-import type { DiagnosisEvent } from "@/features/crossdating/diagnosis/types";
+import type {
+    DiagnosisEvent,
+    SharedZeroMarkerMode,
+} from "@/features/crossdating/diagnosis/types";
 import {
     cofechaStyleStandardize,
     createCofechaMasterReferenceConfig,
@@ -186,6 +189,11 @@ const resume = hasFlag("--resume");
 const statsOnly = hasFlag("--stats-only");
 const aggregateOnly = hasFlag("--aggregate-only");
 const includeProbes = hasFlag("--include-probes");
+const sharedZeroMarkerModeRaw = valueFor("--shared-zero-mode") ?? "local2";
+if (!["none", "local2", "legacy6"].includes(sharedZeroMarkerModeRaw)) {
+    throw new Error(`invalid --shared-zero-mode: ${sharedZeroMarkerModeRaw}`);
+}
+const sharedZeroMarkerMode = sharedZeroMarkerModeRaw as SharedZeroMarkerMode;
 
 const assertSafeRunDirectory = (): void => {
     const rel = relative(outputDir, runDir);
@@ -394,6 +402,7 @@ const executeCase = (
             referenceConfig,
             targetTrees: [plan.target.id],
             cofechaText: outText,
+            sharedZeroMarkerMode,
         });
         const ownEvents = events.events.filter((event) => event.seriesId === plan.target.id);
         if (includeProbes && cofechaDiagnosis && effectiveConfig) {
@@ -621,6 +630,21 @@ const summarize = (rows: CaseRow[]) => {
     const covered = rows.filter((row) => row.windowCovered);
     const widths = correct.flatMap((row) => row.windowWidth === null ? [] : [row.windowWidth]);
     const elapsed = rows.map((row) => row.elapsedMs);
+    const wrongTop1Rows = rows.filter((row) => (
+        row.operationCorrect
+        && row.topYear !== null
+        && row.topYear !== row.truthYear
+    ));
+    const wrongTop1Counts = wrongTop1Rows.reduce((counts, row) => {
+        counts.set(row.topYear!, (counts.get(row.topYear!) ?? 0) + 1);
+        return counts;
+    }, new Map<number, number>());
+    const repeatedAttractorYears = new Set(Array.from(wrongTop1Counts)
+        .filter(([, count]) => count >= 3)
+        .map(([year]) => year));
+    const repeatedAttractionRows = wrongTop1Rows.filter((row) => (
+        repeatedAttractorYears.has(row.topYear!)
+    ));
     return {
         cases: rows.length,
         errors: rows.filter((row) => row.error !== null).length,
@@ -657,6 +681,18 @@ const summarize = (rows: CaseRow[]) => {
         missDistanceHistogram: histogram(rows.filter((row) => (
             row.operationCorrect && !row.windowCovered
         )).map((row) => row.missDistance)),
+        fixedWrongTop1Attraction: {
+            repeatedAttractorYears: repeatedAttractorYears.size,
+            cases: repeatedAttractionRows.length,
+            rate: rate(repeatedAttractionRows.length, rows.length),
+            distantCases: repeatedAttractionRows.filter((row) => (
+                Math.abs(row.topYear! - row.truthYear) > 2
+            )).length,
+            topYears: Array.from(wrongTop1Counts)
+                .sort((left, right) => right[1] - left[1] || right[0] - left[0])
+                .slice(0, 12)
+                .map(([year, count]) => ({ year, count })),
+        },
         medianElapsedMs: quantile(elapsed, 0.5),
         p90ElapsedMs: quantile(elapsed, 0.9),
     };
@@ -699,6 +735,7 @@ const aggregate = () => {
         configuration: {
             workflow: "remove all expert zero years; restore newest-to-oldest",
             referenceMode: "fresh bundled COFECHA master after every truth repair",
+            sharedZeroMarkerMode,
             workers,
             selectedSeries,
             includeProbes,
@@ -776,6 +813,7 @@ const runParent = async (): Promise<void> => {
         "--run-dir", runDir,
         "--worker-count", String(workers),
         "--workers", String(workers),
+        "--shared-zero-mode", sharedZeroMarkerMode,
         ...(selectedSeries ? ["--series", selectedSeries.join(",")] : []),
         ...(resume ? ["--resume"] : []),
         ...(includeProbes ? ["--include-probes"] : []),
@@ -806,6 +844,7 @@ console.log(`BENCHMARK_STATS ${JSON.stringify({
     seriesWithZeros: plans.length,
     totalMissingYears: plans.reduce((sum, plan) => sum + plan.truthYears.length, 0),
     workers,
+    sharedZeroMarkerMode,
     runDir,
 })}`);
 if (statsOnly) {

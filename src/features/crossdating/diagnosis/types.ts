@@ -7,6 +7,9 @@ import type { DeleteShift, MissingInsertSide } from "@/features/rwl/edit";
 
 export type DiagnosisConfidence = "high" | "medium" | "low";
 
+/** Benchmark override; production diagnosis uses local2. */
+export type SharedZeroMarkerMode = "none" | "local2" | "legacy6";
+
 export type DiagnosisEventType =
     | "missingRing"
     | "falseRing"
@@ -510,11 +513,16 @@ export type DiagnosisOptions = {
     minLocalOverlap?: number;
     /** 可选 COFECHA 文本输出，解析为候选证据 hints；不提供时算法照常运行。 */
     cofechaText?: string;
+    /** Internal ablation only; shared zero markers never become user-facing choices. */
+    sharedZeroMarkerMode?: SharedZeroMarkerMode;
 };
 
 export type NumericSeries = Map<number, number>;
 
-export type EffectiveDiagnosisConfig = Required<Omit<DiagnosisOptions, "referenceConfig" | "cofechaText" | "targetTrees">> & {
+export type EffectiveDiagnosisConfig = Required<Omit<
+    DiagnosisOptions,
+    "referenceConfig" | "cofechaText" | "targetTrees" | "sharedZeroMarkerMode"
+>> & {
     referenceConfig: ReferenceSeriesConfig | null;
     minPairsForCorrelation: number;
 };

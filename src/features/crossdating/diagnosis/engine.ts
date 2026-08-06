@@ -207,6 +207,9 @@ export function diagnoseCrossdating(
             cofechaFlaggedSeriesIds:
                 options.referenceConfig?.classification?.candidateFlaggedIds
                 ?? [],
+            sharedZeroMarkerMode:
+                options.sharedZeroMarkerMode
+                ?? INTERNAL_EVENT_ENSEMBLE_OPTIONS.sharedZeroMarkerMode,
         },
     );
     const candidateCountByTree = candidates.reduce((counts, candidate) => {

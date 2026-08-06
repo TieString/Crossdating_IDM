@@ -87,6 +87,7 @@ import type {
     EffectiveDiagnosisConfig,
     NumericSeries,
     SeriesCoreDiagnosis,
+    SharedZeroMarkerMode,
 } from "./types";
 
 export const INTERNAL_EVENT_PATH_CONFIG: Partial<EventPathConfig> = {
@@ -130,6 +131,8 @@ export type DiagnosisEventEnsembleOptions = {
     enableCounterfactualEventLocator?: boolean;
     /** Latest COFECHA PART 6 targets; used only to gate cumulative missing-ring recovery. */
     cofechaFlaggedSeriesIds?: readonly string[];
+    /** Shared zeros may only rerank a lag-derived head in production local2 mode. */
+    sharedZeroMarkerMode?: SharedZeroMarkerMode;
 };
 
 export const INTERNAL_EVENT_ENSEMBLE_OPTIONS: DiagnosisEventEnsembleOptions = {
@@ -140,6 +143,7 @@ export const INTERNAL_EVENT_ENSEMBLE_OPTIONS: DiagnosisEventEnsembleOptions = {
     enableUnitNeighborRanking: true,
     enableEndpointResidualWindow: true,
     enableCounterfactualEventLocator: true,
+    sharedZeroMarkerMode: "local2",
     eventOperationRecoveryConfig: {
         outputSingleMainWindow: true,
         verificationHypothesisCount: 3,
@@ -914,7 +918,7 @@ const boundedSequentialWindow = (
     return { startYear, endYear: startYear + actualWidth - 1 };
 };
 
-const sequentialWindowWidth = (
+const legacySequentialWindowWidth = (
     head: SequentialMissingHead,
     marker: SharedExplicitZeroMarker | null,
 ): 5 | 7 | 13 => {
@@ -925,22 +929,80 @@ const sequentialWindowWidth = (
     return 13;
 };
 
+/** Width calibration uses only lag-head concentration, never explicit-zero availability. */
+const lagHeadSequentialWindowWidth = (
+    head: SequentialMissingHead,
+): 5 | 7 | 13 => {
+    if (!Number.isFinite(head.headMeanAdvantage)
+        || head.headMeanAdvantage < 0.08) return 13;
+    if (head.headMeanAdvantage < 0.4) return 7;
+    return 5;
+};
+
+export type SequentialMissingPresentation = {
+    marker: SharedExplicitZeroMarker | null;
+    selectedYear: number;
+    windowCenterYear: number;
+    width: 5 | 7 | 13;
+};
+
+/** Shared zeros can reorder only the local lag head; production windows stay lag-centered. */
+export const resolveSequentialMissingPresentation = (
+    head: SequentialMissingHead,
+    candidateMarker: SharedExplicitZeroMarker | null,
+    mode: SharedZeroMarkerMode,
+): SequentialMissingPresentation => {
+    const marker = mode === "none"
+        || (mode === "local2" && (candidateMarker?.distanceFromHead ?? 0) > 2)
+        ? null
+        : candidateMarker;
+    const selectedYear = marker?.year ?? head.year;
+    return {
+        marker,
+        selectedYear,
+        windowCenterYear: mode === "legacy6" && marker && marker.distanceFromHead > 2
+            ? selectedYear
+            : head.year,
+        width: mode === "legacy6"
+            ? legacySequentialWindowWidth(head, marker)
+            : lagHeadSequentialWindowWidth(head),
+    };
+};
+
+const selectSharedZeroMarkerForMode = (
+    siteData: RwlSiteData,
+    targetTree: string,
+    headYear: number,
+    mode: SharedZeroMarkerMode,
+    legacyRadius = 6,
+): SharedExplicitZeroMarker | null => {
+    if (mode === "none") return null;
+    return selectSharedExplicitZeroMarker(
+        siteData,
+        targetTree,
+        headYear,
+        mode === "legacy6" ? legacyRadius : 2,
+    );
+};
+
 const finiteNote = (value: number): string => (
     Number.isFinite(value) ? value.toFixed(6) : "unavailable"
 );
 
 const makeSequentialMissingHeadEvent = (
     head: SequentialMissingHead,
-    marker: SharedExplicitZeroMarker | null,
+    candidateMarker: SharedExplicitZeroMarker | null,
     detected: DiagnosisEvent[],
     diagnosis: SeriesCoreDiagnosis,
     candidates: DiagnosisCandidateOperation[],
+    markerMode: SharedZeroMarkerMode,
 ): DiagnosisEvent => {
-    const width = sequentialWindowWidth(head, marker);
-    const selectedYear = marker?.year ?? head.year;
-    const windowCenterYear = marker && marker.distanceFromHead <= 2
-        ? head.year
-        : selectedYear;
+    const {
+        marker,
+        selectedYear,
+        windowCenterYear,
+        width,
+    } = resolveSequentialMissingPresentation(head, candidateMarker, markerMode);
     const window = boundedSequentialWindow(
         windowCenterYear,
         width,
@@ -1019,7 +1081,11 @@ const makeSequentialMissingHeadEvent = (
                     `shared_zero_marker_support=${marker.support}`,
                     `shared_zero_marker_distance=${marker.distanceFromHead}`,
                     `shared_zero_marker_weighted_support=${marker.weightedSupport.toFixed(6)}`,
-                ] : ["shared_zero_marker=none_within_6_years"]),
+                ] : [`shared_zero_marker=none_mode_${markerMode}`]),
+                `shared_zero_marker_mode=${markerMode}`,
+                `sequential_missing_width_source=${
+                    markerMode === "legacy6" ? "legacy_shared_zero" : "lag_head_advantage"
+                }`,
                 `sequential_missing_window_width=${width}`,
                 `sequential_missing_window_center=${windowCenterYear}`,
                 `sequential_missing_replaced_types=${detected.map(
@@ -1072,6 +1138,7 @@ const recoverSequentialMissingHeadEvent = (
     options: DiagnosisEventEnsembleOptions,
     pathCache: LagPathCache,
 ): DiagnosisEvent | null => {
+    const markerMode = options.sharedZeroMarkerMode ?? "local2";
     const allowedByCofecha = isCofechaFlaggedSeries(
         diagnosis.targetTree,
         options.cofechaFlaggedSeriesIds,
@@ -1088,10 +1155,11 @@ const recoverSequentialMissingHeadEvent = (
     );
     // A true continuous gap is normally better explained by one direct breakpoint.
     if (head && head.gainOverDirect > 0) {
-        const marker = selectSharedExplicitZeroMarker(
+        const marker = selectSharedZeroMarkerForMode(
             siteData,
             diagnosis.targetTree,
             head.year,
+            markerMode,
         );
         return makeSequentialMissingHeadEvent(
             head,
@@ -1099,6 +1167,7 @@ const recoverSequentialMissingHeadEvent = (
             detected,
             diagnosis,
             candidates,
+            markerMode,
         );
     }
     const partial = detected.find((event) => (
@@ -1132,10 +1201,11 @@ const recoverSequentialMissingHeadEvent = (
         constrainedHead.year,
     );
     if (!supportsDiscreteMissingStaircase(competition, staircase)) return null;
-    const marker = selectSharedExplicitZeroMarker(
+    const marker = selectSharedZeroMarkerForMode(
         siteData,
         diagnosis.targetTree,
         constrainedHead.year,
+        markerMode,
         2,
     );
     return addExplicitStaircaseCompetitionEvidence(makeSequentialMissingHeadEvent(
@@ -1144,6 +1214,7 @@ const recoverSequentialMissingHeadEvent = (
         detected,
         diagnosis,
         candidates,
+        markerMode,
     ), competition!, staircase!);
 };
 
