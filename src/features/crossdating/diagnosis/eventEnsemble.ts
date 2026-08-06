@@ -1032,7 +1032,9 @@ export const resolveSequentialMissingPresentation = (
             ))[0] ?? null;
     const candidateConsensusYear = (marker?.support ?? 0) >= 10
         ? null
-        : candidateWindowSupportYear;
+        : candidateWindowSupportYear === null
+            ? null
+            : Math.round((candidateWindowSupportYear + head.year) / 2);
     const candidateDistance = candidateWindowSupportYear === null
         ? null
         : Math.abs(candidateWindowSupportYear - head.year);
@@ -1044,14 +1046,18 @@ export const resolveSequentialMissingPresentation = (
         : candidateDistance <= 2
             ? Math.max(9, lagWidth) as 9 | 13
             : 13;
-    const selectedYear = candidateConsensusYear ?? marker?.year ?? head.year;
+    const lagOnlyCenterYear = head.headRunYears <= 2
+        && candidateWindowSupportYear === null
+        ? head.year - 2
+        : head.year;
+    const selectedYear = marker?.year ?? candidateConsensusYear ?? head.year;
     return {
         marker,
         selectedYear,
         windowCenterYear: candidateConsensusYear
             ?? (mode === "legacy6" && marker && marker.distanceFromHead > 2
                 ? selectedYear
-                : head.year),
+                : lagOnlyCenterYear),
         width,
         candidateConsensusYear,
         candidateWindowSupportYear,

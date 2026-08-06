@@ -71,9 +71,9 @@ describe("shared explicit zero locality", () => {
             [1902],
         )).toMatchObject({
             selectedYear: 1902,
-            windowCenterYear: 1902,
+            windowCenterYear: 1901,
             width: 9,
-            candidateConsensusYear: 1902,
+            candidateConsensusYear: 1901,
             candidateWindowSupportYear: 1902,
         });
         expect(resolveSequentialMissingPresentation(
@@ -82,10 +82,10 @@ describe("shared explicit zero locality", () => {
             "local2",
             [1911],
         )).toMatchObject({
-            selectedYear: 1911,
-            windowCenterYear: 1911,
+            selectedYear: 1906,
+            windowCenterYear: 1906,
             width: 13,
-            candidateConsensusYear: 1911,
+            candidateConsensusYear: 1906,
             candidateWindowSupportYear: 1911,
         });
     });
@@ -96,7 +96,7 @@ describe("shared explicit zero locality", () => {
             headRunYears: 1,
         }, null, "local2")).toMatchObject({
             selectedYear: 1900,
-            windowCenterYear: 1900,
+            windowCenterYear: 1898,
             width: 13,
             candidateConsensusYear: null,
             candidateWindowSupportYear: null,
