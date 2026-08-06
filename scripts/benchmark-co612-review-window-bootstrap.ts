@@ -102,6 +102,7 @@ type EventObservation = {
     reviewDecisionStatus: DiagnosisReviewWindowDecision["status"];
     candidateCount: number;
     candidateModeCount: number;
+    reviewQueueEnteredRound: number | null;
     strict: EventOutcome;
     review: EventOutcome;
 };
@@ -576,6 +577,21 @@ if (resume) {
     retainCompletedRounds(roundsPath);
 }
 
+const firstReviewableRoundByEventId = new Map<string, number>();
+if (existsSync(observationsPath)) {
+    readFileSync(observationsPath, "utf8")
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as EventObservation)
+        .filter((row) => row.review.response)
+        .forEach((row) => {
+            const previous = firstReviewableRoundByEventId.get(row.eventId);
+            if (previous === undefined || row.round < previous) {
+                firstReviewableRoundByEventId.set(row.eventId, row.round);
+            }
+        });
+}
+
 const initialVerificationSite = buildInitialSite();
 const initialZeroCount = zeroCount(initialVerificationSite);
 if (initialZeroCount !== 0) {
@@ -620,9 +636,15 @@ try {
             if (truthYear === undefined) return;
             const result = bySeries.get(state.seriesId);
             if (!result) throw new Error(`missing worker result for ${state.seriesId}`);
+            const eventId = `${state.seriesId}:${truthYear}`;
+            const strict = eventOutcome(result.strictEvent, truthYear);
+            const review = eventOutcome(result.reviewEvent, truthYear);
+            if (review.response && !firstReviewableRoundByEventId.has(eventId)) {
+                firstReviewableRoundByEventId.set(eventId, round);
+            }
             activeObservations.push({
                 round,
-                eventId: `${state.seriesId}:${truthYear}`,
+                eventId,
                 seriesId: state.seriesId,
                 truthYear,
                 absoluteIdentifiable: !commonTruthYears.has(truthYear),
@@ -644,8 +666,9 @@ try {
                 reviewDecisionStatus: result.reviewDecision.status,
                 candidateCount: result.audit.candidateCount,
                 candidateModeCount: result.audit.candidateModeCount,
-                strict: eventOutcome(result.strictEvent, truthYear),
-                review: eventOutcome(result.reviewEvent, truthYear),
+                reviewQueueEnteredRound: firstReviewableRoundByEventId.get(eventId) ?? null,
+                strict,
+                review,
             });
         });
         activeObservations.forEach((row) => {
@@ -661,7 +684,9 @@ try {
             const statusWeight = (status: DiagnosisReviewWindowDecision["status"]) => (
                 status === "strict" ? 2 : status === "review" ? 1 : 0
             );
-            return statusWeight(rightResult.reviewDecision.status)
+            return (left.reviewQueueEnteredRound ?? round)
+                - (right.reviewQueueEnteredRound ?? round)
+                || statusWeight(rightResult.reviewDecision.status)
                 - statusWeight(leftResult.reviewDecision.status)
                 || (right.review.score ?? -Infinity) - (left.review.score ?? -Infinity)
                 || left.seriesId.localeCompare(right.seriesId);
