@@ -23,6 +23,10 @@ export type ReviewWindowDisplayConfig = {
     remoteModeDistanceYears: number;
     minimumRemoteModeStrengthMargin: number;
     minimumOperationStrengthMargin: number;
+    minimumPartialVoteGain: number;
+    minimumPartialJointGain: number;
+    minimumPartialReferenceCoreGain: number;
+    partialVoteWindowToleranceYears: number;
     allowedWindowWidths: readonly number[];
 };
 
@@ -32,6 +36,10 @@ export const DEFAULT_REVIEW_WINDOW_DISPLAY_CONFIG: ReviewWindowDisplayConfig = {
     remoteModeDistanceYears: 13,
     minimumRemoteModeStrengthMargin: 0.05,
     minimumOperationStrengthMargin: 0.05,
+    minimumPartialVoteGain: 0.02,
+    minimumPartialJointGain: 0.05,
+    minimumPartialReferenceCoreGain: 0.05,
+    partialVoteWindowToleranceYears: 1,
     allowedWindowWidths: [5, 7, 9, 13],
 };
 
@@ -60,6 +68,92 @@ const hasConsistentUnitDirection = (event: DiagnosisEventAuditSnapshot): boolean
     }
     const transition = event.lagAfter - event.lagBefore;
     return event.eventType === "missingRing" ? transition === 1 : transition === -1;
+};
+
+const numericNote = (
+    event: DiagnosisEvent,
+    key: string,
+): number | null => {
+    const prefix = `${key}=`;
+    const note = event.evidence.notes.find((candidate) => candidate.startsWith(prefix));
+    if (!note) return null;
+    const value = Number(note.slice(prefix.length));
+    return Number.isFinite(value) ? value : null;
+};
+
+const yearSupportsWindow = (
+    event: DiagnosisEvent,
+    year: number | null,
+    toleranceYears: number,
+): boolean => year !== null
+    && year >= event.startYear - toleranceYears
+    && year <= event.endYear + toleranceYears;
+
+const hasOperationConsistentPartialVote = (
+    event: DiagnosisEvent,
+    prefix: "partial_reference_vote" | "partial_exhaustive_vote",
+    config: ReviewWindowDisplayConfig,
+): boolean => numericNote(event, `${prefix}_shift`) === event.shiftYears
+    && yearSupportsWindow(
+        event,
+        numericNote(event, `${prefix}_year`),
+        config.partialVoteWindowToleranceYears,
+    )
+    && (numericNote(event, `${prefix}_gain`) ?? Number.NEGATIVE_INFINITY)
+        >= config.minimumPartialVoteGain;
+
+const hasReviewablePartialMoveEvidence = (
+    event: DiagnosisEvent,
+    config: ReviewWindowDisplayConfig,
+): boolean => {
+    if (event.eventType !== "partialMove") return false;
+    const shiftYears = event.shiftYears;
+    if (shiftYears === undefined
+        || shiftYears > -2
+        || event.shiftSide !== "older"
+        || event.evidence.lagBefore !== shiftYears
+        || event.evidence.lagAfter !== 0) return false;
+
+    const counterfactualShift = numericNote(event, "counterfactual_correction_years");
+    if (counterfactualShift !== null && counterfactualShift !== shiftYears) return false;
+
+    const sources = new Set(event.evidence.algorithmSources);
+    const referenceVote = hasOperationConsistentPartialVote(
+        event,
+        "partial_reference_vote",
+        config,
+    );
+    const exhaustiveVote = hasOperationConsistentPartialVote(
+        event,
+        "partial_exhaustive_vote",
+        config,
+    );
+    if (referenceVote || exhaustiveVote) return true;
+
+    const jointCorrection = numericNote(event, "joint_operation_correction");
+    const jointGain = Math.max(
+        numericNote(event, "joint_operation_best_difference_gain")
+            ?? Number.NEGATIVE_INFINITY,
+        numericNote(event, "joint_operation_top3_difference_gain")
+            ?? Number.NEGATIVE_INFINITY,
+        event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY,
+    );
+    if (sources.has("decisive_joint_operation_fusion")
+        && jointCorrection === shiftYears
+        && jointGain >= config.minimumPartialJointGain) return true;
+
+    const referenceVoteYear = numericNote(event, "reference_vote_year");
+    const referenceCoreGain = Math.max(
+        numericNote(event, "reference_vote_gain") ?? Number.NEGATIVE_INFINITY,
+        event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY,
+    );
+    return sources.has("reference_core_voting")
+        && yearSupportsWindow(
+            event,
+            referenceVoteYear,
+            config.partialVoteWindowToleranceYears,
+        )
+        && referenceCoreGain >= config.minimumPartialReferenceCoreGain;
 };
 
 const stagedEvents = (audit: DiagnosisEventDecisionAudit): StagedEvent[] => {
@@ -204,10 +298,14 @@ export const selectReviewWindowDisplay = (
     const strictUnit = strictEvents.find((event) => (
         event.eventType === "missingRing" || event.eventType === "falseRing"
     )) ?? null;
-    const strictLocal = strictUnit ?? strictEvents.find((event) => (
-        event.eventType === "partialMove"
+    const strictPartial = strictEvents.find((event) => (
+        hasReviewablePartialMoveEvidence(event, config)
     )) ?? null;
-    const strict = strictLocal ?? (strictEvents.length === 1 ? strictEvents[0] : null);
+    const strictWhole = strictEvents.length === 1
+        && strictEvents[0].eventType === "wholeSeriesMove"
+        ? strictEvents[0]
+        : null;
+    const strict = strictUnit ?? strictPartial ?? strictWhole;
     if (strict) {
         const width = strict.endYear - strict.startYear + 1;
         if (strict.eventType !== "wholeSeriesMove"
@@ -224,6 +322,9 @@ export const selectReviewWindowDisplay = (
         };
     }
     if (strictEvents.length > 0) {
+        if (strictEvents.some((event) => event.eventType === "partialMove")) {
+            return refused(audit, "partial_move_evidence_insufficient");
+        }
         return refused(audit, "operation_type_conflict");
     }
     if (audit.finalReason === "older_endpoint_context") {

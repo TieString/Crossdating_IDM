@@ -163,6 +163,7 @@ export type DiagnosisReviewWindowDecisionReason =
     | "no_unit_hypothesis"
     | "lag_direction_conflict"
     | "operation_type_conflict"
+    | "partial_move_evidence_insufficient"
     | "competing_remote_modes"
     | "endpoint_context_insufficient"
     | "window_width_unsafe";

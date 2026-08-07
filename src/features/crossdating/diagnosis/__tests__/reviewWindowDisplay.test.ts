@@ -93,6 +93,30 @@ const strictEvent = (): DiagnosisEvent => ({
     alternativeTypes: [],
 });
 
+const reviewablePartial = (
+    shiftYears = -2,
+    evidence: Partial<DiagnosisEvent["evidence"]> = {},
+): DiagnosisEvent => ({
+    ...strictEvent(),
+    eventType: "partialMove",
+    shiftYears,
+    shiftSide: "older",
+    evidence: {
+        ...strictEvent().evidence,
+        lagBefore: shiftYears,
+        lagAfter: 0,
+        correlationGain: 0,
+        algorithmSources: ["full_interval_counterfactual_locator"],
+        notes: [
+            `counterfactual_correction_years=${shiftYears}`,
+            "partial_reference_vote_year=1900",
+            `partial_reference_vote_shift=${shiftYears}`,
+            "partial_reference_vote_gain=0.08",
+        ],
+        ...evidence,
+    },
+});
+
 describe("lower review-window display gate", () => {
     it("keeps an existing strict event unchanged", () => {
         const strict = strictEvent();
@@ -106,12 +130,7 @@ describe("lower review-window display gate", () => {
     });
 
     it("keeps a strict partial move in the display layer", () => {
-        const partial = {
-            ...strictEvent(),
-            eventType: "partialMove" as const,
-            shiftYears: -2,
-            shiftSide: "older" as const,
-        };
+        const partial = reviewablePartial();
         const result = selectReviewWindowDisplay(audit([
             snapshot("missingRing"),
         ]), [partial]);
@@ -123,12 +142,15 @@ describe("lower review-window display gate", () => {
     });
 
     it("shows a local partial before its independent whole-series baseline", () => {
-        const partial = {
-            ...strictEvent(),
-            eventType: "partialMove" as const,
-            shiftYears: -4,
-            shiftSide: "older" as const,
-        };
+        const partial = reviewablePartial(-4, {
+            correlationGain: 0.12,
+            algorithmSources: ["decisive_joint_operation_fusion"],
+            notes: [
+                "counterfactual_correction_years=-4",
+                "joint_operation_correction=-4",
+                "joint_operation_best_difference_gain=0.12",
+            ],
+        });
         const whole = {
             ...strictEvent(),
             id: "whole",
@@ -143,6 +165,52 @@ describe("lower review-window display gate", () => {
             reason: "strict_event",
             event: partial,
         });
+    });
+
+    it("keeps a high-gain reference-core partial without a per-shift vote", () => {
+        const partial = reviewablePartial(-50, {
+            correlationGain: 0.18,
+            algorithmSources: ["full_interval_counterfactual_locator", "reference_core_voting"],
+            notes: [
+                "counterfactual_correction_years=-50",
+                "reference_vote_year=1900",
+                "reference_vote_gain=0.18",
+            ],
+        });
+
+        expect(selectReviewWindowDisplay(audit([]), [partial])).toMatchObject({
+            status: "strict",
+            event: partial,
+        });
+    });
+
+    it("refuses a lag-path partial when independent votes choose unrelated shifts", () => {
+        const partial = reviewablePartial(-4, {
+            score: 17.85,
+            scoreMargin: 0.28,
+            correlationGain: 0,
+            algorithmSources: [
+                "full_interval_counterfactual_locator",
+                "piecewise_lag_path",
+            ],
+            notes: [
+                "counterfactual_correction_years=-4",
+                "partial_reference_vote_year=1943",
+                "partial_reference_vote_shift=-99",
+                "partial_reference_vote_gain=0.003",
+                "partial_exhaustive_vote_year=1878",
+                "partial_exhaustive_vote_shift=-93",
+                "partial_exhaustive_vote_gain=0.030",
+            ],
+        });
+        const result = selectReviewWindowDisplay(audit([]), [partial]);
+
+        expect(result).toMatchObject({
+            status: "refused",
+            reason: "partial_move_evidence_insufficient",
+            event: null,
+        });
+        expect(partial.evidence.score).toBe(17.85);
     });
 
     it("does not hide a strict whole-series move because it has no narrow window", () => {
