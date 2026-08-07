@@ -7,6 +7,7 @@ import {
     canonicalSnapshot,
     isResumableCompletedStage,
     matchTruthAfterDiagnosis,
+    readRwlForEvaluation,
     siteHash,
     snapshotsSemanticallyEqual,
 } from "../evaluator";
@@ -107,6 +108,21 @@ const snapshot = (candidateScore: number): LegacyDiagnosisSnapshot => ({
 });
 
 describe("Legacy generalization evaluator isolation", () => {
+    it("honors a frozen Tucson declaration when header text contains commas", async () => {
+        const source = [
+            "540    1 Lofoten, Loedingen WIDTH_EARLY PISY -",
+            "540    2 Norway   Scots pine, Scotch pine 200  6829-1602 1485 1978 -",
+            "540    3 FRITZ SCHWEINGRUBER -",
+            "540011  1721    65    75    39    66    76    67    82    60    88",
+        ].join("\n");
+
+        const parsed = await readRwlForEvaluation(source, "tucson-auto");
+
+        expect(parsed.format).toBe("tucson");
+        expect(parsed.data.get("540011")?.get(1721)).toBe(65);
+        expect(parsed.data.size).toBe(1);
+    });
+
     it("does not resume past an explicitly failed gate checkpoint", () => {
         expect(isResumableCompletedStage({ stage: "gate", passed: false })).toBe(false);
         expect(isResumableCompletedStage({ stage: "gate", passed: true })).toBe(true);

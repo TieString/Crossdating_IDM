@@ -34,7 +34,12 @@ import {
     moveSeriesTailByOffset,
 } from "@/features/rwl/edit";
 import { formatHandlers, readRwlString } from "@/features/rwl";
-import type { RwlReadResult, RwlSiteData, RwlTreeData } from "@/features/rwl/types";
+import type {
+    RwlFormat,
+    RwlReadResult,
+    RwlSiteData,
+    RwlTreeData,
+} from "@/features/rwl/types";
 import type {
     LegacyCaseRow,
     LegacyConfig,
@@ -89,10 +94,23 @@ export const siteHash = (siteData: RwlSiteData): string => sha256Bytes(JSON.stri
     ]).sort((left, right) => String(left[0]).localeCompare(String(right[0]))),
 ));
 
-export const loadRwl = async (path: string): Promise<LoadedRwl> => {
+export const readRwlForEvaluation = async (
+    sourceText: string,
+    declaredFormat?: string,
+): Promise<RwlReadResult> => {
+    const preferFormat: RwlFormat | undefined = declaredFormat === "tucson-auto"
+        ? "tucson"
+        : undefined;
+    return readRwlString(sourceText, { edgeZeros: true, preferFormat });
+};
+
+export const loadRwl = async (
+    path: string,
+    declaredFormat?: string,
+): Promise<LoadedRwl> => {
     const bytes = readFileSync(path);
     const sourceText = bytes.toString("utf8");
-    const readResult = await readRwlString(sourceText, { edgeZeros: true });
+    const readResult = await readRwlForEvaluation(sourceText, declaredFormat);
     const series = new Map(Array.from(readResult.data, ([id, valuesByYear]) => {
         const years = Array.from(valuesByYear.keys());
         const zeroCount = Array.from(valuesByYear.values()).filter((value) => value === 0).length;

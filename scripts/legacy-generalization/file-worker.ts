@@ -85,7 +85,7 @@ writeFileSync(workDirMarker, `${fileId}:${phase}\n`, "utf8");
 
 const startedAt = new Date().toISOString();
 const startedMs = Date.now();
-const loaded = await loadRwl(file.path);
+const loaded = await loadRwl(file.path, file.rwlFormat);
 if (loaded.sourceSha256 !== file.sha256) {
     throw new Error(`source hash mismatch: ${loaded.sourceSha256} != ${file.sha256}`);
 }
