@@ -14,30 +14,12 @@ import {
     createReferenceSeriesConfig,
 } from "@/features/crossdating/reference";
 import type { RwlSeries, RwlSiteData } from "@/features/rwl/types";
-
-type MatchedObservation = {
-    rawYear: number;
-    crossdatedYear: number;
-    value: number;
-    offsetYears: number;
-};
-
-type OffsetRun = {
-    offsetYears: number;
-    observationCount: number;
-    rawStartYear: number;
-    rawEndYear: number;
-    crossdatedStartYear: number;
-    crossdatedEndYear: number;
-};
-
-type OperationTransition = {
-    olderOffsetYears: number;
-    newerOffsetYears: number;
-    shiftYears: number;
-    firstFixedYear: number;
-    operationType: "missingRing" | "falseRing" | "partialMove" | "offsetTransition";
-};
+import {
+    deriveZslSeriesTruth,
+    expectedZslFrontier,
+    observedEntries,
+    type ExpectedZslOperation,
+} from "./zsl-operation-truth";
 
 const valueFor = (name: string): string | undefined => {
     const index = process.argv.indexOf(name);
@@ -57,117 +39,6 @@ const outputPath = resolve(
 const sha256 = (path: string): string => createHash("sha256")
     .update(readFileSync(path))
     .digest("hex");
-
-const entries = (series: RwlSeries, includeZeros: boolean): Array<[number, number]> => (
-    Array.from(series.valuesByYear.entries())
-        .filter(([, value]) => value !== -9999 && (includeZeros || value !== 0))
-        .sort((left, right) => left[0] - right[0])
-);
-
-const alignObservations = (
-    raw: RwlSeries,
-    crossdated: RwlSeries,
-): {
-    matched: MatchedObservation[];
-    unmatchedRaw: Array<{ rawYear: number; value: number }>;
-    crossdatedZeroYears: number[];
-    reconstructionMatchesRaw: boolean;
-} => {
-    const rawEntries = entries(raw, true);
-    const crossdatedEntries = entries(crossdated, false);
-    const rowCount = rawEntries.length;
-    const columnCount = crossdatedEntries.length;
-    const dp = Array.from(
-        { length: rowCount + 1 },
-        () => new Uint16Array(columnCount + 1),
-    );
-    for (let row = 1; row <= rowCount; row += 1) {
-        for (let column = 1; column <= columnCount; column += 1) {
-            dp[row][column] = rawEntries[row - 1][1] === crossdatedEntries[column - 1][1]
-                ? dp[row - 1][column - 1] + 1
-                : Math.max(dp[row - 1][column], dp[row][column - 1]);
-        }
-    }
-
-    const matchedRaw = new Array(rowCount).fill(false);
-    const matched: MatchedObservation[] = [];
-    let row = rowCount;
-    let column = columnCount;
-    while (row > 0 && column > 0) {
-        const [rawYear, rawValue] = rawEntries[row - 1];
-        const [crossdatedYear, crossdatedValue] = crossdatedEntries[column - 1];
-        if (rawValue === crossdatedValue
-            && dp[row][column] === dp[row - 1][column - 1] + 1) {
-            matchedRaw[row - 1] = true;
-            matched.push({
-                rawYear,
-                crossdatedYear,
-                value: rawValue,
-                offsetYears: crossdatedYear - rawYear,
-            });
-            row -= 1;
-            column -= 1;
-        } else if (dp[row - 1][column] >= dp[row][column - 1]) {
-            row -= 1;
-        } else {
-            column -= 1;
-        }
-    }
-    matched.reverse();
-
-    return {
-        matched,
-        unmatchedRaw: rawEntries
-            .filter((_, index) => !matchedRaw[index])
-            .map(([rawYear, value]) => ({ rawYear, value })),
-        crossdatedZeroYears: entries(crossdated, true)
-            .filter(([, value]) => value === 0)
-            .map(([year]) => year),
-        reconstructionMatchesRaw: dp[rowCount][columnCount] === columnCount,
-    };
-};
-
-const offsetRuns = (matched: readonly MatchedObservation[]): OffsetRun[] => {
-    const runs: OffsetRun[] = [];
-    matched.forEach((observation) => {
-        const current = runs[runs.length - 1];
-        if (current?.offsetYears === observation.offsetYears) {
-            current.observationCount += 1;
-            current.rawEndYear = observation.rawYear;
-            current.crossdatedEndYear = observation.crossdatedYear;
-            return;
-        }
-        runs.push({
-            offsetYears: observation.offsetYears,
-            observationCount: 1,
-            rawStartYear: observation.rawYear,
-            rawEndYear: observation.rawYear,
-            crossdatedStartYear: observation.crossdatedYear,
-            crossdatedEndYear: observation.crossdatedYear,
-        });
-    });
-    return runs;
-};
-
-const transitionsFor = (runs: readonly OffsetRun[]): OperationTransition[] => (
-    runs.slice(0, -1).map((older, index) => {
-        const newer = runs[index + 1];
-        const shiftYears = older.offsetYears - newer.offsetYears;
-        return {
-            olderOffsetYears: older.offsetYears,
-            newerOffsetYears: newer.offsetYears,
-            shiftYears,
-            firstFixedYear: newer.crossdatedStartYear,
-            operationType: shiftYears === -1
-                ? "missingRing"
-                : shiftYears === 1
-                    ? "falseRing"
-                    : shiftYears < -1
-                        ? "partialMove"
-                        : "offsetTransition",
-        };
-    })
-);
 
 const toSiteData = (input: Map<string, RwlSeries>): RwlSiteData => new Map(
     Array.from(input, ([seriesId, series]) => [
@@ -191,35 +62,9 @@ const eventSummary = (event: DiagnosisEvent | null) => event ? {
     notes: event.evidence.notes,
 } : null;
 
-type ExpectedOperation = {
-    eventType: "missingRing" | "falseRing" | "partialMove" | "wholeSeriesMove";
-    shiftYears: number;
-    firstFixedYear: number | null;
-};
-
-const expectedFrontier = (row: {
-    wholeSeriesMove: { shiftYears: number } | null;
-    transitions: OperationTransition[];
-}): ExpectedOperation | null => {
-    if (row.wholeSeriesMove) {
-        return {
-            eventType: "wholeSeriesMove",
-            shiftYears: row.wholeSeriesMove.shiftYears,
-            firstFixedYear: null,
-        };
-    }
-    const transition = row.transitions.at(-1);
-    if (!transition || transition.operationType === "offsetTransition") return null;
-    return {
-        eventType: transition.operationType,
-        shiftYears: transition.shiftYears,
-        firstFixedYear: transition.firstFixedYear,
-    };
-};
-
 const matchesExpectedOperation = (
     predicted: DiagnosisEvent | null,
-    expected: ExpectedOperation | null,
+    expected: ExpectedZslOperation | null,
 ): boolean => {
     if (!expected) return predicted === null;
     if (!predicted || predicted.eventType !== expected.eventType) return false;
@@ -243,28 +88,23 @@ const sharedIds = [...raw.keys()]
 const series = sharedIds.map((seriesId) => {
     const rawSeries = raw.get(seriesId)!;
     const crossdatedSeries = crossdated.get(seriesId)!;
-    const alignment = alignObservations(rawSeries, crossdatedSeries);
-    const runs = offsetRuns(alignment.matched);
-    const newerBaselineOffsetYears = runs.at(-1)?.offsetYears ?? null;
+    const truth = deriveZslSeriesTruth(rawSeries, crossdatedSeries);
     const row = {
         seriesId,
         rawRange: [rawSeries.startYear, rawSeries.endYear],
         crossdatedRange: [crossdatedSeries.startYear, crossdatedSeries.endYear],
-        rawObservationCount: entries(rawSeries, true).length,
-        crossdatedNonZeroCount: entries(crossdatedSeries, false).length,
-        matchedObservationCount: alignment.matched.length,
-        reconstructionMatchesRaw: alignment.reconstructionMatchesRaw,
-        unmatchedRaw: alignment.unmatchedRaw,
-        crossdatedZeroYears: alignment.crossdatedZeroYears,
-        offsetRuns: runs,
-        newerBaselineOffsetYears,
-        wholeSeriesMove: newerBaselineOffsetYears !== null
-            && newerBaselineOffsetYears !== 0
-            ? { shiftYears: newerBaselineOffsetYears }
-            : null,
-        transitions: transitionsFor(runs),
+        rawObservationCount: observedEntries(rawSeries, true).length,
+        crossdatedNonZeroCount: observedEntries(crossdatedSeries, false).length,
+        matchedObservationCount: truth.matched.length,
+        reconstructionMatchesRaw: truth.reconstructionMatchesRaw,
+        unmatchedRaw: truth.unmatchedRaw,
+        crossdatedZeroYears: truth.crossdatedZeroYears,
+        offsetRuns: truth.offsetRuns,
+        newerBaselineOffsetYears: truth.newerBaselineOffsetYears,
+        wholeSeriesMove: truth.wholeSeriesMove,
+        transitions: truth.transitions,
     };
-    return { ...row, expectedFrontier: expectedFrontier(row) };
+    return { ...row, expectedFrontier: expectedZslFrontier(row) };
 });
 
 const rawSite = toSiteData(raw);
