@@ -425,5 +425,46 @@ Round 1B 仍使用出现次数最多的全区间 lag 生成 whole。加入局部
 本轮已完全解决。安全回归包括 co612 多离散缺轮与 `-2…-100` 连续缺块、ZSL
 whole/partial/false/missing 真值、ZSL141 保存循环和 MCP17A 连续缺块；均保持通过。
 
+### Round 2 基线：whole + missingRing
+
+- 生产算法提交：`82c4c5baff4a3b7762d459b97cb39adcd52a195d`（Round 1C，不含本轮修复）。
+- 结果目录：
+  `D:\软件测试\co612-operation-composition-results\whole-missing-round2-baseline-after-round1c-2026-08-08`
+- 组合基准器已参数化为 `--unit-event missingRing|falseRing`，两种方向使用完全相同的
+  10 条样芯、`-5/-1/+1/+5` whole、20%/50%/80% 位置、先应用 whole 再重新诊断的
+  事件顺序和隐藏真值协议。schema v2 使用中性的 `unitEventType/finalUnitYear` 字段，
+  不再把缺轮结果误记为 falseRing。
+- 245 个唯一状态错误 0，保存重开一致 245/245，组合应用 whole 后与纯 missing 控制
+  逐值相同 120/120；co612 SHA-256 运行前后不变。
+
+| 指标 | Round 2 基线 |
+| --- | ---: |
+| clean review 误报 | 2/55 |
+| 纯 whole 精确 | 40/40 |
+| 纯 missing 操作正确 | 30/30 |
+| 纯 missing 窗口覆盖 | 28/30 |
+| 组合响应 | 120/120 |
+| review whole 精确 | 116/120 = 96.67% |
+| strict 首事件 whole 精确 | 110/120 = 91.67% |
+| internal final 含精确 whole | 116/120 = 96.67% |
+| whole 被判成 partialMove | 0/120 |
+| whole 被判成 missingRing | 4/120 = 3.33% |
+| 正确先 whole、再恢复 missing | 108/120 = 90.00% |
+
+旧端和中部均为 40/40；4 个失败全部在较新端，较新端为 36/40。失败只来自：
+
+- `mon261 whole +1/+5 + newer missing`
+- `mtr831 whole -1/-5 + newer missing`
+
+四例都没有生成正确的 terminal whole 候选。COFECHA 已包含真终态，但现有草案生成器把
+每个 endpoint 段统一要求为 `r>=0.55`：`mon261` 的单终端段为 0.54；`mtr831` 有两条
+方向一致的终端段，分别约为 0.49/0.52 和 0.47/0.50，也被单段阈值一起拒绝。随后旧侧
+多数状态 `g-1` 被当作 whole 或连续缺轮阶梯，最终输出 missingRing。
+
+下一步不是普遍降低阈值，而是区分证据结构：两条以上一致 endpoint 段使用重复性门槛；
+只有一条时要求它相对 lag 0 有明确优势，并继续通过应用 whole 后恰好留下 `-1` 的联合
+反事实门槛。Round 2 本节只冻结基线，不修改生产算法。通用基准器以 falseRing 模式对
+`mon151` 74 个状态反向 smoke，组合 whole 仍为 12/12，clean 仍为 2/55。
+
 后续每轮在这里追加：输入 SHA、案例数、分层、修复前指标、失败类型、算法改动、
 修复后指标、干扰检查、外部回归、提交号和未解决边界。
