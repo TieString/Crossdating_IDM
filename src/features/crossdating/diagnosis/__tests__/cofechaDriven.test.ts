@@ -7,7 +7,10 @@
  * 这是“参考 COFECHA 输出”能力的回归护栏。数据缺失则 skip。
  */
 import { describe, expect, it } from "vitest";
-import { diagnoseCrossdating } from "../engine";
+import {
+    diagnoseCrossdating,
+    limitRankedCandidatesForEventDetection,
+} from "../engine";
 import {
     getCofechaTerminalLagEstimate,
     getNewestFlaggedCofechaSegment,
@@ -18,7 +21,11 @@ import {
     shouldSuppressAliasedCofechaUnitDraft,
     terminalResidualPatternSupport,
 } from "../drafts";
-import { selectWholeSeriesCandidate } from "../events";
+import { terminalWholeCompositionGatePassed } from "../evaluation";
+import {
+    isValidatedTerminalWholeCandidate,
+    selectWholeSeriesCandidate,
+} from "../events";
 import type { RwlSiteData } from "@/features/rwl/types";
 import type { DiagnosisCandidateOperation, PropagationPattern } from "../types";
 import {
@@ -183,6 +190,53 @@ describe("COFECHA terminal whole baseline", () => {
         expect(matching.opposing).toBe(0);
     });
 
+    it("admits only preserved and path-supported physical partial residuals", () => {
+        const input = {
+            residualLag: -6,
+            afterGlobalLag: -6,
+            matchingPatternSupport: 3.2,
+            opposingPatternSupport: 0.4,
+            maxPartialGapYears: 100,
+            lagMin: -100,
+            seriesLength: 225,
+        };
+        expect(terminalWholeCompositionGatePassed(input)).toBe(true);
+        expect(terminalWholeCompositionGatePassed({
+            ...input,
+            afterGlobalLag: -5,
+        })).toBe(false);
+        expect(terminalWholeCompositionGatePassed({
+            ...input,
+            matchingPatternSupport: 0,
+        })).toBe(false);
+        expect(terminalWholeCompositionGatePassed({
+            ...input,
+            opposingPatternSupport: 4,
+        })).toBe(false);
+        expect(terminalWholeCompositionGatePassed({
+            ...input,
+            residualLag: 6,
+            afterGlobalLag: 6,
+        })).toBe(false);
+        expect(terminalWholeCompositionGatePassed({
+            ...input,
+            residualLag: -101,
+            afterGlobalLag: -101,
+        })).toBe(false);
+    });
+
+    it.each([-1, 1])("preserves the existing unit residual gate for lag %i", (lag) => {
+        expect(terminalWholeCompositionGatePassed({
+            residualLag: lag,
+            afterGlobalLag: lag,
+            matchingPatternSupport: 0,
+            opposingPatternSupport: 0,
+            maxPartialGapYears: 100,
+            lagMin: -100,
+            seriesLength: 225,
+        })).toBe(true);
+    });
+
     it("prefers a hard-gated terminal candidate over the higher-scoring majority state", () => {
         const candidate = (
             shiftYears: number,
@@ -208,6 +262,63 @@ describe("COFECHA terminal whole baseline", () => {
             candidate(-4, 18, false),
             candidate(-5, 14, true),
         ])?.deltaYears).toBe(-5);
+    });
+
+    it("reserves one top-five slot for a validated terminal whole baseline", () => {
+        const ordinary = Array.from({ length: 5 }, (_, index) => ({
+            id: `unit-${index}`,
+            operationType: "INSERT_MISSING_RING",
+            score: 20 - index,
+            evidence: {},
+        } as DiagnosisCandidateOperation));
+        const terminal = {
+            id: "terminal-whole",
+            operationType: "SHIFT_RANGE",
+            mode: "wholeSeriesMove",
+            deltaYears: 5,
+            score: 3,
+            candidateStrength: "strong",
+            evidence: {
+                recallSourceTags: ["cofecha_terminal_whole_baseline"],
+                evaluationDelta: { jointCompositionGatePassed: true },
+            },
+        } as DiagnosisCandidateOperation;
+        const retained = limitRankedCandidatesForEventDetection(
+            [...ordinary, terminal],
+            5,
+        );
+
+        expect(retained).toHaveLength(5);
+        expect(retained).toContain(terminal);
+        expect(isValidatedTerminalWholeCandidate(terminal)).toBe(true);
+        expect(retained).not.toContain(ordinary[4]);
+    });
+
+    it("does not reserve a slot for an unvalidated terminal draft", () => {
+        const ordinary = Array.from({ length: 5 }, (_, index) => ({
+            id: `unit-${index}`,
+            operationType: "INSERT_MISSING_RING",
+            score: 20 - index,
+            evidence: {},
+        } as DiagnosisCandidateOperation));
+        const weakTerminal = {
+            id: "weak-terminal",
+            operationType: "SHIFT_RANGE",
+            mode: "wholeSeriesMove",
+            deltaYears: 5,
+            score: 3,
+            candidateStrength: "weak",
+            evidence: {
+                recallSourceTags: ["cofecha_terminal_whole_baseline"],
+                evaluationDelta: { jointCompositionGatePassed: false },
+            },
+        } as DiagnosisCandidateOperation;
+
+        expect(limitRankedCandidatesForEventDetection(
+            [...ordinary, weakTerminal],
+            5,
+        )).toEqual(ordinary);
+        expect(isValidatedTerminalWholeCandidate(weakTerminal)).toBe(false);
     });
 
     it("does not let a weak terminal draft outrank a validated majority candidate", () => {

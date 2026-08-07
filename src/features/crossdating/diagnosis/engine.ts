@@ -45,6 +45,7 @@ import {
     dedupeDiagnosisCandidates,
     rankDiagnosisCandidates,
 } from "./candidateUtils";
+import { isValidatedTerminalWholeCandidate } from "./events";
 import type {
     CrossdatingDiagnosis,
     DiagnosisCandidateOperation,
@@ -66,6 +67,19 @@ export {
     rankDiagnosisCandidates,
     selectSafeDiagnosisCandidateBatch,
 } from "./candidateUtils";
+
+/** Keep one validated bark-side whole baseline inside the fixed candidate budget. */
+export const limitRankedCandidatesForEventDetection = (
+    ranked: DiagnosisCandidateOperation[],
+    maximumCandidates: number,
+): DiagnosisCandidateOperation[] => {
+    const limit = Math.max(0, Math.floor(maximumCandidates));
+    if (limit === 0) return [];
+    const selected = ranked.slice(0, limit);
+    const terminalWhole = ranked.find(isValidatedTerminalWholeCandidate);
+    if (!terminalWhole || selected.includes(terminalWhole)) return selected;
+    return [...selected.slice(0, Math.max(0, limit - 1)), terminalWhole];
+};
 
 export function diagnoseCrossdating(
     siteData: RwlSiteData,
@@ -136,9 +150,10 @@ export function diagnoseCrossdating(
         }
     });
     const rankedCandidates = Array.from(candidatesByTree.values())
-        .flatMap((group) => rankDiagnosisCandidates(group)
-            .sort(compareDiagnosisCandidates)
-            .slice(0, config.maxTopCandidates))
+        .flatMap((group) => limitRankedCandidatesForEventDetection(
+            rankDiagnosisCandidates(group).sort(compareDiagnosisCandidates),
+            config.maxTopCandidates,
+        ).sort(compareDiagnosisCandidates))
         .sort(compareDiagnosisCandidates);
     // 每次只建议最近的一处编辑：仅当同序列确有**多处“强”编辑建议**（分处于多个区域）时，
     // 才只保留最新（最靠树皮）那一处、隐藏更早的——处理它并重新诊断后，下一处会自然浮现（逐个向树心）。

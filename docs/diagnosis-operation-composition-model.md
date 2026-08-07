@@ -567,5 +567,59 @@ Round 3 修复必须把较新固定侧状态作为 whole baseline，并把
 负向 residual（`<= -2`）、应用 whole 后仍保留同一 residual、且存在局部状态转移支持；
 不得把联合门槛无条件放宽到任意大 lag。修复前先冻结本节，生产改动另行提交。
 
+### Round 3A：物理 partial residual 与 terminal whole 保留席位
+
+- 最终结果目录：
+  `D:\软件测试\co612-operation-composition-results\whole-partial-6-round3-terminal-baseline-final-2026-08-08`
+- missing 反向目录：
+  `D:\软件测试\co612-operation-composition-results\whole-missing-round3-reverse-regression-2026-08-08`
+- false 反向目录：
+  `D:\软件测试\co612-operation-composition-results\whole-false-round3-reverse-regression-2026-08-08`
+
+修复分为两个独立层次：
+
+1. `jointCompositionGatePassed` 保留原有 `+/-1` residual 规则；绝对值更大的 residual 只在
+   `isAutomaticPartialShift` 接受的负向范围内放行，并要求应用 whole 后 global lag 精确保留、
+   同向局部传播支持不少于 0.5 且严格强于反向支持。正向大位移、超过动态上限、无局部路径
+   或应用后 residual 改变均拒绝。
+2. 通过上述门槛的 terminal whole 仍可能被每序列 Top 5 候选预算截掉。本轮为已经是
+   strong 且通过 ordinary hard gate 或 joint gate 的 terminal whole 保留一个席位，替换最低
+   的普通候选但不增加候选总数。弱 terminal 不享受保留，也不能绕过评估门槛。
+
+加入 `scripts/inspect-terminal-composition.ts` 作为只读审计器，可对任意隔离的
+`state.rwl + VERYCOF.OUT + target` 输出 global lag、传播模式、terminal 草案 tags、评估分数
+和 hard/joint gate。`mon152` 失败例由此确认：terminal `+5`、residual `-6`、matching
+support `12.464308`、opposing `0`，候选满足普通 hard gate 6/7；真正丢失点是进入事件层
+前的 Top 5 截断，而不是 COFECHA 或 evaluation 没有识别。
+
+| 指标 | Round 3 基线 | Round 3A |
+| --- | ---: | ---: |
+| clean review 误报 | 2/55 | **2/55** |
+| 纯 whole 精确 | 40/40 | **40/40** |
+| 纯 partial `-6` 操作精确 | 24/30 | **24/30** |
+| 纯 partial `-6` 窗口覆盖 | 22/30 | **22/30** |
+| review 首事件 whole 精确 | 107/120 | **120/120** |
+| strict 首事件 whole 精确 | 103/120 | **116/120** |
+| internal final 含精确 whole | 107/120 | **120/120** |
+| whole 被判成 missingRing | 12/120 | **0/120** |
+| whole 被判成 partialMove | 0/120 | **0/120** |
+| 正确先 whole、再恢复 partial | 76/120 | **88/120** |
+
+四个 whole 位移各 30/30，旧/中/新位置各 40/40。串行 88/120 正好等于纯 partial
+窗口 22/30 跨四个位移后的上限，说明应用 whole 后没有新增类型或窗口损失；本轮没有把
+纯 partial 原有 6 个操作错误和 2 个额外窗口错误误称为已解决。
+
+反向完整基准保持：
+
+- whole + missing：review 120/120、strict 114/120、串行 112/120、clean 2/55。
+- whole + false：review 120/120、strict 115/120、串行 100/120、clean 2/55。
+- 两套均为 245 个唯一状态、错误 0、残余映射 120/120、保存重开 245/245，源文件
+  SHA-256 不变。
+
+安全回归通过：terminal/COFECHA 19 项；mon052、mtr841、物理缺块 `-2...-100`、ZSL141、
+MCP17A 和编辑应用 46 项；显式使用最新 `D:\软件测试\ZSL` 的 RAW/crossdated/OUT 后，
+ZSL 整体/局部/伪轮操作类型 11 项通过。下一步分别验证 partial `-2` 与 `-20`，再处理纯
+partial 的位移量和窗口上限，不能用本轮已解决的“先 whole”指标替代局部事件准确率。
+
 后续每轮在这里追加：输入 SHA、案例数、分层、修复前指标、失败类型、算法改动、
 修复后指标、干扰检查、外部回归、提交号和未解决边界。

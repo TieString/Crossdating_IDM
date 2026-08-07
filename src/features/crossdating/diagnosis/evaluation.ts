@@ -25,6 +25,7 @@ import {
     wholeSeriesCorrelation,
 } from "./evaluationMetrics";
 import { getCofechaEvidenceForYear, type CofechaHints } from "./cofechaHints";
+import { isAutomaticPartialShift } from "./partialMoveSemantics";
 import type {
     CandidateDraft,
     CandidateEvaluationDelta,
@@ -42,6 +43,52 @@ import type {
 
 const clamp = (value: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, value));
 const clamp01 = (value: number): number => clamp(value, 0, 1);
+
+export type TerminalWholeCompositionGateInput = {
+    residualLag: number;
+    afterGlobalLag: number;
+    matchingPatternSupport: number;
+    opposingPatternSupport: number;
+    maxPartialGapYears: number;
+    lagMin: number;
+    seriesLength: number;
+};
+
+/**
+ * A terminal whole baseline may leave one local event behind. Unit events retain their existing
+ * exact residual rule. Larger residuals are admitted only for the physical negative partial-move
+ * direction and only when the local lag path independently supports that same transition.
+ */
+export const terminalWholeCompositionGatePassed = ({
+    residualLag,
+    afterGlobalLag,
+    matchingPatternSupport,
+    opposingPatternSupport,
+    maxPartialGapYears,
+    lagMin,
+    seriesLength,
+}: TerminalWholeCompositionGateInput): boolean => {
+    if (afterGlobalLag !== residualLag || residualLag === 0) return false;
+    if (Math.abs(residualLag) === 1) return true;
+    return isAutomaticPartialShift(residualLag, {
+        maxPartialGapYears,
+        lagMin,
+        seriesLength,
+    })
+        && matchingPatternSupport >= 0.5
+        && matchingPatternSupport > opposingPatternSupport;
+};
+
+const recallTagNumber = (
+    draft: CandidateDraft,
+    prefix: string,
+): number => {
+    const value = draft.recallSourceTags
+        ?.find((tag) => tag.startsWith(prefix))
+        ?.slice(prefix.length);
+    const parsed = value === undefined ? Number.NaN : Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+};
 
 const applyDraftToTree = (
     treeData: RwlTreeData,
@@ -384,8 +431,22 @@ export const evaluateDraft = (
     const jointCompositionGatePassed = draft.operationType === "SHIFT_RANGE"
         && draft.mode === "wholeSeriesMove"
         && draft.recallSourceTags?.includes("cofecha_terminal_whole_baseline") === true
-        && Math.abs(terminalWholeResidualLag) === 1
-        && afterDiagnosis.globalSlidingMatch.bestGlobalLag === terminalWholeResidualLag;
+        && terminalWholeCompositionGatePassed({
+            residualLag: terminalWholeResidualLag,
+            afterGlobalLag: afterDiagnosis.globalSlidingMatch.bestGlobalLag,
+            matchingPatternSupport: recallTagNumber(
+                draft,
+                "cofecha_terminal_matching_pattern_support:",
+            ),
+            opposingPatternSupport: recallTagNumber(
+                draft,
+                "cofecha_terminal_opposing_pattern_support:",
+            ),
+            maxPartialGapYears: config.maxPartialGapYears,
+            lagMin: config.lagMin,
+            seriesLength: afterDiagnosis.targetRange.endYear
+                - afterDiagnosis.targetRange.startYear + 1,
+        });
     const evaluationDelta: CandidateEvaluationDelta = {
         meanSegmentRBefore,
         meanSegmentRAfter,

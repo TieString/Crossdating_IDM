@@ -245,23 +245,27 @@ export const selectWholeSeriesCandidate = (
     const whole = candidates.filter((candidate) => (
         eventTypeForCandidate(candidate) === "wholeSeriesMove"
     ));
-    const isTerminal = (candidate: DiagnosisCandidateOperation): boolean => (
-        candidate.evidence.recallSourceTags?.includes(
-            "cofecha_terminal_whole_baseline",
-        ) === true
-    );
-    const validatedTerminal = whole.filter((candidate) => {
-        const evaluation = candidate.evidence.evaluationDelta;
-        return isTerminal(candidate)
-            && candidate.candidateStrength === "strong"
-            && (evaluation?.hardGatePassed === true
-                || evaluation?.jointCompositionGatePassed === true);
-    });
+    const validatedTerminal = whole.filter(isValidatedTerminalWholeCandidate);
     const eligible = validatedTerminal.length > 0
         ? validatedTerminal
-        : whole.filter((candidate) => !isTerminal(candidate));
+        : whole.filter((candidate) => !candidate.evidence.recallSourceTags?.includes(
+            "cofecha_terminal_whole_baseline",
+        ));
     return eligible
         .sort((left, right) => right.score - left.score)[0];
+};
+
+export const isValidatedTerminalWholeCandidate = (
+    candidate: DiagnosisCandidateOperation,
+): boolean => {
+    const evaluation = candidate.evidence.evaluationDelta;
+    return eventTypeForCandidate(candidate) === "wholeSeriesMove"
+        && candidate.evidence.recallSourceTags?.includes(
+            "cofecha_terminal_whole_baseline",
+        ) === true
+        && candidate.candidateStrength === "strong"
+        && (evaluation?.hardGatePassed === true
+            || evaluation?.jointCompositionGatePassed === true);
 };
 
 export const makeDiagnosisEventsFromCandidates = (
