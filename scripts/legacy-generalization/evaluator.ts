@@ -207,6 +207,8 @@ const candidateAudit = (candidate: Record<string, unknown>) => ({
     deltaYears: candidate.deltaYears ?? null,
     score: candidate.score ?? null,
     algorithmSource: candidate.algorithmSource ?? null,
+    recallSourceTags: (candidate.evidence as Record<string, unknown> | undefined)
+        ?.recallSourceTags ?? null,
 });
 
 export const diagnoseTruthBlind = (input: {

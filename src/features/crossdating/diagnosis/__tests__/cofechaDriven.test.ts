@@ -9,11 +9,15 @@
 import { describe, expect, it } from "vitest";
 import { diagnoseCrossdating } from "../engine";
 import {
+    getCofechaTerminalLagEstimate,
     getNewestFlaggedCofechaSegment,
     parseCofechaHints,
+    type CofechaHints,
 } from "../cofechaHints";
 import { shouldSuppressAliasedCofechaUnitDraft } from "../drafts";
+import { selectWholeSeriesCandidate } from "../events";
 import type { RwlSiteData } from "@/features/rwl/types";
+import type { DiagnosisCandidateOperation } from "../types";
 import {
     dataFoldersAvailable,
     loadCofechaOut,
@@ -53,6 +57,124 @@ describe("COFECHA unit-lag alias guard", () => {
             newerAtZero,
             newerAtGlobal,
         })).toBe(false);
+    });
+});
+
+describe("COFECHA terminal whole baseline", () => {
+    const hints = (
+        rows: Array<[number, number, number, number]>,
+    ): CofechaHints => ({
+        segments: rows.map(([startYear, endYear, highLag, r]) => ({
+            seriesId: "TARGET",
+            startYear,
+            endYear,
+            highLag,
+            correlationsByLag: { [highLag]: r },
+            starredLag: highLag,
+            starredR: r,
+        })),
+        effects: [],
+        yearToYear: [],
+        outliers: [],
+    });
+
+    it("uses the stable non-zero state that reaches the newer endpoint", () => {
+        const estimate = getCofechaTerminalLagEstimate(hints([
+            [1800, 1849, -4, 0.91],
+            [1875, 1924, -4, 0.89],
+            [1925, 1974, -5, 0.91],
+            [1950, 1999, -5, 0.94],
+            [1953, 2002, -5, 0.92],
+        ]), "TARGET", 2005);
+
+        expect(estimate).toMatchObject({
+            lag: -5,
+            segmentCount: 3,
+            terminalEndYear: 2002,
+            unmatchedTailYears: 3,
+        });
+    });
+
+    it("does not turn an older local-event state into a terminal baseline", () => {
+        expect(getCofechaTerminalLagEstimate(hints([
+            [1800, 1849, 1, 0.91],
+            [1875, 1924, 1, 0.88],
+            [1900, 1949, 1, 0.45],
+        ]), "TARGET", 2000)).toBeNull();
+    });
+
+    it("allows one strong endpoint row for the later joint-composition gate", () => {
+        const source = hints([
+            [1900, 1949, 6, 0.86],
+            [1925, 1974, 6, 0.63],
+            [1948, 1997, 5, 0.65],
+        ]);
+        expect(getCofechaTerminalLagEstimate(
+            source,
+            "TARGET",
+            1997,
+        )).toBeNull();
+        expect(getCofechaTerminalLagEstimate(
+            source,
+            "TARGET",
+            1997,
+            { minEndpointStarredR: 0.55, minimumSegments: 1 },
+        )).toMatchObject({ lag: 5, segmentCount: 1 });
+    });
+
+    it("prefers a hard-gated terminal candidate over the higher-scoring majority state", () => {
+        const candidate = (
+            shiftYears: number,
+            score: number,
+            terminal: boolean,
+        ) => ({
+            operationType: "SHIFT_RANGE",
+            mode: "wholeSeriesMove",
+            deltaYears: shiftYears,
+            score,
+            candidateStrength: "strong",
+            evidence: {
+                recallSourceTags: terminal
+                    ? ["cofecha_terminal_whole_baseline"]
+                    : [],
+                evaluationDelta: {
+                    hardGatePassed: true,
+                },
+            },
+        } as DiagnosisCandidateOperation);
+
+        expect(selectWholeSeriesCandidate([
+            candidate(-4, 18, false),
+            candidate(-5, 14, true),
+        ])?.deltaYears).toBe(-5);
+    });
+
+    it("does not let a weak terminal draft outrank a validated majority candidate", () => {
+        const candidate = (
+            shiftYears: number,
+            score: number,
+            terminal: boolean,
+            strong: boolean,
+        ) => ({
+            operationType: "SHIFT_RANGE",
+            mode: "wholeSeriesMove",
+            deltaYears: shiftYears,
+            score,
+            candidateStrength: strong ? "strong" : "weak",
+            evidence: {
+                recallSourceTags: terminal
+                    ? ["cofecha_terminal_whole_baseline"]
+                    : [],
+                evaluationDelta: {
+                    hardGatePassed: strong,
+                },
+            },
+        } as DiagnosisCandidateOperation);
+
+        expect(selectWholeSeriesCandidate([
+            candidate(-4, 18, false, true),
+            candidate(-5, 20, true, false),
+        ])?.deltaYears).toBe(-4);
     });
 });
 

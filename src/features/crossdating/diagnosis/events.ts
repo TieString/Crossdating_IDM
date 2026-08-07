@@ -208,7 +208,19 @@ const wholeEventFromCandidate = (
             samplePairs: candidate.evidence.globalSliding?.overlapYears ?? 0,
             candidateIds: [candidate.id],
             notes: [
-                "candidate_hard_gate_passed",
+                ...(evaluation?.hardGatePassed
+                    ? ["candidate_hard_gate_passed"]
+                    : evaluation?.jointCompositionGatePassed
+                        ? ["candidate_joint_composition_gate_passed"]
+                        : ["candidate_protected_weak_evidence"]),
+                ...(candidate.evidence.recallSourceTags?.includes(
+                    "cofecha_terminal_whole_baseline",
+                ) ? [
+                    "whole_baseline_source=cofecha_terminal_lag",
+                    ...(candidate.evidence.recallSourceTags
+                        .filter((tag) => tag.startsWith("cofecha_terminal_residual_lag:"))
+                        .map((tag) => tag.replace(":", "="))),
+                ] : []),
                 `whole_operation_shift=${shiftYears}`,
                 `whole_observed_dominant_lag=${
                     evaluation?.dominantLagBefore ?? candidate.evidence.before.bestLag
@@ -218,6 +230,31 @@ const wholeEventFromCandidate = (
         },
         alternativeTypes: [],
     };
+};
+
+export const selectWholeSeriesCandidate = (
+    candidates: DiagnosisCandidateOperation[],
+): DiagnosisCandidateOperation | undefined => {
+    const whole = candidates.filter((candidate) => (
+        eventTypeForCandidate(candidate) === "wholeSeriesMove"
+    ));
+    const isTerminal = (candidate: DiagnosisCandidateOperation): boolean => (
+        candidate.evidence.recallSourceTags?.includes(
+            "cofecha_terminal_whole_baseline",
+        ) === true
+    );
+    const validatedTerminal = whole.filter((candidate) => {
+        const evaluation = candidate.evidence.evaluationDelta;
+        return isTerminal(candidate)
+            && candidate.candidateStrength === "strong"
+            && (evaluation?.hardGatePassed === true
+                || evaluation?.jointCompositionGatePassed === true);
+    });
+    const eligible = validatedTerminal.length > 0
+        ? validatedTerminal
+        : whole.filter((candidate) => !isTerminal(candidate));
+    return eligible
+        .sort((left, right) => right.score - left.score)[0];
 };
 
 export const makeDiagnosisEventsFromCandidates = (
@@ -230,9 +267,7 @@ export const makeDiagnosisEventsFromCandidates = (
         const matching = own.filter((candidate) => eventTypeForCandidate(candidate) === eventType);
         clusterCandidates(eventType, matching).forEach((cluster) => events.push(eventFromCluster(diagnosis, cluster)));
     });
-    const whole = own
-        .filter((candidate) => eventTypeForCandidate(candidate) === "wholeSeriesMove")
-        .sort((a, b) => b.score - a.score)[0];
+    const whole = selectWholeSeriesCandidate(own);
     if (whole) events.push(wholeEventFromCandidate(diagnosis, whole));
     return events.sort((a, b) => b.endYear - a.endYear || b.evidence.score - a.evidence.score);
 });

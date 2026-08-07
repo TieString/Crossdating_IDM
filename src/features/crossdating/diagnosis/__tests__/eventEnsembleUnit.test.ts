@@ -3,6 +3,7 @@ import type { DiagnosisEvent } from "../types";
 import {
     partialMoveExplainsWholeSeriesCandidate,
     partialMoveSupportsSequentialMissingDepth,
+    prioritizeEndpointUnitAgainstWhole,
     pruneLocalEventsDisconnectedFromWholeBaseline,
     projectSequentialUnitChainHead,
     pruneWholeSeriesPartialAliases,
@@ -51,6 +52,15 @@ const wholeSeriesEvent = (lag: number): DiagnosisEvent => ({
         lagAfter: 0,
     },
 });
+
+const terminalWholeSeriesEvent = (lag: number): DiagnosisEvent => {
+    const event = wholeSeriesEvent(lag);
+    event.evidence.notes = [
+        ...event.evidence.notes,
+        "whole_baseline_source=cofecha_terminal_lag",
+    ];
+    return event;
+};
 
 const partialMoveEvent = (shiftYears: number, fixedSideLag = 0): DiagnosisEvent => ({
     ...falseRingEvent(1800, true),
@@ -116,6 +126,46 @@ describe("partialMoveSupportsSequentialMissingDepth", () => {
             partial,
             { transitionCount: 24, headRunYears: 10 },
         )).toBe(false);
+    });
+});
+
+describe("terminal whole baseline ordering", () => {
+    it("does not collapse an independently verified whole baseline into a unit chain", () => {
+        const whole = terminalWholeSeriesEvent(-1);
+        const missing = falseRingEvent(1995, true);
+        missing.eventType = "missingRing";
+        missing.evidence.lagBefore = -1;
+        missing.evidence.lagAfter = 0;
+        const partial = partialMoveEvent(-2);
+
+        expect(projectSequentialUnitChainHead([whole, missing, partial]))
+            .toEqual([whole, missing, partial]);
+    });
+
+    it("keeps the terminal whole operation before a same-direction endpoint unit", () => {
+        const whole = terminalWholeSeriesEvent(-1);
+        const missing = falseRingEvent(1995, true);
+        missing.eventType = "missingRing";
+        missing.evidence.algorithmSources = ["series_endpoint_review_window"];
+        missing.evidence.lagBefore = -1;
+        missing.evidence.lagAfter = 0;
+
+        expect(prioritizeEndpointUnitAgainstWhole([whole, missing]))
+            .toEqual([whole, missing]);
+    });
+
+    it("retains endpoint-unit precedence for an unverified global-lag alias", () => {
+        const whole = wholeSeriesEvent(-1);
+        const missing = falseRingEvent(1995, true);
+        missing.eventType = "missingRing";
+        missing.evidence.algorithmSources = ["series_endpoint_review_window"];
+        missing.evidence.lagBefore = -1;
+        missing.evidence.lagAfter = 0;
+
+        const prioritized = prioritizeEndpointUnitAgainstWhole([whole, missing]);
+        expect(prioritized[0].id).toBe(missing.id);
+        expect(prioritized[0].evidence.algorithmSources)
+            .toContain("newer_endpoint_unit_preferred_over_global_lag");
     });
 });
 

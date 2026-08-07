@@ -300,6 +300,103 @@ export type CofechaFlaggedRegion = {
     support: number;
 };
 
+export type CofechaTerminalLagEstimate = {
+    lag: number;
+    support: number;
+    segmentCount: number;
+    consistency: number;
+    terminalEndYear: number;
+    unmatchedTailYears: number;
+};
+
+/**
+ * Estimate the lag state that reaches the checked newer endpoint. A local missing/false event
+ * stops producing non-zero [A] rows once COFECHA reaches its fixed newer side; a true whole
+ * baseline (including whole + local compositions) keeps the same non-zero lag through the last
+ * checked rows. The default requires two agreeing rows; callers may admit one strong endpoint row
+ * only when a later joint counterfactual gate validates it.
+ */
+export const getCofechaTerminalLagEstimate = (
+    hints: CofechaHints,
+    seriesId: string | null,
+    seriesEndYear: number,
+    options: {
+        maxUnmatchedTailYears?: number;
+        maxSupportingLookbackYears?: number;
+        minStarredR?: number;
+        minEndpointStarredR?: number;
+        minimumSegments?: number;
+        minimumConsistency?: number;
+    } = {},
+): CofechaTerminalLagEstimate | null => {
+    const maxUnmatchedTailYears = options.maxUnmatchedTailYears ?? 12;
+    const maxSupportingLookbackYears = options.maxSupportingLookbackYears ?? 25;
+    const minStarredR = options.minStarredR ?? 0.3;
+    const minEndpointStarredR = options.minEndpointStarredR ?? minStarredR;
+    const minimumSegments = options.minimumSegments ?? 2;
+    const minimumConsistency = options.minimumConsistency ?? 2 / 3;
+    const reliableSegments = hints.segments.filter((segment) => {
+        const starredR = segment.starredR
+            ?? segment.correlationsByLag[segment.highLag]
+            ?? 0;
+        return hintMatchesSeries(segment.seriesId, seriesId)
+            && segment.highLag !== 0
+            && seriesEndYear - segment.endYear >= 0
+            && starredR >= minStarredR;
+    });
+    const endpointLags = new Set(reliableSegments
+        .filter((segment) => {
+            const starredR = segment.starredR
+                ?? segment.correlationsByLag[segment.highLag]
+                ?? 0;
+            return seriesEndYear - segment.endYear <= maxUnmatchedTailYears
+                && starredR >= minEndpointStarredR;
+        })
+        .map((segment) => segment.highLag));
+    if (endpointLags.size === 0) return null;
+    const endpointSegments = reliableSegments.filter((segment) => (
+        endpointLags.has(segment.highLag)
+        && seriesEndYear - segment.endYear
+            <= maxUnmatchedTailYears + maxSupportingLookbackYears
+    ));
+    if (endpointSegments.length < minimumSegments) return null;
+
+    const votes = new Map<number, { support: number; count: number; endYear: number }>();
+    endpointSegments.forEach((segment) => {
+        const starredR = segment.starredR
+            ?? segment.correlationsByLag[segment.highLag]
+            ?? minStarredR;
+        const vote = votes.get(segment.highLag) ?? {
+            support: 0,
+            count: 0,
+            endYear: segment.endYear,
+        };
+        vote.support += Math.max(0.1, starredR);
+        vote.count += 1;
+        vote.endYear = Math.max(vote.endYear, segment.endYear);
+        votes.set(segment.highLag, vote);
+    });
+    const ranked = Array.from(votes, ([lag, vote]) => ({ lag, ...vote }))
+        .sort((left, right) => (
+            right.support - left.support
+            || right.count - left.count
+            || right.endYear - left.endYear
+        ));
+    const winner = ranked[0];
+    if (!winner || winner.count < minimumSegments) return null;
+    const totalSupport = ranked.reduce((sum, vote) => sum + vote.support, 0);
+    const consistency = totalSupport > 0 ? winner.support / totalSupport : 0;
+    if (consistency < minimumConsistency) return null;
+    return {
+        lag: winner.lag,
+        support: winner.support,
+        segmentCount: winner.count,
+        consistency,
+        terminalEndYear: winner.endYear,
+        unmatchedTailYears: seriesEndYear - winner.endYear,
+    };
+};
+
 /**
  * 从 COFECHA [A] 段级 lag 表提取某序列**最新**的 flagged 区域（人工定年流程：从较近年份处理）。
  *

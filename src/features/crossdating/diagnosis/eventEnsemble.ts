@@ -653,6 +653,13 @@ export const wholeSeriesEventIsLocalUnitAlias = (
     ));
 };
 
+export const isTerminalWholeBaselineEvent = (
+    event: DiagnosisEvent,
+): boolean => event.eventType === "wholeSeriesMove"
+    && event.evidence.notes.includes(
+        "whole_baseline_source=cofecha_terminal_lag",
+    );
+
 export const partialMoveExplainsWholeSeriesCandidate = (
     whole: DiagnosisEvent,
     event: DiagnosisEvent,
@@ -770,6 +777,14 @@ const keepWholeSeriesEvent = (
     pathDiagnosis: LagPathDiagnosis,
 ): DiagnosisEvent[] => {
     if (!whole) return [];
+    const terminalBaseline = whole.evidence.notes.includes(
+        "whole_baseline_source=cofecha_terminal_lag",
+    );
+    // A terminal COFECHA baseline has already passed either the ordinary whole hard gate or the
+    // joint gate proving that its application leaves exactly one residual unit lag. It is an
+    // independent baseline, so local unit hypotheses must be diagnosed after that baseline is
+    // applied rather than deleting it as an endpoint alias.
+    if (terminalBaseline) return [whole];
     // A local unit error can make its long older side dominate the global lag. A matching unit
     // correction that returns to zero or remains score-competitive is one boundary explanation,
     // not an independent whole-series move.
@@ -883,6 +898,10 @@ const addCompressedMissingStaircaseEvidence = (
 export const projectSequentialUnitChainHead = (
     events: DiagnosisEvent[],
 ): DiagnosisEvent[] => {
+    // A terminal whole baseline is the operation that must be applied first. Projecting the
+    // remaining states into one unit event here would erase that independently verified baseline.
+    if (events.some(isTerminalWholeBaselineEvent)) return events;
+
     const compressedHeads = events.filter((event) => (
         event.eventType === "partialMove"
         && event.shiftYears === -2
@@ -1065,6 +1084,45 @@ export const projectSequentialUnitChainHead = (
             ],
         },
     }];
+};
+
+export const prioritizeEndpointUnitAgainstWhole = (
+    events: DiagnosisEvent[],
+): DiagnosisEvent[] => {
+    const whole = events.find((event) => event.eventType === "wholeSeriesMove");
+    if (!whole || isTerminalWholeBaselineEvent(whole)) return events;
+    const endpointUnit = events.find((event) => (
+        event.evidence.algorithmSources.includes(
+            "series_endpoint_review_window",
+        )
+        && (
+            event.eventType === "missingRing"
+            || event.eventType === "falseRing"
+        )
+    ));
+    const wholeLag = wholeSeriesMoveShiftYears(whole);
+    const operationMatchesWholeLag = endpointUnit?.eventType === "missingRing"
+        ? wholeLag === -1
+        : endpointUnit?.eventType === "falseRing" && wholeLag === 1;
+    if (!endpointUnit || !operationMatchesWholeLag) return events;
+    const preferredUnit = {
+        ...endpointUnit,
+        evidence: {
+            ...endpointUnit.evidence,
+            algorithmSources: Array.from(new Set([
+                ...endpointUnit.evidence.algorithmSources,
+                "newer_endpoint_unit_preferred_over_global_lag",
+            ])).sort(),
+            notes: [
+                ...endpointUnit.evidence.notes,
+                "event_order=newer_endpoint_unit_before_global_lag",
+            ],
+        },
+    };
+    return [
+        preferredUnit,
+        ...events.filter((event) => event.id !== endpointUnit.id),
+    ];
 };
 
 const isCofechaFlaggedSeries = (
@@ -2917,41 +2975,7 @@ export const makeDiagnosisEvents = (
                 }))
                 .map(refineEventWithAdjacentBoundaryConsensus);
             const projected = projectSequentialUnitChainHead(valid);
-            const whole = projected.find((event) => (
-                event.eventType === "wholeSeriesMove"
-            ));
-            const endpointUnit = projected.find((event) => (
-                event.evidence.algorithmSources.includes(
-                    "series_endpoint_review_window",
-                )
-                && (
-                    event.eventType === "missingRing"
-                    || event.eventType === "falseRing"
-                )
-            ));
-            const wholeLag = wholeSeriesMoveShiftYears(whole);
-            const operationMatchesWholeLag = endpointUnit?.eventType === "missingRing"
-                ? wholeLag === -1
-                : endpointUnit?.eventType === "falseRing" && wholeLag === 1;
-            if (!whole || !endpointUnit || !operationMatchesWholeLag) return projected;
-            const preferredUnit = {
-                ...endpointUnit,
-                evidence: {
-                    ...endpointUnit.evidence,
-                    algorithmSources: Array.from(new Set([
-                        ...endpointUnit.evidence.algorithmSources,
-                        "newer_endpoint_unit_preferred_over_global_lag",
-                    ])).sort(),
-                    notes: [
-                        ...endpointUnit.evidence.notes,
-                        "event_order=newer_endpoint_unit_before_global_lag",
-                    ],
-                },
-            };
-            return [
-                preferredUnit,
-                ...projected.filter((event) => event.id !== endpointUnit.id),
-            ];
+            return prioritizeEndpointUnitAgainstWhole(projected);
         };
         const finalize = (sourceEvents: DiagnosisEvent[]): DiagnosisEvent[] => {
             const automaticSemanticsRejectedCount = sourceEvents.filter(
@@ -3026,6 +3050,7 @@ export const makeDiagnosisEvents = (
             diagnosis.targetTree,
             options.cofechaFlaggedSeriesIds,
         );
+        const hasTerminalWholeBaseline = displayed.some(isTerminalWholeBaselineEvent);
         if (options.enableCounterfactualEventLocator !== true
             || (!hasLocalEvent && !mayRecoverSequentialMissing)) {
             return finalize(displayed);
@@ -3037,7 +3062,7 @@ export const makeDiagnosisEvents = (
             cofechaPreprocess,
         );
         if (!cofechaDiagnosis) return finalize(displayed);
-        if (mayRecoverSequentialMissing) {
+        if (mayRecoverSequentialMissing && !hasTerminalWholeBaseline) {
             const sequentialMissing = recoverSequentialMissingHeadEvent(
                 displayed,
                 diagnosis,

@@ -381,6 +381,8 @@ export type CandidateEvaluationDelta = {
 
     hardGatePassedConditions: number;
     hardGatePassed: boolean;
+    /** Whole baseline is valid jointly because applying it leaves exactly one unit-lag state. */
+    jointCompositionGatePassed?: boolean;
 };
 
 /**

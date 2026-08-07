@@ -379,7 +379,13 @@ export const evaluateDraft = (
     ];
     const hardGatePassedConditions = hardGateConditions.filter(Boolean).length;
     const hardGatePassed = hardGatePassedConditions >= evalCfg.minHardGateConditions;
-
+    const terminalWholeResidualLag = beforeDiagnosis.globalSlidingMatch.bestGlobalLag
+        - (draft.deltaYears ?? 0);
+    const jointCompositionGatePassed = draft.operationType === "SHIFT_RANGE"
+        && draft.mode === "wholeSeriesMove"
+        && draft.recallSourceTags?.includes("cofecha_terminal_whole_baseline") === true
+        && Math.abs(terminalWholeResidualLag) === 1
+        && afterDiagnosis.globalSlidingMatch.bestGlobalLag === terminalWholeResidualLag;
     const evaluationDelta: CandidateEvaluationDelta = {
         meanSegmentRBefore,
         meanSegmentRAfter,
@@ -408,6 +414,7 @@ export const evaluateDraft = (
         introducedNewStrongProblem,
         hardGatePassedConditions,
         hardGatePassed,
+        jointCompositionGatePassed,
     };
 
     // Hard gate 未通过：通常丢弃；但若 HMM 边界后验很高（强证据），保留为 weak 候选用于 top5
@@ -417,8 +424,10 @@ export const evaluateDraft = (
     const isWeakProtected = !hardGatePassed
         && bayesianPosterior >= rerankCfg.weakHmmPosteriorFloor
         && !introducedNewStrongProblem;
-    if (!hardGatePassed && !isWeakProtected) return null;
-    const candidateStrength: CandidateStrength = hardGatePassed ? "strong" : "weak";
+    if (!hardGatePassed && !jointCompositionGatePassed && !isWeakProtected) return null;
+    const candidateStrength: CandidateStrength = hardGatePassed || jointCompositionGatePassed
+        ? "strong"
+        : "weak";
 
     const deleteEvidence: DeleteFalseYearEvidence | undefined = draft.operationType === "DELETE_FALSE_RING"
         ? {

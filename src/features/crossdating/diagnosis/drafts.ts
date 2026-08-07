@@ -21,7 +21,11 @@ import {
     refinePartialSelectedRange,
     runSlidingMatchForRange,
 } from "./rangeMove";
-import { getNewestFlaggedCofechaSegment, type CofechaHints } from "./cofechaHints";
+import {
+    getCofechaTerminalLagEstimate,
+    getNewestFlaggedCofechaSegment,
+    type CofechaHints,
+} from "./cofechaHints";
 import {
     isAutomaticPartialShift,
     partialMoveBreakpoint,
@@ -174,6 +178,62 @@ export const makeGlobalSlidingDrafts = (
         sourceSegment,
         globalSlidingMatch: match,
         algorithmSource: ["global_sliding_match", "segmented_diagnosis"],
+    }];
+};
+
+/**
+ * Generate the executable whole baseline represented by reliable COFECHA rows at the newer end.
+ * This is intentionally a draft, not a direct event: the proposed shift must still pass the same
+ * full before/after evaluation as every other whole-series candidate.
+ */
+export const makeCofechaTerminalWholeDrafts = (
+    diagnosis: SeriesCoreDiagnosis,
+    config: EffectiveDiagnosisConfig,
+    cofechaHints: CofechaHints | null,
+): CandidateDraft[] => {
+    if (!cofechaHints) return [];
+    const terminal = getCofechaTerminalLagEstimate(
+        cofechaHints,
+        diagnosis.targetTree,
+        diagnosis.targetRange.endYear,
+        {
+            maxUnmatchedTailYears: Math.max(
+                4,
+                Math.min(12, Math.floor(config.segmentLength / 4)),
+            ),
+            minEndpointStarredR: 0.55,
+            minimumSegments: 1,
+        },
+    );
+    if (!terminal) return [];
+    const sourceSegment = getSegmentNearYear(
+        diagnosis.segments,
+        terminal.terminalEndYear,
+    ) ?? getRepresentativeSegmentForLag(diagnosis, terminal.lag);
+    if (!sourceSegment) return [];
+    return [{
+        targetTree: diagnosis.targetTree,
+        operationType: "SHIFT_RANGE",
+        candidateType: "batchMoveYears",
+        mode: "wholeSeriesMove",
+        anchorYear: diagnosis.targetRange.endYear,
+        selectedRange: { ...diagnosis.targetRange },
+        deltaYears: terminal.lag,
+        sourceSegment,
+        algorithmSource: uniqueAlgorithmSources([
+            "cofecha_segment_lag",
+            "segmented_diagnosis",
+        ]),
+        recallSourceTags: [
+            "cofecha_terminal_whole_baseline",
+            `cofecha_terminal_lag:${terminal.lag}`,
+            `cofecha_terminal_segments:${terminal.segmentCount}`,
+            `cofecha_terminal_consistency:${terminal.consistency.toFixed(6)}`,
+            `cofecha_terminal_unmatched_tail:${terminal.unmatchedTailYears}`,
+            `cofecha_terminal_residual_lag:${
+                diagnosis.globalSlidingMatch.bestGlobalLag - terminal.lag
+            }`,
+        ],
     }];
 };
 

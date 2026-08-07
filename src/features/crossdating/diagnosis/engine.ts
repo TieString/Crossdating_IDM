@@ -24,6 +24,7 @@ import { diagnoseSeriesCore, createSeriesSummary } from "./segments";
 import {
     makeArRecallInsertDrafts,
     makeCofechaDrivenDrafts,
+    makeCofechaTerminalWholeDrafts,
     makeGlobalSlidingDrafts,
     makePatternDrafts,
     makeSegmentDrafts,
@@ -90,6 +91,7 @@ export function diagnoseCrossdating(
     const globalSlidingMatches = seriesDiagnoses.map((diagnosis) => diagnosis.globalSlidingMatch);
     const candidateDrafts = seriesDiagnoses.flatMap((diagnosis) => [
         ...makeGlobalSlidingDrafts(diagnosis),
+        ...makeCofechaTerminalWholeDrafts(diagnosis, config, cofechaHints),
         ...makePatternDrafts(diagnosis, config),
         ...makeSegmentDrafts(diagnosis, config),
         // COFECHA [A] 段级 lag 表驱动候选（仅在用户提供 cofechaText 时生效）：用 COFECHA 干净的段级定年
