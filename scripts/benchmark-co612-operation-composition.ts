@@ -12,6 +12,7 @@ import type { DiagnosisEvent, DiagnosisEventAuditSnapshot } from "@/features/cro
 import {
     createEndAnchoredFalseRingCase,
     createEndAnchoredMissingRingCase,
+    createPartialRangeMoveCase,
     createWholeSeriesMoveCase,
     type FalseRingMode,
     type RwlSeries,
@@ -29,8 +30,8 @@ import {
 import type { LegacyDiagnosisSnapshot } from "./legacy-generalization/types";
 
 type PositionStratum = "older" | "middle" | "newer";
-type UnitEventType = "missingRing" | "falseRing";
-type ScenarioKind = "clean" | "whole" | "unit" | "whole-unit";
+type LocalEventType = "missingRing" | "falseRing" | "partialMove";
+type ScenarioKind = "clean" | "whole" | "local" | "whole-local";
 
 type CaseSpec = {
     index: number;
@@ -39,9 +40,10 @@ type CaseSpec = {
     scenarioKind: ScenarioKind;
     wholeShiftYears: number;
     positionStratum: PositionStratum | null;
-    unitEventType: UnitEventType;
-    finalUnitYear: number | null;
-    displayedUnitYear: number | null;
+    localEventType: LocalEventType;
+    localShiftYears: number;
+    finalLocalYear: number | null;
+    displayedLocalYear: number | null;
     falseRingMode: FalseRingMode;
 };
 
@@ -50,22 +52,24 @@ type CombinationSpec = {
     targetId: string;
     wholeShiftYears: number;
     positionStratum: PositionStratum;
-    unitEventType: UnitEventType;
-    finalUnitYear: number;
-    displayedUnitYear: number;
+    localEventType: LocalEventType;
+    localShiftYears: number;
+    finalLocalYear: number;
+    displayedLocalYear: number;
     cleanCaseId: string;
     wholeCaseId: string;
-    unitCaseId: string;
+    localCaseId: string;
     compositeCaseId: string;
 };
 
 type Manifest = {
-    schemaVersion: 2;
+    schemaVersion: 3;
     createdAt: string;
     inputPath: string;
     sourceSha256: string;
     gitCommit: string;
-    unitEventType: UnitEventType;
+    localEventType: LocalEventType;
+    localShiftYears: number;
     falseRingMode: FalseRingMode;
     wholeShifts: number[];
     positions: Array<{ stratum: PositionStratum; fraction: number }>;
@@ -116,11 +120,12 @@ type CaseResult = {
     scenarioKind: ScenarioKind;
     wholeShiftYears: number;
     positionStratum: PositionStratum | null;
-    unitEventType: UnitEventType;
-    finalUnitYear: number | null;
-    displayedUnitYear: number | null;
+    localEventType: LocalEventType;
+    localShiftYears: number;
+    finalLocalYear: number | null;
+    displayedLocalYear: number | null;
     targetHash: string;
-    residualMatchesUnitControl: boolean | null;
+    residualMatchesLocalControl: boolean | null;
     cofechaFlagged: boolean;
     beforeSave: SnapshotPreview;
     afterReopen: SnapshotPreview;
@@ -134,12 +139,13 @@ type CombinationRow = {
     targetId: string;
     wholeShiftYears: number;
     positionStratum: PositionStratum;
-    unitEventType: UnitEventType;
-    finalUnitYear: number;
-    displayedUnitYear: number;
+    localEventType: LocalEventType;
+    localShiftYears: number;
+    finalLocalYear: number;
+    displayedLocalYear: number;
     pureWholeCorrect: boolean;
-    pureUnitOperationCorrect: boolean;
-    pureUnitWindowCovered: boolean;
+    pureLocalOperationCorrect: boolean;
+    pureLocalWindowCovered: boolean;
     controlsBothCorrect: boolean;
     compositeResponse: boolean;
     compositePredictedType: DiagnosisEvent["eventType"] | null;
@@ -149,12 +155,12 @@ type CombinationRow = {
     reviewDemotedExactWhole: boolean;
     compositeWholeExact: boolean;
     compositeWholeBiasYears: number | null;
-    compositeChoseOlderUnitState: boolean;
+    compositeChoseOlderLocalState: boolean;
     wholeToPartialConfusion: boolean;
     wholeToUnitConfusion: boolean;
     interactionFailure: boolean;
-    residualMatchesUnitControl: boolean;
-    serialWholeThenUnitCorrect: boolean;
+    residualMatchesLocalControl: boolean;
+    serialWholeThenLocalCorrect: boolean;
     saveReopenStable: boolean;
     cofechaFlagged: boolean;
     referenceAnchorCount: number;
@@ -173,7 +179,7 @@ const inputPath = resolve(valueFor("--input") ?? "D:/软件测试/co612.rwl");
 const outputDir = resolve(
     valueFor("--output-dir") ?? "D:/软件测试/co612-operation-composition-results",
 );
-const runId = valueFor("--run-id") ?? "whole-unit-composition-baseline";
+const runId = valueFor("--run-id") ?? "whole-local-composition-baseline";
 const runDir = resolve(valueFor("--run-dir") ?? join(outputDir, runId));
 const manifestPath = resolve(valueFor("--manifest") ?? join(runDir, "manifest.json"));
 const workerIndexValue = valueFor("--worker-index");
@@ -187,7 +193,15 @@ const maximumTargets = Number.isInteger(maximumTargetsValue) && maximumTargetsVa
     ? maximumTargetsValue
     : 10;
 const minimumSeriesLength = Number(valueFor("--minimum-series-length") ?? 180);
-const unitEventType = (valueFor("--unit-event") ?? "falseRing") as UnitEventType;
+const localEventType = (
+    valueFor("--local-event") ?? valueFor("--unit-event") ?? "falseRing"
+) as LocalEventType;
+const partialShiftValue = Number(valueFor("--partial-shift") ?? -6);
+const localShiftYears = localEventType === "missingRing"
+    ? -1
+    : localEventType === "falseRing"
+        ? 1
+        : partialShiftValue;
 const falseRingMode = (valueFor("--false-ring-mode") ?? "moderate") as FalseRingMode;
 const wholeShifts = (valueFor("--whole-shifts") ?? "-5,-1,1,5")
     .split(",")
@@ -279,51 +293,67 @@ const snapshotPreview = (snapshot: LegacyDiagnosisSnapshot): SnapshotPreview => 
     error: snapshot.error,
 });
 
+const eventPreviewStable = (
+    left: EventPreview | null,
+    right: EventPreview | null,
+): boolean => {
+    if (left === null || right === null) return left === right;
+    return left.eventType === right.eventType
+        && left.shiftYears === right.shiftYears
+        && left.startYear === right.startYear
+        && left.endYear === right.endYear
+        && left.topYear === right.topYear
+        && left.lagBefore === right.lagBefore
+        && left.lagAfter === right.lagAfter
+        && Math.abs(left.score - right.score) <= 1e-9
+        && Math.abs(left.scoreMargin - right.scoreMargin) <= 1e-9
+        && JSON.stringify(left.sources) === JSON.stringify(right.sources)
+        && JSON.stringify(left.notes) === JSON.stringify(right.notes);
+};
+
 const previewStable = (left: SnapshotPreview, right: SnapshotPreview): boolean => (
-    JSON.stringify({
-        strict: left.strict,
-        review: left.review,
-        reviewStatus: left.reviewStatus,
-        reviewReason: left.reviewReason,
-        finalReason: left.finalReason,
-    }) === JSON.stringify({
-        strict: right.strict,
-        review: right.review,
-        reviewStatus: right.reviewStatus,
-        reviewReason: right.reviewReason,
-        finalReason: right.finalReason,
-    })
+    eventPreviewStable(left.strict, right.strict)
+    && eventPreviewStable(left.review, right.review)
+    && left.reviewStatus === right.reviewStatus
+    && left.reviewReason === right.reviewReason
+    && left.finalReason === right.finalReason
 );
 
 const targetForCase = (
     source: RwlSeries,
     spec: CaseSpec,
-): { values: Map<number, number>; residualMatchesUnitControl: boolean | null } => {
+): { values: Map<number, number>; residualMatchesLocalControl: boolean | null } => {
     if (spec.scenarioKind === "clean") {
-        return { values: new Map(source.valuesByYear), residualMatchesUnitControl: null };
+        return { values: new Map(source.valuesByYear), residualMatchesLocalControl: null };
     }
     if (spec.scenarioKind === "whole") {
         return {
             values: createWholeSeriesMoveCase(source, -spec.wholeShiftYears).corrupted,
-            residualMatchesUnitControl: null,
+            residualMatchesLocalControl: null,
         };
     }
-    if (spec.finalUnitYear === null) throw new Error(`unit year missing: ${spec.caseId}`);
-    const unitControl = spec.unitEventType === "missingRing"
-        ? createEndAnchoredMissingRingCase(source, spec.finalUnitYear).corrupted
-        : createEndAnchoredFalseRingCase(
-            source,
-            spec.finalUnitYear,
-            spec.falseRingMode,
-        ).corrupted;
-    if (spec.scenarioKind === "unit") {
-        return { values: unitControl, residualMatchesUnitControl: null };
+    if (spec.finalLocalYear === null) throw new Error(`local year missing: ${spec.caseId}`);
+    const localControl = spec.localEventType === "missingRing"
+        ? createEndAnchoredMissingRingCase(source, spec.finalLocalYear).corrupted
+        : spec.localEventType === "falseRing"
+            ? createEndAnchoredFalseRingCase(
+                source,
+                spec.finalLocalYear,
+                spec.falseRingMode,
+            ).corrupted
+            : createPartialRangeMoveCase(
+                source,
+                spec.finalLocalYear,
+                Math.abs(spec.localShiftYears),
+            ).corrupted;
+    if (spec.scenarioKind === "local") {
+        return { values: localControl, residualMatchesLocalControl: null };
     }
-    const composite = shiftMap(unitControl, -spec.wholeShiftYears);
+    const composite = shiftMap(localControl, -spec.wholeShiftYears);
     const residual = shiftMap(composite, spec.wholeShiftYears);
     return {
         values: composite,
-        residualMatchesUnitControl: mapsEqual(residual, unitControl),
+        residualMatchesLocalControl: mapsEqual(residual, localControl),
     };
 };
 
@@ -352,9 +382,10 @@ const buildManifest = async (): Promise<Manifest> => {
             scenarioKind: "clean",
             wholeShiftYears: 0,
             positionStratum: null,
-            unitEventType,
-            finalUnitYear: null,
-            displayedUnitYear: null,
+            localEventType,
+            localShiftYears,
+            finalLocalYear: null,
+            displayedLocalYear: null,
             falseRingMode,
         });
     });
@@ -372,48 +403,56 @@ const buildManifest = async (): Promise<Manifest> => {
                 scenarioKind: "whole",
                 wholeShiftYears,
                 positionStratum: null,
-                unitEventType,
-                finalUnitYear: null,
-                displayedUnitYear: null,
+                localEventType,
+                localShiftYears,
+                finalLocalYear: null,
+                displayedLocalYear: null,
                 falseRingMode,
             });
             positions.forEach(({ stratum }) => {
-                const finalUnitYear = years.get(stratum)!;
-                const displayedUnitYear = finalUnitYear - wholeShiftYears;
-                const unitSlug = unitEventType === "missingRing" ? "missing" : "false";
-                const unitCaseId = addCase({
-                    caseId: `${series.id}:${unitSlug}:${stratum}`,
+                const finalLocalYear = years.get(stratum)!;
+                const displayedLocalYear = finalLocalYear - wholeShiftYears;
+                const localSlug = localEventType === "missingRing"
+                    ? "missing"
+                    : localEventType === "falseRing"
+                        ? "false"
+                        : `partial${localShiftYears}`;
+                const localCaseId = addCase({
+                    caseId: `${series.id}:${localSlug}:${stratum}`,
                     targetId: series.id,
-                    scenarioKind: "unit",
+                    scenarioKind: "local",
                     wholeShiftYears: 0,
                     positionStratum: stratum,
-                    unitEventType,
-                    finalUnitYear,
-                    displayedUnitYear: finalUnitYear,
+                    localEventType,
+                    localShiftYears,
+                    finalLocalYear,
+                    displayedLocalYear: finalLocalYear,
                     falseRingMode,
                 });
                 const compositeCaseId = addCase({
-                    caseId: `${series.id}:whole-${unitSlug}:${wholeShiftYears}:${stratum}`,
+                    caseId: `${series.id}:whole-${localSlug}:${wholeShiftYears}:${stratum}`,
                     targetId: series.id,
-                    scenarioKind: "whole-unit",
+                    scenarioKind: "whole-local",
                     wholeShiftYears,
                     positionStratum: stratum,
-                    unitEventType,
-                    finalUnitYear,
-                    displayedUnitYear,
+                    localEventType,
+                    localShiftYears,
+                    finalLocalYear,
+                    displayedLocalYear,
                     falseRingMode,
                 });
                 combinations.push({
-                    combinationId: `${series.id}:${unitSlug}:${wholeShiftYears}:${stratum}`,
+                    combinationId: `${series.id}:${localSlug}:${wholeShiftYears}:${stratum}`,
                     targetId: series.id,
                     wholeShiftYears,
                     positionStratum: stratum,
-                    unitEventType,
-                    finalUnitYear,
-                    displayedUnitYear,
+                    localEventType,
+                    localShiftYears,
+                    finalLocalYear,
+                    displayedLocalYear,
                     cleanCaseId,
                     wholeCaseId,
-                    unitCaseId,
+                    localCaseId,
                     compositeCaseId,
                 });
             });
@@ -425,12 +464,13 @@ const buildManifest = async (): Promise<Manifest> => {
         windowsHide: true,
     }).trim();
     return {
-        schemaVersion: 2,
+        schemaVersion: 3,
         createdAt: new Date().toISOString(),
         inputPath,
         sourceSha256: loaded.sourceSha256,
         gitCommit,
-        unitEventType,
+        localEventType,
+        localShiftYears,
         falseRingMode,
         wholeShifts,
         positions,
@@ -492,11 +532,12 @@ const runWorker = async (): Promise<void> => {
                 scenarioKind: spec.scenarioKind,
                 wholeShiftYears: spec.wholeShiftYears,
                 positionStratum: spec.positionStratum,
-                unitEventType: spec.unitEventType,
-                finalUnitYear: spec.finalUnitYear,
-                displayedUnitYear: spec.displayedUnitYear,
+                localEventType: spec.localEventType,
+                localShiftYears: spec.localShiftYears,
+                finalLocalYear: spec.finalLocalYear,
+                displayedLocalYear: spec.displayedLocalYear,
                 targetHash: siteHash(new Map([[spec.targetId, generated.values]])),
-                residualMatchesUnitControl: generated.residualMatchesUnitControl,
+                residualMatchesLocalControl: generated.residualMatchesLocalControl,
                 cofechaFlagged: context.flaggedIds.some(
                     (id) => id.toLowerCase() === spec.targetId.toLowerCase(),
                 ),
@@ -527,11 +568,12 @@ const runWorker = async (): Promise<void> => {
                 scenarioKind: spec.scenarioKind,
                 wholeShiftYears: spec.wholeShiftYears,
                 positionStratum: spec.positionStratum,
-                unitEventType: spec.unitEventType,
-                finalUnitYear: spec.finalUnitYear,
-                displayedUnitYear: spec.displayedUnitYear,
+                localEventType: spec.localEventType,
+                localShiftYears: spec.localShiftYears,
+                finalLocalYear: spec.finalLocalYear,
+                displayedLocalYear: spec.displayedLocalYear,
                 targetHash: "",
-                residualMatchesUnitControl: null,
+                residualMatchesLocalControl: null,
                 cofechaFlagged: false,
                 beforeSave: empty,
                 afterReopen: empty,
@@ -560,12 +602,12 @@ const histogram = (values: Array<string | number | null>): Record<string, number
 const summarizeCombinations = (rows: CombinationRow[]) => ({
     combinations: rows.length,
     pureWholeExact: rate(rows.filter((row) => row.pureWholeCorrect).length, rows.length),
-    pureUnitOperationCorrect: rate(
-        rows.filter((row) => row.pureUnitOperationCorrect).length,
+    pureLocalOperationCorrect: rate(
+        rows.filter((row) => row.pureLocalOperationCorrect).length,
         rows.length,
     ),
-    pureUnitWindowCoverage: rate(
-        rows.filter((row) => row.pureUnitWindowCovered).length,
+    pureLocalWindowCoverage: rate(
+        rows.filter((row) => row.pureLocalWindowCovered).length,
         rows.length,
     ),
     compositeResponse: rate(rows.filter((row) => row.compositeResponse).length, rows.length),
@@ -590,8 +632,8 @@ const summarizeCombinations = (rows: CombinationRow[]) => ({
         rows.filter((row) => row.interactionFailure).length,
         rows.filter((row) => row.controlsBothCorrect).length,
     ),
-    choseOlderUnitStateRate: rate(
-        rows.filter((row) => row.compositeChoseOlderUnitState).length,
+    choseOlderLocalStateRate: rate(
+        rows.filter((row) => row.compositeChoseOlderLocalState).length,
         rows.length,
     ),
     wholeToPartialConfusionRate: rate(
@@ -602,8 +644,8 @@ const summarizeCombinations = (rows: CombinationRow[]) => ({
         rows.filter((row) => row.wholeToUnitConfusion).length,
         rows.length,
     ),
-    serialWholeThenUnitCorrect: rate(
-        rows.filter((row) => row.serialWholeThenUnitCorrect).length,
+    serialWholeThenLocalCorrect: rate(
+        rows.filter((row) => row.serialWholeThenLocalCorrect).length,
         rows.length,
     ),
     saveReopenStable: rate(rows.filter((row) => row.saveReopenStable).length, rows.length),
@@ -636,22 +678,22 @@ const aggregate = async (manifest: Manifest): Promise<void> => {
     }
     const rows: CombinationRow[] = manifest.combinations.map((combination) => {
         const whole = resultById.get(combination.wholeCaseId)!;
-        const unitControl = resultById.get(combination.unitCaseId)!;
+        const localControl = resultById.get(combination.localCaseId)!;
         const composite = resultById.get(combination.compositeCaseId)!;
         const wholeEvent = whole.afterReopen.review;
-        const unitEvent = unitControl.afterReopen.review;
+        const localEvent = localControl.afterReopen.review;
         const compositeEvent = composite.afterReopen.review;
         const compositeStrictEvent = composite.afterReopen.strict;
-        const expectedUnitShift = combination.unitEventType === "missingRing" ? -1 : 1;
+        const expectedLocalShift = combination.localShiftYears;
         const pureWholeCorrect = wholeEvent?.eventType === "wholeSeriesMove"
             && wholeEvent.shiftYears === combination.wholeShiftYears;
-        const pureUnitOperationCorrect = unitEvent?.eventType === combination.unitEventType
-            && unitEvent.shiftYears === expectedUnitShift;
-        const pureUnitWindowCovered = Boolean(
-            pureUnitOperationCorrect
-            && unitEvent
-            && combination.finalUnitYear >= unitEvent.startYear
-            && combination.finalUnitYear <= unitEvent.endYear,
+        const pureLocalOperationCorrect = localEvent?.eventType === combination.localEventType
+            && localEvent.shiftYears === expectedLocalShift;
+        const pureLocalWindowCovered = Boolean(
+            pureLocalOperationCorrect
+            && localEvent
+            && combination.finalLocalYear >= localEvent.startYear
+            && combination.finalLocalYear <= localEvent.endYear,
         );
         const compositeWholeExact = compositeEvent?.eventType === "wholeSeriesMove"
             && compositeEvent.shiftYears === combination.wholeShiftYears;
@@ -662,8 +704,8 @@ const aggregate = async (manifest: Manifest): Promise<void> => {
             event.eventType === "wholeSeriesMove"
             && event.shiftYears === combination.wholeShiftYears
         ));
-        const controlsBothCorrect = pureWholeCorrect && pureUnitOperationCorrect
-            && pureUnitWindowCovered;
+        const controlsBothCorrect = pureWholeCorrect && pureLocalOperationCorrect
+            && pureLocalWindowCovered;
         const compositeWholeBiasYears = compositeEvent?.eventType === "wholeSeriesMove"
             && compositeEvent.shiftYears !== null
             ? compositeEvent.shiftYears - combination.wholeShiftYears
@@ -673,12 +715,13 @@ const aggregate = async (manifest: Manifest): Promise<void> => {
             targetId: combination.targetId,
             wholeShiftYears: combination.wholeShiftYears,
             positionStratum: combination.positionStratum,
-            unitEventType: combination.unitEventType,
-            finalUnitYear: combination.finalUnitYear,
-            displayedUnitYear: combination.displayedUnitYear,
+            localEventType: combination.localEventType,
+            localShiftYears: combination.localShiftYears,
+            finalLocalYear: combination.finalLocalYear,
+            displayedLocalYear: combination.displayedLocalYear,
             pureWholeCorrect,
-            pureUnitOperationCorrect,
-            pureUnitWindowCovered,
+            pureLocalOperationCorrect,
+            pureLocalWindowCovered,
             controlsBothCorrect,
             compositeResponse: compositeEvent !== null,
             compositePredictedType: compositeEvent?.eventType ?? null,
@@ -688,18 +731,18 @@ const aggregate = async (manifest: Manifest): Promise<void> => {
             reviewDemotedExactWhole: compositeInternalWholeExact && !compositeWholeExact,
             compositeWholeExact,
             compositeWholeBiasYears,
-            compositeChoseOlderUnitState: compositeWholeBiasYears === expectedUnitShift,
+            compositeChoseOlderLocalState: compositeWholeBiasYears === expectedLocalShift,
             wholeToPartialConfusion: compositeEvent?.eventType === "partialMove",
             wholeToUnitConfusion: compositeEvent?.eventType === "missingRing"
                 || compositeEvent?.eventType === "falseRing",
             interactionFailure: controlsBothCorrect && !compositeWholeExact,
-            residualMatchesUnitControl: composite.residualMatchesUnitControl === true,
-            serialWholeThenUnitCorrect: compositeWholeExact
-                && composite.residualMatchesUnitControl === true
-                && pureUnitOperationCorrect
-                && pureUnitWindowCovered,
+            residualMatchesLocalControl: composite.residualMatchesLocalControl === true,
+            serialWholeThenLocalCorrect: compositeWholeExact
+                && composite.residualMatchesLocalControl === true
+                && pureLocalOperationCorrect
+                && pureLocalWindowCovered,
             saveReopenStable: whole.saveReopenStable
-                && unitControl.saveReopenStable
+                && localControl.saveReopenStable
                 && composite.saveReopenStable,
             cofechaFlagged: composite.cofechaFlagged,
             referenceAnchorCount: composite.afterReopen.referenceAnchorCount,
@@ -718,7 +761,7 @@ const aggregate = async (manifest: Manifest): Promise<void> => {
     const sourceSha256After = sha256Bytes(readFileSync(manifest.inputPath));
     const cleanCases = results.filter((row) => row.scenarioKind === "clean");
     const wholeCases = results.filter((row) => row.scenarioKind === "whole");
-    const unitCases = results.filter((row) => row.scenarioKind === "unit");
+    const localCases = results.filter((row) => row.scenarioKind === "local");
     const wholeReviewExact = (row: CaseResult): boolean => (
         row.afterReopen.review?.eventType === "wholeSeriesMove"
         && row.afterReopen.review.shiftYears === row.wholeShiftYears
@@ -729,34 +772,35 @@ const aggregate = async (manifest: Manifest): Promise<void> => {
             && event.shiftYears === row.wholeShiftYears
         ))
     );
-    const unitOperationCorrect = (row: CaseResult): boolean => (
-        row.afterReopen.review?.eventType === row.unitEventType
-        && row.afterReopen.review.shiftYears === (row.unitEventType === "missingRing" ? -1 : 1)
+    const localOperationCorrect = (row: CaseResult): boolean => (
+        row.afterReopen.review?.eventType === row.localEventType
+        && row.afterReopen.review.shiftYears === row.localShiftYears
     );
-    const unitWindowCovered = (row: CaseResult): boolean => Boolean(
-        unitOperationCorrect(row)
+    const localWindowCovered = (row: CaseResult): boolean => Boolean(
+        localOperationCorrect(row)
         && row.afterReopen.review
-        && row.finalUnitYear !== null
-        && row.finalUnitYear >= row.afterReopen.review.startYear
-        && row.finalUnitYear <= row.afterReopen.review.endYear
+        && row.finalLocalYear !== null
+        && row.finalLocalYear >= row.afterReopen.review.startYear
+        && row.finalLocalYear <= row.afterReopen.review.endYear
     );
     const report = {
-        schemaVersion: 2,
+        schemaVersion: 3,
         createdAt: new Date().toISOString(),
         runDir,
         sourceSha256Before: manifest.sourceSha256,
         sourceSha256After,
         sourceUnchanged: sourceSha256After === manifest.sourceSha256,
         gitCommit: manifest.gitCommit,
-        unitEventType: manifest.unitEventType,
+        localEventType: manifest.localEventType,
+        localShiftYears: manifest.localShiftYears,
         workers: workerCount,
         selectedTargets: manifest.selection.selectedTargetIds,
         cleanTargets: manifest.selection.cleanTargetIds,
         uniqueDiagnosisCases: results.length,
         errors: results.filter((row) => row.error !== null).length,
         residualMapMismatches: results.filter((row) => (
-            row.scenarioKind === "whole-unit"
-            && row.residualMatchesUnitControl !== true
+            row.scenarioKind === "whole-local"
+            && row.residualMatchesLocalControl !== true
         )).length,
         controls: {
             cleanCases: cleanCases.length,
@@ -777,14 +821,14 @@ const aggregate = async (manifest: Manifest): Promise<void> => {
                 wholeCases.filter(wholeInternalExact).length,
                 wholeCases.length,
             ),
-            unitCases: unitCases.length,
-            unitOperationCorrectRate: rate(
-                unitCases.filter(unitOperationCorrect).length,
-                unitCases.length,
+            localCases: localCases.length,
+            localOperationCorrectRate: rate(
+                localCases.filter(localOperationCorrect).length,
+                localCases.length,
             ),
-            unitWindowCoverageRate: rate(
-                unitCases.filter(unitWindowCovered).length,
-                unitCases.length,
+            localWindowCoverageRate: rate(
+                localCases.filter(localWindowCovered).length,
+                localCases.length,
             ),
             saveReopenStableRate: rate(
                 results.filter((row) => row.saveReopenStable).length,
@@ -807,8 +851,12 @@ const runParent = async (): Promise<void> => {
     if (!existsSync(inputPath)) throw new Error(`input missing: ${inputPath}`);
     if (!existsSync(cofechaExe)) throw new Error(`COFECHA missing: ${cofechaExe}`);
     if (!wholeShifts.length) throw new Error("at least one non-zero whole shift is required");
-    if (unitEventType !== "missingRing" && unitEventType !== "falseRing") {
-        throw new Error(`invalid unit-event type: ${unitEventType}`);
+    if (!["missingRing", "falseRing", "partialMove"].includes(localEventType)) {
+        throw new Error(`invalid local-event type: ${localEventType}`);
+    }
+    if (localEventType === "partialMove"
+        && (!Number.isInteger(localShiftYears) || localShiftYears > -2)) {
+        throw new Error(`partial shift must be an integer <= -2: ${localShiftYears}`);
     }
     if (!["average", "moderate", "splitLike"].includes(falseRingMode)) {
         throw new Error(`invalid false-ring mode: ${falseRingMode}`);

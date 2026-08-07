@@ -512,5 +512,60 @@ whole/partial/false/missing 真值、ZSL141 保存循环和 MCP17A 连续缺块�
 缺块 `-2…-100`、ZSL whole/partial/unit、ZSL141 保存循环、MCP17A 和编辑语义。第一次
 出现的 `mon052` 回退已保留在过程记录中，不将中间 120/120 误称为可发布结果。
 
+### Round 3 基线：whole + partialMove -6
+
+- 生产算法提交：`7df94538caab19b48562147429deb77dfd463e13`（Round 2A，不含本轮修复）。
+- 冻结结果目录：
+  `D:\软件测试\co612-operation-composition-results\whole-partial-6-round3-baseline-frozen-2026-08-08`
+- 组合基准器升级到 schema v3，使用中性的 `localEventType/localShiftYears/finalLocalYear`
+  字段，并支持 `missingRing`、`falseRing` 和精确负向 `partialMove`。partialMove 真值年份
+  统一为 `firstFixedYear`，位移必须精确相等，不能把 `-6` 近似为较小位移。
+- 仍使用相同 10 条目标样芯、`-5/-1/+1/+5` whole 和 20%/50%/80% 三个断点位置；
+  245 个唯一状态错误 0，组合应用 whole 后与纯 partial 控制逐值相同 120/120，保存重开
+  一致 245/245。源文件 SHA-256 运行前后均为
+  `36e6c6a9d0cbc16d1870a1662da553a7b40d5578ea9ede25ff790c556c34667d`。
+
+保存稳定性原先有 13 个假失败：操作、位移、窗口和 Top1 均相同，仅分数在
+`2e-15` 量级不同。schema v3 改为结构字段精确比较、浮点分数使用 `1e-9` 容差；没有
+隐藏任何真实的操作或窗口变化。
+
+| 指标 | Round 3 基线 |
+| --- | ---: |
+| clean review 误报 | 2/55 |
+| 纯 whole 精确 | 40/40 |
+| 纯 partial `-6` 操作精确 | 24/30 = 80.00% |
+| 纯 partial `-6` 窗口覆盖 | 22/30 = 73.33% |
+| 组合响应 | 120/120 |
+| review 首事件 whole 精确 | 107/120 = 89.17% |
+| strict 首事件 whole 精确 | 103/120 = 85.83% |
+| internal final 含精确 whole | 107/120 = 89.17% |
+| whole 被判成 missingRing | 12/120 = 10.00% |
+| whole 被判成 partialMove | 0/120 |
+| 正确先 whole、再恢复 partial | 76/120 = 63.33% |
+
+失败并非随机分布。`whole=-5/-1/+1` 均为 30/30，只有 `whole=+5` 降到 17/30：
+12 例输出 missingRing `-1`，另 1 例输出 whole `-1`。较老位置为 40/40，中部 37/40，
+较新位置 30/40。
+
+原因是两个 lag 状态发生精确抵消。设较新固定侧的整体基线为 `g`，局部缺失量为
+`p< -1`，则较老侧状态为 `g+p`。本轮失败组合为：
+
+```text
+newer baseline g = +5
+partial shift  p = -6
+older state  g+p = -1
+```
+
+COFECHA 并未丢失信息。例如 `mon152` 较新断点案例的旧侧 14 条连续分段均为 `lag=-1`，
+新侧 3 条分段均为 `lag=+5`，真实路径清楚地表现为 `-1 -> +5`。终端 whole 草案也能
+得到 `+5`，但现有 `jointCompositionGatePassed` 只允许应用 whole 后留下绝对值为 1 的
+residual，因此 residual `-6` 的草案被 evaluation 丢弃，旧侧多数状态随后被单位事件
+定位器解释成 missingRing。
+
+Round 3 修复必须把较新固定侧状态作为 whole baseline，并把
+`olderLag - newerLag` 作为局部位移联合验证。只允许符合自动 partialMove 物理语义的
+负向 residual（`<= -2`）、应用 whole 后仍保留同一 residual、且存在局部状态转移支持；
+不得把联合门槛无条件放宽到任意大 lag。修复前先冻结本节，生产改动另行提交。
+
 后续每轮在这里追加：输入 SHA、案例数、分层、修复前指标、失败类型、算法改动、
 修复后指标、干扰检查、外部回归、提交号和未解决边界。
