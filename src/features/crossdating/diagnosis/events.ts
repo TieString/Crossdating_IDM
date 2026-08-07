@@ -218,7 +218,14 @@ const wholeEventFromCandidate = (
                 ) ? [
                     "whole_baseline_source=cofecha_terminal_lag",
                     ...(candidate.evidence.recallSourceTags
-                        .filter((tag) => tag.startsWith("cofecha_terminal_residual_lag:"))
+                        .filter((tag) => (
+                            tag.startsWith("cofecha_terminal_mode:")
+                            || tag.startsWith("cofecha_terminal_segments:")
+                            || tag.startsWith("cofecha_terminal_consistency:")
+                            || tag.startsWith("cofecha_terminal_residual_lag:")
+                            || tag.startsWith("cofecha_terminal_matching_pattern_support:")
+                            || tag.startsWith("cofecha_terminal_opposing_pattern_support:")
+                        ))
                         .map((tag) => tag.replace(":", "="))),
                 ] : []),
                 `whole_operation_shift=${shiftYears}`,

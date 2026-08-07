@@ -14,10 +14,13 @@ import {
     parseCofechaHints,
     type CofechaHints,
 } from "../cofechaHints";
-import { shouldSuppressAliasedCofechaUnitDraft } from "../drafts";
+import {
+    shouldSuppressAliasedCofechaUnitDraft,
+    terminalResidualPatternSupport,
+} from "../drafts";
 import { selectWholeSeriesCandidate } from "../events";
 import type { RwlSiteData } from "@/features/rwl/types";
-import type { DiagnosisCandidateOperation } from "../types";
+import type { DiagnosisCandidateOperation, PropagationPattern } from "../types";
 import {
     dataFoldersAvailable,
     loadCofechaOut,
@@ -61,18 +64,36 @@ describe("COFECHA unit-lag alias guard", () => {
 });
 
 describe("COFECHA terminal whole baseline", () => {
-    const hints = (
-        rows: Array<[number, number, number, number]>,
-    ): CofechaHints => ({
-        segments: rows.map(([startYear, endYear, highLag, r]) => ({
-            seriesId: "TARGET",
-            startYear,
-            endYear,
-            highLag,
-            correlationsByLag: { [highLag]: r },
-            starredLag: highLag,
-            starredR: r,
+    const pattern = (
+        dominantLag: number,
+        confidence = 0.8,
+        segmentCount = 3,
+    ) => ({
+        dominantLag,
+        confidence,
+        affectedSegments: Array.from({ length: segmentCount }, (_, index) => ({
+            startYear: 1800 + index * 25,
+            endYear: 1849 + index * 25,
+            flag: "B_like" as const,
         })),
+    } as PropagationPattern);
+
+    const hints = (
+        rows: Array<[number, number, number, number, number?]>,
+    ): CofechaHints => ({
+        segments: rows.map(([startYear, endYear, highLag, r, asDatedR]) => {
+            const correlationsByLag: Record<number, number> = { [highLag]: r };
+            if (asDatedR !== undefined) correlationsByLag[0] = asDatedR;
+            return {
+                seriesId: "TARGET",
+                startYear,
+                endYear,
+                highLag,
+                correlationsByLag,
+                starredLag: highLag,
+                starredR: r,
+            };
+        }),
         effects: [],
         yearToYear: [],
         outliers: [],
@@ -107,7 +128,7 @@ describe("COFECHA terminal whole baseline", () => {
         const source = hints([
             [1900, 1949, 6, 0.86],
             [1925, 1974, 6, 0.63],
-            [1948, 1997, 5, 0.65],
+            [1948, 1997, 5, 0.54, 0.10],
         ]);
         expect(getCofechaTerminalLagEstimate(
             source,
@@ -118,8 +139,48 @@ describe("COFECHA terminal whole baseline", () => {
             source,
             "TARGET",
             1997,
-            { minEndpointStarredR: 0.55, minimumSegments: 1 },
+            {
+                minEndpointStarredR: 0.45,
+                minimumEndpointLagAdvantage: 0.2,
+                minimumSegments: 1,
+            },
         )).toMatchObject({ lag: 5, segmentCount: 1 });
+    });
+
+    it("uses repeated moderate endpoint rows instead of applying a single-row cutoff", () => {
+        expect(getCofechaTerminalLagEstimate(hints([
+            [1900, 1949, -6, 0.90],
+            [1950, 1999, -5, 0.47, -0.17],
+            [1953, 2002, -5, 0.50, -0.21],
+        ]), "TARGET", 2007)).toMatchObject({
+            lag: -5,
+            segmentCount: 2,
+        });
+    });
+
+    it("rejects a single endpoint lag without a clear advantage over lag zero", () => {
+        expect(getCofechaTerminalLagEstimate(hints([
+            [1948, 1997, 5, 0.54, 0.49],
+        ]), "TARGET", 1997, {
+            minEndpointStarredR: 0.45,
+            minimumEndpointLagAdvantage: 0.2,
+            minimumSegments: 1,
+        })).toBeNull();
+    });
+
+    it("detects when local states contradict the terminal residual direction", () => {
+        expect(terminalResidualPatternSupport(
+            [pattern(-8, 0.9, 4)],
+            -1,
+            1,
+        )).toEqual({ matching: 0, opposing: 3.6 });
+        const matching = terminalResidualPatternSupport(
+            [pattern(4, 0.8, 3)],
+            5,
+            -1,
+        );
+        expect(matching.matching).toBeCloseTo(2.4);
+        expect(matching.opposing).toBe(0);
     });
 
     it("prefers a hard-gated terminal candidate over the higher-scoring majority state", () => {

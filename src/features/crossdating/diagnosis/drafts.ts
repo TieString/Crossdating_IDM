@@ -181,6 +181,20 @@ export const makeGlobalSlidingDrafts = (
     }];
 };
 
+export const terminalResidualPatternSupport = (
+    patterns: PropagationPattern[],
+    terminalLag: number,
+    residualLag: number,
+): { matching: number; opposing: number } => patterns.reduce((support, pattern) => {
+    const relativeLag = pattern.dominantLag - terminalLag;
+    const weight = pattern.affectedSegments.length * Math.max(0.1, pattern.confidence);
+    if (Math.sign(relativeLag) === Math.sign(residualLag)) support.matching += weight;
+    if (relativeLag !== 0 && Math.sign(relativeLag) !== Math.sign(residualLag)) {
+        support.opposing += weight;
+    }
+    return support;
+}, { matching: 0, opposing: 0 });
+
 /**
  * Generate the executable whole baseline represented by reliable COFECHA rows at the newer end.
  * This is intentionally a draft, not a direct event: the proposed shift must still pass the same
@@ -192,20 +206,46 @@ export const makeCofechaTerminalWholeDrafts = (
     cofechaHints: CofechaHints | null,
 ): CandidateDraft[] => {
     if (!cofechaHints) return [];
-    const terminal = getCofechaTerminalLagEstimate(
+    const endpointOptions = {
+        maxUnmatchedTailYears: Math.max(
+            4,
+            Math.min(12, Math.floor(config.segmentLength / 4)),
+        ),
+    };
+    const repeatedTerminal = getCofechaTerminalLagEstimate(
         cofechaHints,
         diagnosis.targetTree,
         diagnosis.targetRange.endYear,
         {
-            maxUnmatchedTailYears: Math.max(
-                4,
-                Math.min(12, Math.floor(config.segmentLength / 4)),
-            ),
-            minEndpointStarredR: 0.55,
+            ...endpointOptions,
+            minimumSegments: 2,
+        },
+    );
+    const terminal = repeatedTerminal ?? getCofechaTerminalLagEstimate(
+        cofechaHints,
+        diagnosis.targetTree,
+        diagnosis.targetRange.endYear,
+        {
+            ...endpointOptions,
+            minEndpointStarredR: 0.45,
+            minimumEndpointLagAdvantage: 0.2,
             minimumSegments: 1,
         },
     );
     if (!terminal) return [];
+    const residualLag = diagnosis.globalSlidingMatch.bestGlobalLag - terminal.lag;
+    const patternSupport = terminalResidualPatternSupport(
+        diagnosis.propagationPatterns,
+        terminal.lag,
+        residualLag,
+    );
+    // Overlapping endpoint segments can all cross the same recent local event. If their implied
+    // unit residual points one way while the local lag path has stronger support in the opposite
+    // direction, the endpoint state is not an independent whole baseline.
+    if (
+        Math.abs(residualLag) === 1
+        && patternSupport.opposing > patternSupport.matching
+    ) return [];
     const sourceSegment = getSegmentNearYear(
         diagnosis.segments,
         terminal.terminalEndYear,
@@ -226,13 +266,14 @@ export const makeCofechaTerminalWholeDrafts = (
         ]),
         recallSourceTags: [
             "cofecha_terminal_whole_baseline",
+            `cofecha_terminal_mode:${repeatedTerminal ? "repeated" : "single_advantage"}`,
             `cofecha_terminal_lag:${terminal.lag}`,
             `cofecha_terminal_segments:${terminal.segmentCount}`,
             `cofecha_terminal_consistency:${terminal.consistency.toFixed(6)}`,
             `cofecha_terminal_unmatched_tail:${terminal.unmatchedTailYears}`,
-            `cofecha_terminal_residual_lag:${
-                diagnosis.globalSlidingMatch.bestGlobalLag - terminal.lag
-            }`,
+            `cofecha_terminal_residual_lag:${residualLag}`,
+            `cofecha_terminal_matching_pattern_support:${patternSupport.matching.toFixed(6)}`,
+            `cofecha_terminal_opposing_pattern_support:${patternSupport.opposing.toFixed(6)}`,
         ],
     }];
 };

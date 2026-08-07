@@ -466,5 +466,51 @@ whole/partial/false/missing 真值、ZSL141 保存循环和 MCP17A 连续缺块�
 反事实门槛。Round 2 本节只冻结基线，不修改生产算法。通用基准器以 falseRing 模式对
 `mon151` 74 个状态反向 smoke，组合 whole 仍为 12/12，clean 仍为 2/55。
 
+### Round 2A：重复终端证据与相对状态方向一致性
+
+- missing 最终目录：
+  `D:\软件测试\co612-operation-composition-results\whole-missing-round2-direction-consistency-final-2026-08-08`
+- false 反向目录：
+  `D:\软件测试\co612-operation-composition-results\whole-false-round1-direction-consistency-final-2026-08-08`
+- 两套运行均为 245 个唯一状态、错误 0、残余映射 120/120、保存重开 245/245，源文件
+  SHA-256 未改变。
+
+固定 `r>=0.55` 同时忽略了两类有效证据：多条方向一致但单条相关中等的终端段，以及仅一条
+但相对 lag 0 有很大优势的终端段。本轮改为：
+
+1. 先要求至少两条可靠 endpoint 段在同一非零 lag 上一致；重复性本身作为证据，不再要求
+   每条都超过 0.55。
+2. 没有重复段时才允许单段回退，并同时要求 `starredR>=0.45` 且相对 lag 0 的增益至少
+   0.20；候选仍必须通过普通 hard gate 或应用 whole 后留下唯一单位 residual 的联合门槛。
+3. 第一次实现使 whole+missing 达到 120/120，但误把 `mon052` 的九个离散缺轮显示为
+   `whole -1`。原因是三个重叠 endpoint 窗都跨过最新缺轮，重复段不等于固定侧终态。
+4. 因此增加相对状态方向检查。对每个传播模式计算
+   `pattern.dominantLag - terminalLag`，按受影响段数与置信度加权。若候选声称的单位 residual
+   方向与局部状态变化相反，且 opposing support 大于 matching support，则拒绝该 terminal
+   whole 草案。`mon052` 反例为 residual `+1`，matching 0、opposing 8.24；真实组合的局部
+   状态与 residual 同向。
+5. 终端 evidence mode、段数、一致性、residual 和正反传播支持写入事件 notes，便于后续
+   跨文件审计。
+
+| 指标 | Round 2 基线 | Round 2A |
+| --- | ---: | ---: |
+| clean review 误报 | 2/55 | **2/55** |
+| 纯 whole 精确 | 40/40 | **40/40** |
+| 纯 missing 操作正确 | 30/30 | **30/30** |
+| 纯 missing 窗口覆盖 | 28/30 | **28/30** |
+| review whole 精确 | 116/120 | **120/120** |
+| strict 首事件 whole 精确 | 110/120 | **114/120** |
+| internal final 含精确 whole | 116/120 | **120/120** |
+| whole 被判成 missing/partial | 4/120 | **0/120** |
+| 正确先 whole、再恢复 missing | 108/120 | **112/120** |
+
+串行 112/120 正好等于纯 missing 窗口控制 28/30 跨四种 whole 位移后的上限，不再有组合
+损失。四个位移各 30/30，旧/中/新位置各 40/40。full false 反向基准保持 review
+120/120、strict 115/120、串行 100/120、clean 2/55，说明方向检查没有偏向 missing。
+
+安全回归最终通过 50/50：`mon052` 九个自然缺轮逐轮恢复、`mtr841`、分离缺轮、真实连续
+缺块 `-2…-100`、ZSL whole/partial/unit、ZSL141 保存循环、MCP17A 和编辑语义。第一次
+出现的 `mon052` 回退已保留在过程记录中，不将中间 120/120 误称为可发布结果。
+
 后续每轮在这里追加：输入 SHA、案例数、分层、修复前指标、失败类型、算法改动、
 修复后指标、干扰检查、外部回归、提交号和未解决边界。

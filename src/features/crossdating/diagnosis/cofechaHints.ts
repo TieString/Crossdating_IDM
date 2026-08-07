@@ -325,6 +325,7 @@ export const getCofechaTerminalLagEstimate = (
         maxSupportingLookbackYears?: number;
         minStarredR?: number;
         minEndpointStarredR?: number;
+        minimumEndpointLagAdvantage?: number;
         minimumSegments?: number;
         minimumConsistency?: number;
     } = {},
@@ -333,6 +334,8 @@ export const getCofechaTerminalLagEstimate = (
     const maxSupportingLookbackYears = options.maxSupportingLookbackYears ?? 25;
     const minStarredR = options.minStarredR ?? 0.3;
     const minEndpointStarredR = options.minEndpointStarredR ?? minStarredR;
+    const minimumEndpointLagAdvantage = options.minimumEndpointLagAdvantage
+        ?? Number.NEGATIVE_INFINITY;
     const minimumSegments = options.minimumSegments ?? 2;
     const minimumConsistency = options.minimumConsistency ?? 2 / 3;
     const reliableSegments = hints.segments.filter((segment) => {
@@ -349,8 +352,10 @@ export const getCofechaTerminalLagEstimate = (
             const starredR = segment.starredR
                 ?? segment.correlationsByLag[segment.highLag]
                 ?? 0;
+            const asDatedR = segment.correlationsByLag[0] ?? 0;
             return seriesEndYear - segment.endYear <= maxUnmatchedTailYears
-                && starredR >= minEndpointStarredR;
+                && starredR >= minEndpointStarredR
+                && starredR - asDatedR >= minimumEndpointLagAdvantage;
         })
         .map((segment) => segment.highLag));
     if (endpointLags.size === 0) return null;
