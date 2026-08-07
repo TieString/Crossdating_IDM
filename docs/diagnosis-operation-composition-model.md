@@ -770,3 +770,46 @@ whole `-2/-1`，表明 terminal baseline 与局部单位前沿仍需联合判别
 ZSL192 和 missing -> whole 失败案检查候选形成、全局 terminal 证据与事件路径竞争；随后
 在 crossdated 干净序列上系统注入 whole/partial/unit 组合，补足自然文件中只有四个 whole、
 两个 partial 所造成的样本量不足。
+
+### Round 3E：候选支持的真实 partial 不再被单位路径吞掉
+
+- 修复提交：`8e3ca4347c707d7c865fb6cd5851b090efdd169a`。
+- 提交后冻结结果：
+  `D:\软件测试\ZSL\window-coverage-results\zsl-serial-operation-candidate-partial-round3-committed-2026-08-08`。
+- RAW 与 crossdated SHA-256 与 Round 3D 相同，运行前后均未改变；结果内记录的生产提交与
+  当前提交一致。
+
+fresh COFECHA 审计表明，ZSL212 和 ZSL192 都已经形成可执行的精确 `partialMove -4`
+候选，但 regularized lag path 没有发射该转移。旧管线随后从自由度更高的单位路径或远距离
+候选中重选，分别表现为拒答或 false/missing 型建议。这里不是保存没有应用，也不是
+partial 的物理位移上限不足，而是候选证据没有进入最终事件状态竞争。
+
+新规则只恢复两种可审计情形：
+
+1. COFECHA 候选与独立 segmented candidate 对同一负向位移幅度达成一致；
+2. COFECHA 候选的幅度与观测 lag 一致，且其余候选的幅度与该 lag 明显不一致。
+
+恢复后统一表达为 `shift -> 0` 的局部状态。只有候选或共享/已确认零值直接锚定的单位事件
+才能与之竞争；单纯由 partial 条件化产生的单位别名不能覆盖精确局部移动。该 fallback 仅
+接管 `-4` 及更大的缺块，`-2/-3` 继续经过显式 missing-staircase 竞争，避免把两个离散缺轮
+重新压成一个 partial。
+
+| 精确重建指标 | Round 3D 全 RAW | Round 3E 全 RAW | Round 3D 隔离参考 | Round 3E 隔离参考 |
+| --- | ---: | ---: | ---: | ---: |
+| 响应 | 10/12 | **11/12** | 11/12 | **11/12** |
+| 操作正确 | 10/12 | **11/12** | 10/12 | **11/12** |
+| 局部窗口覆盖 | 7/9 | **7/9** | 7/9 | **8/9** |
+| whole 精确 | 3/3 | **3/3** | 3/3 | **3/3** |
+| partial 精确 | 0/1 | **1/1** | 0/1 | **1/1** |
+| whole -> partial | 0 | **0** | 0 | **0** |
+| partial -> missing | 0 | **0** | 0 | **0** |
+| 终态 review 误报 | 3/9 | **3/9** | 3/9 | **3/9** |
+
+补充非严格真值中的 ZSL192 也在两种模式都输出 `partialMove -4` 且窗口覆盖 1888；保存重开
+34/34、序列化状态 34/34 稳定。ZSL212 在隔离参考下覆盖断点 1870，在整文件 RAW 背景下
+窗口为 1857-1869，只差 1 年，因此本轮只声明**操作类型已修复**，不把窗口问题算作成功。
+
+反向回归包括 event ensemble/review 40 项、operation recovery 与 co612 多缺轮 86 项、ZSL
+操作类型 11 项和 production build。mon052 九个缺轮、mtr841 四步缺轮、分离两缺轮以及
+物理缺块 `-2...-100` 均保持通过。下一轮分别处理 ZSL212 的模式内定位，以及 ZSL202
+缺轮拒答和补充真值中的 missing -> whole；不得通过削弱 whole 证据来换取单位事件召回。
