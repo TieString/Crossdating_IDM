@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DiagnosisEvent } from "../types";
 import {
     partialMoveExplainsWholeSeriesCandidate,
+    pruneLocalEventsDisconnectedFromWholeBaseline,
     projectSequentialUnitChainHead,
     pruneWholeSeriesPartialAliases,
     pruneUnsupportedFalseRingPathSupplements,
@@ -82,6 +83,33 @@ describe("pruneWholeSeriesPartialAliases", () => {
 
         expect(partialMoveExplainsWholeSeriesCandidate(whole, partial)).toBe(false);
         expect(pruneWholeSeriesPartialAliases([whole, partial]))
+            .toEqual([whole, partial]);
+    });
+});
+
+describe("pruneLocalEventsDisconnectedFromWholeBaseline", () => {
+    it("removes a local fragment that cannot join the global lag state", () => {
+        const whole = wholeSeriesEvent(-9);
+        const disconnected = partialMoveEvent(-3, 3);
+
+        expect(pruneLocalEventsDisconnectedFromWholeBaseline([
+            whole,
+            disconnected,
+        ])).toMatchObject([{
+            eventType: "wholeSeriesMove",
+            evidence: {
+                notes: expect.arrayContaining([
+                    "disconnected_local_supplements_removed=1",
+                ]),
+            },
+        }]);
+    });
+
+    it("keeps a local transition connected to a non-zero whole baseline", () => {
+        const whole = wholeSeriesEvent(-9);
+        const partial = partialMoveEvent(-4, -9);
+
+        expect(pruneLocalEventsDisconnectedFromWholeBaseline([whole, partial]))
             .toEqual([whole, partial]);
     });
 });

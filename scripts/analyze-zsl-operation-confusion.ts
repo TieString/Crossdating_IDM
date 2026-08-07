@@ -225,6 +225,9 @@ const matchesExpectedOperation = (
     if (!predicted || predicted.eventType !== expected.eventType) return false;
     if (expected.eventType === "missingRing") return true;
     if (expected.eventType === "falseRing") return true;
+    if (expected.eventType === "wholeSeriesMove") {
+        return predicted.evidence.lagBefore === expected.shiftYears;
+    }
     return predicted.shiftYears === expected.shiftYears;
 };
 

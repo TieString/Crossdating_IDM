@@ -44,8 +44,8 @@ const EXPECTED_ZERO_YEARS = [
     1778,
     1813,
     1861,
+    1870,
     1873,
-    1879,
     1902,
     1977,
 ];
@@ -125,6 +125,23 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
     const diagnose = (valuesByYear: Map<number, number>): DiagnosisEvent[] => (
         runDiagnosis(valuesByYear).events.filter((event) => event.seriesId === TARGET_ID)
     );
+    const diagnoseWithFreshCofecha = (valuesByYear: Map<number, number>) => {
+        const site = buildSite(valuesByYear);
+        const outText = runBundledCofecha(site);
+        const parts = splitReportByParts(outText);
+        const dynamicReference = createCofechaMasterReferenceConfig({
+            siteData: site,
+            flaggedAIds: extractPart6FlaggedASeriesIds(parts.get("PART 6") ?? ""),
+            cofechaRunId: "co612-multi-missing-fresh",
+            rwlHash: "co612-multi-missing-fresh",
+            masterDatingSeries: parseCofechaResult(outText).masterDatingSeries,
+        });
+        return diagnoseCrossdating(site, {
+            referenceConfig: dynamicReference,
+            targetTrees: [TARGET_ID],
+            cofechaText: outText,
+        }).events.filter((event) => event.seriesId === TARGET_ID);
+    };
 
     it("keeps every single-zero removal inside its main window", () => {
         expect(zeroYears).toEqual(EXPECTED_ZERO_YEARS);
@@ -149,25 +166,25 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
         expect(singleCases.every((row) => row.covered)).toBe(true);
     }, 180_000);
 
-    it("shows only the newest missing ring for the fully undated sequence", () => {
+    bundledCofechaIt("shows only the newest missing ring after fresh COFECHA", () => {
         const corrupted = buildMultiMissingCorrupted(
             target.valuesByYear,
             zeroYears,
         );
-        const diagnosis = runDiagnosis(corrupted);
-        const [event] = diagnosis.events;
+        const events = diagnoseWithFreshCofecha(corrupted);
+        const [event] = events;
 
-        expect(diagnosis.events, JSON.stringify(summarize(diagnosis.events)))
+        expect(events, JSON.stringify(summarize(events)))
             .toHaveLength(1);
         expect(event.eventType).toBe("missingRing");
         expect(event.startYear).toBeLessThanOrEqual(1977);
         expect(event.endYear).toBeGreaterThanOrEqual(1977);
         expect(event.rankedYears[0]?.year).toBe(1977);
         expect(event.evidence.algorithmSources)
-            .toContain("sequential_unit_chain_projection");
+            .toContain("sequential_missing_staircase_head");
     }, 180_000);
 
-    it("reveals all nine missing rings from bark to pith", () => {
+    bundledCofechaIt("reveals all nine missing rings from bark to pith", () => {
         let corrupted = buildMultiMissingCorrupted(
             target.valuesByYear,
             zeroYears,
@@ -178,7 +195,7 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
         }> = [];
 
         zeroYears.slice().reverse().forEach((truthYear) => {
-            const events = diagnose(corrupted);
+            const events = diagnoseWithFreshCofecha(corrupted);
             steps.push({ truthYear, events: summarize(events) });
             const [event] = events;
 

@@ -1,0 +1,163 @@
+import { describe, expect, it } from "vitest";
+import {
+    extractPart6FlaggedASeriesIds,
+    parseCofechaResult,
+    splitReportByParts,
+} from "@/features/cofecha/formatter";
+import {
+    createCofechaMasterReferenceConfig,
+    createReferenceSeriesConfig,
+} from "@/features/crossdating/reference";
+import type { RwlSiteData } from "@/features/rwl/types";
+import { getDisplayedDiagnosisEvents } from "@/features/crossdating/diagnosis";
+import { diagnoseCrossdating } from "../engine";
+import {
+    loadCofechaOut,
+    loadDataFolder,
+    type RwlSeries,
+} from "./rdmFixture";
+
+const loaded = loadDataFolder("ZSL");
+const rawOut = loadCofechaOut("ZSL", "RAW");
+const fixtureDescribe = loaded && rawOut ? describe : describe.skip;
+
+const toSite = (series: Map<string, RwlSeries>): RwlSiteData => new Map(
+    Array.from(series, ([seriesId, value]) => [
+        seriesId,
+        new Map(value.valuesByYear),
+    ]),
+);
+
+const PURE_WHOLE_CASES = [
+    ["ZSL091", -9],
+    ["ZSL092", -6],
+    ["ZSL111", -21],
+    ["ZSL112", -24],
+    ["ZSL211", -14],
+    ["ZSL213", -7],
+] as const;
+
+fixtureDescribe("ZSL RAW/crossdated operation-type regression", () => {
+    const rawSite = toSite(loaded!.raw);
+    const crossdatedSite = toSite(loaded!.crossdated);
+    const sharedIds = [...loaded!.crossdated.keys()].sort();
+    const rawReference = createCofechaMasterReferenceConfig({
+        siteData: rawSite,
+        flaggedAIds: extractPart6FlaggedASeriesIds(
+            splitReportByParts(rawOut!).get("PART 6") ?? "",
+        ),
+        cofechaRunId: "zsl-operation-type-raw",
+        rwlHash: "zsl-operation-type-raw",
+        masterDatingSeries: parseCofechaResult(rawOut!).masterDatingSeries,
+    });
+
+    it.each(PURE_WHOLE_CASES)(
+        "keeps real RAW whole move %s at shift %i with a clean reference",
+        (seriesId, shiftYears) => {
+            const site = new Map(crossdatedSite);
+            site.set(seriesId, new Map(loaded!.raw.get(seriesId)!.valuesByYear));
+            const diagnosis = diagnoseCrossdating(site, {
+                targetTrees: [seriesId],
+                referenceConfig: createReferenceSeriesConfig(
+                    sharedIds.filter((candidate) => candidate !== seriesId),
+                ),
+                cofechaText: rawOut!,
+                reviewWindowDisplayMode: "review",
+            });
+            const displayed = getDisplayedDiagnosisEvents(diagnosis);
+
+            expect(displayed).toHaveLength(1);
+            expect(displayed[0].eventType).toBe("wholeSeriesMove");
+            expect(displayed[0].evidence.lagBefore).toBe(shiftYears);
+        },
+    );
+
+    it.each(PURE_WHOLE_CASES)(
+        "does not collapse RAW dynamic whole move %s into a local event",
+        (seriesId, shiftYears) => {
+            const diagnosis = diagnoseCrossdating(rawSite, {
+                targetTrees: [seriesId],
+                referenceConfig: rawReference,
+                cofechaText: rawOut!,
+                reviewWindowDisplayMode: "review",
+            });
+            const displayed = getDisplayedDiagnosisEvents(diagnosis);
+
+            expect(displayed).toHaveLength(1);
+            expect(displayed[0].eventType).toBe("wholeSeriesMove");
+            expect(displayed[0].evidence.lagBefore).toBe(shiftYears);
+        },
+    );
+
+    it("finds the residual ZSL212 -4 partial after applying its whole -9 baseline", () => {
+        const site = new Map(crossdatedSite);
+        site.set("ZSL212", new Map(Array.from(
+            loaded!.raw.get("ZSL212")!.valuesByYear,
+            ([year, value]) => [year - 9, value],
+        )));
+        const diagnosis = diagnoseCrossdating(site, {
+            targetTrees: ["ZSL212"],
+            referenceConfig: createReferenceSeriesConfig(
+                sharedIds.filter((candidate) => candidate !== "ZSL212"),
+            ),
+            reviewWindowDisplayMode: "review",
+        });
+        const displayed = getDisplayedDiagnosisEvents(diagnosis);
+        const summary = JSON.stringify({
+            strict: diagnosis.events.map((event) => ({
+                type: event.eventType,
+                shift: event.shiftYears,
+                range: [event.startYear, event.endYear],
+                top: event.rankedYears[0]?.year,
+                lag: [event.evidence.lagBefore, event.evidence.lagAfter],
+                sources: event.evidence.algorithmSources,
+                notes: event.evidence.notes,
+            })),
+            review: diagnosis.reviewWindowDecisions,
+            candidates: diagnosis.candidates.map((candidate) => ({
+                type: candidate.operationType,
+                delta: candidate.deltaYears,
+                anchor: candidate.anchorYear,
+                score: candidate.score,
+            })),
+        });
+
+        expect(displayed, summary).toHaveLength(1);
+        expect(displayed[0].eventType).toBe("partialMove");
+        expect(displayed[0].shiftYears).toBe(-4);
+        expect(displayed[0].startYear).toBeLessThanOrEqual(1870);
+        expect(displayed[0].endYear).toBeGreaterThanOrEqual(1870);
+    });
+
+    it("keeps the real ZSL152 false ring distinct from missing-ring evidence", () => {
+        const site = new Map(crossdatedSite);
+        site.set("ZSL152", new Map(loaded!.raw.get("ZSL152")!.valuesByYear));
+        const diagnosis = diagnoseCrossdating(site, {
+            targetTrees: ["ZSL152"],
+            referenceConfig: createReferenceSeriesConfig(
+                sharedIds.filter((candidate) => candidate !== "ZSL152"),
+            ),
+            cofechaText: rawOut!,
+            reviewWindowDisplayMode: "review",
+        });
+        const displayed = getDisplayedDiagnosisEvents(diagnosis);
+
+        expect(displayed).toHaveLength(1);
+        expect(displayed[0].eventType).toBe("falseRing");
+        expect(displayed[0].startYear).toBeLessThanOrEqual(2007);
+        expect(displayed[0].endYear).toBeGreaterThanOrEqual(2007);
+    });
+
+    it("does not let a RAW-dynamic missing staircase overwrite ZSL152 false ring", () => {
+        const diagnosis = diagnoseCrossdating(rawSite, {
+            targetTrees: ["ZSL152"],
+            referenceConfig: rawReference,
+            cofechaText: rawOut!,
+            reviewWindowDisplayMode: "review",
+        });
+        const displayed = getDisplayedDiagnosisEvents(diagnosis);
+
+        expect(displayed).toHaveLength(1);
+        expect(displayed[0].eventType).toBe("falseRing");
+    });
+});

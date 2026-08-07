@@ -167,6 +167,31 @@ describe("lower review-window display gate", () => {
         });
     });
 
+    it("falls back to an independent whole move when a local partial is not reviewable", () => {
+        const partial = reviewablePartial(-4, {
+            correlationGain: 0,
+            algorithmSources: ["piecewise_lag_path"],
+            notes: [
+                "partial_reference_vote_shift=-30",
+                "partial_exhaustive_vote_shift=-40",
+            ],
+        });
+        const whole = {
+            ...strictEvent(),
+            id: "whole-fallback",
+            eventType: "wholeSeriesMove" as const,
+            startYear: 1800,
+            endYear: 2000,
+        };
+
+        expect(selectReviewWindowDisplay(audit([]), [whole, partial]))
+            .toMatchObject({
+                status: "strict",
+                reason: "strict_event",
+                event: whole,
+            });
+    });
+
     it("keeps a high-gain reference-core partial without a per-shift vote", () => {
         const partial = reviewablePartial(-50, {
             correlationGain: 0.18,
@@ -175,6 +200,27 @@ describe("lower review-window display gate", () => {
                 "counterfactual_correction_years=-50",
                 "reference_vote_year=1900",
                 "reference_vote_gain=0.18",
+            ],
+        });
+
+        expect(selectReviewWindowDisplay(audit([]), [partial])).toMatchObject({
+            status: "strict",
+            event: partial,
+        });
+    });
+
+    it("keeps a partial boundary supported by five independent local views", () => {
+        const partial = reviewablePartial(-4, {
+            correlationGain: 0,
+            algorithmSources: [
+                "full_interval_counterfactual_locator",
+                "negative_partial_multiview_consensus",
+                "piecewise_lag_path",
+            ],
+            notes: [
+                "counterfactual_correction_years=-4",
+                "partial_consensus_year=1900",
+                "partial_consensus_support=5",
             ],
         });
 

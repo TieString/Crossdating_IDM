@@ -978,6 +978,107 @@ describe("decisive dynamic operation fusion", () => {
         expect(result[1].eventType).toBe("falseRing");
     });
 
+    it("does not manufacture a same-shift local gap from a whole-only event", () => {
+        const whole: DiagnosisEvent = {
+            ...event(1800, 2000),
+            id: "whole-only-negative-nine",
+            eventType: "wholeSeriesMove",
+            evidence: {
+                ...event(1800, 2000).evidence,
+                lagBefore: -9,
+            },
+        };
+        const result = fuseDecisiveJointOperationScores(
+            [whole],
+            fusionDiagnosis,
+            [
+                jointOperation(-1, 0.02, 2010),
+                jointOperation(1, 0.01, 2010),
+                jointOperation(-8, 0.4, 2010),
+                jointOperation(-9, 0.8, 2010),
+                jointOperation(-10, 0.4, 2010),
+            ],
+        );
+
+        expect(result).toEqual([whole]);
+    });
+
+    it("recovers an interior exact gap when the alleged whole lag is its older state", () => {
+        const whole: DiagnosisEvent = {
+            ...event(1800, 2024),
+            id: "whole-partial-alias-negative-thirty",
+            eventType: "wholeSeriesMove",
+            evidence: {
+                ...event(1800, 2024).evidence,
+                lagBefore: -30,
+                lagAfter: -65,
+            },
+        };
+        const fragment: DiagnosisEvent = {
+            ...partialEvent(-2, 1848, 1856),
+            evidence: {
+                ...partialEvent(-2, 1848, 1856).evidence,
+                lagBefore: -30,
+                lagAfter: -28,
+            },
+        };
+        const result = fuseDecisiveJointOperationScores(
+            [whole, fragment],
+            fusionDiagnosis,
+            [
+                jointOperation(-1, 0.05, 1850),
+                jointOperation(1, 0.04, 1850),
+                jointOperation(-29, 0.2, 1850),
+                jointOperation(-30, 0.9, 1850),
+                jointOperation(-31, 0.2, 1850),
+            ],
+        );
+
+        expect(result).toHaveLength(2);
+        expect(result[0]).toBe(whole);
+        expect(result[1]).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -30,
+        });
+        expect(result[1].evidence).toMatchObject({
+            lagBefore: -30,
+            lagAfter: 0,
+        });
+    });
+
+    it("keeps a real whole baseline when the local move terminates at that lag", () => {
+        const whole: DiagnosisEvent = {
+            ...event(1800, 2024),
+            id: "whole-with-independent-partial",
+            eventType: "wholeSeriesMove",
+            evidence: {
+                ...event(1800, 2024).evidence,
+                lagBefore: -9,
+                lagAfter: -4,
+            },
+        };
+        const local: DiagnosisEvent = {
+            ...partialEvent(-4, 1866, 1874),
+            evidence: {
+                ...partialEvent(-4, 1866, 1874).evidence,
+                lagBefore: -13,
+                lagAfter: -9,
+            },
+        };
+
+        expect(fuseDecisiveJointOperationScores(
+            [whole, local],
+            fusionDiagnosis,
+            [
+                jointOperation(-1, 0.05, 1870),
+                jointOperation(1, 0.04, 1870),
+                jointOperation(-8, 0.2, 1870),
+                jointOperation(-9, 0.9, 1870),
+                jointOperation(-10, 0.2, 1870),
+            ],
+        )).toEqual([whole, local]);
+    });
+
     it("keeps a whole-series move while correcting a decisive unit direction", () => {
         const whole: DiagnosisEvent = {
             ...event(1800, 2000),

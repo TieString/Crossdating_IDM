@@ -705,6 +705,63 @@ export const pruneWholeSeriesPartialAliases = (
             : event);
 };
 
+/**
+ * A retained whole-series lag is the newer-side baseline for every local transition. Local
+ * supplements with finite lag states must connect to that baseline, directly or through another
+ * event. Disconnected path fragments are competing noise rather than an independent edit.
+ */
+export const pruneLocalEventsDisconnectedFromWholeBaseline = (
+    events: DiagnosisEvent[],
+): DiagnosisEvent[] => {
+    const wholeEvents = events.filter((event) => event.eventType === "wholeSeriesMove");
+    if (wholeEvents.length !== 1) return events;
+    const wholeLag = wholeEvents[0].evidence.lagBefore;
+    if (wholeLag === null || wholeLag === 0) return events;
+
+    const comparableLocalEvents = events.filter((event) => (
+        event.eventType !== "wholeSeriesMove"
+        && event.evidence.lagBefore !== null
+        && event.evidence.lagAfter !== null
+    ));
+    if (comparableLocalEvents.length === 0) return events;
+
+    const connectedIds = new Set<string>();
+    const connectedStates = new Set([wholeLag]);
+    let added = true;
+    while (added) {
+        added = false;
+        comparableLocalEvents.forEach((event) => {
+            if (connectedIds.has(event.id)) return;
+            const before = event.evidence.lagBefore!;
+            const after = event.evidence.lagAfter!;
+            if (!connectedStates.has(before) && !connectedStates.has(after)) return;
+            connectedIds.add(event.id);
+            connectedStates.add(before);
+            connectedStates.add(after);
+            added = true;
+        });
+    }
+
+    const rejectedIds = new Set(comparableLocalEvents
+        .filter((event) => !connectedIds.has(event.id))
+        .map((event) => event.id));
+    if (rejectedIds.size === 0) return events;
+    return events
+        .filter((event) => !rejectedIds.has(event.id))
+        .map((event) => event.eventType !== "wholeSeriesMove"
+            ? event
+            : {
+                ...event,
+                evidence: {
+                    ...event.evidence,
+                    notes: [
+                        ...event.evidence.notes,
+                        `disconnected_local_supplements_removed=${rejectedIds.size}`,
+                    ],
+                },
+            });
+};
+
 const keepWholeSeriesEvent = (
     whole: DiagnosisEvent | undefined,
     partialEvents: DiagnosisEvent[],
@@ -1360,6 +1417,38 @@ const recoverSequentialMissingHeadEvent = (
             head.year,
             markerMode,
         );
+        const candidateCenters = candidateEvents
+            .filter((event) => event.eventType === "partialMove")
+            .map((event) => event.rankedYears[0]?.year)
+            .filter((year): year is number => year !== undefined);
+        const presentation = resolveSequentialMissingPresentation(
+            head,
+            marker,
+            markerMode,
+            candidateCenters,
+            confirmedTargetZeroYears,
+        );
+        const replacesNonUnitEvent = detected.some((event) => (
+            event.eventType === "partialMove" || event.eventType === "wholeSeriesMove"
+        ));
+        const hasExistingUnitEvent = detected.some((event) => (
+            event.eventType === "missingRing" || event.eventType === "falseRing"
+        ));
+        const hasOppositeUnitOnly = detected.some(
+            (event) => event.eventType === "falseRing",
+        ) && !detected.some((event) => event.eventType === "missingRing");
+        const hasIndependentMissingDirection = detected.some(
+            (event) => event.eventType === "missingRing",
+        ) || candidateEvents.some((event) => event.eventType === "missingRing")
+            || presentation.confirmedTargetStaircaseYear !== null
+            || (marker?.support ?? 0) >= 10;
+        const hasIndependentStaircaseSupport = hasExistingUnitEvent
+            || head.headRunYears >= 7
+            || presentation.candidateConsensusYear !== null
+            || presentation.confirmedTargetStaircaseYear !== null
+            || (marker?.support ?? 0) >= 10;
+        if (hasOppositeUnitOnly && !hasIndependentMissingDirection) return null;
+        if (replacesNonUnitEvent && !hasIndependentStaircaseSupport) return null;
         return makeSequentialMissingHeadEvent(
             head,
             marker,
@@ -2676,7 +2765,10 @@ export const makeDiagnosisEvents = (
                 siteData,
             )
             : detectedBeforeFusion;
-        const detected = pruneWholeSeriesPartialAliases(fusedDetected);
+        const coherentDetected = pruneLocalEventsDisconnectedFromWholeBaseline(
+            fusedDetected,
+        );
+        const detected = pruneWholeSeriesPartialAliases(coherentDetected);
         const retainedDetected = detected.filter((event) => (
             !isAutomaticOlderEndpointUnitEvent(event, diagnosis)
         ));

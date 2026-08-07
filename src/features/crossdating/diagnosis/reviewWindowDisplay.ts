@@ -26,6 +26,7 @@ export type ReviewWindowDisplayConfig = {
     minimumPartialVoteGain: number;
     minimumPartialJointGain: number;
     minimumPartialReferenceCoreGain: number;
+    minimumPartialMultiviewSupport: number;
     partialVoteWindowToleranceYears: number;
     allowedWindowWidths: readonly number[];
 };
@@ -39,6 +40,7 @@ export const DEFAULT_REVIEW_WINDOW_DISPLAY_CONFIG: ReviewWindowDisplayConfig = {
     minimumPartialVoteGain: 0.02,
     minimumPartialJointGain: 0.05,
     minimumPartialReferenceCoreGain: 0.05,
+    minimumPartialMultiviewSupport: 5,
     partialVoteWindowToleranceYears: 1,
     allowedWindowWidths: [5, 7, 9, 13],
 };
@@ -141,6 +143,16 @@ const hasReviewablePartialMoveEvidence = (
     if (sources.has("decisive_joint_operation_fusion")
         && jointCorrection === shiftYears
         && jointGain >= config.minimumPartialJointGain) return true;
+
+    const multiviewConsensusYear = numericNote(event, "partial_consensus_year");
+    const multiviewSupport = numericNote(event, "partial_consensus_support") ?? 0;
+    if (sources.has("negative_partial_multiview_consensus")
+        && multiviewSupport >= config.minimumPartialMultiviewSupport
+        && yearSupportsWindow(
+            event,
+            multiviewConsensusYear,
+            config.partialVoteWindowToleranceYears,
+        )) return true;
 
     const referenceVoteYear = numericNote(event, "reference_vote_year");
     const referenceCoreGain = Math.max(
@@ -301,10 +313,9 @@ export const selectReviewWindowDisplay = (
     const strictPartial = strictEvents.find((event) => (
         hasReviewablePartialMoveEvidence(event, config)
     )) ?? null;
-    const strictWhole = strictEvents.length === 1
-        && strictEvents[0].eventType === "wholeSeriesMove"
-        ? strictEvents[0]
-        : null;
+    const strictWhole = strictEvents.find((event) => (
+        event.eventType === "wholeSeriesMove"
+    )) ?? null;
     const strict = strictUnit ?? strictPartial ?? strictWhole;
     if (strict) {
         const width = strict.endYear - strict.startYear + 1;

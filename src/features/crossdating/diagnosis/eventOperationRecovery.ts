@@ -357,14 +357,36 @@ export const selectDecisiveJointOperationFusion = (
         && localEvents[0].eventType === "partialMove"
         && gridOperation !== null
         && gridOperation.eventType !== "partialMove";
+    const wholeLag = wholeEvents.length === 1
+        ? wholeEvents[0].evidence.lagBefore
+        : null;
+    const wholeBaselineIsOlderPartialState = wholeLag !== null
+        && wholeLag <= -2
+        && gridOperation?.eventType === "partialMove"
+        && gridOperation.shiftYears === wholeLag
+        && stablePartialShift
+        && (gridSelection?.scoreMargin ?? 0)
+            >= config.dynamicJointPartialOverUnitMinimumMargin
+        && gridOperation.bestYear - wholeEvents[0].startYear
+            >= config.minimumSideYears
+        && wholeEvents[0].endYear - gridOperation.bestYear + 1
+            >= config.minimumSideYears
+        && localEvents.some((event) => (
+            event.evidence.lagBefore === wholeLag
+            && event.evidence.lagAfter !== null
+            && Math.abs(event.evidence.lagAfter) < Math.abs(wholeLag)
+        ));
     // Preserve mixed lag paths. A whole-series baseline may retain one corrected local unit
-    // event, and a unit chain may collapse only for decisive physical-gap evidence.
+    // event. The exception is an interior exact-gap winner whose local path starts at the
+    // alleged whole lag and moves toward zero: that topology makes the whole lag the older
+    // partial state, not the newer fixed-side baseline.
     if (
         (
             wholeEvents.length > 0
             && localEvents.length > 0
             && !wholePartialUnitCorrection
             && !unitTypeCorrection
+            && !wholeBaselineIsOlderPartialState
         )
         || (coherentLocalChain && !coherentUnitChainOverride)
     ) {
@@ -571,6 +593,17 @@ export const fuseDecisiveJointOperationScores = (
     if (!fusion) return events;
 
     const wholeEvents = events.filter((event) => event.eventType === "wholeSeriesMove");
+    const localEvents = events.filter((event) => event.eventType !== "wholeSeriesMove");
+    const wholeOnlyPartialAlias = wholeEvents.length === 1
+        && localEvents.length === 0
+        && fusion.operation.eventType === "partialMove"
+        && fusion.operation.shiftYears === wholeEvents[0].evidence.lagBefore
+        && diagnosis.targetRange.endYear - fusion.operation.bestYear + 1
+            < config.minimumSideYears;
+    // The local grid has no whole-series hypothesis. Near the newer endpoint it can imitate a
+    // pure global offset by moving almost the entire core and sacrificing only the short tail.
+    // Preserve the upstream global decision until an independently detected boundary exists.
+    if (wholeOnlyPartialAlias) return events;
     const matchingEvent = fusion.action === "override"
         ? events.find((event) => (
             event.eventType === fusion.operation.eventType
