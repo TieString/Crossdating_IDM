@@ -1189,6 +1189,40 @@ export const resolveSequentialMissingPresentation = (
     };
 };
 
+export const partialMoveSupportsSequentialMissingDepth = (
+    event: DiagnosisEvent,
+    head: Pick<SequentialMissingHead, "transitionCount" | "headRunYears">,
+): boolean => {
+    if (event.eventType !== "partialMove"
+        || event.shiftYears === undefined
+        || event.shiftYears > -2
+        || head.transitionCount <= 0) return false;
+    const candidateDepth = Math.abs(event.shiftYears);
+    const depthDifference = Math.abs(candidateDepth - head.transitionCount);
+    return depthDifference <= 1
+        || (
+            candidateDepth < head.transitionCount
+            && candidateDepth / head.transitionCount >= 0.4
+            && head.headRunYears >= 3
+        );
+};
+
+const sequentialMissingCandidateCenters = (
+    candidateEvents: readonly DiagnosisEvent[],
+): number[] => candidateEvents
+    .filter((event) => event.eventType === "partialMove")
+    .map((event) => event.rankedYears[0]?.year)
+    .filter((year): year is number => year !== undefined);
+
+const hasDepthConsistentSequentialMissingCandidate = (
+    candidateEvents: readonly DiagnosisEvent[],
+    head: Pick<SequentialMissingHead, "transitionCount" | "headRunYears" | "year">,
+): boolean => candidateEvents.some((event) => (
+    partialMoveSupportsSequentialMissingDepth(event, head)
+    && event.rankedYears[0]?.year !== undefined
+    && Math.abs(event.rankedYears[0].year - head.year) <= 13
+));
+
 const selectSharedZeroMarkerForMode = (
     siteData: RwlSiteData,
     targetTree: string,
@@ -1219,10 +1253,7 @@ const makeSequentialMissingHeadEvent = (
     confirmedTargetZeroYears: readonly number[],
     markerMode: SharedZeroMarkerMode,
 ): DiagnosisEvent => {
-    const candidateCenters = candidateEvents
-        .filter((event) => event.eventType === "partialMove")
-        .map((event) => event.rankedYears[0]?.year)
-        .filter((year): year is number => year !== undefined);
+    const candidateCenters = sequentialMissingCandidateCenters(candidateEvents);
     const {
         marker,
         selectedYear,
@@ -1423,10 +1454,7 @@ const recoverSequentialMissingHeadEvent = (
             head.year,
             markerMode,
         );
-        const candidateCenters = candidateEvents
-            .filter((event) => event.eventType === "partialMove")
-            .map((event) => event.rankedYears[0]?.year)
-            .filter((year): year is number => year !== undefined);
+        const candidateCenters = sequentialMissingCandidateCenters(candidateEvents);
         const presentation = resolveSequentialMissingPresentation(
             head,
             marker,
@@ -1458,7 +1486,7 @@ const recoverSequentialMissingHeadEvent = (
             ));
         const hasIndependentStaircaseSupport = hasExistingUnitEvent
             || head.headRunYears >= 7
-            || presentation.candidateConsensusYear !== null
+            || hasDepthConsistentSequentialMissingCandidate(candidateEvents, head)
             || presentation.confirmedTargetStaircaseYear !== null
             || (marker?.support ?? 0) >= 10;
         if (hasOppositeUnitOnly && !hasIndependentMissingDirection) return null;

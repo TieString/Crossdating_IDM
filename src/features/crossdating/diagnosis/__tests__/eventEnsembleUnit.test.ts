@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DiagnosisEvent } from "../types";
 import {
     partialMoveExplainsWholeSeriesCandidate,
+    partialMoveSupportsSequentialMissingDepth,
     pruneLocalEventsDisconnectedFromWholeBaseline,
     projectSequentialUnitChainHead,
     pruneWholeSeriesPartialAliases,
@@ -84,6 +85,37 @@ describe("pruneWholeSeriesPartialAliases", () => {
         expect(partialMoveExplainsWholeSeriesCandidate(whole, partial)).toBe(false);
         expect(pruneWholeSeriesPartialAliases([whole, partial]))
             .toEqual([whole, partial]);
+    });
+});
+
+describe("partialMoveSupportsSequentialMissingDepth", () => {
+    it("requires a compressed partial gap to match the staircase depth", () => {
+        const partial = partialMoveEvent(-5);
+
+        expect(partialMoveSupportsSequentialMissingDepth(
+            partial,
+            { transitionCount: 5, headRunYears: 1 },
+        )).toBe(true);
+        expect(partialMoveSupportsSequentialMissingDepth(
+            partial,
+            { transitionCount: 6, headRunYears: 1 },
+        )).toBe(true);
+        expect(partialMoveSupportsSequentialMissingDepth(
+            partialMoveEvent(-3),
+            { transitionCount: 7, headRunYears: 3 },
+        )).toBe(true);
+        expect(partialMoveSupportsSequentialMissingDepth(
+            partialMoveEvent(-3),
+            { transitionCount: 7, headRunYears: 1 },
+        )).toBe(false);
+        expect(partialMoveSupportsSequentialMissingDepth(
+            partial,
+            { transitionCount: 12, headRunYears: 1 },
+        )).toBe(false);
+        expect(partialMoveSupportsSequentialMissingDepth(
+            partial,
+            { transitionCount: 24, headRunYears: 10 },
+        )).toBe(false);
     });
 });
 
