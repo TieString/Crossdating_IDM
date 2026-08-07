@@ -5,6 +5,7 @@ import {
     applyConfirmedEvent,
     buildScenarioSite,
     canonicalSnapshot,
+    isResumableCompletedStage,
     matchTruthAfterDiagnosis,
     siteHash,
     snapshotsSemanticallyEqual,
@@ -106,6 +107,13 @@ const snapshot = (candidateScore: number): LegacyDiagnosisSnapshot => ({
 });
 
 describe("Legacy generalization evaluator isolation", () => {
+    it("does not resume past an explicitly failed gate checkpoint", () => {
+        expect(isResumableCompletedStage({ stage: "gate", passed: false })).toBe(false);
+        expect(isResumableCompletedStage({ stage: "gate", passed: true })).toBe(true);
+        expect(isResumableCompletedStage({ stage: "worker", files: 3 })).toBe(true);
+        expect(isResumableCompletedStage(null)).toBe(false);
+    });
+
     it("builds a partial-gap copy without mutating the clean target or references", () => {
         const target = series("TARGET");
         const reference = series("REFERENCE");

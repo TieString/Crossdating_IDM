@@ -8,7 +8,7 @@
     "itrdbRoot": "D:/软件测试/数据/ITRDB/itrdb_download/measurements",
     "priorItrdbManifest": "docs/benchmarks/itrdb-validation-v1-manifest.json",
     "co612Input": "D:/软件测试/co612-all-series-bootstrap-results/task2-final-truth-assisted-v2-2026-08-06/source-copy.rwl",
-    "co612FrozenRun": "D:/软件测试/co612-review-window-results/review-bootstrap-final-fifo-v3-2026-08-06",
+    "co612FrozenRun": "D:/软件测试/co612-review-window-results/review-bootstrap-post-partial-evidence-v1-2026-08-07",
     "zslInput": "D:/软件测试/ZSL/crossdated.rwl",
     "mcp17aInput": "D:/软件测试/数据/ITRDB/itrdb_download/measurements/ausl038.rwl",
     "cofechaSidecar": "src-tauri/bin/cofecha-x86_64-pc-windows-msvc.exe"
@@ -16,7 +16,12 @@
   "expectedHashes": {
     "co612Input": "5bedc4dba8dbfd5cf2ef7d1764dab8a3e9fdf6211c52a2f649e5fadb0c4f4549",
     "priorItrdbManifest": "9807bffd805432c0635977f947a97b7a6bb381d84b5731918a55587d9e3093bc",
-    "cofechaSidecar": "3b898012c417ed06b3a1d88c0a4f86a677e276eadfe30a04fd5798542c63372b"
+    "cofechaSidecar": "3b898012c417ed06b3a1d88c0a4f86a677e276eadfe30a04fd5798542c63372b",
+    "co612FrozenObservations": "972f4738c302a47e8c675c6a6a5e2482b1a25de676b5c8134cebe601bf84b361",
+    "co612FrozenApplications": "bd607bf8834a9a5747f4f641e30210dc710fe9a6da07e7de760e0e5d404aecc5",
+    "co612FrozenRounds": "499dcd2699f50ae44e529600fd47bfca9795dec1bc0ce8e585bd2b5ce1c17693",
+    "co612FrozenRunSummary": "5e9ec9f50521c6a4c26f3638d5497c5db6dbaa8f2074df784bfffe079d43fb74",
+    "co612FrozenCleanTargets": "f378eec3f84d483f382d96d18a33d061f696ddad1055c2ea5cf9ddfae119a235"
   },
   "legacy": {
     "reviewDisplayMode": "review",
@@ -117,11 +122,11 @@
     "truthEvents": 358,
     "confirmed": 329,
     "everCorrectWindow": 330,
-    "firstWindowCoverage": 285,
-    "firstResponse": 334,
-    "operationCorrectNumerator": 333,
-    "operationCorrectDenominator": 334,
-    "confirmedTop1": 245,
+    "firstWindowCoverage": 286,
+    "firstResponse": 335,
+    "operationCorrectNumerator": 332,
+    "operationCorrectDenominator": 335,
+    "confirmedTop1": 248,
     "windowMedian": 9,
     "windowP90": 13,
     "earliestTrajectoryDifference": null

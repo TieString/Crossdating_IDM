@@ -3,7 +3,7 @@
   "protocolVersion": "legacy-cross-file-generalization-v1",
   "gitCommit": "5fd3f4a93f91484d84e86706afa2df02b9499163",
   "configPath": "docs/benchmarks/legacy-cross-file-generalization-config-v1.json",
-  "configHash": "f08df2844c4b57d14b52faf96841ca4b29f4dc6e050cbc0c452b3367602b3bbe",
+  "configHash": "fd72c2cfb8835d50d89ea452a4b4c14f345c061bdf39ea031b4d9a8696893e54",
   "createdBeforeExternalEvaluation": true,
   "selection": {
     "seed": "legacy-cross-file-generalization-2026-08-07-v1",

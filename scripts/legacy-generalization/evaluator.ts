@@ -723,3 +723,9 @@ export const assertFrozenConfig = (
     if (config.schemaVersion !== 1) throw new Error("unsupported config schema");
     return hash;
 };
+
+export const isResumableCompletedStage = (stage: unknown): boolean => (
+    Boolean(stage)
+    && typeof stage === "object"
+    && (stage as { passed?: unknown }).passed !== false
+);

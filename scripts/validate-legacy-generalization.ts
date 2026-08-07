@@ -12,7 +12,11 @@ import {
 import { availableParallelism, cpus, platform, release } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { sha256Bytes, assertFrozenConfig } from "./legacy-generalization/evaluator";
+import {
+    assertFrozenConfig,
+    isResumableCompletedStage,
+    sha256Bytes,
+} from "./legacy-generalization/evaluator";
 import { writeLegacyGeneralizationArtifacts } from "./legacy-generalization/summary";
 import type {
     LegacyConfig,
@@ -184,7 +188,16 @@ const runChild = (input: {
 });
 
 const stagePath = (name: string): string => join(stageDir, `${name}.json`);
-const completedStage = (name: string): boolean => resume && existsSync(stagePath(name));
+const completedStage = (name: string): boolean => {
+    if (!resume || !existsSync(stagePath(name))) return false;
+    try {
+        return isResumableCompletedStage(JSON.parse(
+            readFileSync(stagePath(name), "utf8"),
+        ));
+    } catch {
+        return false;
+    }
+};
 const markStage = (name: string, details: Record<string, unknown>): void => {
     writeFileSync(stagePath(name), `${JSON.stringify({
         stage: name,
@@ -322,6 +335,23 @@ const runCo612Gate = async (): Promise<Record<string, unknown>> => {
         ],
     });
     const frozenDir = resolveRepoPath(config.paths.co612FrozenRun);
+    const frozenBaselineArtifacts = [
+        ["co612FrozenObservations", "observations.jsonl"],
+        ["co612FrozenApplications", "applications.jsonl"],
+        ["co612FrozenRounds", "rounds.jsonl"],
+        ["co612FrozenRunSummary", "run-summary.json"],
+        ["co612FrozenCleanTargets", "clean-original-targets.json"],
+    ] as const;
+    const frozenBaselineHashMismatches = frozenBaselineArtifacts.flatMap(
+        ([hashKey, fileName]) => {
+            const artifactPath = join(frozenDir, fileName);
+            const expected = config.expectedHashes[hashKey];
+            if (!expected) return [`${hashKey}:missing_expected_hash`];
+            if (!existsSync(artifactPath)) return [`${fileName}:missing`];
+            const actual = sha256File(artifactPath);
+            return actual === expected ? [] : [`${fileName}:${actual}!=${expected}`];
+        },
+    );
     const trajectoryDifference = compareTrajectory(
         frozenDir,
         childRunDir,
@@ -397,11 +427,13 @@ const runCo612Gate = async (): Promise<Record<string, unknown>> => {
         gate: name,
         quick,
         rounds,
+        frozenBaselineHashMismatches,
         trajectoryDifference,
         cleanBaselineDifference,
         metricDifference,
         actualMetrics,
-        passed: trajectoryDifference === null
+        passed: frozenBaselineHashMismatches.length === 0
+            && trajectoryDifference === null
             && cleanBaselineDifference === null
             && metricDifference === null,
         runDir: childRunDir,
