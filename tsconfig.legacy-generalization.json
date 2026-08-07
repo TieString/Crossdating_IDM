@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": [
+    "scripts/legacy-generalization/**/*.ts",
+    "scripts/prepare-legacy-generalization-manifest.ts",
+    "scripts/validate-legacy-generalization.ts"
+  ],
+  "references": []
+}
