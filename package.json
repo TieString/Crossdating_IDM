@@ -27,6 +27,7 @@
     "benchmark:co612-review-initial": "node scripts/run-co612-review-window-initial.mjs",
     "benchmark:co612-review-bootstrap": "node scripts/run-co612-review-window-bootstrap.mjs",
     "analyze:co612-review-bootstrap": "node scripts/run-analyze-co612-review-window-bootstrap.mjs",
+    "analyze:zsl-operation-confusion": "node scripts/run-zsl-operation-confusion.mjs",
     "benchmark:itrdb:prepare": "node scripts/run-prepare-itrdb-validation-manifest.mjs",
     "benchmark:itrdb:formal": "node scripts/run-itrdb-formal-holdout.mjs",
     "benchmark:itrdb:complex": "node scripts/run-itrdb-complex-events.mjs",
