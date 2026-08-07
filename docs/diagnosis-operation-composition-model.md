@@ -659,3 +659,64 @@ Round 3A 的 whole baseline 分离已经跨位移量泛化：`-2/-6/-20` 三档�
 
 后续每轮在这里追加：输入 SHA、案例数、分层、修复前指标、失败类型、算法改动、
 修复后指标、干扰检查、外部回归、提交号和未解决边界。
+
+### Round 3C：精确 partial 阶跃不可被单位假设静默降级
+
+- `-2` 结果目录：
+  `D:\软件测试\co612-operation-composition-results\whole-partial-2-round4b-unopposed-exact-preservation-2026-08-08`
+- `-20` 结果目录：
+  `D:\软件测试\co612-operation-composition-results\whole-partial-20-round4b-unopposed-exact-preservation-2026-08-08`
+- missing 反向目录：
+  `D:\软件测试\co612-operation-composition-results\whole-missing-round4b-unopposed-partial-reverse-regression-2026-08-08`
+- false 反向目录：
+  `D:\软件测试\co612-operation-composition-results\whole-false-round4-unopposed-partial-reverse-regression-2026-08-08`
+- 两套仍使用相同 10 条无 0 目标、三个断点位置和四种 whole 位移；各 245 个唯一状态，
+  错误 0、残余映射 120/120、保存重开 245/245。输入 SHA-256 仍为
+  `36e6c6a9d0cbc16d1870a1662da553a7b40d5578ea9ede25ff790c556c34667d`，clean review
+  仍为 2/55。
+
+逐案审计发现 partial 被改成 missingRing 有三条重复路径：初次动态 operation fusion、
+顺序缺轮 head recovery，以及 counterfactual locator 后的 compressed staircase projection。
+例如 `mon252 partial -20 older` 在融合前已经给出精确 `-20 -> 0`，但旧规则只因单位分数
+接近就改成 `-1 -> 0`；`mon251 partial -2 newer` 在初次融合后仍为精确 `-2 -> 0`，随后
+被两个自由断点的阶梯模型改成 missingRing。
+
+本轮统一使用状态差不变量：
+
+```text
+partial shift = older lag - newer lag
+```
+
+纯 partial 的 newer lag 为 0；whole + partial 中 newer lag 为 whole baseline，因此同一公式
+同时覆盖 `-20 -> 0` 和 `-1 -> +5` 这类组合。动态单位选择器不得仅凭接近分数把满足该式
+的负向 partial 改成单位事件；不满足该式的夸张 partial 仍可按原门槛纠正。对于 `-2`，
+分离的两个 missingRing 在代数上也可形成 `-2 -> 0`，因此没有一律保护：只有 COFECHA
+候选与 lag path 都支持直接 partial，且没有独立 missing 候选或邻近共享 0 锚点时，才禁止
+高自由度阶梯模型覆盖直接解释。真实 mtr841、mon121、mon162 离散缺轮仍通过原恢复路径。
+
+第一版曾保护事件集合中的任意 exact partial。missing 反向基准立即发现 `mon151/mon152`
+旧侧各有一个远距离伪 `-2 -> 0` 与正确高分 missing 同时存在，导致正确单位窗口被伪 partial
+拖走：窗口由 28/30 降为 26/30，串行由 112/120 降为 104/120。最终规则收紧为只保护
+**唯一、无竞争**的 exact partial；一旦事件集合已有独立 missing/false，单位事件仍可参与并
+赢得融合。修正版 missing 恢复为操作 30/30、窗口 28/30、串行 112/120；false 与前轮逐项
+相同：操作 26/30、窗口 25/30、串行 100/120。两者 whole review 均为 120/120，clean
+均为 2/55。
+
+| 指标 | `-2` Round 3B | `-2` Round 3C | `-20` Round 3B | `-20` Round 3C |
+| --- | ---: | ---: | ---: | ---: |
+| 纯 partial 精确操作 | 14/30 | **16/30** | 17/30 | **21/30** |
+| 唯一主窗口覆盖 | 13/30 | **15/30** | 15/30 | **19/30** |
+| whole 首步 review 精确 | 120/120 | **120/120** | 120/120 | **120/120** |
+| whole 被判成 partial/unit | 0/120 | **0/120** | 0/120 | **0/120** |
+| whole -> partial 串行正确 | 52/120 | **60/120** | 60/120 | **76/120** |
+
+`-20` 较老位置由操作/窗口 0/10 提升到 3/10，中部操作由 9/10 到 10/10；`-2` 的
+操作和窗口各追回 2/30。完整 COFECHA 回归 11/11 通过：mon052 九缺轮、mtr841 四步恢复、
+分离两缺轮、`-2...-100` 多断点物理缺块以及新增的 `mon251 -2`、`mon252 -20`。
+ZSL RAW/crossdated 11 项操作回归全部通过。49 条初始前沿审计与修复前逐条零变化：RAW
+动态参考仍为响应 12/14、操作正确 11/14、clean 误报 3/35；隔离 crossdated 参考仍为
+11/14、8/14、4/35。四个真实 whole 均保持 whole，没有新增 whole -> partial 或
+partial -> missing。该初始前沿审计尚不等于“先应用 whole 后逐事件”的 ZSL 串行回放，
+后者仍需单独实现，不能由 11 项定点回归替代。
+这轮只修复“已有精确 partial 被降级”；候选层没有形成精确位移、whole alias 抢占以及
+窗口中心偏移仍留给下一轮，不能把当前 50%/63.33% 覆盖率误称为最终结果。

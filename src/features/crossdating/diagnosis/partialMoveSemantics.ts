@@ -68,6 +68,18 @@ export const isNegativePartialShift = (shiftYears: number | undefined): shiftYea
     Number.isInteger(shiftYears) && (shiftYears ?? 0) <= -MIN_PARTIAL_GAP_YEARS
 );
 
+/** The observed older-to-newer lag step must equal the proposed physical gap. */
+export const isExactPartialLagTransition = (
+    shiftYears: number | undefined,
+    lagBefore: number | null | undefined,
+    lagAfter: number | null | undefined,
+): shiftYears is number => (
+    isNegativePartialShift(shiftYears)
+    && Number.isFinite(lagBefore)
+    && Number.isFinite(lagAfter)
+    && (lagBefore ?? 0) - (lagAfter ?? 0) === shiftYears
+);
+
 export const isAutomaticPartialShift = (
     shiftYears: number | undefined,
     options: PartialShiftCandidateOptions = {},

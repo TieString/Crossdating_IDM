@@ -364,6 +364,52 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
         });
     }, 240_000);
 
+    bundledCofechaIt("keeps COFECHA-backed physical gaps as partial moves", () => {
+        const scenarios = [
+            { seriesId: "mon251", firstFixedYear: 1942, gapYears: 2 },
+            { seriesId: "mon252", firstFixedYear: 1765, gapYears: 20 },
+        ];
+        scenarios.forEach(({ seriesId, firstFixedYear, gapYears }) => {
+            const series = parsed.get(seriesId)!;
+            const physical = createPartialRangeMoveCase(
+                series,
+                firstFixedYear,
+                gapYears,
+            );
+            const site = new Map(cleanSite);
+            site.set(seriesId, physical.corrupted);
+            const outText = runBundledCofecha(site);
+            const parts = splitReportByParts(outText);
+            const dynamicReference = createCofechaMasterReferenceConfig({
+                siteData: site,
+                flaggedAIds: extractPart6FlaggedASeriesIds(parts.get("PART 6") ?? ""),
+                cofechaRunId: `co612-physical-partial-${seriesId}-${gapYears}`,
+                rwlHash: `co612-physical-partial-${seriesId}-${gapYears}`,
+                masterDatingSeries: parseCofechaResult(outText).masterDatingSeries,
+            });
+            const events = diagnoseCrossdating(site, {
+                referenceConfig: dynamicReference,
+                targetTrees: [seriesId],
+                cofechaText: outText,
+            }).events.filter((event) => event.seriesId === seriesId);
+            const event = events.find((candidate) => (
+                candidate.eventType === "partialMove"
+                && candidate.shiftYears === -gapYears
+            ));
+
+            expect(event, JSON.stringify({
+                seriesId,
+                firstFixedYear,
+                gapYears,
+                events: summarize(events),
+            })).toBeDefined();
+            expect(event!.startYear).toBeLessThanOrEqual(firstFixedYear);
+            expect(event!.endYear).toBeGreaterThanOrEqual(firstFixedYear);
+            expect(events.some((candidate) => candidate.eventType === "missingRing"),
+                JSON.stringify(summarize(events))).toBe(false);
+        });
+    }, 240_000);
+
     it("keeps genuine two-year gaps as partial moves", () => {
         [1800, 1850].forEach((firstFixedYear) => {
             const partial = createPartialRangeMoveCase(target, firstFixedYear, 2);

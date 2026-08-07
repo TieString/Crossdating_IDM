@@ -27,6 +27,7 @@ import { scoreFalseRingReferenceConsensusRecovery } from "./unitReferenceConsens
 import {
     DEFAULT_MAX_PARTIAL_GAP_YEARS,
     firstFixedYearFromLastMovedYear,
+    isExactPartialLagTransition,
 } from "./partialMoveSemantics";
 import type {
     DiagnosisEvent,
@@ -290,6 +291,13 @@ export const selectDecisiveJointOperationFusion = (
                 : []
         )),
     );
+    const hasUnopposedExactPartialTransition = localEvents.length === 1
+        && localEvents[0].eventType === "partialMove"
+        && isExactPartialLagTransition(
+            localEvents[0].shiftYears,
+            localEvents[0].evidence.lagBefore,
+            localEvents[0].evidence.lagAfter,
+        );
     const initialGridSelection = selectDynamicJointOperation(operations);
     const unitSelection = selectDynamicUnitOperation(operations);
     const unitFallbackSelection =
@@ -323,6 +331,7 @@ export const selectDecisiveJointOperationFusion = (
         unitFallbackSelection !== null
         && initialGridSelection !== null
         && partialUnitContextPasses
+        && !hasUnopposedExactPartialTransition
         && unitFallbackSelection.score
             >= config.dynamicJointPartialUnitMinimumScore
         && unitFallbackSelection.scoreMargin
@@ -433,6 +442,9 @@ export const selectDecisiveJointOperationFusion = (
                     >= config.dynamicJointPartialUnitMinimumMargin
             )
         );
+    const demotesExactPartialTransition = hasUnopposedExactPartialTransition
+        && gridOperation !== null
+        && gridOperation.eventType !== "partialMove";
     const doesNotCompressExistingPartial = gridOperation?.eventType !== "partialMove"
         || existingPartialMagnitude === 0
         || Math.abs(gridOperation.shiftYears) > existingPartialMagnitude
@@ -444,6 +456,7 @@ export const selectDecisiveJointOperationFusion = (
         && gridOperation
         && (strongestExisting === null || gridTypeChangePasses)
         && doesNotCompressExistingPartial
+        && !demotesExactPartialTransition
         && (!gridMatchesExisting || localEvents.length > 1)
         && !(
             localEvents.length === 1
@@ -1949,6 +1962,15 @@ export const recoverSingleEventOperationSuggestions = (
         const calibratedSelection = selectJointCounterfactualOperation(operations);
         const selectedOperation = calibratedSelection?.operation ?? selected;
         if (!selectedOperation) return preserveExisting();
+        const exactPartialWouldBeDemoted = selectedOperation.eventType !== "partialMove"
+            && localEvents.length === 1
+            && localEvents[0].eventType === "partialMove"
+            && isExactPartialLagTransition(
+                localEvents[0].shiftYears,
+                localEvents[0].evidence.lagBefore,
+                localEvents[0].evidence.lagAfter,
+            );
+        if (exactPartialWouldBeDemoted) return preserveExisting();
         const matchingExisting = localEvents.some((event) => (
             event.eventType === selectedOperation.eventType
             && eventShiftYears(event) === selectedOperation.shiftYears

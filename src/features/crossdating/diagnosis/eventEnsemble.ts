@@ -79,6 +79,7 @@ import {
 import { refineEventWithCounterfactualLocator } from "./counterfactualEventLocator";
 import { refineEventWithAdjacentBoundaryConsensus } from "./eventBoundaryConsensus";
 import {
+    isExactPartialLagTransition,
     isAutomaticPartialShift,
 } from "./partialMoveSemantics";
 import type {
@@ -855,6 +856,16 @@ const supportsCompressedMissingStaircase = (
         && (aggregateGainSupport || perReferenceSupport);
 };
 
+const isCandidateBackedExactPartial = (event: DiagnosisEvent): boolean => (
+    event.eventType === "partialMove"
+    && event.evidence.candidateIds.length > 0
+    && isExactPartialLagTransition(
+        event.shiftYears,
+        event.evidence.lagBefore,
+        event.evidence.lagAfter,
+    )
+);
+
 const addCompressedMissingStaircaseEvidence = (
     event: DiagnosisEvent,
     diagnosis: SeriesCoreDiagnosis,
@@ -870,6 +881,13 @@ const addCompressedMissingStaircaseEvidence = (
         pathCache,
     );
     if (!supportsCompressedMissingStaircase(staircase)) return event;
+    const sharedUnitAnchor = selectSharedExplicitZeroMarker(
+        siteData,
+        event.seriesId,
+        staircase.newerBoundaryYear,
+        2,
+    );
+    if (isCandidateBackedExactPartial(event) && sharedUnitAnchor === null) return event;
     return {
         ...event,
         evidence: {
@@ -1605,6 +1623,16 @@ const recoverSequentialMissingHeadEvent = (
         markerMode,
         2,
     );
+    const hasIndependentMissingCandidate = candidateEvents.some(
+        (event) => event.eventType === "missingRing",
+    );
+    const hasCandidateBackedExactPartial = isCandidateBackedExactPartial(partial);
+    // A separated two-ring fit has more degrees of freedom than one physical gap. When COFECHA
+    // and the lag path independently agree on the exact direct step, require a unit-specific
+    // anchor before replacing it with a missing-ring operation.
+    if (hasCandidateBackedExactPartial
+        && !hasIndependentMissingCandidate
+        && marker === null) return null;
     return {
         event: addExplicitStaircaseCompetitionEvidence(makeSequentialMissingHeadEvent(
             constrainedHead,

@@ -938,6 +938,55 @@ describe("decisive dynamic operation fusion", () => {
         );
     });
 
+    it("does not demote an exact physical partial lag step to a unit fallback", () => {
+        const exact = {
+            ...partialEvent(-20),
+            evidence: {
+                ...partialEvent(-20).evidence,
+                lagBefore: -20,
+                lagAfter: 0,
+            },
+        };
+        const result = fuseDecisiveJointOperationScores(
+            [exact],
+            fusionDiagnosis,
+            [
+                jointOperation(-1, 0.213),
+                jointOperation(1, 0.12),
+                jointOperation(-19, 0.19),
+                jointOperation(-20, 0.226),
+                jointOperation(-21, 0.18),
+            ],
+        );
+
+        expect(result).toEqual([exact]);
+    });
+
+    it("lets an independently detected unit event compete with an exact partial alias", () => {
+        const missing = event(1665, 1671);
+        const exactAlias = {
+            ...partialEvent(-2, 1610, 1618),
+            evidence: {
+                ...partialEvent(-2, 1610, 1618).evidence,
+                lagBefore: -2,
+                lagAfter: 0,
+            },
+        };
+        const result = fuseDecisiveJointOperationScores(
+            [missing, exactAlias],
+            fusionDiagnosis,
+            [
+                jointOperation(-1, 0.3, 1668),
+                jointOperation(1, 0.05, 1668),
+                jointOperation(-2, 0.12, 1614),
+                jointOperation(-3, 0.08, 1614),
+            ],
+        );
+
+        expect(result).toHaveLength(1);
+        expect(result[0].eventType).toBe("missingRing");
+    });
+
     it("does not replace a plausible small physical gap with the unit fallback", () => {
         const existing = partialEvent(-4);
         const result = fuseDecisiveJointOperationScores(
