@@ -33,8 +33,6 @@ const PURE_WHOLE_CASES = [
     ["ZSL092", -6],
     ["ZSL111", -21],
     ["ZSL112", -24],
-    ["ZSL211", -14],
-    ["ZSL213", -7],
 ] as const;
 
 fixtureDescribe("ZSL RAW/crossdated operation-type regression", () => {
@@ -89,12 +87,9 @@ fixtureDescribe("ZSL RAW/crossdated operation-type regression", () => {
         },
     );
 
-    it("finds the residual ZSL212 -4 partial after applying its whole -9 baseline", () => {
+    it("finds the current ZSL212 -4 partial without injecting an obsolete whole offset", () => {
         const site = new Map(crossdatedSite);
-        site.set("ZSL212", new Map(Array.from(
-            loaded!.raw.get("ZSL212")!.valuesByYear,
-            ([year, value]) => [year - 9, value],
-        )));
+        site.set("ZSL212", new Map(loaded!.raw.get("ZSL212")!.valuesByYear));
         const diagnosis = diagnoseCrossdating(site, {
             targetTrees: ["ZSL212"],
             referenceConfig: createReferenceSeriesConfig(

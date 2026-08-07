@@ -69,6 +69,7 @@ type Manifest = {
         requireZeroFreeTarget: true;
         maximumTargets: number;
         selectedTargetIds: string[];
+        cleanTargetIds: string[];
     };
     cases: CaseSpec[];
     combinations: CombinationSpec[];
@@ -85,6 +86,7 @@ type EventPreview = {
     score: number;
     scoreMargin: number;
     sources: string[];
+    notes: string[];
 };
 
 type SnapshotPreview = {
@@ -95,6 +97,7 @@ type SnapshotPreview = {
     finalReason: string | null;
     referenceMode: string;
     referenceAnchorCount: number;
+    candidates: Array<Record<string, unknown>>;
     detectedBeforeFusion: EventPreview[];
     detectedAfterFusion: EventPreview[];
     finalEvents: EventPreview[];
@@ -211,7 +214,9 @@ const mapsEqual = (left: Map<number, number>, right: Map<number, number>): boole
 
 const eventShift = (event: DiagnosisEvent | null): number | null => {
     if (!event) return null;
-    if (event.eventType === "wholeSeriesMove") return event.evidence.lagBefore;
+    if (event.eventType === "wholeSeriesMove") {
+        return event.shiftYears ?? event.evidence.lagBefore;
+    }
     if (event.eventType === "missingRing") return -1;
     if (event.eventType === "falseRing") return 1;
     return event.shiftYears ?? null;
@@ -220,7 +225,7 @@ const eventShift = (event: DiagnosisEvent | null): number | null => {
 const auditEventPreview = (event: DiagnosisEventAuditSnapshot): EventPreview => ({
     eventType: event.eventType,
     shiftYears: event.eventType === "wholeSeriesMove"
-        ? event.lagBefore
+        ? event.shiftYears ?? event.lagBefore
         : event.eventType === "missingRing"
             ? -1
             : event.eventType === "falseRing"
@@ -234,6 +239,7 @@ const auditEventPreview = (event: DiagnosisEventAuditSnapshot): EventPreview => 
     score: event.score,
     scoreMargin: event.scoreMargin,
     sources: event.algorithmSources,
+    notes: event.notes,
 });
 
 const eventPreview = (event: DiagnosisEvent | null): EventPreview | null => event ? ({
@@ -247,6 +253,7 @@ const eventPreview = (event: DiagnosisEvent | null): EventPreview | null => even
     score: event.evidence.score,
     scoreMargin: event.evidence.scoreMargin,
     sources: event.evidence.algorithmSources,
+    notes: event.evidence.notes,
 }) : null;
 
 const snapshotPreview = (snapshot: LegacyDiagnosisSnapshot): SnapshotPreview => ({
@@ -257,6 +264,7 @@ const snapshotPreview = (snapshot: LegacyDiagnosisSnapshot): SnapshotPreview => 
     finalReason: snapshot.audit?.finalReason ?? null,
     referenceMode: snapshot.referenceMode,
     referenceAnchorCount: snapshot.referenceAnchorCount,
+    candidates: snapshot.candidates,
     detectedBeforeFusion: snapshot.audit?.detectedBeforeFusion.map(auditEventPreview) ?? [],
     detectedAfterFusion: snapshot.audit?.detectedAfterFusion.map(auditEventPreview) ?? [],
     finalEvents: snapshot.audit?.finalEvents.map(auditEventPreview) ?? [],
@@ -311,9 +319,10 @@ const targetForCase = (
 
 const buildManifest = async (): Promise<Manifest> => {
     const loaded = await loadRwl(inputPath, "tucson-auto");
-    const selected = Array.from(loaded.series.values())
+    const allTargets = Array.from(loaded.series.values())
+        .sort((left, right) => left.id.localeCompare(right.id));
+    const selected = allTargets
         .filter((series) => series.zeroCount === 0 && series.length >= minimumSeriesLength)
-        .sort((left, right) => left.id.localeCompare(right.id))
         .slice(0, maximumTargets);
     if (selected.length === 0) throw new Error("no zero-free co612 targets satisfy selection");
 
@@ -326,8 +335,8 @@ const buildManifest = async (): Promise<Manifest> => {
         return spec.caseId;
     };
 
-    selected.forEach((series) => {
-        const cleanCaseId = addCase({
+    allTargets.forEach((series) => {
+        addCase({
             caseId: `${series.id}:clean`,
             targetId: series.id,
             scenarioKind: "clean",
@@ -337,6 +346,10 @@ const buildManifest = async (): Promise<Manifest> => {
             displayedFalseYear: null,
             falseRingMode,
         });
+    });
+
+    selected.forEach((series) => {
+        const cleanCaseId = `${series.id}:clean`;
         const years = new Map(positions.map(({ stratum, fraction }) => [
             stratum,
             Math.round(series.startYear + (series.endYear - series.startYear) * fraction),
@@ -409,6 +422,7 @@ const buildManifest = async (): Promise<Manifest> => {
             requireZeroFreeTarget: true,
             maximumTargets,
             selectedTargetIds: selected.map((series) => series.id),
+            cleanTargetIds: allTargets.map((series) => series.id),
         },
         cases,
         combinations,
@@ -715,6 +729,7 @@ const aggregate = async (manifest: Manifest): Promise<void> => {
         gitCommit: manifest.gitCommit,
         workers: workerCount,
         selectedTargets: manifest.selection.selectedTargetIds,
+        cleanTargets: manifest.selection.cleanTargetIds,
         uniqueDiagnosisCases: results.length,
         errors: results.filter((row) => row.error !== null).length,
         residualMapMismatches: results.filter((row) => (

@@ -35,6 +35,7 @@ import type {
     DiagnosisRankedYear,
     SeriesCoreDiagnosis,
 } from "./types";
+import { wholeSeriesMoveShiftYears } from "./wholeSeriesMoveSemantics";
 
 type RecoverableEventType = Exclude<DiagnosisEventType, "wholeSeriesMove">;
 
@@ -358,7 +359,7 @@ export const selectDecisiveJointOperationFusion = (
         && gridOperation !== null
         && gridOperation.eventType !== "partialMove";
     const wholeLag = wholeEvents.length === 1
-        ? wholeEvents[0].evidence.lagBefore
+        ? wholeSeriesMoveShiftYears(wholeEvents[0])
         : null;
     const wholeBaselineIsOlderPartialState = wholeLag !== null
         && wholeLag <= -2
@@ -597,7 +598,7 @@ export const fuseDecisiveJointOperationScores = (
     const wholeOnlyPartialAlias = wholeEvents.length === 1
         && localEvents.length === 0
         && fusion.operation.eventType === "partialMove"
-        && fusion.operation.shiftYears === wholeEvents[0].evidence.lagBefore
+        && fusion.operation.shiftYears === wholeSeriesMoveShiftYears(wholeEvents[0])
         && diagnosis.targetRange.endYear - fusion.operation.bestYear + 1
             < config.minimumSideYears;
     // The local grid has no whole-series hypothesis. Near the newer endpoint it can imitate a

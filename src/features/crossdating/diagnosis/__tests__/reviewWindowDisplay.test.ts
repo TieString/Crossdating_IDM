@@ -141,7 +141,7 @@ describe("lower review-window display gate", () => {
         });
     });
 
-    it("shows a local partial before its independent whole-series baseline", () => {
+    it("shows an independent whole-series baseline before its local partial", () => {
         const partial = reviewablePartial(-4, {
             correlationGain: 0.12,
             algorithmSources: ["decisive_joint_operation_fusion"],
@@ -163,7 +163,25 @@ describe("lower review-window display gate", () => {
         expect(result).toMatchObject({
             status: "strict",
             reason: "strict_event",
-            event: partial,
+            event: whole,
+        });
+    });
+
+    it("shows an independent whole-series baseline before a local unit event", () => {
+        const unit = strictEvent();
+        const whole = {
+            ...strictEvent(),
+            id: "whole-before-unit",
+            eventType: "wholeSeriesMove" as const,
+            shiftYears: -5,
+            startYear: 1800,
+            endYear: 2000,
+        };
+
+        expect(selectReviewWindowDisplay(audit([]), [unit, whole])).toMatchObject({
+            status: "strict",
+            reason: "strict_event",
+            event: whole,
         });
     });
 

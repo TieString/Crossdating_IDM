@@ -198,7 +198,9 @@ export const runCofecha = (input: {
 };
 
 const candidateAudit = (candidate: Record<string, unknown>) => ({
+    id: candidate.id ?? null,
     operationType: candidate.operationType ?? null,
+    mode: candidate.mode ?? null,
     targetTree: candidate.targetTree ?? null,
     targetYear: candidate.targetYear ?? null,
     suggestedLag: candidate.suggestedLag ?? null,

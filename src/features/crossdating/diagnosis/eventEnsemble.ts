@@ -65,6 +65,7 @@ import {
     rerankEventYearsByAnchorConsensus,
     type EventOperationRecoveryConfig,
 } from "./eventOperationRecovery";
+import { wholeSeriesMoveShiftYears } from "./wholeSeriesMoveSemantics";
 import {
     addDiagnosisReviewWindowPadding,
     restoreUnlocalizedFalseRingReviewWindow,
@@ -603,7 +604,7 @@ export const unitEventExplainsWholeSeriesCandidate = (
     whole: DiagnosisEvent,
     event: DiagnosisEvent,
 ): boolean => {
-    const wholeLag = whole.evidence.lagBefore;
+    const wholeLag = wholeSeriesMoveShiftYears(whole);
     if (whole.eventType !== "wholeSeriesMove" || wholeLag === null || wholeLag === 0) {
         return false;
     }
@@ -627,7 +628,7 @@ export const unitEventCompetesWithWholeAtNewerEndpoint = (
     whole: DiagnosisEvent,
     event: DiagnosisEvent,
 ): boolean => {
-    const wholeLag = whole.evidence.lagBefore;
+    const wholeLag = wholeSeriesMoveShiftYears(whole);
     if (
         whole.eventType !== "wholeSeriesMove"
         || (wholeLag !== -1 && wholeLag !== 1)
@@ -656,7 +657,7 @@ export const partialMoveExplainsWholeSeriesCandidate = (
     whole: DiagnosisEvent,
     event: DiagnosisEvent,
 ): boolean => {
-    const wholeLag = whole.evidence.lagBefore;
+    const wholeLag = wholeSeriesMoveShiftYears(whole);
     return whole.eventType === "wholeSeriesMove"
         && wholeLag !== null
         && wholeLag !== 0
@@ -715,7 +716,7 @@ export const pruneLocalEventsDisconnectedFromWholeBaseline = (
 ): DiagnosisEvent[] => {
     const wholeEvents = events.filter((event) => event.eventType === "wholeSeriesMove");
     if (wholeEvents.length !== 1) return events;
-    const wholeLag = wholeEvents[0].evidence.lagBefore;
+    const wholeLag = wholeSeriesMoveShiftYears(wholeEvents[0]);
     if (wholeLag === null || wholeLag === 0) return events;
 
     const comparableLocalEvents = events.filter((event) => (
@@ -1380,6 +1381,11 @@ const addExplicitStaircaseCompetitionEvidence = (
     },
 });
 
+type SequentialMissingRecovery = {
+    event: DiagnosisEvent;
+    preserveWholeBaseline: boolean;
+};
+
 const recoverSequentialMissingHeadEvent = (
     detected: DiagnosisEvent[],
     diagnosis: SeriesCoreDiagnosis,
@@ -1390,7 +1396,7 @@ const recoverSequentialMissingHeadEvent = (
     effectiveConfig: EffectiveDiagnosisConfig,
     options: DiagnosisEventEnsembleOptions,
     pathCache: LagPathCache,
-): DiagnosisEvent | null => {
+): SequentialMissingRecovery | null => {
     const markerMode = options.sharedZeroMarkerMode ?? "local2";
     const confirmedTargetZeroYears = Array.from(
         siteData.get(diagnosis.targetTree) ?? [],
@@ -1442,23 +1448,38 @@ const recoverSequentialMissingHeadEvent = (
         ) || candidateEvents.some((event) => event.eventType === "missingRing")
             || presentation.confirmedTargetStaircaseYear !== null
             || (marker?.support ?? 0) >= 10;
+        const whole = detected.find((event) => event.eventType === "wholeSeriesMove");
+        const wholeShift = wholeSeriesMoveShiftYears(whole);
+        const independentWholeBaseline = wholeShift !== null
+            && wholeShift !== head.pathStartLag
+            && detected.some((event) => (
+                event.eventType !== "wholeSeriesMove"
+                && event.evidence.lagAfter === wholeShift
+            ));
         const hasIndependentStaircaseSupport = hasExistingUnitEvent
             || head.headRunYears >= 7
             || presentation.candidateConsensusYear !== null
             || presentation.confirmedTargetStaircaseYear !== null
             || (marker?.support ?? 0) >= 10;
         if (hasOppositeUnitOnly && !hasIndependentMissingDirection) return null;
+        // A staircase may be an endpoint artefact of a non-zero global baseline. It may replace a
+        // whole candidate only when that candidate is the staircase's older state. An independently
+        // connected baseline needs its own missing-direction evidence and remains in the event set.
+        if (independentWholeBaseline && !hasIndependentMissingDirection) return null;
         if (replacesNonUnitEvent && !hasIndependentStaircaseSupport) return null;
-        return makeSequentialMissingHeadEvent(
-            head,
-            marker,
-            detected,
-            diagnosis,
-            candidates,
-            candidateEvents,
-            confirmedTargetZeroYears,
-            markerMode,
-        );
+        return {
+            event: makeSequentialMissingHeadEvent(
+                head,
+                marker,
+                detected,
+                diagnosis,
+                candidates,
+                candidateEvents,
+                confirmedTargetZeroYears,
+                markerMode,
+            ),
+            preserveWholeBaseline: independentWholeBaseline,
+        };
     }
     const partial = detected.find((event) => (
         event.eventType === "partialMove"
@@ -1498,16 +1519,19 @@ const recoverSequentialMissingHeadEvent = (
         markerMode,
         2,
     );
-    return addExplicitStaircaseCompetitionEvidence(makeSequentialMissingHeadEvent(
-        constrainedHead,
-        marker,
-        detected,
-        diagnosis,
-        candidates,
-        [],
-        confirmedTargetZeroYears,
-        markerMode,
-    ), competition!, staircase!);
+    return {
+        event: addExplicitStaircaseCompetitionEvidence(makeSequentialMissingHeadEvent(
+            constrainedHead,
+            marker,
+            detected,
+            diagnosis,
+            candidates,
+            [],
+            confirmedTargetZeroYears,
+            markerMode,
+        ), competition!, staircase!),
+        preserveWholeBaseline: false,
+    };
 };
 
 const recoverCollapsedMissingStaircaseHead = (
@@ -2877,7 +2901,7 @@ export const makeDiagnosisEvents = (
                     || event.eventType === "falseRing"
                 )
             ));
-            const wholeLag = whole?.evidence.lagBefore;
+            const wholeLag = wholeSeriesMoveShiftYears(whole);
             const operationMatchesWholeLag = endpointUnit?.eventType === "missingRing"
                 ? wholeLag === -1
                 : endpointUnit?.eventType === "falseRing" && wholeLag === 1;
@@ -2998,7 +3022,10 @@ export const makeDiagnosisEvents = (
                 locatorPathCache,
             );
             if (sequentialMissing) {
-                return finalize([sequentialMissing]);
+                const preservedWhole = sequentialMissing.preserveWholeBaseline
+                    ? displayed.filter((event) => event.eventType === "wholeSeriesMove")
+                    : [];
+                return finalize([...preservedWhole, sequentialMissing.event]);
             }
         }
         if (!hasLocalEvent) return finalize(displayed);

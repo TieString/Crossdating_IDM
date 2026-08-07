@@ -186,10 +186,12 @@ const wholeEventFromCandidate = (
     candidate: DiagnosisCandidateOperation,
 ): DiagnosisEvent => {
     const evaluation = candidate.evidence.evaluationDelta;
+    const shiftYears = candidate.deltaYears ?? candidate.suggestedLag;
     return {
-        id: `diagnosis-event-${diagnosis.targetTree}-whole-${candidate.deltaYears ?? candidate.suggestedLag}`,
+        id: `diagnosis-event-${diagnosis.targetTree}-whole-${shiftYears}`,
         seriesId: diagnosis.targetTree,
         eventType: "wholeSeriesMove",
+        shiftYears,
         startYear: diagnosis.targetRange.startYear,
         endYear: diagnosis.targetRange.endYear,
         rankedYears: [],
@@ -205,7 +207,14 @@ const wholeEventFromCandidate = (
             lagAfter: evaluation?.dominantLagAfter ?? candidate.evidence.after.bestLag,
             samplePairs: candidate.evidence.globalSliding?.overlapYears ?? 0,
             candidateIds: [candidate.id],
-            notes: ["candidate_hard_gate_passed", "scores_are_relative_not_probabilities"],
+            notes: [
+                "candidate_hard_gate_passed",
+                `whole_operation_shift=${shiftYears}`,
+                `whole_observed_dominant_lag=${
+                    evaluation?.dominantLagBefore ?? candidate.evidence.before.bestLag
+                }`,
+                "scores_are_relative_not_probabilities",
+            ],
         },
         alternativeTypes: [],
     };

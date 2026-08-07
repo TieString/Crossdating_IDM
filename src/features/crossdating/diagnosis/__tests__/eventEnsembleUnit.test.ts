@@ -155,6 +155,23 @@ describe("wholeSeriesEventIsLocalUnitAlias", () => {
         )).toBe(false);
     });
 
+    it("uses the executable whole shift instead of a locally biased dominant lag", () => {
+        const whole = wholeSeriesEvent(-4);
+        whole.shiftYears = -5;
+        const localOnWholeBaseline = falseRingEvent(2014, true);
+        localOnWholeBaseline.evidence.lagBefore = -4;
+        localOnWholeBaseline.evidence.lagAfter = -5;
+
+        expect(wholeSeriesEventIsLocalUnitAlias(
+            whole,
+            [localOnWholeBaseline],
+        )).toBe(false);
+        expect(pruneLocalEventsDisconnectedFromWholeBaseline([
+            whole,
+            localOnWholeBaseline,
+        ])).toEqual([whole, localOnWholeBaseline]);
+    });
+
     it("recognizes matching bounded-search metadata as one counterfactual explanation", () => {
         const whole = wholeSeriesEvent(-1);
         whole.evidence.lagAfter = -98;

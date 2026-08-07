@@ -316,7 +316,9 @@ export const selectReviewWindowDisplay = (
     const strictWhole = strictEvents.find((event) => (
         event.eventType === "wholeSeriesMove"
     )) ?? null;
-    const strict = strictUnit ?? strictPartial ?? strictWhole;
+    // A retained whole-series correction is applied first. Local events are re-diagnosed on the
+    // corrected calendar instead of competing with the global baseline in the same UI step.
+    const strict = strictWhole ?? strictUnit ?? strictPartial;
     if (strict) {
         const width = strict.endYear - strict.startYear + 1;
         if (strict.eventType !== "wholeSeriesMove"
