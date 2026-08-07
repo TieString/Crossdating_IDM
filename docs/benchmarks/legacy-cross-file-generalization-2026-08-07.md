@@ -2,7 +2,7 @@
 
 ## 状态
 
-修复后 co612 基线已经重新冻结并通过完整 reproduction gate，外部全量待恢复。本轮从此处起只运行评估，不根据结果修改 Legacy 生产诊断、阈值、窗口、排序、事件或编辑规则。
+修复后 co612 基线已精确复现，24 个外部文件的 single、serial、negative control 和 10,000 次文件聚类 bootstrap 均已完成。最终结论为 **D. 泛化失败**。本轮只运行评估，没有根据结果修改 Legacy 生产诊断、阈值、窗口、排序、事件或编辑规则。
 
 ## 冻结标识
 
@@ -81,10 +81,160 @@ pilot 的准确率仅用于确认统计链路可运行，不作为正式泛化�
 
 这两项作为已观察到的适用边界进入最终报告，不在本轮修改算法处理。
 
-## 待运行阶段
+## 正式外部运行
 
-1. 完整 co612 400 轮 reproduction gate。
-2. 24 文件 external single。
-3. 24 文件 external serial。
-4. negative controls、文件聚类 10,000 次 bootstrap 和分层汇总。
-5. 输出哈希复核与最终 A/B/C/D 泛化结论。
+结果目录：`D:\软件测试\legacy-cross-file-generalization-results\legacy-full-2026-08-07-v1`
+
+- 状态：`COMPLETED`，exit code 0。
+- runner 提交：`3482f45a38abab2f82365f61c70269662057dc07`。
+- 24 个独立 ITRDB 文件，48 条目标序列，528 个场景。
+- exact-injected：1,152 个事件。
+- natural-confirmed：0；weak-natural：0；两者没有混入主统计。
+- negative-clean：48 个案例。
+- 24 个文件的 `developmentExposure` 均为 `unknown`，因此本轮是外部扩展验证，不称为 untouched final holdout。
+- worker 输出 48 份，运行错误 0，源文件变化 0，保存重开差异 0。
+
+### 单次诊断
+
+| 指标 | 结果 |
+| --- | ---: |
+| response | 420/1,152 = 36.46% |
+| type accuracy（全事件） | 289/1,152 = 25.09% |
+| type accuracy（已回答） | 289/420 = 68.81% |
+| shift accuracy（全事件） | 308/1,152 = 26.74% |
+| shift accuracy（已回答） | 308/420 = 73.33% |
+| operation accuracy（全事件） | 287/1,152 = 24.91% |
+| operation accuracy（已回答） | 287/420 = 68.33% |
+| first-window coverage | 167/1,056 = 15.81% |
+| conditional window coverage | 167/287 = 58.19% |
+| Top1 | 35/1,056 = 3.31% |
+| breakpoint absolute error | median 5 年；P90 130 年；P95 158 年 |
+| breakpoint signed bias | +25.52 年，明显偏向较新年份 |
+| window width | median 13 年；P90 13 年 |
+| save/reopen stable | 1,200/1,200 = 100% |
+
+`first-window` 和 Top1 的分母排除了 96 个没有断点年份的 whole-series 事件。conditional 指标只在类型、shift 和操作语义均正确且真值唯一匹配时计算。
+
+### 串行人工确认工作流
+
+串行测试覆盖 144 个 series-scenario、768 个真值事件：
+
+| 指标 | 结果 |
+| --- | ---: |
+| confirmed | 179/768 = 23.31% |
+| ever correct window | 180/768 = 23.44% |
+| first response | 296/768 = 38.54% |
+| first-response operation accuracy（已回答） | 290/296 = 97.97% |
+| first-response window coverage | 176/768 = 22.92% |
+| first-response window coverage（已回答） | 176/296 = 59.46% |
+| first-response Top1 | 32/768 = 4.17% |
+| confirmed Top1 | 34/768 = 4.43% |
+| Top1 among confirmed | 34/179 = 18.99% |
+| 完全恢复 series-scenario | 11/144 = 7.64% |
+| 至少恢复一个事件 | 63/144 = 43.75% |
+| 当前前沿直接失败 | 133/768 = 17.32% |
+| 被前序失败阻塞 | 456/768 = 59.38% |
+| FIFO 等待轮数 | median 0；P90 1 |
+| window width | median 13 年；P90 13 年 |
+
+这里的 97.97% 只表示“串行首轮已经回答的 296 个前沿”中操作多数正确，不能替代 23.31% 的端到端恢复率。72 个文件级串行场景中，69 个因 `no_new_correct_review_window_after_full_sweep` 自然停止，仅 3 个恢复了全部注入事件；终局 COFECHA flagged 数 median 10、P90 25，只有 9/72 为 0。
+
+## 分层结果
+
+### 事件类型
+
+| 类型 | 事件数 | response | 已回答 operation accuracy | first-window | conditional window |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| missingRing | 816 | 259/816 = 32% | 252/259 = 97% | 142/816 = 17% | 142/252 = 56% |
+| falseRing | 96 | 45/96 = 47% | 19/45 = 42% | 10/96 = 10% | 10/19 = 53% |
+| partialMove | 144 | 75/144 = 52% | 16/75 = 21% | 15/144 = 10% | 15/16 = 94% |
+| wholeSeriesMove | 96 | 41/96 = 43% | 0/41 = 0% | 不适用 | 不适用 |
+
+partialMove 的 94% 条件窗口覆盖只适用于已经选对类型和 shift 的少量案例；其已回答 operation accuracy 仅 21%，不能据此定义可用边界。wholeSeriesMove 没有一次形成完整正确操作。
+
+### 事件复杂度
+
+| 复杂度 | 事件数 | response | 已回答 operation accuracy | first-window | conditional window |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| single | 144 | 121/144 = 84% | 66/121 = 55% | 39/144 = 27% | 39/66 = 59% |
+| single contiguous block | 48 | 37/48 = 77% | 6/37 = 16% | 6/48 = 12% | 6/6 = 100% |
+| multi-discrete 2 | 96 | 43/96 = 45% | 42/43 = 98% | 27/96 = 28% | 27/42 = 64% |
+| multi-discrete 4 | 192 | 42/192 = 22% | 42/42 = 100% | 35/192 = 18% | 35/42 = 83% |
+| multi-discrete 8 | 384 | 45/384 = 12% | 42/45 = 93% | 28/384 = 7% | 28/42 = 67% |
+| composite global + local | 192 | 45/192 = 23% | 44/45 = 98% | 0/144 = 0% | 0/44 = 0% |
+| endpoint cropped | 48 | 46/48 = 96% | 45/46 = 98% | 32/48 = 67% | 32/45 = 71% |
+
+多离散事件中，一旦系统回答，类型通常正确，但 response 随事件数从 45% 降到 12%，并在 FIFO 中造成大面积前序阻塞。复合事件即使操作标签匹配，也没有一个断点窗口覆盖真值，说明 event fusion 和概率模式选择失败。
+
+### 数据质量与端点
+
+- 高相关组 `r=0.55..1` 仍只有 270/696 = 39% response、190/270 = 70% 已回答 operation accuracy、123/638 = 19% first-window 和 123/190 = 65% conditional window。
+- 高 segment stability `0.8..1` 仍只有 342/912 = 38% response、236/342 = 69% 已回答 operation accuracy、149/836 = 18% first-window 和 149/236 = 63% conditional window。
+- reference depth `30+` 仍只有 119/288 = 41% response、81/119 = 68% 已回答 operation accuracy、51/264 = 19% first-window 和 51/81 = 63% conditional window。
+- 新端 0-14 年 response 为 46/48 = 96%、operation accuracy 为 45/46 = 98%，但 conditional window 只有 32/45 = 71%，仍低于 94% 门槛。
+- 新端 29-59 年 conditional window 为 22/28 = 79%；距端点 59 年以上降到 113/214 = 53%，断点 P90 误差为 146 年。
+
+没有任何预先冻结的数据质量层同时满足 response、operation、conditional window 和阴性安全要求，因此不能给出可执行的“B. 条件泛化”适用边界。
+
+## 阴性安全性
+
+- clean strict false positive：18/48 = 37.50%。
+- clean review false positive：17/48 = 35.42%，涉及 11/24 个文件。
+- review 误报类型：13 个 missingRing、2 个 falseRing、2 个 wholeSeriesMove；本轮没有 partialMove 阴性误报。
+- co612 修复后 clean review 参考为 3/55 = 5.45%。
+
+外部阴性误报比 co612 参考高约 6.5 倍。由于 response 本身已经很低，继续单纯降低 review 门槛会扩大误报，不能解决端到端覆盖问题。
+
+## 文件层与区间
+
+- file-level macro：response 36.46%，已回答 operation accuracy 69.74%，first-window 15.81%，conditional window 53.63%，serial confirmed 23.31%。
+- event-level micro 与 file-level macro 接近，结论不是少数大文件贡献。
+- 文件 serial confirmed 的 P10：`itrdb-13-93eeb0586c`，4.55%。
+- 最差文件：`itrdb-08-e1f6c0b64c`，0%。
+- 文件间 serial confirmed IQR：11.36 个百分点；最佳文件也只有 56%。
+
+10,000 次 file-cluster bootstrap：
+
+| 指标 | 点估计 | 95% CI |
+| --- | ---: | ---: |
+| single response | 36.46% | 32.38%-39.50% |
+| single operation accuracy（已回答） | 68.33% | 65.13%-71.43% |
+| single first-window | 15.81% | 12.59%-18.94% |
+| single conditional window | 58.19% | 50.00%-65.69% |
+| serial confirmed | 23.31% | 17.06%-29.56% |
+| serial ever correct | 23.44% | 17.32%-29.56% |
+| serial first response | 38.54% | 32.03%-44.79% |
+| serial first-response window | 22.92% | 16.80%-28.91% |
+
+所有关键区间的上界仍远低于冻结目标，文件聚类后结论不变。
+
+## 失败层定位
+
+1. **proposal/response**：单次 response 36.46%，multi-discrete 8 仅 12%，大量事件根本没有形成可展示前沿。
+2. **candidate ranking 与 window**：在操作正确后 conditional window 仍只有 58.19%，断点 P90 误差 130 年且向新端偏 25.52 年，说明经常选中远距离错误模式，而非只差一两年。
+3. **event fusion**：composite first-window 和 conditional window 均为 0%；wholeSeriesMove operation accuracy 为 0%。
+4. **review gate**：低 response 与 35.42% clean review 误报同时存在，当前分数没有形成可通过单阈值分离的区域。
+5. **serial blocking**：456/768 事件被前序失败阻塞，是 serial confirmed 从 co612 91.90% 降到 23.31% 的直接放大器。
+
+## 定向回归与适用边界
+
+- MCP17A：2/2 通过，连续自然缺块在保存前后均保持 `partialMove -9`。
+- ZSL141：7/9 通过；动态参考 `-6` 和真实保存循环 `-11` 仍会被 2008 年 missingRing 阶梯证据替换。
+- ZSL141 两个失败是冻结前已知指纹，本轮没有修改夹具、测试期望或生产算法。
+
+## 完整性审计
+
+- 26 个外部/定向 RWL 输入重新计算 SHA-256，0 个不匹配。
+- co612、COFECHA、prior manifest 和 5 个 co612 冻结轨迹文件重新计算 SHA-256，8/8 匹配。
+- config 与 manifest SHA-256 分别为 `fd72c2cf...e54` 和 `9e90353c...dd6`，与运行记录一致。
+- 18 个正式结果文件重新计算 SHA-256，18/18 匹配；完整值见 `checksums.sha256.json`。
+- `sourceMutationCount=0`，`saveReopenDifferentialCount=0`，`baselineProductionDifferential=0`，`errors=0`。
+- evaluator Vitest：6/6 通过；Legacy typecheck 通过；`npm run build` 通过。构建仅保留既有 chunk size/dynamic import 警告。
+
+## 最终结论
+
+**D. 泛化失败。**
+
+co612 的 329/358（91.90%）serial confirmed 是单文件/同站点优势，不能视为当前 Legacy 的普遍能力。外部 24 文件上，serial confirmed 为 179/768（23.31%），已回答 operation accuracy 为 68.33%，conditional window 为 58.19%，clean review 误报为 17/48（35.42%）；高相关、高 reference depth 和高 segment stability 分层仍明显退化，多数文件不能复现 co612 工作流能力。
+
+本轮到此停止，不继续修改 Legacy 算法。下一轮若重建设计，应优先处理完整概率模式的 proposal、事件类型/shift 联合选择、远距离伪峰抑制、复合事件状态路径和 FIFO 阻塞传播；不能只扩窗或降低 review 门槛。
