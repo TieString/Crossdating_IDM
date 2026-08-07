@@ -71,6 +71,9 @@ type ReplayStep = {
     reviewStatus: string | null;
     reviewReason: string | null;
     finalReason: string | null;
+    candidates: Array<Record<string, unknown>>;
+    diagnosisAudit: unknown;
+    reviewDecisionDetail: unknown;
     stateHash: string;
     error: string | null;
 };
@@ -99,6 +102,7 @@ const cofechaExe = resolve(valueFor("--cofecha-exe") ?? fileURLToPath(new URL(
 )));
 const timeoutSeconds = Math.max(10, Number(valueFor("--timeout-seconds") ?? 60));
 const requestedMode = valueFor("--mode") ?? "both";
+const requestedTarget = valueFor("--target");
 const modes: ReplayMode[] = requestedMode === "both"
     ? ["whole-file-raw", "isolated-crossdated-reference"]
     : [requestedMode as ReplayMode];
@@ -240,10 +244,18 @@ const inventory = sharedIds.map((seriesId) => {
         crossdatedZeroYears: truth.crossdatedZeroYears,
     };
 });
-const replayTargets = inventory.filter((row) => (
+const allReplayTargets = inventory.filter((row) => (
     row.initialOperationCount > 0
 ));
-const excludedTruthTargets = inventory.filter((row) => (
+const replayTargets = requestedTarget
+    ? allReplayTargets.filter((row) => (
+        row.seriesId.trim().toUpperCase() === requestedTarget.trim().toUpperCase()
+    ))
+    : allReplayTargets;
+if (requestedTarget && replayTargets.length === 0) {
+    throw new Error(`target has no derived dating operation: ${requestedTarget}`);
+}
+const excludedTruthTargets = allReplayTargets.filter((row) => (
     !row.reconstructionMatchesRaw && row.initialOperationCount > 0
 ));
 
@@ -332,6 +344,9 @@ for (const mode of modes) {
                     reviewStatus: before.reviewDecision?.status ?? null,
                     reviewReason: before.reviewDecision?.reason ?? null,
                     finalReason: before.audit?.finalReason ?? null,
+                    candidates: before.candidates,
+                    diagnosisAudit: before.audit,
+                    reviewDecisionDetail: before.reviewDecision,
                     stateHash: siteHash(site),
                     error: before.error ?? afterReopen.error,
                 });
@@ -378,6 +393,9 @@ for (const mode of modes) {
                     reviewStatus: null,
                     reviewReason: null,
                     finalReason: null,
+                    candidates: [],
+                    diagnosisAudit: null,
+                    reviewDecisionDetail: null,
                     stateHash: siteHash(site),
                     error,
                 });
@@ -514,10 +532,13 @@ const summary = {
         exactReconstructionSeries: inventory.filter(
             (row) => row.reconstructionMatchesRaw,
         ).length,
+        availableReplaySeries: allReplayTargets.length,
         primaryReplaySeries: replayTargets.filter(
             (row) => row.reconstructionMatchesRaw,
         ).length,
-        supplementalReplaySeries: excludedTruthTargets.length,
+        supplementalReplaySeries: replayTargets.filter(
+            (row) => !row.reconstructionMatchesRaw,
+        ).length,
         replaySeries: replayTargets.length,
         excludedNonExactTruthSeries: excludedTruthTargets.length,
         replayTruthOperations: replayTargets.reduce(

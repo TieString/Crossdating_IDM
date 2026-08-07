@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { DiagnosisEvent } from "../types";
+import type { DiagnosisEvent, SeriesCoreDiagnosis } from "../types";
 import {
     partialMoveExplainsWholeSeriesCandidate,
     partialMoveSupportsSequentialMissingDepth,
     prioritizeEndpointUnitAgainstWhole,
+    pruneUnanchoredUnitAlternativesToCandidatePartial,
     pruneLocalEventsDisconnectedFromWholeBaseline,
     projectSequentialUnitChainHead,
+    recoverCandidateBackedPartialConsensus,
     pruneWholeSeriesPartialAliases,
     pruneUnsupportedFalseRingPathSupplements,
     unitEventCompetesWithWholeAtNewerEndpoint,
@@ -73,6 +75,113 @@ const partialMoveEvent = (shiftYears: number, fixedSideLag = 0): DiagnosisEvent 
         lagBefore: shiftYears + fixedSideLag,
         lagAfter: fixedSideLag,
     },
+});
+
+const candidatePartial = ({
+    shiftYears,
+    anchorYear,
+    candidateId,
+    source,
+    observedLag = shiftYears,
+    gain = 0.2,
+}: {
+    shiftYears: number;
+    anchorYear: number;
+    candidateId: string;
+    source: "cofecha_segment_lag" | "segmented_diagnosis";
+    observedLag?: number;
+    gain?: number;
+}): DiagnosisEvent => {
+    const event = partialMoveEvent(shiftYears);
+    event.startYear = anchorYear - 4;
+    event.endYear = anchorYear + 4;
+    event.rankedYears = [{
+        year: anchorYear,
+        rank: 1,
+        score: 1,
+        evidenceTags: [source],
+    }];
+    event.evidence.algorithmSources = [source, "candidate_ranking"];
+    event.evidence.candidateIds = [candidateId];
+    event.evidence.notes = ["candidate_hard_gate_passed"];
+    event.evidence.lagBefore = observedLag;
+    event.evidence.lagAfter = 0;
+    event.evidence.correlationGain = gain;
+    return event;
+};
+
+const candidateRecoveryDiagnosis = {
+    targetTree: "TEST",
+    targetRange: { startYear: 1800, endYear: 2020 },
+} as SeriesCoreDiagnosis;
+
+describe("recoverCandidateBackedPartialConsensus", () => {
+    it("recovers the shared amplitude of independent COFECHA and segmented candidates", () => {
+        const recovered = recoverCandidateBackedPartialConsensus([
+            candidatePartial({
+                shiftYears: -4,
+                anchorYear: 1904,
+                candidateId: "cofecha-partial",
+                source: "cofecha_segment_lag",
+            }),
+            candidatePartial({
+                shiftYears: -4,
+                anchorYear: 1902,
+                candidateId: "segmented-partial",
+                source: "segmented_diagnosis",
+            }),
+        ], candidateRecoveryDiagnosis, 100);
+
+        expect(recovered?.eventType).toBe("partialMove");
+        expect(recovered?.shiftYears).toBe(-4);
+        expect(recovered?.evidence.lagBefore).toBe(-4);
+        expect(recovered?.evidence.lagAfter).toBe(0);
+        expect(recovered?.evidence.algorithmSources)
+            .toContain("candidate_backed_partial_consensus");
+    });
+
+    it("uses a coherent COFECHA amplitude over an incoherent large-shift alternative", () => {
+        const recovered = recoverCandidateBackedPartialConsensus([
+            candidatePartial({
+                shiftYears: -4,
+                anchorYear: 1875,
+                candidateId: "cofecha-partial",
+                source: "cofecha_segment_lag",
+                observedLag: -4,
+            }),
+            candidatePartial({
+                shiftYears: -56,
+                anchorYear: 1892,
+                candidateId: "incoherent-partial",
+                source: "segmented_diagnosis",
+                observedLag: -4,
+            }),
+        ], candidateRecoveryDiagnosis, 100);
+
+        expect(recovered?.shiftYears).toBe(-4);
+        expect(recovered?.evidence.candidateIds).toEqual(["cofecha-partial"]);
+        expect(recovered?.evidence.algorithmSources)
+            .toContain("cofecha_backed_partial_over_incoherent_alternatives");
+    });
+
+    it("leaves -2 candidates to the explicit missing-staircase competition", () => {
+        const recovered = recoverCandidateBackedPartialConsensus([
+            candidatePartial({
+                shiftYears: -2,
+                anchorYear: 1904,
+                candidateId: "cofecha-partial",
+                source: "cofecha_segment_lag",
+            }),
+            candidatePartial({
+                shiftYears: -2,
+                anchorYear: 1902,
+                candidateId: "segmented-partial",
+                source: "segmented_diagnosis",
+            }),
+        ], candidateRecoveryDiagnosis, 100);
+
+        expect(recovered).toBeNull();
+    });
 });
 
 describe("pruneWholeSeriesPartialAliases", () => {
@@ -362,6 +471,35 @@ describe("projectSequentialUnitChainHead", () => {
         });
     });
 
+    it("does not project an exact candidate-backed partial through an unanchored unit path", () => {
+        const partial = partialMoveEvent(-4);
+        partial.evidence.algorithmSources = [
+            "candidate_backed_partial_consensus",
+            "cofecha_segment_lag",
+        ];
+        partial.evidence.candidateIds = ["partial-a", "partial-b"];
+        const missing = falseRingEvent(1840, false);
+        missing.eventType = "missingRing";
+        missing.evidence.lagBefore = -1;
+        missing.evidence.lagAfter = 0;
+
+        expect(projectSequentialUnitChainHead([partial, missing]))
+            .toEqual([partial, missing]);
+    });
+
+    it("allows an independently candidate-backed unit to head the deferred state", () => {
+        const partial = partialMoveEvent(-4);
+        const missing = falseRingEvent(1840, true);
+        missing.eventType = "missingRing";
+        missing.evidence.lagBefore = -1;
+        missing.evidence.lagAfter = 0;
+
+        const [projected] = projectSequentialUnitChainHead([partial, missing]);
+        expect(projected.eventType).toBe("missingRing");
+        expect(projected.evidence.algorithmSources)
+            .toContain("sequential_unit_chain_projection");
+    });
+
     it("keeps the projected missing year when Top1 is at the window edge", () => {
         const partial = partialEvent(true);
         partial.startYear = 1779;
@@ -372,5 +510,37 @@ describe("projectSequentialUnitChainHead", () => {
         expect(projected.startYear).toBe(1778);
         expect(projected.endYear).toBe(1786);
         expect(projected.rankedYears[0]?.year).toBe(1778);
+    });
+});
+
+describe("pruneUnanchoredUnitAlternativesToCandidatePartial", () => {
+    it("removes a conditioned unit alias that returns to the same fixed lag", () => {
+        const partial = partialMoveEvent(-4);
+        partial.evidence.algorithmSources = ["candidate_backed_partial_consensus"];
+        partial.evidence.candidateIds = ["partial-a", "partial-b"];
+        const missing = falseRingEvent(1840, false);
+        missing.eventType = "missingRing";
+        missing.evidence.lagBefore = -1;
+        missing.evidence.lagAfter = 0;
+        missing.evidence.notes = ["partial_conditioned_unit_transition"];
+
+        expect(pruneUnanchoredUnitAlternativesToCandidatePartial([
+            missing,
+            partial,
+        ])).toEqual([partial]);
+    });
+
+    it("keeps an independently candidate-backed unit transition", () => {
+        const partial = partialMoveEvent(-4);
+        const missing = falseRingEvent(1840, true);
+        missing.eventType = "missingRing";
+        missing.evidence.lagBefore = -1;
+        missing.evidence.lagAfter = 0;
+        missing.evidence.notes.push("partial_conditioned_unit_transition");
+
+        expect(pruneUnanchoredUnitAlternativesToCandidatePartial([
+            missing,
+            partial,
+        ])).toEqual([missing, partial]);
     });
 });

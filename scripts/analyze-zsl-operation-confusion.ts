@@ -35,6 +35,7 @@ const outputPath = resolve(
     valueFor("--output")
     ?? "D:/软件测试/ZSL/window-coverage-results/zsl-operation-truth.json",
 );
+const requestedTarget = valueFor("--target");
 
 const sha256 = (path: string): string => createHash("sha256")
     .update(readFileSync(path))
@@ -84,8 +85,16 @@ const crossdated = parseRwl(crossdatedText);
 const sharedIds = [...raw.keys()]
     .filter((seriesId) => crossdated.has(seriesId))
     .sort();
+const analyzedIds = requestedTarget
+    ? sharedIds.filter((seriesId) => (
+        seriesId.trim().toUpperCase() === requestedTarget.trim().toUpperCase()
+    ))
+    : sharedIds;
+if (requestedTarget && analyzedIds.length === 0) {
+    throw new Error(`target not shared by RAW/crossdated: ${requestedTarget}`);
+}
 
-const series = sharedIds.map((seriesId) => {
+const series = analyzedIds.map((seriesId) => {
     const rawSeries = raw.get(seriesId)!;
     const crossdatedSeries = crossdated.get(seriesId)!;
     const truth = deriveZslSeriesTruth(rawSeries, crossdatedSeries);
@@ -199,6 +208,7 @@ const report = {
         rawSeries: raw.size,
         crossdatedSeries: crossdated.size,
         sharedSeries: sharedIds.length,
+        analyzedSeries: analyzedIds.length,
         reconstructionFailures: series.filter((row) => !row.reconstructionMatchesRaw).length,
         wholeSeriesMoveSeries: series.filter((row) => row.wholeSeriesMove !== null).length,
         partialMoveTransitions: series.reduce(

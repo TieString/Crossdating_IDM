@@ -539,6 +539,160 @@ const withCandidateSupport = (
     };
 };
 
+const candidateEventAnchorYear = (event: DiagnosisEvent): number | null => {
+    const year = event.rankedYears
+        .slice()
+        .sort((left, right) => left.rank - right.rank)[0]?.year;
+    return Number.isInteger(year) ? year : null;
+};
+
+/**
+ * Recover a physical partial move when executable edit evidence is stronger than the regularized
+ * lag path: either independent candidates agree, or a COFECHA-backed amplitude is the only one
+ * coherent with the observed lag. Candidate before/after metrics are global, so the recovered
+ * local state is normalized to the directly evaluated `shift -> 0` edit.
+ */
+export const recoverCandidateBackedPartialConsensus = (
+    candidateEvents: DiagnosisEvent[],
+    diagnosis: SeriesCoreDiagnosis,
+    maxPartialGapYears: number,
+): DiagnosisEvent | null => {
+    if (candidateEvents.some((event) => event.eventType !== "partialMove")) return null;
+    const eligible = candidateEvents.filter((event) => (
+        event.eventType === "partialMove"
+        && event.shiftSide === "older"
+        // Unit-depth -2/-3 steps have a dedicated explicit missing-staircase competition. Let
+        // that path run before using this large-gap candidate fallback.
+        && (event.shiftYears ?? 0) <= -4
+        && isAutomaticPartialShift(event.shiftYears, {
+            maxPartialGapYears,
+            seriesLength:
+                diagnosis.targetRange.endYear - diagnosis.targetRange.startYear + 1,
+            minimumSideYears: DEFAULT_EVENT_OPERATION_RECOVERY_CONFIG.minimumSideYears,
+        })
+        && event.evidence.notes.includes("candidate_hard_gate_passed")
+        && (event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY) >= 0.04
+        && candidateEventAnchorYear(event) !== null
+    ));
+    if (eligible.length === 0) return null;
+    const shifts = new Set(eligible.map((event) => event.shiftYears));
+    const hasCofechaSupport = eligible.some((event) => (
+        event.evidence.algorithmSources.includes("cofecha_segment_lag")
+    ));
+    const hasIndependentSegmentedSupport = eligible.some((event) => (
+        !event.evidence.algorithmSources.includes("cofecha_segment_lag")
+        && event.evidence.algorithmSources.includes("segmented_diagnosis")
+    ));
+    let supporting: DiagnosisEvent[];
+    let recoverySource: "candidate_backed_partial_consensus"
+        | "cofecha_backed_partial_over_incoherent_alternatives";
+    const allCandidateIds = new Set(
+        eligible.flatMap((event) => event.evidence.candidateIds),
+    );
+    if (shifts.size === 1
+        && allCandidateIds.size >= 2
+        && hasCofechaSupport
+        && hasIndependentSegmentedSupport) {
+        supporting = eligible;
+        recoverySource = "candidate_backed_partial_consensus";
+    } else {
+        const coherentCofecha = eligible.filter((event) => (
+            event.evidence.algorithmSources.includes("cofecha_segment_lag")
+            && event.shiftYears === event.evidence.lagBefore
+            && (event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY) >= 0.1
+        ));
+        const alternatives = eligible.filter((event) => event !== coherentCofecha[0]);
+        const alternativesAreIncoherent = alternatives.length > 0
+            && alternatives.every((event) => (
+                !event.evidence.algorithmSources.includes("cofecha_segment_lag")
+                && event.shiftYears !== event.evidence.lagBefore
+            ));
+        if (coherentCofecha.length !== 1 || !alternativesAreIncoherent) return null;
+        supporting = coherentCofecha;
+        recoverySource = "cofecha_backed_partial_over_incoherent_alternatives";
+    }
+
+    const candidateIds = new Set(
+        supporting.flatMap((event) => event.evidence.candidateIds),
+    );
+
+    const anchors = supporting
+        .map(candidateEventAnchorYear)
+        .filter((year): year is number => year !== null)
+        .sort((left, right) => left - right);
+    const anchorSpan = anchors[anchors.length - 1] - anchors[0];
+    if (anchorSpan > 24) return null;
+    const centerYear = Math.round(
+        anchors.reduce((sum, year) => sum + year, 0) / anchors.length,
+    );
+    const width = 13;
+    const boundedWidth = Math.min(
+        width,
+        diagnosis.targetRange.endYear - diagnosis.targetRange.startYear + 1,
+    );
+    const startYear = Math.max(
+        diagnosis.targetRange.startYear,
+        Math.min(
+            centerYear - Math.floor(boundedWidth / 2),
+            diagnosis.targetRange.endYear - boundedWidth + 1,
+        ),
+    );
+    const endYear = startYear + boundedWidth - 1;
+    const rankedYears = Array.from(
+        { length: boundedWidth },
+        (_, index) => {
+            const year = startYear + index;
+            const totalDistance = anchors.reduce(
+                (sum, anchor) => sum + Math.abs(year - anchor),
+                0,
+            );
+            return {
+                year,
+                score: -totalDistance,
+                evidenceTags: ["candidate_backed_partial_consensus"],
+            };
+        },
+    )
+        .sort((left, right) => right.score - left.score || left.year - right.year)
+        .map((row, index) => ({ ...row, rank: index + 1 }));
+    const strongest = supporting.slice().sort((left, right) => (
+        right.evidence.score - left.evidence.score
+    ))[0];
+    const shiftYears = supporting[0].shiftYears!;
+    return {
+        ...strongest,
+        id: `${strongest.id}-candidate-backed-partial-consensus`,
+        eventType: "partialMove",
+        shiftYears,
+        shiftSide: "older",
+        startYear,
+        endYear,
+        rankedYears,
+        confidenceLevel: "medium",
+        evidence: {
+            ...strongest.evidence,
+            algorithmSources: Array.from(new Set([
+                ...supporting.flatMap((event) => event.evidence.algorithmSources),
+                "candidate_backed_partial_consensus",
+                recoverySource,
+            ])).sort(),
+            lagBefore: shiftYears,
+            lagAfter: 0,
+            candidateIds: Array.from(candidateIds).sort(),
+            samplePairs: Math.max(...supporting.map((event) => event.evidence.samplePairs)),
+            notes: Array.from(new Set([
+                ...strongest.evidence.notes,
+                `partial_recovery=${recoverySource}`,
+                `partial_candidate_consensus_shift=${shiftYears}`,
+                `partial_candidate_consensus_count=${candidateIds.size}`,
+                `partial_candidate_consensus_anchors=${anchors.join(",")}`,
+                `partial_candidate_consensus_anchor_span=${anchorSpan}`,
+                "partial_candidate_global_after_lag_not_used_as_local_state",
+            ])),
+        },
+    };
+};
+
 export const pruneUnsupportedFalseRingPathSupplements = (
     events: DiagnosisEvent[],
     hasCandidateOperation: boolean,
@@ -866,6 +1020,42 @@ const isCandidateBackedExactPartial = (event: DiagnosisEvent): boolean => (
     )
 );
 
+const hasIndependentUnitSpecificAnchor = (event: DiagnosisEvent): boolean => (
+    event.evidence.candidateIds.length > 0
+    || event.evidence.algorithmSources.some((source) => (
+        source === "shared_explicit_zero_marker"
+        || source === "confirmed_target_zero_staircase"
+        || source === "sequential_missing_candidate_consensus"
+        || source === "compressed_missing_staircase_evidence"
+    ))
+    || event.evidence.notes.some((note) => (
+        note.startsWith("shared_zero_marker_year=")
+        || note.startsWith("confirmed_target_staircase_year=")
+    ))
+);
+
+/** Remove a conditioned unit hypothesis that is an unanchored alternative to the same fixed side. */
+export const pruneUnanchoredUnitAlternativesToCandidatePartial = (
+    events: DiagnosisEvent[],
+): DiagnosisEvent[] => {
+    const exactPartials = events.filter(isCandidateBackedExactPartial);
+    if (exactPartials.length === 0) return events;
+    return events.filter((event) => {
+        if (event.eventType !== "missingRing" && event.eventType !== "falseRing") {
+            return true;
+        }
+        if (!event.evidence.notes.includes("partial_conditioned_unit_transition")) {
+            return true;
+        }
+        if (hasIndependentUnitSpecificAnchor(event)) return true;
+        return !exactPartials.some((partial) => (
+            event.evidence.lagAfter === partial.evidence.lagAfter
+            && event.evidence.lagBefore !== partial.evidence.lagAfter
+            && event.evidence.lagAfter !== partial.evidence.lagBefore
+        ));
+    });
+};
+
 const addCompressedMissingStaircaseEvidence = (
     event: DiagnosisEvent,
     diagnosis: SeriesCoreDiagnosis,
@@ -1008,6 +1198,14 @@ export const projectSequentialUnitChainHead = (
     if (!units.every((event) => isDirectedUnitTransition(event, eventType))) return events;
 
     const partials = events.filter((event) => event.eventType === "partialMove");
+    const hasCandidateBackedExactPartial = partials.some(
+        isCandidateBackedExactPartial,
+    );
+    const hasIndependentUnitAnchor = units.some(hasIndependentUnitSpecificAnchor);
+    // A conditioned unit path has more freedom than one directly evaluated partial edit. Do not
+    // reinterpret an exact candidate-backed step unless a unit-specific candidate/zero anchor
+    // independently supports the staircase explanation.
+    if (hasCandidateBackedExactPartial && !hasIndependentUnitAnchor) return events;
     if (eventType === "missingRing") {
         const overlappingBoundaryUnits = partials.flatMap((partial) => {
             const partialBefore = partial.evidence.lagBefore;
@@ -2138,8 +2336,22 @@ const eventsForSeriesPass = (
         candidateFalse.length > 0,
     );
 
-    const primaryPartialEvents = typeEvents(pathEvents, "partialMove")
+    const pathPartialEvents = typeEvents(pathEvents, "partialMove")
         .map((event) => withCandidateSupport(event, candidateEvents));
+    const candidateBackedPartial = !hasWholeCandidate
+        ? recoverCandidateBackedPartialConsensus(
+            candidateEvents,
+            diagnosis,
+            effectiveConfig.maxPartialGapYears,
+        )
+        : null;
+    const pathAgreesWithCandidate = candidateBackedPartial !== null
+        && pathPartialEvents.some((event) => (
+            event.shiftYears === candidateBackedPartial.shiftYears
+        ));
+    const primaryPartialEvents = candidateBackedPartial && !pathAgreesWithCandidate
+        ? [candidateBackedPartial]
+        : pathPartialEvents;
     const partialEvents = locateMultiviewPartialEvents(
         diagnosis,
         cofechaDiagnosis,
@@ -2266,11 +2478,11 @@ const eventsForSeriesPass = (
             )
         ))
         : independentlyRefinedUnitEvents;
-    const assembledEvents = [
+    const assembledEvents = pruneUnanchoredUnitAlternativesToCandidatePartial([
         ...scoredUnitEvents,
         ...partialEvents,
         ...wholeEvents,
-    ];
+    ]);
     if (audit) audit.assembledEventCount = assembledEvents.length;
     const coherentAssembledEvents = options.enableIncoherentPartialPruning === true
         ? pruneIncoherentPartialSupplements(assembledEvents)

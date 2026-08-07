@@ -154,6 +154,27 @@ const hasReviewablePartialMoveEvidence = (
             config.partialVoteWindowToleranceYears,
         )) return true;
 
+    const candidateConsensusShift = numericNote(
+        event,
+        "partial_candidate_consensus_shift",
+    );
+    const candidateConsensusCount = numericNote(
+        event,
+        "partial_candidate_consensus_count",
+    ) ?? 0;
+    const hasMultiCandidateConsensus = sources.has("candidate_backed_partial_consensus")
+        && candidateConsensusCount >= 2
+        && event.evidence.candidateIds.length >= 2;
+    const hasCofechaOverrideOfIncoherentAlternatives = sources.has(
+        "cofecha_backed_partial_over_incoherent_alternatives",
+    ) && candidateConsensusCount >= 1
+        && event.evidence.candidateIds.length >= 1
+        && (event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY) >= 0.1;
+    if ((hasMultiCandidateConsensus || hasCofechaOverrideOfIncoherentAlternatives)
+        && candidateConsensusShift === shiftYears
+        && (event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY)
+            >= config.minimumPartialJointGain) return true;
+
     const referenceVoteYear = numericNote(event, "reference_vote_year");
     const referenceCoreGain = Math.max(
         numericNote(event, "reference_vote_gain") ?? Number.NEGATIVE_INFINITY,
