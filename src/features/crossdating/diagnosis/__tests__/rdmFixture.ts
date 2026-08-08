@@ -718,8 +718,14 @@ export const createPiecewiseLagMixedCase = (
             ...splitFalseRingParts(sourceValue),
         });
     });
+    const olderSideLag = wholeSeriesLag + ordered.reduce(
+        (sum, event) => sum + event.shiftYears,
+        0,
+    );
+    const displayedStartYear = series.startYear - olderSideLag;
+    const displayedEndYear = series.endYear - wholeSeriesLag;
     const corrupted = new Map<number, number>();
-    for (let year = series.startYear; year <= series.endYear; year += 1) {
+    for (let year = displayedStartYear; year <= displayedEndYear; year += 1) {
         const active = ordered.filter((event) => (
             event.eventType === "partialMove"
                 ? year < event.year

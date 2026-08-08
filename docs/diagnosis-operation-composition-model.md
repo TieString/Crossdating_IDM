@@ -1655,3 +1655,23 @@ COFECHA sidecar、参考重建和保存重开，不是纯定位器 microbenchmar
 恢复失败的无 whole `partialMove -2` 上运行，普通事件路径不付出该枚举成本。跨站点混合矩阵
 保持 84/84 whole 位移精确、错误 whole 位移 0；ZSL RAW/crossdated 13 项、co612 12 项、
 ZSL141、MCP17A 和物理 partial `-2...-100` 回归均通过。
+
+### Round 6A：修正 B7 双伪轮冻结基准的日历端点
+
+B7 第一次建立 manifest 时被 truth round-trip 主动终止，尚未进入生产诊断。失败案例为
+`mon151`：源序列有 416 个有效值，双伪轮注入后按真值删除两次只剩 415 个值，起点也由
+1585 错成 1587。根因在混合 fixture，而不是 falseRing 应用逻辑：fixture 使用
+`target[y] = correct[y + lag(y)]` 生成同一日历坐标，却固定只遍历原始 `startYear...endYear`。
+双伪轮老侧的累积 lag 为 `+2`，显示区间本应向老端延长 2 年；固定起点会在生成时先截掉
+两条真实年轮，后续任何删除顺序都不可能还原源序列。
+
+生成区间现统一由端点状态推导：
+
+- `displayedStartYear = sourceStartYear - (wholeSeriesLag + sum(local shifts))`；
+- `displayedEndYear = sourceEndYear - wholeSeriesLag`。
+
+这与四类操作的固定侧语义一致：缺轮或负向 partial 缩短老端，伪轮延长老端，whole 同时移动
+两端。新增确定性测试验证双伪轮按老到新删除，以及先删除新侧后把老侧真值坐标 `+1`，两种
+确认顺序都逐年逐值还原源序列。修改只位于合成 fixture 和测试，不改变生产诊断。修改后
+`rdmFixtureFalseRing` 6/6、co612 多缺轮 12/12、跨站点混合事件 3/3 通过，其中 whole 与局部
+事件共存仍为 84/84 精确位移。

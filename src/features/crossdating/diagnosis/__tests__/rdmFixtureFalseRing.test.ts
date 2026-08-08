@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { deleteYearWithMode } from "@/features/rwl/edit";
 import {
     createEndAnchoredFalseRingCase,
+    createPiecewiseLagMixedCase,
     type RwlSeries,
 } from "./rdmFixture";
 
@@ -62,6 +63,33 @@ describe("RDM false-ring fixtures", () => {
                 "direct",
                 "right",
             );
+
+            expect([...restored.entries()]).toEqual([...source.valuesByYear.entries()]);
+        },
+    );
+
+    it.each([
+        ["older-to-newer", [1903, 1906]],
+        ["newer-to-older", [1906, 1904]],
+    ] as const)(
+        "round-trips two false rings in %s confirmation order",
+        (_label, deletionYears) => {
+            const source = series();
+            let restored = createPiecewiseLagMixedCase(source, [{
+                eventType: "falseRing",
+                year: 1903,
+                shiftYears: 1,
+                falseMode: "moderate",
+            }, {
+                eventType: "falseRing",
+                year: 1906,
+                shiftYears: 1,
+                falseMode: "moderate",
+            }]).corrupted;
+
+            deletionYears.forEach((year) => {
+                restored = deleteYearWithMode(restored, year, "direct", "right");
+            });
 
             expect([...restored.entries()]).toEqual([...source.valuesByYear.entries()]);
         },
