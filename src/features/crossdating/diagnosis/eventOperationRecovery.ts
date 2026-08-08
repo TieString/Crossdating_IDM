@@ -72,6 +72,7 @@ export type EventOperationRecoveryConfig = {
     dynamicJointPartialUnitMinimumScore: number;
     dynamicJointPartialUnitMinimumMargin: number;
     dynamicJointPartialUnitMaximumDeficit: number;
+    dynamicJointPartialUnitMaximumBreakpointDistance: number;
     dynamicJointPartialUnitMinimumExistingMagnitude: number;
     dynamicJointUnitChainPartialMinimumMargin: number;
     dynamicJointUnitOverPartialMinimumMargin: number;
@@ -109,6 +110,7 @@ EventOperationRecoveryConfig = {
     dynamicJointPartialUnitMinimumScore: 0.02,
     dynamicJointPartialUnitMinimumMargin: 0,
     dynamicJointPartialUnitMaximumDeficit: 0.2,
+    dynamicJointPartialUnitMaximumBreakpointDistance: 2,
     dynamicJointPartialUnitMinimumExistingMagnitude: 10,
     dynamicJointUnitChainPartialMinimumMargin: 0.2,
     dynamicJointUnitOverPartialMinimumMargin: 0,
@@ -304,6 +306,19 @@ export const selectDecisiveJointOperationFusion = (
         initialGridSelection?.operation.eventType === "partialMove"
         ? unitSelection
         : null;
+    const hasDecisiveCoLocatedPartialStep = initialGridSelection !== null
+        && initialGridSelection.operation.eventType === "partialMove"
+        && initialGridSelection.operation.baselineLag === 0
+        && unitSelection !== null
+        && initialGridSelection.score >= config.dynamicJointMinimumScore
+        && (initialGridSelection.shiftScoreMargin ?? 0)
+            >= config.dynamicJointPartialShiftMinimumMargin
+        && initialGridSelection.scoreMargin
+            >= config.dynamicJointPartialOverUnitMinimumMargin
+        && Math.abs(
+            initialGridSelection.operation.bestYear
+            - unitSelection.operation.bestYear,
+        ) <= config.dynamicJointPartialUnitMaximumBreakpointDistance;
     const unitTypeCorrection = localEvents.length === 1
         && (
             localEvents[0].eventType === "missingRing"
@@ -332,6 +347,9 @@ export const selectDecisiveJointOperationFusion = (
         && initialGridSelection !== null
         && partialUnitContextPasses
         && !hasUnopposedExactPartialTransition
+        // A unit edit can approximate the first year of a larger move at the same boundary.
+        // Do not let that hierarchy fallback erase a stable zero-baseline partial step.
+        && !hasDecisiveCoLocatedPartialStep
         && unitFallbackSelection.score
             >= config.dynamicJointPartialUnitMinimumScore
         && unitFallbackSelection.scoreMargin

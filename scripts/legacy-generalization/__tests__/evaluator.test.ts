@@ -101,6 +101,7 @@ const snapshot = (candidateScore: number): LegacyDiagnosisSnapshot => ({
     candidates: [{ score: candidateScore, operationType: "INSERT_MISSING_RING" }],
     audit: null,
     reviewDecision: null,
+    operationGrid: null,
     referenceMode: "cofecha-pass-leave-one-out",
     referenceAnchorCount: 4,
     durationMs: 123,

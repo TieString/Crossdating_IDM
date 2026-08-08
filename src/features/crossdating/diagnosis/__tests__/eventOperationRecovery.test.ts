@@ -885,6 +885,43 @@ describe("decisive dynamic operation fusion", () => {
         expect(result[0].eventType).toBe("missingRing");
     });
 
+    it("keeps a decisive partial step over its co-located unit approximation", () => {
+        const result = fuseDecisiveJointOperationScores(
+            [],
+            fusionDiagnosis,
+            [
+                jointOperation(-1, 0.01, 1851),
+                jointOperation(1, 0.04, 1851),
+                jointOperation(-3, 0.02, 1851),
+                jointOperation(-4, 0.2, 1851),
+                jointOperation(-5, 0.03, 1851),
+            ],
+        );
+
+        expect(result).toHaveLength(1);
+        expect(result[0]).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -4,
+        });
+    });
+
+    it("keeps the unit fallback when the partial peak belongs to a remote mode", () => {
+        const result = fuseDecisiveJointOperationScores(
+            [],
+            fusionDiagnosis,
+            [
+                jointOperation(-1, 0.01, 1851),
+                jointOperation(1, 0.04, 1851),
+                jointOperation(-3, 0.02, 1900),
+                jointOperation(-4, 0.2, 1900),
+                jointOperation(-5, 0.03, 1900),
+            ],
+        );
+
+        expect(result).toHaveLength(1);
+        expect(result[0].eventType).toBe("falseRing");
+    });
+
     it("does not recover a unit fallback outside the calibrated score gate", () => {
         const result = fuseDecisiveJointOperationScores(
             [],

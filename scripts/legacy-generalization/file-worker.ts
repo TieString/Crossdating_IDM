@@ -102,7 +102,12 @@ const diagnosisAudits: Array<{
     scenarioPair: string;
     snapshot: Pick<
         LegacyDiagnosisSnapshot,
-        "strictEvent" | "reviewEvent" | "candidates" | "audit" | "reviewDecision"
+        | "strictEvent"
+        | "reviewEvent"
+        | "candidates"
+        | "audit"
+        | "reviewDecision"
+        | "operationGrid"
     >;
 }> = [];
 const errors: Array<{ scope: string; error: string }> = [];
@@ -125,6 +130,8 @@ for (const target of file.targets) {
         targetId: target.targetId,
         context: cleanContext,
         runId: `${file.fileId}-quality`,
+        includeOperationGrid: auditOutputPath !== null
+            && (onlyScenarioKind === null || onlyScenarioKind === "clean"),
     });
     cleanSnapshotByTarget.set(target.targetId, snapshot);
     qualityByTarget[target.targetId] = computeQualityMetrics({
@@ -269,6 +276,7 @@ const runSingle = async (): Promise<void> => {
                         targetId: target.targetId,
                         context,
                         runId: `${file.fileId}-${scenario.kind}-before`,
+                        includeOperationGrid: auditOutputPath !== null,
                     });
                 const reopenedSite = await reopenFormattedSite(
                     scenarioSite,
@@ -287,6 +295,9 @@ const runSingle = async (): Promise<void> => {
                     targetId: target.targetId,
                     context,
                     runId: `${file.fileId}-${scenario.kind}-after`,
+                    // The serialized state must produce the same diagnosis, but the expensive
+                    // 101-operation research grid is deterministic for an unchanged site.
+                    includeOperationGrid: false,
                 });
                 if (auditOutputPath) {
                     for (const [scenarioPair, snapshot] of [
@@ -304,6 +315,7 @@ const runSingle = async (): Promise<void> => {
                                 candidates: snapshot.candidates,
                                 audit: snapshot.audit,
                                 reviewDecision: snapshot.reviewDecision,
+                                operationGrid: snapshot.operationGrid,
                             },
                         });
                     }
@@ -437,6 +449,7 @@ const runSerial = async (): Promise<LegacySerialEventState[]> => {
                     targetId: seriesId,
                     context,
                     runId: `${file.fileId}-${scenarioKind}-round-${round}`,
+                    includeOperationGrid: auditOutputPath !== null,
                 }),
             }));
             if (auditOutputPath) {
@@ -454,6 +467,7 @@ const runSerial = async (): Promise<LegacySerialEventState[]> => {
                             candidates: snapshot.candidates,
                             audit: snapshot.audit,
                             reviewDecision: snapshot.reviewDecision,
+                            operationGrid: snapshot.operationGrid,
                         },
                     });
                 });

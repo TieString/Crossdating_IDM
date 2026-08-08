@@ -1234,3 +1234,72 @@ display 和 locator 全链路快照。
 `partial -> falseRing`，其失败发生得更早：精确 `-4/-10` partial 已在
 `candidateProjectedEvents` 中形成，但 operation fusion 选择了一个删除后仍保持负 lag 的
 falseRing。下一轮必须修复 fusion 的操作方向与状态路径解释，不能复用本轮 serial 历史门禁。
+
+### Round 5F：同断点单位近似不得覆盖决定性的局部阶跃
+
+- 生产 baseline 审计：
+  `D:\软件测试\legacy-cross-file-generalization-results\partial-false-operation-grid-production-baseline-2026-08-08`。
+- 24 文件 single：
+  `D:\软件测试\legacy-cross-file-generalization-results\legacy-partial-unit-colocated-gate-single-2026-08-08`。
+- 24 文件 serial：
+  `D:\软件测试\legacy-cross-file-generalization-results\legacy-partial-unit-colocated-gate-serial-2026-08-08`。
+- ZSL RAW -> crossdated 串行回放：
+  `D:\软件测试\ZSL\window-coverage-results\zsl-serial-operation-partial-unit-colocated-gate-2026-08-08`。
+
+Round 5E 剩余的 18 个 `partial -> false` 不是同一种失败。以 `az101/413021` 的 `-4`
+局部移动为例，完整 `year x operation` 网格已经把 `partialMove -4 @ 1851` 选为稳定全局
+赢家，动态分数 0.205、相对单位族 margin 0.168、相邻位移 margin 0.085；但是旧的
+`dynamic_unit_fallback` 允许分数仅 0.037 的 `falseRing +1 @ 1851` 覆盖它。一个单位编辑
+确实能近似多年份移动的第一年，因此“单位操作自由度更低”不能单独作为最终优先级。
+
+融合层现在先识别**决定性的同断点局部阶跃**。只有同时满足以下条件，单位回退才不得覆盖
+局部移动：
+
+1. 较新固定侧 baseline lag 为 0；
+2. 动态网格的主操作为 `partialMove`，总分通过现有 presence 门槛；
+3. 该位移相对其他 98 个负向位移稳定，shift margin 至少 0.035；
+4. partial 相对最强单位操作的 family margin 至少 0.075；
+5. partial 与单位近似的最佳断点相距不超过 2 年。
+
+该规则不按位移绝对值惩罚，也不偏爱 `-4/-10`。`-50/-100` 只要满足相同证据即可保留；
+非零整体 baseline、远距离模式竞争、位移不稳定以及已有独立单位路径仍走原仲裁。基准审计
+新增可选 operation grid，并严格复用生产融合的 baseline 语义；保存重开只计算一次昂贵网格，
+不会改变诊断输入或普通 benchmark 性能。
+
+| single 指标 | Round 5E | Round 5F |
+| --- | ---: | ---: |
+| response | 417/1152 | 417/1152 |
+| type correct | 344/1152 | **346/1152** |
+| operation correct | 342/1152 | **344/1152** |
+| 唯一主窗口覆盖 | 181/1056 | **183/1056** |
+| 条件窗口覆盖 | 181/267 | **183/269** |
+| Top1 | 41/1056 | **42/1056** |
+| clean strict / review | 15/48 / 14/48 | 15/48 / 14/48 |
+| 保存重开一致 | 1200/1200 | 1200/1200 |
+
+1200 个 before-save 状态逐案只有两个变化，均为完整修复，没有旧成功损失：
+
+- `az101/413021`：`falseRing +1 @ 1851` 改为精确 `partialMove -4 @ 1851`，窗口
+  1844--1856 覆盖真断点，Top1 正确。
+- `cana212/PRB07A` 连续缺块：`falseRing +1 @ 1848` 改为精确
+  `partialMove -10 @ 1861`，窗口 1850--1862 覆盖真断点 1860。
+
+partial 的混淆由正确 36/144、拒答 72、missing 18、false 18 改为正确 **38/144**、
+拒答 72、missing 18、false **16**。whole 仍为正确 75/96、拒答 19、missing 1，
+`whole -> partial` 保持 0。24 个 single worker 的运行错误、源文件修改和保存重开差异均为 0。
+
+serial 的 768 个事件状态相对 Round 5E 逐案零变化：confirmed 187、ever correct window 189、
+首次回答 296、首次操作正确 267、首次窗口覆盖 181、blocked by prior event 447。说明新门禁
+没有把多个离散缺轮重新压成连续缺块。
+
+ZSL 两种参考模式各完成 34/34 保存重开；严格 exact-reconstruction 真值在两种模式下均为
+whole 3/3、partial 1/1、missing 5/6、false 2/2，whole -> partial 与 partial -> missing 均为
+0。RAW 与 crossdated SHA-256 运行前后不变。相关 operation fusion、ZSL、ZSL141、MCP17A、
+co612 和 `-2...-100` 物理缺块共 140 项通过，Legacy evaluator 6 项、Legacy typecheck 和
+production build 通过。
+
+这一步只关闭“同一断点的单位近似覆盖决定性 partial”这一条路径。剩余 16 个
+`partial -> false` 中，一部分已经选对位移但断点与单位峰属于远距离模式，一部分在 fusion
+前已形成 false，还有一部分连动态位移族都选错。下一轮应把 candidate/COFECHA 边界锚点与
+同区域 operation family 联合起来，先选唯一位置模式，再在该模式内比较 `+1/-1/-2...-100`；
+不能继续单纯放宽本轮 family margin 或断点距离。

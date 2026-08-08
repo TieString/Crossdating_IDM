@@ -13,6 +13,16 @@ import {
     splitReportByParts,
 } from "@/features/cofecha/formatter";
 import { diagnoseCrossdating } from "@/features/crossdating/diagnosis/engine";
+import { getConfig } from "@/features/crossdating/diagnosis/config";
+import { getJointCounterfactualOperationScores } from "@/features/crossdating/diagnosis/jointCounterfactualOperation";
+import { DEFAULT_MAX_PARTIAL_GAP_YEARS } from "@/features/crossdating/diagnosis/partialMoveSemantics";
+import {
+    scoreDynamicJointOperation,
+    selectDynamicJointOperation,
+    selectDynamicUnitOperation,
+} from "@/features/crossdating/diagnosis/jointOperationSelector";
+import { preprocessSeries } from "@/features/crossdating/diagnosis/series";
+import { diagnoseSeriesCore } from "@/features/crossdating/diagnosis/segments";
 import type { DiagnosisEvent } from "@/features/crossdating/diagnosis/types";
 import {
     cofechaStyleStandardize,
@@ -216,6 +226,7 @@ export const diagnoseTruthBlind = (input: {
     targetId: string;
     context: CofechaContext;
     runId: string;
+    includeOperationGrid?: boolean;
 }): LegacyDiagnosisSnapshot => {
     const started = performance.now();
     try {
@@ -250,6 +261,66 @@ export const diagnoseTruthBlind = (input: {
             includeEventDecisionAudits: true,
             reviewWindowDisplayMode: "review",
         });
+        const operationGrid = input.includeOperationGrid === true
+            ? (() => {
+                const core = diagnoseSeriesCore(
+                    input.siteData,
+                    input.targetId,
+                    getConfig({ referenceConfig }),
+                    preprocessSeries,
+                );
+                if (!core) return null;
+                const beforeFusion = diagnosis.eventDecisionAudits?.[0]
+                    ?.detectedBeforeFusion ?? [];
+                const hasWholeBaseline = beforeFusion.some(
+                    (event) => event.eventType === "wholeSeriesMove",
+                );
+                const localUnitEvents = beforeFusion.filter((event) => (
+                    event.eventType === "missingRing" || event.eventType === "falseRing"
+                ));
+                const productionBaselineLag = hasWholeBaseline
+                    && localUnitEvents.length === 1
+                    ? localUnitEvents[0].lagAfter ?? 0
+                    : 0;
+                const operations = getJointCounterfactualOperationScores(
+                    core,
+                    15,
+                    DEFAULT_MAX_PARTIAL_GAP_YEARS,
+                    productionBaselineLag,
+                );
+                const dynamicSelection = selectDynamicJointOperation(operations);
+                const unitSelection = selectDynamicUnitOperation(operations);
+                return {
+                    operations: operations.map((operation) => ({
+                        eventType: operation.eventType,
+                        shiftYears: operation.shiftYears,
+                        bestYear: operation.bestYear,
+                        dynamicScore: scoreDynamicJointOperation(operation, operations),
+                        bestRawGain: operation.bestRawGain,
+                        bestDifferenceGain: operation.bestDifferenceGain,
+                        bestCombinedGain: operation.bestCombinedGain,
+                        topThreeDifferenceGain: operation.topThreeDifferenceGain,
+                        remoteDifferenceMargin: operation.remoteDifferenceMargin,
+                        baselineLag: operation.baselineLag,
+                    })),
+                    dynamicSelection: dynamicSelection ? {
+                        eventType: dynamicSelection.operation.eventType,
+                        shiftYears: dynamicSelection.operation.shiftYears,
+                        bestYear: dynamicSelection.operation.bestYear,
+                        score: dynamicSelection.score,
+                        scoreMargin: dynamicSelection.scoreMargin,
+                        shiftScoreMargin: dynamicSelection.shiftScoreMargin,
+                    } : null,
+                    unitSelection: unitSelection ? {
+                        eventType: unitSelection.operation.eventType,
+                        shiftYears: unitSelection.operation.shiftYears,
+                        bestYear: unitSelection.operation.bestYear,
+                        score: unitSelection.score,
+                        scoreMargin: unitSelection.scoreMargin,
+                    } : null,
+                };
+            })()
+            : null;
         return {
             strictEvent: diagnosis.events[0] ?? null,
             reviewEvent: diagnosis.reviewEvents?.[0] ?? null,
@@ -258,6 +329,7 @@ export const diagnoseTruthBlind = (input: {
             )),
             audit: diagnosis.eventDecisionAudits?.[0] ?? null,
             reviewDecision: diagnosis.reviewWindowDecisions?.[0] ?? null,
+            operationGrid,
             referenceMode,
             referenceAnchorCount:
                 referenceConfig.cofechaPassReference?.summary.includedCount
@@ -272,6 +344,7 @@ export const diagnoseTruthBlind = (input: {
             candidates: [],
             audit: null,
             reviewDecision: null,
+            operationGrid: null,
             referenceMode: "cofecha-pass-leave-one-out",
             referenceAnchorCount: 0,
             durationMs: Math.round(performance.now() - started),

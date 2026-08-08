@@ -172,6 +172,35 @@ export type LegacyDiagnosisSnapshot = {
     candidates: Array<Record<string, unknown>>;
     audit: DiagnosisEventDecisionAudit | null;
     reviewDecision: DiagnosisReviewWindowDecision | null;
+    operationGrid: {
+        operations: Array<{
+            eventType: DiagnosisEvent["eventType"];
+            shiftYears: number;
+            bestYear: number;
+            dynamicScore: number;
+            bestRawGain: number;
+            bestDifferenceGain: number;
+            bestCombinedGain: number;
+            topThreeDifferenceGain: number;
+            remoteDifferenceMargin: number;
+            baselineLag: number;
+        }>;
+        dynamicSelection: {
+            eventType: DiagnosisEvent["eventType"];
+            shiftYears: number;
+            bestYear: number;
+            score: number;
+            scoreMargin: number;
+            shiftScoreMargin: number | null;
+        } | null;
+        unitSelection: {
+            eventType: DiagnosisEvent["eventType"];
+            shiftYears: number;
+            bestYear: number;
+            score: number;
+            scoreMargin: number;
+        } | null;
+    } | null;
     referenceMode: "cofecha-pass-leave-one-out" | "cofecha-master-leave-one-out";
     referenceAnchorCount: number;
     durationMs: number;
