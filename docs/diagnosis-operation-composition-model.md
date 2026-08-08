@@ -862,3 +862,52 @@ ZSL202 的相邻 false 1884 + missing 1886 仍在第一步拒答。补充实验�
 纠正收益仍为负且仅 1/8 参考支持。由于当前内部参考没有可辨识证据，本轮没有通过降低门槛
 强制回答，也没有把失败隐藏在扩大窗口中。下一步先修复 ZSL212 只差一年的模式内窗口，再
 继续审计多事件条件下的拒答与参考竞争。
+
+### Round 3G：保持已验证 partial 的 COFECHA 锚定模式
+
+- 修复提交：`993a9855782c42c9080fca2e91e36d1d96fe24b4`。
+- ZSL 提交后冻结结果：
+  `D:\软件测试\ZSL\window-coverage-results\zsl-serial-operation-cofecha-anchor-mode-round5-committed-2026-08-08`。
+- co612 `partialMove -4` 提交后冻结结果：
+  `D:\软件测试\co612-operation-composition-results\whole-partial-4-round5f-cofecha-anchor-mode-committed-2026-08-08`。
+
+ZSL212 的操作融合已经正确恢复 `partialMove -4`，融合前的 13 年窗口也覆盖真实
+`firstFixedYear=1870`；但反事实精定位器随后只使用 difference 与逐参考芯 fixed-lag
+profile 重新选模式，将整文件 RAW 窗口拉到 1857--1869。这属于已经选对操作、却在下游
+丢失候选来源和断点模式的定位错误，不应通过统一扩窗修复。
+
+事件融合现在单独记录来自 `cofecha_segment_lag` 的 partial 断点锚点。定位器只对已经通过
+候选共识恢复的 partial，将该锚点与当前接受中心的中点作为模式先验；校准器仅在没有满足
+5/7/9 年集中证据、仍会输出 `calibrated_default_13` 时使用它。重新选择的 13 年窗必须与
+原模式至少重叠 7 年，因此不能跳到远距离候选峰；已有 5/7/9 年窄窗完全不受影响。空锚点
+不写入 evidence，解析端也拒绝空 token，避免把空字符串转换成年份 0。
+
+| ZSL 严格重建指标 | Round 3F 全 RAW | Round 3G 全 RAW | Round 3F 隔离参考 | Round 3G 隔离参考 |
+| --- | ---: | ---: | ---: | ---: |
+| 响应 | 11/12 | 11/12 | 11/12 | 11/12 |
+| 操作正确 | 11/12 | 11/12 | 11/12 | 11/12 |
+| 局部窗口覆盖 | 7/9 | **8/9** | 8/9 | 8/9 |
+| whole 精确 | 3/3 | 3/3 | 3/3 | 3/3 |
+| partial 精确 | 1/1 | 1/1 | 1/1 | 1/1 |
+| whole -> partial | 0 | 0 | 0 | 0 |
+| partial -> missing | 0 | 0 | 0 | 0 |
+| 保存重开稳定 | 34/34 | 34/34 | 34/34 | 34/34 |
+
+ZSL212 全 RAW 窗口由 1857--1869 改为 1863--1875，隔离参考窗口为 1864--1876；两者都
+保持 `partialMove -4` 并覆盖 1870。RAW 与 crossdated SHA-256 分别仍为
+`63072b6d72c565f2e3da06d32b95d1734599860c0a32c47492654224967744b3` 和
+`a836e8a09030ebdc09135f24f44215ca1ab0c6590fdae6827661ed7d9c64f358`，运行前后未改变。
+
+co612 对照包含 245 个唯一状态，错误 0、残余映射不一致 0、保存重开 245/245。clean
+review 误报保持 2/55；whole 为 40/40，whole + partial 首步 whole 为 120/120，
+whole -> partial/unit 均为 0。纯 `partialMove -4` 操作仍为 22/30、窗口 21/30，应用 whole
+后串行复诊为 84/120。与 Round 3F 后的冻结基线逐案比较，只有
+`mtr831:partial-4:middle` 的 13 年窗口从 1891--1903 平移到 1892--1904，仍覆盖真断点
+1899；没有窗口变宽、覆盖退化或操作类型变化。
+
+验证包括 event window、event ensemble、review display 和 ZSL 操作回归 89 项，operation
+recovery 与 co612 多缺轮连续恢复 62 项，以及 production build。ZSL 严格真值仍有 1 个
+单位事件拒答和 1 个局部窗口未覆盖；co612 的纯 partial 操作与窗口召回也仍分别只有
+73.33% 和 70%。因此本轮只冻结“候选 partial 模式不再被下游定位器丢弃”这一项改进，
+后续仍需扩展不同 partial 幅度、重复同类事件和三至四事件组合，并在外部 ITRDB 文件上
+检验泛化。
