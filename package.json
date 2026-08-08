@@ -30,6 +30,7 @@
     "analyze:zsl-operation-confusion": "node scripts/run-zsl-operation-confusion.mjs",
     "benchmark:zsl:serial-operations": "node scripts/run-zsl-serial-operation-replay.mjs",
     "benchmark:co612:composition": "node scripts/run-co612-operation-composition.mjs",
+    "benchmark:co612:unit-pulse": "node scripts/run-co612-unit-pulse-composition.mjs",
     "benchmark:itrdb:prepare": "node scripts/run-prepare-itrdb-validation-manifest.mjs",
     "benchmark:itrdb:formal": "node scripts/run-itrdb-formal-holdout.mjs",
     "benchmark:itrdb:complex": "node scripts/run-itrdb-complex-events.mjs",
