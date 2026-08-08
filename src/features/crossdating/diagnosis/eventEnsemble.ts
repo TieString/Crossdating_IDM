@@ -720,22 +720,6 @@ export const pruneUnsupportedFalseRingPathSupplements = (
     return independentlySupported.length > 0 ? independentlySupported : events;
 };
 
-export const shouldUseCandidateFalseFallback = ({
-    hasPathFalse,
-    hasCandidateFalse,
-    hasWholeHypothesis,
-    hasPathMissing,
-}: {
-    hasPathFalse: boolean;
-    hasCandidateFalse: boolean;
-    hasWholeHypothesis: boolean;
-    hasPathMissing: boolean;
-}): boolean => (
-    !hasPathFalse
-    && hasCandidateFalse
-    && !(hasWholeHypothesis && hasPathMissing)
-);
-
 const withTargetedCandidateVerification = (
     event: DiagnosisEvent,
     candidates: DiagnosisCandidateOperation[],
@@ -2303,10 +2287,6 @@ const eventsForSeriesPass = (
         ...options.eventOperationRecoveryConfig,
     };
     const ownCandidates = candidates.filter((candidate) => candidate.targetTree === diagnosis.targetTree);
-    const hasWholeHypothesis = ownCandidates.some((candidate) => (
-        candidate.operationType === "SHIFT_RANGE"
-        && candidate.mode === "wholeSeriesMove"
-    ));
     const candidateEvents = makeDiagnosisEventsFromCandidates([diagnosis], ownCandidates);
     if (audit) audit.candidateEventCount = candidateEvents.length;
     const cofechaDiagnosis = diagnoseSeriesCore(
@@ -2470,12 +2450,8 @@ const eventsForSeriesPass = (
                     ? withTargetedCandidateVerification(event, targetedFalseCandidates)
                     : event
         ))
-        : shouldUseCandidateFalseFallback({
-            hasPathFalse: pathFalse.length > 0,
-            hasCandidateFalse: candidateFalse.length > 0,
-            hasWholeHypothesis,
-            hasPathMissing: pathMissing.length > 0,
-        })
+        : pathFalse.length === 0 && candidateFalse[0]
+            && !(hasWholeCandidate && pathMissing.length > 0)
             ? [candidateFalse[0]]
             : [];
     falseEvents = pruneUnsupportedFalseRingPathSupplements(

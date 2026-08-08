@@ -8,7 +8,6 @@ import {
     pruneLocalEventsDisconnectedFromWholeBaseline,
     projectSequentialUnitChainHead,
     recoverCandidateBackedPartialConsensus,
-    shouldUseCandidateFalseFallback,
     shouldReplaceUnanchoredPartialWithReferencePulse,
     pruneWholeSeriesPartialAliases,
     pruneUnsupportedFalseRingPathSupplements,
@@ -386,35 +385,6 @@ describe("pruneUnsupportedFalseRingPathSupplements", () => {
             [first, second],
             false,
         )).toEqual([first, second]);
-    });
-});
-
-describe("shouldUseCandidateFalseFallback", () => {
-    it("does not reverse a missing path after a compressed whole hypothesis is rejected", () => {
-        expect(shouldUseCandidateFalseFallback({
-            hasPathFalse: false,
-            hasCandidateFalse: true,
-            hasWholeHypothesis: true,
-            hasPathMissing: true,
-        })).toBe(false);
-    });
-
-    it("still allows a false-ring candidate when no missing path competes", () => {
-        expect(shouldUseCandidateFalseFallback({
-            hasPathFalse: false,
-            hasCandidateFalse: true,
-            hasWholeHypothesis: true,
-            hasPathMissing: false,
-        })).toBe(true);
-    });
-
-    it("keeps the ordinary candidate fallback without a whole hypothesis", () => {
-        expect(shouldUseCandidateFalseFallback({
-            hasPathFalse: false,
-            hasCandidateFalse: true,
-            hasWholeHypothesis: false,
-            hasPathMissing: true,
-        })).toBe(true);
     });
 });
 
