@@ -16,6 +16,10 @@ import {
     firstFixedYearFromLastMovedYear,
     isNegativePartialShift,
 } from "./partialMoveSemantics";
+import {
+    measureWholeSeriesStateConsistency,
+    wholeSeriesStateConsistencyNotes,
+} from "./wholeSeriesStateConsistency";
 
 const WINDOW_WIDTH: Record<Exclude<DiagnosisEventType, "wholeSeriesMove">, number> = {
     missingRing: 7,
@@ -187,6 +191,10 @@ const wholeEventFromCandidate = (
 ): DiagnosisEvent => {
     const evaluation = candidate.evidence.evaluationDelta;
     const shiftYears = candidate.deltaYears ?? candidate.suggestedLag;
+    const stateConsistency = measureWholeSeriesStateConsistency(
+        diagnosis,
+        shiftYears,
+    );
     return {
         id: `diagnosis-event-${diagnosis.targetTree}-whole-${shiftYears}`,
         seriesId: diagnosis.targetTree,
@@ -232,6 +240,7 @@ const wholeEventFromCandidate = (
                 `whole_observed_dominant_lag=${
                     evaluation?.dominantLagBefore ?? candidate.evidence.before.bestLag
                 }`,
+                ...wholeSeriesStateConsistencyNotes(stateConsistency),
                 "scores_are_relative_not_probabilities",
             ],
         },
