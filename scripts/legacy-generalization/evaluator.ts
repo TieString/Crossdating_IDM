@@ -17,6 +17,10 @@ import { getConfig } from "@/features/crossdating/diagnosis/config";
 import { getJointCounterfactualOperationScores } from "@/features/crossdating/diagnosis/jointCounterfactualOperation";
 import { DEFAULT_MAX_PARTIAL_GAP_YEARS } from "@/features/crossdating/diagnosis/partialMoveSemantics";
 import {
+    scorePerReferenceCounterfactualEvidence,
+    summarizePerReferenceCounterfactualRows,
+} from "@/features/crossdating/diagnosis/perReferenceCounterfactualEvidence";
+import {
     scoreDynamicJointOperation,
     selectDynamicJointOperation,
     selectDynamicUnitOperation,
@@ -290,6 +294,27 @@ export const diagnoseTruthBlind = (input: {
                 );
                 const dynamicSelection = selectDynamicJointOperation(operations);
                 const unitSelection = selectDynamicUnitOperation(operations);
+                const perReferenceSelection = dynamicSelection?.operation.eventType
+                    === "partialMove"
+                    ? (() => {
+                        const rows = scorePerReferenceCounterfactualEvidence(
+                            core,
+                            input.siteData,
+                            dynamicSelection.operation.shiftYears,
+                            { baselineLagCenter: productionBaselineLag },
+                        );
+                        const selectedRow = rows.slice().sort((left, right) => (
+                            Math.abs(left.year - dynamicSelection.operation.bestYear)
+                                - Math.abs(right.year - dynamicSelection.operation.bestYear)
+                            || right.fixedLagStepWeighted - left.fixedLagStepWeighted
+                        ))[0] ?? null;
+                        return {
+                            shiftYears: dynamicSelection.operation.shiftYears,
+                            summary: summarizePerReferenceCounterfactualRows(rows),
+                            selectedRow,
+                        };
+                    })()
+                    : null;
                 return {
                     operations: operations.map((operation) => ({
                         eventType: operation.eventType,
@@ -318,6 +343,7 @@ export const diagnoseTruthBlind = (input: {
                         score: unitSelection.score,
                         scoreMargin: unitSelection.scoreMargin,
                     } : null,
+                    perReferenceSelection,
                 };
             })()
             : null;

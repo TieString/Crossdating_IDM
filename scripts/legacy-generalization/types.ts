@@ -3,6 +3,10 @@ import type {
     DiagnosisEventDecisionAudit,
     DiagnosisReviewWindowDecision,
 } from "@/features/crossdating/diagnosis/types";
+import type {
+    PerReferenceCounterfactualRow,
+    PerReferenceCounterfactualSummary,
+} from "@/features/crossdating/diagnosis/perReferenceCounterfactualEvidence";
 
 export type LegacyTruthQuality =
     | "exact-injected"
@@ -199,6 +203,11 @@ export type LegacyDiagnosisSnapshot = {
             bestYear: number;
             score: number;
             scoreMargin: number;
+        } | null;
+        perReferenceSelection: {
+            shiftYears: number;
+            summary: PerReferenceCounterfactualSummary | null;
+            selectedRow: PerReferenceCounterfactualRow | null;
         } | null;
     } | null;
     referenceMode: "cofecha-pass-leave-one-out" | "cofecha-master-leave-one-out";

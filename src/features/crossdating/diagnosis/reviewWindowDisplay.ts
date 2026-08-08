@@ -175,6 +175,51 @@ const hasReviewablePartialMoveEvidence = (
         && (event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY)
             >= config.minimumPartialJointGain) return true;
 
+    const gridConsensusShift = numericNote(event, "candidate_grid_partial_shift");
+    const gridCandidateYear = numericNote(
+        event,
+        "candidate_grid_partial_candidate_year",
+    );
+    const gridOperationYear = numericNote(
+        event,
+        "candidate_grid_partial_operation_year",
+    );
+    const gridReferenceCount = numericNote(
+        event,
+        "candidate_grid_partial_reference_count",
+    ) ?? 0;
+    const gridPeakKernel5 = numericNote(
+        event,
+        "candidate_grid_partial_reference_peak_kernel5",
+    ) ?? 0;
+    const gridScore = numericNote(event, "candidate_grid_partial_score") ?? 0;
+    const gridFamilyMargin = numericNote(
+        event,
+        "candidate_grid_partial_family_margin",
+    ) ?? 0;
+    const gridShiftMargin = numericNote(
+        event,
+        "candidate_grid_partial_shift_margin",
+    ) ?? 0;
+    if (sources.has("candidate_grid_reference_partial_consensus")
+        && sources.has("per_reference_counterfactual_evidence")
+        && gridConsensusShift === shiftYears
+        && yearSupportsWindow(
+            event,
+            gridOperationYear,
+            config.partialVoteWindowToleranceYears,
+        )
+        && gridCandidateYear !== null
+        && gridOperationYear !== null
+        && Math.abs(gridCandidateYear - gridOperationYear) <= 6
+        && gridScore >= 0.08
+        && gridFamilyMargin >= 0.05
+        && gridShiftMargin >= 0.01
+        && gridReferenceCount >= 6
+        && gridPeakKernel5 >= 1 / 3
+        && (event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY) >= 0.04
+        && event.evidence.candidateIds.length >= 1) return true;
+
     const referenceVoteYear = numericNote(event, "reference_vote_year");
     const referenceCoreGain = Math.max(
         numericNote(event, "reference_vote_gain") ?? Number.NEGATIVE_INFINITY,

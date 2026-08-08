@@ -1303,3 +1303,80 @@ production build 通过。
 前已形成 false，还有一部分连动态位移族都选错。下一轮应把 candidate/COFECHA 边界锚点与
 同区域 operation family 联合起来，先选唯一位置模式，再在该模式内比较 `+1/-1/-2...-100`；
 不能继续单纯放宽本轮 family margin 或断点距离。
+
+### Round 5G：用候选、完整操作网格与逐参考芯边界共识恢复剩余局部缺块
+
+- 全量校准审计：
+  `D:\软件测试\legacy-cross-file-generalization-results\candidate-grid-per-reference-full-calibration-2026-08-08`。
+- 24 文件 single：
+  `D:\软件测试\legacy-cross-file-generalization-results\legacy-candidate-grid-reference-partial-single-workers-2026-08-08`。
+- 24 文件 serial：
+  `D:\软件测试\legacy-cross-file-generalization-results\legacy-candidate-grid-reference-partial-serial-workers-2026-08-08`。
+- ZSL RAW -> crossdated 串行回放：
+  `D:\软件测试\ZSL\window-coverage-results\zsl-serial-candidate-grid-reference-partial-2026-08-08`。
+- co612 whole/local 组合：
+  `D:\软件测试\co612-operation-composition-results\candidate-grid-reference-partial-local6-2026-08-08`、
+  `candidate-grid-reference-partial-missing-2026-08-08`、
+  `candidate-grid-reference-partial-false-2026-08-08`。
+
+Round 5F 后仍有一些精确 partial 候选在融合前已经形成，但只靠候选不能决定它是否应覆盖
+lag path 的单位解释。反过来，完整 master 网格与逐参考芯网格也可能共同追随同一个远端伪峰。
+因此新增的恢复层要求三个职责不同的证据同时成立：
+
+1. **可执行候选**：所有已投影候选都属于负向 `partialMove`，至少一个候选通过既有 hard
+   gate、相关增益至少 0.04，并与动态网格选择相同位移；候选断点与网格断点相距不超过 6 年。
+2. **完整操作网格**：在 `missingRing -1`、`falseRing +1` 和 `partialMove -2...-100`
+   的同尺度比较中，partial 动态分数至少 0.08，相对单位族 margin 至少 0.05，相邻位移
+   margin 至少 0.01。位移量保持原值，不按绝对值偏爱小缺块。
+3. **逐参考芯边界**：只在前两层已经命中后计算每条可靠参考芯的反事实边界，动态断点处
+   至少有 6 条参考，5 年峰核集中度至少为 1/3。该二级计算复用缓存，不对所有普通诊断
+   无条件扫描。
+
+任何 whole 候选都会阻止该恢复层。已有局部事件若有可执行候选 ID 或 hard-gate 锚点也不会
+被覆盖；只有纯 lag-path/reference 的无锚解释才可由三层共识替换。这样既能把错误的单位
+阶梯或 `-96` 参考峰改回一次物理缺块，也不会删除已经独立确认的混合事件。恢复出的唯一主窗
+以最近的可执行候选锚点生成 13 年搜索窗，再由正式 counterfactual locator 精定位；窗口内
+Top1 仍由逐年证据排序。显示层复核相同的 score、family margin、shift margin、参考数和
+5 年核，并要求最终窗口覆盖 operation 模式。候选锚点允许在精定位后落到窗口外，但候选与
+operation 之间仍必须保持不超过 6 年的一致关系。
+
+完整校准的 1,200 个保存前状态中，动态网格共有 390 个 partial 赢家。候选/网格基础共识
+只命中 24 个，24/24 真值均为 partial，clean、missing、false、whole 命中均为 0；加上
+逐参考芯 5 年核后命中 17 个。生产全链路相对 Round 5F 只有以下 7 个状态变化，全部修复：
+
+| 序列与场景 | Round 5F | Round 5G | 真断点 / 新窗口 |
+| --- | --- | --- | --- |
+| `mt148/012` 连续缺块 | 拒答 | `partial -10` | 1718 / 1707--1719 |
+| `mt148/014` 连续缺块 | `missing -1` | `partial -10` | 1743 / 1741--1745 |
+| `az101/413022` 连续缺块 | `missing -1` | `partial -10` | 1840 / 1839--1851 |
+| `co066/472212` 连续缺块 | `missing -1` | `partial -10` | 1732 / 1722--1734 |
+| `cana212/PRB04A` 单次局部移动 | `false +1` | `partial -4` | 1856 / 1847--1859 |
+| `cana212/PRB07A` 单次局部移动 | `false +1` | `partial -4` | 1870 / 1862--1874 |
+| `az581/PRM07A` 连续缺块 | `missing -1` | `partial -10` | 1892 / 1888--1900 |
+
+| single 指标 | Round 5F | Round 5G |
+| --- | ---: | ---: |
+| response | 417/1152 | **418/1152** |
+| type correct | 346/1152 | **353/1152** |
+| operation correct | 344/1152 | **351/1152** |
+| 唯一主窗口覆盖 | 183/1056 | **190/1056** |
+| 条件窗口覆盖 | 183/269 | **190/276** |
+| Top1 | 42/1056 | **43/1056** |
+| clean strict / review | 15/48 / 14/48 | 15/48 / 14/48 |
+| 保存重开一致 | 1200/1200 | 1200/1200 |
+
+partial 混淆由正确 38/144、拒答 72、missing 18、false 16 改为正确 **45/144**、
+拒答 **71**、missing **14**、false **14**。whole 保持正确 76/96、拒答 19、missing 1，
+`whole -> partial` 仍为 0。24 个 worker 的错误、源文件修改和保存重开差异均为 0；累计
+生产运行时间没有增加。serial 的 768/768 个事件状态与 Round 5F 逐字段相同：confirmed
+187、首次响应 296、首次操作正确 267、首次窗口覆盖 181、最终阻塞 447。
+
+ZSL 两种模式均为 whole -> partial 0、partial -> missing 0，34/34 保存重开稳定，源 SHA
+不变。co612 的 `whole + partial -6`、`whole + missing`、`whole + false` 各 120 个组合均
+先输出精确 whole，whole -> partial 与 whole -> unit 均为 0，交互失败 0；应用 whole 后的
+局部窗口成功率分别为 83.33%、93.33%、83.33%，与各自 pure-local 控制完全一致。
+
+本轮关闭的是“候选已给出真实连续缺块，但弱 path/reference 模式仍让最终结果拒答或变成
+单位事件”这一类失败。剩余 partial 错误主要是候选、master 网格和参考芯共同选错远距离模式，
+不能再靠放宽本恢复层解决；下一步应研究位置模式的独立反证或直接进入不同操作共存的联合
+状态路径验证。

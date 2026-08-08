@@ -23,6 +23,7 @@ import {
     selectDynamicUnitOperation,
     selectJointCounterfactualOperation,
 } from "./jointOperationSelector";
+import { scorePerReferenceCounterfactualEvidence } from "./perReferenceCounterfactualEvidence";
 import { scoreFalseRingReferenceConsensusRecovery } from "./unitReferenceConsensusRecovery";
 import {
     DEFAULT_MAX_PARTIAL_GAP_YEARS,
@@ -122,6 +123,70 @@ EventOperationRecoveryConfig = {
     dynamicJointUnitTypeCorrectionMinimumScore: 0.06,
     dynamicJointUnitTypeCorrectionMinimumMargin: 0.015,
     dynamicJointWholeOnlyMinimumScore: 0.15,
+};
+
+export type CandidateGridReferencePartialConsensusConfig = {
+    minimumDynamicScore: number;
+    minimumFamilyMargin: number;
+    minimumShiftMargin: number;
+    minimumCandidateGain: number;
+    maximumCandidateDistanceYears: number;
+    minimumReferenceCount: number;
+    minimumPeakKernel5: number;
+    windowYears: number;
+};
+
+export const DEFAULT_CANDIDATE_GRID_REFERENCE_PARTIAL_CONSENSUS_CONFIG:
+CandidateGridReferencePartialConsensusConfig = {
+    minimumDynamicScore: 0.08,
+    minimumFamilyMargin: 0.05,
+    minimumShiftMargin: 0.01,
+    minimumCandidateGain: 0.04,
+    maximumCandidateDistanceYears: 6,
+    minimumReferenceCount: 6,
+    minimumPeakKernel5: 1 / 3,
+    windowYears: 13,
+};
+
+export type CandidateGridReferencePartialConsensusEvidence = {
+    hasWholeEvent: boolean;
+    hasMatchingExistingPartial: boolean;
+    existingLocalEventsAreUnanchored: boolean;
+    candidateCount: number;
+    allCandidatesArePartial: boolean;
+    dynamicEventType: DiagnosisEventType;
+    dynamicShiftYears: number;
+    dynamicScore: number;
+    familyMargin: number;
+    shiftMargin: number;
+    candidateGain: number;
+    candidateDistanceYears: number;
+    referenceCount: number;
+    referencePeakKernel5: number;
+};
+
+export const passesCandidateGridReferencePartialConsensusGate = (
+    evidence: CandidateGridReferencePartialConsensusEvidence,
+    overrides: Partial<CandidateGridReferencePartialConsensusConfig> = {},
+): boolean => {
+    const config = {
+        ...DEFAULT_CANDIDATE_GRID_REFERENCE_PARTIAL_CONSENSUS_CONFIG,
+        ...overrides,
+    };
+    return !evidence.hasWholeEvent
+        && !evidence.hasMatchingExistingPartial
+        && evidence.existingLocalEventsAreUnanchored
+        && evidence.candidateCount > 0
+        && evidence.allCandidatesArePartial
+        && evidence.dynamicEventType === "partialMove"
+        && evidence.dynamicShiftYears <= -2
+        && evidence.dynamicScore >= config.minimumDynamicScore
+        && evidence.familyMargin >= config.minimumFamilyMargin
+        && evidence.shiftMargin >= config.minimumShiftMargin
+        && evidence.candidateGain >= config.minimumCandidateGain
+        && evidence.candidateDistanceYears <= config.maximumCandidateDistanceYears
+        && evidence.referenceCount >= config.minimumReferenceCount
+        && evidence.referencePeakKernel5 >= config.minimumPeakKernel5;
 };
 
 const eventShiftYears = (event: DiagnosisEvent): number | null => {
@@ -228,6 +293,150 @@ const jointEventFromOperation = (
             shiftYears: operation.shiftYears,
             shiftSide: "older" as const,
         } : {}),
+    };
+};
+
+const eventAnchorYear = (event: DiagnosisEvent): number | null => {
+    const year = event.rankedYears
+        .slice()
+        .sort((left, right) => left.rank - right.rank)[0]?.year;
+    return Number.isInteger(year) ? year : null;
+};
+
+/**
+ * Recovers one physical partial gap only when three independent layers agree: an executable
+ * partial candidate, the full year-by-operation grid, and a concentrated per-reference boundary.
+ * Mixed paths and whole-series hypotheses remain outside this single-event recovery.
+ */
+export const recoverCandidateGridReferencePartialConsensus = (
+    events: readonly DiagnosisEvent[],
+    candidateEvents: readonly DiagnosisEvent[],
+    diagnosis: SeriesCoreDiagnosis,
+    siteData: RwlSiteData,
+    operations: readonly JointCounterfactualOperationScore[],
+    recoveryConfig: EventOperationRecoveryConfig,
+    overrides: Partial<CandidateGridReferencePartialConsensusConfig> = {},
+): DiagnosisEvent | null => {
+    const config = {
+        ...DEFAULT_CANDIDATE_GRID_REFERENCE_PARTIAL_CONSENSUS_CONFIG,
+        ...overrides,
+    };
+    const localEvents = events.filter((event) => event.eventType !== "wholeSeriesMove");
+    if (candidateEvents.length === 0
+        || candidateEvents.some((event) => event.eventType !== "partialMove")) return null;
+
+    const selection = selectDynamicJointOperation(operations);
+    if (
+        !selection
+        || selection.operation.eventType !== "partialMove"
+    ) return null;
+
+    const matchingCandidates = candidateEvents
+        .filter((event) => (
+            event.eventType === "partialMove"
+            && event.shiftSide === "older"
+            && event.shiftYears === selection.operation.shiftYears
+            && event.evidence.notes.includes("candidate_hard_gate_passed")
+            && (event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY)
+                >= config.minimumCandidateGain
+            && eventAnchorYear(event) !== null
+        ))
+        .map((event) => ({ event, anchorYear: eventAnchorYear(event)! }))
+        .sort((left, right) => (
+            Math.abs(left.anchorYear - selection.operation.bestYear)
+                - Math.abs(right.anchorYear - selection.operation.bestYear)
+            || right.event.evidence.score - left.event.evidence.score
+        ));
+    const candidate = matchingCandidates[0];
+    if (!candidate) return null;
+
+    const referenceRows = scorePerReferenceCounterfactualEvidence(
+        diagnosis,
+        siteData,
+        selection.operation.shiftYears,
+        { baselineLagCenter: selection.operation.baselineLag },
+    );
+    const referenceRow = referenceRows.slice().sort((left, right) => (
+        Math.abs(left.year - selection.operation.bestYear)
+            - Math.abs(right.year - selection.operation.bestYear)
+        || right.fixedLagStepWeighted - left.fixedLagStepWeighted
+    ))[0];
+    if (!referenceRow || !passesCandidateGridReferencePartialConsensusGate({
+        hasWholeEvent: events.some((event) => event.eventType === "wholeSeriesMove"),
+        hasMatchingExistingPartial: localEvents.some((event) => (
+            event.eventType === "partialMove"
+            && event.shiftYears === selection.operation.shiftYears
+        )),
+        existingLocalEventsAreUnanchored: localEvents.every((event) => (
+            event.evidence.candidateIds.length === 0
+            && !event.evidence.notes.includes("candidate_hard_gate_passed")
+        )),
+        candidateCount: candidateEvents.length,
+        allCandidatesArePartial: candidateEvents.every(
+            (event) => event.eventType === "partialMove",
+        ),
+        dynamicEventType: selection.operation.eventType,
+        dynamicShiftYears: selection.operation.shiftYears,
+        dynamicScore: selection.score,
+        familyMargin: selection.scoreMargin,
+        shiftMargin: selection.shiftScoreMargin ?? Number.NEGATIVE_INFINITY,
+        candidateGain: candidate.event.evidence.correlationGain
+            ?? Number.NEGATIVE_INFINITY,
+        candidateDistanceYears: Math.abs(
+            candidate.anchorYear - selection.operation.bestYear,
+        ),
+        referenceCount: referenceRow.referenceCount,
+        referencePeakKernel5: referenceRow.peakKernel5,
+    }, config)) return null;
+
+    const recovered = jointEventFromOperation(
+        { ...selection.operation, bestYear: candidate.anchorYear },
+        null,
+        diagnosis,
+        selection.scoreMargin,
+        selection.probabilityLike,
+        { ...recoveryConfig, partialWindowYears: config.windowYears },
+    );
+    return {
+        ...recovered,
+        id: `${recovered.id}-candidate-grid-reference-partial-consensus`,
+        confidenceLevel: "medium",
+        rankedYears: recovered.rankedYears.map((row) => ({
+            ...row,
+            evidenceTags: Array.from(new Set([
+                ...row.evidenceTags,
+                "candidate_grid_reference_partial_consensus",
+            ])),
+        })),
+        evidence: {
+            ...recovered.evidence,
+            baselineCorrelation: candidate.event.evidence.baselineCorrelation,
+            correctedCorrelation: candidate.event.evidence.correctedCorrelation,
+            algorithmSources: Array.from(new Set([
+                ...recovered.evidence.algorithmSources,
+                ...candidate.event.evidence.algorithmSources,
+                "candidate_grid_reference_partial_consensus",
+                "per_reference_counterfactual_evidence",
+            ])).sort(),
+            candidateIds: candidate.event.evidence.candidateIds.slice(),
+            notes: Array.from(new Set([
+                ...recovered.evidence.notes,
+                ...candidate.event.evidence.notes,
+                "operation_recovery=candidate_grid_reference_partial_consensus",
+                `candidate_grid_partial_candidate_year=${candidate.anchorYear}`,
+                `candidate_grid_partial_operation_year=${selection.operation.bestYear}`,
+                `candidate_grid_partial_shift=${selection.operation.shiftYears}`,
+                `candidate_grid_partial_score=${selection.score.toFixed(6)}`,
+                `candidate_grid_partial_family_margin=${selection.scoreMargin.toFixed(6)}`,
+                `candidate_grid_partial_shift_margin=${(
+                    selection.shiftScoreMargin ?? 0
+                ).toFixed(6)}`,
+                `candidate_grid_partial_reference_count=${referenceRow.referenceCount}`,
+                `candidate_grid_partial_reference_peak_kernel5=${
+                    referenceRow.peakKernel5.toFixed(6)
+                }`,
+            ])),
+        },
     };
 };
 
@@ -793,6 +1002,7 @@ export const applyDecisiveJointOperationFusion = (
     diagnosis: SeriesCoreDiagnosis,
     overrides: Partial<EventOperationRecoveryConfig> = {},
     siteData?: RwlSiteData,
+    candidateEvents: readonly DiagnosisEvent[] = [],
 ): DiagnosisEvent[] => {
     const config = {
         ...DEFAULT_EVENT_OPERATION_RECOVERY_CONFIG,
@@ -822,6 +1032,17 @@ export const applyDecisiveJointOperationFusion = (
         operations,
         config,
     );
+    const candidateGridReferencePartial = siteData
+        ? recoverCandidateGridReferencePartialConsensus(
+            events,
+            candidateEvents,
+            diagnosis,
+            siteData,
+            operations,
+            config,
+        )
+        : null;
+    if (candidateGridReferencePartial) return [candidateGridReferencePartial];
     if (events.length === 0 && fused.length === 0) {
         if (siteData) {
             const consensus = scoreFalseRingReferenceConsensusRecovery(

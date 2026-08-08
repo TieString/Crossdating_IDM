@@ -270,6 +270,61 @@ describe("lower review-window display gate", () => {
         });
     });
 
+    it("keeps a candidate-grid partial with concentrated per-reference support", () => {
+        const partial = reviewablePartial(-10, {
+            candidateIds: ["partial-candidate"],
+            correlationGain: 0.1,
+            algorithmSources: [
+                "candidate_grid_reference_partial_consensus",
+                "full_interval_counterfactual_locator",
+                "per_reference_counterfactual_evidence",
+            ],
+            notes: [
+                "counterfactual_correction_years=-10",
+                "candidate_grid_partial_shift=-10",
+                "candidate_grid_partial_candidate_year=1906",
+                "candidate_grid_partial_operation_year=1900",
+                "candidate_grid_partial_score=0.12",
+                "candidate_grid_partial_family_margin=0.08",
+                "candidate_grid_partial_shift_margin=0.04",
+                "candidate_grid_partial_reference_count=8",
+                "candidate_grid_partial_reference_peak_kernel5=0.5",
+            ],
+        });
+
+        expect(selectReviewWindowDisplay(audit([]), [partial])).toMatchObject({
+            status: "strict",
+            event: partial,
+        });
+    });
+
+    it("refuses a candidate-grid partial with diffuse reference breakpoints", () => {
+        const partial = reviewablePartial(-10, {
+            candidateIds: ["partial-candidate"],
+            correlationGain: 0.1,
+            algorithmSources: [
+                "candidate_grid_reference_partial_consensus",
+                "per_reference_counterfactual_evidence",
+            ],
+            notes: [
+                "counterfactual_correction_years=-10",
+                "candidate_grid_partial_shift=-10",
+                "candidate_grid_partial_candidate_year=1900",
+                "candidate_grid_partial_operation_year=1901",
+                "candidate_grid_partial_score=0.12",
+                "candidate_grid_partial_family_margin=0.08",
+                "candidate_grid_partial_shift_margin=0.04",
+                "candidate_grid_partial_reference_count=8",
+                "candidate_grid_partial_reference_peak_kernel5=0.2",
+            ],
+        });
+
+        expect(selectReviewWindowDisplay(audit([]), [partial])).toMatchObject({
+            status: "refused",
+            reason: "partial_move_evidence_insufficient",
+        });
+    });
+
     it("refuses a lag-path partial when independent votes choose unrelated shifts", () => {
         const partial = reviewablePartial(-4, {
             score: 17.85,

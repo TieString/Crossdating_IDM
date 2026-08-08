@@ -4,6 +4,7 @@ import {
     buildDualSignalLocationChoices,
     DEFAULT_EVENT_OPERATION_RECOVERY_CONFIG,
     fuseDecisiveJointOperationScores,
+    passesCandidateGridReferencePartialConsensusGate,
     partitionVerifiedRecoveryHypotheses,
     recoverSubtleFalseRingEmptySuggestion,
     rerankEventYearsByAnchorConsensus,
@@ -24,6 +25,47 @@ import type {
     DiagnosisEventLocationAlternative,
     SeriesCoreDiagnosis,
 } from "../types";
+
+describe("passesCandidateGridReferencePartialConsensusGate", () => {
+    const decisivePartial = {
+        hasWholeEvent: false,
+        hasMatchingExistingPartial: false,
+        existingLocalEventsAreUnanchored: true,
+        candidateCount: 1,
+        allCandidatesArePartial: true,
+        dynamicEventType: "partialMove" as const,
+        dynamicShiftYears: -10,
+        dynamicScore: 0.12,
+        familyMargin: 0.08,
+        shiftMargin: 0.04,
+        candidateGain: 0.1,
+        candidateDistanceYears: 4,
+        referenceCount: 8,
+        referencePeakKernel5: 0.5,
+    };
+
+    it("accepts a single concentrated negative partial consensus", () => {
+        expect(passesCandidateGridReferencePartialConsensusGate(
+            decisivePartial,
+        )).toBe(true);
+    });
+
+    it.each([
+        ["whole baseline", { hasWholeEvent: true }],
+        ["mixed candidates", { allCandidatesArePartial: false }],
+        ["anchored existing event", { existingLocalEventsAreUnanchored: false }],
+        ["matching existing partial", { hasMatchingExistingPartial: true }],
+        ["unit operation", { dynamicEventType: "missingRing" as const }],
+        ["positive partial", { dynamicShiftYears: 4 }],
+        ["remote candidate", { candidateDistanceYears: 7 }],
+        ["diffuse reference peak", { referencePeakKernel5: 0.32 }],
+    ])("rejects %s", (_label, change) => {
+        expect(passesCandidateGridReferencePartialConsensusGate({
+            ...decisivePartial,
+            ...change,
+        })).toBe(false);
+    });
+});
 
 const cumulative = (
     year: number,

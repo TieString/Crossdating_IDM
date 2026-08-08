@@ -3471,6 +3471,7 @@ export const makeDiagnosisEvents = (
                     ...options.eventOperationRecoveryConfig,
                 },
                 siteData,
+                candidateEvents,
             )
             : detectedBeforeFusion;
         const coherentDetected = pruneLocalEventsDisconnectedFromWholeBaseline(
