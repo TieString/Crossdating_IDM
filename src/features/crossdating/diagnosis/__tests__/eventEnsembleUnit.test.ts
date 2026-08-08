@@ -9,6 +9,7 @@ import {
     projectSequentialUnitChainHead,
     recoverCandidateBackedPartialConsensus,
     shouldReplaceUnanchoredPartialWithReferencePulse,
+    shouldSuppressSelfWorseningCandidateFalseRing,
     pruneWholeSeriesPartialAliases,
     pruneUnsupportedFalseRingPathSupplements,
     unitEventCompetesWithWholeAtNewerEndpoint,
@@ -385,6 +386,44 @@ describe("pruneUnsupportedFalseRingPathSupplements", () => {
             [first, second],
             false,
         )).toEqual([first, second]);
+    });
+});
+
+describe("shouldSuppressSelfWorseningCandidateFalseRing", () => {
+    it("rejects a candidate-only deletion that worsens the negative lag", () => {
+        const event = falseRingEvent(1858, true);
+        event.evidence.correlationGain = -0.007;
+        event.evidence.lagBefore = -2;
+        event.evidence.lagAfter = -3;
+
+        expect(shouldSuppressSelfWorseningCandidateFalseRing(event, false))
+            .toBe(true);
+    });
+
+    it("keeps the same counterfactual when an independent false-ring path exists", () => {
+        const event = falseRingEvent(1858, true);
+        event.evidence.correlationGain = -0.007;
+        event.evidence.lagBefore = -2;
+        event.evidence.lagAfter = -3;
+
+        expect(shouldSuppressSelfWorseningCandidateFalseRing(event, true))
+            .toBe(false);
+    });
+
+    it("keeps a candidate that improves correlation or does not deepen negative lag", () => {
+        const improving = falseRingEvent(1858, true);
+        improving.evidence.correlationGain = 0.001;
+        improving.evidence.lagBefore = -2;
+        improving.evidence.lagAfter = -3;
+        const stableDirection = falseRingEvent(1858, true);
+        stableDirection.evidence.correlationGain = -0.001;
+        stableDirection.evidence.lagBefore = 1;
+        stableDirection.evidence.lagAfter = 0;
+
+        expect(shouldSuppressSelfWorseningCandidateFalseRing(improving, false))
+            .toBe(false);
+        expect(shouldSuppressSelfWorseningCandidateFalseRing(stableDirection, false))
+            .toBe(false);
     });
 });
 

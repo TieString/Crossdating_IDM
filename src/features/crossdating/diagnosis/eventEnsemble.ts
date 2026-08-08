@@ -720,6 +720,23 @@ export const pruneUnsupportedFalseRingPathSupplements = (
     return independentlySupported.length > 0 ? independentlySupported : events;
 };
 
+export const shouldSuppressSelfWorseningCandidateFalseRing = (
+    event: DiagnosisEvent,
+    hasFalseRingPathSupport: boolean,
+): boolean => {
+    if (hasFalseRingPathSupport || event.eventType !== "falseRing") return false;
+    const gain = event.evidence.correlationGain;
+    const before = event.evidence.lagBefore;
+    const after = event.evidence.lagAfter;
+    return gain !== null
+        && Number.isFinite(gain)
+        && gain <= 0
+        && before !== null
+        && after !== null
+        && before < 0
+        && after === before - 1;
+};
+
 const withTargetedCandidateVerification = (
     event: DiagnosisEvent,
     candidates: DiagnosisCandidateOperation[],
@@ -2408,7 +2425,13 @@ const eventsForSeriesPass = (
         : candidateMissing ? [candidateMissing] : [];
 
     const pathFalse = typeEvents(pathEvents, "falseRing");
-    const candidateFalse = typeEvents(candidateEvents, "falseRing");
+    // A candidate-only deletion that deepens the negative lag is the opposite of a
+    // false-ring correction. Path-backed cases remain eligible for local arbitration.
+    const candidateFalse = typeEvents(candidateEvents, "falseRing")
+        .filter((event) => !shouldSuppressSelfWorseningCandidateFalseRing(
+            event,
+            pathFalse.length > 0,
+        ));
     const hasMultiplePathEvents = pathEvents.length >= 2;
     const verifiedFalseCandidates = options.enableTargetedPathVerification === true
         && pathFalse.length === 1
