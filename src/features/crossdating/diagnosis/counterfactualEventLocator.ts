@@ -1201,6 +1201,22 @@ export const refineEventWithCounterfactualLocator = (
     const currentPrimaryYear = event.rankedYears
         .slice()
         .sort((left, right) => left.rank - right.rank)[0]?.year;
+    const cofechaPartialAnchors = event.evidence.notes
+        .find((note) => note.startsWith("partial_candidate_cofecha_anchors="))
+        ?.slice("partial_candidate_cofecha_anchors=".length)
+        .split(",")
+        .filter((token) => token.length > 0)
+        .map(Number)
+        .filter((year) => Number.isInteger(year)) ?? [];
+    const candidateBackedModePriorYear = event.eventType === "partialMove"
+        && currentPrimaryYear !== undefined
+        && cofechaPartialAnchors.length > 0
+        ? Math.round((
+            currentPrimaryYear
+            + cofechaPartialAnchors.reduce((sum, year) => sum + year, 0)
+                / cofechaPartialAnchors.length
+        ) / 2)
+        : undefined;
     if (currentPrimaryYear !== undefined) {
         internalCandidates.push({
             ...boundedWindow(
@@ -1482,6 +1498,7 @@ export const refineEventWithCounterfactualLocator = (
                 coarseWindow,
                 internalCandidates: uniqueCandidates,
                 currentPrimaryYear,
+                candidateBackedModePriorYear,
                 ...(selectedOperation ? {
                     operationEvidence: {
                         bestYear: selectedOperation.bestYear,

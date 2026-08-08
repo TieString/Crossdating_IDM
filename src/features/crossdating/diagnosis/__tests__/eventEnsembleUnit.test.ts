@@ -138,6 +138,8 @@ describe("recoverCandidateBackedPartialConsensus", () => {
         expect(recovered?.evidence.lagAfter).toBe(0);
         expect(recovered?.evidence.algorithmSources)
             .toContain("candidate_backed_partial_consensus");
+        expect(recovered?.evidence.notes)
+            .toContain("partial_candidate_cofecha_anchors=1904");
     });
 
     it("uses a coherent COFECHA amplitude over an incoherent large-shift alternative", () => {

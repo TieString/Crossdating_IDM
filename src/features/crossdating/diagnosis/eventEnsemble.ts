@@ -624,6 +624,14 @@ export const recoverCandidateBackedPartialConsensus = (
         .map(candidateEventAnchorYear)
         .filter((year): year is number => year !== null)
         .sort((left, right) => left - right);
+    const cofechaAnchors = Array.from(new Set(
+        supporting
+            .filter((event) => event.evidence.algorithmSources.includes(
+                "cofecha_segment_lag",
+            ))
+            .map(candidateEventAnchorYear)
+            .filter((year): year is number => year !== null),
+    )).sort((left, right) => left - right);
     const anchorSpan = anchors[anchors.length - 1] - anchors[0];
     if (anchorSpan > 24) return null;
     const centerYear = Math.round(
@@ -690,6 +698,9 @@ export const recoverCandidateBackedPartialConsensus = (
                 `partial_candidate_consensus_shift=${shiftYears}`,
                 `partial_candidate_consensus_count=${candidateIds.size}`,
                 `partial_candidate_consensus_anchors=${anchors.join(",")}`,
+                ...(cofechaAnchors.length > 0
+                    ? [`partial_candidate_cofecha_anchors=${cofechaAnchors.join(",")}`]
+                    : []),
                 `partial_candidate_consensus_anchor_span=${anchorSpan}`,
                 "partial_candidate_global_after_lag_not_used_as_local_state",
             ])),

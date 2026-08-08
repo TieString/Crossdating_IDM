@@ -374,6 +374,42 @@ describe("selectCalibratedEventWindow", () => {
         expect(result!.window.endYear).toBeGreaterThanOrEqual(1924);
     });
 
+    it("regularizes only a candidate-backed default partial mode with its accepted center", () => {
+        const input = {
+            eventType: "partialMove" as const,
+            years,
+            ranks: ranks({
+                differenceFull: peak(1912, 8),
+                whitenedFull: peak(1912, 6),
+                comboFull: peak(1912, 6),
+                pairFixedLagStepWeighted: peak(1912, 4),
+                pairFixedLagStepMedian: peak(1913, 4),
+            }),
+            coarseWindow,
+            internalCandidates: [],
+            currentPrimaryYear: 1920,
+            operationEvidence: {
+                bestYear: 1912,
+                remoteDifferenceMargin: 0.008,
+            },
+        };
+        const baseline = selectCalibratedEventWindow(input);
+        const regularized = selectCalibratedEventWindow({
+            ...input,
+            candidateBackedModePriorYear: 1920,
+        });
+
+        expect(baseline?.width).toBe(13);
+        expect(baseline?.calibrationRule).toBe("calibrated_default_13");
+        expect(regularized?.width).toBe(13);
+        expect(regularized?.calibrationRule).toBe(
+            "partial_candidate_mode_regularized_13",
+        );
+        expect(regularized!.window.startYear).toBeGreaterThan(
+            baseline!.window.startYear,
+        );
+    });
+
     it("falls back to 13 years for weak partial-move peaks", () => {
         const result = selectCalibratedEventWindow({
             eventType: "partialMove",
@@ -401,6 +437,8 @@ describe("selectCalibratedEventWindow", () => {
             ranks: ranks(physicalPartialProfiles(1920)),
             coarseWindow,
             internalCandidates: [],
+            currentPrimaryYear: 1920,
+            candidateBackedModePriorYear: 1920,
             operationEvidence: {
                 bestYear: 1920,
                 remoteDifferenceMargin: 0.05,

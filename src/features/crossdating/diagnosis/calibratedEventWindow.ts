@@ -26,6 +26,7 @@ export type CalibratedEventWindowInput = {
     coarseWindow: CalibratedEventWindow;
     internalCandidates: readonly CalibratedWindowCandidate[];
     currentPrimaryYear?: number;
+    candidateBackedModePriorYear?: number;
     decisiveYear?: number;
     operationEvidence?: {
         bestYear: number;
@@ -162,11 +163,21 @@ const profileRows = (
             ? 0
             : Math.max(0, 1 - Math.abs(year - input.currentPrimaryYear) / 9)
     )));
+    const candidateModePriorPeak = percentileRanks(input.years.map((year) => (
+        input.candidateBackedModePriorYear === undefined
+            ? 0
+            : Math.max(
+                0,
+                1 - Math.abs(year - input.candidateBackedModePriorYear) / 9,
+            )
+    )));
     return input.years.map((year, index) => ({
         year,
         value: mean(profileNames.map((profile) => (
             profile === "currentPeak"
                 ? currentPeak[index] ?? 0
+                : profile === "candidateModePriorPeak"
+                    ? candidateModePriorPeak[index] ?? 0
                 : input.ranks.get(profile)?.[index] ?? 0
         ))),
     })).filter((row) => contains(input.coarseWindow, row.year));
@@ -894,6 +905,36 @@ export const selectCalibratedEventWindow = (
             selectedRows = narrowRows;
             selectedProfiles = narrowProfiles;
             calibrationRule = "partial_physical_peak_score_9";
+        }
+        if (
+            calibrationRule === "calibrated_default_13"
+            && input.candidateBackedModePriorYear !== undefined
+        ) {
+            const priorProfiles = [
+                ...modeProfileNames,
+                "candidateModePriorPeak",
+            ];
+            const priorRows = profileRows(input, priorProfiles);
+            const priorMode = bestWindow(
+                priorRows,
+                13,
+                input.coarseWindow,
+            );
+            const overlapYears = priorMode
+                ? Math.max(
+                    0,
+                    Math.min(modeWindow.endYear, priorMode.endYear)
+                        - Math.max(modeWindow.startYear, priorMode.startYear)
+                        + 1,
+                )
+                : 0;
+            if (priorMode && overlapYears >= 7) {
+                modeWindow = priorMode;
+                selected = priorMode;
+                selectedRows = priorRows;
+                selectedProfiles = priorProfiles;
+                calibrationRule = "partial_candidate_mode_regularized_13";
+            }
         }
     }
 

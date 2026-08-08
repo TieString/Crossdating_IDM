@@ -131,6 +131,36 @@ fixtureDescribe("ZSL RAW/crossdated operation-type regression", () => {
         expect(displayed[0].endYear).toBeGreaterThanOrEqual(1870);
     });
 
+    it("keeps the RAW-dynamic ZSL212 candidate-backed mode over its true breakpoint", () => {
+        const diagnosis = diagnoseCrossdating(rawSite, {
+            targetTrees: ["ZSL212"],
+            referenceConfig: rawReference,
+            cofechaText: rawOut!,
+            reviewWindowDisplayMode: "review",
+        });
+        const displayed = getDisplayedDiagnosisEvents(diagnosis);
+        const summary = JSON.stringify({
+            displayed: displayed.map((event) => ({
+                type: event.eventType,
+                shift: event.shiftYears,
+                range: [event.startYear, event.endYear],
+                top: event.rankedYears[0]?.year,
+                sources: event.evidence.algorithmSources,
+                notes: event.evidence.notes,
+            })),
+            audit: diagnosis.eventDecisionAudits,
+        });
+
+        expect(displayed).toHaveLength(1);
+        expect(displayed[0].eventType).toBe("partialMove");
+        expect(displayed[0].shiftYears).toBe(-4);
+        expect(displayed[0].startYear).toBeLessThanOrEqual(1870);
+        expect(displayed[0].endYear, summary).toBeGreaterThanOrEqual(1870);
+        expect(displayed[0].evidence.notes).toContain(
+            "counterfactual_window_calibration_rule=partial_candidate_mode_regularized_13",
+        );
+    });
+
     it("keeps the real ZSL152 false ring distinct from missing-ring evidence", () => {
         const site = new Map(crossdatedSite);
         site.set("ZSL152", new Map(loaded!.raw.get("ZSL152")!.valuesByYear));
