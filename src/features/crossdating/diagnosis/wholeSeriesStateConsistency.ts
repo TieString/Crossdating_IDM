@@ -85,3 +85,18 @@ export const wholeSeriesStateConsistencyNotes = (
     `whole_state_global_lag=${evidence.globalLag}`,
     `whole_state_global_lag_matches_shift=${evidence.globalLagMatchesShift}`,
 ];
+
+/**
+ * Non-terminal whole candidates need either a stable newer-end state or broad independent
+ * agreement with the global lag. Terminal COFECHA baselines are validated separately.
+ */
+export const supportsNonTerminalWholeSeriesCandidate = (
+    evidence: WholeSeriesStateConsistency,
+): boolean => {
+    if (evidence.segmentCount < 3) return false;
+    const stableNewerState = evidence.newerEdgeSupportFraction === 1;
+    const broadGlobalConsensus = evidence.globalLagMatchesShift
+        && evidence.supportFraction >= 2 / 3
+        && evidence.weightedSupportFraction >= 2 / 3;
+    return stableNewerState || broadGlobalConsensus;
+};

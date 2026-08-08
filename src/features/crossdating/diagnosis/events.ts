@@ -18,6 +18,7 @@ import {
 } from "./partialMoveSemantics";
 import {
     measureWholeSeriesStateConsistency,
+    supportsNonTerminalWholeSeriesCandidate,
     wholeSeriesStateConsistencyNotes,
 } from "./wholeSeriesStateConsistency";
 
@@ -250,6 +251,7 @@ const wholeEventFromCandidate = (
 
 export const selectWholeSeriesCandidate = (
     candidates: DiagnosisCandidateOperation[],
+    diagnosis?: SeriesCoreDiagnosis,
 ): DiagnosisCandidateOperation | undefined => {
     const whole = candidates.filter((candidate) => (
         eventTypeForCandidate(candidate) === "wholeSeriesMove"
@@ -259,7 +261,13 @@ export const selectWholeSeriesCandidate = (
         ? validatedTerminal
         : whole.filter((candidate) => !candidate.evidence.recallSourceTags?.includes(
             "cofecha_terminal_whole_baseline",
-        ));
+        )).filter((candidate) => {
+            if (!diagnosis) return true;
+            const shiftYears = candidate.deltaYears ?? candidate.suggestedLag;
+            return supportsNonTerminalWholeSeriesCandidate(
+                measureWholeSeriesStateConsistency(diagnosis, shiftYears),
+            );
+        });
     return eligible
         .sort((left, right) => right.score - left.score)[0];
 };
@@ -287,7 +295,7 @@ export const makeDiagnosisEventsFromCandidates = (
         const matching = own.filter((candidate) => eventTypeForCandidate(candidate) === eventType);
         clusterCandidates(eventType, matching).forEach((cluster) => events.push(eventFromCluster(diagnosis, cluster)));
     });
-    const whole = selectWholeSeriesCandidate(own);
+    const whole = selectWholeSeriesCandidate(own, diagnosis);
     if (whole) events.push(wholeEventFromCandidate(diagnosis, whole));
     return events.sort((a, b) => b.endYear - a.endYear || b.evidence.score - a.evidence.score);
 });

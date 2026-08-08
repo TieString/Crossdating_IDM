@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { SegmentDiagnosis } from "../types";
-import { measureWholeSeriesStateConsistency } from "../wholeSeriesStateConsistency";
+import {
+    measureWholeSeriesStateConsistency,
+    supportsNonTerminalWholeSeriesCandidate,
+} from "../wholeSeriesStateConsistency";
 
 const segment = (
     startYear: number,
@@ -82,5 +85,38 @@ describe("whole-series state consistency", () => {
         expect(evidence.globalLagMatchesShift).toBe(true);
         expect(evidence.newerEdgeSupportFraction).toBe(0.5);
         expect(evidence.newestLag).toBe(0);
+    });
+
+    it("accepts a stable newer baseline for a whole plus local-event path", () => {
+        const evidence = measureWholeSeriesStateConsistency(
+            diagnosis([0, -1, 2, 2], 2),
+            2,
+        );
+
+        expect(evidence.supportFraction).toBe(0.5);
+        expect(evidence.newerEdgeSupportFraction).toBe(1);
+        expect(supportsNonTerminalWholeSeriesCandidate(evidence)).toBe(true);
+    });
+
+    it("accepts broad global consensus when an endpoint segment is noisy", () => {
+        const evidence = measureWholeSeriesStateConsistency(
+            diagnosis([-4, -4, -4, -4, -4, -4, -4, 0], -4),
+            -4,
+        );
+
+        expect(evidence.newerEdgeSupportFraction).toBe(0.5);
+        expect(evidence.supportFraction).toBeGreaterThanOrEqual(2 / 3);
+        expect(supportsNonTerminalWholeSeriesCandidate(evidence)).toBe(true);
+    });
+
+    it("rejects a local majority when the fixed newer side and global lag disagree", () => {
+        const evidence = measureWholeSeriesStateConsistency(
+            diagnosis([-4, -4, -4, 0, 0], 0),
+            -4,
+        );
+
+        expect(evidence.newerEdgeSupportFraction).toBe(0);
+        expect(evidence.globalLagMatchesShift).toBe(false);
+        expect(supportsNonTerminalWholeSeriesCandidate(evidence)).toBe(false);
     });
 });
