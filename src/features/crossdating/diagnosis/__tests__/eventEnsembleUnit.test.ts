@@ -8,6 +8,7 @@ import {
     pruneLocalEventsDisconnectedFromWholeBaseline,
     projectSequentialUnitChainHead,
     recoverCandidateBackedPartialConsensus,
+    shouldReplaceUnanchoredPartialWithReferencePulse,
     pruneWholeSeriesPartialAliases,
     pruneUnsupportedFalseRingPathSupplements,
     unitEventCompetesWithWholeAtNewerEndpoint,
@@ -114,6 +115,64 @@ const candidateRecoveryDiagnosis = {
     targetTree: "TEST",
     targetRange: { startYear: 1800, endYear: 2020 },
 } as SeriesCoreDiagnosis;
+
+const verifiedPulse = (): DiagnosisEvent[] => ([
+    {
+        ...falseRingEvent(1900, false),
+        id: "pulse-missing",
+        eventType: "missingRing",
+        evidence: {
+            ...falseRingEvent(1900, false).evidence,
+            algorithmSources: ["bounded_lag_pulse", "reference_core_pair_voting"],
+        },
+    },
+    {
+        ...falseRingEvent(1909, false),
+        id: "pulse-false",
+        evidence: {
+            ...falseRingEvent(1909, false).evidence,
+            algorithmSources: ["bounded_lag_pulse", "reference_core_pair_voting"],
+        },
+    },
+]);
+
+describe("shouldReplaceUnanchoredPartialWithReferencePulse", () => {
+    it("lets a strictly verified cancelling pulse replace only an unanchored partial -2", () => {
+        const unanchored = partialMoveEvent(-2);
+        unanchored.evidence.candidateIds = [];
+        unanchored.evidence.algorithmSources = ["piecewise_lag_path"];
+
+        expect(shouldReplaceUnanchoredPartialWithReferencePulse(
+            [unanchored],
+            [],
+            verifiedPulse(),
+            false,
+        )).toBe(true);
+    });
+
+    it("preserves candidate-backed, large-gap, unit-competing and whole-competing events", () => {
+        const supported = partialMoveEvent(-2);
+        const largeGap = partialMoveEvent(-4);
+        largeGap.evidence.candidateIds = [];
+        largeGap.evidence.algorithmSources = ["piecewise_lag_path"];
+        const unanchored = partialMoveEvent(-2);
+        unanchored.evidence.candidateIds = [];
+        unanchored.evidence.algorithmSources = ["piecewise_lag_path"];
+
+        expect(shouldReplaceUnanchoredPartialWithReferencePulse(
+            [supported], [], verifiedPulse(), false,
+        )).toBe(false);
+        expect(shouldReplaceUnanchoredPartialWithReferencePulse(
+            [largeGap], [], verifiedPulse(), false,
+        )).toBe(false);
+        expect(shouldReplaceUnanchoredPartialWithReferencePulse(
+            [unanchored], [falseRingEvent(1909, true)], verifiedPulse(), false,
+        )).toBe(false);
+        expect(shouldReplaceUnanchoredPartialWithReferencePulse(
+            [unanchored], [], verifiedPulse(), true,
+        )).toBe(false);
+    });
+});
 
 describe("recoverCandidateBackedPartialConsensus", () => {
     it("recovers the shared amplitude of independent COFECHA and segmented candidates", () => {

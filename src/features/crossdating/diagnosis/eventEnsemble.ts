@@ -2038,6 +2038,40 @@ export const passesUnhintedAdjacentPairGate = (
     && vote.jointExcessGain >= 0.3
 );
 
+export const shouldReplaceUnanchoredPartialWithReferencePulse = (
+    partialEvents: readonly DiagnosisEvent[],
+    existingUnitEvents: readonly DiagnosisEvent[],
+    pulseEvents: readonly DiagnosisEvent[],
+    hasWholeCandidate: boolean,
+): boolean => {
+    if (hasWholeCandidate
+        || existingUnitEvents.length > 0
+        || partialEvents.length !== 1
+        || pulseEvents.length !== 2) return false;
+    const partial = partialEvents[0];
+    if (partial.eventType !== "partialMove"
+        || partial.shiftYears !== -2
+        || partial.evidence.candidateIds.length > 0
+        || partial.evidence.algorithmSources.some((source) => [
+            "candidate_backed_partial_consensus",
+            "cofecha_segment_lag",
+            "counterfactual_operation_verification",
+            "local_corrected_raw_breakpoint",
+            "unique_repeated_block_boundary",
+        ].includes(source))) return false;
+    const pulseTypes = new Set(pulseEvents.map((event) => event.eventType));
+    return pulseTypes.size === 2
+        && pulseTypes.has("missingRing")
+        && pulseTypes.has("falseRing")
+        && pulseEvents.every((event) => (
+            event.evidence.algorithmSources.includes("reference_core_pair_voting")
+            && (
+                event.evidence.algorithmSources.includes("bounded_lag_pulse")
+                || event.evidence.algorithmSources.includes("localized_reference_pair")
+            )
+        ));
+};
+
 const locateReferenceVerifiedPulse = (
     diagnosis: SeriesCoreDiagnosis,
     siteData: RwlSiteData,
@@ -2395,7 +2429,7 @@ const eventsForSeriesPass = (
     const primaryPartialEvents = candidateBackedPartial && !pathAgreesWithCandidate
         ? [candidateBackedPartial]
         : pathPartialEvents;
-    const partialEvents = locateMultiviewPartialEvents(
+    let partialEvents = locateMultiviewPartialEvents(
         diagnosis,
         cofechaDiagnosis,
         primaryPartialEvents,
@@ -2407,6 +2441,26 @@ const eventsForSeriesPass = (
             diagnosis,
             options.enableLearnedWindowRanking !== false,
         ));
+    if (partialEvents.length === 1
+        && missingEvents.length === 0
+        && falseEvents.length === 0
+        && !hasWholeCandidate) {
+        const verifiedPulse = referenceVerifiedFallback();
+        if (shouldReplaceUnanchoredPartialWithReferencePulse(
+            partialEvents,
+            [...missingEvents, ...falseEvents],
+            verifiedPulse,
+            hasWholeCandidate,
+        )) {
+            partialEvents = [];
+            missingEvents = verifiedPulse.filter((event) => (
+                event.eventType === "missingRing"
+            ));
+            falseEvents = verifiedPulse.filter((event) => (
+                event.eventType === "falseRing"
+            ));
+        }
+    }
     if (partialEvents.length > 0) {
         const conditionedUnitEvents = diagnoseLagPath(cofechaDiagnosis, siteData, {
             ...eventPathConfig,
