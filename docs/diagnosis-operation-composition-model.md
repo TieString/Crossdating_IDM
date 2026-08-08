@@ -1058,3 +1058,70 @@ partial -> whole 全部属于这一弱层。当前 `keepWholeSeriesEvent` 对“
 增加全区间状态一致性验证：候选 shift 必须得到较老端、较新端和足够多独立分段共同支持，
 且不能被一个有边界的局部状态路径解释。终端锚定 whole、whole+local 复合顺序和已验证的
 partial 均须单独保留回归，避免修掉过度补偿时重新回到 whole -> partial。
+
+### Round 5B：用新端与全段状态共识过滤弱 whole
+
+- 状态证据提交：`b2939d29fc9e72d498636c06dd1e14513cdcd9ee`。
+- 正式门禁提交：`0958ab0facdf7c65562d2f8e655cccab58ab953e`。
+- 冻结结果：
+  `D:\软件测试\legacy-cross-file-generalization-results\legacy-whole-state-gate-2026-08-08-v1`。
+
+非终端 whole 不再因为局部事件暂未形成就自动保留。候选 shift 必须得到最新两个可靠分段
+共同支持，或同时得到 global best lag、按样本数加权的分段多数和按置信度加权的分段多数
+支持；由重复 COFECHA 终端 lag 验证的 whole 保留独立通道。该门禁使 single 已回答操作准确率
+由 315/428（73.60%）提高到 324/418（77.51%），clean review 从 16/48 降到 14/48；
+missing -> whole 从 34 降到 14，partial -> whole 从 13 降到 0，false -> whole 从 5 降到 1。
+真实 whole 的精确操作由 66/96 小幅降到 64/96，说明仍有两个弱 whole 缺少当前状态锚点。
+
+门禁同时暴露了一个此前被错误 whole 偶然遮挡的下游问题。serial confirmed 从 191/768 降到
+183/768；17 个丢失成功全部是 `multiDiscreteMissing4/8` 中的 missingRing。以
+`russ046e/895112` 为例，恢复 1918 后会形成一个删除 1858 的候选：整体相关从
+0.20552 降到 0.19844，dominant lag 从 -2 恶化为 -3，但它仍靠通用 hard-gate 的其他条件
+通过，最终被定位器拉到 1739。旧弱 whole `+61` 并不正确，只是先把该伪轮候选当作不相连
+补充项删掉，随后才由串行 missing 恢复接管。因此不能恢复弱 whole；必须修复自我恶化的
+候选伪轮。一个保留 rejected-whole 方向信息的实验没有改变任何冻结案例，已由
+`433d6d2e` 完整移除，没有留在生产管线。
+
+### Round 5C：拒绝无路径支撑且令负 lag 自我恶化的候选伪轮
+
+- 修复提交：`2be20485946931d6951a7e8425ac08ac3cb9ec75`。
+- 冻结结果：
+  `D:\软件测试\legacy-cross-file-generalization-results\legacy-self-worsening-false-gate-2026-08-08-v2`。
+- 派生 config SHA-256：
+  `e74bca573b019945425c6356e0e0a7ef552fe4c11a4ccf7f53d3abcbf60e6a1e`；
+  manifest SHA-256：
+  `f7534ee1dab1f73eaf5a2b75fbc9d27546e40d6eb18021beceaf2841a87faac3`。
+
+门禁位于 candidate 与 lag path 汇合处，只过滤同时满足以下条件的 falseRing：没有独立
+falseRing 路径支持、反事实整体相关不升、纠正前 lag 已小于 0，且删除后恰好从 `-n` 变成
+`-(n+1)`。这表示删除操作让负向缺轮阶梯再恶化一年，与伪轮纠正方向矛盾。不能把
+`wholeSeriesRDelta <= 0` 单独当门禁，因为冻结集中有四个真实 falseRing 也会轻微降低整体
+相关；路径支持的案例和正常 `+1 -> 0` 纠正因此明确保留。
+
+single 仍响应 418/1152，clean review 仍为 14/48，保存重开 1200/1200，说明收益不是靠
+增加拒答或误报获得。操作正确由 324 增到 325，主窗口覆盖由 174 增到 175。逐案只有
+`nh001/297072` 的 `multiDiscreteMissing2` 改变：从错误 falseRing 变为正确 missingRing，
+且窗口覆盖 1877。真实 falseRing、whole 和 partial 的 single 输出逐案不变。
+
+| serial 指标 | Round 5B | Round 5C |
+| --- | ---: | ---: |
+| confirmed | 183/768 | **187/768** |
+| ever correct window | 185/768 | **189/768** |
+| first response | 293/768 | **297/768** |
+| first response operation correct | 262 | **268** |
+| first response window covered | 177 | **181** |
+| completely recovered series-scenario | 10/144 | 10/144 |
+| series-scenario with any recovery | 86/144 | **87/144** |
+| blocked by prior event | 451 | **447** |
+| local window median / P90 | 13 / 13 | 13 / 13 |
+
+四个新增 confirmed 没有对应损失：`russ046e/895112` 恢复 1875、1833，
+`nh001/297072` 恢复 1903、1864。两条更旧缺轮从 `blocked_by_prior_event` 变成可回答但
+窗口未覆盖，继续按失败统计。源文件修改 0、保存重开差异 0、错误 0；ZSL141 9 项、
+MCP17A 2 项和本轮相关 Vitest/build 均通过。
+
+本轮只修复 weak-whole 门禁暴露的 falseRing 回退，不代表类型建模已经完成。在相同冻结
+single 中仍有 9 个 `wholeSeriesMove -> partialMove`、3 个 `wholeSeriesMove -> missingRing`、
+25 个 `partialMove -> missingRing` 和 18 个 `partialMove -> falseRing`。下一步应回到 ZSL
+RAW/crossdated 的真实编辑链，先从全序列 baseline 与有断点局部状态的生成语义区分入手，
+再验证 whole 与 partial 共存时的操作顺序；不得靠降低 partial 或 missing 的统一门槛修补。
