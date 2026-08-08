@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
     passesJointNecessityPairGate,
+    passesLongPulsePairGate,
     passesUnhintedAdjacentPairGate,
 } from "../eventEnsemble";
 import { removeOverlappingEvents } from "../eventPath";
@@ -121,5 +122,28 @@ describe("adjacent cancelling event state", () => {
             lowerQuartileReferenceGain: 0.007,
             jointExcessGain: 0.301,
         }))).toBe(false);
+    });
+
+    it("accepts long pulses only with separated unanimous local reference evidence", () => {
+        const global = vote({ gain: 0.016, remoteMargin: 0.005 });
+        const localized = vote({
+            gain: 0.23,
+            remoteMargin: 0.08,
+            referenceCount: 8,
+            positiveReferenceFraction: 1,
+            lowerQuartileReferenceGain: 0.18,
+            jointExcessGain: 0.37,
+        });
+
+        expect(passesLongPulsePairGate(global, localized, 21)).toBe(true);
+        expect(passesLongPulsePairGate(global, localized, 14)).toBe(false);
+        expect(passesLongPulsePairGate(global, vote({
+            ...localized,
+            positiveReferenceFraction: 0.875,
+        }), 21)).toBe(false);
+        expect(passesLongPulsePairGate(global, vote({
+            ...localized,
+            lowerQuartileReferenceGain: -0.01,
+        }), 21)).toBe(false);
     });
 });

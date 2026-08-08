@@ -91,6 +91,17 @@ describe("unit-event edge guards", () => {
         const rankGuarded = addUnitEventRankEdgeGuard(eventFor(1900, 1908, 1900), diagnosis);
         expect(addUnitEventEvidenceEdgeGuard(rankGuarded, diagnosis)).toBe(rankGuarded);
     });
+
+    it("preserves a window already anchored by long-pulse reference consensus", () => {
+        const event = eventFor(1900, 1908, 1900, [
+            "unit_local_combo31_year=1908",
+            "unit_local_combo41_year=1908",
+            "unit_local_combo61_year=1908",
+        ]);
+        event.evidence.algorithmSources.push("long_pulse_consensus");
+
+        expect(addUnitEventEvidenceEdgeGuard(event, diagnosis)).toBe(event);
+    });
 });
 
 describe("missing-ring neighbour ranking", () => {

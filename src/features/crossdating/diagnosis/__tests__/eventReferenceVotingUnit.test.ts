@@ -3,6 +3,7 @@ import {
     passesReferenceRecoveryGate,
     selectReferenceRecoveryEventType,
     type ReferenceRecoveryPeakSummary,
+    unitPairDurationBounds,
 } from "../eventReferenceVoting";
 
 const peak = (
@@ -60,5 +61,32 @@ describe("passesReferenceRecoveryGate", () => {
         expect(passesReferenceRecoveryGate(
             peak("partialMove", 0.1, 0.004),
         )).toBe(true);
+    });
+});
+
+describe("unitPairDurationBounds", () => {
+    it("keeps the calibrated unhinted and short-pulse search unchanged", () => {
+        expect(unitPairDurationBounds()).toEqual({ minimum: 8, maximum: 14 });
+        expect(unitPairDurationBounds({
+            orientation: "missingThenFalse",
+            olderYear: 1900,
+            newerYear: 1909,
+            maximumDistance: 4,
+        })).toEqual({ minimum: 8, maximum: 14 });
+    });
+
+    it("expands only a path-hinted long pulse around both uncertain boundaries", () => {
+        expect(unitPairDurationBounds({
+            orientation: "falseThenMissing",
+            olderYear: 1900,
+            newerYear: 1921,
+            maximumDistance: 4,
+        })).toEqual({ minimum: 13, maximum: 29 });
+        expect(unitPairDurationBounds({
+            orientation: "falseThenMissing",
+            olderYear: 1900,
+            newerYear: 1990,
+            maximumDistance: 4,
+        })).toEqual({ minimum: 70, maximum: 70 });
     });
 });

@@ -773,7 +773,8 @@ export const addUnitEventEvidenceEdgeGuard = (
     diagnosis: SeriesCoreDiagnosis,
 ): DiagnosisEvent => {
     if ((event.eventType !== "missingRing" && event.eventType !== "falseRing")
-        || event.evidence.algorithmSources.includes("edge_rank_guard")) {
+        || event.evidence.algorithmSources.includes("edge_rank_guard")
+        || event.evidence.algorithmSources.includes("long_pulse_consensus")) {
         return event;
     }
     const evidenceYears = evidenceEdgePrefixes

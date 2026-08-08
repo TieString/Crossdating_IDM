@@ -105,6 +105,35 @@ const PARTIAL_RECOVERY_MINIMUM_REMOTE_MARGIN = 0.004;
 const FALSE_OVER_PARTIAL_MAXIMUM_GAIN_DEFICIT = 0.03;
 const FALSE_OVER_PARTIAL_MAXIMUM_PARTIAL_MARGIN = 0.003;
 const FALSE_OVER_PARTIAL_MINIMUM_FALSE_GAIN = 0.02;
+const MIN_UNHINTED_UNIT_PAIR_YEARS = 8;
+const MAX_UNHINTED_UNIT_PAIR_YEARS = 14;
+const MAX_HINTED_UNIT_PAIR_YEARS = 70;
+
+export const unitPairDurationBounds = (
+    hint?: AdjacentUnitPairHint,
+): { minimum: number; maximum: number } => {
+    if (!hint) return {
+        minimum: MIN_UNHINTED_UNIT_PAIR_YEARS,
+        maximum: MAX_UNHINTED_UNIT_PAIR_YEARS,
+    };
+    const hintedDuration = hint.newerYear - hint.olderYear;
+    if (!Number.isFinite(hintedDuration)
+        || hintedDuration <= MAX_UNHINTED_UNIT_PAIR_YEARS) return {
+        minimum: MIN_UNHINTED_UNIT_PAIR_YEARS,
+        maximum: MAX_UNHINTED_UNIT_PAIR_YEARS,
+    };
+    const boundaryUncertainty = Math.max(0, hint.maximumDistance) * 2;
+    return {
+        minimum: Math.min(
+            MAX_HINTED_UNIT_PAIR_YEARS,
+            Math.max(2, Math.floor(hintedDuration - boundaryUncertainty)),
+        ),
+        maximum: Math.min(
+            MAX_HINTED_UNIT_PAIR_YEARS,
+            Math.ceil(hintedDuration + boundaryUncertainty),
+        ),
+    };
+};
 
 /**
  * A low-separation partial hypothesis must not erase a plausible unit deletion. This changes
@@ -356,13 +385,18 @@ const scanAdjacentUnitPairs = (
     const yearSet = new Set(candidateYears(diagnosis, 20));
     const scores: AdjacentPairScore[] = [];
     const hintedScanRadius = hint ? hint.maximumDistance + 8 : null;
+    const durationBounds = unitPairDurationBounds(hint);
     const baselineDifference = scoreMode === "localized"
         ? firstDifferences(diagnosis.rawTarget)
         : null;
     yearSet.forEach((olderYear) => {
         if (hint && hintedScanRadius !== null
             && Math.abs(olderYear - hint.olderYear) > hintedScanRadius) return;
-        for (let duration = 8; duration <= 14; duration += 1) {
+        for (
+            let duration = durationBounds.minimum;
+            duration <= durationBounds.maximum;
+            duration += 1
+        ) {
             const newerYear = olderYear + duration;
             if (!yearSet.has(newerYear)) continue;
             if (hint && hintedScanRadius !== null
@@ -553,10 +587,20 @@ const masterRemoteMarginForPair = (
     );
     const bestScore = score(best.olderYear, best.newerYear);
     const years = candidateYears(diagnosis, 20);
+    const durationBounds = unitPairDurationBounds({
+        orientation: best.orientation,
+        olderYear: best.olderYear,
+        newerYear: best.newerYear,
+        maximumDistance: 4,
+    });
     let remoteScore = Number.NEGATIVE_INFINITY;
     for (let index = 0; index < years.length; index += 2) {
         const olderYear = years[index];
-        for (let duration = 8; duration <= 14; duration += 2) {
+        for (
+            let duration = durationBounds.minimum;
+            duration <= durationBounds.maximum;
+            duration += 2
+        ) {
             const newerYear = olderYear + duration;
             if (Math.abs(olderYear - best.olderYear) <= 7
                 && Math.abs(newerYear - best.newerYear) <= 7) continue;

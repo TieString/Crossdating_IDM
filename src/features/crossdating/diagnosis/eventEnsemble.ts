@@ -2027,6 +2027,24 @@ export const passesJointNecessityPairGate = (
     && pulseDurationYears <= 14
 );
 
+export const passesLongPulsePairGate = (
+    vote: AdjacentUnitPairVote,
+    localizedVote: AdjacentUnitPairVote,
+    pulseDurationYears: number,
+): boolean => (
+    Number.isFinite(pulseDurationYears)
+    && pulseDurationYears >= 15
+    && pulseDurationYears <= 70
+    && vote.gain >= 0.012
+    && vote.remoteMargin >= 0.0045
+    && localizedVote.gain >= 0.2
+    && localizedVote.remoteMargin >= 0.075
+    && localizedVote.referenceCount >= 7
+    && localizedVote.positiveReferenceFraction >= 0.999
+    && localizedVote.lowerQuartileReferenceGain >= 0.15
+    && localizedVote.jointExcessGain >= 0.25
+);
+
 export const passesUnhintedAdjacentPairGate = (
     vote: AdjacentUnitPairVote,
 ): boolean => (
@@ -2094,17 +2112,30 @@ const locateReferenceVerifiedPulse = (
             notes: [...event.evidence.notes, source],
         },
     }));
-    const pulseEvents = diagnoseLagPath(diagnosis, siteData, {
-        ...eventPathConfig,
-        enablePulseScan: true,
-        maxPulseYears: 14,
-        maxPulseCount: 1,
-        minPulseGain: 3,
-        minPulseContextGain: 0.3,
-    }, pathCache).events.filter((event) => (
-        event.evidence.algorithmSources.includes("bounded_lag_pulse")
-    ));
-    if (pulseEvents.length === 2) {
+    const pulseAttempts: Array<Partial<EventPathConfig>> = [
+        {
+            maxPulseYears: 14,
+            maxPulseCount: 1,
+            minPulseGain: 3,
+            minPulseContextGain: 0.3,
+        },
+        {
+            minPulseYears: 15,
+            maxPulseYears: 70,
+            maxPulseCount: 1,
+            minPulseGain: 2,
+            minPulseContextGain: 0.2,
+        },
+    ];
+    for (const pulseAttempt of pulseAttempts) {
+        const pulseEvents = diagnoseLagPath(diagnosis, siteData, {
+            ...eventPathConfig,
+            ...pulseAttempt,
+            enablePulseScan: true,
+        }, pathCache).events.filter((event) => (
+            event.evidence.algorithmSources.includes("bounded_lag_pulse")
+        ));
+        if (pulseEvents.length !== 2) continue;
         const ordered = [...pulseEvents].sort((a, b) => a.startYear - b.startYear);
         const [older, newer] = ordered;
         if (older.eventType !== newer.eventType
@@ -2152,16 +2183,29 @@ const locateReferenceVerifiedPulse = (
                         localizedVote,
                         pulseDurationYears,
                     );
+                const passesLongPulseGate = localizedVote !== null
+                    && passesLongPulsePairGate(
+                        vote,
+                        localizedVote,
+                        pulseDurationYears,
+                    );
                 if (localizedVote && (
                     passesStandardGate
                     || passesStrongLocalConsensus
                     || passesJointNecessityGate
+                    || passesLongPulseGate
                 )) {
                     return annotate(
                         vote.events.map((event) => ({
                             ...event,
                             evidence: {
                                 ...event.evidence,
+                                algorithmSources: Array.from(new Set([
+                                    ...event.evidence.algorithmSources,
+                                    ...(passesLongPulseGate
+                                        ? ["long_pulse_consensus"]
+                                        : []),
+                                ])).sort(),
                                 notes: [
                                     ...event.evidence.notes,
                                     `localized_pair_gain=${localizedVote.gain.toFixed(6)}`,
@@ -2173,7 +2217,9 @@ const locateReferenceVerifiedPulse = (
                                         ? "standard"
                                         : passesStrongLocalConsensus
                                             ? "strong_local_consensus"
-                                            : "joint_necessity"}`,
+                                            : passesJointNecessityGate
+                                                ? "joint_necessity"
+                                                : "long_pulse_consensus"}`,
                                     `localized_pair_joint_excess_gain=${
                                         localizedVote.jointExcessGain.toFixed(6)
                                     }`,
