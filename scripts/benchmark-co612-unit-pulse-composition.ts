@@ -36,9 +36,20 @@ import {
 import type { LegacyDiagnosisSnapshot } from "./legacy-generalization/types";
 
 type UnitEventType = "missingRing" | "falseRing";
-type Orientation = "missingThenFalse" | "falseThenMissing";
+type Orientation = "missingThenFalse"
+    | "falseThenMissing"
+    | "missingThenMissing"
+    | "falseThenFalse";
 type PositionStratum = "older" | "middle" | "newer";
 type TruthSide = "older" | "newer";
+type OperationIdentifiability = "operation-identifiable" | "operation-unidentifiable";
+
+const ALL_ORIENTATIONS: readonly Orientation[] = [
+    "missingThenFalse",
+    "falseThenMissing",
+    "missingThenMissing",
+    "falseThenFalse",
+];
 
 type TruthSpec = {
     truthId: string;
@@ -60,6 +71,7 @@ type ScenarioSpec = {
     orientation: Orientation;
     spacingYears: number;
     positionStratum: PositionStratum;
+    identifiability: OperationIdentifiability;
     truths: [TruthSpec, TruthSpec];
     controlIds: [string, string];
 };
@@ -71,13 +83,14 @@ type WorkItem = {
 };
 
 type Manifest = {
-    schemaVersion: 1;
+    schemaVersion: 2;
     createdAt: string;
     inputPath: string;
     sourceSha256: string;
     gitCommit: string;
     truthRoundTripVerified: true;
     falseRingMode: "moderate";
+    orientations: Orientation[];
     spacings: number[];
     positions: Array<{ stratum: PositionStratum; fraction: number }>;
     selection: {
@@ -181,6 +194,7 @@ type ScenarioResult = {
     orientation: Orientation;
     spacingYears: number;
     positionStratum: PositionStratum;
+    identifiability: OperationIdentifiability;
     initialTruths: TruthSpec[];
     controlIds: [string, string];
     steps: SerialStepResult[];
@@ -235,7 +249,18 @@ const minimumSeriesLength = Number(valueFor("--minimum-series-length") ?? 180);
 const spacings = (valueFor("--spacings") ?? "2,9,21")
     .split(",")
     .map(Number)
-    .filter((value) => Number.isInteger(value) && value >= 2);
+    .filter((value) => Number.isInteger(value) && value >= 1);
+const requestedOrientations = (valueFor("--orientations")
+    ?? "missingThenFalse,falseThenMissing")
+    .split(",")
+    .filter(Boolean);
+const invalidOrientations = requestedOrientations.filter((orientation) => (
+    !ALL_ORIENTATIONS.includes(orientation as Orientation)
+));
+if (invalidOrientations.length > 0) {
+    throw new Error(`invalid orientations: ${invalidOrientations.join(",")}`);
+}
+const orientations = requestedOrientations as Orientation[];
 const positions: Manifest["positions"] = [
     { stratum: "older", fraction: 0.25 },
     { stratum: "middle", fraction: 0.5 },
@@ -430,6 +455,15 @@ const fixtureEvents = (truths: readonly TruthSpec[]): PiecewiseLagEventSpec[] =>
     }))
 );
 
+const eventTypesForOrientation = (
+    orientation: Orientation,
+): [UnitEventType, UnitEventType] => {
+    if (orientation === "missingThenFalse") return ["missingRing", "falseRing"];
+    if (orientation === "falseThenMissing") return ["falseRing", "missingRing"];
+    if (orientation === "missingThenMissing") return ["missingRing", "missingRing"];
+    return ["falseRing", "falseRing"];
+};
+
 const applyConfirmedTruth = (
     site: RwlSiteData,
     targetId: string,
@@ -489,8 +523,13 @@ const assertTruthRoundTrip = (
             ].join(" "));
         }
         const zeros = Array.from(final).filter(([, value]) => value === 0);
-        if (zeros.length !== 1) {
-            throw new Error(`round-trip zero mismatch: ${source.id}:${zeros.length}`);
+        const expectedZeros = truths.filter((truth) => (
+            truth.eventType === "missingRing"
+        )).length;
+        if (zeros.length !== expectedZeros) {
+            throw new Error(
+                `round-trip zero mismatch: ${source.id}:${zeros.length}!=${expectedZeros}`,
+            );
         }
         const mismatch = Array.from(final).find(([year, value]) => (
             value !== 0 && observedSource.get(year) !== value
@@ -534,13 +573,8 @@ const buildManifest = async (): Promise<Manifest> => {
                     || newerYear > series.endYear - 30
                     || !series.valuesByYear.has(olderYear)
                     || !series.valuesByYear.has(newerYear)) return;
-                (["missingThenFalse", "falseThenMissing"] as const).forEach((orientation) => {
-                    const olderType: UnitEventType = orientation === "missingThenFalse"
-                        ? "missingRing"
-                        : "falseRing";
-                    const newerType: UnitEventType = orientation === "missingThenFalse"
-                        ? "falseRing"
-                        : "missingRing";
+                orientations.forEach((orientation) => {
+                    const [olderType, newerType] = eventTypesForOrientation(orientation);
                     const truths: [TruthSpec, TruthSpec] = [{
                         truthId: "older",
                         side: "older",
@@ -569,6 +603,9 @@ const buildManifest = async (): Promise<Manifest> => {
                         orientation,
                         spacingYears,
                         positionStratum: stratum,
+                        identifiability: spacingYears === 1
+                            ? "operation-unidentifiable"
+                            : "operation-identifiable",
                         truths,
                         controlIds,
                     });
@@ -604,13 +641,14 @@ const buildManifest = async (): Promise<Manifest> => {
         windowsHide: true,
     }).trim();
     return {
-        schemaVersion: 1,
+        schemaVersion: 2,
         createdAt: new Date().toISOString(),
         inputPath,
         sourceSha256: loaded.sourceSha256,
         gitCommit,
         truthRoundTripVerified: true,
         falseRingMode: "moderate",
+        orientations,
         spacings,
         positions,
         selection: {
@@ -798,6 +836,7 @@ const runWorker = async (): Promise<void> => {
                 orientation: spec.orientation,
                 spacingYears: spec.spacingYears,
                 positionStratum: spec.positionStratum,
+                identifiability: spec.identifiability,
                 initialTruths: spec.truths,
                 controlIds: spec.controlIds,
                 steps,
@@ -848,6 +887,7 @@ type ScenarioRow = {
     orientation: Orientation;
     spacingYears: number;
     positionStratum: PositionStratum;
+    identifiability: OperationIdentifiability;
     controlsBothCorrect: boolean;
     initialResponse: boolean;
     initialOperationCorrect: boolean;
@@ -970,6 +1010,7 @@ const aggregate = (manifest: Manifest): void => {
             orientation: scenario.orientation,
             spacingYears: scenario.spacingYears,
             positionStratum: scenario.positionStratum,
+            identifiability: scenario.identifiability,
             controlsBothCorrect,
             initialResponse: initial?.response ?? false,
             initialOperationCorrect: initial?.operationMatchesAny ?? false,
@@ -998,7 +1039,7 @@ const aggregate = (manifest: Manifest): void => {
     });
     const sourceSha256After = sha256Bytes(readFileSync(manifest.inputPath));
     const report = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         createdAt: new Date().toISOString(),
         runDir,
         sourceSha256Before: manifest.sourceSha256,
@@ -1008,6 +1049,7 @@ const aggregate = (manifest: Manifest): void => {
         truthRoundTripVerified: manifest.truthRoundTripVerified,
         workers: workerCount,
         selectedTargets: manifest.selection.selectedTargetIds,
+        orientations: manifest.orientations,
         spacings: manifest.spacings,
         positions: manifest.positions,
         uniqueDiagnosisStates: clean.length
@@ -1049,10 +1091,20 @@ const aggregate = (manifest: Manifest): void => {
         },
         overall: summarizeRows(rows),
         byOrientation: Object.fromEntries(
-            (["missingThenFalse", "falseThenMissing"] as const).map((orientation) => [
+            manifest.orientations.map((orientation) => [
                 orientation,
                 summarizeRows(rows.filter((row) => row.orientation === orientation)),
             ]),
+        ),
+        byIdentifiability: Object.fromEntries(
+            (["operation-identifiable", "operation-unidentifiable"] as const).map(
+                (identifiability) => [
+                    identifiability,
+                    summarizeRows(rows.filter((row) => (
+                        row.identifiability === identifiability
+                    ))),
+                ],
+            ),
         ),
         bySpacing: Object.fromEntries(manifest.spacings.map((spacing) => [
             String(spacing),
@@ -1077,6 +1129,7 @@ const runParent = async (): Promise<void> => {
     if (!existsSync(inputPath)) throw new Error(`input missing: ${inputPath}`);
     if (!existsSync(cofechaExe)) throw new Error(`COFECHA missing: ${cofechaExe}`);
     if (spacings.length === 0) throw new Error("at least one spacing is required");
+    if (orientations.length === 0) throw new Error("at least one orientation is required");
     rmSync(runDir, { force: true, recursive: true });
     mkdirSync(runDir, { recursive: true });
     const manifest = await buildManifest();

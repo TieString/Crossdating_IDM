@@ -1564,3 +1564,28 @@ strict 为 16/55，review 为 **2/55**，均未高于冻结基线的 18/55 和 3
 后续顺序冻结为：B6 missing+missing -> B7 false+false -> B8/B9 单位+partial 两种顺序 ->
 B10 partial+partial -> C1--C6 -> D1--D4。每轮只允许针对当前失败族修改算法；若破坏前一轮，
 该轮不得提交为改进。全部 co612 规则冻结后，再运行同一完整矩阵的跨文件 ITRDB 验证。
+
+### Round 5K 基准：B6 同向双缺轮阶梯
+
+`benchmark:co612:unit-pulse` 扩展为显式 `--orientations`，新增
+`missingThenMissing` 与 `falseThenFalse`，默认值仍是原有的
+`missingThenFalse,falseThenMissing`，因此旧 B4/B5 命令语义不变。真值 round-trip 不再假定
+固定 1 个零值，而按缺轮数量验证；间距允许 1 年，并将该层标记为
+`operation-unidentifiable`，不强迫它输出两个 missingRing。
+
+B6 首个 truth-blind smoke 使用 co612 的 `mon151`、3 年间距和老/中/新三个位置。源 SHA
+前后不变，66 个保存重开状态全部稳定，clean review 为 2/55。结果为：
+
+| 指标 | 结果 |
+| --- | ---: |
+| 单缺轮控制操作正确 | 6/6 |
+| 单缺轮控制窗口覆盖 | 5/6 |
+| 双缺轮首次响应/窗口覆盖 | 1/3 |
+| 两个控制均覆盖的组合 | 2/3 |
+| 其中组合交互失败 | 1/2 |
+| 完整串行恢复 | 1/3 |
+| partial / whole / 反向单位误判 | 0 / 0 / 0 |
+
+当前失败首先表现为拒答，不是把双缺轮压成 partial。该 1 条样芯结果只验证基准链路，不用于
+修改门槛；下一步运行 10 条样芯、间距 1/3/9/21 和三个位置的冻结生产基线，再按候选形成、
+严格层、review 层与参考支持分类拒答。
