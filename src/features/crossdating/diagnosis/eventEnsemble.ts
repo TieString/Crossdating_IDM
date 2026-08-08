@@ -1127,6 +1127,35 @@ const hasCoherentLagChain = (events: DiagnosisEvent[]): boolean => {
     });
 };
 
+/**
+ * A whole-interval single-event posterior is misspecified once two independent local state
+ * transitions already form one continuous lag path. Keep its boundary search local in that case;
+ * otherwise the unresolved companion event can pull the posterior to a distant false mode.
+ */
+export const hasMultipleCoherentLocalTransitions = (
+    events: readonly DiagnosisEvent[],
+): boolean => {
+    const localEvents = events.filter((event) => (
+        event.eventType !== "wholeSeriesMove"
+    ));
+    return localEvents.length >= 2 && hasCoherentLagChain(localEvents);
+};
+
+/** The endpoint residual model assumes a zero global baseline and cannot relocate this boundary. */
+export const unitEventUsesWholeSeriesBaseline = (
+    whole: DiagnosisEvent | undefined,
+    event: DiagnosisEvent,
+): boolean => {
+    const wholeShift = wholeSeriesMoveShiftYears(whole);
+    if (wholeShift === null
+        || (event.eventType !== "missingRing" && event.eventType !== "falseRing")
+        || event.evidence.lagBefore === null
+        || event.evidence.lagAfter !== wholeShift
+        || event.evidence.lagBefore === wholeShift) return false;
+    const transition = event.evidence.lagAfter - event.evidence.lagBefore;
+    return event.eventType === "missingRing" ? transition === 1 : transition === -1;
+};
+
 const isDirectedUnitTransition = (
     event: DiagnosisEvent,
     eventType: "missingRing" | "falseRing",
@@ -1170,6 +1199,8 @@ const isCandidateBackedExactPartial = (event: DiagnosisEvent): boolean => (
         event.evidence.lagAfter,
     )
 );
+
+const MIN_CONFIRMED_NEWER_MISSING_MARKERS = 2;
 
 const hasIndependentUnitSpecificAnchor = (event: DiagnosisEvent): boolean => (
     event.evidence.candidateIds.length > 0
@@ -1222,6 +1253,25 @@ const addCompressedMissingStaircaseEvidence = (
         pathCache,
     );
     if (!supportsCompressedMissingStaircase(staircase)) return event;
+    const competition = comparePartialMoveWithMissingStaircase(
+        diagnosis,
+        siteData,
+        event,
+        true,
+        staircase.newerBoundaryYear,
+    );
+    const confirmedNewerMissingCount = Array.from(
+        siteData.get(event.seriesId) ?? [],
+    ).filter(([year, value]) => (
+        value === 0 && year > staircase.newerBoundaryYear
+    )).length;
+    // A two-boundary fit has more degrees of freedom than one physical -2 gap. Local lag shape
+    // alone is therefore insufficient. Confirmed newer missing rings may relax only a borderline
+    // unanimous vote; first-pass cases still need the stronger independent operation margin.
+    if (!supportsDiscreteMissingStaircase(competition, staircase, {
+        allowConfirmedHistoryRelaxation:
+            confirmedNewerMissingCount >= MIN_CONFIRMED_NEWER_MISSING_MARKERS,
+    })) return event;
     const sharedUnitAnchor = selectSharedExplicitZeroMarker(
         siteData,
         event.seriesId,
@@ -1229,7 +1279,7 @@ const addCompressedMissingStaircaseEvidence = (
         2,
     );
     if (isCandidateBackedExactPartial(event) && sharedUnitAnchor === null) return event;
-    return {
+    return addExplicitStaircaseCompetitionEvidence({
         ...event,
         evidence: {
             ...event.evidence,
@@ -1244,9 +1294,10 @@ const addCompressedMissingStaircaseEvidence = (
                 `compressed_staircase_gain=${staircase.staircaseGain.toFixed(6)}`,
                 `compressed_staircase_reference_support=${staircase.referenceSupport}/${staircase.referenceCount}`,
                 `compressed_staircase_reference_median=${staircase.referenceMedianAdvantage.toFixed(6)}`,
+                `compressed_staircase_confirmed_newer_missing_count=${confirmedNewerMissingCount}`,
             ],
         },
-    };
+    }, competition!, staircase);
 };
 
 /**
@@ -1873,7 +1924,6 @@ type SequentialMissingRecovery = {
 const MIN_SEQUENTIAL_GAIN_PER_EXTRA_TRANSITION = 0.8;
 const MIN_STABLE_SEQUENTIAL_HEAD_RUN_YEARS = 30;
 const MIN_DISTINCT_PARTIAL_MODE_SEPARATION_YEARS = 9;
-const MIN_CONFIRMED_NEWER_MISSING_MARKERS = 2;
 const MAX_CONFIRMED_STAIRCASE_CANDIDATE_DISTANCE_YEARS = 2;
 
 /** A multi-step path needs enough complexity-adjusted gain or one durable unit-lag state. */
@@ -3501,6 +3551,8 @@ export const makeDiagnosisEvents = (
             : null;
         const endpointRefined = options.enableEndpointResidualWindow === true
             && endpointUnits.length === 1
+            && !hasMultipleCoherentLocalTransitions(retainedDetected)
+            && !unitEventUsesWholeSeriesBaseline(endpointWhole, endpointUnits[0])
             && !endpointUnits[0].evidence.algorithmSources.includes(
                 "collapsed_missing_staircase_head",
             )

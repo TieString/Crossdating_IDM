@@ -36,12 +36,22 @@ export type LocalTwoStepStaircaseEvidence = {
 export const supportsDiscreteMissingStaircase = (
     competition: MissingStaircaseCompetition | null,
     local: LocalTwoStepStaircaseEvidence | null,
+    options: { allowConfirmedHistoryRelaxation?: boolean } = {},
 ): boolean => {
     if (!competition || !local || competition.cumulativeShiftYears !== -2) return false;
     const localSupportRatio = local.referenceSupport
         / Math.max(1, local.referenceCount);
+    const unanimousExplicitSupport = options.allowConfirmedHistoryRelaxation === true
+        && competition.referenceMedianMargin >= 0.025
+        && competition.masterMargin > 0
+        && competition.localMargin > 0
+        && competition.referenceLowerQuartileMargin > 0;
+    const referenceMarginSupported = competition.referenceMedianMargin >= 0.03
+        || unanimousExplicitSupport;
+    const localGainSupported = local.staircaseGain >= -0.15
+        || (unanimousExplicitSupport && local.staircaseGain >= -0.2);
     return local.newerBoundaryYear - local.olderBoundaryYear >= 2
-        && local.staircaseGain >= -0.15
+        && localGainSupported
         && local.middleMeanAdvantage > 0
         && local.referenceCount >= 8
         && localSupportRatio >= 0.65
@@ -49,7 +59,7 @@ export const supportsDiscreteMissingStaircase = (
         && competition.missingSpanYears > 1
         && competition.referenceCount >= 8
         && competition.referenceSupportRatio >= 0.75
-        && competition.referenceMedianMargin >= 0.03
+        && referenceMarginSupported
         && competition.referenceLowerQuartileMargin >= -1e-9;
 };
 

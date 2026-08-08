@@ -62,4 +62,64 @@ describe("discrete missing-staircase safety gate", () => {
             local(),
         )).toBe(false);
     });
+
+    it("accepts a near-threshold reference median when every aggregate margin is positive", () => {
+        expect(supportsDiscreteMissingStaircase(
+            competition({
+                masterMargin: 0.015,
+                localMargin: 0.024,
+                referenceMedianMargin: 0.026,
+                referenceLowerQuartileMargin: 0.009,
+                referenceSupport: 42,
+                referenceCount: 54,
+                referenceSupportRatio: 42 / 54,
+            }),
+            local(),
+            { allowConfirmedHistoryRelaxation: true },
+        )).toBe(true);
+    });
+
+    it("rejects the same near-threshold median when the direct partial wins globally", () => {
+        expect(supportsDiscreteMissingStaircase(
+            competition({
+                masterMargin: -0.01,
+                localMargin: 0.024,
+                referenceMedianMargin: 0.026,
+                referenceLowerQuartileMargin: 0.009,
+            }),
+            local(),
+            { allowConfirmedHistoryRelaxation: true },
+        )).toBe(false);
+    });
+
+    it("allows a slightly penalized local path only under unanimous explicit support", () => {
+        const unanimous = competition({
+            masterMargin: 0.015,
+            localMargin: 0.024,
+            referenceMedianMargin: 0.026,
+            referenceLowerQuartileMargin: 0.009,
+        });
+        expect(supportsDiscreteMissingStaircase(
+            unanimous,
+            local({ staircaseGain: -0.152 }),
+            { allowConfirmedHistoryRelaxation: true },
+        )).toBe(true);
+        expect(supportsDiscreteMissingStaircase(
+            { ...unanimous, masterMargin: -0.001 },
+            local({ staircaseGain: -0.152 }),
+            { allowConfirmedHistoryRelaxation: true },
+        )).toBe(false);
+    });
+
+    it("does not use the borderline relaxation without confirmed history", () => {
+        expect(supportsDiscreteMissingStaircase(
+            competition({
+                masterMargin: 0.02,
+                localMargin: 0.03,
+                referenceMedianMargin: 0.026,
+                referenceLowerQuartileMargin: 0.008,
+            }),
+            local({ staircaseGain: 1.7 }),
+        )).toBe(false);
+    });
 });

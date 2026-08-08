@@ -158,8 +158,10 @@ const scenariosFor = (
     anchors: { old: number; middle: number; newer: number; adjacent: number },
     index: number,
 ): Scenario[] => {
-    const partialA = index % 2 === 0 ? 2 : -2;
-    const partialB = index % 3 === 0 ? 3 : -3;
+    // Automatic partialMove represents a physical missing block and is always negative. Positive
+    // manual fragment alignment belongs to a separate UI stress test, not this diagnosis metric.
+    const partialA = -(2 + index % 2);
+    const partialB = -(3 + index % 3);
     const falseMode = (["average", "moderate", "splitLike"] as const)[index % 3];
     return [
         {
@@ -1011,6 +1013,9 @@ describe("mixed event experiment with immutable truth coordinates", () => {
         const dualAudit: unknown[] = [];
         let cleanCases = 0;
         let cleanFalsePositives = 0;
+        const requestedTargetIds = new Set(
+            process.env.MIXED_TARGET_IDS?.split(",").filter(Boolean) ?? [],
+        );
 
         folders.forEach((folder, folderIndex) => {
             const loaded = loadDataFolder(folder);
@@ -1023,6 +1028,7 @@ describe("mixed event experiment with immutable truth coordinates", () => {
             const targets = sampleAcross(eligible, 2)
                 .slice(0, Number(process.env.MIXED_TARGETS ?? "3"));
             targets.forEach((series, targetIndex) => {
+                if (requestedTargetIds.size > 0 && !requestedTargetIds.has(series.id)) return;
                 const anchors = anchorsFor(
                     series,
                     `${folder}:${series.id}:${folderIndex}:${targetIndex}`,
@@ -1285,6 +1291,7 @@ describe("mixed event experiment with immutable truth coordinates", () => {
         }).filter((series) => series.zeroCount === 0);
         const targets = sampleAcross(eligible, 2).slice(0, 3);
         let coveredCases = 0;
+        const auditCases: unknown[] = [];
 
         targets.forEach((series, targetIndex) => {
             const anchors = anchorsFor(series, `ZSD:${series.id}:regression:${targetIndex}`);
@@ -1310,6 +1317,19 @@ describe("mixed event experiment with immutable truth coordinates", () => {
                 eventType: "missingRing",
                 year: scenario.events[0].year,
             };
+            auditCases.push({
+                seriesId: series.id,
+                truthYear: truth.year,
+                predictions: predictions.map((event) => ({
+                    type: event.eventType,
+                    range: [event.startYear, event.endYear],
+                    topYear: event.rankedYears[0]?.year,
+                    shiftYears: event.shiftYears,
+                    lags: [event.evidence.lagBefore, event.evidence.lagAfter],
+                    sources: event.evidence.algorithmSources,
+                    notes: event.evidence.notes,
+                })),
+            });
             const result = matchDiagnosisEvents(
                 [truth],
                 predictions.filter((event) => event.eventType === "missingRing"),
@@ -1326,6 +1346,11 @@ describe("mixed event experiment with immutable truth coordinates", () => {
                 .slice(0, 5)
                 .some((rankedYear) => rankedYear.year === truth.year)).toBe(true);
         });
+
+        if (process.env.PRINT_WHOLE_OFFSET_UNIT_CASES === "1") {
+            // eslint-disable-next-line no-console
+            console.log(`WHOLE_OFFSET_UNIT_CASES ${JSON.stringify(auditCases)}`);
+        }
 
         expect(coveredCases).toBeGreaterThanOrEqual(2);
     }, 60_000);

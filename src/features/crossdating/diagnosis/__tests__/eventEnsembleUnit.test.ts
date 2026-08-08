@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import type { DiagnosisEvent, SeriesCoreDiagnosis } from "../types";
 import {
     hasIndependentPartialBoundaryAnchor,
+    hasMultipleCoherentLocalTransitions,
     partialMoveExplainsWholeSeriesCandidate,
     partialMoveSupportsSequentialMissingDepth,
     prioritizeEndpointUnitAgainstWhole,
+    unitEventUsesWholeSeriesBaseline,
     pruneUnanchoredUnitAlternativesToCandidatePartial,
     pruneLocalEventsDisconnectedFromWholeBaseline,
     projectSequentialUnitChainHead,
@@ -783,6 +785,79 @@ describe("projectSequentialUnitChainHead", () => {
         expect(projected.startYear).toBe(1778);
         expect(projected.endYear).toBe(1786);
         expect(projected.rankedYears[0]?.year).toBe(1778);
+    });
+});
+
+describe("hasMultipleCoherentLocalTransitions", () => {
+    it("protects a unit boundary from whole-interval relocation beside a partial transition", () => {
+        const partial = partialMoveEvent(-2);
+        partial.evidence.lagBefore = -2;
+        partial.evidence.lagAfter = 0;
+        partial.startYear = 1979;
+        partial.endYear = 1987;
+        const missing = falseRingEvent(1910, false);
+        missing.eventType = "missingRing";
+        missing.evidence.lagBefore = -3;
+        missing.evidence.lagAfter = -2;
+
+        expect(hasMultipleCoherentLocalTransitions([partial, missing])).toBe(true);
+    });
+
+    it("does not disable the single-event posterior for overlapping alternatives", () => {
+        const partial = partialMoveEvent(-2);
+        partial.evidence.lagBefore = -2;
+        partial.evidence.lagAfter = 0;
+        const missing = falseRingEvent(partial.startYear, false);
+        missing.eventType = "missingRing";
+        missing.evidence.lagBefore = -1;
+        missing.evidence.lagAfter = 0;
+
+        expect(hasMultipleCoherentLocalTransitions([partial, missing])).toBe(false);
+    });
+
+    it("keeps endpoint refinement available for a whole baseline plus one unit event", () => {
+        const whole = partialMoveEvent(-5);
+        whole.eventType = "wholeSeriesMove";
+        const missing = falseRingEvent(1910, false);
+        missing.eventType = "missingRing";
+        missing.evidence.lagBefore = 4;
+        missing.evidence.lagAfter = 5;
+
+        expect(hasMultipleCoherentLocalTransitions([whole, missing])).toBe(false);
+    });
+});
+
+describe("unitEventUsesWholeSeriesBaseline", () => {
+    it("protects a missing-ring boundary whose fixed side is the whole-series lag", () => {
+        const whole = partialMoveEvent(2);
+        whole.eventType = "wholeSeriesMove";
+        const missing = falseRingEvent(1881, false);
+        missing.eventType = "missingRing";
+        missing.evidence.lagBefore = 1;
+        missing.evidence.lagAfter = 2;
+
+        expect(unitEventUsesWholeSeriesBaseline(whole, missing)).toBe(true);
+    });
+
+    it("protects the opposite unit direction on the same non-zero baseline", () => {
+        const whole = partialMoveEvent(-3);
+        whole.eventType = "wholeSeriesMove";
+        const falseRing = falseRingEvent(1881, false);
+        falseRing.evidence.lagBefore = -2;
+        falseRing.evidence.lagAfter = -3;
+
+        expect(unitEventUsesWholeSeriesBaseline(whole, falseRing)).toBe(true);
+    });
+
+    it("leaves a disconnected unit hypothesis available for endpoint refinement", () => {
+        const whole = partialMoveEvent(2);
+        whole.eventType = "wholeSeriesMove";
+        const missing = falseRingEvent(1881, false);
+        missing.eventType = "missingRing";
+        missing.evidence.lagBefore = -1;
+        missing.evidence.lagAfter = 0;
+
+        expect(unitEventUsesWholeSeriesBaseline(whole, missing)).toBe(false);
     });
 });
 
