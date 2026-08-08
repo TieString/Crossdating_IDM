@@ -29,6 +29,26 @@ export type LocalTwoStepStaircaseEvidence = {
     referenceMedianAdvantage: number;
 };
 
+const MAX_TWO_STEP_SEPARATION_YEARS = 17;
+const MAX_HEAD_BOUNDARY_OFFSET_YEARS = 4;
+
+export const supportsRobustMissingStaircaseCorrection = (
+    competition: MissingStaircaseCompetition | null,
+    local: LocalTwoStepStaircaseEvidence | null,
+): boolean => Boolean(
+    competition
+        && local
+        && competition.cumulativeShiftYears === -2
+        && competition.referenceCount >= 8
+        && competition.referenceSupportRatio >= 0.8
+        && competition.referenceMedianMargin >= 0.02
+        && competition.referenceLowerQuartileMargin >= 0.005
+        && competition.missingSpanYears >= 4
+        && local.newerBoundaryYear - local.olderBoundaryYear >= 4
+        && local.staircaseGain > 0
+        && local.middleMeanAdvantage > 0
+);
+
 /**
  * Requires two independent views to prefer separated unit events. Adjacent unit inserts are
  * algebraically equivalent to one continuous gap and are deliberately not auto-split.
@@ -188,6 +208,8 @@ const simulateMissingRings = (
     years: number[],
 ): NumericSeries => years
     .slice()
+    // Missing-ring years use the displayed frame seen during bark-to-pith recovery. Applying the
+    // newer correction first preserves the same year semantics as sequential user confirmation.
     .sort((left, right) => right - left)
     .reduce(simulateMissingRing, new Map(series));
 
@@ -358,6 +380,156 @@ export const comparePartialMoveWithMissingStaircase = (
             - directGlobal * 0.35 - directLocal * 0.65
         )];
     });
+    const referenceSupport = referenceMargins.filter((margin) => margin > 0).length;
+    const missingYears = staircase.years.slice().sort((left, right) => right - left);
+    return {
+        cumulativeShiftYears,
+        directFirstFixedYear: direct.firstFixedYear,
+        missingYears,
+        missingSpanYears: (missingYears[0] ?? 0)
+            - (missingYears[missingYears.length - 1] ?? 0),
+        masterMargin: staircase.score - direct.score,
+        globalMargin: staircase.globalScore - direct.globalScore,
+        localMargin: staircase.localScore - direct.localScore,
+        referenceSupport,
+        referenceCount: referenceMargins.length,
+        referenceSupportRatio: referenceSupport / Math.max(1, referenceMargins.length),
+        referenceMedianMargin: median(referenceMargins),
+        referenceLowerQuartileMargin: quantile(referenceMargins, 0.25),
+    };
+};
+
+export const comparePartialMoveWithRobustMissingStaircase = (
+    diagnosis: SeriesCoreDiagnosis,
+    siteData: RwlSiteData,
+    event: DiagnosisEvent,
+    useCofechaStandardization = true,
+    headYear: number | null = null,
+): MissingStaircaseCompetition | null => {
+    if (
+        event.eventType !== "partialMove"
+        || event.shiftYears !== -2
+    ) return null;
+    const cumulativeShiftYears = event.shiftYears;
+    const missingCount = Math.abs(cumulativeShiftYears);
+    const directStartYear = Math.max(
+        diagnosis.targetRange.startYear + 8,
+        event.startYear,
+    );
+    const directEndYear = Math.min(
+        diagnosis.targetRange.endYear - 8,
+        event.endYear,
+    );
+    const staircaseStartYear = Math.max(
+        diagnosis.targetRange.startYear + 8,
+        event.startYear - MAX_TWO_STEP_SEPARATION_YEARS,
+    );
+    const staircaseEndYear = Math.min(
+        diagnosis.targetRange.endYear - 8,
+        event.endYear + MAX_HEAD_BOUNDARY_OFFSET_YEARS,
+    );
+    if (directEndYear < directStartYear
+        || staircaseEndYear - staircaseStartYear + 1 < missingCount) return null;
+    const directYears = Array.from(
+        { length: directEndYear - directStartYear + 1 },
+        (_, index) => directStartYear + index,
+    );
+    const staircaseYears = Array.from(
+        { length: staircaseEndYear - staircaseStartYear + 1 },
+        (_, index) => staircaseStartYear + index,
+    );
+    const localRange = {
+        startYear: Math.max(diagnosis.targetRange.startYear, event.startYear - 12),
+        endYear: Math.min(diagnosis.targetRange.endYear, event.endYear + 12),
+    };
+    const masterViews: Views = {
+        raw: diagnosis.master.data,
+        difference: firstDifferences(diagnosis.master.data),
+        whitened: ar1WhitenSeries(diagnosis.master.data),
+    };
+    const directCandidates = directYears.map((firstFixedYear): ScoredCorrection => ({
+        years: [],
+        firstFixedYear,
+        ...scoreCorrection(
+            simulatePartialMove(
+                diagnosis.rawTarget,
+                firstFixedYear,
+                cumulativeShiftYears,
+            ),
+            masterViews,
+            useCofechaStandardization,
+            diagnosis.targetRange,
+            localRange,
+        ),
+    }));
+    const direct = directCandidates.slice()
+        .sort((left, right) => right.score - left.score)[0];
+    const staircaseCandidates = combinations(staircaseYears, missingCount)
+        .filter((years) => (
+            headYear === null
+            || Math.abs((years[0] ?? headYear) - headYear)
+                <= MAX_HEAD_BOUNDARY_OFFSET_YEARS
+        ))
+        .map((years): ScoredCorrection => ({
+            years,
+            firstFixedYear: null,
+            ...scoreCorrection(
+                simulateMissingRings(diagnosis.rawTarget, years),
+                masterViews,
+                useCofechaStandardization,
+                diagnosis.targetRange,
+                localRange,
+            ),
+        }));
+    if (!direct || staircaseCandidates.length === 0 || direct.firstFixedYear === null) {
+        return null;
+    }
+
+    const referenceViews = diagnosis.master.sourceTrees.flatMap((tree) => {
+        const rawReference = toNumericSeries(siteData.get(tree));
+        if (rawReference.size === 0) return [];
+        return [makeViews(rawReference, useCofechaStandardization)];
+    });
+    const scoreAgainstReference = (candidate: ScoredCorrection, reference: Views): number => (
+        scoreViews(
+            candidate.views,
+            reference,
+            diagnosis.targetRange.startYear,
+            diagnosis.targetRange.endYear,
+            20,
+        ) * 0.35
+        + scoreViews(
+            candidate.views,
+            reference,
+            localRange.startYear,
+            localRange.endYear,
+            6,
+        ) * 0.65
+    );
+    const bestDirectByReference = referenceViews.map((reference) => Math.max(
+        ...directCandidates.map((candidate) => scoreAgainstReference(candidate, reference)),
+    ));
+    const robustStaircases = staircaseCandidates.map((candidate) => {
+        const margins = referenceViews.map((reference, index) => (
+            scoreAgainstReference(candidate, reference) - bestDirectByReference[index]
+        ));
+        return {
+            candidate,
+            margins,
+            medianMargin: median(margins),
+            lowerQuartileMargin: quantile(margins, 0.25),
+            support: margins.filter((margin) => margin > 0).length,
+        };
+    }).sort((left, right) => (
+        right.medianMargin - left.medianMargin
+        || right.lowerQuartileMargin - left.lowerQuartileMargin
+        || right.support - left.support
+        || right.candidate.score - left.candidate.score
+    ));
+    const selectedStaircase = robustStaircases[0];
+    if (!selectedStaircase) return null;
+    const staircase = selectedStaircase.candidate;
+    const referenceMargins = selectedStaircase.margins;
     const referenceSupport = referenceMargins.filter((margin) => margin > 0).length;
     const missingYears = staircase.years.slice().sort((left, right) => right - left);
     return {

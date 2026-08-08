@@ -10,7 +10,9 @@ import type { RwlSiteData } from "@/features/rwl/types";
 import { cofechaStyleStandardize } from "../reference";
 import {
     comparePartialMoveWithMissingStaircase,
+    comparePartialMoveWithRobustMissingStaircase,
     supportsDiscreteMissingStaircase,
+    supportsRobustMissingStaircaseCorrection,
     type MissingStaircaseCompetition,
 } from "./discreteMissingStaircaseCompetition";
 import {
@@ -2012,6 +2014,86 @@ const recoverSequentialMissingHeadEvent = (
         },
         pathCache,
     );
+    const hasDetectedUnitEvent = detected.some((event) => (
+        event.eventType === "missingRing" || event.eventType === "falseRing"
+    ));
+    const compressedPartial = detected.find((event) => (
+        event.eventType === "partialMove"
+        && event.shiftYears === -2
+        && event.evidence.lagBefore === -2
+        && event.evidence.lagAfter === 0
+    ));
+    const recoverRobustCompressedPartial = (): SequentialMissingRecovery | null => {
+        if (
+            !compressedPartial
+            || hasDetectedUnitEvent
+            || detected.some((event) => event.eventType === "wholeSeriesMove")
+        ) return null;
+        const robustCache = createLagPathCache();
+        const robustHead = locateSequentialMissingHead(
+            cofechaDiagnosis,
+            siteData,
+            { minLag: -2, maxPartialGapYears: 2 },
+            robustCache,
+            0,
+        );
+        const robustStaircase = locateTwoStepMissingStaircase(
+            cofechaDiagnosis,
+            siteData,
+            compressedPartial,
+            { minLag: -2, maxPartialGapYears: 2 },
+            robustCache,
+        );
+        const robustCompetition = comparePartialMoveWithRobustMissingStaircase(
+            cofechaDiagnosis,
+            siteData,
+            compressedPartial,
+            true,
+            robustHead?.year ?? null,
+        );
+        if (!robustHead || !supportsRobustMissingStaircaseCorrection(
+            robustCompetition,
+            robustStaircase,
+        )) return null;
+        const selectedHead = {
+            ...robustHead,
+            year: robustCompetition!.missingYears[0] ?? robustHead.year,
+        };
+        const marker = selectSharedZeroMarkerForMode(
+            siteData,
+            diagnosis.targetTree,
+            selectedHead.year,
+            markerMode,
+            2,
+        );
+        const recovered = addExplicitStaircaseCompetitionEvidence(
+            makeSequentialMissingHeadEvent(
+                selectedHead,
+                marker,
+                detected,
+                diagnosis,
+                candidates,
+                [],
+                confirmedTargetZeroYears,
+                markerMode,
+            ),
+            robustCompetition!,
+            robustStaircase!,
+        );
+        return {
+            event: {
+                ...recovered,
+                evidence: {
+                    ...recovered.evidence,
+                    algorithmSources: Array.from(new Set([
+                        ...recovered.evidence.algorithmSources,
+                        "robust_per_reference_missing_staircase",
+                    ])).sort(),
+                },
+            },
+            preserveWholeBaseline: false,
+        };
+    };
     // A true continuous gap is normally better explained by one direct breakpoint.
     if (head && head.gainOverDirect > 0) {
         const marker = selectSharedZeroMarkerForMode(
@@ -2062,17 +2144,23 @@ const recoverSequentialMissingHeadEvent = (
             head,
             confirmedTargetZeroYears,
         );
-        if (hasOppositeUnitOnly && !hasIndependentMissingDirection) return null;
+        if (hasOppositeUnitOnly && !hasIndependentMissingDirection) {
+            return recoverRobustCompressedPartial();
+        }
         if (replacesPartial
             && !supportsSequentialMissingReplacementOfPartial(head)
             && !hasDistinctConfirmedMissingMode) {
-            return null;
+            return recoverRobustCompressedPartial();
         }
         // A staircase may be an endpoint artefact of a non-zero global baseline. It may replace a
         // whole candidate only when that candidate is the staircase's older state. An independently
         // connected baseline needs its own missing-direction evidence and remains in the event set.
-        if (independentWholeBaseline && !hasIndependentMissingDirection) return null;
-        if (replacesNonUnitEvent && !hasIndependentStaircaseSupport) return null;
+        if (independentWholeBaseline && !hasIndependentMissingDirection) {
+            return recoverRobustCompressedPartial();
+        }
+        if (replacesNonUnitEvent && !hasIndependentStaircaseSupport) {
+            return recoverRobustCompressedPartial();
+        }
         const recoveredEvent = makeSequentialMissingHeadEvent(
             head,
             marker,
@@ -2104,13 +2192,8 @@ const recoverSequentialMissingHeadEvent = (
             preserveWholeBaseline: independentWholeBaseline,
         };
     }
-    const partial = detected.find((event) => (
-        event.eventType === "partialMove"
-        && event.shiftYears === -2
-        && event.evidence.lagBefore === -2
-        && event.evidence.lagAfter === 0
-    ));
-    if (!partial) return null;
+    const partial = compressedPartial;
+    if (!partial) return recoverRobustCompressedPartial();
     const constrainedCache = createLagPathCache();
     const constrainedHead = locateSequentialMissingHead(
         cofechaDiagnosis,
@@ -2119,7 +2202,7 @@ const recoverSequentialMissingHeadEvent = (
         constrainedCache,
         0,
     );
-    if (!constrainedHead) return null;
+    if (!constrainedHead) return recoverRobustCompressedPartial();
     const staircase = locateTwoStepMissingStaircase(
         cofechaDiagnosis,
         siteData,
@@ -2134,7 +2217,9 @@ const recoverSequentialMissingHeadEvent = (
         true,
         constrainedHead.year,
     );
-    if (!supportsDiscreteMissingStaircase(competition, staircase)) return null;
+    if (!supportsDiscreteMissingStaircase(competition, staircase)) {
+        return recoverRobustCompressedPartial();
+    }
     const marker = selectSharedZeroMarkerForMode(
         siteData,
         diagnosis.targetTree,
@@ -2151,7 +2236,7 @@ const recoverSequentialMissingHeadEvent = (
     // anchor before replacing it with a missing-ring operation.
     if (hasCandidateBackedExactPartial
         && !hasIndependentMissingCandidate
-        && marker === null) return null;
+        && marker === null) return recoverRobustCompressedPartial();
     return {
         event: addExplicitStaircaseCompetitionEvidence(makeSequentialMissingHeadEvent(
             constrainedHead,

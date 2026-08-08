@@ -10,7 +10,10 @@ import {
     parseCofechaResult,
     splitReportByParts,
 } from "@/features/cofecha/formatter";
-import { createCofechaMasterReferenceConfig } from "@/features/crossdating/reference";
+import {
+    createCofechaMasterReferenceConfig,
+    createCofechaPassReferenceConfig,
+} from "@/features/crossdating/reference";
 import { formatTucson } from "@/features/rwl/parsers/tucson";
 import type { RwlSiteData } from "@/features/rwl/types";
 import { diagnoseCrossdating } from "@/features/crossdating/diagnosis";
@@ -26,6 +29,7 @@ import {
     applyInsertRestore,
     buildMultiMissingCorrupted,
     createPartialRangeMoveCase,
+    createPiecewiseLagMixedCase,
     parseRwl,
     reconstructMissingFromZero,
     sameSeries,
@@ -363,6 +367,65 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
                 .toBeGreaterThanOrEqual(truthYear);
             expect(event?.evidence.algorithmSources, JSON.stringify(summarize(events)))
                 .toContain("explicit_partial_vs_missing_staircase");
+        });
+    }, 240_000);
+
+    bundledCofechaIt("keeps separated same-direction unit steps visible before a -2 partial", () => {
+        const rows = ["mtr712", "mtr832"].map((seriesId) => {
+            const series = parsed.get(seriesId)!;
+            const center = Math.round(
+                series.startYear + (series.endYear - series.startYear) * 0.5,
+            );
+            // Mirror the frozen composition benchmark's deterministic middle stratum.
+            const olderYear = center - 3;
+            const newerYear = olderYear + 9;
+            const corrupted = createPiecewiseLagMixedCase(series, [{
+                eventType: "missingRing",
+                year: olderYear,
+                shiftYears: -1,
+            }, {
+                eventType: "missingRing",
+                year: newerYear,
+                shiftYears: -1,
+            }]).corrupted;
+            const site = new Map(cleanSite);
+            site.set(seriesId, corrupted);
+            const outText = runBundledCofecha(site);
+            const flaggedIds = extractPart6FlaggedASeriesIds(
+                splitReportByParts(outText).get("PART 6") ?? "",
+            );
+            const targetExcludedFlags = new Set([...flaggedIds, seriesId]);
+            const dynamicReference = createCofechaPassReferenceConfig({
+                siteData: site,
+                flaggedAIds: targetExcludedFlags,
+                cofechaRunId: `co612-same-direction-staircase-${seriesId}`,
+                rwlHash: `co612-same-direction-staircase-${seriesId}`,
+            });
+            const diagnosis = diagnoseCrossdating(site, {
+                referenceConfig: dynamicReference,
+                targetTrees: [seriesId],
+                cofechaText: outText,
+                includeEventDecisionAudits: true,
+            });
+            const events = diagnosis.events.filter((event) => event.seriesId === seriesId);
+            return {
+                seriesId,
+                olderYear,
+                newerYear,
+                events: summarize(events),
+                audit: diagnosis.eventDecisionAudits?.[0] ?? null,
+            };
+        });
+
+        rows.forEach((row) => {
+            const event = row.events[0];
+            expect(event?.type, JSON.stringify(rows)).toBe("missingRing");
+            expect(
+                event && row.newerYear >= event.range[0] && row.newerYear <= event.range[1],
+                JSON.stringify(rows),
+            ).toBe(true);
+            expect(event?.sources, JSON.stringify(rows))
+                .toContain("robust_per_reference_missing_staircase");
         });
     }, 240_000);
 
