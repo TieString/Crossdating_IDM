@@ -813,3 +813,52 @@ partial 的物理位移上限不足，而是候选证据没有进入最终事件
 操作类型 11 项和 production build。mon052 九个缺轮、mtr841 四步缺轮、分离两缺轮以及
 物理缺块 `-2...-100` 均保持通过。下一轮分别处理 ZSL212 的模式内定位，以及 ZSL202
 缺轮拒答和补充真值中的 missing -> whole；不得通过削弱 whole 证据来换取单位事件召回。
+
+### Round 3F：用较新侧固定证据区分端点单位事件与整体移动
+
+- 修复提交：`d38fc4c76b1f0aebb9ed68efef786015b42f8aaf`。
+- ZSL 提交后冻结结果：
+  `D:\软件测试\ZSL\window-coverage-results\zsl-serial-operation-endpoint-contrast-round4-committed-2026-08-08`。
+- co612 missing 反向结果：
+  `D:\软件测试\co612-operation-composition-results\endpoint-whole-unit-contrast-reverse-round2-committed-2026-08-08`。
+- co612 false 反向结果：
+  `D:\软件测试\co612-operation-composition-results\endpoint-whole-unit-contrast-false-reverse-round2-committed-2026-08-08`。
+
+ZSL182 的真实缺轮位于较新端。旧逻辑看到大多数 50 年 COFECHA 分段都落在事件较老侧，
+因而把同方向的终端 `lag=-1` 解释为整条序列移动。新判别器不按端点距离直接改类型，而在
+单位事件唯一窗口内枚举断点，单独检查断点较新侧是否保持正确日历：比较该侧在 `lag=0`
+和整体 `lag=+/-1` 下的原始相关与一阶差分相关，并分别计算 master、逐参考芯和同树配对芯
+优势。只有 master、参考芯中位数、下四分位及正向支持比例共同形成稳健共识时，单位事件
+才允许压过终端 whole；否则仍保持“先应用整体移动、再重新诊断局部事件”的顺序。
+
+ZSL182 的较新侧由 45 条可用参考芯支持，`91.11%` 的逐芯证据偏向 `lag=0`；修复后在整文件
+RAW 和隔离 crossdated 参考两种模式都输出 missingRing，唯一窗口覆盖 2015，保存重开后不再
+变回 whole。ZSL 完整串行回放的严格重建指标保持 Round 3E 水平：whole 3/3、partial 1/1，
+whole -> partial 与 partial -> missing 均为 0；补充真值操作则由全 RAW 6/8 提升到 7/8、隔离
+参考由 7/8 提升到 8/8。两种模式各 34/34 保存重开稳定，输入 SHA-256 与 Round 3D 相同且
+运行前后未改变。
+
+| co612 反向指标 | missing / whole -1 | false / whole +1 |
+| --- | ---: | ---: |
+| 唯一诊断状态 | 125 | 125 |
+| 错误 / 残余映射不一致 | 0 / 0 | 0 / 0 |
+| clean review 误报 | 2/55 | 2/55 |
+| 真实 whole 精确 | 10/10 | 10/10 |
+| 纯局部操作正确 | 30/30 | 26/30 |
+| 纯局部窗口覆盖 | 28/30 | 25/30 |
+| whole + 局部首步 whole 精确 | 30/30 | 30/30 |
+| whole 被判成 unit / partial | 0/30 | 0/30 |
+| 应用 whole 后局部复诊正确 | 28/30 | 25/30 |
+| 保存重开稳定 | 125/125 | 125/125 |
+
+串行复诊结果分别精确等于纯 missing/false 对照自身的窗口上限，说明组合状态没有产生额外
+损失。两批 co612 的源 SHA-256 都保持
+`36e6c6a9d0cbc16d1870a1662da553a7b40d5578ea9ede25ff790c556c34667d`。因此这轮可以明确
+冻结为：端点单位事件可在强逐参考芯证据下纠正 terminal whole，但不能凭“靠近新端”改写
+真实整体移动。
+
+ZSL202 的相邻 false 1884 + missing 1886 仍在第一步拒答。补充实验将短脉冲范围扩到 2--7
+年并运行单位联合路径后，未提示真值时的最强峰落在 1917--1919；即使只在真值邻域计算，
+纠正收益仍为负且仅 1/8 参考支持。由于当前内部参考没有可辨识证据，本轮没有通过降低门槛
+强制回答，也没有把失败隐藏在扩大窗口中。下一步先修复 ZSL212 只差一年的模式内窗口，再
+继续审计多事件条件下的拒答与参考竞争。
