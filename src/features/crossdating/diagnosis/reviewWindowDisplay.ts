@@ -339,7 +339,10 @@ export const selectReviewWindowDisplay = (
     )) ?? null;
     // A retained whole-series correction is applied first. Local events are re-diagnosed on the
     // corrected calendar instead of competing with the global baseline in the same UI step.
-    const strict = strictWhole ?? strictUnit ?? strictPartial;
+    const decisiveEndpointUnit = strictUnit?.evidence.algorithmSources.includes(
+        "newer_fixed_side_lag_contrast",
+    ) ? strictUnit : null;
+    const strict = decisiveEndpointUnit ?? strictWhole ?? strictUnit ?? strictPartial;
     if (strict) {
         const width = strict.endYear - strict.startYear + 1;
         if (strict.eventType !== "wholeSeriesMove"

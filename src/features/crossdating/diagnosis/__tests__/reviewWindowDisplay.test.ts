@@ -185,6 +185,28 @@ describe("lower review-window display gate", () => {
         });
     });
 
+    it("shows an endpoint unit first when its newer side decisively remains at lag zero", () => {
+        const unit = strictEvent();
+        unit.evidence.algorithmSources = [
+            "series_endpoint_review_window",
+            "newer_fixed_side_lag_contrast",
+        ];
+        const whole = {
+            ...strictEvent(),
+            id: "terminal-whole-alias",
+            eventType: "wholeSeriesMove" as const,
+            shiftYears: -1,
+            startYear: 1800,
+            endYear: 2000,
+        };
+
+        expect(selectReviewWindowDisplay(audit([]), [whole, unit])).toMatchObject({
+            status: "strict",
+            reason: "strict_event",
+            event: unit,
+        });
+    });
+
     it("falls back to an independent whole move when a local partial is not reviewable", () => {
         const partial = reviewablePartial(-4, {
             correlationGain: 0,

@@ -76,6 +76,10 @@ import {
     isAutomaticOlderEndpointUnitEvent,
     refineUnitEventWithEndpointResidualWindow,
 } from "./endpointResidualWindow";
+import {
+    hasDecisiveNewerSideFixedEvidence,
+    scoreNewerSideEndpointOperationContrast,
+} from "./endpointOperationContrast";
 import { refineEventWithCounterfactualLocator } from "./counterfactualEventLocator";
 import { refineEventWithAdjacentBoundaryConsensus } from "./eventBoundaryConsensus";
 import {
@@ -1304,9 +1308,11 @@ export const projectSequentialUnitChainHead = (
 
 export const prioritizeEndpointUnitAgainstWhole = (
     events: DiagnosisEvent[],
+    diagnosis?: SeriesCoreDiagnosis,
+    siteData?: RwlSiteData,
 ): DiagnosisEvent[] => {
     const whole = events.find((event) => event.eventType === "wholeSeriesMove");
-    if (!whole || isTerminalWholeBaselineEvent(whole)) return events;
+    if (!whole) return events;
     const endpointUnit = events.find((event) => (
         event.evidence.algorithmSources.includes(
             "series_endpoint_review_window",
@@ -1321,6 +1327,19 @@ export const prioritizeEndpointUnitAgainstWhole = (
         ? wholeLag === -1
         : endpointUnit?.eventType === "falseRing" && wholeLag === 1;
     if (!endpointUnit || !operationMatchesWholeLag) return events;
+    const fixedSideContrast = diagnosis && siteData
+        ? scoreNewerSideEndpointOperationContrast(
+            diagnosis,
+            siteData,
+            whole,
+            endpointUnit,
+        )
+        : null;
+    if (isTerminalWholeBaselineEvent(whole)
+        && (!fixedSideContrast
+            || !hasDecisiveNewerSideFixedEvidence(fixedSideContrast))) {
+        return events;
+    }
     const preferredUnit = {
         ...endpointUnit,
         evidence: {
@@ -1328,10 +1347,23 @@ export const prioritizeEndpointUnitAgainstWhole = (
             algorithmSources: Array.from(new Set([
                 ...endpointUnit.evidence.algorithmSources,
                 "newer_endpoint_unit_preferred_over_global_lag",
+                ...(isTerminalWholeBaselineEvent(whole)
+                    ? ["newer_fixed_side_lag_contrast"] as const
+                    : []),
             ])).sort(),
             notes: [
                 ...endpointUnit.evidence.notes,
                 "event_order=newer_endpoint_unit_before_global_lag",
+                ...(fixedSideContrast ? [
+                    `newer_fixed_side_boundary_year=${fixedSideContrast.boundaryYear}`,
+                    `newer_fixed_side_range=${fixedSideContrast.startYear}-${fixedSideContrast.endYear}`,
+                    `newer_fixed_side_master_advantage=${fixedSideContrast.masterAdvantage?.toFixed(6) ?? "none"}`,
+                    `newer_fixed_side_reference_count=${fixedSideContrast.referenceCount}`,
+                    `newer_fixed_side_positive_fraction=${fixedSideContrast.positiveReferenceFraction.toFixed(6)}`,
+                    `newer_fixed_side_median_advantage=${fixedSideContrast.medianReferenceAdvantage?.toFixed(6) ?? "none"}`,
+                    `newer_fixed_side_lower_quartile_advantage=${fixedSideContrast.lowerQuartileReferenceAdvantage?.toFixed(6) ?? "none"}`,
+                    `newer_fixed_side_paired_advantage=${fixedSideContrast.pairedReferenceAdvantage?.toFixed(6) ?? "none"}`,
+                ] : []),
             ],
         },
     };
@@ -3215,7 +3247,11 @@ export const makeDiagnosisEvents = (
                 }))
                 .map(refineEventWithAdjacentBoundaryConsensus);
             const projected = projectSequentialUnitChainHead(valid);
-            return prioritizeEndpointUnitAgainstWhole(projected);
+            return prioritizeEndpointUnitAgainstWhole(
+                projected,
+                diagnosis,
+                siteData,
+            );
         };
         const finalize = (sourceEvents: DiagnosisEvent[]): DiagnosisEvent[] => {
             const automaticSemanticsRejectedCount = sourceEvents.filter(

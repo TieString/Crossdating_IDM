@@ -10,7 +10,14 @@ import {
 } from "@/features/crossdating/reference";
 import type { RwlSiteData } from "@/features/rwl/types";
 import { getDisplayedDiagnosisEvents } from "@/features/crossdating/diagnosis";
+import { getConfig } from "../config";
 import { diagnoseCrossdating } from "../engine";
+import {
+    hasDecisiveNewerSideFixedEvidence,
+    scoreNewerSideEndpointOperationContrast,
+} from "../endpointOperationContrast";
+import { preprocessSeries } from "../series";
+import { diagnoseSeriesCore } from "../segments";
 import {
     loadCofechaOut,
     loadDataFolder,
@@ -154,5 +161,42 @@ fixtureDescribe("ZSL RAW/crossdated operation-type regression", () => {
 
         expect(displayed).toHaveLength(1);
         expect(displayed[0].eventType).toBe("falseRing");
+    });
+
+    it("keeps newer-side lag-zero evidence for the ZSL182 endpoint missing ring", () => {
+        const diagnosis = diagnoseCrossdating(rawSite, {
+            targetTrees: ["ZSL182"],
+            referenceConfig: rawReference,
+            cofechaText: rawOut!,
+            reviewWindowDisplayMode: "review",
+        });
+        const whole = diagnosis.events.find((event) => (
+            event.eventType === "wholeSeriesMove"
+        ));
+        const unit = diagnosis.events.find((event) => (
+            event.eventType === "missingRing"
+        ));
+        const core = diagnoseSeriesCore(
+            rawSite,
+            "ZSL182",
+            getConfig({ referenceConfig: rawReference }),
+            preprocessSeries,
+        );
+        expect(whole).toBeDefined();
+        expect(unit).toBeDefined();
+        expect(core).not.toBeNull();
+        const contrast = scoreNewerSideEndpointOperationContrast(
+            core!,
+            rawSite,
+            whole!,
+            unit!,
+        );
+        expect(contrast).not.toBeNull();
+        expect(hasDecisiveNewerSideFixedEvidence(contrast!)).toBe(true);
+        expect(contrast!.positiveReferenceFraction).toBeGreaterThanOrEqual(0.9);
+        const [displayed] = getDisplayedDiagnosisEvents(diagnosis);
+        expect(displayed.eventType).toBe("missingRing");
+        expect(displayed.startYear).toBeLessThanOrEqual(2015);
+        expect(displayed.endYear).toBeGreaterThanOrEqual(2015);
     });
 });
