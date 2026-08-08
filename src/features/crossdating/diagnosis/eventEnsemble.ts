@@ -82,6 +82,7 @@ import {
 } from "./endpointOperationContrast";
 import { refineEventWithCounterfactualLocator } from "./counterfactualEventLocator";
 import { refineEventWithAdjacentBoundaryConsensus } from "./eventBoundaryConsensus";
+import { getJointCounterfactualOperationScores } from "./jointCounterfactualOperation";
 import {
     isExactPartialLagTransition,
     isAutomaticPartialShift,
@@ -847,7 +848,27 @@ export const isTerminalWholeBaselineEvent = (
         "whole_baseline_source=cofecha_terminal_lag",
     );
 
-export const partialMoveExplainsWholeSeriesCandidate = (
+const PARTIAL_BOUNDARY_ANCHOR_SOURCES = new Set([
+    "candidate_backed_partial_consensus",
+    "cofecha_segment_lag",
+    "counterfactual_operation_verification",
+    "local_corrected_raw_breakpoint",
+    "partial_neighbor_agreement_ranker",
+    "piecewise_lag_path",
+    "unique_repeated_block_boundary",
+]);
+
+export const hasIndependentPartialBoundaryAnchor = (
+    event: DiagnosisEvent,
+): boolean => event.eventType === "partialMove"
+    && (
+        event.evidence.candidateIds.length > 0
+        || event.evidence.algorithmSources.some((source) => (
+            PARTIAL_BOUNDARY_ANCHOR_SOURCES.has(source)
+        ))
+    );
+
+export const partialMoveSharesWholeSeriesState = (
     whole: DiagnosisEvent,
     event: DiagnosisEvent,
 ): boolean => {
@@ -861,29 +882,99 @@ export const partialMoveExplainsWholeSeriesCandidate = (
         && event.evidence.lagAfter === 0;
 };
 
+const WHOLE_ALIAS_FIXED_SIDE_ADVANTAGE_MAXIMUM = -0.1;
+
+export const shouldPreferWholeSeriesAlias = (
+    whole: DiagnosisEvent,
+    partial: DiagnosisEvent,
+    fixedSideAdvantage: number | null,
+): boolean => {
+    if (!partialMoveSharesWholeSeriesState(whole, partial)) return false;
+    if (isTerminalWholeBaselineEvent(whole)) return true;
+    if (hasIndependentPartialBoundaryAnchor(partial)) return false;
+    return fixedSideAdvantage !== null
+        && fixedSideAdvantage <= WHOLE_ALIAS_FIXED_SIDE_ADVANTAGE_MAXIMUM;
+};
+
+export const partialMoveExplainsWholeSeriesCandidate = (
+    whole: DiagnosisEvent,
+    event: DiagnosisEvent,
+    fixedSideAdvantage: number | null = null,
+): boolean => partialMoveSharesWholeSeriesState(whole, event)
+    && !shouldPreferWholeSeriesAlias(whole, event, fixedSideAdvantage);
+
+const partialFixedSideAdvantage = (
+    diagnosis: SeriesCoreDiagnosis | undefined,
+    event: DiagnosisEvent,
+    maxPartialGapYears: number,
+): number | null => {
+    if (!diagnosis || event.eventType !== "partialMove") return null;
+    const operation = getJointCounterfactualOperationScores(
+        diagnosis,
+        15,
+        maxPartialGapYears,
+        0,
+    ).find((candidate) => (
+        candidate.eventType === "partialMove"
+        && candidate.shiftYears === event.shiftYears
+    ));
+    const row = operation?.rows.find((candidate) => (
+        candidate.year === operation.sideStepBestYear
+    ));
+    return row && Number.isFinite(row.sideNewerAdvantage)
+        ? row.sideNewerAdvantage
+        : null;
+};
+
 export const pruneWholeSeriesPartialAliases = (
     events: DiagnosisEvent[],
+    diagnosis?: SeriesCoreDiagnosis,
+    maxPartialGapYears = DEFAULT_EVENT_OPERATION_RECOVERY_CONFIG.maxPartialGapYears,
 ): DiagnosisEvent[] => {
     const wholeEvents = events.filter((event) => (
         event.eventType === "wholeSeriesMove"
     ));
-    const partialAliases = events.filter((event) => (
-        event.eventType === "partialMove"
-        && wholeEvents.some((whole) => (
-            partialMoveExplainsWholeSeriesCandidate(whole, event)
-        ))
+    const partialEvents = events.filter((event) => event.eventType === "partialMove");
+    const fixedSideAdvantageById = new Map(partialEvents
+        .map((event) => [
+            event.id,
+            partialFixedSideAdvantage(diagnosis, event, maxPartialGapYears),
+        ]));
+    const relations = wholeEvents.flatMap((whole) => partialEvents
+        .filter((partial) => partialMoveSharesWholeSeriesState(whole, partial))
+        .map((partial) => ({
+            whole,
+            partial,
+            fixedSideAdvantage: fixedSideAdvantageById.get(partial.id) ?? null,
+            preferWhole: shouldPreferWholeSeriesAlias(
+                whole,
+                partial,
+                fixedSideAdvantageById.get(partial.id) ?? null,
+            ),
+        })));
+    if (relations.length === 0) return events;
+
+    const rejectedPartialIds = new Set(relations
+        .filter((relation) => relation.preferWhole)
+        .map((relation) => relation.partial.id));
+    const partialPreferredRelations = relations.filter((relation) => (
+        !relation.preferWhole
+        && !rejectedPartialIds.has(relation.partial.id)
     ));
-    if (partialAliases.length === 0) return events;
-    const aliasIds = new Set(partialAliases.map((event) => event.id));
+    const rejectedWholeIds = new Set(partialPreferredRelations.map((relation) => (
+        relation.whole.id
+    )));
+    const retainedPartialAliasIds = new Set(partialPreferredRelations.map((relation) => (
+        relation.partial.id
+    )));
+
     return events
         .filter((event) => (
-            event.eventType !== "wholeSeriesMove"
-            || !partialAliases.some((partial) => (
-                partialMoveExplainsWholeSeriesCandidate(event, partial)
-            ))
+            !rejectedPartialIds.has(event.id)
+            && !rejectedWholeIds.has(event.id)
         ))
-        .map((event) => aliasIds.has(event.id)
-            ? {
+        .map((event) => {
+            if (retainedPartialAliasIds.has(event.id)) return {
                 ...event,
                 evidence: {
                     ...event.evidence,
@@ -896,8 +987,36 @@ export const pruneWholeSeriesPartialAliases = (
                         "whole_series_candidate=local_partial_alias",
                     ],
                 },
-            }
-            : event);
+            };
+            if (event.eventType !== "wholeSeriesMove") return event;
+            const rejectedRelations = relations.filter((relation) => (
+                relation.whole.id === event.id
+                && rejectedPartialIds.has(relation.partial.id)
+            ));
+            if (rejectedRelations.length === 0) return event;
+            const advantages = rejectedRelations
+                .map((relation) => relation.fixedSideAdvantage)
+                .filter((value): value is number => value !== null);
+            return {
+                ...event,
+                evidence: {
+                    ...event.evidence,
+                    algorithmSources: Array.from(new Set([
+                        ...event.evidence.algorithmSources,
+                        "whole_series_preferred_over_partial_alias",
+                    ])).sort(),
+                    notes: [
+                        ...event.evidence.notes,
+                        `partial_aliases_removed=${rejectedRelations.length}`,
+                        ...(advantages.length === 0 ? [] : [
+                            `partial_alias_best_fixed_side_advantage=${Math.max(
+                                ...advantages,
+                            ).toFixed(6)}`,
+                        ]),
+                    ],
+                },
+            };
+        });
 };
 
 /**
@@ -3284,7 +3403,11 @@ export const makeDiagnosisEvents = (
         const coherentDetected = pruneLocalEventsDisconnectedFromWholeBaseline(
             fusedDetected,
         );
-        const detected = pruneWholeSeriesPartialAliases(coherentDetected);
+        const detected = pruneWholeSeriesPartialAliases(
+            coherentDetected,
+            diagnosis,
+            effectiveConfig.maxPartialGapYears,
+        );
         const retainedDetected = detected.filter((event) => (
             !isAutomaticOlderEndpointUnitEvent(event, diagnosis)
         ));

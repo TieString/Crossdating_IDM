@@ -1125,3 +1125,56 @@ single 中仍有 9 个 `wholeSeriesMove -> partialMove`、3 个 `wholeSeriesMove
 25 个 `partialMove -> missingRing` 和 18 个 `partialMove -> falseRing`。下一步应回到 ZSL
 RAW/crossdated 的真实编辑链，先从全序列 baseline 与有断点局部状态的生成语义区分入手，
 再验证 whole 与 partial 共存时的操作顺序；不得靠降低 partial 或 missing 的统一门槛修补。
+
+### Round 5D：用较新固定侧证据仲裁 whole 与 partial 的同状态别名
+
+- 修复结果：
+  `D:\软件测试\legacy-cross-file-generalization-results\whole-partial-arbitration-comparable-single-final-2026-08-08`。
+- 对照结果：
+  `D:\软件测试\legacy-cross-file-generalization-results\legacy-self-worsening-false-gate-2026-08-08-v2`。
+- 严格复用对照目录保存的 config/manifest，SHA-256 分别为 `e74bca573b019945425c6356e0e0a7ef552fe4c11a4ccf7f53d3abcbf60e6a1e`
+  和 `f7534ee1dab1f73eaf5a2b75fbc9d27546e40d6eb18021beceaf2841a87faac3`。
+
+whole 与 partial 可能给出相同的负 lag 和位移量，但生成语义不同。whole 表示整条序列都处于
+同一非零基线；partial 表示老侧处于该 lag，经过一个可定位断点后，较新固定侧回到原状态。
+因此不再用候选总分直接决定二者，而按以下顺序仲裁：
+
+1. 重复 COFECHA 终端 lag 已验证的 whole baseline 优先于没有独立边界锚点的 partial 别名。
+2. candidate、COFECHA 分段、局部反事实、piecewise path 或重复块边界明确锚定的 partial
+   保持优先，不能被弱 whole 吞掉。
+3. 对其余 joint-grid partial，读取同一位移量的单侧反事实。若所谓“较新固定侧”仍明显偏向
+   whole lag，`sideNewerAdvantage <= -0.1`，则该断点不成立，保留 whole；接近 0 或为正时
+   仍由 partial 解释 whole 的全局 lag 别名。
+4. 仲裁按 whole-partial 关系逐对执行。同一轮可以同时删除一个 whole 别名并删除另一个
+   partial 别名，不再假设两类结果互斥。
+
+另外，非终端 whole 的状态门禁增加严格分段多数通道：至少 8 个可靠分段、其中至少 5 个
+支持同一 shift、支持比例大于 0.5、置信度加权比例大于 0.55。冻结证据中该条件恢复 7 个
+弱但正确的 whole，错误 weak whole 的最高普通支持比例只有 0.5；平票继续拒绝。
+
+| single 指标 | Round 5C | Round 5D |
+| --- | ---: | ---: |
+| response | 418/1152 | 418/1152 |
+| type correct | 327/1152 | **338/1152** |
+| operation correct | 325/1152 | **336/1152** |
+| 唯一主窗口覆盖 | 175/1056 | 175/1056 |
+| 条件窗口覆盖 | 175/261 | 175/261 |
+| Top1 | 41/1056 | 41/1056 |
+| clean strict / review | 15/48 / 14/48 | 15/48 / 14/48 |
+| 保存重开一致 | 1200/1200 | 1200/1200 |
+
+逐案只有 11 个操作变化，全部由错误类型变为精确 whole `-4`，没有损失：9 个
+`whole -> partial` 和 2 个 `whole -> missing` 被修复。whole 的最终混淆为正确 76/96、
+拒答 19/96、误判 missing 1/96；`whole -> partial` 已为 0。partial 的逐案输出完全不变：
+正确 30/144、拒答 71/144、误判 missing 25/144、误判 false 18/144，没有新增
+`partial -> whole`。响应率、窗口、clean 对照和所有保存重开结果均未变化，源文件修改 0、
+运行错误 0。
+
+MCP17A 连续 9 年缺块保存前后仍输出 `partialMove -9`；ZSL141 的 `-6/-11/-16/-20/-30`
+保存回归、`whole + partial -4` 共存、co612 多个离散缺轮串行恢复和物理缺块 `-2...-100`
+均通过。相关单元测试 43 项、真实文件回归 34 项通过。
+
+本轮已经关闭 frozen single 中的 whole -> partial 混淆，但没有处理 partial -> missing/false。
+下一轮应比较“单个连续缺块的一个大状态跃迁”和“多个单位缺轮/伪轮形成的阶梯或脉冲”：
+先确认 partial 候选是否形成，再区分它是在 operation recovery 中丢失，还是形成后被单位事件
+优先级覆盖。不能通过统一压低 missing/false 或扩大 partial 门槛来交换错误。

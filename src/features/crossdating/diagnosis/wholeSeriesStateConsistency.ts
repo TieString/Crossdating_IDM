@@ -98,5 +98,9 @@ export const supportsNonTerminalWholeSeriesCandidate = (
     const broadGlobalConsensus = evidence.globalLagMatchesShift
         && evidence.supportFraction >= 2 / 3
         && evidence.weightedSupportFraction >= 2 / 3;
-    return stableNewerState || broadGlobalConsensus;
+    const robustSegmentMajority = evidence.segmentCount >= 8
+        && evidence.shiftSupportCount >= 5
+        && evidence.supportFraction > 0.5
+        && evidence.weightedSupportFraction > 0.55;
+    return stableNewerState || broadGlobalConsensus || robustSegmentMajority;
 };

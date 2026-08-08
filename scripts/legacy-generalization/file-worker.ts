@@ -60,6 +60,8 @@ const phase = valueFor("--phase") as "single" | "serial" | null;
 const outputPath = valueFor("--output");
 const workDir = resolve(valueFor("--work-dir") ?? "legacy-generalization-worker-temp");
 const quick = hasFlag("--quick");
+const onlySeriesId = valueFor("--series-id");
+const onlyScenarioKind = valueFor("--scenario-kind");
 const maxRoundsOverride = Number(valueFor("--max-rounds"));
 if (!fileId || !phase || !outputPath || !["single", "serial"].includes(phase)) {
     throw new Error("worker requires --file-id, --phase single|serial and --output");
@@ -225,9 +227,12 @@ const runSingle = async (): Promise<void> => {
         "singlePartialMove",
         "multiDiscreteMissing4",
     ]);
-    for (const target of file.targets) {
+    for (const target of file.targets.filter((row) => (
+        onlySeriesId === null || row.targetId === onlySeriesId
+    ))) {
         const scenarios = target.scenarios.filter((scenario) => (
-            !quick || quickKinds.has(scenario.kind)
+            (!quick || quickKinds.has(scenario.kind))
+            && (onlyScenarioKind === null || scenario.kind === onlyScenarioKind)
         ));
         for (const scenario of scenarios) {
             try {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DiagnosisEvent, SeriesCoreDiagnosis } from "../types";
 import {
+    hasIndependentPartialBoundaryAnchor,
     partialMoveExplainsWholeSeriesCandidate,
     partialMoveSupportsSequentialMissingDepth,
     prioritizeEndpointUnitAgainstWhole,
@@ -9,6 +10,7 @@ import {
     projectSequentialUnitChainHead,
     recoverCandidateBackedPartialConsensus,
     shouldReplaceUnanchoredPartialWithReferencePulse,
+    shouldPreferWholeSeriesAlias,
     shouldSuppressSelfWorseningCandidateFalseRing,
     pruneWholeSeriesPartialAliases,
     pruneUnsupportedFalseRingPathSupplements,
@@ -257,6 +259,66 @@ describe("pruneWholeSeriesPartialAliases", () => {
         expect(result[0].eventType).toBe("partialMove");
         expect(result[0].evidence.algorithmSources)
             .toContain("partial_move_preferred_over_global_lag");
+    });
+
+    it("keeps a terminal whole baseline ahead of an unanchored joint-grid partial", () => {
+        const whole = terminalWholeSeriesEvent(-4);
+        const partial = partialMoveEvent(-4);
+        partial.evidence.candidateIds = [];
+        partial.evidence.algorithmSources = [
+            "decisive_joint_operation_fusion",
+            "joint_year_operation_evidence",
+        ];
+
+        expect(hasIndependentPartialBoundaryAnchor(partial)).toBe(false);
+        expect(shouldPreferWholeSeriesAlias(whole, partial, 0.2)).toBe(true);
+        expect(partialMoveExplainsWholeSeriesCandidate(whole, partial)).toBe(false);
+        expect(pruneWholeSeriesPartialAliases([whole, partial]))
+            .toMatchObject([{
+                eventType: "wholeSeriesMove",
+                evidence: {
+                    algorithmSources: expect.arrayContaining([
+                        "whole_series_preferred_over_partial_alias",
+                    ]),
+                    notes: expect.arrayContaining([
+                        "partial_aliases_removed=1",
+                    ]),
+                },
+            }]);
+    });
+
+    it("uses newer fixed-side evidence to arbitrate a non-terminal alias", () => {
+        const whole = wholeSeriesEvent(-4);
+        const partial = partialMoveEvent(-4);
+        partial.evidence.candidateIds = [];
+        partial.evidence.algorithmSources = ["joint_year_operation_evidence"];
+
+        expect(shouldPreferWholeSeriesAlias(whole, partial, -0.2)).toBe(true);
+        expect(shouldPreferWholeSeriesAlias(whole, partial, -0.02)).toBe(false);
+        expect(partialMoveExplainsWholeSeriesCandidate(whole, partial, -0.02))
+            .toBe(true);
+
+        partial.evidence.candidateIds = ["verified-partial"];
+        expect(shouldPreferWholeSeriesAlias(whole, partial, -0.2)).toBe(false);
+    });
+
+    it("arbitrates whole- and partial-preferred aliases in the same pass", () => {
+        const terminalWhole = terminalWholeSeriesEvent(-4);
+        const rejectedPartial = partialMoveEvent(-4);
+        rejectedPartial.evidence.candidateIds = [];
+        rejectedPartial.evidence.algorithmSources = ["joint_year_operation_evidence"];
+        const localWholeAlias = wholeSeriesEvent(-3);
+        const retainedPartial = partialMoveEvent(-3);
+
+        expect(pruneWholeSeriesPartialAliases([
+            terminalWhole,
+            rejectedPartial,
+            localWholeAlias,
+            retainedPartial,
+        ])).toMatchObject([
+            { id: terminalWhole.id, eventType: "wholeSeriesMove" },
+            { id: retainedPartial.id, eventType: "partialMove" },
+        ]);
     });
 
     it("keeps a real whole-series baseline under a local partial move", () => {

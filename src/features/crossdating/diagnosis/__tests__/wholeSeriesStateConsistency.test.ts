@@ -109,6 +109,27 @@ describe("whole-series state consistency", () => {
         expect(supportsNonTerminalWholeSeriesCandidate(evidence)).toBe(true);
     });
 
+    it("accepts a strict robust segment majority when global lag is a remote alias", () => {
+        const evidence = measureWholeSeriesStateConsistency(
+            diagnosis([-4, -4, -4, -4, -4, -4, 10, -52, -50, -97], 62),
+            -4,
+        );
+
+        expect(evidence.supportFraction).toBe(0.6);
+        expect(evidence.globalLagMatchesShift).toBe(false);
+        expect(supportsNonTerminalWholeSeriesCandidate(evidence)).toBe(true);
+    });
+
+    it("does not treat a tied local state as a whole-series majority", () => {
+        const evidence = measureWholeSeriesStateConsistency(
+            diagnosis([-4, -4, -4, -4, 0, 0, 0, 0], 0),
+            -4,
+        );
+
+        expect(evidence.supportFraction).toBe(0.5);
+        expect(supportsNonTerminalWholeSeriesCandidate(evidence)).toBe(false);
+    });
+
     it("rejects a local majority when the fixed newer side and global lag disagree", () => {
         const evidence = measureWholeSeriesStateConsistency(
             diagnosis([-4, -4, -4, 0, 0], 0),
