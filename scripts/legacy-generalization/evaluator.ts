@@ -126,17 +126,20 @@ export const loadRwl = async (
     const sourceText = bytes.toString("utf8");
     const readResult = await readRwlForEvaluation(sourceText, declaredFormat);
     const series = new Map(Array.from(readResult.data, ([id, valuesByYear]) => {
-        const years = Array.from(valuesByYear.keys());
-        const zeroCount = Array.from(valuesByYear.values()).filter((value) => value === 0).length;
+        const observedEntries = Array.from(valuesByYear).flatMap(([year, value]) => (
+            typeof value === "number" && value !== -9999
+                ? [[year, value] as [number, number]]
+                : []
+        ));
+        const years = observedEntries.map(([year]) => year);
+        const zeroCount = observedEntries.filter(([, value]) => value === 0).length;
         return [id, {
             id,
-            valuesByYear: new Map(Array.from(valuesByYear).flatMap(([year, value]) => (
-                typeof value === "number" ? [[year, value] as [number, number]] : []
-            ))),
+            valuesByYear: new Map(observedEntries),
             startYear: Math.min(...years),
             endYear: Math.max(...years),
-            length: valuesByYear.size,
-            nonZeroCount: valuesByYear.size - zeroCount,
+            length: observedEntries.length,
+            nonZeroCount: observedEntries.length - zeroCount,
             zeroCount,
         }];
     }));
