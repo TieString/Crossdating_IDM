@@ -124,6 +124,178 @@ export const pathFixedSideWholeCompositionGatePassed = ({
     )
 );
 
+export type RecentTailPathTerminalGateInput = {
+    wholeShift: number;
+    tailLag: number;
+    supportCount: number;
+    totalCount: number;
+    competingSupportCount: number;
+    contextYears: number;
+    medianCorrelation: number;
+    pathLag: number;
+    pathMargin: number;
+    pathPairs: number;
+};
+
+export const recentTailPathTerminalGatePassed = ({
+    wholeShift,
+    tailLag,
+    supportCount,
+    totalCount,
+    competingSupportCount,
+    contextYears,
+    medianCorrelation,
+    pathLag,
+    pathMargin,
+    pathPairs,
+}: RecentTailPathTerminalGateInput): boolean => (
+    wholeShift !== 0
+    && wholeShift === tailLag
+    && wholeShift === pathLag
+    && supportCount >= 4
+    && supportCount === totalCount
+    && competingSupportCount === 0
+    && contextYears >= 20
+    && medianCorrelation >= 0.7
+    && pathMargin >= 2
+    && pathPairs >= 40
+);
+
+export type RecentTailGlobalAgreementGateInput = {
+    wholeShift: number;
+    tailLag: number;
+    globalLag: number;
+    supportCount: number;
+    totalCount: number;
+    competingSupportCount: number;
+    contextYears: number;
+    medianCorrelation: number;
+};
+
+/** Independent fixed-side and full-series estimates must agree before overruling a local path. */
+export const recentTailGlobalAgreementGatePassed = ({
+    wholeShift,
+    tailLag,
+    globalLag,
+    supportCount,
+    totalCount,
+    competingSupportCount,
+    contextYears,
+    medianCorrelation,
+}: RecentTailGlobalAgreementGateInput): boolean => (
+    wholeShift !== 0
+    && wholeShift === tailLag
+    && wholeShift === globalLag
+    && supportCount === 4
+    && supportCount === totalCount
+    && competingSupportCount === 0
+    && contextYears >= 20
+    && medianCorrelation >= 0.45
+);
+
+export type RecentTailJointChainGateInput = {
+    wholeShift: number;
+    tailLag: number;
+    supportCount: number;
+    totalCount: number;
+    competingSupportCount: number;
+    contextYears: number;
+    medianCorrelation: number;
+    jointEventCount: number;
+    afterGlobalLag: number;
+    wholeSeriesRDelta: number;
+    meanSegmentRDelta: number;
+    problemReduction: number;
+};
+
+export const recentTailJointChainGatePassed = ({
+    wholeShift,
+    tailLag,
+    supportCount,
+    totalCount,
+    competingSupportCount,
+    contextYears,
+    medianCorrelation,
+    jointEventCount,
+    afterGlobalLag,
+    wholeSeriesRDelta,
+    meanSegmentRDelta,
+    problemReduction,
+}: RecentTailJointChainGateInput): boolean => (
+    wholeShift !== 0
+    && wholeShift === tailLag
+    && supportCount >= 3
+    && totalCount === 4
+    && competingSupportCount <= 1
+    && contextYears >= 20
+    && medianCorrelation >= 0.55
+    && jointEventCount >= 3
+    && afterGlobalLag === 0
+    && wholeSeriesRDelta >= -0.04
+    && meanSegmentRDelta >= 0
+    && problemReduction >= -2
+);
+
+export type RecentTailResidualPartialGateInput = {
+    wholeShift: number;
+    tailLag: number;
+    supportCount: number;
+    totalCount: number;
+    competingSupportCount: number;
+    contextYears: number;
+    medianCorrelation: number;
+    pathLag: number;
+    residualPartialShift: number;
+    pathEventCount: number;
+    pathAfterGlobalLag: number;
+    pathWholeSeriesRDelta: number;
+    pathMeanSegmentRDelta: number;
+    pathProblemReduction: number;
+    maxPartialGapYears: number;
+};
+
+export const recentTailResidualPartialGatePassed = ({
+    wholeShift,
+    tailLag,
+    supportCount,
+    totalCount,
+    competingSupportCount,
+    contextYears,
+    medianCorrelation,
+    pathLag,
+    residualPartialShift,
+    pathEventCount,
+    pathAfterGlobalLag,
+    pathWholeSeriesRDelta,
+    pathMeanSegmentRDelta,
+    pathProblemReduction,
+    maxPartialGapYears,
+}: RecentTailResidualPartialGateInput): boolean => (
+    wholeShift !== 0
+    && wholeShift === tailLag
+    && pathLag === wholeShift + residualPartialShift
+    && residualPartialShift <= -2
+    && residualPartialShift >= -maxPartialGapYears
+    && supportCount >= 3
+    && totalCount === 4
+    && competingSupportCount <= 1
+    && contextYears >= 20
+    && (
+        medianCorrelation >= 0.7
+        || (supportCount === totalCount
+            && competingSupportCount === 0
+            && medianCorrelation >= 0.55)
+    )
+    && pathEventCount >= 1
+    && pathAfterGlobalLag === 0
+    && pathProblemReduction >= 0
+    && (
+        pathWholeSeriesRDelta >= 0.02
+        || pathMeanSegmentRDelta >= 0.02
+        || pathProblemReduction >= 1
+    )
+);
+
 const applyDraftToTree = (
     treeData: RwlTreeData,
     draft: CandidateDraft,
@@ -486,11 +658,16 @@ export const evaluateDraft = (
         && draft.recallSourceTags?.includes("path_fixed_side_joint_composition") === true
         && pathFixedSideWholeCompositionGatePassed({
             wholeShift: draft.deltaYears ?? 0,
-            fixedSideLag: recallTagNumber(draft, "path_fixed_side_lag:"),
-            newerContextYears: recallTagNumber(
-                draft,
-                "path_fixed_side_newer_context_years:",
-            ),
+            fixedSideLag: draft.recallSourceTags?.includes(
+                "recent_tail_whole_baseline",
+            ) === true
+                ? recallTagNumber(draft, "recent_tail_lag:")
+                : recallTagNumber(draft, "path_fixed_side_lag:"),
+            newerContextYears: draft.recallSourceTags?.includes(
+                "recent_tail_whole_baseline",
+            ) === true
+                ? recallTagNumber(draft, "recent_tail_context_years:")
+                : recallTagNumber(draft, "path_fixed_side_newer_context_years:"),
             jointEventCount: recallTagNumber(
                 draft,
                 "path_fixed_side_joint_event_count:",
@@ -512,8 +689,128 @@ export const evaluateDraft = (
                 "path_fixed_side_joint_problem_reduction:",
             ),
         });
+    const recentTailTerminalGatePassed = draft.operationType === "SHIFT_RANGE"
+        && draft.mode === "wholeSeriesMove"
+        && draft.recallSourceTags?.includes(
+            "recent_tail_path_terminal_agreement",
+        ) === true
+        && recentTailPathTerminalGatePassed({
+            wholeShift: draft.deltaYears ?? 0,
+            tailLag: recallTagNumber(draft, "recent_tail_lag:"),
+            supportCount: recallTagNumber(draft, "recent_tail_support_count:"),
+            totalCount: recallTagNumber(draft, "recent_tail_total_count:"),
+            competingSupportCount: recallTagNumber(
+                draft,
+                "recent_tail_competing_support:",
+            ),
+            contextYears: recallTagNumber(draft, "recent_tail_context_years:"),
+            medianCorrelation: recallTagNumber(draft, "recent_tail_median_r:"),
+            pathLag: recallTagNumber(draft, "recent_tail_path_lag:"),
+            pathMargin: recallTagNumber(draft, "recent_tail_path_margin:"),
+            pathPairs: recallTagNumber(draft, "recent_tail_path_pairs:"),
+        });
+    const recentTailGlobalGatePassed = draft.operationType === "SHIFT_RANGE"
+        && draft.mode === "wholeSeriesMove"
+        && draft.recallSourceTags?.includes(
+            "recent_tail_global_agreement",
+        ) === true
+        && recentTailGlobalAgreementGatePassed({
+            wholeShift: draft.deltaYears ?? 0,
+            tailLag: recallTagNumber(draft, "recent_tail_lag:"),
+            globalLag: recallTagNumber(draft, "recent_tail_global_lag:"),
+            supportCount: recallTagNumber(draft, "recent_tail_support_count:"),
+            totalCount: recallTagNumber(draft, "recent_tail_total_count:"),
+            competingSupportCount: recallTagNumber(
+                draft,
+                "recent_tail_competing_support:",
+            ),
+            contextYears: recallTagNumber(draft, "recent_tail_context_years:"),
+            medianCorrelation: recallTagNumber(draft, "recent_tail_median_r:"),
+        });
+    const recentTailJointGatePassed = draft.operationType === "SHIFT_RANGE"
+        && draft.mode === "wholeSeriesMove"
+        && draft.recallSourceTags?.includes("recent_tail_joint_chain_measured") === true
+        && recentTailJointChainGatePassed({
+            wholeShift: draft.deltaYears ?? 0,
+            tailLag: recallTagNumber(draft, "recent_tail_lag:"),
+            supportCount: recallTagNumber(draft, "recent_tail_support_count:"),
+            totalCount: recallTagNumber(draft, "recent_tail_total_count:"),
+            competingSupportCount: recallTagNumber(
+                draft,
+                "recent_tail_competing_support:",
+            ),
+            contextYears: recallTagNumber(draft, "recent_tail_context_years:"),
+            medianCorrelation: recallTagNumber(draft, "recent_tail_median_r:"),
+            jointEventCount: recallTagNumber(
+                draft,
+                "path_fixed_side_joint_event_count:",
+            ),
+            afterGlobalLag: recallTagNumber(
+                draft,
+                "path_fixed_side_joint_after_global_lag:",
+            ),
+            wholeSeriesRDelta: recallTagNumber(
+                draft,
+                "path_fixed_side_joint_whole_r_delta:",
+            ),
+            meanSegmentRDelta: recallTagNumber(
+                draft,
+                "path_fixed_side_joint_mean_segment_r_delta:",
+            ),
+            problemReduction: recallTagNumber(
+                draft,
+                "path_fixed_side_joint_problem_reduction:",
+            ),
+        });
+    const recentTailResidualGatePassed = draft.operationType === "SHIFT_RANGE"
+        && draft.mode === "wholeSeriesMove"
+        && draft.recallSourceTags?.includes(
+            "recent_tail_residual_partial_baseline",
+        ) === true
+        && recentTailResidualPartialGatePassed({
+            wholeShift: draft.deltaYears ?? 0,
+            tailLag: recallTagNumber(draft, "recent_tail_lag:"),
+            supportCount: recallTagNumber(draft, "recent_tail_support_count:"),
+            totalCount: recallTagNumber(draft, "recent_tail_total_count:"),
+            competingSupportCount: recallTagNumber(
+                draft,
+                "recent_tail_competing_support:",
+            ),
+            contextYears: recallTagNumber(draft, "recent_tail_context_years:"),
+            medianCorrelation: recallTagNumber(draft, "recent_tail_median_r:"),
+            pathLag: recallTagNumber(draft, "recent_tail_residual_path_lag:"),
+            residualPartialShift: recallTagNumber(
+                draft,
+                "recent_tail_residual_partial_shift:",
+            ),
+            pathEventCount: recallTagNumber(
+                draft,
+                "recent_tail_residual_path_event_count:",
+            ),
+            pathAfterGlobalLag: recallTagNumber(
+                draft,
+                "recent_tail_residual_path_after_global_lag:",
+            ),
+            pathWholeSeriesRDelta: recallTagNumber(
+                draft,
+                "recent_tail_residual_path_whole_r_delta:",
+            ),
+            pathMeanSegmentRDelta: recallTagNumber(
+                draft,
+                "recent_tail_residual_path_mean_segment_r_delta:",
+            ),
+            pathProblemReduction: recallTagNumber(
+                draft,
+                "recent_tail_residual_path_problem_reduction:",
+            ),
+            maxPartialGapYears: config.maxPartialGapYears,
+        });
     const jointCompositionGatePassed = terminalCompositionGatePassed
-        || pathCompositionGatePassed;
+        || pathCompositionGatePassed
+        || recentTailTerminalGatePassed
+        || recentTailGlobalGatePassed
+        || recentTailJointGatePassed
+        || recentTailResidualGatePassed;
     const evaluationDelta: CandidateEvaluationDelta = {
         meanSegmentRBefore,
         meanSegmentRAfter,

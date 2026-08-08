@@ -16,6 +16,11 @@ import { diagnoseSeriesCore } from "../segments";
 import { scoreEditYearsInRegion } from "../rangeMove";
 import { scoreDiagnosisEventSets } from "../jointEventRefinement";
 import { measureWholeSeriesStateConsistency } from "../wholeSeriesStateConsistency";
+import {
+    evaluatePathFixedSideWholeCandidate,
+    measurePathFixedSideComposition,
+    measureRecentTailLagConsensus,
+} from "../pathFixedSideWholeBaseline";
 import type {
     DiagnosisEvent,
     DiagnosisEventDecisionAudit,
@@ -53,6 +58,37 @@ let lastPathBaselineAudit: {
     newestLagMargin: number;
     newestLagPairs: number;
     state: ReturnType<typeof measureWholeSeriesStateConsistency>;
+    tail: ReturnType<typeof measureRecentTailLagConsensus>;
+    composition: ReturnType<typeof measurePathFixedSideComposition>;
+    lateComposition: ReturnType<typeof measurePathFixedSideComposition>;
+    recovered: {
+        shiftYears: number | null;
+        strength: string;
+        hardGatePassed: boolean;
+        jointGatePassed: boolean;
+        tags: string[];
+    } | null;
+    cofechaRecovered: {
+        shiftYears: number | null;
+        strength: string;
+        hardGatePassed: boolean;
+        jointGatePassed: boolean;
+        tags: string[];
+    } | null;
+    lateRecovered: {
+        shiftYears: number | null;
+        strength: string;
+        hardGatePassed: boolean;
+        jointGatePassed: boolean;
+        tags: string[];
+    } | null;
+    bundleWholeCandidates: Array<{
+        shiftYears: number;
+        strength: string;
+        hardGatePassed: boolean;
+        jointGatePassed: boolean;
+        tags: string[];
+    }>;
 } | null = null;
 
 type Scenario = {
@@ -176,6 +212,10 @@ const scenariosFor = (
     const partialA = -(2 + index % 2);
     const partialB = -(3 + index % 3);
     const falseMode = (["average", "moderate", "splitLike"] as const)[index % 3];
+    const requestedWholeLag = Number(process.env.MIXED_WHOLE_LAG ?? "2");
+    const wholeLag = Number.isInteger(requestedWholeLag) && requestedWholeLag !== 0
+        ? requestedWholeLag
+        : 2;
     return [
         {
             name: "multiple-missing-far",
@@ -225,14 +265,14 @@ const scenariosFor = (
             events: [
                 { eventType: "partialMove", year: anchors.middle, shiftYears: partialA },
             ],
-            wholeSeriesLag: 2,
+            wholeSeriesLag: wholeLag,
         },
         {
             name: "missing-with-whole",
             events: [
                 { eventType: "missingRing", year: anchors.middle, shiftYears: -1 },
             ],
-            wholeSeriesLag: 2,
+            wholeSeriesLag: wholeLag,
         },
         {
             name: "missing-partial-with-whole",
@@ -240,7 +280,39 @@ const scenariosFor = (
                 { eventType: "missingRing", year: anchors.old, shiftYears: -1 },
                 { eventType: "partialMove", year: anchors.middle, shiftYears: partialA },
             ],
-            wholeSeriesLag: 2,
+            wholeSeriesLag: wholeLag,
+        },
+        {
+            name: "false-with-whole",
+            events: [
+                { eventType: "falseRing", year: anchors.middle, shiftYears: 1, falseMode },
+            ],
+            wholeSeriesLag: wholeLag,
+        },
+        {
+            name: "false-partial-with-whole",
+            events: [
+                { eventType: "falseRing", year: anchors.old, shiftYears: 1, falseMode },
+                { eventType: "partialMove", year: anchors.middle, shiftYears: partialA },
+            ],
+            wholeSeriesLag: wholeLag,
+        },
+        {
+            name: "missing-false-with-whole",
+            events: [
+                { eventType: "missingRing", year: anchors.old, shiftYears: -1 },
+                { eventType: "falseRing", year: anchors.newer, shiftYears: 1, falseMode },
+            ],
+            wholeSeriesLag: wholeLag,
+        },
+        {
+            name: "missing-false-partial-with-whole",
+            events: [
+                { eventType: "missingRing", year: anchors.old, shiftYears: -1 },
+                { eventType: "falseRing", year: anchors.middle, shiftYears: 1, falseMode },
+                { eventType: "partialMove", year: anchors.newer, shiftYears: partialB },
+            ],
+            wholeSeriesLag: wholeLag,
         },
         {
             name: "adjacent-missing-false",
@@ -397,7 +469,10 @@ const diagnoseTargetEvents = (
             jointIndependentReferenceCount,
         ].some((value) => value !== undefined);
         const decisionAudits: DiagnosisEventDecisionAudit[] = [];
-        const captureDecisionAudit = process.env.PRINT_MIXED_WHOLE_STAGES === "1";
+        const captureDecisionAudit = ["1", "all"].includes(
+            process.env.PRINT_MIXED_WHOLE_STAGES ?? "",
+        )
+            || process.env.PRINT_MIXED_WHOLE_TAIL === "1";
         const productionOptions = {
             enableCounterfactualEventLocator:
                 process.env.MIXED_COUNTERFACTUAL_LOCATOR !== "0",
@@ -495,10 +570,73 @@ const diagnoseTargetEvents = (
         if (captureDecisionAudit) {
             lastDecisionAudit = decisionAudits[0] ?? null;
             if (primaryBundle) {
+                const effectiveConfig = getConfig({ referenceConfig: null });
+                const effectivePathConfig = {
+                    ...INTERNAL_EVENT_PATH_CONFIG,
+                    maxPartialGapYears: effectiveConfig.maxPartialGapYears,
+                    ...productionOptions.eventPathConfig,
+                };
                 const path = diagnoseLagPath(
                     primaryBundle.diagnosis,
                     site,
-                    productionOptions.eventPathConfig,
+                    effectivePathConfig,
+                );
+                const tail = measureRecentTailLagConsensus(
+                    primaryBundle.diagnosis,
+                    effectiveConfig,
+                );
+                const recovered = evaluatePathFixedSideWholeCandidate(
+                    site,
+                    primaryBundle.diagnosis,
+                    path.events,
+                    effectiveConfig,
+                    {
+                        lag: path.newestLag,
+                        margin: path.newestLagMargin,
+                        pairs: path.newestLagPairs,
+                    },
+                );
+                const cofechaDiagnosis = diagnoseSeriesCore(
+                    site,
+                    seriesId,
+                    effectiveConfig,
+                    (series) => new Map(cofechaStyleStandardize(series).map((point) => (
+                        [point.year, point.value]
+                    ))),
+                );
+                const cofechaPath = cofechaDiagnosis
+                    ? diagnoseLagPath(
+                        cofechaDiagnosis,
+                        site,
+                        effectivePathConfig,
+                    )
+                    : null;
+                const cofechaRecovered = cofechaDiagnosis && cofechaPath
+                    ? evaluatePathFixedSideWholeCandidate(
+                        site,
+                        primaryBundle.diagnosis,
+                        cofechaPath.events,
+                        effectiveConfig,
+                        {
+                            lag: cofechaPath.newestLag,
+                            margin: cofechaPath.newestLagMargin,
+                            pairs: cofechaPath.newestLagPairs,
+                        },
+                    )
+                    : null;
+                const finalLocalEvents = primaryBundle.events.filter((event) => (
+                    event.eventType !== "wholeSeriesMove"
+                ));
+                const lateRecovered = evaluatePathFixedSideWholeCandidate(
+                    site,
+                    primaryBundle.diagnosis,
+                    finalLocalEvents,
+                    effectiveConfig,
+                    {
+                        lag: path.newestLag,
+                        margin: path.newestLagMargin,
+                        pairs: path.newestLagPairs,
+                    },
                 );
                 lastPathBaselineAudit = {
                     newestLag: path.newestLag,
@@ -508,6 +646,67 @@ const diagnoseTargetEvents = (
                         primaryBundle.diagnosis,
                         path.newestLag,
                     ),
+                    tail,
+                    composition: tail ? measurePathFixedSideComposition(
+                        site,
+                        primaryBundle.diagnosis,
+                        path.events,
+                        tail.lag,
+                        effectiveConfig,
+                    ) : null,
+                    lateComposition: tail ? measurePathFixedSideComposition(
+                        site,
+                        primaryBundle.diagnosis,
+                        finalLocalEvents,
+                        tail.lag,
+                        effectiveConfig,
+                    ) : null,
+                    recovered: recovered ? {
+                        shiftYears: recovered.deltaYears ?? recovered.suggestedLag ?? null,
+                        strength: recovered.candidateStrength,
+                        hardGatePassed:
+                            recovered.evidence.evaluationDelta?.hardGatePassed === true,
+                        jointGatePassed:
+                            recovered.evidence.evaluationDelta?.jointCompositionGatePassed === true,
+                        tags: recovered.evidence.recallSourceTags ?? [],
+                    } : null,
+                    cofechaRecovered: cofechaRecovered ? {
+                        shiftYears:
+                            cofechaRecovered.deltaYears ?? cofechaRecovered.suggestedLag ?? null,
+                        strength: cofechaRecovered.candidateStrength,
+                        hardGatePassed:
+                            cofechaRecovered.evidence.evaluationDelta?.hardGatePassed === true,
+                        jointGatePassed:
+                            cofechaRecovered.evidence.evaluationDelta?.jointCompositionGatePassed
+                                === true,
+                        tags: cofechaRecovered.evidence.recallSourceTags ?? [],
+                    } : null,
+                    lateRecovered: lateRecovered ? {
+                        shiftYears:
+                            lateRecovered.deltaYears ?? lateRecovered.suggestedLag ?? null,
+                        strength: lateRecovered.candidateStrength,
+                        hardGatePassed:
+                            lateRecovered.evidence.evaluationDelta?.hardGatePassed === true,
+                        jointGatePassed:
+                            lateRecovered.evidence.evaluationDelta?.jointCompositionGatePassed
+                                === true,
+                        tags: lateRecovered.evidence.recallSourceTags ?? [],
+                    } : null,
+                    bundleWholeCandidates: primaryBundle.candidates
+                        .filter((candidate) => (
+                            candidate.operationType === "SHIFT_RANGE"
+                            && candidate.mode === "wholeSeriesMove"
+                        ))
+                        .map((candidate) => ({
+                            shiftYears: candidate.deltaYears ?? candidate.suggestedLag,
+                            strength: candidate.candidateStrength,
+                            hardGatePassed:
+                                candidate.evidence.evaluationDelta?.hardGatePassed === true,
+                            jointGatePassed:
+                                candidate.evidence.evaluationDelta?.jointCompositionGatePassed
+                                    === true,
+                            tags: candidate.evidence.recallSourceTags ?? [],
+                        })),
                 };
             }
         }
@@ -1057,6 +1256,7 @@ describe("mixed event experiment with immutable truth coordinates", () => {
             localTypes: DiagnosisEventType[];
         }> = [];
         const wholeStageCases: unknown[] = [];
+        const wholeTailCases: unknown[] = [];
         let cleanCases = 0;
         let cleanFalsePositives = 0;
         const requestedTargetIds = new Set(
@@ -1115,8 +1315,12 @@ describe("mixed event experiment with immutable truth coordinates", () => {
                                 .filter((event) => event.eventType !== "wholeSeriesMove")
                                 .map((event) => event.eventType),
                         });
-                        if (!predictedWhole
-                            && process.env.PRINT_MIXED_WHOLE_STAGES === "1"
+                        if ((predictedWhole?.shiftYears !== scenario.wholeSeriesLag
+                            || process.env.PRINT_MIXED_WHOLE_STAGES === "all")
+                            && (["1", "all"].includes(
+                                process.env.PRINT_MIXED_WHOLE_STAGES ?? "",
+                            )
+                                || process.env.PRINT_MIXED_WHOLE_TAIL === "1")
                             && lastDecisionAudit) {
                             const compact = (rows: DiagnosisEventDecisionAudit[
                                 "detectedBeforeFusion"
@@ -1143,6 +1347,33 @@ describe("mixed event experiment with immutable truth coordinates", () => {
                                 final: compact(lastDecisionAudit.finalEvents),
                                 pathBaseline: lastPathBaselineAudit,
                                 finalReason: lastDecisionAudit.finalReason,
+                            });
+                            wholeTailCases.push({
+                                folder,
+                                seriesId: series.id,
+                                scenario: scenario.name,
+                                truthShift: scenario.wholeSeriesLag,
+                                predictedShift: predictedWhole?.shiftYears ?? null,
+                                selectedReferencePass: lastDecisionAudit.pass.selectedReferencePass,
+                                wholeCandidates: lastDecisionAudit.candidates.filter((candidate) => (
+                                    candidate.operationType === "SHIFT_RANGE"
+                                )),
+                                pathEvents: compact(lastDecisionAudit.detectedBeforeFusion)
+                                    .filter((event) => event.sources.includes("piecewise_lag_path")),
+                                final: compact(lastDecisionAudit.finalEvents),
+                                pathNewestLag: lastPathBaselineAudit?.newestLag ?? null,
+                                pathNewestLagMargin:
+                                    lastPathBaselineAudit?.newestLagMargin ?? null,
+                                pathNewestLagPairs:
+                                    lastPathBaselineAudit?.newestLagPairs ?? null,
+                                tail: lastPathBaselineAudit?.tail ?? null,
+                                composition: lastPathBaselineAudit?.composition ?? null,
+                                lateComposition:
+                                    lastPathBaselineAudit?.lateComposition ?? null,
+                                recovered: lastPathBaselineAudit?.recovered ?? null,
+                                lateRecovered: lastPathBaselineAudit?.lateRecovered ?? null,
+                                bundleWholeCandidates:
+                                    lastPathBaselineAudit?.bundleWholeCandidates ?? [],
                             });
                         }
                     }
@@ -1329,6 +1560,7 @@ describe("mixed event experiment with immutable truth coordinates", () => {
                 method: "value-independent deterministic calendar anchors",
                 endpointContextYears: 24,
                 signalConditionedSelection: false,
+                wholeSeriesLag: Number(process.env.MIXED_WHOLE_LAG ?? "2"),
             },
             overall: summary(overall),
             mixedTypes: summary(mixedTypes),
@@ -1354,6 +1586,15 @@ describe("mixed event experiment with immutable truth coordinates", () => {
                     row.predictedWholeShift !== null
                     && row.predictedWholeShift !== row.truthShift
                 )).length,
+                wrongShiftHistogram: Object.fromEntries(
+                    Array.from(wholeCoexistenceCases.reduce((counts, row) => {
+                        if (row.predictedWholeShift === null
+                            || row.predictedWholeShift === row.truthShift) return counts;
+                        const key = `${row.truthShift}->${row.predictedWholeShift}`;
+                        counts.set(key, (counts.get(key) ?? 0) + 1);
+                        return counts;
+                    }, new Map<string, number>()).entries()).sort(),
+                ),
                 absent: wholeCoexistenceCases.filter((row) => (
                     row.predictedWholeShift === null
                 )).length,
@@ -1377,6 +1618,13 @@ describe("mixed event experiment with immutable truth coordinates", () => {
                                 cases: rows.length,
                                 correctShift: rows.filter((row) => (
                                     row.predictedWholeShift === row.truthShift
+                                )).length,
+                                wrongShift: rows.filter((row) => (
+                                    row.predictedWholeShift !== null
+                                    && row.predictedWholeShift !== row.truthShift
+                                )).length,
+                                absent: rows.filter((row) => (
+                                    row.predictedWholeShift === null
                                 )).length,
                                 absentWithPartial: rows.filter((row) => (
                                     row.predictedWholeShift === null
@@ -1412,9 +1660,21 @@ describe("mixed event experiment with immutable truth coordinates", () => {
             // eslint-disable-next-line no-console
             console.log(`EVENT_MIXED_WHOLE_CASES ${JSON.stringify(wholeCoexistenceCases)}`);
         }
-        if (process.env.PRINT_MIXED_WHOLE_STAGES === "1") {
+        if (process.env.PRINT_MIXED_WHOLE_WRONG_CASES === "1") {
+            // eslint-disable-next-line no-console
+            console.log(`EVENT_MIXED_WHOLE_WRONG_CASES ${JSON.stringify(
+                wholeCoexistenceCases.filter((row) => (
+                    row.predictedWholeShift !== row.truthShift
+                )),
+            )}`);
+        }
+        if (["1", "all"].includes(process.env.PRINT_MIXED_WHOLE_STAGES ?? "")) {
             // eslint-disable-next-line no-console
             console.log(`EVENT_MIXED_WHOLE_STAGES ${JSON.stringify(wholeStageCases)}`);
+        }
+        if (process.env.PRINT_MIXED_WHOLE_TAIL === "1") {
+            // eslint-disable-next-line no-console
+            console.log(`EVENT_MIXED_WHOLE_TAIL ${JSON.stringify(wholeTailCases)}`);
         }
         if (process.env.PRINT_MIXED_DUAL_AUDIT === "1") {
             // eslint-disable-next-line no-console
@@ -1502,7 +1762,7 @@ describe("mixed event experiment with immutable truth coordinates", () => {
         expect(coveredCases).toBeGreaterThanOrEqual(2);
     }, 60_000);
 
-    it("recovers the non-zero fixed-side whole baseline from coherent local lag transitions", () => {
+    it("recovers the fixed-side whole baseline across local operations, directions and amplitudes", () => {
         const loaded = loadDataFolder("EBD");
         expect(loaded).not.toBeNull();
         if (!loaded) return;
@@ -1517,42 +1777,46 @@ describe("mixed event experiment with immutable truth coordinates", () => {
         expect(anchors).not.toBeNull();
         if (!anchors) return;
 
+        const scenarioNames = new Set([
+            "missing-with-whole",
+            "false-with-whole",
+            "partial-with-whole",
+            "missing-false-with-whole",
+            "false-partial-with-whole",
+            "missing-false-partial-with-whole",
+        ]);
         const scenarios = scenariosFor(anchors, 0).filter((scenario) => (
-            scenario.name === "partial-with-whole"
-            || scenario.name === "missing-partial-with-whole"
+            scenarioNames.has(scenario.name)
         ));
-        expect(scenarios).toHaveLength(2);
-        scenarios.forEach((scenario) => {
-            const synthetic = createPiecewiseLagMixedCase(
-                series,
-                scenario.events,
-                scenario.wholeSeriesLag ?? 0,
-            );
-            const site = buildSyntheticSite(
-                loaded.crossdated,
-                series.id,
-                synthetic.corrupted,
-            ).site;
-            expect(site).not.toBeNull();
-            if (!site) return;
-            const result = diagnoseCrossdating(site, { targetTrees: [series.id] });
-            const whole = result.events.find((event) => (
-                event.eventType === "wholeSeriesMove"
-            ));
-            expect(whole?.shiftYears).toBe(2);
-            expect(whole?.evidence.candidateIds).toHaveLength(1);
-            expect(result.candidates.some((candidate) => (
-                candidate.id === whole?.evidence.candidateIds[0]
-                && candidate.operationType === "SHIFT_RANGE"
-                && candidate.mode === "wholeSeriesMove"
-                && candidate.deltaYears === 2
-            ))).toBe(true);
-            expect(result.events.some((event) => (
-                event.eventType === "partialMove" && event.shiftYears === -2
-            ))).toBe(true);
-            if (scenario.name === "missing-partial-with-whole") {
-                expect(result.events.some((event) => event.eventType === "missingRing")).toBe(true);
-            }
+        expect(scenarios).toHaveLength(scenarioNames.size);
+        [-5, -2, 2, 5].forEach((wholeShift) => {
+            scenarios.forEach((scenario) => {
+                const synthetic = createPiecewiseLagMixedCase(
+                    series,
+                    scenario.events,
+                    wholeShift,
+                );
+                const site = buildSyntheticSite(
+                    loaded.crossdated,
+                    series.id,
+                    synthetic.corrupted,
+                ).site;
+                expect(site).not.toBeNull();
+                if (!site) return;
+                const result = diagnoseCrossdating(site, { targetTrees: [series.id] });
+                const whole = result.events.find((event) => (
+                    event.eventType === "wholeSeriesMove"
+                ));
+                expect(whole?.shiftYears, `${scenario.name} whole ${wholeShift}`)
+                    .toBe(wholeShift);
+                expect(whole?.evidence.candidateIds).toHaveLength(1);
+                expect(result.candidates.some((candidate) => (
+                    candidate.id === whole?.evidence.candidateIds[0]
+                    && candidate.operationType === "SHIFT_RANGE"
+                    && candidate.mode === "wholeSeriesMove"
+                    && candidate.deltaYears === wholeShift
+                ))).toBe(true);
+            });
         });
-    }, 60_000);
+    }, 180_000);
 });

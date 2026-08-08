@@ -10,6 +10,10 @@ import {
 import type { RwlSiteData } from "@/features/rwl/types";
 import { evaluateDraft } from "./evaluation";
 import { isExactPartialLagTransition } from "./partialMoveSemantics";
+import {
+    getRepresentativeSegmentForLag,
+    runSlidingMatchForRange,
+} from "./rangeMove";
 import { diagnoseSeriesCore } from "./segments";
 import type {
     CandidateDraft,
@@ -18,6 +22,168 @@ import type {
     EffectiveDiagnosisConfig,
     SeriesCoreDiagnosis,
 } from "./types";
+
+export type RecentTailLagConsensus = {
+    lag: number;
+    supportCount: number;
+    competingSupportCount: number;
+    rows: Array<{
+        width: number;
+        startYear: number;
+        endYear: number;
+        bestLag: number;
+        bestR: number | null;
+        overlapYears: number;
+    }>;
+};
+
+export type PathTerminalLagEvidence = {
+    lag: number;
+    margin: number;
+    pairs: number;
+};
+
+/**
+ * Rank independently validated whole-series baselines by the evidence that identifies the
+ * fixed newer side. Scores from different locator families are not directly comparable.
+ */
+export const wholeBaselineCandidatePriority = (
+    candidate: DiagnosisCandidateOperation,
+): number => {
+    const tags = candidate.evidence.recallSourceTags ?? [];
+    const joint = candidate.evidence.evaluationDelta?.jointCompositionGatePassed === true;
+    const hard = candidate.evidence.evaluationDelta?.hardGatePassed === true;
+    const tagNumber = (prefix: string): number => {
+        const value = Number(tags.find((tag) => tag.startsWith(prefix))?.slice(prefix.length));
+        return Number.isFinite(value) ? value : Number.NaN;
+    };
+    const tailSupport = tagNumber("recent_tail_support_count:");
+    const tailTotal = tagNumber("recent_tail_total_count:");
+    const highQualityTail = tags.includes("recent_tail_whole_baseline")
+        && hard
+        && tailSupport >= 4
+        && tailSupport === tailTotal
+        && tagNumber("recent_tail_competing_support:") === 0
+        && tagNumber("recent_tail_median_r:") >= 0.7;
+    if (tags.includes("cofecha_terminal_whole_baseline") && (joint || hard)) return 100;
+    if (joint && tags.includes("recent_tail_global_agreement")) return 90;
+    if ((joint || hard) && tags.includes("recent_tail_residual_partial_baseline")) return 80;
+    if (joint && tags.includes("recent_tail_path_terminal_agreement")) return 70;
+    if (joint && tags.includes("path_fixed_side_event_type:partialMove")) return 60;
+    if (joint && tags.includes("recent_tail_whole_baseline")) return 50;
+    if (highQualityTail) return 45;
+    if (joint && tags.includes("path_fixed_side_whole_baseline")) return 40;
+    if (hard && tags.includes("recent_tail_whole_baseline")) return 30;
+    if (hard && tags.includes("path_fixed_side_whole_baseline")) return 20;
+    return 0;
+};
+
+/** Independent terminal-state view that does not assume the newest detected transition is last. */
+export const measureRecentTailLagConsensus = (
+    diagnosis: SeriesCoreDiagnosis,
+    effectiveConfig: EffectiveDiagnosisConfig,
+    widths: readonly number[] = [20, 21, 22, 23],
+    recoveryLagRadius = 10,
+): RecentTailLagConsensus | null => {
+    const tailConfig: EffectiveDiagnosisConfig = {
+        ...effectiveConfig,
+        globalLagMin: Math.max(effectiveConfig.globalLagMin, -recoveryLagRadius),
+        globalLagMax: Math.min(effectiveConfig.globalLagMax, recoveryLagRadius),
+    };
+    const rows = widths
+        .map((requestedWidth) => {
+            const width = Math.min(
+                requestedWidth,
+                diagnosis.targetRange.endYear - diagnosis.targetRange.startYear + 1,
+            );
+            const endYear = diagnosis.targetRange.endYear;
+            const startYear = endYear - width + 1;
+            const match = runSlidingMatchForRange(
+                diagnosis,
+                { startYear, endYear },
+                tailConfig,
+            );
+            return {
+                width,
+                startYear,
+                endYear,
+                bestLag: match.bestGlobalLag,
+                bestR: match.bestGlobalR,
+                overlapYears: match.overlapYears,
+            };
+        })
+        .filter((row) => row.bestR !== null && row.overlapYears >= effectiveConfig.minLocalOverlap);
+    if (rows.length < 2) return null;
+    const support = rows.reduce((counts, row) => {
+        const current = counts.get(row.bestLag) ?? { count: 0, rSum: 0 };
+        current.count += 1;
+        current.rSum += row.bestR ?? -1;
+        counts.set(row.bestLag, current);
+        return counts;
+    }, new Map<number, { count: number; rSum: number }>());
+    const ordered = Array.from(support.entries()).sort((left, right) => (
+        right[1].count - left[1].count
+        || right[1].rSum - left[1].rSum
+        || Math.abs(left[0]) - Math.abs(right[0])
+    ));
+    const [best, second] = ordered;
+    if (!best) return null;
+    return {
+        lag: best[0],
+        supportCount: best[1].count,
+        competingSupportCount: second?.[1].count ?? 0,
+        rows,
+    };
+};
+
+/**
+ * Recover a short-range terminal state that mixed local events can hide from the full-series
+ * optimum. This only proposes a draft; full-series counterfactual evaluation remains mandatory.
+ */
+export const makeRecentTailWholeDraft = (
+    diagnosis: SeriesCoreDiagnosis,
+    effectiveConfig: EffectiveDiagnosisConfig,
+): CandidateDraft | null => {
+    const consensus = measureRecentTailLagConsensus(diagnosis, effectiveConfig);
+    if (!consensus
+        || consensus.lag === 0
+        || consensus.supportCount < 3
+        || consensus.supportCount <= consensus.competingSupportCount) return null;
+    const supportingRows = consensus.rows.filter((row) => row.bestLag === consensus.lag);
+    const supportingCorrelations = supportingRows
+        .map((row) => row.bestR)
+        .filter((value): value is number => value !== null)
+        .sort((left, right) => left - right);
+    const medianCorrelation = supportingCorrelations[
+        Math.floor(supportingCorrelations.length / 2)
+    ] ?? -1;
+    if (Math.max(...supportingCorrelations, -1) < 0.45 || medianCorrelation < 0.3) {
+        return null;
+    }
+    const sourceSegment = getRepresentativeSegmentForLag(diagnosis, consensus.lag);
+    if (!sourceSegment) return null;
+    return {
+        targetTree: diagnosis.targetTree,
+        operationType: "SHIFT_RANGE",
+        candidateType: "batchMoveYears",
+        mode: "wholeSeriesMove",
+        anchorYear: diagnosis.targetRange.endYear,
+        selectedRange: { ...diagnosis.targetRange },
+        deltaYears: consensus.lag,
+        sourceSegment,
+        algorithmSource: ["global_sliding_match", "segmented_diagnosis"],
+        recallSourceTags: [
+            "recent_tail_whole_baseline",
+            `recent_tail_lag:${consensus.lag}`,
+            `recent_tail_support:${consensus.supportCount}/${consensus.rows.length}`,
+            `recent_tail_support_count:${consensus.supportCount}`,
+            `recent_tail_total_count:${consensus.rows.length}`,
+            `recent_tail_competing_support:${consensus.competingSupportCount}`,
+            `recent_tail_context_years:${Math.min(...supportingRows.map((row) => row.width))}`,
+            `recent_tail_median_r:${medianCorrelation.toFixed(6)}`,
+        ],
+    };
+};
 
 const pathTransitionMatchesOperation = (event: DiagnosisEvent): boolean => {
     const lagBefore = event.evidence.lagBefore;
@@ -81,7 +247,7 @@ const meanUsableSegmentCorrelation = (diagnosis: SeriesCoreDiagnosis): number =>
         : -1;
 };
 
-const evaluatePathFixedSideComposition = (
+export const measurePathFixedSideComposition = (
     siteData: RwlSiteData,
     diagnosis: SeriesCoreDiagnosis,
     pathEvents: readonly DiagnosisEvent[],
@@ -222,48 +388,137 @@ export const evaluatePathFixedSideWholeCandidate = (
     diagnosis: SeriesCoreDiagnosis,
     pathEvents: readonly DiagnosisEvent[],
     effectiveConfig: EffectiveDiagnosisConfig,
+    pathTerminal?: PathTerminalLagEvidence,
 ): DiagnosisCandidateOperation | null => {
-    const draft = makePathFixedSideWholeDraft(
-        diagnosis,
-        pathEvents,
-        effectiveConfig,
-    );
-    if (!draft) return null;
-    const composition = evaluatePathFixedSideComposition(
-        siteData,
-        diagnosis,
-        pathEvents,
-        draft.deltaYears!,
-        effectiveConfig,
-    );
-    const evaluatedDraft: CandidateDraft = composition?.passed
+    const measuredTailDraft = makeRecentTailWholeDraft(diagnosis, effectiveConfig);
+    const rawTailDraft = measuredTailDraft
+        && diagnosis.globalSlidingMatch.bestGlobalLag === measuredTailDraft.deltaYears
         ? {
-            ...draft,
+            ...measuredTailDraft,
             recallSourceTags: [
-                ...(draft.recallSourceTags ?? []),
-                "path_fixed_side_joint_composition",
-                `path_fixed_side_joint_event_count:${composition.eventCount}`,
-                `path_fixed_side_joint_after_global_lag:${composition.afterBestGlobalLag}`,
-                `path_fixed_side_joint_whole_r_delta:${
-                    composition.wholeSeriesRDelta.toFixed(6)
-                }`,
-                `path_fixed_side_joint_mean_segment_r_delta:${
-                    composition.meanSegmentRDelta.toFixed(6)
-                }`,
-                `path_fixed_side_joint_problem_reduction:${composition.problemReduction}`,
+                ...(measuredTailDraft.recallSourceTags ?? []),
+                "recent_tail_global_agreement",
+                `recent_tail_global_lag:${diagnosis.globalSlidingMatch.bestGlobalLag}`,
             ],
         }
-        : draft;
-    const candidate = evaluateDraft(
+        : measuredTailDraft;
+    const pathDraft = makePathFixedSideWholeDraft(
+        diagnosis,
+        pathEvents,
+        effectiveConfig,
+    );
+    const pathComposition = pathDraft ? measurePathFixedSideComposition(
         siteData,
         diagnosis,
-        evaluatedDraft,
+        pathEvents,
+        pathDraft.deltaYears!,
         effectiveConfig,
-        null,
-    );
-    return candidate?.candidateStrength === "strong"
-        && (candidate.evidence.evaluationDelta?.hardGatePassed === true
-            || candidate.evidence.evaluationDelta?.jointCompositionGatePassed === true)
-        ? candidate
-        : null;
+    ) : null;
+    const residualPartialShift = rawTailDraft && pathDraft
+        ? pathDraft.deltaYears! - rawTailDraft.deltaYears!
+        : 0;
+    const tailDraft = rawTailDraft
+        && pathDraft
+        && pathComposition?.passed
+        && residualPartialShift <= -2
+        && residualPartialShift >= -effectiveConfig.maxPartialGapYears
+        ? {
+            ...rawTailDraft,
+            recallSourceTags: [
+                ...(rawTailDraft.recallSourceTags ?? []),
+                "recent_tail_residual_partial_baseline",
+                `recent_tail_residual_path_lag:${pathDraft.deltaYears}`,
+                `recent_tail_residual_partial_shift:${residualPartialShift}`,
+                `recent_tail_residual_path_event_count:${pathComposition.eventCount}`,
+                `recent_tail_residual_path_after_global_lag:${
+                    pathComposition.afterBestGlobalLag
+                }`,
+                `recent_tail_residual_path_whole_r_delta:${
+                    pathComposition.wholeSeriesRDelta.toFixed(6)
+                }`,
+                `recent_tail_residual_path_mean_segment_r_delta:${
+                    pathComposition.meanSegmentRDelta.toFixed(6)
+                }`,
+                `recent_tail_residual_path_problem_reduction:${
+                    pathComposition.problemReduction
+                }`,
+            ],
+        }
+        : rawTailDraft;
+    const drafts = [
+        tailDraft,
+        pathDraft,
+    ].filter((draft): draft is CandidateDraft => draft !== null)
+        .filter((draft, index, rows) => rows.findIndex((row) => (
+            row.deltaYears === draft.deltaYears
+        )) === index);
+    const accepted: DiagnosisCandidateOperation[] = [];
+    for (const draft of drafts) {
+        const terminalAgreement = draft.recallSourceTags?.includes(
+            "recent_tail_whole_baseline",
+        ) === true
+            && pathTerminal
+            && pathTerminal.lag === draft.deltaYears;
+        const terminalDraft: CandidateDraft = terminalAgreement
+            ? {
+                ...draft,
+                recallSourceTags: [
+                    ...(draft.recallSourceTags ?? []),
+                    "recent_tail_path_terminal_agreement",
+                    `recent_tail_path_lag:${pathTerminal.lag}`,
+                    `recent_tail_path_margin:${pathTerminal.margin.toFixed(6)}`,
+                    `recent_tail_path_pairs:${pathTerminal.pairs}`,
+                ],
+            }
+            : draft;
+        const composition = measurePathFixedSideComposition(
+            siteData,
+            diagnosis,
+            pathEvents,
+            draft.deltaYears!,
+            effectiveConfig,
+        );
+        const compositionTags = composition ? [
+            `path_fixed_side_joint_event_count:${composition.eventCount}`,
+            `path_fixed_side_joint_after_global_lag:${composition.afterBestGlobalLag}`,
+            `path_fixed_side_joint_whole_r_delta:${
+                composition.wholeSeriesRDelta.toFixed(6)
+            }`,
+            `path_fixed_side_joint_mean_segment_r_delta:${
+                composition.meanSegmentRDelta.toFixed(6)
+            }`,
+            `path_fixed_side_joint_problem_reduction:${composition.problemReduction}`,
+        ] : [];
+        const evaluatedDraft: CandidateDraft = composition
+            ? {
+                ...terminalDraft,
+                recallSourceTags: [
+                    ...(terminalDraft.recallSourceTags ?? []),
+                    ...(terminalDraft.recallSourceTags?.includes(
+                        "recent_tail_whole_baseline",
+                    ) === true ? ["recent_tail_joint_chain_measured"] : []),
+                    ...(composition.passed ? [
+                    "path_fixed_side_joint_composition",
+                    ] : []),
+                    ...compositionTags,
+                ],
+            }
+            : terminalDraft;
+        const candidate = evaluateDraft(
+            siteData,
+            diagnosis,
+            evaluatedDraft,
+            effectiveConfig,
+            null,
+        );
+        if (candidate?.candidateStrength === "strong"
+            && (candidate.evidence.evaluationDelta?.hardGatePassed === true
+                || candidate.evidence.evaluationDelta?.jointCompositionGatePassed === true)) {
+            accepted.push(candidate);
+        }
+    }
+    return accepted.sort((left, right) => (
+        wholeBaselineCandidatePriority(right) - wholeBaselineCandidatePriority(left)
+        || right.score - left.score
+    ))[0] ?? null;
 };

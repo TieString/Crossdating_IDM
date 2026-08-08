@@ -23,6 +23,8 @@ import {
 } from "../drafts";
 import {
     pathFixedSideWholeCompositionGatePassed,
+    recentTailGlobalAgreementGatePassed,
+    recentTailResidualPartialGatePassed,
     terminalWholeCompositionGatePassed,
 } from "../evaluation";
 import {
@@ -415,6 +417,114 @@ describe("path fixed-side whole baseline", () => {
         expect(isValidatedPathFixedSideWholeCandidate(pathCandidate)).toBe(true);
         expect(isValidatedPathFixedSideWholeCandidate(weakPathCandidate)).toBe(false);
         expect(selectWholeSeriesCandidate([pathCandidate])?.deltaYears).toBe(2);
+    });
+
+    it("uses evidence-family priority instead of comparing incomparable raw scores", () => {
+        const candidate = (
+            shiftYears: number,
+            score: number,
+            tags: string[],
+            hardGatePassed: boolean,
+            jointCompositionGatePassed: boolean,
+        ) => ({
+            operationType: "SHIFT_RANGE",
+            mode: "wholeSeriesMove",
+            deltaYears: shiftYears,
+            score,
+            candidateStrength: "strong",
+            evidence: {
+                recallSourceTags: tags,
+                evaluationDelta: { hardGatePassed, jointCompositionGatePassed },
+            },
+        } as DiagnosisCandidateOperation);
+        const unitPath = candidate(-5, 30, [
+            "path_fixed_side_whole_baseline",
+            "path_fixed_side_event_type:falseRing",
+        ], true, true);
+        const residualTail = candidate(-2, 5, [
+            "recent_tail_whole_baseline",
+            "recent_tail_residual_partial_baseline",
+        ], true, false);
+        const partialPath = candidate(5, 4, [
+            "path_fixed_side_whole_baseline",
+            "path_fixed_side_event_type:partialMove",
+        ], false, true);
+        const spuriousTail = candidate(-9, 40, [
+            "recent_tail_whole_baseline",
+        ], true, false);
+        const highQualityTail = candidate(-2, 3, [
+            "recent_tail_whole_baseline",
+            "recent_tail_support_count:4",
+            "recent_tail_total_count:4",
+            "recent_tail_competing_support:0",
+            "recent_tail_median_r:0.75",
+        ], true, false);
+
+        expect(selectWholeSeriesCandidate([unitPath, residualTail])?.deltaYears).toBe(-2);
+        expect(selectWholeSeriesCandidate([unitPath, highQualityTail])?.deltaYears).toBe(-2);
+        expect(selectWholeSeriesCandidate([partialPath, spuriousTail])?.deltaYears).toBe(5);
+    });
+
+    it("requires unanimous recent-tail agreement before it can confirm the global lag", () => {
+        const agreement = {
+            wholeShift: 5,
+            tailLag: 5,
+            globalLag: 5,
+            supportCount: 4,
+            totalCount: 4,
+            competingSupportCount: 0,
+            contextYears: 20,
+            medianCorrelation: 0.62,
+        };
+
+        expect(recentTailGlobalAgreementGatePassed(agreement)).toBe(true);
+        expect(recentTailGlobalAgreementGatePassed({
+            ...agreement,
+            globalLag: 6,
+        })).toBe(false);
+        expect(recentTailGlobalAgreementGatePassed({
+            ...agreement,
+            supportCount: 3,
+        })).toBe(false);
+        expect(recentTailGlobalAgreementGatePassed({
+            ...agreement,
+            medianCorrelation: 0.45,
+        })).toBe(true);
+        expect(recentTailGlobalAgreementGatePassed({
+            ...agreement,
+            medianCorrelation: 0.449,
+        })).toBe(false);
+    });
+
+    it("allows a unanimous moderate tail to explain a dynamic negative residual partial shift", () => {
+        const residual = {
+            wholeShift: 5,
+            tailLag: 5,
+            supportCount: 4,
+            totalCount: 4,
+            competingSupportCount: 0,
+            contextYears: 20,
+            medianCorrelation: 0.56,
+            pathLag: 2,
+            residualPartialShift: -3,
+            pathEventCount: 2,
+            pathAfterGlobalLag: 0,
+            pathWholeSeriesRDelta: 0.19,
+            pathMeanSegmentRDelta: 0.2,
+            pathProblemReduction: 4,
+            maxPartialGapYears: 100,
+        };
+
+        expect(recentTailResidualPartialGatePassed(residual)).toBe(true);
+        expect(recentTailResidualPartialGatePassed({
+            ...residual,
+            supportCount: 3,
+        })).toBe(false);
+        expect(recentTailResidualPartialGatePassed({
+            ...residual,
+            residualPartialShift: -101,
+            pathLag: -96,
+        })).toBe(false);
     });
 });
 

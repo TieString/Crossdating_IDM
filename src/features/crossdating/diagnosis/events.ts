@@ -21,6 +21,7 @@ import {
     supportsNonTerminalWholeSeriesCandidate,
     wholeSeriesStateConsistencyNotes,
 } from "./wholeSeriesStateConsistency";
+import { wholeBaselineCandidatePriority } from "./pathFixedSideWholeBaseline";
 
 const WINDOW_WIDTH: Record<Exclude<DiagnosisEventType, "wholeSeriesMove">, number> = {
     missingRing: 7,
@@ -250,6 +251,37 @@ const wholeEventFromCandidate = (
                         ))
                         .map((tag) => tag.replace(":", "="))),
                 ] : []),
+                ...(candidate.evidence.recallSourceTags?.includes(
+                    "recent_tail_whole_baseline",
+                ) ? [
+                    "whole_baseline_source=recent_tail_lag",
+                    ...(candidate.evidence.recallSourceTags
+                        .filter((tag) => (
+                            tag.startsWith("recent_tail_lag:")
+                            || tag.startsWith("recent_tail_support:")
+                            || tag.startsWith("recent_tail_support_count:")
+                            || tag.startsWith("recent_tail_total_count:")
+                            || tag.startsWith("recent_tail_competing_support:")
+                            || tag.startsWith("recent_tail_context_years:")
+                            || tag.startsWith("recent_tail_median_r:")
+                            || tag.startsWith("recent_tail_path_lag:")
+                            || tag.startsWith("recent_tail_path_margin:")
+                            || tag.startsWith("recent_tail_path_pairs:")
+                            || tag.startsWith("recent_tail_global_lag:")
+                            || tag.startsWith("recent_tail_residual_path_lag:")
+                            || tag.startsWith("recent_tail_residual_partial_shift:")
+                            || tag.startsWith("recent_tail_residual_path_event_count:")
+                            || tag.startsWith("recent_tail_residual_path_after_global_lag:")
+                            || tag.startsWith("recent_tail_residual_path_whole_r_delta:")
+                            || tag.startsWith(
+                                "recent_tail_residual_path_mean_segment_r_delta:",
+                            )
+                            || tag.startsWith(
+                                "recent_tail_residual_path_problem_reduction:",
+                            )
+                        ))
+                        .map((tag) => tag.replace(":", "="))),
+                ] : []),
                 `whole_operation_shift=${shiftYears}`,
                 `whole_observed_dominant_lag=${
                     evaluation?.dominantLagBefore ?? candidate.evidence.before.bestLag
@@ -272,6 +304,7 @@ export const selectWholeSeriesCandidate = (
     const validatedBaselines = whole.filter((candidate) => (
         isValidatedTerminalWholeCandidate(candidate)
         || isValidatedPathFixedSideWholeCandidate(candidate)
+        || isValidatedRecentTailWholeCandidate(candidate)
     ));
     const eligible = validatedBaselines.length > 0
         ? validatedBaselines
@@ -285,7 +318,10 @@ export const selectWholeSeriesCandidate = (
             );
         });
     return eligible
-        .sort((left, right) => right.score - left.score)[0];
+        .sort((left, right) => (
+            wholeBaselineCandidatePriority(right) - wholeBaselineCandidatePriority(left)
+            || right.score - left.score
+        ))[0];
 };
 
 export const isValidatedPathFixedSideWholeCandidate = (
@@ -295,6 +331,18 @@ export const isValidatedPathFixedSideWholeCandidate = (
     return eventTypeForCandidate(candidate) === "wholeSeriesMove"
         && candidate.evidence.recallSourceTags?.includes(
             "path_fixed_side_whole_baseline",
+        ) === true
+        && candidate.candidateStrength === "strong"
+        && evaluation?.jointCompositionGatePassed === true;
+};
+
+export const isValidatedRecentTailWholeCandidate = (
+    candidate: DiagnosisCandidateOperation,
+): boolean => {
+    const evaluation = candidate.evidence.evaluationDelta;
+    return eventTypeForCandidate(candidate) === "wholeSeriesMove"
+        && candidate.evidence.recallSourceTags?.includes(
+            "recent_tail_whole_baseline",
         ) === true
         && candidate.candidateStrength === "strong"
         && (evaluation?.hardGatePassed === true

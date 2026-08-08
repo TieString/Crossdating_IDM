@@ -27,7 +27,11 @@ import {
     type TwoStepMissingStaircase,
 } from "./eventPath";
 import { makeDiagnosisEventsFromCandidates } from "./events";
-import { evaluatePathFixedSideWholeCandidate } from "./pathFixedSideWholeBaseline";
+import {
+    evaluatePathFixedSideWholeCandidate,
+    measureRecentTailLagConsensus,
+    wholeBaselineCandidatePriority,
+} from "./pathFixedSideWholeBaseline";
 import {
     refineEventYearsJointly,
     scoreDiagnosisEventSets,
@@ -68,6 +72,7 @@ import {
     type EventOperationRecoveryConfig,
 } from "./eventOperationRecovery";
 import { wholeSeriesMoveShiftYears } from "./wholeSeriesMoveSemantics";
+import { measureWholeSeriesStateConsistency } from "./wholeSeriesStateConsistency";
 import {
     addDiagnosisReviewWindowPadding,
     restoreUnlocalizedFalseRingReviewWindow,
@@ -848,9 +853,11 @@ export const wholeSeriesEventIsLocalUnitAlias = (
 export const isTerminalWholeBaselineEvent = (
     event: DiagnosisEvent,
 ): boolean => event.eventType === "wholeSeriesMove"
-    && event.evidence.notes.includes(
+    && event.evidence.notes.some((note) => [
         "whole_baseline_source=cofecha_terminal_lag",
-    );
+        "whole_baseline_source=path_fixed_side_lag",
+        "whole_baseline_source=recent_tail_lag",
+    ].includes(note));
 
 const PARTIAL_BOUNDARY_ANCHOR_SOURCES = new Set([
     "candidate_backed_partial_consensus",
@@ -1044,7 +1051,16 @@ export const pruneLocalEventsDisconnectedFromWholeBaseline = (
     if (comparableLocalEvents.length === 0) return events;
 
     const connectedIds = new Set<string>();
-    const connectedStates = new Set([wholeLag]);
+    const residualPathLagNote = wholeEvents[0].evidence.notes.find((note) => (
+        note.startsWith("recent_tail_residual_path_lag=")
+    ));
+    const residualPathLag = Number(
+        residualPathLagNote?.slice("recent_tail_residual_path_lag=".length),
+    );
+    const connectedStates = new Set([
+        wholeLag,
+        ...(Number.isInteger(residualPathLag) ? [residualPathLag] : []),
+    ]);
     let added = true;
     while (added) {
         added = false;
@@ -1087,9 +1103,7 @@ const keepWholeSeriesEvent = (
     pathDiagnosis: LagPathDiagnosis,
 ): DiagnosisEvent[] => {
     if (!whole) return [];
-    const terminalBaseline = whole.evidence.notes.includes(
-        "whole_baseline_source=cofecha_terminal_lag",
-    );
+    const terminalBaseline = isTerminalWholeBaselineEvent(whole);
     // A terminal COFECHA baseline has already passed either the ordinary whole hard gate or the
     // joint gate proving that its application leaves exactly one residual unit lag. It is an
     // independent baseline, so local unit hypotheses must be diagnosed after that baseline is
@@ -1154,8 +1168,9 @@ export const unitEventUsesWholeSeriesBaseline = (
     if (wholeShift === null
         || (event.eventType !== "missingRing" && event.eventType !== "falseRing")
         || event.evidence.lagBefore === null
-        || event.evidence.lagAfter !== wholeShift
-        || event.evidence.lagBefore === wholeShift) return false;
+        || event.evidence.lagAfter === null
+        || (event.evidence.lagBefore !== wholeShift
+            && event.evidence.lagAfter !== wholeShift)) return false;
     const transition = event.evidence.lagAfter - event.evidence.lagBefore;
     return event.eventType === "missingRing" ? transition === 1 : transition === -1;
 };
@@ -2636,26 +2651,132 @@ const eventsForSeriesPass = (
         enablePulseScan: false,
     }, pathCache).events;
     if (audit) audit.rawLagPathEventCount = rawPathEvents.length;
-    if (typeEvents(candidateEvents, "wholeSeriesMove").length === 0) {
-        const pathWholeCandidate = evaluatePathFixedSideWholeCandidate(
-            siteData,
+    // Local event extraction uses the COFECHA-core diagnosis above. The fixed-side baseline must
+    // retain the original diagnosis identity, otherwise mixed events can be standardized twice
+    // and a residual local state can replace the true whole-series lag.
+    const fixedSidePathDiagnosis = diagnoseLagPath(
+        diagnosis,
+        siteData,
+        eventPathConfig,
+        pathCache,
+    );
+    const cofechaFixedSideWholeCandidate = evaluatePathFixedSideWholeCandidate(
+        siteData,
+        diagnosis,
+        pathDiagnosis.events,
+        effectiveConfig,
+        {
+            lag: pathDiagnosis.newestLag,
+            margin: pathDiagnosis.newestLagMargin,
+            pairs: pathDiagnosis.newestLagPairs,
+        },
+    );
+    const directFixedSideWholeCandidate = evaluatePathFixedSideWholeCandidate(
+        siteData,
+        diagnosis,
+        fixedSidePathDiagnosis.events,
+        effectiveConfig,
+        {
+            lag: fixedSidePathDiagnosis.newestLag,
+            margin: fixedSidePathDiagnosis.newestLagMargin,
+            pairs: fixedSidePathDiagnosis.newestLagPairs,
+        },
+    );
+    const recentTailLag = measureRecentTailLagConsensus(diagnosis, effectiveConfig);
+    const directShift = directFixedSideWholeCandidate?.deltaYears
+        ?? directFixedSideWholeCandidate?.suggestedLag;
+    const cofechaShift = cofechaFixedSideWholeCandidate?.deltaYears
+        ?? cofechaFixedSideWholeCandidate?.suggestedLag;
+    const cofechaTags = cofechaFixedSideWholeCandidate?.evidence.recallSourceTags ?? [];
+    const crossViewResidualShift = Number.isInteger(directShift)
+        && Number.isInteger(cofechaShift)
+        ? cofechaShift! - directShift!
+        : 0;
+    const directTailExplainsResidualPartial = directFixedSideWholeCandidate !== null
+        && recentTailLag !== null
+        && directFixedSideWholeCandidate.evidence.recallSourceTags?.includes(
+            "recent_tail_whole_baseline",
+        ) === true
+        && recentTailLag.lag === directShift
+        && recentTailLag.supportCount === recentTailLag.rows.length
+        && recentTailLag.competingSupportCount === 0
+        && (cofechaTags.includes("path_fixed_side_event_type:missingRing")
+            || cofechaTags.includes("path_fixed_side_event_type:falseRing"))
+        && crossViewResidualShift <= -2
+        && crossViewResidualShift >= -effectiveConfig.maxPartialGapYears;
+    const crossViewTailCandidate = directTailExplainsResidualPartial
+        ? {
+            ...directFixedSideWholeCandidate,
+            evidence: {
+                ...directFixedSideWholeCandidate.evidence,
+                recallSourceTags: Array.from(new Set([
+                    ...(directFixedSideWholeCandidate.evidence.recallSourceTags ?? []),
+                    "recent_tail_residual_partial_baseline",
+                    `recent_tail_cross_view_path_lag:${cofechaShift}`,
+                    `recent_tail_cross_view_residual_partial_shift:${crossViewResidualShift}`,
+                ])),
+            },
+        }
+        : directFixedSideWholeCandidate;
+    const pathWholeCandidate = [
+        cofechaFixedSideWholeCandidate,
+        crossViewTailCandidate,
+    ].filter((candidate): candidate is DiagnosisCandidateOperation => candidate !== null)
+        .sort((left, right) => (
+            wholeBaselineCandidatePriority(right) - wholeBaselineCandidatePriority(left)
+            || right.score - left.score
+        ))[0] ?? null;
+    const fixedSideCandidateCanOverride = (
+        candidate: DiagnosisCandidateOperation | null,
+    ): candidate is DiagnosisCandidateOperation => {
+        if (!candidate) return false;
+        if (candidate.evidence.recallSourceTags?.includes(
+            "recent_tail_whole_baseline",
+        )) return true;
+        const shiftYears = candidate.deltaYears ?? candidate.suggestedLag;
+        if (!Number.isInteger(shiftYears)) return false;
+        return measureWholeSeriesStateConsistency(
             diagnosis,
-            pathDiagnosis.events,
-            effectiveConfig,
+            shiftYears!,
+        ).newestLag !== 0;
+    };
+    const upsertWholeBaselineCandidate = (
+        pool: DiagnosisCandidateOperation[],
+        candidate: DiagnosisCandidateOperation,
+    ): DiagnosisCandidateOperation[] => {
+        const shiftYears = candidate.deltaYears ?? candidate.suggestedLag;
+        const sameHypothesis = (existing: DiagnosisCandidateOperation): boolean => (
+            existing.operationType === "SHIFT_RANGE"
+            && existing.mode === "wholeSeriesMove"
+            && (existing.deltaYears ?? existing.suggestedLag) === shiftYears
         );
-        if (pathWholeCandidate) {
-            ownCandidates = [...ownCandidates, pathWholeCandidate];
-            if (options.supplementalCandidates
-                && !options.supplementalCandidates.some((candidate) => (
-                    candidate.id === pathWholeCandidate.id
-                ))) {
-                options.supplementalCandidates.push(pathWholeCandidate);
-            }
-            candidateEvents = makeDiagnosisEventsFromCandidates(
-                [diagnosis],
-                ownCandidates,
+        const existing = pool.filter(sameHypothesis);
+        if (existing.length === 0) return [...pool, candidate];
+        const strongest = [candidate, ...existing].sort((left, right) => (
+            wholeBaselineCandidatePriority(right) - wholeBaselineCandidatePriority(left)
+            || right.score - left.score
+        ))[0];
+        return strongest === candidate
+            ? [...pool.filter((row) => !sameHypothesis(row)), candidate]
+            : pool;
+    };
+    if (fixedSideCandidateCanOverride(pathWholeCandidate)) {
+        ownCandidates = upsertWholeBaselineCandidate(ownCandidates, pathWholeCandidate);
+        if (options.supplementalCandidates) {
+            const supplemented = upsertWholeBaselineCandidate(
+                options.supplementalCandidates,
+                pathWholeCandidate,
+            );
+            options.supplementalCandidates.splice(
+                0,
+                options.supplementalCandidates.length,
+                ...supplemented,
             );
         }
+        candidateEvents = makeDiagnosisEventsFromCandidates(
+            [diagnosis],
+            ownCandidates,
+        );
     }
     if (audit) audit.candidateEventCount = candidateEvents.length;
     const hasWholeCandidate = typeEvents(candidateEvents, "wholeSeriesMove").length > 0;
@@ -2837,6 +2958,38 @@ const eventsForSeriesPass = (
         );
         missingEvents = missingEvents.filter(hasUnitTransition);
         falseEvents = falseEvents.filter(hasUnitTransition);
+    }
+    const lateFixedSideWholeCandidate = evaluatePathFixedSideWholeCandidate(
+        siteData,
+        diagnosis,
+        [...partialEvents, ...missingEvents, ...falseEvents],
+        effectiveConfig,
+        {
+            lag: pathDiagnosis.newestLag,
+            margin: pathDiagnosis.newestLagMargin,
+            pairs: pathDiagnosis.newestLagPairs,
+        },
+    );
+    if (fixedSideCandidateCanOverride(lateFixedSideWholeCandidate)) {
+        ownCandidates = upsertWholeBaselineCandidate(
+            ownCandidates,
+            lateFixedSideWholeCandidate,
+        );
+        if (options.supplementalCandidates) {
+            const supplemented = upsertWholeBaselineCandidate(
+                options.supplementalCandidates,
+                lateFixedSideWholeCandidate,
+            );
+            options.supplementalCandidates.splice(
+                0,
+                options.supplementalCandidates.length,
+                ...supplemented,
+            );
+        }
+        candidateEvents = makeDiagnosisEventsFromCandidates(
+            [diagnosis],
+            ownCandidates,
+        );
     }
     const wholeCandidate = typeEvents(candidateEvents, "wholeSeriesMove")[0];
     const unitEventsBeforeWholeSelection = [...missingEvents, ...falseEvents];

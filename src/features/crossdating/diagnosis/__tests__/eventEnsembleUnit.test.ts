@@ -839,6 +839,17 @@ describe("unitEventUsesWholeSeriesBaseline", () => {
         expect(unitEventUsesWholeSeriesBaseline(whole, missing)).toBe(true);
     });
 
+    it("protects a missing-ring boundary when the whole baseline is the older path state", () => {
+        const whole = partialMoveEvent(5);
+        whole.eventType = "wholeSeriesMove";
+        const missing = falseRingEvent(1881, false);
+        missing.eventType = "missingRing";
+        missing.evidence.lagBefore = 5;
+        missing.evidence.lagAfter = 6;
+
+        expect(unitEventUsesWholeSeriesBaseline(whole, missing)).toBe(true);
+    });
+
     it("protects the opposite unit direction on the same non-zero baseline", () => {
         const whole = partialMoveEvent(-3);
         whole.eventType = "wholeSeriesMove";

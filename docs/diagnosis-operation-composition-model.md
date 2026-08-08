@@ -1461,3 +1461,64 @@ mon052 的九级离散缺轮没有被重新压成 partial 或 whole。
 完全缺失”的表示问题。当前 54 例尚未包含 false+whole、false+partial+whole、负向 whole
 和不同 whole 幅度；下一轮必须扩展这些方向、位置与幅度，不能把本轮 `+2` 的 54/54 当作
 所有组合已经完成。
+
+### Round 5I：用双视图固定侧证据消除整体与局部基线混淆
+
+Round 5H 扩展到 false、双单位事件、正负方向和不同幅度后，剩余失败不再是 whole 缺失，
+而是局部状态被错误当作 whole baseline。典型失败有两类：
+
+```text
+truth: whole -2 + partial -3 + unit events
+wrong: whole -5                # 把 older residual state 当成整体基线
+
+truth: whole -2 + missing + false
+wrong: whole -1                # 把单位阶梯中间状态当成整体基线
+```
+
+正确的 `-2` 在这些案例中已经存在于较新固定侧，但不同候选族的原始 score 没有共同标尺，
+最后选择器仍会让局部路径候选获胜。本轮统一了生成、仲裁和最终选择：
+
+1. 在目标序列最近端分别使用 20、21、22、23 年嵌套窗口估计 lag。该恢复扫描只使用
+   `±10` 的短范围以控制端点噪声，不改变正式 whole 与 partial 的 `±100/-2...-100`
+   搜索范围；至少 3 个窗口同意且无同强度竞争模式才形成草案。
+2. 局部事件继续使用 COFECHA-core 路径，whole fixed side 同时在原始 diagnosis 路径中
+   估计。两种视图都只产生假设，必须经过完整 before/after 或联合事件链反事实。
+3. 若路径由真实 `partialMove` 转移锚定，它比孤立短尾峰更可靠。例如 RDM141 的真值
+   `whole +5 + partial -4` 保留路径 `+5`，不会被短尾伪峰 `-9` 覆盖。
+4. 若 COFECHA 路径只由 missing/false 单位阶梯锚定，而 `pathLag - tailLag` 是
+   `-2...-maxPartialGapYears` 的合法负向 residual partial，则整体基线取 tailLag，局部差值
+   留给 partial。禁止把这个负向 residual 吸收到 whole。
+5. 4/4 一致、无竞争且中位相关至少 0.70 的短尾可压过单位路径基线；短尾与全序列 lag
+   同时一致时，中位相关门槛为 0.45。较新侧独立分段 lag 为 0 时，普通 path-fixed whole
+   仍被拒绝，防止干净序列和纯局部移动产生虚假整体移动。
+6. 所有通过门槛的 whole 候选使用统一证据族优先级：COFECHA terminal、tail+global、
+   tail+residual partial、tail+path terminal、partial 锚定路径、tail 联合链、单位锚定路径、
+   普通 hard gate。只有同一证据族内才比较原始 score。
+7. supplemental sink 不再只按 candidate ID 去重。同一位移假设用更强证据替换，位移不同
+   的假设允许同时进入内部选择；UI 仍只显示最终唯一 whole 操作。
+
+泛化矩阵固定使用 EBD、EBM、RDM、RDU、EBU、ZSD 六个站点，每站 3 条按值无关规则选择的
+样芯。每个位移分别构造 missing+whole、false+whole、partial+whole、missing+false+whole、
+false+partial+whole、missing+false+partial+whole 六种场景，共 108 例：
+
+| whole shift | 精确位移 | 错误位移 | 缺失 whole | clean false positive |
+| ---: | ---: | ---: | ---: | ---: |
+| `-5` | **108/108** | 0 | 0 | 3/18 |
+| `-2` | **108/108** | 0 | 0 | 3/18 |
+| `+2` | **108/108** | 0 | 0 | 3/18 |
+| `+5` | **108/108** | 0 | 0 | 3/18 |
+| 合计 | **432/432** | **0** | **0** | 未高于既有 3/18 |
+
+真实数据回归保持：ZSL RAW/crossdated 13/13，ZSL091 `whole -9`、ZSL092 `whole -6`、
+ZSL212 `partial -4`、ZSL152 false 均未改变；co612 11/11，mon052 九个离散缺轮和 mtr841
+连续恢复没有被压成 partial，多个断点的物理缺块 `-2...-100` 也没有转成 missing。
+
+当前代码另以 co612 原文件直接运行一轮自举扫描，源 SHA-256
+`36e6c6a9d0cbc16d1870a1662da553a7b40d5578ea9ede25ff790c556c34667d` 前后不变；clean
+strict 为 16/55，review 为 **2/55**，均未高于冻结基线的 18/55 和 3/55。第一轮仍正确
+选择 `mon022:1977`。该检查只用于 current-code clean 与首轮响应，不声称当前代码逐字段复现
+旧提交的 400 轮冻结轨迹。
+
+本轮证明 fixed-side baseline 可以在整体移动与多个局部事件混杂时稳定恢复，但 432/432
+只表示整体位移量正确，不代表同一批案例的所有局部事件和窗口都已达到同等召回。局部窗口
+仍按各自定位器单独评估，不能用 whole 的全序列范围计入 5--13 年窗口指标。
