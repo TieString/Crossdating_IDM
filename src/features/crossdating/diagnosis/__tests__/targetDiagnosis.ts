@@ -66,9 +66,19 @@ export const diagnoseTargetBundle = (
     const candidates = rankDiagnosisCandidates(evaluated)
         .sort(compareDiagnosisCandidates)
         .slice(0, config.maxTopCandidates);
+    const supplementalCandidates: DiagnosisCandidateOperation[] = [];
+    const events = makeDiagnosisEvents(siteData, [diagnosis], candidates, config, {
+        ...eventOptions,
+        supplementalCandidates,
+    });
+    supplementalCandidates.forEach((candidate) => {
+        if (!candidates.some((existing) => existing.id === candidate.id)) {
+            candidates.push(candidate);
+        }
+    });
     return {
         diagnosis,
         candidates,
-        events: makeDiagnosisEvents(siteData, [diagnosis], candidates, config, eventOptions),
+        events,
     };
 };

@@ -21,8 +21,12 @@ import {
     shouldSuppressAliasedCofechaUnitDraft,
     terminalResidualPatternSupport,
 } from "../drafts";
-import { terminalWholeCompositionGatePassed } from "../evaluation";
 import {
+    pathFixedSideWholeCompositionGatePassed,
+    terminalWholeCompositionGatePassed,
+} from "../evaluation";
+import {
+    isValidatedPathFixedSideWholeCandidate,
     isValidatedTerminalWholeCandidate,
     selectWholeSeriesCandidate,
 } from "../events";
@@ -347,6 +351,70 @@ describe("COFECHA terminal whole baseline", () => {
             candidate(-4, 18, false, true),
             candidate(-5, 20, true, false),
         ])?.deltaYears).toBe(-4);
+    });
+});
+
+describe("path fixed-side whole baseline", () => {
+    const validComposition = {
+        wholeShift: 2,
+        fixedSideLag: 2,
+        newerContextYears: 64,
+        jointEventCount: 2,
+        afterGlobalLag: 0,
+        wholeSeriesRDelta: 0.08,
+        meanSegmentRDelta: 0.05,
+        problemReduction: 3,
+    };
+
+    it("requires an exact fixed-side shift and a jointly corrected zero-lag state", () => {
+        expect(pathFixedSideWholeCompositionGatePassed(validComposition)).toBe(true);
+        expect(pathFixedSideWholeCompositionGatePassed({
+            ...validComposition,
+            wholeShift: 1,
+        })).toBe(false);
+        expect(pathFixedSideWholeCompositionGatePassed({
+            ...validComposition,
+            newerContextYears: 17,
+        })).toBe(false);
+        expect(pathFixedSideWholeCompositionGatePassed({
+            ...validComposition,
+            afterGlobalLag: -1,
+        })).toBe(false);
+        expect(pathFixedSideWholeCompositionGatePassed({
+            ...validComposition,
+            problemReduction: -1,
+        })).toBe(false);
+        expect(pathFixedSideWholeCompositionGatePassed({
+            ...validComposition,
+            wholeSeriesRDelta: 0,
+            meanSegmentRDelta: 0,
+            problemReduction: 0,
+        })).toBe(false);
+    });
+
+    it("accepts a strong jointly validated path baseline without weakening ordinary whole gates", () => {
+        const pathCandidate = {
+            operationType: "SHIFT_RANGE",
+            mode: "wholeSeriesMove",
+            deltaYears: 2,
+            score: 8,
+            candidateStrength: "strong",
+            evidence: {
+                recallSourceTags: ["path_fixed_side_whole_baseline"],
+                evaluationDelta: {
+                    hardGatePassed: false,
+                    jointCompositionGatePassed: true,
+                },
+            },
+        } as DiagnosisCandidateOperation;
+        const weakPathCandidate = {
+            ...pathCandidate,
+            candidateStrength: "weak",
+        } as DiagnosisCandidateOperation;
+
+        expect(isValidatedPathFixedSideWholeCandidate(pathCandidate)).toBe(true);
+        expect(isValidatedPathFixedSideWholeCandidate(weakPathCandidate)).toBe(false);
+        expect(selectWholeSeriesCandidate([pathCandidate])?.deltaYears).toBe(2);
     });
 });
 

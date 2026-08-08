@@ -237,6 +237,19 @@ const wholeEventFromCandidate = (
                         ))
                         .map((tag) => tag.replace(":", "="))),
                 ] : []),
+                ...(candidate.evidence.recallSourceTags?.includes(
+                    "path_fixed_side_whole_baseline",
+                ) ? [
+                    "whole_baseline_source=path_fixed_side_lag",
+                    ...(candidate.evidence.recallSourceTags
+                        .filter((tag) => (
+                            tag.startsWith("path_fixed_side_lag:")
+                            || tag.startsWith("path_fixed_side_event_type:")
+                            || tag.startsWith("path_fixed_side_transition:")
+                            || tag.startsWith("path_fixed_side_newer_context_years:")
+                        ))
+                        .map((tag) => tag.replace(":", "="))),
+                ] : []),
                 `whole_operation_shift=${shiftYears}`,
                 `whole_observed_dominant_lag=${
                     evaluation?.dominantLagBefore ?? candidate.evidence.before.bestLag
@@ -256,9 +269,12 @@ export const selectWholeSeriesCandidate = (
     const whole = candidates.filter((candidate) => (
         eventTypeForCandidate(candidate) === "wholeSeriesMove"
     ));
-    const validatedTerminal = whole.filter(isValidatedTerminalWholeCandidate);
-    const eligible = validatedTerminal.length > 0
-        ? validatedTerminal
+    const validatedBaselines = whole.filter((candidate) => (
+        isValidatedTerminalWholeCandidate(candidate)
+        || isValidatedPathFixedSideWholeCandidate(candidate)
+    ));
+    const eligible = validatedBaselines.length > 0
+        ? validatedBaselines
         : whole.filter((candidate) => !candidate.evidence.recallSourceTags?.includes(
             "cofecha_terminal_whole_baseline",
         )).filter((candidate) => {
@@ -270,6 +286,19 @@ export const selectWholeSeriesCandidate = (
         });
     return eligible
         .sort((left, right) => right.score - left.score)[0];
+};
+
+export const isValidatedPathFixedSideWholeCandidate = (
+    candidate: DiagnosisCandidateOperation,
+): boolean => {
+    const evaluation = candidate.evidence.evaluationDelta;
+    return eventTypeForCandidate(candidate) === "wholeSeriesMove"
+        && candidate.evidence.recallSourceTags?.includes(
+            "path_fixed_side_whole_baseline",
+        ) === true
+        && candidate.candidateStrength === "strong"
+        && (evaluation?.hardGatePassed === true
+            || evaluation?.jointCompositionGatePassed === true);
 };
 
 export const isValidatedTerminalWholeCandidate = (

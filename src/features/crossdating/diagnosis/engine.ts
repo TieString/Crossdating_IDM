@@ -220,6 +220,7 @@ export function diagnoseCrossdating(
         || options.reviewWindowDisplayMode === "review"
         ? [] as DiagnosisEventDecisionAudit[]
         : undefined;
+    const supplementalCandidates: DiagnosisCandidateOperation[] = [];
     const events = makeDiagnosisEvents(
         siteData,
         seriesDiagnoses,
@@ -234,8 +235,14 @@ export function diagnoseCrossdating(
                 options.sharedZeroMarkerMode
                 ?? INTERNAL_EVENT_ENSEMBLE_OPTIONS.sharedZeroMarkerMode,
             ...(eventDecisionAudits ? { eventDecisionAudits } : {}),
+            supplementalCandidates,
         },
     );
+    supplementalCandidates.forEach((candidate) => {
+        if (!candidates.some((existing) => existing.id === candidate.id)) {
+            candidates.push(candidate);
+        }
+    });
     if (eventDecisionAudits) {
         const diagnosedTrees = new Set(seriesDiagnoses.map((diagnosis) => (
             diagnosis.targetTree

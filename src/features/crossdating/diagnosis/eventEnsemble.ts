@@ -3,7 +3,8 @@
  *
  * The constrained lag path supplies narrow, potentially repeated changepoints. Existing
  * counterfactual candidates supply conservative operation/type support and remain the only
- * executable objects. The ensemble never applies an edit.
+ * executable objects. The ensemble may run in-memory counterfactuals but never mutates caller
+ * data or commits an edit.
  */
 import type { RwlSiteData } from "@/features/rwl/types";
 import { cofechaStyleStandardize } from "../reference";
@@ -26,6 +27,7 @@ import {
     type TwoStepMissingStaircase,
 } from "./eventPath";
 import { makeDiagnosisEventsFromCandidates } from "./events";
+import { evaluatePathFixedSideWholeCandidate } from "./pathFixedSideWholeBaseline";
 import {
     refineEventYearsJointly,
     scoreDiagnosisEventSets,
@@ -147,6 +149,8 @@ export type DiagnosisEventEnsembleOptions = {
     sharedZeroMarkerMode?: SharedZeroMarkerMode;
     /** Optional caller-owned sink. Recording must never affect event selection. */
     eventDecisionAudits?: DiagnosisEventDecisionAudit[];
+    /** Validated candidates recovered during path assembly and required for UI event application. */
+    supplementalCandidates?: DiagnosisCandidateOperation[];
 };
 
 const emptyEventPassAudit = (): DiagnosisEventPassAudit => ({
@@ -2545,9 +2549,8 @@ const eventsForSeriesPass = (
         maxPartialGapYears: effectiveConfig.maxPartialGapYears,
         ...options.eventOperationRecoveryConfig,
     };
-    const ownCandidates = candidates.filter((candidate) => candidate.targetTree === diagnosis.targetTree);
-    const candidateEvents = makeDiagnosisEventsFromCandidates([diagnosis], ownCandidates);
-    if (audit) audit.candidateEventCount = candidateEvents.length;
+    let ownCandidates = candidates.filter((candidate) => candidate.targetTree === diagnosis.targetTree);
+    let candidateEvents = makeDiagnosisEventsFromCandidates([diagnosis], ownCandidates);
     const cofechaDiagnosis = diagnoseSeriesCore(
         siteData,
         diagnosis.targetTree,
@@ -2633,6 +2636,28 @@ const eventsForSeriesPass = (
         enablePulseScan: false,
     }, pathCache).events;
     if (audit) audit.rawLagPathEventCount = rawPathEvents.length;
+    if (typeEvents(candidateEvents, "wholeSeriesMove").length === 0) {
+        const pathWholeCandidate = evaluatePathFixedSideWholeCandidate(
+            siteData,
+            diagnosis,
+            pathDiagnosis.events,
+            effectiveConfig,
+        );
+        if (pathWholeCandidate) {
+            ownCandidates = [...ownCandidates, pathWholeCandidate];
+            if (options.supplementalCandidates
+                && !options.supplementalCandidates.some((candidate) => (
+                    candidate.id === pathWholeCandidate.id
+                ))) {
+                options.supplementalCandidates.push(pathWholeCandidate);
+            }
+            candidateEvents = makeDiagnosisEventsFromCandidates(
+                [diagnosis],
+                ownCandidates,
+            );
+        }
+    }
+    if (audit) audit.candidateEventCount = candidateEvents.length;
     const hasWholeCandidate = typeEvents(candidateEvents, "wholeSeriesMove").length > 0;
     let cachedReferenceVerifiedFallback: DiagnosisEvent[] | null = null;
     const referenceVerifiedFallback = (): DiagnosisEvent[] => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getConfig } from "../config";
+import { diagnoseCrossdating } from "../engine";
 import { locateDenseLagProfileEvents } from "../denseLagProfile";
 import { INTERNAL_EVENT_PATH_CONFIG } from "../eventEnsemble";
 import { diagnoseLagPath, locateLagPathEvents } from "../eventPath";
@@ -1499,5 +1500,59 @@ describe("mixed event experiment with immutable truth coordinates", () => {
         }
 
         expect(coveredCases).toBeGreaterThanOrEqual(2);
+    }, 60_000);
+
+    it("recovers the non-zero fixed-side whole baseline from coherent local lag transitions", () => {
+        const loaded = loadDataFolder("EBD");
+        expect(loaded).not.toBeNull();
+        if (!loaded) return;
+        const series = getEligibleSeriesForSyntheticTests(loaded.crossdated, {
+            minLength: 150,
+            minNonZero: 120,
+            minSpan: 150,
+        }).find((candidate) => candidate.id === "EBD011");
+        expect(series).toBeDefined();
+        if (!series) return;
+        const anchors = anchorsFor(series, "EBD:EBD011:0:0");
+        expect(anchors).not.toBeNull();
+        if (!anchors) return;
+
+        const scenarios = scenariosFor(anchors, 0).filter((scenario) => (
+            scenario.name === "partial-with-whole"
+            || scenario.name === "missing-partial-with-whole"
+        ));
+        expect(scenarios).toHaveLength(2);
+        scenarios.forEach((scenario) => {
+            const synthetic = createPiecewiseLagMixedCase(
+                series,
+                scenario.events,
+                scenario.wholeSeriesLag ?? 0,
+            );
+            const site = buildSyntheticSite(
+                loaded.crossdated,
+                series.id,
+                synthetic.corrupted,
+            ).site;
+            expect(site).not.toBeNull();
+            if (!site) return;
+            const result = diagnoseCrossdating(site, { targetTrees: [series.id] });
+            const whole = result.events.find((event) => (
+                event.eventType === "wholeSeriesMove"
+            ));
+            expect(whole?.shiftYears).toBe(2);
+            expect(whole?.evidence.candidateIds).toHaveLength(1);
+            expect(result.candidates.some((candidate) => (
+                candidate.id === whole?.evidence.candidateIds[0]
+                && candidate.operationType === "SHIFT_RANGE"
+                && candidate.mode === "wholeSeriesMove"
+                && candidate.deltaYears === 2
+            ))).toBe(true);
+            expect(result.events.some((event) => (
+                event.eventType === "partialMove" && event.shiftYears === -2
+            ))).toBe(true);
+            if (scenario.name === "missing-partial-with-whole") {
+                expect(result.events.some((event) => event.eventType === "missingRing")).toBe(true);
+            }
+        });
     }, 60_000);
 });

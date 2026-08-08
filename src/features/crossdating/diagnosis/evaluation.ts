@@ -90,6 +90,40 @@ const recallTagNumber = (
     return Number.isFinite(parsed) ? parsed : 0;
 };
 
+export type PathFixedSideWholeCompositionGateInput = {
+    wholeShift: number;
+    fixedSideLag: number;
+    newerContextYears: number;
+    jointEventCount: number;
+    afterGlobalLag: number;
+    wholeSeriesRDelta: number;
+    meanSegmentRDelta: number;
+    problemReduction: number;
+};
+
+export const pathFixedSideWholeCompositionGatePassed = ({
+    wholeShift,
+    fixedSideLag,
+    newerContextYears,
+    jointEventCount,
+    afterGlobalLag,
+    wholeSeriesRDelta,
+    meanSegmentRDelta,
+    problemReduction,
+}: PathFixedSideWholeCompositionGateInput): boolean => (
+    wholeShift !== 0
+    && wholeShift === fixedSideLag
+    && newerContextYears >= 18
+    && jointEventCount >= 1
+    && afterGlobalLag === 0
+    && problemReduction >= 0
+    && (
+        wholeSeriesRDelta >= 0.02
+        || meanSegmentRDelta >= 0.02
+        || problemReduction >= 1
+    )
+);
+
 const applyDraftToTree = (
     treeData: RwlTreeData,
     draft: CandidateDraft,
@@ -428,7 +462,7 @@ export const evaluateDraft = (
     const hardGatePassed = hardGatePassedConditions >= evalCfg.minHardGateConditions;
     const terminalWholeResidualLag = beforeDiagnosis.globalSlidingMatch.bestGlobalLag
         - (draft.deltaYears ?? 0);
-    const jointCompositionGatePassed = draft.operationType === "SHIFT_RANGE"
+    const terminalCompositionGatePassed = draft.operationType === "SHIFT_RANGE"
         && draft.mode === "wholeSeriesMove"
         && draft.recallSourceTags?.includes("cofecha_terminal_whole_baseline") === true
         && terminalWholeCompositionGatePassed({
@@ -447,6 +481,39 @@ export const evaluateDraft = (
             seriesLength: afterDiagnosis.targetRange.endYear
                 - afterDiagnosis.targetRange.startYear + 1,
         });
+    const pathCompositionGatePassed = draft.operationType === "SHIFT_RANGE"
+        && draft.mode === "wholeSeriesMove"
+        && draft.recallSourceTags?.includes("path_fixed_side_joint_composition") === true
+        && pathFixedSideWholeCompositionGatePassed({
+            wholeShift: draft.deltaYears ?? 0,
+            fixedSideLag: recallTagNumber(draft, "path_fixed_side_lag:"),
+            newerContextYears: recallTagNumber(
+                draft,
+                "path_fixed_side_newer_context_years:",
+            ),
+            jointEventCount: recallTagNumber(
+                draft,
+                "path_fixed_side_joint_event_count:",
+            ),
+            afterGlobalLag: recallTagNumber(
+                draft,
+                "path_fixed_side_joint_after_global_lag:",
+            ),
+            wholeSeriesRDelta: recallTagNumber(
+                draft,
+                "path_fixed_side_joint_whole_r_delta:",
+            ),
+            meanSegmentRDelta: recallTagNumber(
+                draft,
+                "path_fixed_side_joint_mean_segment_r_delta:",
+            ),
+            problemReduction: recallTagNumber(
+                draft,
+                "path_fixed_side_joint_problem_reduction:",
+            ),
+        });
+    const jointCompositionGatePassed = terminalCompositionGatePassed
+        || pathCompositionGatePassed;
     const evaluationDelta: CandidateEvaluationDelta = {
         meanSegmentRBefore,
         meanSegmentRAfter,

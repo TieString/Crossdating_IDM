@@ -2,7 +2,8 @@
 
 日期：2026-08-08  
 工作树：`D:\Code\Crossdating_Tauri_js-diagnosis-events-v1`  
-状态：Round 0，已冻结操作语义和待测情况；组合基准尚未运行
+状态：Round 5H，已恢复无 COFECHA 候选时的路径固定侧整体基线；继续扩展 false/whole
+与四类共存矩阵
 
 ## 目的
 
@@ -1380,3 +1381,83 @@ ZSL 两种模式均为 whole -> partial 0、partial -> missing 0，34/34 保存�
 单位事件”这一类失败。剩余 partial 错误主要是候选、master 网格和参考芯共同选错远距离模式，
 不能再靠放宽本恢复层解决；下一步应研究位置模式的独立反证或直接进入不同操作共存的联合
 状态路径验证。
+
+### Round 5H：从局部状态路径恢复较新固定侧的整体基线
+
+- 阶段审计提交：`a38051fc`。
+- 固定输入：EBD、EBM、RDM、RDU、EBU、ZSD 六个站点，每站 3 条按值无关规则选择的
+  样芯；整体位移固定为 `+2`，分别与 partial、missing、missing+partial 共存，共 54 例。
+- 全矩阵继续使用同一 18 条样芯的 10 种场景，共 180 case、396 个事件真值；clean 对照
+  18 条。所有真值仅用于构造和评分，不进入参考、候选、门槛或窗口。
+
+阶段审计确认，失败并不是一个正确 whole 候选在后处理被删除。基线 54 例中只有 26 例
+产生精确整体位移，错误位移为 0，另外 28 例根本没有 whole 候选；其中 20 例最终只剩
+partial，18 例同时或单独剩下单位事件。典型状态为：
+
+```text
+truth: whole +2 + partial -2
+path:  older lag 0 -> newer fixed-side lag +2
+old interpretation: partial -2 only
+new interpretation: whole +2 baseline, plus partial -2 local transition
+```
+
+不能使用 `newestLagDiagnosis` 或最末分段直接补候选。端点缺测时该汇总在 EBD011 给出
+`newestLag=8`、分段边缘甚至 `-42`，而局部路径转移稳定地给出 `0 -> +2`。本轮使用以下
+统一推断：
+
+1. 只读取 `piecewise_lag_path` 中操作语义精确一致的转移：missing 必须为 `-1 -> 0`
+   的相对形式，false 为 `+1 -> 0` 的相对形式，partial 必须满足
+   `shiftYears = lagBefore - lagAfter <= -2`。
+2. 取最新可靠转移的 `lagAfter` 作为较新固定侧 baseline；它必须非零、位于 whole lag
+   范围内、至少有 18 年较新侧上下文，并达到既有路径分数和样本对数门槛。
+3. 该 baseline 只生成一个内部 whole 草案，不直接生成事件。先尝试现有单操作
+   `evaluateDraft` hard gate。
+4. whole 单独应用可能仍留下真实局部异常，因而不能要求它独自解决全部问题。若普通 hard
+   gate 不通过，则沿连通状态链从新到老应用所有局部纠正，再应用 whole；只有最终全局
+   best lag 精确回到 0、问题段不增加，且整体相关、平均分段相关或问题段数量有实质改善，
+   才允许通过 joint composition gate。
+5. 联合验证只赋予候选资格，最终 whole 仍是完整 before/after 证据支持的可执行候选；
+   ordinary whole、COFECHA terminal whole 和局部事件的既有门槛均未降低。
+6. 事件编排中新恢复的候选通过显式 supplemental sink 返回 `diagnosis.candidates`。whole
+   事件引用的 candidate ID 因而始终可在 UI 执行列表中找到，避免出现“能显示但应用失败”。
+
+54 个整体共存案例结果：
+
+| 指标 | 修复前 | Round 5H |
+| --- | ---: | ---: |
+| 精确 whole shift | 26/54 | **54/54** |
+| 错误 whole shift | 0/54 | **0/54** |
+| 完全没有 whole | 28/54 | **0/54** |
+| whole 缺失且只/同时报 partial | 20/54 | **0/54** |
+| whole 缺失且只/同时报单位事件 | 18/54 | **0/54** |
+| partial + whole | 未全覆盖 | **18/18** |
+| missing + whole | 未全覆盖 | **18/18** |
+| missing + partial + whole | 未全覆盖 | **18/18** |
+
+完整 180 case 矩阵中，修复不仅补回 28 个 whole，也使 whole baseline 下的局部状态不再
+被错误融合：
+
+| 指标 | 修复前 | Round 5H |
+| --- | ---: | ---: |
+| 响应率 | 174/180 = 96.67% | **174/180 = 96.67%** |
+| 事件召回 | 243/396 = 61.36% | **283/396 = 71.46%** |
+| 事件精确率 | 243/316 = 76.90% | **283/342 = 82.75%** |
+| 完整案例成功 | 69/180 = 38.33% | **87/180 = 48.33%** |
+| missing 匹配 | 85/144 | **94/144** |
+| false 匹配 | 71/108 | **71/108** |
+| partial 匹配 | 61/90 | **64/90** |
+| whole 匹配 | 26/54 | **54/54** |
+| clean false positive | 3/18 | **3/18** |
+
+clean 的 3 个提示仍是原有的 EBM131 false、RDM022 missing 和 RDU012 missing，没有新增
+wholeSeriesMove。窗口中位数仍为 9 年；whole 的全序列范围不计作局部复核窗口宽度。
+
+回归结果：路径组合门槛与 EBD011 确定性回归 3 项、事件融合与 COFECHA 67 项、ZSL
+RAW/crossdated 真实操作 13 项、co612 多离散缺轮/mtr841/连续缺块 `-2...-100` 11 项通过。
+ZSL091/092/111/112 继续保持真实 whole，ZSL212 保持 partial `-4`，ZSL152 保持 false；
+mon052 的九级离散缺轮没有被重新压成 partial 或 whole。
+
+本轮解决的是“已有可靠局部状态链，但无 COFECHA terminal/global candidate 时 whole baseline
+完全缺失”的表示问题。当前 54 例尚未包含 false+whole、false+partial+whole、负向 whole
+和不同 whole 幅度；下一轮必须扩展这些方向、位置与幅度，不能把本轮 `+2` 的 54/54 当作
+所有组合已经完成。
