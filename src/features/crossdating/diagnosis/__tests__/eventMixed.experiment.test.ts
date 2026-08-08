@@ -14,7 +14,12 @@ import { locateReturnToZeroEvents } from "../transitionScan";
 import { diagnoseSeriesCore } from "../segments";
 import { scoreEditYearsInRegion } from "../rangeMove";
 import { scoreDiagnosisEventSets } from "../jointEventRefinement";
-import type { DiagnosisEvent, DiagnosisEventType } from "../types";
+import { measureWholeSeriesStateConsistency } from "../wholeSeriesStateConsistency";
+import type {
+    DiagnosisEvent,
+    DiagnosisEventDecisionAudit,
+    DiagnosisEventType,
+} from "../types";
 import { cofechaStyleStandardize } from "../../reference";
 import {
     buildSyntheticSite,
@@ -40,6 +45,13 @@ let lastDualComparison: {
     alternate: DiagnosisEvent[];
     primaryScore: ReturnType<typeof scoreDiagnosisEventSets>[number];
     alternateScore: ReturnType<typeof scoreDiagnosisEventSets>[number];
+} | null = null;
+let lastDecisionAudit: DiagnosisEventDecisionAudit | null = null;
+let lastPathBaselineAudit: {
+    newestLag: number;
+    newestLagMargin: number;
+    newestLagPairs: number;
+    state: ReturnType<typeof measureWholeSeriesStateConsistency>;
 } | null = null;
 
 type Scenario = {
@@ -326,6 +338,8 @@ const diagnoseTargetEvents = (
     seriesId: string,
 ): DiagnosisEvent[] => {
     lastDualComparison = null;
+    lastDecisionAudit = null;
+    lastPathBaselineAudit = null;
     const method = process.env.MIXED_METHOD;
     if (method !== "path"
         && method !== "segmented"
@@ -381,6 +395,8 @@ const diagnoseTargetEvents = (
             jointMaximumReferences,
             jointIndependentReferenceCount,
         ].some((value) => value !== undefined);
+        const decisionAudits: DiagnosisEventDecisionAudit[] = [];
+        const captureDecisionAudit = process.env.PRINT_MIXED_WHOLE_STAGES === "1";
         const productionOptions = {
             enableCounterfactualEventLocator:
                 process.env.MIXED_COUNTERFACTUAL_LOCATOR !== "0",
@@ -468,12 +484,32 @@ const diagnoseTargetEvents = (
                     }),
                 },
             } : {}),
+            ...(captureDecisionAudit ? { eventDecisionAudits: decisionAudits } : {}),
         };
-        const primaryBundle = method === "production-dual-score"
+        const primaryBundle = method === "production-dual-score" || captureDecisionAudit
             ? diagnoseTargetBundle(site, seriesId, productionOptions)
             : null;
         const primary = primaryBundle?.events
             ?? diagnoseProductionTargetEvents(site, seriesId, productionOptions);
+        if (captureDecisionAudit) {
+            lastDecisionAudit = decisionAudits[0] ?? null;
+            if (primaryBundle) {
+                const path = diagnoseLagPath(
+                    primaryBundle.diagnosis,
+                    site,
+                    productionOptions.eventPathConfig,
+                );
+                lastPathBaselineAudit = {
+                    newestLag: path.newestLag,
+                    newestLagMargin: path.newestLagMargin,
+                    newestLagPairs: path.newestLagPairs,
+                    state: measureWholeSeriesStateConsistency(
+                        primaryBundle.diagnosis,
+                        path.newestLag,
+                    ),
+                };
+            }
+        }
         if ((method !== "production-dual" && method !== "production-dual-score")
             || primary.length === 0) return primary;
         const alternateOptions = {
@@ -1011,6 +1047,15 @@ describe("mixed event experiment with immutable truth coordinates", () => {
         const cases: unknown[] = [];
         const refinementChanges: unknown[] = [];
         const dualAudit: unknown[] = [];
+        const wholeCoexistenceCases: Array<{
+            folder: string;
+            seriesId: string;
+            scenario: string;
+            truthShift: number;
+            predictedWholeShift: number | null;
+            localTypes: DiagnosisEventType[];
+        }> = [];
+        const wholeStageCases: unknown[] = [];
         let cleanCases = 0;
         let cleanFalsePositives = 0;
         const requestedTargetIds = new Set(
@@ -1055,6 +1100,51 @@ describe("mixed event experiment with immutable truth coordinates", () => {
                     if (!site) return;
                     const predictions = diagnoseTargetEvents(site, series.id);
                     const truths = truthsFor(series.id, scenario);
+                    if (scenario.wholeSeriesLag) {
+                        const predictedWhole = predictions.find((event) => (
+                            event.eventType === "wholeSeriesMove"
+                        ));
+                        wholeCoexistenceCases.push({
+                            folder,
+                            seriesId: series.id,
+                            scenario: scenario.name,
+                            truthShift: scenario.wholeSeriesLag,
+                            predictedWholeShift: predictedWhole?.shiftYears ?? null,
+                            localTypes: predictions
+                                .filter((event) => event.eventType !== "wholeSeriesMove")
+                                .map((event) => event.eventType),
+                        });
+                        if (!predictedWhole
+                            && process.env.PRINT_MIXED_WHOLE_STAGES === "1"
+                            && lastDecisionAudit) {
+                            const compact = (rows: DiagnosisEventDecisionAudit[
+                                "detectedBeforeFusion"
+                            ]) => rows.map((row) => ({
+                                type: row.eventType,
+                                shift: row.shiftYears,
+                                range: [row.startYear, row.endYear],
+                                lags: [row.lagBefore, row.lagAfter],
+                                score: row.score,
+                                sources: row.algorithmSources,
+                            }));
+                            wholeStageCases.push({
+                                folder,
+                                seriesId: series.id,
+                                scenario: scenario.name,
+                                truthShift: scenario.wholeSeriesLag,
+                                candidates: lastDecisionAudit.candidates,
+                                pass: lastDecisionAudit.pass,
+                                projected: compact(lastDecisionAudit.candidateProjectedEvents),
+                                beforeFusion: compact(lastDecisionAudit.detectedBeforeFusion),
+                                afterFusion: compact(lastDecisionAudit.detectedAfterFusion),
+                                retained: compact(lastDecisionAudit.retainedAfterEndpointGuard),
+                                displayed: compact(lastDecisionAudit.displayedBeforeLocator),
+                                final: compact(lastDecisionAudit.finalEvents),
+                                pathBaseline: lastPathBaselineAudit,
+                                finalReason: lastDecisionAudit.finalReason,
+                            });
+                        }
+                    }
                     const result = add(overall, truths, predictions);
                     if (process.env.PRINT_MIXED_DUAL_AUDIT === "1" && lastDualComparison) {
                         const compactEvent = (event: DiagnosisEvent) => ({
@@ -1254,6 +1344,54 @@ describe("mixed event experiment with immutable truth coordinates", () => {
                     localizationSummary(aggregate),
                 ]),
             ),
+            wholeCoexistence: {
+                cases: wholeCoexistenceCases.length,
+                correctShift: wholeCoexistenceCases.filter((row) => (
+                    row.predictedWholeShift === row.truthShift
+                )).length,
+                wrongShift: wholeCoexistenceCases.filter((row) => (
+                    row.predictedWholeShift !== null
+                    && row.predictedWholeShift !== row.truthShift
+                )).length,
+                absent: wholeCoexistenceCases.filter((row) => (
+                    row.predictedWholeShift === null
+                )).length,
+                absentWithPartial: wholeCoexistenceCases.filter((row) => (
+                    row.predictedWholeShift === null
+                    && row.localTypes.includes("partialMove")
+                )).length,
+                absentWithUnit: wholeCoexistenceCases.filter((row) => (
+                    row.predictedWholeShift === null
+                    && row.localTypes.some((eventType) => (
+                        eventType === "missingRing" || eventType === "falseRing"
+                    ))
+                )).length,
+                byScenario: Object.fromEntries(
+                    Array.from(new Set(wholeCoexistenceCases.map((row) => row.scenario)))
+                        .map((scenario) => {
+                            const rows = wholeCoexistenceCases.filter((row) => (
+                                row.scenario === scenario
+                            ));
+                            return [scenario, {
+                                cases: rows.length,
+                                correctShift: rows.filter((row) => (
+                                    row.predictedWholeShift === row.truthShift
+                                )).length,
+                                absentWithPartial: rows.filter((row) => (
+                                    row.predictedWholeShift === null
+                                    && row.localTypes.includes("partialMove")
+                                )).length,
+                                absentWithUnit: rows.filter((row) => (
+                                    row.predictedWholeShift === null
+                                    && row.localTypes.some((eventType) => (
+                                        eventType === "missingRing"
+                                        || eventType === "falseRing"
+                                    ))
+                                )).length,
+                            }];
+                        }),
+                ),
+            },
             clean: {
                 cases: cleanCases,
                 falsePositiveRate: cleanFalsePositives / Math.max(1, cleanCases),
@@ -1268,6 +1406,14 @@ describe("mixed event experiment with immutable truth coordinates", () => {
         if (process.env.PRINT_MIXED_CASES === "1") {
             // eslint-disable-next-line no-console
             console.log(`EVENT_MIXED_CASES ${JSON.stringify(cases)}`);
+        }
+        if (process.env.PRINT_MIXED_WHOLE_CASES === "1") {
+            // eslint-disable-next-line no-console
+            console.log(`EVENT_MIXED_WHOLE_CASES ${JSON.stringify(wholeCoexistenceCases)}`);
+        }
+        if (process.env.PRINT_MIXED_WHOLE_STAGES === "1") {
+            // eslint-disable-next-line no-console
+            console.log(`EVENT_MIXED_WHOLE_STAGES ${JSON.stringify(wholeStageCases)}`);
         }
         if (process.env.PRINT_MIXED_DUAL_AUDIT === "1") {
             // eslint-disable-next-line no-console
