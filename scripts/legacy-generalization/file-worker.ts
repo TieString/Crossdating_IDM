@@ -62,6 +62,7 @@ const workDir = resolve(valueFor("--work-dir") ?? "legacy-generalization-worker-
 const quick = hasFlag("--quick");
 const onlySeriesId = valueFor("--series-id");
 const onlyScenarioKind = valueFor("--scenario-kind");
+const auditOutputPath = valueFor("--audit-output");
 const maxRoundsOverride = Number(valueFor("--max-rounds"));
 if (!fileId || !phase || !outputPath || !["single", "serial"].includes(phase)) {
     throw new Error("worker requires --file-id, --phase single|serial and --output");
@@ -94,6 +95,16 @@ if (loaded.sourceSha256 !== file.sha256) {
 const cases: LegacyCaseRow[] = [];
 const events: LegacyEventRow[] = [];
 const serialRounds: LegacySerialRound[] = [];
+const diagnosisAudits: Array<{
+    scenarioId: string;
+    scenarioKind: string;
+    seriesId: string;
+    scenarioPair: string;
+    snapshot: Pick<
+        LegacyDiagnosisSnapshot,
+        "strictEvent" | "reviewEvent" | "candidates" | "audit" | "reviewDecision"
+    >;
+}> = [];
 const errors: Array<{ scope: string; error: string }> = [];
 let saveReopenDifferentialCount = 0;
 
@@ -277,6 +288,26 @@ const runSingle = async (): Promise<void> => {
                     context,
                     runId: `${file.fileId}-${scenario.kind}-after`,
                 });
+                if (auditOutputPath) {
+                    for (const [scenarioPair, snapshot] of [
+                        ["before-save", before],
+                        ["after-reopen", after],
+                    ] as const) {
+                        diagnosisAudits.push({
+                            scenarioId: scenario.scenarioId,
+                            scenarioKind: scenario.kind,
+                            seriesId: target.targetId,
+                            scenarioPair,
+                            snapshot: {
+                                strictEvent: snapshot.strictEvent,
+                                reviewEvent: snapshot.reviewEvent,
+                                candidates: snapshot.candidates,
+                                audit: snapshot.audit,
+                                reviewDecision: snapshot.reviewDecision,
+                            },
+                        });
+                    }
+                }
                 const stable = snapshotsSemanticallyEqual(before, after);
                 if (!stable) {
                     saveReopenDifferentialCount += 1;
@@ -325,11 +356,14 @@ const runSerial = async (): Promise<LegacySerialEventState[]> => {
     const scenarioKinds = quick
         ? config.injection.serialScenarioOrder.slice(0, 1)
         : config.injection.serialScenarioOrder;
+    const selectedScenarioKinds = scenarioKinds.filter((kind) => (
+        onlyScenarioKind === null || kind === onlyScenarioKind
+    ));
     const configuredMaxRounds = Number.isFinite(maxRoundsOverride) && maxRoundsOverride > 0
         ? maxRoundsOverride
         : config.runtime.maxRounds;
     const maxRounds = quick ? Math.min(2, configuredMaxRounds) : configuredMaxRounds;
-    for (const scenarioKind of scenarioKinds) {
+    for (const scenarioKind of selectedScenarioKinds) {
         const scenarioBySeries = new Map(file.targets.flatMap((target) => {
             const scenario = target.scenarios.find((row) => row.kind === scenarioKind);
             return scenario ? [[target.targetId, scenario] as const] : [];
@@ -405,6 +439,25 @@ const runSerial = async (): Promise<LegacySerialEventState[]> => {
                     runId: `${file.fileId}-${scenarioKind}-round-${round}`,
                 }),
             }));
+            if (auditOutputPath) {
+                diagnosed.filter(({ seriesId }) => (
+                    onlySeriesId === null || seriesId === onlySeriesId
+                )).forEach(({ seriesId, snapshot }) => {
+                    diagnosisAudits.push({
+                        scenarioId: `${file.fileId}:serial:${scenarioKind}`,
+                        scenarioKind,
+                        seriesId,
+                        scenarioPair: `serial-round-${round}`,
+                        snapshot: {
+                            strictEvent: snapshot.strictEvent,
+                            reviewEvent: snapshot.reviewEvent,
+                            candidates: snapshot.candidates,
+                            audit: snapshot.audit,
+                            reviewDecision: snapshot.reviewDecision,
+                        },
+                    });
+                });
+            }
             const eligible: Array<{
                 seriesId: string;
                 truth: MutableTruth;
@@ -585,6 +638,15 @@ const output: LegacyFileWorkerOutput = {
     runtimeMs: Date.now() - startedMs,
 };
 writeFileSync(resolve(outputPath), `${JSON.stringify(output, null, 2)}\n`, "utf8");
+if (auditOutputPath) {
+    const resolvedAuditOutputPath = resolve(auditOutputPath);
+    mkdirSync(dirname(resolvedAuditOutputPath), { recursive: true });
+    writeFileSync(
+        resolvedAuditOutputPath,
+        `${JSON.stringify(diagnosisAudits, null, 2)}\n`,
+        "utf8",
+    );
+}
 rmSync(workDir, { force: true, recursive: true });
 console.log(`LEGACY_FILE_WORKER ${JSON.stringify({
     fileId,

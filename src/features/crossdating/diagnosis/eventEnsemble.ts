@@ -1870,6 +1870,50 @@ type SequentialMissingRecovery = {
     preserveWholeBaseline: boolean;
 };
 
+const MIN_SEQUENTIAL_GAIN_PER_EXTRA_TRANSITION = 0.8;
+const MIN_STABLE_SEQUENTIAL_HEAD_RUN_YEARS = 30;
+const MIN_DISTINCT_PARTIAL_MODE_SEPARATION_YEARS = 9;
+const MIN_CONFIRMED_NEWER_MISSING_MARKERS = 2;
+const MAX_CONFIRMED_STAIRCASE_CANDIDATE_DISTANCE_YEARS = 2;
+
+/** A multi-step path needs enough complexity-adjusted gain or one durable unit-lag state. */
+export const supportsSequentialMissingReplacementOfPartial = (
+    head: Pick<
+        SequentialMissingHead,
+        "gainOverDirect" | "transitionCount" | "headRunYears"
+    >,
+): boolean => head.headRunYears >= MIN_STABLE_SEQUENTIAL_HEAD_RUN_YEARS
+    || head.gainOverDirect / Math.max(1, head.transitionCount - 1)
+        >= MIN_SEQUENTIAL_GAIN_PER_EXTRA_TRANSITION;
+
+/** Keeps a confirmed unit-event frontier separate from a distant partial-move mode. */
+export const hasDistinctConfirmedSequentialMissingMode = (
+    detected: readonly DiagnosisEvent[],
+    candidateEvents: readonly DiagnosisEvent[],
+    head: Pick<SequentialMissingHead, "year" | "transitionCount" | "headRunYears">,
+    confirmedTargetZeroYears: readonly number[],
+): boolean => {
+    const partialCenters = detected
+        .filter((event) => event.eventType === "partialMove")
+        .map((event) => event.rankedYears[0]?.year)
+        .filter((year): year is number => year !== undefined);
+    const nearestPartialDistance = partialCenters.length === 0
+        ? 0
+        : Math.min(...partialCenters.map((year) => Math.abs(year - head.year)));
+    const newerConfirmedMissingCount = confirmedTargetZeroYears.filter(
+        (year) => year > head.year,
+    ).length;
+    const hasHeadCandidate = candidateEvents.some((event) => (
+        partialMoveSupportsSequentialMissingDepth(event, head)
+        && event.rankedYears[0]?.year !== undefined
+        && Math.abs(event.rankedYears[0].year - head.year)
+            <= MAX_CONFIRMED_STAIRCASE_CANDIDATE_DISTANCE_YEARS
+    ));
+    return nearestPartialDistance >= MIN_DISTINCT_PARTIAL_MODE_SEPARATION_YEARS
+        && newerConfirmedMissingCount >= MIN_CONFIRMED_NEWER_MISSING_MARKERS
+        && hasHeadCandidate;
+};
+
 const recoverSequentialMissingHeadEvent = (
     detected: DiagnosisEvent[],
     diagnosis: SeriesCoreDiagnosis,
@@ -1918,6 +1962,7 @@ const recoverSequentialMissingHeadEvent = (
         const replacesNonUnitEvent = detected.some((event) => (
             event.eventType === "partialMove" || event.eventType === "wholeSeriesMove"
         ));
+        const replacesPartial = detected.some((event) => event.eventType === "partialMove");
         const hasExistingUnitEvent = detected.some((event) => (
             event.eventType === "missingRing" || event.eventType === "falseRing"
         ));
@@ -1942,23 +1987,51 @@ const recoverSequentialMissingHeadEvent = (
             || hasDepthConsistentSequentialMissingCandidate(candidateEvents, head)
             || presentation.confirmedTargetStaircaseYear !== null
             || (marker?.support ?? 0) >= 10;
+        const hasDistinctConfirmedMissingMode = hasDistinctConfirmedSequentialMissingMode(
+            detected,
+            candidateEvents,
+            head,
+            confirmedTargetZeroYears,
+        );
         if (hasOppositeUnitOnly && !hasIndependentMissingDirection) return null;
+        if (replacesPartial
+            && !supportsSequentialMissingReplacementOfPartial(head)
+            && !hasDistinctConfirmedMissingMode) {
+            return null;
+        }
         // A staircase may be an endpoint artefact of a non-zero global baseline. It may replace a
         // whole candidate only when that candidate is the staircase's older state. An independently
         // connected baseline needs its own missing-direction evidence and remains in the event set.
         if (independentWholeBaseline && !hasIndependentMissingDirection) return null;
         if (replacesNonUnitEvent && !hasIndependentStaircaseSupport) return null;
+        const recoveredEvent = makeSequentialMissingHeadEvent(
+            head,
+            marker,
+            detected,
+            diagnosis,
+            candidates,
+            candidateEvents,
+            confirmedTargetZeroYears,
+            markerMode,
+        );
         return {
-            event: makeSequentialMissingHeadEvent(
-                head,
-                marker,
-                detected,
-                diagnosis,
-                candidates,
-                candidateEvents,
-                confirmedTargetZeroYears,
-                markerMode,
-            ),
+            event: hasDistinctConfirmedMissingMode ? {
+                ...recoveredEvent,
+                evidence: {
+                    ...recoveredEvent.evidence,
+                    algorithmSources: Array.from(new Set([
+                        ...recoveredEvent.evidence.algorithmSources,
+                        "confirmed_missing_history_distinct_mode",
+                    ])).sort(),
+                    notes: [
+                        ...recoveredEvent.evidence.notes,
+                        `sequential_missing_confirmed_newer_zero_count=${
+                            confirmedTargetZeroYears.filter((year) => year > head.year).length
+                        }`,
+                        "sequential_missing_distinct_partial_mode=true",
+                    ],
+                },
+            } : recoveredEvent,
             preserveWholeBaseline: independentWholeBaseline,
         };
     }

@@ -302,8 +302,10 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
 
         expect(sameSeries(corrupted, mtr841.valuesByYear), JSON.stringify(steps))
             .toBe(true);
-        expect(steps[2]?.events[0]?.sources, JSON.stringify(steps))
-            .toContain("sequential_missing_staircase_head");
+        expect(steps[2]?.events[0]?.sources.some((source) => (
+            source === "sequential_missing_staircase_head"
+            || source === "compressed_missing_staircase_projection"
+        )), JSON.stringify(steps)).toBe(true);
 
         const physical = createPartialRangeMoveCase(mtr841, 1800, 2);
         const physicalSite = new Map(cleanSite);

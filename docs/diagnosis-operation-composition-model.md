@@ -1178,3 +1178,59 @@ MCP17A 连续 9 年缺块保存前后仍输出 `partialMove -9`；ZSL141 的 `-6
 下一轮应比较“单个连续缺块的一个大状态跃迁”和“多个单位缺轮/伪轮形成的阶梯或脉冲”：
 先确认 partial 候选是否形成，再区分它是在 operation recovery 中丢失，还是形成后被单位事件
 优先级覆盖。不能通过统一压低 missing/false 或扩大 partial 门槛来交换错误。
+
+### Round 5E：区分一次连续缺块与多个离散缺轮形成的 lag 阶梯
+
+- single 候选结果：
+  `D:\软件测试\legacy-cross-file-generalization-results\legacy-partial-staircase-complexity-gate-single-2026-08-08`。
+- serial 最终结果：
+  `D:\软件测试\legacy-cross-file-generalization-results\legacy-partial-staircase-distinct-mode-workers-2026-08-08\serial`。
+- PRB07A 隔离审计：
+  `D:\软件测试\legacy-cross-file-generalization-results\partial-staircase-serial-prb07a-distinct-mode-2026-08-08`。
+
+逐阶段审计表明，12 个 physical partial 被报成 missing 的主要路径不是 partial 没有形成，
+而是 `recoverSequentialMissingHeadEvent` 在融合、端点门禁和显示层之后又用一个高自由度
+单位 lag 路径替换了已经成立的 direct partial。对每个额外状态转移计算
+`gainOverDirect / max(1, transitionCount - 1)` 后，错误 physical partial 的最高值为 0.762，
+头部 `-1` 状态最长 28 年。因此，同一个断点模式内，阶梯只有满足以下任一条件才可覆盖
+direct partial：
+
+1. 每个额外转移的收益至少为 0.8；
+2. 最后一个 `-1` 单位状态连续稳定至少 30 年。
+
+这不是偏爱小位移。direct partial 的 `-4/-10` 位移量仍完整保留；门禁惩罚的是用很多自由
+断点解释一个本来可由一次状态跃迁解释的连续缺块。single 中 6 个错误 missing 因而恢复为
+精确 partial，另 1 个错误 missing 改为拒答，没有旧正确案例损失。最终 single 为：响应
+417/1152、类型正确 344/1152、操作正确 342/1152、唯一主窗口覆盖 181/1056、条件覆盖
+181/267、Top1 41/1056；clean strict/review 仍为 15/48、14/48。partial 混淆变为正确
+36/144、拒答 72/144、missing 18/144、false 18/144。
+
+单纯使用复杂度门禁会在 serial 中损失 `cana212/PRB07A` 的 1866 缺轮。前三个较新缺轮
+1922、1904、1885 已确认后，当前融合层选择的 partial 模式中心为 1851；但阶梯头 1863
+另有一个精确候选，13 年主窗 1857-1869 覆盖真值。二者相距 12 年，不是同一个断点模式。
+因此新增一个严格的“已确认历史下的独立前沿”通道，必须同时满足：
+
+1. 阶梯头与当前 selected partial 模式中心相距至少 9 年；
+2. 阶梯头的新侧已有至少 2 个目标序列显式 0，表示用户先前确认的缺轮历史；
+3. 距阶梯头不超过 2 年存在位移深度与 transition count 一致的候选。
+
+三个条件只读取当前 working series、候选和 lag 路径，不读取注入真值。它也不会把一组
+隐藏真值作为自动操作列表暴露给 UI。若 partial 与阶梯解释同一断点，仍必须通过前述复杂度
+门禁；若只有确认历史而没有独立模式或深度一致候选，也不能拆分 partial。
+
+该通道使 serial confirmed 从 186 恢复到 187、首次正确窗口从 180 恢复到 181、首次操作
+正确从 265 增到 267，没有 confirmed 损失。PRB07A 1866 在第 4 轮恢复，随后 1848 首次
+变为可回答但窗口未覆盖，仍按失败统计。相对 Round 5C，confirmed 187 和首次正确窗口 181
+已完全恢复；唯一剩余轨迹差异是 `or052/JCT11A` 1922 原先有一个操作类型正确但窗口不覆盖、
+最终也不能确认的响应，现在改为拒答。24 文件 single 的 1200 个 before-save case 在加入独立
+前沿通道前后逐案变化为 0，说明 serial 历史条件没有泄漏到干净 single。
+
+基准 worker 增加可选 `--audit-output`，并让 `--scenario-kind` 可限制 serial 场景；
+`--series-id` 在 serial 中只限制审计记录，不从全文件 active series 中删除其他样芯。这样可在
+不改变 FIFO 队列、参考构建和 COFECHA 输入的前提下保存每轮 candidate、fusion、endpoint、
+display 和 locator 全链路快照。
+
+本轮关闭的是 `partial -> missing` 的最终阶梯覆盖路径。冻结 single 仍有 18 个
+`partial -> falseRing`，其失败发生得更早：精确 `-4/-10` partial 已在
+`candidateProjectedEvents` 中形成，但 operation fusion 选择了一个删除后仍保持负 lag 的
+falseRing。下一轮必须修复 fusion 的操作方向与状态路径解释，不能复用本轮 serial 历史门禁。

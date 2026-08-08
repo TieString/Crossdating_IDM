@@ -12,6 +12,8 @@ import {
     shouldReplaceUnanchoredPartialWithReferencePulse,
     shouldPreferWholeSeriesAlias,
     shouldSuppressSelfWorseningCandidateFalseRing,
+    hasDistinctConfirmedSequentialMissingMode,
+    supportsSequentialMissingReplacementOfPartial,
     pruneWholeSeriesPartialAliases,
     pruneUnsupportedFalseRingPathSupplements,
     unitEventCompetesWithWholeAtNewerEndpoint,
@@ -328,6 +330,115 @@ describe("pruneWholeSeriesPartialAliases", () => {
         expect(partialMoveExplainsWholeSeriesCandidate(whole, partial)).toBe(false);
         expect(pruneWholeSeriesPartialAliases([whole, partial]))
             .toEqual([whole, partial]);
+    });
+});
+
+describe("supportsSequentialMissingReplacementOfPartial", () => {
+    it("rejects a short overfit staircase that barely beats one direct breakpoint", () => {
+        expect(supportsSequentialMissingReplacementOfPartial({
+            gainOverDirect: 7.9,
+            transitionCount: 11,
+            headRunYears: 29,
+        })).toBe(false);
+    });
+
+    it("accepts either complexity-adjusted gain or a durable unit-lag run", () => {
+        expect(supportsSequentialMissingReplacementOfPartial({
+            gainOverDirect: 8,
+            transitionCount: 11,
+            headRunYears: 4,
+        })).toBe(true);
+        expect(supportsSequentialMissingReplacementOfPartial({
+            gainOverDirect: 0.1,
+            transitionCount: 11,
+            headRunYears: 30,
+        })).toBe(true);
+    });
+});
+
+describe("hasDistinctConfirmedSequentialMissingMode", () => {
+    const weakHead = {
+        year: 1863,
+        transitionCount: 4,
+        headRunYears: 19,
+    };
+
+    it("recovers a confirmed unit frontier distinct from the selected partial mode", () => {
+        const selectedPartial = candidatePartial({
+            shiftYears: -4,
+            anchorYear: 1851,
+            candidateId: "selected-partial",
+            source: "cofecha_segment_lag",
+        });
+        const headCandidate = candidatePartial({
+            shiftYears: -4,
+            anchorYear: 1863,
+            candidateId: "head-candidate",
+            source: "segmented_diagnosis",
+        });
+
+        expect(hasDistinctConfirmedSequentialMissingMode(
+            [selectedPartial],
+            [headCandidate],
+            weakHead,
+            [1885, 1904, 1922],
+        )).toBe(true);
+    });
+
+    it("does not use history to split one local partial-move mode", () => {
+        const selectedPartial = candidatePartial({
+            shiftYears: -4,
+            anchorYear: 1855,
+            candidateId: "selected-partial",
+            source: "cofecha_segment_lag",
+        });
+        const headCandidate = candidatePartial({
+            shiftYears: -4,
+            anchorYear: 1863,
+            candidateId: "head-candidate",
+            source: "segmented_diagnosis",
+        });
+
+        expect(hasDistinctConfirmedSequentialMissingMode(
+            [selectedPartial],
+            [headCandidate],
+            weakHead,
+            [1885, 1904, 1922],
+        )).toBe(false);
+    });
+
+    it("requires both prior confirmations and a depth-consistent head candidate", () => {
+        const selectedPartial = candidatePartial({
+            shiftYears: -4,
+            anchorYear: 1851,
+            candidateId: "selected-partial",
+            source: "cofecha_segment_lag",
+        });
+        const wrongDepthCandidate = candidatePartial({
+            shiftYears: -10,
+            anchorYear: 1863,
+            candidateId: "wrong-depth",
+            source: "segmented_diagnosis",
+        });
+        const headCandidate = candidatePartial({
+            shiftYears: -4,
+            anchorYear: 1863,
+            candidateId: "head-candidate",
+            source: "segmented_diagnosis",
+        });
+
+        expect(hasDistinctConfirmedSequentialMissingMode(
+            [selectedPartial],
+            [wrongDepthCandidate],
+            weakHead,
+            [1885, 1904, 1922],
+        )).toBe(false);
+        expect(hasDistinctConfirmedSequentialMissingMode(
+            [selectedPartial],
+            [headCandidate],
+            weakHead,
+            [],
+        )).toBe(false);
     });
 });
 
