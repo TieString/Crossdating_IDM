@@ -109,6 +109,20 @@ describe("whole-series state consistency", () => {
         expect(supportsNonTerminalWholeSeriesCandidate(evidence)).toBe(true);
     });
 
+    it("rejects a broad older-side majority when the newer side stays at zero", () => {
+        const evidence = measureWholeSeriesStateConsistency(
+            diagnosis([2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0], 2),
+            2,
+        );
+
+        expect(evidence.supportFraction).toBe(0.75);
+        expect(evidence.weightedSupportFraction).toBe(0.75);
+        expect(evidence.olderEdgeSupportFraction).toBe(1);
+        expect(evidence.newerEdgeSupportFraction).toBe(0);
+        expect(evidence.newestLag).toBe(0);
+        expect(supportsNonTerminalWholeSeriesCandidate(evidence)).toBe(false);
+    });
+
     it("accepts a strict robust segment majority when global lag is a remote alias", () => {
         const evidence = measureWholeSeriesStateConsistency(
             diagnosis([-4, -4, -4, -4, -4, -4, 10, -52, -50, -97], 62),

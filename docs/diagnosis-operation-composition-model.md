@@ -1735,3 +1735,17 @@ wholeSeriesMove、2 个拒答。下一步必须用 10 条样芯冻结完整分�
 lag；若固定新侧仍为 0，则保留为局部状态路径。随后在同一有符号路径上识别两个 `+1` 阶跃，
 用逐参考芯删除反事实与直接 whole/partial 竞争；missing 阶梯恢复也必须证明方向为负，不能仅靠
 共享 0 标记翻转操作类型。最终仍只输出当前最前沿的一个 falseRing 和一个唯一窗口。
+
+### Round 6C：whole 双端同态安全门禁
+
+先单独修复 B7 中危险性最高的 whole 误判，不把它与 falseRing 恢复混成一次阈值调整。
+`supportsNonTerminalWholeSeriesCandidate` 新增稳定固定新侧否决条件：最新分段 lag 为 0、最新两段
+均不支持 proposed whole shift，且至少两段明确支持 0 时，说明新侧日期仍正确；即使老侧占全局
+多数、global lag 也等于 proposed shift，也不得输出 whole。只出现一个噪声端段仍可由原 broad
+consensus 接受，terminal、path-fixed-side 与 recent-tail 已验证基线继续使用各自专用门禁。
+
+同配置 `mon151` 12 例 smoke 中，whole 误判由 4 降到 0；clean review 仍为 2/55，24 个单伪轮
+控制的操作、窗口和 Top1 完全不变，保存重开 100%、错误 0。被拒绝的 4 个 whole 中，2 个转为
+missing、2 个拒答，所以首轮操作正确仍为 1/12。本轮只证明“固定新侧不能被整体移动”，不把
+错误类型转移称为准确率提升。保护门禁包括 whole state 单元测试 9/9、ZSL RAW/crossdated
+操作类型 13/13，以及 whole shift `-5/-2/+2/+5` 与七类局部组合的 28/28 精确恢复。

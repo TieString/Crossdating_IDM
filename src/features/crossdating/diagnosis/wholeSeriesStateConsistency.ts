@@ -94,6 +94,10 @@ export const supportsNonTerminalWholeSeriesCandidate = (
     evidence: WholeSeriesStateConsistency,
 ): boolean => {
     if (evidence.segmentCount < 3) return false;
+    const stableZeroNewerSide = evidence.newestLag === 0
+        && evidence.newerEdgeSupportFraction === 0
+        && evidence.zeroSupportCount >= 2;
+    if (stableZeroNewerSide) return false;
     const stableNewerState = evidence.newerEdgeSupportFraction === 1;
     const broadGlobalConsensus = evidence.globalLagMatchesShift
         && evidence.supportFraction >= 2 / 3
