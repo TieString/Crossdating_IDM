@@ -311,6 +311,93 @@ describe("counterfactual coarse-mode selection", () => {
         });
     });
 
+    it("uses event-family consensus despite a weak remote margin or one outlier vote", () => {
+        const referenceBase = localPartialEvent([
+            "reference_vote_year=1797",
+            "reference_vote_gain=0.178317",
+            "reference_vote_remote_margin=0.005985",
+            "reference_missingRing_peak_gain=0.061641",
+            "reference_falseRing_peak_gain=0.109012",
+            "reference_partialMove_peak_year=1797",
+            "reference_partialMove_peak_gain=0.178317",
+        ]);
+        const referenceEvent: DiagnosisEvent = {
+            ...referenceBase,
+            startYear: 1793,
+            endYear: 1801,
+            shiftYears: -14,
+            rankedYears: [{
+                year: 1797,
+                rank: 1,
+                score: 1,
+                evidenceTags: [],
+            }],
+            evidence: {
+                ...referenceBase.evidence,
+                algorithmSources: ["reference_core_voting"],
+                correlationGain: 0.178317,
+                lagBefore: -14,
+            },
+        };
+        expect(selectPartialMoveLocalConsensusRecenter({
+            event: referenceEvent,
+            correctionYears: -14,
+            proposedWindow: { startYear: 1799, endYear: 1811 },
+            calibrationRule: "calibrated_default_13",
+        })).toMatchObject({
+            window: { startYear: 1793, endYear: 1801 },
+            centerYear: 1797,
+            consensusKind: "reference_core",
+        });
+
+        const localBase = localPartialEvent([
+            "local_raw_boundary_year=1774",
+            "local_raw_boundary_support=6",
+            "partial_gap_raw31_year=1774",
+            "partial_gap_difference31_year=1774",
+            "partial_gap_whitened31_year=1773",
+            "partial_gap_combo31_year=1774",
+            "partial_gap_combo41_year=1775",
+            "partial_gap_combo61_year=1775",
+            "partial_gap_multiScale_year=1775",
+            "partial_reference_vote_year=1774",
+            "partial_reference_vote_shift=-4",
+            "partial_reference_vote_gain=0.111540",
+            "partial_reference_vote_margin=0.003762",
+            "partial_exhaustive_vote_year=1780",
+            "partial_exhaustive_vote_shift=-4",
+            "partial_exhaustive_vote_gain=0.180407",
+            "partial_exhaustive_vote_margin=0.017413",
+        ]);
+        const localEvent: DiagnosisEvent = {
+            ...localBase,
+            startYear: 1770,
+            endYear: 1778,
+            shiftYears: -4,
+            rankedYears: [{
+                year: 1774,
+                rank: 1,
+                score: 1,
+                evidenceTags: [],
+            }],
+            evidence: {
+                ...localBase.evidence,
+                lagBefore: -4,
+            },
+        };
+        expect(selectPartialMoveLocalConsensusRecenter({
+            event: localEvent,
+            correctionYears: -4,
+            proposedWindow: { startYear: 1781, endYear: 1793 },
+            calibrationRule: "calibrated_default_13",
+        })).toMatchObject({
+            window: { startYear: 1770, endYear: 1778 },
+            centerYear: 1774,
+            supportCount: 4,
+            consensusKind: "local_votes",
+        });
+    });
+
     it("does not keep the local partial window without independent concentrated support", () => {
         const input = {
             event: localPartialEvent(localPartialNotes),

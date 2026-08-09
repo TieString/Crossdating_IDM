@@ -518,9 +518,8 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
         ]);
     }, 180_000);
 
-    bundledCofechaIt("keeps the mtr721 three- and four-year physical gaps visible", () => {
+    bundledCofechaIt("keeps mtr721 physical gaps visible across boundaries and magnitudes", () => {
         const seriesId = "mtr721";
-        const firstFixedYear = 1803;
         const source = parsed.get(seriesId)!;
         const compact = (diagnosis: ReturnType<typeof diagnoseCrossdating>) => {
             const audit = diagnosis.eventDecisionAudits?.[0];
@@ -556,7 +555,12 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
                 } : null,
             };
         };
-        const scenarios = [3, 4].map((gapYears) => {
+        const scenarios = [
+            { firstFixedYear: 1803, gapYears: 3 },
+            { firstFixedYear: 1803, gapYears: 4 },
+            { firstFixedYear: 1798, gapYears: 14 },
+            { firstFixedYear: 1778, gapYears: 4 },
+        ].map(({ firstFixedYear, gapYears }) => {
             const physical = createPartialRangeMoveCase(
                 source,
                 firstFixedYear,
@@ -577,8 +581,10 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
                 flaggedAIds: extractPart6FlaggedASeriesIds(
                     parts.get("PART 6") ?? "",
                 ),
-                cofechaRunId: `co612-mtr721-physical-gap-${gapYears}`,
-                rwlHash: `co612-mtr721-physical-gap-${gapYears}`,
+                cofechaRunId:
+                    `co612-mtr721-physical-gap-${firstFixedYear}-${gapYears}`,
+                rwlHash:
+                    `co612-mtr721-physical-gap-${firstFixedYear}-${gapYears}`,
                 masterDatingSeries: parseCofechaResult(outText).masterDatingSeries,
             });
             const afterSave = diagnoseCrossdating(site, {
@@ -588,15 +594,21 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
                 reviewWindowDisplayMode: "review",
                 includeEventDecisionAudits: true,
             });
-            return { gapYears, beforeSave, afterSave };
+            return { firstFixedYear, gapYears, beforeSave, afterSave };
         });
         const failureContext = JSON.stringify(scenarios.map((scenario) => ({
+            firstFixedYear: scenario.firstFixedYear,
             gapYears: scenario.gapYears,
             beforeSave: compact(scenario.beforeSave),
             afterSave: compact(scenario.afterSave),
         })));
 
-        scenarios.forEach(({ gapYears, beforeSave, afterSave }) => {
+        scenarios.forEach(({
+            firstFixedYear,
+            gapYears,
+            beforeSave,
+            afterSave,
+        }) => {
             const displayedStates = [beforeSave, afterSave].map((diagnosis) => (
                 getDisplayedDiagnosisEvents(diagnosis).filter(
                     (event) => event.seriesId === seriesId,

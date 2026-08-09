@@ -666,13 +666,26 @@ export const selectPartialMoveLocalConsensusRecenter = (input: {
     if (currentPrimaryYear === undefined) return null;
 
     const finish = (
-        evidenceYears: number[],
+        evidenceAnchors: Array<{ family: string; year: number }>,
         consensusKind: PartialMoveLocalConsensusRecenter["consensusKind"],
+        minimumFamilySupport: number,
     ): PartialMoveLocalConsensusRecenter | null => {
+        const clusters = evidenceAnchors.map((anchor) => ({
+            anchor,
+            members: evidenceAnchors.filter((candidate) => (
+                Math.abs(candidate.year - anchor.year) <= 3
+            )),
+        })).sort((left, right) => (
+            right.members.length - left.members.length
+            || Math.abs(left.anchor.year - currentPrimaryYear)
+                - Math.abs(right.anchor.year - currentPrimaryYear)
+        ));
+        const members = clusters[0]?.members ?? [];
+        if (members.length < minimumFamilySupport) return null;
+        const evidenceYears = members.map((anchor) => anchor.year);
         if (evidenceYears.some((year) => (
             year < event.startYear - 1 || year > event.endYear + 1
         ))) return null;
-        if (Math.max(...evidenceYears) - Math.min(...evidenceYears) > 4) return null;
         const centerYear = Math.floor(median(evidenceYears));
         if (
             centerYear >= proposedWindow.startYear - 1
@@ -702,16 +715,34 @@ export const selectPartialMoveLocalConsensusRecenter = (input: {
         event,
         "reference_vote_remote_margin=",
     ) ?? Number.NEGATIVE_INFINITY;
+    const referencePartialGain = evidenceNoteNumber(
+        event,
+        "reference_partialMove_peak_gain=",
+    ) ?? referenceCoreGain;
+    const referenceAlternativeGain = Math.max(
+        evidenceNoteNumber(event, "reference_missingRing_peak_gain=")
+            ?? Number.NEGATIVE_INFINITY,
+        evidenceNoteNumber(event, "reference_falseRing_peak_gain=")
+            ?? Number.NEGATIVE_INFINITY,
+    );
     if (
         sources.has("reference_core_voting")
         && referenceCoreYear === currentPrimaryYear
         && referencePartialYear === currentPrimaryYear
         && referenceCoreGain >= 0.05
-        && referenceCoreMargin >= 0.01
+        && (
+            referenceCoreMargin >= 0.01
+            || referencePartialGain - referenceAlternativeGain >= 0.05
+        )
     ) {
         return finish(
-            [currentPrimaryYear, referenceCoreYear, referencePartialYear],
+            [
+                { family: "current", year: currentPrimaryYear },
+                { family: "reference_core", year: referenceCoreYear },
+                { family: "reference_partial", year: referencePartialYear },
+            ],
             "reference_core",
+            3,
         );
     }
 
@@ -721,11 +752,9 @@ export const selectPartialMoveLocalConsensusRecenter = (input: {
         const year = evidenceNoteNumber(event, `${prefix}_year=`);
         const shift = evidenceNoteNumber(event, `${prefix}_shift=`);
         const gain = evidenceNoteNumber(event, `${prefix}_gain=`);
-        const margin = evidenceNoteNumber(event, `${prefix}_margin=`);
         return Number.isInteger(year)
             && shift === correctionYears
-            && (gain ?? Number.NEGATIVE_INFINITY) >= 0.02
-            && (margin ?? Number.NEGATIVE_INFINITY) >= 0.009
+            && (gain ?? Number.NEGATIVE_INFINITY) >= 0.05
             ? year
             : undefined;
     };
@@ -747,20 +776,55 @@ export const selectPartialMoveLocalConsensusRecenter = (input: {
     const multiviewSupported = sources.has("negative_partial_multiview_consensus")
         && multiviewYear !== undefined
         && multiviewSupport >= 3;
+    const boundaryProfileYears = [
+        "partial_gap_raw31_year=",
+        "partial_gap_difference31_year=",
+        "partial_gap_whitened31_year=",
+        "partial_gap_combo31_year=",
+        "partial_gap_combo41_year=",
+        "partial_gap_combo61_year=",
+        "partial_gap_multiScale_year=",
+    ].flatMap((prefix) => {
+        const year = evidenceNoteNumber(event, prefix);
+        return year === undefined ? [] : [year];
+    });
+    const boundaryProfileCenter = boundaryProfileYears.length > 0
+        ? Math.floor(median(boundaryProfileYears))
+        : undefined;
+    const boundaryProfileSupported = boundaryProfileCenter !== undefined
+        && boundaryProfileYears.filter((year) => (
+            Math.abs(year - boundaryProfileCenter) <= 3
+        )).length >= 4;
     if (
-        referenceVoteYear === undefined
-        || exhaustiveVoteYear === undefined
-        || !sources.has("piecewise_lag_path")
-        || (!localBoundarySupported && !multiviewSupported)
+        !sources.has("piecewise_lag_path")
+        || (!localBoundarySupported
+            && !multiviewSupported
+            && !boundaryProfileSupported)
     ) return null;
 
-    const evidenceYears = [currentPrimaryYear];
-    if (localBoundarySupported) evidenceYears.push(localBoundaryYear!);
-    if (multiviewSupported) evidenceYears.push(multiviewYear!);
-    evidenceYears.push(referenceVoteYear, exhaustiveVoteYear);
+    const evidenceAnchors = [{ family: "current", year: currentPrimaryYear }];
+    if (localBoundarySupported) {
+        evidenceAnchors.push({ family: "local_raw", year: localBoundaryYear! });
+    }
+    if (multiviewSupported) {
+        evidenceAnchors.push({ family: "multiview", year: multiviewYear! });
+    }
+    if (boundaryProfileSupported) {
+        evidenceAnchors.push({
+            family: "boundary_profiles",
+            year: boundaryProfileCenter!,
+        });
+    }
+    if (referenceVoteYear !== undefined) {
+        evidenceAnchors.push({ family: "reference_vote", year: referenceVoteYear });
+    }
+    if (exhaustiveVoteYear !== undefined) {
+        evidenceAnchors.push({ family: "exhaustive_vote", year: exhaustiveVoteYear });
+    }
     return finish(
-        evidenceYears,
+        evidenceAnchors,
         multiviewSupported ? "multiview_votes" : "local_votes",
+        4,
     );
 };
 
@@ -1869,7 +1933,12 @@ export const refineEventWithCounterfactualLocator = (
             ...(exactYearEvidence ? { exactYearEvidence } : {}),
             ...(falseCounterfactualRows ? { falseCounterfactualRows } : {}),
         }) : null;
-    const rankingScoreByYear = unitYearRanking?.scoreByYear ?? scoreByYear;
+    const localPartialScoreByYear = partialLocalConsensusRecenter
+        ? new Map(event.rankedYears.map((row) => [row.year, row.score]))
+        : null;
+    const rankingScoreByYear = unitYearRanking?.scoreByYear
+        ?? localPartialScoreByYear
+        ?? scoreByYear;
     const scoredValues = [...rankingScoreByYear.values()];
     const minimumScore = scoredValues.length > 0
         ? Math.min(...scoredValues)
@@ -1884,6 +1953,7 @@ export const refineEventWithCounterfactualLocator = (
             const partialRankingYear = decisivePartialBoundaryYear
                 ?? selectedOperation?.bestYear;
             const isJointBest = event.eventType === "partialMove"
+                && partialLocalConsensusRecenter === null
                 && partialRankingYear === year;
             const rankingRemoteMargin = decisivePartialBoundaryYear !== undefined
                 ? selectedOperation?.sideStepRemoteMargin ?? 0
@@ -1909,6 +1979,9 @@ export const refineEventWithCounterfactualLocator = (
                     "full_interval_counterfactual_locator",
                     ...(unitYearRanking
                         ? ["unit_event_year_consensus"]
+                        : []),
+                    ...(partialLocalConsensusRecenter
+                        ? ["partial_local_consensus_ranking"]
                         : []),
                     ...(isJointBest
                         ? ["joint_operation_best_year"]
