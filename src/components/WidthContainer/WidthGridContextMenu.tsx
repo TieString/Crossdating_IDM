@@ -50,8 +50,8 @@ const SHIFT_OPTIONS: Array<{ shift: DeleteShift; label: string; chip: string }> 
 ];
 
 const WHOLE_MOVE_DIRECTION_OPTIONS: Array<{ direction: WholeSeriesMoveDirection; label: string; chip: string }> = [
-    { direction: "older", label: "向老年份移动", chip: "向老" },
-    { direction: "newer", label: "向新年份移动", chip: "向新" },
+    { direction: "older", label: "向左侧移动", chip: "向左" },
+    { direction: "newer", label: "向右侧移动", chip: "向右" },
 ];
 
 const DROPDOWN_GAP = 4;
@@ -735,7 +735,7 @@ export default function WidthGridContextMenu({
                         inputMode="numeric"
                         aria-label="局部移动断点年份"
                     />
-                    <span className={style["menu-row-fixed-direction"]}>老侧左移</span>
+                    <span className={style["menu-row-label"]}>移动</span>
                     <input
                         className={`${style["menu-row-input"]} ${style["menu-row-input-amount"]} ${parsedPartialMoveYears === null ? style["menu-row-input-invalid"] : ""}`}
                         type="number"
