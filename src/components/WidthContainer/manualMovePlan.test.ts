@@ -3,6 +3,7 @@ import { moveSeriesTailByOffset } from "@/features/rwl/edit";
 import {
     createOlderSidePartialMovePlan,
     createWholeSeriesMovePlan,
+    remapSelectionForMoveHistory,
 } from "./manualMovePlan";
 
 describe("manual move plans", () => {
@@ -63,5 +64,49 @@ describe("manual move plans", () => {
         expect(createOlderSidePartialMovePlan(1800, 2024, 2025, 4)).toBeNull();
         expect(createOlderSidePartialMovePlan(1800, 2024, 1904, 0)).toBeNull();
         expect(createWholeSeriesMovePlan(1800, 2024, "older", -2)).toBeNull();
+    });
+
+    it("returns a moved selection to its original years on undo and reapplies it on redo", () => {
+        const history = {
+            tree: "TARGET",
+            selectedStartYear: 1898,
+            selectedEndYear: 1903,
+            yearOffset: -4,
+        };
+        const movedSelection = {
+            tree: "TARGET",
+            startYear: 1894,
+            endYear: 1899,
+        };
+        const restored = remapSelectionForMoveHistory(movedSelection, {
+            ...history,
+            direction: "undo",
+        });
+
+        expect(restored).toEqual({
+            tree: "TARGET",
+            startYear: 1898,
+            endYear: 1903,
+        });
+        expect(remapSelectionForMoveHistory(restored, {
+            ...history,
+            direction: "redo",
+        })).toEqual(movedSelection);
+    });
+
+    it("does not move unrelated or partially overlapping selections", () => {
+        const history = {
+            tree: "TARGET",
+            selectedStartYear: 1900,
+            selectedEndYear: 1905,
+            yearOffset: 3,
+            direction: "undo" as const,
+        };
+        const otherTree = { tree: "OTHER", startYear: 1903, endYear: 1908 };
+        const partialOverlap = { tree: "TARGET", startYear: 1902, endYear: 1904 };
+
+        expect(remapSelectionForMoveHistory(otherTree, history)).toBe(otherTree);
+        expect(remapSelectionForMoveHistory(partialOverlap, history))
+            .toBe(partialOverlap);
     });
 });

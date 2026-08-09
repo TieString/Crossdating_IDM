@@ -44,6 +44,7 @@ import {
 import {
     createOlderSidePartialMovePlan,
     createWholeSeriesMovePlan,
+    remapSelectionForMoveHistory,
     type ManualSeriesMovePlan,
     type WholeSeriesMoveDirection,
 } from "./manualMovePlan";
@@ -1454,6 +1455,13 @@ function WidthContainer({
         handledHistoryAnimationIdRef.current = historyAnimation.id;
         pendingInsertFlipRef.current = null;
         clearInsertAnimations();
+
+        if (historyAnimation.type === "move-selection") {
+            setSelection((previous) => remapSelectionForMoveHistory(
+                previous,
+                historyAnimation,
+            ));
+        }
 
         if (!shouldAnimateHistory) return;
         // replace-all-data（整库替换）没有单序列位移动画，这里不处理。
