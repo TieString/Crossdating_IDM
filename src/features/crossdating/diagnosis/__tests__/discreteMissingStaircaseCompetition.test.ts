@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+    supportsDecisiveUnanchoredMissingStaircase,
     supportsDiscreteMissingStaircase,
     type LocalTwoStepStaircaseEvidence,
     type MissingStaircaseCompetition,
@@ -37,6 +38,38 @@ const local = (
 });
 
 describe("discrete missing-staircase safety gate", () => {
+    it("accepts a three-year boundary span only with decisive unanchored support", () => {
+        const decisiveCompetition = competition({
+            referenceSupport: 35,
+            referenceCount: 36,
+            referenceSupportRatio: 35 / 36,
+            referenceMedianMargin: 0.12,
+            referenceLowerQuartileMargin: 0.09,
+        });
+        const decisiveLocal = local({
+            olderBoundaryYear: 1901,
+            newerBoundaryYear: 1904,
+            staircaseGain: 0.5,
+            middleMeanAdvantage: 0.25,
+            referenceSupport: 34,
+            referenceCount: 36,
+            referenceMedianAdvantage: 0.19,
+        });
+
+        expect(supportsDecisiveUnanchoredMissingStaircase(
+            decisiveCompetition,
+            decisiveLocal,
+        )).toBe(true);
+        expect(supportsDecisiveUnanchoredMissingStaircase(
+            decisiveCompetition,
+            { ...decisiveLocal, newerBoundaryYear: 1903 },
+        )).toBe(false);
+        expect(supportsDecisiveUnanchoredMissingStaircase(
+            { ...decisiveCompetition, referenceLowerQuartileMargin: 0.019 },
+            decisiveLocal,
+        )).toBe(false);
+    });
+
     it("accepts separated unit events supported by both independent views", () => {
         expect(supportsDiscreteMissingStaircase(
             competition(),

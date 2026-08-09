@@ -133,6 +133,31 @@ export const supportsRobustMissingStaircaseCorrection = (
 );
 
 /**
+ * Lets overwhelming per-reference evidence survive a one-year boundary wobble after rebuilding
+ * the COFECHA master. This is intentionally much stricter than the normal staircase gate because
+ * there is no shared-zero or unit-candidate anchor to distinguish it from one physical -2 gap.
+ */
+export const supportsDecisiveUnanchoredMissingStaircase = (
+    competition: MissingStaircaseCompetition | null,
+    local: LocalTwoStepStaircaseEvidence | null,
+): boolean => Boolean(
+    competition
+        && local
+        && competition.cumulativeShiftYears === -2
+        && competition.missingSpanYears >= 3
+        && competition.referenceCount >= 8
+        && competition.referenceSupportRatio >= 0.9
+        && competition.referenceMedianMargin >= 0.05
+        && competition.referenceLowerQuartileMargin >= 0.02
+        && local.newerBoundaryYear - local.olderBoundaryYear >= 3
+        && local.staircaseGain > 0
+        && local.middleMeanAdvantage >= 0.1
+        && local.referenceCount >= 8
+        && local.referenceSupport / Math.max(1, local.referenceCount) >= 0.85
+        && local.referenceMedianAdvantage >= 0.1
+);
+
+/**
  * Requires two independent views to prefer separated unit events. Adjacent unit inserts are
  * algebraically equivalent to one continuous gap and are deliberately not auto-split.
  */

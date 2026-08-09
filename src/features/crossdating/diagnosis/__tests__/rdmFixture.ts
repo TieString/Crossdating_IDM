@@ -229,7 +229,7 @@ export const reconstructMissingFromZero = (
 };
 
 /**
- * 多缺轮端锚重建：把含 n 个 0 的真实序列里所有 0 移除，得到"专家校正前、缺 n 环"的原始测量。
+ * 多缺轮端锚重建：把指定的 n 个 0 从真实序列移除，得到"专家校正前、缺 n 环"的原始测量。
  * endYear（树皮端）固定；某真实年份 y 的值，其上方（更新一侧）每有一个缺轮就把它向树皮顶一年，
  * 故当前年份 = y + (#zeros > y)。结果年份仍连续，长度 = 非零值个数。是逐个 reconstructMissingFromZero 的净效果。
  */
@@ -238,8 +238,9 @@ export const buildMultiMissingCorrupted = (
     zeros: number[],
 ): Map<number, number> => {
     const corrupted = new Map<number, number>();
+    const removedZeros = new Set(zeros);
     valuesByYear.forEach((v, y) => {
-        if (v === 0) return;
+        if (removedZeros.has(y)) return;
         const above = zeros.reduce((n, z) => n + (z > y ? 1 : 0), 0);
         corrupted.set(y + above, v);
     });

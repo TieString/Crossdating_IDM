@@ -328,6 +328,76 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
         });
     }, 180_000);
 
+    bundledCofechaIt("keeps the first two bark-side mtr721 zero removals as one missing-ring frontier", () => {
+        const seriesId = "mtr721";
+        const mtr721 = parsed.get(seriesId)!;
+        const removedZeroYears = Array.from(mtr721.valuesByYear)
+            .filter(([, value]) => value === 0)
+            .map(([year]) => year)
+            .sort((left, right) => right - left)
+            .slice(0, 2);
+        const corrupted = buildMultiMissingCorrupted(
+            mtr721.valuesByYear,
+            removedZeroYears,
+        );
+        const site = new Map(cleanSite);
+        site.set(seriesId, corrupted);
+        const beforeSave = diagnoseCrossdating(site, {
+            referenceConfig,
+            targetTrees: [seriesId],
+            reviewWindowDisplayMode: "review",
+        });
+
+        const outText = runBundledCofecha(site);
+        const parts = splitReportByParts(outText);
+        const freshReference = createCofechaMasterReferenceConfig({
+            siteData: site,
+            flaggedAIds: extractPart6FlaggedASeriesIds(parts.get("PART 6") ?? ""),
+            cofechaRunId: "co612-mtr721-after-two-zero-removals",
+            rwlHash: "co612-mtr721-after-two-zero-removals",
+            masterDatingSeries: parseCofechaResult(outText).masterDatingSeries,
+        });
+        const afterSave = diagnoseCrossdating(site, {
+            referenceConfig: freshReference,
+            targetTrees: [seriesId],
+            cofechaText: outText,
+            reviewWindowDisplayMode: "review",
+        });
+
+        expect(removedZeroYears).toEqual([1803, 1798]);
+        const displayedByState = [beforeSave, afterSave].map((diagnosis) => (
+            getDisplayedDiagnosisEvents(diagnosis)
+                .filter((event) => event.seriesId === seriesId)
+        ));
+        const failureContext = JSON.stringify({
+            before: summarize(displayedByState[0]),
+            after: summarize(displayedByState[1]),
+        });
+        displayedByState.forEach((events) => {
+            const [event] = events;
+            expect(events, failureContext).toHaveLength(1);
+            expect(event.eventType, failureContext).toBe("missingRing");
+            expect(event.startYear, failureContext)
+                .toBeLessThanOrEqual(removedZeroYears[0]);
+            expect(event.endYear, failureContext)
+                .toBeGreaterThanOrEqual(removedZeroYears[0]);
+            expect(event.rankedYears[0]?.year, failureContext)
+                .toBe(removedZeroYears[0]);
+            expect(event.endYear - event.startYear + 1, failureContext)
+                .toBeLessThanOrEqual(13);
+        });
+        expect(displayedByState[1][0].eventType, failureContext)
+            .toBe(displayedByState[0][0].eventType);
+        expect(
+            displayedByState[1][0].endYear - displayedByState[1][0].startYear,
+            failureContext,
+        ).toBeLessThanOrEqual(
+            displayedByState[0][0].endYear - displayedByState[0][0].startYear,
+        );
+        expect(displayedByState[1][0].evidence.algorithmSources, failureContext)
+            .toContain("robust_per_reference_missing_staircase");
+    }, 180_000);
+
     bundledCofechaIt("reveals all mtr841 missing rings without a partial-move detour", () => {
         const mtr841 = parsed.get("mtr841")!;
         const mtrZeroYears = Array.from(mtr841.valuesByYear)

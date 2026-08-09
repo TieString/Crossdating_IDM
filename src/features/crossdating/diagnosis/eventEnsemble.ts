@@ -15,6 +15,7 @@ import {
     comparePartialMoveWithMissingStaircase,
     comparePartialMoveWithRobustMissingStaircase,
     compareTwoStepUnitDirections,
+    supportsDecisiveUnanchoredMissingStaircase,
     supportsDiscreteMissingStaircase,
     supportsRobustMissingStaircaseCorrection,
     type CompletedPartialStaircaseCompetition,
@@ -2807,10 +2808,14 @@ const recoverSequentialMissingHeadEvent = (
             true,
             robustHead?.year ?? null,
         );
-        if (!robustHead || !supportsRobustMissingStaircaseCorrection(
+        const robustSupport = supportsRobustMissingStaircaseCorrection(
             robustCompetition,
             robustStaircase,
-        )) return null;
+        ) || supportsDecisiveUnanchoredMissingStaircase(
+            robustCompetition,
+            robustStaircase,
+        );
+        if (!robustHead || !robustSupport) return null;
         const selectedHead = {
             ...robustHead,
             year: robustCompetition!.missingYears[0] ?? robustHead.year,
