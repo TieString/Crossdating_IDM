@@ -244,6 +244,8 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
           ? ` · 较老侧向老年份移动 ${Math.abs(selectedEvent.shiftYears)} 年`
           : "";
         const yearEvidence = yearEvidenceLabel(selectedEvent);
+        const retainedAcrossEvidenceRefresh = selectedEvent.evidence.algorithmSources
+          .includes("evidence_refresh_adjudicator");
 
         return (
           <article
@@ -277,6 +279,14 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
                 >
                   年份证据 {yearEvidence}
                 </span>
+                {retainedAcrossEvidenceRefresh ? (
+                  <span
+                    title="working 数据没有变化；保存后新 COFECHA 与保存前内部假设冲突，当前保留两边都支持的原复核事件。"
+                    style={{ fontSize: 10, fontWeight: 700, color: "#8a5a18" }}
+                  >
+                    保存后证据冲突 · 保留原复核
+                  </span>
+                ) : null}
               </div>
 
               {selectableYears.length > 0 ? (

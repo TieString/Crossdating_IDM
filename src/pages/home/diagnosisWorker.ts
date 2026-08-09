@@ -17,6 +17,8 @@ export type DiagnosisWorkerRequest = {
     cofechaText?: string;
     // 后台广度扫描与当前可见诊断都使用 review 门槛；严格自动结果仍保留在 diagnosis.events。
     reviewWindowDisplayMode?: ReviewWindowDisplayMode;
+    // 当前可见序列在保存前后需要完整假设链做跨证据裁决；后台广度扫描不请求该字段。
+    includeEventDecisionAudits?: boolean;
 };
 
 export type DiagnosisWorkerResponse =
@@ -40,6 +42,7 @@ ctx.addEventListener("message", (event: MessageEvent<DiagnosisWorkerRequest>) =>
         targetTree,
         cofechaText,
         reviewWindowDisplayMode,
+        includeEventDecisionAudits,
     } = event.data;
 
     try {
@@ -51,6 +54,7 @@ ctx.addEventListener("message", (event: MessageEvent<DiagnosisWorkerRequest>) =>
                 targetTrees: targetTree ? [targetTree] : [],
                 cofechaText,
                 reviewWindowDisplayMode,
+                includeEventDecisionAudits,
             }),
             elapsedMs: performance.now() - startedAt,
         } satisfies DiagnosisWorkerResponse);

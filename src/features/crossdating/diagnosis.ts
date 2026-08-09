@@ -24,6 +24,11 @@ export {
 } from "./diagnosis/eventLocationAlternatives";
 export { getDisplayedDiagnosisEvents } from "./diagnosis/eventDisplay";
 export {
+    stabilizeDiagnosisAcrossEvidenceRefresh,
+    type EvidenceRefreshDecision,
+    type EvidenceRefreshDecisionReason,
+} from "./diagnosis/evidenceRefreshAdjudicator";
+export {
     applyLocalCrossdatingOption,
     diagnoseCrossdating,
     getDiagnosisCandidateLabel,
