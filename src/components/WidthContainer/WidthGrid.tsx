@@ -71,7 +71,7 @@ const isShiftAnimation = (animationKind: GridAnimationKind | undefined) => (
     || animationKind === "insert-cross-row-shift-right"
 );
 
-const getMotionConfig = (
+export const getWidthGridMotionConfig = (
     animationKind: GridAnimationKind | undefined,
     delaySeconds = 0,
     animationSpeed = 1,
@@ -234,19 +234,17 @@ const getMotionConfig = (
             return {
                 initial: {
                     scaleX: 0.86,
-                    backgroundColor: "#e5edf8",
                     boxShadow: "inset 0 0 0 1px #8fb3df",
                 },
                 animate: {
                     scaleX: [1.03, 1],
-                    backgroundColor: ["#eef4fb", "#ffffff"],
                     boxShadow: [
                         "inset 0 0 0 1px #76a2d6, 0 0 0 3px rgba(118, 162, 214, 0.12)",
                         "inset 0 0 0 0 rgba(118, 162, 214, 0), 0 0 0 0 rgba(118, 162, 214, 0)",
                     ],
                 },
                 transition: withDelay({ duration: 0.72, ease: "easeOut", times: [0.55, 1] }, delaySeconds, animationSpeed),
-                transitionEnd: { backgroundColor: "", boxShadow: "" },
+                transitionEnd: { boxShadow: "" },
             };
         case "overwrite":
             return {
@@ -497,7 +495,7 @@ export default function WidthGrid({
         ? `${style["insert-missing-button"]} ${style[`insert-missing-button-${hoverPlusSide}`]} ${style["insert-missing-button-visible"]}`
         : style["insert-missing-button"];
     const motionConfig = useMemo(
-        () => shouldReduceMotion ? {} : getMotionConfig(animationKind, animationDelay, animationSpeed, animationOffset, insertCellMotion),
+        () => shouldReduceMotion ? {} : getWidthGridMotionConfig(animationKind, animationDelay, animationSpeed, animationOffset, insertCellMotion),
         [animationDelay, animationKind, animationOffset, animationSpeed, insertCellMotion, shouldReduceMotion],
     );
     const motionAnimate = useMemo(
