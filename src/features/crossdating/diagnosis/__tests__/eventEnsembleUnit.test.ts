@@ -16,6 +16,7 @@ import {
     shouldPreferWholeSeriesAlias,
     shouldSuppressSelfWorseningCandidateFalseRing,
     hasDistinctConfirmedSequentialMissingMode,
+    supportsSequentialMissingDirectionOverride,
     supportsSequentialMissingReplacementOfPartial,
     pruneWholeSeriesPartialAliases,
     pruneUnsupportedFalseRingPathSupplements,
@@ -491,6 +492,45 @@ describe("supportsSequentialMissingReplacementOfPartial", () => {
             gainOverDirect: 0.1,
             transitionCount: 11,
             headRunYears: 30,
+        })).toBe(true);
+    });
+});
+
+describe("supportsSequentialMissingDirectionOverride", () => {
+    it("does not reverse explicit false-ring evidence from shared reference zeros alone", () => {
+        expect(supportsSequentialMissingDirectionOverride({
+            hasOppositeUnitOnly: true,
+            hasDetectedMissing: false,
+            hasMissingCandidate: false,
+            hasConfirmedTargetStaircase: false,
+            sharedZeroSupport: 35,
+        })).toBe(false);
+    });
+
+    it("still accepts target-specific missing evidence against the opposite unit direction", () => {
+        expect(supportsSequentialMissingDirectionOverride({
+            hasOppositeUnitOnly: true,
+            hasDetectedMissing: false,
+            hasMissingCandidate: true,
+            hasConfirmedTargetStaircase: false,
+            sharedZeroSupport: 0,
+        })).toBe(true);
+        expect(supportsSequentialMissingDirectionOverride({
+            hasOppositeUnitOnly: true,
+            hasDetectedMissing: false,
+            hasMissingCandidate: false,
+            hasConfirmedTargetStaircase: true,
+            sharedZeroSupport: 0,
+        })).toBe(true);
+    });
+
+    it("retains shared-zero localization when no opposite unit event exists", () => {
+        expect(supportsSequentialMissingDirectionOverride({
+            hasOppositeUnitOnly: false,
+            hasDetectedMissing: false,
+            hasMissingCandidate: false,
+            hasConfirmedTargetStaircase: false,
+            sharedZeroSupport: 10,
         })).toBe(true);
     });
 });

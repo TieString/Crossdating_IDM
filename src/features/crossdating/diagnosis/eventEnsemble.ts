@@ -2576,6 +2576,26 @@ export const supportsSequentialMissingReplacementOfPartial = (
     || head.gainOverDirect / Math.max(1, head.transitionCount - 1)
         >= MIN_SEQUENTIAL_GAIN_PER_EXTRA_TRANSITION;
 
+type SequentialMissingDirectionEvidence = {
+    hasOppositeUnitOnly: boolean;
+    hasDetectedMissing: boolean;
+    hasMissingCandidate: boolean;
+    hasConfirmedTargetStaircase: boolean;
+    sharedZeroSupport: number;
+};
+
+/** Shared reference zeros may locate a missing event, but cannot reverse explicit +1 lag evidence. */
+export const supportsSequentialMissingDirectionOverride = ({
+    hasOppositeUnitOnly,
+    hasDetectedMissing,
+    hasMissingCandidate,
+    hasConfirmedTargetStaircase,
+    sharedZeroSupport,
+}: SequentialMissingDirectionEvidence): boolean => hasDetectedMissing
+    || hasMissingCandidate
+    || hasConfirmedTargetStaircase
+    || (!hasOppositeUnitOnly && sharedZeroSupport >= 10);
+
 /** Keeps a confirmed unit-event frontier separate from a distant partial-move mode. */
 export const hasDistinctConfirmedSequentialMissingMode = (
     detected: readonly DiagnosisEvent[],
@@ -2746,11 +2766,18 @@ const recoverSequentialMissingHeadEvent = (
         const hasOppositeUnitOnly = detected.some(
             (event) => event.eventType === "falseRing",
         ) && !detected.some((event) => event.eventType === "missingRing");
-        const hasIndependentMissingDirection = detected.some(
-            (event) => event.eventType === "missingRing",
-        ) || candidateEvents.some((event) => event.eventType === "missingRing")
-            || presentation.confirmedTargetStaircaseYear !== null
-            || (marker?.support ?? 0) >= 10;
+        const hasIndependentMissingDirection = supportsSequentialMissingDirectionOverride({
+            hasOppositeUnitOnly,
+            hasDetectedMissing: detected.some(
+                (event) => event.eventType === "missingRing",
+            ),
+            hasMissingCandidate: candidateEvents.some(
+                (event) => event.eventType === "missingRing",
+            ),
+            hasConfirmedTargetStaircase:
+                presentation.confirmedTargetStaircaseYear !== null,
+            sharedZeroSupport: marker?.support ?? 0,
+        });
         const whole = detected.find((event) => event.eventType === "wholeSeriesMove");
         const wholeShift = wholeSeriesMoveShiftYears(whole);
         const independentWholeBaseline = wholeShift !== null
