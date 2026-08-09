@@ -622,6 +622,90 @@ const evidenceNoteNumber = (
     return Number.isFinite(value) ? value : undefined;
 };
 
+type PartialMoveLocalConsensusRecenter = {
+    window: { startYear: number; endYear: number };
+    centerYear: number;
+    supportCount: number;
+    discardedWindow: { startYear: number; endYear: number };
+};
+
+/**
+ * A diffuse full-interval profile may drift onto the newer-side plateau even when the
+ * pre-locator breakpoint, local raw residual, and per-reference votes agree locally.
+ * Keep the already calibrated local window only when all operation-consistent channels
+ * agree and the default 13-year mode has become completely disconnected from it.
+ */
+export const selectPartialMoveLocalConsensusRecenter = (input: {
+    event: DiagnosisEvent;
+    correctionYears: number;
+    proposedWindow: { startYear: number; endYear: number };
+    calibrationRule: string | undefined;
+}): PartialMoveLocalConsensusRecenter | null => {
+    const { event, correctionYears, proposedWindow } = input;
+    if (
+        event.eventType !== "partialMove"
+        || input.calibrationRule !== "calibrated_default_13"
+        || proposedWindow.startYear <= event.endYear
+        || !event.evidence.algorithmSources.includes(
+            "local_corrected_raw_breakpoint",
+        )
+        || !event.evidence.algorithmSources.includes("piecewise_lag_path")
+    ) return null;
+
+    const currentWidth = event.endYear - event.startYear + 1;
+    if (![5, 7, 9, 13].includes(currentWidth)) return null;
+    const currentPrimaryYear = event.rankedYears
+        .slice()
+        .sort((left, right) => left.rank - right.rank)[0]?.year;
+    if (currentPrimaryYear === undefined) return null;
+
+    const consistentVoteYear = (
+        prefix: "partial_reference_vote" | "partial_exhaustive_vote",
+    ): number | undefined => {
+        const year = evidenceNoteNumber(event, `${prefix}_year=`);
+        const shift = evidenceNoteNumber(event, `${prefix}_shift=`);
+        const gain = evidenceNoteNumber(event, `${prefix}_gain=`);
+        const margin = evidenceNoteNumber(event, `${prefix}_margin=`);
+        return Number.isInteger(year)
+            && shift === correctionYears
+            && (gain ?? Number.NEGATIVE_INFINITY) >= 0.02
+            && (margin ?? Number.NEGATIVE_INFINITY) >= 0.01
+            ? year
+            : undefined;
+    };
+    const referenceVoteYear = consistentVoteYear("partial_reference_vote");
+    const exhaustiveVoteYear = consistentVoteYear("partial_exhaustive_vote");
+    const localBoundaryYear = evidenceNoteNumber(event, "local_raw_boundary_year=");
+    const localBoundarySupport = evidenceNoteNumber(
+        event,
+        "local_raw_boundary_support=",
+    ) ?? 0;
+    if (
+        referenceVoteYear === undefined
+        || exhaustiveVoteYear === undefined
+        || localBoundaryYear === undefined
+        || localBoundarySupport < 2
+    ) return null;
+
+    const evidenceYears = [
+        currentPrimaryYear,
+        localBoundaryYear,
+        referenceVoteYear,
+        exhaustiveVoteYear,
+    ];
+    if (evidenceYears.some((year) => (
+        year < event.startYear - 1 || year > event.endYear + 1
+    ))) return null;
+    if (Math.max(...evidenceYears) - Math.min(...evidenceYears) > 4) return null;
+
+    return {
+        window: { startYear: event.startYear, endYear: event.endYear },
+        centerYear: Math.floor(median(evidenceYears)),
+        supportCount: evidenceYears.length,
+        discardedWindow: { ...proposedWindow },
+    };
+};
+
 const valueForCumulative = (
     row: CumulativeLagChangePointScore,
     profile: ProfileName,
@@ -1619,6 +1703,18 @@ export const refineEventWithCounterfactualLocator = (
     if (directFalseRingRecenter) {
         finalWindow = directFalseRingRecenter.window;
     }
+    const partialLocalConsensusRecenter = event.eventType === "partialMove"
+        ? selectPartialMoveLocalConsensusRecenter({
+                event,
+                correctionYears,
+                proposedWindow: finalWindow,
+                calibrationRule: preliminaryCalibrationRule,
+            })
+        : null;
+    if (partialLocalConsensusRecenter) {
+        finalWindow = partialLocalConsensusRecenter.window;
+        finalCalibratedWidth = finalWindow.endYear - finalWindow.startYear + 1;
+    }
     const localConsensusBoundaryShift = unitEventType
         ? selectLocalConsensusBoundaryShift({
                 window: finalWindow,
@@ -1638,9 +1734,11 @@ export const refineEventWithCounterfactualLocator = (
     if (localConsensusBoundaryShift) {
         finalWindow = localConsensusBoundaryShift.window;
     }
-    const finalCalibrationRule = missingPhysicalRecenter
-        ? `unit_event_missing_${missingPhysicalRecenter.rule}`
-        : physicalFalseRingRecenter
+    const finalCalibrationRule = partialLocalConsensusRecenter
+        ? "partial_local_consensus_recenter"
+        : missingPhysicalRecenter
+            ? `unit_event_missing_${missingPhysicalRecenter.rule}`
+            : physicalFalseRingRecenter
             ? "unit_event_false_merge_older_physical_recenter"
             : directFalseRingRecenter
                 ? "unit_event_false_direct_consensus_recenter"
@@ -1933,6 +2031,9 @@ export const refineEventWithCounterfactualLocator = (
                     ...(localConsensusBoundaryShift
                         ? ["local_consensus_boundary_shift"]
                         : []),
+                    ...(partialLocalConsensusRecenter
+                        ? ["partial_local_consensus_recenter"]
+                        : []),
                 ])).sort(),
                 notes: [
                     ...event.evidence.notes,
@@ -2012,6 +2113,19 @@ export const refineEventWithCounterfactualLocator = (
                         }`,
                         `local_consensus_boundary_shift_years=${
                             localConsensusBoundaryShift.shiftYears
+                        }`,
+                    ] : []),
+                    ...(partialLocalConsensusRecenter ? [
+                        `partial_local_consensus_center_year=${
+                            partialLocalConsensusRecenter.centerYear
+                        }`,
+                        `partial_local_consensus_support_count=${
+                            partialLocalConsensusRecenter.supportCount
+                        }`,
+                        `partial_local_consensus_discarded_window=${
+                            partialLocalConsensusRecenter.discardedWindow.startYear
+                        }-${
+                            partialLocalConsensusRecenter.discardedWindow.endYear
                         }`,
                     ] : []),
                     `counterfactual_mode_window=${

@@ -1,10 +1,59 @@
 import { describe, expect, it } from "vitest";
 import {
     selectLocalConsensusBoundaryShift,
+    selectPartialMoveLocalConsensusRecenter,
     selectCorroboratedFalseRingCurrentCandidateIndex,
     selectCounterfactualCoarseCandidateIndex,
     selectFalseRingCoarseCandidateIndex,
 } from "../counterfactualEventLocator";
+import type { DiagnosisEvent } from "../types";
+
+const localPartialEvent = (notes: string[]): DiagnosisEvent => ({
+    id: "partial-local-consensus",
+    seriesId: "TARGET",
+    eventType: "partialMove",
+    startYear: 1795,
+    endYear: 1803,
+    rankedYears: [{
+        year: 1799,
+        rank: 1,
+        score: 1,
+        evidenceTags: [],
+    }],
+    confidenceLevel: "medium",
+    shiftYears: -2,
+    shiftSide: "older",
+    evidence: {
+        algorithmSources: [
+            "local_corrected_raw_breakpoint",
+            "piecewise_lag_path",
+        ],
+        score: 1,
+        scoreMargin: 0.1,
+        baselineCorrelation: 0.3,
+        correctedCorrelation: 0.6,
+        correlationGain: 0.3,
+        lagBefore: -2,
+        lagAfter: 0,
+        samplePairs: 40,
+        candidateIds: ["partial-candidate"],
+        notes,
+    },
+    alternativeTypes: [],
+});
+
+const localPartialNotes = [
+    "local_raw_boundary_year=1799",
+    "local_raw_boundary_support=2",
+    "partial_reference_vote_year=1802",
+    "partial_reference_vote_shift=-2",
+    "partial_reference_vote_gain=0.149899",
+    "partial_reference_vote_margin=0.017845",
+    "partial_exhaustive_vote_year=1802",
+    "partial_exhaustive_vote_shift=-2",
+    "partial_exhaustive_vote_gain=0.240447",
+    "partial_exhaustive_vote_margin=0.018906",
+];
 
 describe("counterfactual coarse-mode selection", () => {
     const candidates = [
@@ -164,6 +213,43 @@ describe("counterfactual coarse-mode selection", () => {
             ...base,
             evidenceYears: [1946, 1946, 1947, 1958],
             anchorYear: 1955,
+        })).toBeNull();
+    });
+
+    it("keeps a compact operation-consistent partial window over a detached diffuse mode", () => {
+        expect(selectPartialMoveLocalConsensusRecenter({
+            event: localPartialEvent(localPartialNotes),
+            correctionYears: -2,
+            proposedWindow: { startYear: 1805, endYear: 1817 },
+            calibrationRule: "calibrated_default_13",
+        })).toEqual({
+            window: { startYear: 1795, endYear: 1803 },
+            centerYear: 1800,
+            supportCount: 4,
+            discardedWindow: { startYear: 1805, endYear: 1817 },
+        });
+    });
+
+    it("does not keep the local partial window without independent concentrated support", () => {
+        const input = {
+            event: localPartialEvent(localPartialNotes),
+            correctionYears: -2,
+            proposedWindow: { startYear: 1805, endYear: 1817 },
+            calibrationRule: "calibrated_default_13",
+        };
+        expect(selectPartialMoveLocalConsensusRecenter({
+            ...input,
+            event: localPartialEvent(localPartialNotes.filter((note) => (
+                !note.startsWith("partial_exhaustive_vote_")
+            ))),
+        })).toBeNull();
+        expect(selectPartialMoveLocalConsensusRecenter({
+            ...input,
+            proposedWindow: { startYear: 1803, endYear: 1815 },
+        })).toBeNull();
+        expect(selectPartialMoveLocalConsensusRecenter({
+            ...input,
+            calibrationRule: "partial_physical_consensus_7",
         })).toBeNull();
     });
 

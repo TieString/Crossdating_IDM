@@ -398,6 +398,126 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
             .toContain("robust_per_reference_missing_staircase");
     }, 180_000);
 
+    bundledCofechaIt("keeps the mtr721 1801-1802 physical gap visible before and after save", () => {
+        const seriesId = "mtr721";
+        const firstFixedYear = 1803;
+        const gapYears = 2;
+        const source = parsed.get(seriesId)!;
+        const cleanDisplayed = getDisplayedDiagnosisEvents(diagnoseCrossdating(
+            cleanSite,
+            {
+                referenceConfig,
+                targetTrees: [seriesId],
+                reviewWindowDisplayMode: "review",
+                includeEventDecisionAudits: true,
+            },
+        )).filter((event) => event.seriesId === seriesId);
+        const physical = createPartialRangeMoveCase(
+            source,
+            firstFixedYear,
+            gapYears,
+        );
+        const site = new Map(cleanSite);
+        site.set(seriesId, physical.corrupted);
+        const beforeSave = diagnoseCrossdating(site, {
+            referenceConfig,
+            targetTrees: [seriesId],
+            reviewWindowDisplayMode: "review",
+            includeEventDecisionAudits: true,
+        });
+
+        const outText = runBundledCofecha(site);
+        const parts = splitReportByParts(outText);
+        const freshReference = createCofechaMasterReferenceConfig({
+            siteData: site,
+            flaggedAIds: extractPart6FlaggedASeriesIds(parts.get("PART 6") ?? ""),
+            cofechaRunId: "co612-mtr721-physical-gap-1803",
+            rwlHash: "co612-mtr721-physical-gap-1803",
+            masterDatingSeries: parseCofechaResult(outText).masterDatingSeries,
+        });
+        const afterSave = diagnoseCrossdating(site, {
+            referenceConfig: freshReference,
+            targetTrees: [seriesId],
+            cofechaText: outText,
+            reviewWindowDisplayMode: "review",
+            includeEventDecisionAudits: true,
+        });
+        const displayedByState = [beforeSave, afterSave].map((diagnosis) => (
+            getDisplayedDiagnosisEvents(diagnosis)
+                .filter((event) => event.seriesId === seriesId)
+        ));
+        const auditSummary = (diagnosis: typeof beforeSave) => {
+            const audit = diagnosis.eventDecisionAudits?.[0];
+            const events = (rows: NonNullable<typeof audit>["finalEvents"]) => rows.map(
+                (event) => ({
+                    type: event.eventType,
+                    range: [event.startYear, event.endYear],
+                    topYear: event.topYear,
+                    shiftYears: event.shiftYears,
+                    lag: [event.lagBefore, event.lagAfter],
+                    sources: event.algorithmSources,
+                }),
+            );
+            return audit ? {
+                finalReason: audit.finalReason,
+                pass: audit.pass,
+                candidates: audit.candidates,
+                candidateProjected: events(audit.candidateProjectedEvents),
+                detectedBeforeFusion: events(audit.detectedBeforeFusion),
+                detectedAfterFusion: events(audit.detectedAfterFusion),
+                retained: events(audit.retainedAfterEndpointGuard),
+                displayed: events(audit.displayedBeforeLocator),
+                final: events(audit.finalEvents),
+                finalNotes: diagnosis.events[0]?.evidence.notes.filter((note) => (
+                    note.startsWith("counterfactual_")
+                    || note.startsWith("candidate_")
+                    || note.startsWith("partial_")
+                    || note.startsWith("local_")
+                    || note.startsWith("scan_")
+                    || note.startsWith("paired_")
+                )),
+            } : null;
+        };
+        const failureContext = JSON.stringify({
+            before: summarize(displayedByState[0]),
+            after: summarize(displayedByState[1]),
+            beforeAudit: auditSummary(beforeSave),
+            afterAudit: auditSummary(afterSave),
+        });
+
+        expect(source.valuesByYear.get(1803)).toBe(0);
+        expect(
+            cleanDisplayed.filter((event) => event.eventType === "partialMove"),
+            JSON.stringify(summarize(cleanDisplayed)),
+        ).toEqual([]);
+        expect(physical.corrupted.get(1800)).toBe(source.valuesByYear.get(1798));
+        expect(physical.corrupted.get(1801)).toBe(source.valuesByYear.get(1799));
+        expect(physical.corrupted.get(1802)).toBe(source.valuesByYear.get(1800));
+        expect(physical.corrupted.get(1803)).toBe(source.valuesByYear.get(1803));
+        displayedByState.forEach((events) => {
+            const [event] = events;
+            expect(events, failureContext).toHaveLength(1);
+            expect(event.eventType, failureContext).toBe("partialMove");
+            expect(event.shiftYears, failureContext).toBe(-gapYears);
+            expect(event.startYear, failureContext).toBeLessThanOrEqual(firstFixedYear);
+            expect(event.endYear, failureContext).toBeGreaterThanOrEqual(firstFixedYear);
+            expect([5, 7, 9, 13], failureContext).toContain(
+                event.endYear - event.startYear + 1,
+            );
+            expect(event.rankedYears.some((row) => row.year === firstFixedYear), failureContext)
+                .toBe(true);
+            expect(event.evidence.algorithmSources, failureContext)
+                .toContain("partial_local_consensus_recenter");
+        });
+        expect(
+            [displayedByState[1][0].startYear, displayedByState[1][0].endYear],
+            failureContext,
+        ).toEqual([
+            displayedByState[0][0].startYear,
+            displayedByState[0][0].endYear,
+        ]);
+    }, 180_000);
+
     bundledCofechaIt("reveals all mtr841 missing rings without a partial-move detour", () => {
         const mtr841 = parsed.get("mtr841")!;
         const mtrZeroYears = Array.from(mtr841.valuesByYear)
