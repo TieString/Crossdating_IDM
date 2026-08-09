@@ -5,7 +5,7 @@ import { moveSeriesTailByOffset as previewMoveSeriesTailByOffset } from '@/featu
 import { BayesianDateButton } from '@/features/rwl/components/BayesianDateButton';
 import type { BayesianDatingCandidate, BayesianMcmcDatingResult } from '@/features/rwl/bayesianDating';
 import type { CofechaPassReference } from '@/features/crossdating/reference';
-import type { DeleteMode, DeleteShift, DeletionMarkerInfo, RwlDeletionMarkers, RwlHistoryAnimation } from '@/features/rwl/edit';
+import type { DeleteMode, DeleteShift, DeletionMarkerInfo, RwlDeletionMarkers, RwlHistoryAnimation, RwlMoveConflictPolicy } from '@/features/rwl/edit';
 import { RollingNumber } from '@/components/RollingNumber/RollingNumber';
 import WidthGrid from './WidthGrid';
 import WidthGridContextMenu from './WidthGridContextMenu';
@@ -711,7 +711,13 @@ export type WidthContainerProps = {
     /** Inserts a missing year on the requested side of an existing year. */
     onInsertMissingYearAtSide?: (tree: string, year: number, side: PlusSide) => void,
     /** Moves the selected tail/range by a year offset. */
-    onMoveSeriesTailByOffset?: (tree: string, selectedStartYear: number, selectedEndYear: number, yearOffset: number) => void,
+    onMoveSeriesTailByOffset?: (
+        tree: string,
+        selectedStartYear: number,
+        selectedEndYear: number,
+        yearOffset: number,
+        conflictPolicy?: RwlMoveConflictPolicy,
+    ) => void,
     /** Deletes one year and applies the selected redistribution mode. */
     onDeleteYearWithMode?: (tree: string, year: number, mode: DeleteMode, shift?: DeleteShift) => void,
     /** Marks a year range as missing. */
@@ -2449,20 +2455,14 @@ function WidthContainer({
                     })
                 : [];
 
-            if (overwrittenYears.length > 0) {
-                window.alert(
-                    `无法移动：目标年份已有固定数据（${overwrittenYears.join("、")}）。请先调整片段范围或移动方向。`,
-                );
-                setSelection(normalizeSelection(
+            flushSync(() => {
+                onMoveSeriesTailByOffset?.(
                     interaction.tree,
                     interaction.startYear,
                     interaction.endYear,
-                ));
-                return;
-            }
-
-            flushSync(() => {
-                onMoveSeriesTailByOffset?.(interaction.tree, interaction.startYear, interaction.endYear, interaction.yearOffset);
+                    interaction.yearOffset,
+                    "overwrite",
+                );
                 setSelection(targetSelection);
                 if (animationsEnabled) {
                     showAnimationPlan({

@@ -32,7 +32,7 @@ import {
     RwlMoveConflictError,
     registerChangeYearWidth,
 } from "@/features/rwl/edit";
-import type { DeleteMode, DeleteShift, RwlDeletionMarkers, RwlHistoryAnimation, RwlHistoryStatus, RwlOperationLogEntry } from "@/features/rwl/edit";
+import type { DeleteMode, DeleteShift, RwlDeletionMarkers, RwlHistoryAnimation, RwlHistoryStatus, RwlMoveConflictPolicy, RwlOperationLogEntry } from "@/features/rwl/edit";
 import type { RwlSiteData } from "@/features/rwl/types";
 import { runCofecha } from "@/services/cofecha/runner";
 import { readRwlFile, saveFile } from "@/services/fs/io";
@@ -1093,13 +1093,21 @@ export function useHomeWorkspace() {
         rwlEditorRef.current.insertMissingYearAtSide(tree, nextYear, side);
     }, []);
 
-    const handleMoveSeriesTailByOffset = useCallback((tree: string, selectedStartYear: number, selectedEndYear: number, yearOffset: number) => {
+    const handleMoveSeriesTailByOffset = useCallback((
+        tree: string,
+        selectedStartYear: number,
+        selectedEndYear: number,
+        yearOffset: number,
+        conflictPolicy: RwlMoveConflictPolicy = "reject",
+    ) => {
         try {
             rwlEditorRef.current.moveSeriesTailByOffset(
                 tree,
                 selectedStartYear,
                 selectedEndYear,
                 yearOffset,
+                undefined,
+                conflictPolicy,
             );
         } catch (error) {
             if (error instanceof RwlMoveConflictError) {

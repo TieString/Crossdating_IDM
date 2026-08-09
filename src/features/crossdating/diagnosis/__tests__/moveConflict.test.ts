@@ -33,6 +33,33 @@ describe("partial-range move conflicts", () => {
         expect(editor.getHistoryStatus().undoCount).toBe(0);
     });
 
+    it("allows an explicit drag overwrite and keeps it undoable", () => {
+        const editor = new RwlEditor(new Map([["TARGET", tree]]));
+
+        editor.moveSeriesTailByOffset(
+            "TARGET",
+            1898,
+            1903,
+            2,
+            undefined,
+            "overwrite",
+        );
+
+        expect([...editor.getData().get("TARGET")!.entries()]).toEqual([
+            [1900, 10],
+            [1901, 20],
+            [1902, 30],
+            [1903, 40],
+            [1904, 50],
+            [1905, 60],
+        ]);
+        expect(editor.getHistoryStatus().undoCount).toBe(1);
+
+        editor.undo();
+        expect([...editor.getData().get("TARGET")!.entries()])
+            .toEqual([...tree.entries()]);
+    });
+
     it("moves the older side negatively without changing firstFixedYear onward", () => {
         expect(getSeriesMoveConflicts(tree, 1898, 1903, -4)).toEqual([]);
         const editor = new RwlEditor(new Map([["TARGET", tree]]));

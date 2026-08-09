@@ -588,6 +588,8 @@ export const getSeriesMoveConflicts = (
         .sort((left, right) => left - right);
 };
 
+export type RwlMoveConflictPolicy = "reject" | "overwrite";
+
 export class RwlMoveConflictError extends Error {
     readonly conflictYears: number[];
 
@@ -644,7 +646,7 @@ export function moveSeriesTailByOffset(
         }
     });
 
-    // The editor and interactive callers reject fixed-range collisions before this transform.
+    // Moved values are written last so explicit overwrite moves replace destination values.
     selectedEntries.forEach(([year, width]) => {
         next.set(year + yearOffset, width);
     });
@@ -1203,17 +1205,20 @@ export class RwlEditor {
         selectedEndYear: number,
         yearOffset: number,
         logMetadata?: RwlOperationLogMetadata,
+        conflictPolicy: RwlMoveConflictPolicy = "reject",
     ): void {
         if (yearOffset === 0) return;
         if (!this.rwlData.has(tree)) return;
         const treeData = this.rwlData.get(tree)!;
-        const conflicts = getSeriesMoveConflicts(
-            treeData,
-            selectedStartYear,
-            selectedEndYear,
-            yearOffset,
-        );
-        if (conflicts.length > 0) throw new RwlMoveConflictError(conflicts);
+        if (conflictPolicy === "reject") {
+            const conflicts = getSeriesMoveConflicts(
+                treeData,
+                selectedStartYear,
+                selectedEndYear,
+                yearOffset,
+            );
+            if (conflicts.length > 0) throw new RwlMoveConflictError(conflicts);
+        }
 
         const operation: RwlEditOperation = { type: "move-selection", tree, selectedStartYear, selectedEndYear, yearOffset };
         const beforeState = this.captureTreeLogState(tree);
