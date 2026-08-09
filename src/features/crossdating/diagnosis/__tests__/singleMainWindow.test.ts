@@ -3,6 +3,7 @@ import type { DiagnosisEvent } from "../types";
 import {
     INTERNAL_EVENT_ENSEMBLE_OPTIONS,
     keepSingleMainWindow,
+    selectFalseRingContinuedEdgeRecenterShift,
     selectFalseRingConsensusWindowShift,
 } from "../eventEnsemble";
 
@@ -320,5 +321,79 @@ describe("single main diagnosis window", () => {
         };
 
         expect(selectFalseRingConsensusWindowShift(primary)).toBe(0);
+    });
+
+    it("recenters one 9-year window after two same-direction edge advances", () => {
+        const primary = {
+            ...event(),
+            eventType: "falseRing" as const,
+            startYear: 1881,
+            endYear: 1889,
+            rankedYears: Array.from({ length: 9 }, (_, index) => ({
+                year: 1881 + index,
+                rank: index === 6 ? 1 : index + 2,
+                score: index === 6 ? 2 : 1,
+                evidenceTags: [],
+            })),
+            locationAlternatives: [{
+                rank: 1,
+                startYear: 1885,
+                endYear: 1891,
+                rankedYears: [],
+                evidenceScore: 1,
+                scoreMargin: 0,
+                algorithmSource: "continued_edge_guard_location",
+            }],
+            evidence: {
+                ...event().evidence,
+                algorithmSources: [
+                    "continued_edge_guard_location",
+                    "edge_rank_guard",
+                    "joint_event_counterfactual",
+                ],
+                notes: [
+                    "window_refinement=joint_event_edge_nudge",
+                    "window_before=1880-1886",
+                    "window_refinement=edge_rank_guard",
+                    "window_before=1881-1887",
+                ],
+            },
+        };
+
+        expect(selectFalseRingContinuedEdgeRecenterShift(primary)).toBe(2);
+        const result = keepSingleMainWindow(primary);
+        expect([result.startYear, result.endYear]).toEqual([1883, 1891]);
+        expect(result.rankedYears[0]).toMatchObject({ year: 1887, rank: 1 });
+        expect(result.locationAlternatives).toBeUndefined();
+        expect(result.evidence.algorithmSources).toContain(
+            "false_ring_continued_edge_recenter",
+        );
+    });
+
+    it("does not recenter from one edge guard without the preceding advance", () => {
+        const primary = {
+            ...event(),
+            eventType: "falseRing" as const,
+            startYear: 1881,
+            endYear: 1889,
+            rankedYears: [{ year: 1887, rank: 1, score: 2, evidenceTags: [] }],
+            evidence: {
+                ...event().evidence,
+                algorithmSources: [
+                    "continued_edge_guard_location",
+                    "edge_rank_guard",
+                ],
+                notes: [
+                    "window_refinement=edge_rank_guard",
+                    "window_before=1881-1887",
+                ],
+            },
+        };
+
+        expect(selectFalseRingContinuedEdgeRecenterShift(primary)).toBe(0);
+        expect(keepSingleMainWindow(primary)).toMatchObject({
+            startYear: 1881,
+            endYear: 1889,
+        });
     });
 });

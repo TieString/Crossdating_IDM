@@ -4169,6 +4169,50 @@ export const selectFalseRingConsensusWindowShift = (
         : 0;
 };
 
+type ContinuedEdgeRecenterShift = -2 | 0 | 2;
+
+/** Recenters only after two same-direction edge advances and a retained continuation window. */
+export const selectFalseRingContinuedEdgeRecenterShift = (
+    event: DiagnosisEvent,
+): ContinuedEdgeRecenterShift => {
+    if (event.eventType !== "falseRing"
+        || event.endYear - event.startYear + 1 !== 9
+        || !event.evidence.algorithmSources.includes("edge_rank_guard")
+        || !event.evidence.algorithmSources.includes("continued_edge_guard_location")
+        || !event.evidence.notes.includes("window_refinement=joint_event_edge_nudge")) {
+        return 0;
+    }
+    const topYear = [...event.rankedYears]
+        .sort((left, right) => left.rank - right.rank)[0]?.year;
+    if (topYear === undefined) return 0;
+    const centerYear = Math.floor((event.startYear + event.endYear) / 2);
+    const shift = topYear - centerYear;
+    if (shift !== -2 && shift !== 2) return 0;
+    const direction = Math.sign(shift);
+    const priorWindows = event.evidence.notes.flatMap((note) => {
+        const match = note.match(/^window_before=(-?\d+)-(-?\d+)$/);
+        return match ? [{ startYear: Number(match[1]), endYear: Number(match[2]) }] : [];
+    });
+    const [olderWindow, newerWindow] = priorWindows.slice(-2);
+    if (!olderWindow || !newerWindow
+        || newerWindow.startYear - olderWindow.startYear !== direction
+        || newerWindow.endYear - olderWindow.endYear !== direction
+        || (direction > 0 ? topYear !== newerWindow.endYear : topYear !== newerWindow.startYear)
+        || (direction > 0
+            ? event.startYear !== newerWindow.startYear
+                || event.endYear !== newerWindow.endYear + 2
+            : event.startYear !== newerWindow.startYear - 2
+                || event.endYear !== newerWindow.endYear)) {
+        return 0;
+    }
+    const hasContinuation = event.locationAlternatives?.some((location) => (
+        direction > 0
+            ? location.endYear === event.endYear + 2
+            : location.startYear === event.startYear - 2
+    )) ?? false;
+    return hasContinuation ? shift : 0;
+};
+
 const compactMainWindow = (
     event: DiagnosisEvent,
     centerYear: number,
@@ -4228,7 +4272,9 @@ const trimMainWindowNewerEdge = (
 
 const shiftMainWindow = (
     event: DiagnosisEvent,
-    direction: -1 | 1,
+    direction: -2 | -1 | 1 | 2,
+    algorithmSource = "false_ring_directional_consensus_window_shift",
+    refinement = "false_ring_directional_consensus_shift",
 ): DiagnosisEvent => {
     const startYear = event.startYear + direction;
     const endYear = event.endYear + direction;
@@ -4261,15 +4307,29 @@ const shiftMainWindow = (
             ...event.evidence,
             algorithmSources: Array.from(new Set([
                 ...event.evidence.algorithmSources,
-                "false_ring_directional_consensus_window_shift",
+                algorithmSource,
             ])).sort(),
             notes: [
                 ...event.evidence.notes,
-                "window_refinement=false_ring_directional_consensus_shift",
+                `window_refinement=${refinement}`,
                 `false_ring_window_shift=${direction}`,
             ],
         },
     };
+};
+
+const recenterFalseRingContinuedEdgeMainWindow = (
+    event: DiagnosisEvent,
+): DiagnosisEvent => {
+    const shift = selectFalseRingContinuedEdgeRecenterShift(event);
+    return shift === 0
+        ? event
+        : shiftMainWindow(
+            event,
+            shift,
+            "false_ring_continued_edge_recenter",
+            "false_ring_continued_edge_recenter",
+        );
 };
 
 export const keepSingleMainWindow = (event: DiagnosisEvent): DiagnosisEvent => {
@@ -4345,14 +4405,19 @@ export const keepSingleMainWindow = (event: DiagnosisEvent): DiagnosisEvent => {
             ],
         );
     }
-    const falseRingWindowShift = selectFalseRingConsensusWindowShift(
+    const continuedEdgeRecentered = recenterFalseRingContinuedEdgeMainWindow(
         displayedEvent,
     );
-    if (falseRingWindowShift !== 0) {
-        displayedEvent = shiftMainWindow(
-            displayedEvent,
-            falseRingWindowShift,
-        );
+    if (continuedEdgeRecentered !== displayedEvent) {
+        displayedEvent = continuedEdgeRecentered;
+    } else {
+        const falseRingWindowShift = selectFalseRingConsensusWindowShift(displayedEvent);
+        if (falseRingWindowShift !== 0) {
+            displayedEvent = shiftMainWindow(
+                displayedEvent,
+                falseRingWindowShift,
+            );
+        }
     }
     const primary = {
         ...displayedEvent,
@@ -4367,8 +4432,9 @@ export const keepSingleMainWindow = (event: DiagnosisEvent): DiagnosisEvent => {
 const stripDiagnosisEventAlternatives = (
     event: DiagnosisEvent,
 ): DiagnosisEvent => {
+    const displayedEvent = recenterFalseRingContinuedEdgeMainWindow(event);
     const primary = {
-        ...event,
+        ...displayedEvent,
         alternativeTypes: [],
     };
     delete primary.locationAlternatives;
