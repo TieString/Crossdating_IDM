@@ -19,7 +19,9 @@ import {
 } from "@/features/crossdating/diagnosis/__tests__/rdmFixture";
 import {
     deleteYearWithMode,
+    getSeriesMoveConflicts,
     insertMissingYearAtSide,
+    moveSeriesTailByOffset,
 } from "@/features/rwl/edit";
 import type { RwlSiteData } from "@/features/rwl/types";
 import {
@@ -36,10 +38,13 @@ import {
 import type { LegacyDiagnosisSnapshot } from "./legacy-generalization/types";
 
 type UnitEventType = "missingRing" | "falseRing";
+type LocalEventType = UnitEventType | "partialMove";
 type Orientation = "missingThenFalse"
     | "falseThenMissing"
     | "missingThenMissing"
-    | "falseThenFalse";
+    | "falseThenFalse"
+    | "missingThenPartial"
+    | "partialThenMissing";
 type PositionStratum = "older" | "middle" | "newer";
 type TruthSide = "older" | "newer";
 type OperationIdentifiability = "operation-identifiable" | "operation-unidentifiable";
@@ -49,14 +54,16 @@ const ALL_ORIENTATIONS: readonly Orientation[] = [
     "falseThenMissing",
     "missingThenMissing",
     "falseThenFalse",
+    "missingThenPartial",
+    "partialThenMissing",
 ];
 
 type TruthSpec = {
     truthId: string;
     side: TruthSide;
-    eventType: UnitEventType;
+    eventType: LocalEventType;
     year: number;
-    shiftYears: -1 | 1;
+    shiftYears: number;
 };
 
 type ControlSpec = {
@@ -70,6 +77,7 @@ type ScenarioSpec = {
     targetId: string;
     orientation: Orientation;
     spacingYears: number;
+    partialShiftYears: number | null;
     positionStratum: PositionStratum;
     identifiability: OperationIdentifiability;
     truths: [TruthSpec, TruthSpec];
@@ -83,7 +91,7 @@ type WorkItem = {
 };
 
 type Manifest = {
-    schemaVersion: 2;
+    schemaVersion: 3;
     createdAt: string;
     inputPath: string;
     sourceSha256: string;
@@ -92,6 +100,7 @@ type Manifest = {
     falseRingMode: "moderate";
     orientations: Orientation[];
     spacings: number[];
+    partialShifts: number[];
     positions: Array<{ stratum: PositionStratum; fraction: number }>;
     selection: {
         minimumSeriesLength: number;
@@ -193,6 +202,7 @@ type ScenarioResult = {
     targetId: string;
     orientation: Orientation;
     spacingYears: number;
+    partialShiftYears: number | null;
     positionStratum: PositionStratum;
     identifiability: OperationIdentifiability;
     initialTruths: TruthSpec[];
@@ -250,6 +260,10 @@ const spacings = (valueFor("--spacings") ?? "2,9,21")
     .split(",")
     .map(Number)
     .filter((value) => Number.isInteger(value) && value >= 1);
+const partialShifts = (valueFor("--partial-shifts") ?? "-2,-6,-20")
+    .split(",")
+    .map(Number)
+    .filter((value) => Number.isInteger(value) && value <= -2 && value >= -100);
 const requestedOrientations = (valueFor("--orientations")
     ?? "missingThenFalse,falseThenMissing")
     .split(",")
@@ -261,11 +275,23 @@ if (invalidOrientations.length > 0) {
     throw new Error(`invalid orientations: ${invalidOrientations.join(",")}`);
 }
 const orientations = requestedOrientations as Orientation[];
-const positions: Manifest["positions"] = [
-    { stratum: "older", fraction: 0.25 },
-    { stratum: "middle", fraction: 0.5 },
-    { stratum: "newer", fraction: 0.75 },
-];
+const requestedPositionFractions = (valueFor("--position-fractions") ?? "0.25,0.5,0.75")
+    .split(",")
+    .map(Number);
+if (requestedPositionFractions.length !== 3
+    || requestedPositionFractions.some((value) => (
+        !Number.isFinite(value) || value <= 0 || value >= 1
+    ))) {
+    throw new Error("position fractions must contain exactly three values between 0 and 1");
+}
+const positions: Manifest["positions"] = ([
+    "older",
+    "middle",
+    "newer",
+] as const).map((stratum, index) => ({
+    stratum,
+    fraction: requestedPositionFractions[index],
+}));
 const cofechaExe = resolve(valueFor("--cofecha-exe") ?? fileURLToPath(new URL(
     "../src-tauri/bin/cofecha-x86_64-pc-windows-msvc.exe",
     import.meta.url,
@@ -412,8 +438,12 @@ const evaluateEvent = (
     event: DiagnosisEvent | null,
     truths: readonly TruthSpec[],
 ): EventEvaluation => {
+    const predictedShift = eventShift(event);
     const sameOperation = event
-        ? truths.filter((truth) => truth.eventType === event.eventType)
+        ? truths.filter((truth) => (
+            truth.eventType === event.eventType
+            && (truth.eventType !== "partialMove" || truth.shiftYears === predictedShift)
+        ))
         : [];
     const covered = event
         ? sameOperation.filter((truth) => (
@@ -434,7 +464,7 @@ const evaluateEvent = (
         matchedTruthId: matched?.truthId ?? null,
         matchedSide: matched?.side ?? null,
         predictedType: event?.eventType ?? null,
-        predictedShiftYears: eventShift(event),
+        predictedShiftYears: predictedShift,
         windowStart: event?.startYear ?? null,
         windowEnd: event?.endYear ?? null,
         topYear,
@@ -457,10 +487,12 @@ const fixtureEvents = (truths: readonly TruthSpec[]): PiecewiseLagEventSpec[] =>
 
 const eventTypesForOrientation = (
     orientation: Orientation,
-): [UnitEventType, UnitEventType] => {
+): [LocalEventType, LocalEventType] => {
     if (orientation === "missingThenFalse") return ["missingRing", "falseRing"];
     if (orientation === "falseThenMissing") return ["falseRing", "missingRing"];
     if (orientation === "missingThenMissing") return ["missingRing", "missingRing"];
+    if (orientation === "missingThenPartial") return ["missingRing", "partialMove"];
+    if (orientation === "partialThenMissing") return ["partialMove", "missingRing"];
     return ["falseRing", "falseRing"];
 };
 
@@ -472,9 +504,37 @@ const applyConfirmedTruth = (
     const next = cloneSite(site);
     const current = next.get(targetId);
     if (!current) throw new Error(`target missing while applying ${truth.truthId}`);
-    next.set(targetId, truth.eventType === "missingRing"
-        ? insertMissingYearAtSide(current, truth.year, "right")
-        : deleteYearWithMode(current, truth.year, "direct", "right"));
+    if (truth.eventType === "missingRing") {
+        next.set(targetId, insertMissingYearAtSide(current, truth.year, "right"));
+    } else if (truth.eventType === "falseRing") {
+        next.set(targetId, deleteYearWithMode(current, truth.year, "direct", "right"));
+    } else {
+        const editableYears = Array.from(current).filter(([, value]) => (
+            value !== -9999
+        )).map(([year]) => year);
+        const selectedStartYear = Math.min(...editableYears);
+        const selectedEndYear = truth.year - 1;
+        const conflicts = getSeriesMoveConflicts(
+            current,
+            selectedStartYear,
+            selectedEndYear,
+            truth.shiftYears,
+        );
+        if (conflicts.length > 0) {
+            throw new Error([
+                `partial truth conflicts while applying ${truth.truthId}`,
+                `firstFixedYear=${truth.year}`,
+                `shiftYears=${truth.shiftYears}`,
+                `conflicts=${conflicts.join(",")}`,
+            ].join(" "));
+        }
+        next.set(targetId, moveSeriesTailByOffset(
+            current,
+            selectedStartYear,
+            selectedEndYear,
+            truth.shiftYears,
+        ));
+    }
     return next;
 };
 
@@ -486,7 +546,7 @@ const transformRemainingTruths = (
     .map((truth) => ({
         ...truth,
         year: truth.year < applied.year
-            ? truth.year + (applied.eventType === "missingRing" ? -1 : 1)
+            ? truth.year + applied.shiftYears
             : truth.year,
     }));
 
@@ -494,10 +554,13 @@ const assertTruthRoundTrip = (
     source: RwlSeries,
     truths: readonly TruthSpec[],
 ): void => {
-    const verifyOrder = (truthIds: string[]): void => {
-        const observedSource = new Map(Array.from(source.valuesByYear).filter(([, value]) => (
-            value !== -9999
-        )));
+    const observedSource = new Map(Array.from(source.valuesByYear).filter(([, value]) => (
+        value !== -9999
+    )));
+    const expectedFinalSize = observedSource.size - truths.reduce((sum, truth) => (
+        sum + (truth.eventType === "partialMove" ? Math.abs(truth.shiftYears) : 0)
+    ), 0);
+    const verifyOrder = (truthIds: string[]): Map<number, number | null> => {
         let site: RwlSiteData = new Map([[
             source.id,
             createPiecewiseLagMixedCase(source, fixtureEvents(truths)).corrupted,
@@ -510,12 +573,12 @@ const assertTruthRoundTrip = (
             remaining = transformRemainingTruths(remaining, truth);
         });
         const final = site.get(source.id);
-        if (!final || remaining.length !== 0 || final.size !== observedSource.size) {
+        if (!final || remaining.length !== 0 || final.size !== expectedFinalSize) {
             const finalYears = final ? Array.from(final.keys()) : [];
             throw new Error([
                 `round-trip shape mismatch: ${source.id}`,
                 `order=${truthIds.join(",")}`,
-                `sourceSize=${observedSource.size}`,
+                `expectedSize=${expectedFinalSize}`,
                 `finalSize=${final?.size ?? 0}`,
                 `sourceRange=${source.startYear}-${source.endYear}`,
                 `finalRange=${Math.min(...finalYears)}-${Math.max(...finalYears)}`,
@@ -537,9 +600,16 @@ const assertTruthRoundTrip = (
         if (mismatch) {
             throw new Error(`round-trip value mismatch: ${source.id}:${mismatch[0]}`);
         }
+        return final;
     };
-    verifyOrder(["older", "newer"]);
-    verifyOrder(["newer", "older"]);
+    const olderFirst = verifyOrder(["older", "newer"]);
+    const newerFirst = verifyOrder(["newer", "older"]);
+    const serialize = (data: Map<number, number | null>): string => JSON.stringify(
+        Array.from(data).sort((left, right) => left[0] - right[0]),
+    );
+    if (serialize(olderFirst) !== serialize(newerFirst)) {
+        throw new Error(`round-trip order mismatch: ${source.id}`);
+    }
 };
 
 const buildManifest = async (): Promise<Manifest> => {
@@ -554,7 +624,12 @@ const buildManifest = async (): Promise<Manifest> => {
     const controlById = new Map<string, ControlSpec>();
     const scenarios: ScenarioSpec[] = [];
     const addControl = (targetId: string, truth: TruthSpec): string => {
-        const controlId = `${targetId}:${truth.eventType}:${truth.year}`;
+        const controlId = [
+            targetId,
+            truth.eventType,
+            truth.shiftYears,
+            truth.year,
+        ].join(":");
         if (!controlById.has(controlId)) {
             controlById.set(controlId, { controlId, targetId, truth });
         }
@@ -569,45 +644,65 @@ const buildManifest = async (): Promise<Manifest> => {
                 );
                 const olderYear = center - Math.floor(spacingYears / 2);
                 const newerYear = olderYear + spacingYears;
-                if (olderYear < series.startYear + 30
-                    || newerYear > series.endYear - 30
+                if (newerYear > series.endYear - 30
                     || !series.valuesByYear.has(olderYear)
                     || !series.valuesByYear.has(newerYear)) return;
                 orientations.forEach((orientation) => {
                     const [olderType, newerType] = eventTypesForOrientation(orientation);
-                    const truths: [TruthSpec, TruthSpec] = [{
-                        truthId: "older",
-                        side: "older",
-                        eventType: olderType,
-                        year: olderYear,
-                        shiftYears: olderType === "missingRing" ? -1 : 1,
-                    }, {
-                        truthId: "newer",
-                        side: "newer",
-                        eventType: newerType,
-                        year: newerYear,
-                        shiftYears: newerType === "missingRing" ? -1 : 1,
-                    }];
-                    const controlIds = truths.map((truth) => (
-                        addControl(series.id, truth)
-                    )) as [string, string];
-                    assertTruthRoundTrip(series, truths);
-                    scenarios.push({
-                        scenarioId: [
-                            series.id,
+                    const usesPartial = olderType === "partialMove"
+                        || newerType === "partialMove";
+                    (usesPartial ? partialShifts : [null]).forEach((partialShiftYears) => {
+                        const shiftFor = (eventType: LocalEventType): number => {
+                            if (eventType === "missingRing") return -1;
+                            if (eventType === "falseRing") return 1;
+                            if (partialShiftYears === null) {
+                                throw new Error("partial orientation missing shift");
+                            }
+                            return partialShiftYears;
+                        };
+                        const truths: [TruthSpec, TruthSpec] = [{
+                            truthId: "older",
+                            side: "older",
+                            eventType: olderType,
+                            year: olderYear,
+                            shiftYears: shiftFor(olderType),
+                        }, {
+                            truthId: "newer",
+                            side: "newer",
+                            eventType: newerType,
+                            year: newerYear,
+                            shiftYears: shiftFor(newerType),
+                        }];
+                        const displayedStartYear = series.startYear - truths.reduce(
+                            (sum, truth) => sum + truth.shiftYears,
+                            0,
+                        );
+                        if (olderYear < displayedStartYear + 30) return;
+                        const controlIds = truths.map((truth) => (
+                            addControl(series.id, truth)
+                        )) as [string, string];
+                        assertTruthRoundTrip(series, truths);
+                        scenarios.push({
+                            scenarioId: [
+                                series.id,
+                                orientation,
+                                partialShiftYears === null
+                                    ? null
+                                    : `shift${partialShiftYears}`,
+                                `gap${spacingYears}`,
+                                stratum,
+                            ].filter((value) => value !== null).join(":"),
+                            targetId: series.id,
                             orientation,
-                            `gap${spacingYears}`,
-                            stratum,
-                        ].join(":"),
-                        targetId: series.id,
-                        orientation,
-                        spacingYears,
-                        positionStratum: stratum,
-                        identifiability: spacingYears === 1
-                            ? "operation-unidentifiable"
-                            : "operation-identifiable",
-                        truths,
-                        controlIds,
+                            spacingYears,
+                            partialShiftYears,
+                            positionStratum: stratum,
+                            identifiability: spacingYears === 1
+                                ? "operation-unidentifiable"
+                                : "operation-identifiable",
+                            truths,
+                            controlIds,
+                        });
                     });
                 });
             });
@@ -641,7 +736,7 @@ const buildManifest = async (): Promise<Manifest> => {
         windowsHide: true,
     }).trim();
     return {
-        schemaVersion: 2,
+        schemaVersion: 3,
         createdAt: new Date().toISOString(),
         inputPath,
         sourceSha256: loaded.sourceSha256,
@@ -650,6 +745,7 @@ const buildManifest = async (): Promise<Manifest> => {
         falseRingMode: "moderate",
         orientations,
         spacings,
+        partialShifts,
         positions,
         selection: {
             minimumSeriesLength,
@@ -835,6 +931,7 @@ const runWorker = async (): Promise<void> => {
                 targetId: spec.targetId,
                 orientation: spec.orientation,
                 spacingYears: spec.spacingYears,
+                partialShiftYears: spec.partialShiftYears,
                 positionStratum: spec.positionStratum,
                 identifiability: spec.identifiability,
                 initialTruths: spec.truths,
@@ -886,6 +983,7 @@ type ScenarioRow = {
     targetId: string;
     orientation: Orientation;
     spacingYears: number;
+    partialShiftYears: number | null;
     positionStratum: PositionStratum;
     identifiability: OperationIdentifiability;
     controlsBothCorrect: boolean;
@@ -1009,6 +1107,7 @@ const aggregate = (manifest: Manifest): void => {
             targetId: scenario.targetId,
             orientation: scenario.orientation,
             spacingYears: scenario.spacingYears,
+            partialShiftYears: scenario.partialShiftYears,
             positionStratum: scenario.positionStratum,
             identifiability: scenario.identifiability,
             controlsBothCorrect,
@@ -1039,7 +1138,7 @@ const aggregate = (manifest: Manifest): void => {
     });
     const sourceSha256After = sha256Bytes(readFileSync(manifest.inputPath));
     const report = {
-        schemaVersion: 2,
+        schemaVersion: 3,
         createdAt: new Date().toISOString(),
         runDir,
         sourceSha256Before: manifest.sourceSha256,
@@ -1051,6 +1150,7 @@ const aggregate = (manifest: Manifest): void => {
         selectedTargets: manifest.selection.selectedTargetIds,
         orientations: manifest.orientations,
         spacings: manifest.spacings,
+        partialShifts: manifest.partialShifts,
         positions: manifest.positions,
         uniqueDiagnosisStates: clean.length
             + controls.length
@@ -1110,6 +1210,10 @@ const aggregate = (manifest: Manifest): void => {
             String(spacing),
             summarizeRows(rows.filter((row) => row.spacingYears === spacing)),
         ])),
+        byPartialShift: Object.fromEntries(manifest.partialShifts.map((shiftYears) => [
+            String(shiftYears),
+            summarizeRows(rows.filter((row) => row.partialShiftYears === shiftYears)),
+        ])),
         byPosition: Object.fromEntries(manifest.positions.map(({ stratum }) => [
             stratum,
             summarizeRows(rows.filter((row) => row.positionStratum === stratum)),
@@ -1130,6 +1234,10 @@ const runParent = async (): Promise<void> => {
     if (!existsSync(cofechaExe)) throw new Error(`COFECHA missing: ${cofechaExe}`);
     if (spacings.length === 0) throw new Error("at least one spacing is required");
     if (orientations.length === 0) throw new Error("at least one orientation is required");
+    if (orientations.some((orientation) => orientation.includes("Partial"))
+        && partialShifts.length === 0) {
+        throw new Error("partial orientations require at least one shift from -2 to -100");
+    }
     rmSync(runDir, { force: true, recursive: true });
     mkdirSync(runDir, { recursive: true });
     const manifest = await buildManifest();

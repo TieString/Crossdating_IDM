@@ -1856,3 +1856,43 @@ gap=9 和 gap=21 的操作均为 29/30，clean review 2/55。B7 完整结果位�
 新分支同样触发 0 次，操作 65/120、窗口 60/120、Top1 21/120、partial 5/120、whole 0/120、
 串行 45/120，与 Round 6D 逐项一致。ZSL RAW/crossdated 13/13、ZSL141 9/9、MCP17A 2/2、
 whole 状态与事件融合 56/56、跨站点混合实验 3/3 均通过，其中 whole 共存仍为 84/84。
+
+### Round 7A：B8 缺轮与局部移动共存的真值隔离基准
+
+先扩展 `benchmark-co612-unit-pulse-composition.ts`，不修改生产算法。新基准支持
+`missingThenPartial` 与 `partialThenMissing` 两种日历顺序，并把 partial 位移量作为操作正确的
+必要条件；例如真值 `partialMove -6` 不能再把 `partialMove -7` 统计为正确。位移量可由命令行
+传入 `-2...-100`，位置比例、事件间距也可独立固定。
+
+串行真值应用统一使用 UI 的 `firstFixedYear` 语义：partial 只移动该年以前的较老侧；应用一个
+事件后，只有更老事件的显示帧年份随该操作位移。每个夹具在进入诊断前必须同时通过以下回环：
+
+1. 先应用较老事件与先应用较新事件得到逐年完全相同的最终数据；
+2. 最终所有非零观测都回到源序列的同一绝对年份；
+3. missingRing 恢复为一个 0，partial 物理缺块保持明确空白；
+4. partial 应用前执行固定侧冲突检查；
+5. 每一步都保存、重开、重新运行 COFECHA 和 truth-blind 诊断；源 RWL 前后 SHA-256 必须相同。
+
+首个 `mon151`、`partial -6`、间距 9 年、旧/中/新三个位置的 6 场景冒烟结果位于
+`D:\软件测试\co612-operation-composition-results\b8-unit-partial-smoke-2026-08-09`。源 SHA-256
+前后均为 `36e6c6a9d0cbc16d1870a1662da553a7b40d5578ea9ede25ff790c556c34667d`，真值回环、保存重开
+和错误检查全部通过；clean review 仍为 2/55。
+
+该基准精确复现了新的失败族：6 个共存场景首轮操作正确为 0。三个已显示的场景都把老侧累计
+lag `-7` 压成一个 `partialMove -7`，而真实解释是一个 `partialMove -6` 加一个
+`missingRing -1`；其余三个拒答。两种顺序都会发生：
+
+- missing 较老、partial 较新时，真实状态为 `-7 -> -6 -> 0`；
+- partial 较老、missing 较新时，真实状态为 `-7 -> -1 -> 0`。
+
+因此问题不是保存后前端没有应用，也不能靠把 `-7` 宽松算作 `-6`。当前完整操作网格只比较
+“一次 partial -7”和单位操作，尚未把“partial -6 + missing -1 的完成态”作为一个联合假设；
+它会把两个边界之一当作累计状态断点。下一步应在同一逐参考芯证据表中联合枚举一个负向
+partial 与一个 missing，先证明中间平台，再只输出其中一个可执行前沿事件。相邻不可辨识情况
+继续单列，不能用它放宽自动拆分门槛。
+
+同提交的 ZSL 当前全文件审计记录在
+`D:\软件测试\ZSL\window-coverage-results\zsl-operation-confusion-current-2026-08-09.json`：RAW 动态
+参考的 14 个当前前沿中响应 13、操作正确 12，剩余为 ZSL102 `missing -> whole -1` 与 ZSL202
+拒答；当前前沿没有 `whole -> partial`。这说明纯 whole 仲裁修复仍生效，而 RAW/crossdated 的
+单前沿回归本身不足以覆盖本轮 B8 串行组合。
