@@ -17,6 +17,7 @@ const head: SequentialMissingHead = {
     headMeanAdvantage: 0.1,
     fixedTailMeanAdvantage: 0.1,
     pathStartLag: -2,
+    unitEventYears: [1880, 1900],
 };
 
 const marker = (year: number): SharedExplicitZeroMarker => ({

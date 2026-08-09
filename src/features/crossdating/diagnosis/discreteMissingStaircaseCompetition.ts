@@ -40,6 +40,35 @@ export type TwoStepUnitDirectionCompetition = {
     referenceLowerQuartileMargin: number;
 };
 
+export type CompletedPartialStaircaseCompetition = {
+    familyShiftYears: number;
+    partialShiftYears: number;
+    partialFirstFixedYear: number;
+    boundaryPriorYear: number;
+    shiftSelectionSource: "cofecha_segment_lag" | "completed_family_profile";
+    missingYears: number[];
+    masterMargin: number;
+    totalReferenceCount: number;
+    ambiguousReferenceCount: number;
+    referenceCount: number;
+    staircaseReferenceSupport: number;
+    staircaseReferenceSupportRatio: number;
+    partialReferenceSupport: number;
+    partialReferenceSupportRatio: number;
+    referenceMedianMargin: number;
+    referenceLowerQuartileMargin: number;
+    referenceUpperQuartileMargin: number;
+    shiftProfiles: Array<{
+        shiftYears: number;
+        referenceCount: number;
+        partialReferenceSupport: number;
+        partialReferenceSupportRatio: number;
+        referenceMedianMargin: number;
+        referenceUpperQuartileMargin: number;
+        masterScore: number;
+    }>;
+};
+
 const MAX_TWO_STEP_SEPARATION_YEARS = 17;
 const MAX_HEAD_BOUNDARY_OFFSET_YEARS = 4;
 
@@ -103,6 +132,7 @@ type Views = {
 type ScoredCorrection = {
     years: number[];
     firstFixedYear: number | null;
+    shiftYears?: number;
     corrected: NumericSeries;
     views: Views;
     globalScore: number;
@@ -402,6 +432,284 @@ export const compareTwoStepUnitDirections = (
         referenceSupportRatio: referenceSupport / Math.max(1, referenceMargins.length),
         referenceMedianMargin: median(referenceMargins),
         referenceLowerQuartileMargin: quantile(referenceMargins, 0.25),
+    };
+};
+
+/**
+ * Compares two complete explanations of the same cumulative negative lag: one continuous
+ * partial move versus every unit insertion implied by the monotone lag path. Comparing a
+ * single insertion while the remaining staircase is unresolved is not a fair family test.
+ */
+export const compareCompletedPartialWithMissingStaircase = (
+    diagnosis: SeriesCoreDiagnosis,
+    siteData: RwlSiteData,
+    candidateEvents: readonly DiagnosisEvent[],
+    pathMissingYears: readonly number[],
+    useCofechaStandardization = true,
+): CompletedPartialStaircaseCompetition | null => {
+    const range = diagnosis.targetRange;
+    const eligiblePartials = candidateEvents.flatMap((event) => {
+        const firstFixedYear = event.rankedYears.slice().sort(
+            (left, right) => left.rank - right.rank,
+        )[0]?.year;
+        if (
+            event.eventType !== "partialMove"
+            || event.shiftSide !== "older"
+            || (event.shiftYears ?? 0) > -4
+            || !Number.isInteger(firstFixedYear)
+            || event.evidence.candidateIds.length === 0
+            || !event.evidence.notes.includes("candidate_hard_gate_passed")
+        ) return [];
+        return [{
+            shiftYears: event.shiftYears!,
+            firstFixedYear: firstFixedYear!,
+            cofechaBacked: event.evidence.algorithmSources.includes(
+                "cofecha_segment_lag",
+            ),
+        }];
+    });
+    const missingYears = Array.from(new Set(pathMissingYears))
+        .sort((left, right) => left - right);
+    if (eligiblePartials.length === 0 || missingYears.length < 2) return null;
+    const directYears = new Set<number>();
+    const pathSearchStart = Math.max(
+        range.startYear + 8,
+        missingYears[0] - 8,
+    );
+    const pathSearchEnd = Math.min(
+        range.endYear - 8,
+        missingYears[missingYears.length - 1] + 8,
+    );
+    for (let year = pathSearchStart; year <= pathSearchEnd; year += 1) {
+        directYears.add(year);
+    }
+    eligiblePartials.forEach(({ firstFixedYear }) => {
+        for (let offset = -2; offset <= 2; offset += 1) {
+            const year = firstFixedYear + offset;
+            if (year >= range.startYear + 8 && year <= range.endYear - 8) {
+                directYears.add(year);
+            }
+        }
+    });
+    const partialShifts = Array.from(new Set(
+        eligiblePartials.map((row) => row.shiftYears),
+    ));
+    const partialHypotheses = partialShifts.flatMap((shiftYears) => (
+        Array.from(directYears).map((firstFixedYear) => ({
+            shiftYears,
+            firstFixedYear,
+        }))
+    ));
+    const staircaseHypotheses = Array.from({ length: 5 }, (_, index) => {
+        const offset = index - 2;
+        return missingYears.map((year) => year + offset);
+    }).filter((years) => years.every((year) => (
+        year >= range.startYear + 8 && year <= range.endYear - 8
+    )));
+    if (staircaseHypotheses.length === 0) return null;
+
+    const hypothesisYears = [
+        ...partialHypotheses.map((row) => row.firstFixedYear),
+        ...staircaseHypotheses.flat(),
+    ];
+    const localRange = {
+        startYear: Math.max(range.startYear, Math.min(...hypothesisYears) - 16),
+        endYear: Math.min(range.endYear, Math.max(...hypothesisYears) + 16),
+    };
+    const masterViews: Views = {
+        raw: diagnosis.master.data,
+        difference: firstDifferences(diagnosis.master.data),
+        whitened: ar1WhitenSeries(diagnosis.master.data),
+    };
+    const directCandidates = partialHypotheses.map((hypothesis): ScoredCorrection => ({
+        years: [],
+        firstFixedYear: hypothesis.firstFixedYear,
+        shiftYears: hypothesis.shiftYears,
+        ...scoreCorrection(
+            simulatePartialMove(
+                diagnosis.rawTarget,
+                hypothesis.firstFixedYear,
+                hypothesis.shiftYears,
+            ),
+            masterViews,
+            useCofechaStandardization,
+            range,
+            localRange,
+        ),
+    })).sort((left, right) => right.score - left.score);
+    const staircaseCandidates = staircaseHypotheses.map((years): ScoredCorrection => ({
+        years,
+        firstFixedYear: null,
+        ...scoreCorrection(
+            simulateMissingRings(diagnosis.rawTarget, years),
+            masterViews,
+            useCofechaStandardization,
+            range,
+            localRange,
+        ),
+    })).sort((left, right) => right.score - left.score);
+    const selectedStaircase = staircaseCandidates[0];
+    if (!selectedStaircase) {
+        return null;
+    }
+
+    const scoreAgainstReference = (
+        candidate: ScoredCorrection,
+        reference: Views,
+    ): number => scoreViews(
+        candidate.views,
+        reference,
+        range.startYear,
+        range.endYear,
+        20,
+    ) * 0.35 + scoreViews(
+        candidate.views,
+        reference,
+        localRange.startYear,
+        localRange.endYear,
+        6,
+    ) * 0.65;
+    const referenceViews = diagnosis.master.sourceTrees.flatMap((tree) => {
+        const rawReference = toNumericSeries(siteData.get(tree));
+        if (rawReference.size === 0) return [];
+        return [makeViews(rawReference, useCofechaStandardization)];
+    });
+    const referenceScoreCache = new Map<ScoredCorrection, number[]>();
+    const referenceScoresFor = (candidate: ScoredCorrection): number[] => {
+        const cached = referenceScoreCache.get(candidate);
+        if (cached) return cached;
+        const scores = referenceViews.map((reference) => (
+            scoreAgainstReference(candidate, reference)
+        ));
+        referenceScoreCache.set(candidate, scores);
+        return scores;
+    };
+    const staircaseScores = referenceViews.map((_reference, index) => Math.max(
+        ...staircaseCandidates.map((candidate) => (
+            referenceScoresFor(candidate)[index]
+        )),
+    ));
+    const INFORMATIVE_MARGIN = 1e-9;
+    const shiftProfiles = partialShifts.flatMap((shiftYears) => {
+        const candidatesForShift = directCandidates.filter(
+            (candidate) => candidate.shiftYears === shiftYears,
+        );
+        if (candidatesForShift.length === 0) return [];
+        const allMargins = referenceViews.map((_reference, index) => {
+            const bestDirect = Math.max(...candidatesForShift.map((candidate) => (
+                referenceScoresFor(candidate)[index]
+            )));
+            return staircaseScores[index] - bestDirect;
+        }).filter(Number.isFinite);
+        const margins = allMargins.filter(
+            (margin) => Math.abs(margin) > INFORMATIVE_MARGIN,
+        );
+        if (margins.length === 0) return [];
+        const partialSupport = margins.filter((margin) => margin < 0).length;
+        return [{
+            shiftYears,
+            candidates: candidatesForShift,
+            margins,
+            medianMargin: median(margins),
+            upperQuartileMargin: quantile(margins, 0.75),
+            partialSupportRatio: partialSupport / margins.length,
+            masterScore: Math.max(...candidatesForShift.map((candidate) => candidate.score)),
+        }];
+    }).sort((left, right) => (
+        left.medianMargin - right.medianMargin
+        || left.upperQuartileMargin - right.upperQuartileMargin
+        || right.partialSupportRatio - left.partialSupportRatio
+        || right.margins.length - left.margins.length
+        || right.masterScore - left.masterScore
+    ));
+    const familyShift = shiftProfiles[0];
+    if (!familyShift) return null;
+    const cofechaShifts = Array.from(new Set(
+        eligiblePartials
+            .filter((row) => row.cofechaBacked)
+            .map((row) => row.shiftYears),
+    ));
+    const cofechaShift = cofechaShifts.length === 1
+        ? shiftProfiles.find((profile) => profile.shiftYears === cofechaShifts[0])
+        : undefined;
+    const selectedShift = cofechaShift ?? familyShift;
+    const boundaryEvidenceCount = Math.min(
+        Math.abs(selectedShift.shiftYears),
+        missingYears.length,
+    );
+    const boundaryEvidenceYears = missingYears.slice(-boundaryEvidenceCount);
+    const boundaryPriorYear = Math.round(median(boundaryEvidenceYears));
+    const boundaryCandidates = selectedShift.candidates.filter((candidate) => (
+        candidate.firstFixedYear !== null
+        && Math.abs(candidate.firstFixedYear - boundaryPriorYear) <= 2
+    ));
+
+    const directProfiles = (
+        boundaryCandidates.length > 0 ? boundaryCandidates : selectedShift.candidates
+    ).map((candidate) => {
+        const margins = referenceViews.map((_reference, index) => (
+            staircaseScores[index] - referenceScoresFor(candidate)[index]
+        )).filter((margin) => (
+            Number.isFinite(margin) && Math.abs(margin) > INFORMATIVE_MARGIN
+        ));
+        const partialSupport = margins.filter((margin) => margin < 0).length;
+        return {
+            candidate,
+            margins,
+            medianMargin: median(margins),
+            upperQuartileMargin: quantile(margins, 0.75),
+            partialSupportRatio: partialSupport / Math.max(1, margins.length),
+        };
+    }).sort((left, right) => (
+        left.medianMargin - right.medianMargin
+        || left.upperQuartileMargin - right.upperQuartileMargin
+        || right.partialSupportRatio - left.partialSupportRatio
+        || right.margins.length - left.margins.length
+        || right.candidate.score - left.candidate.score
+    ));
+    const selectedDirect = directProfiles[0]?.candidate;
+    if (!selectedDirect || selectedDirect.firstFixedYear === null) return null;
+
+    const referenceMargins = familyShift.margins;
+    const staircaseReferenceSupport = referenceMargins.filter(
+        (margin) => margin > 0,
+    ).length;
+    const partialReferenceSupport = referenceMargins.filter(
+        (margin) => margin < 0,
+    ).length;
+    return {
+        familyShiftYears: familyShift.shiftYears,
+        partialShiftYears: selectedShift.shiftYears,
+        partialFirstFixedYear: selectedDirect.firstFixedYear,
+        boundaryPriorYear,
+        shiftSelectionSource: cofechaShift
+            ? "cofecha_segment_lag"
+            : "completed_family_profile",
+        missingYears: selectedStaircase.years.slice().sort((left, right) => left - right),
+        masterMargin: selectedStaircase.score - selectedDirect.score,
+        totalReferenceCount: referenceViews.length,
+        ambiguousReferenceCount: referenceViews.length - referenceMargins.length,
+        referenceCount: referenceMargins.length,
+        staircaseReferenceSupport,
+        staircaseReferenceSupportRatio:
+            staircaseReferenceSupport / Math.max(1, referenceMargins.length),
+        partialReferenceSupport,
+        partialReferenceSupportRatio:
+            partialReferenceSupport / Math.max(1, referenceMargins.length),
+        referenceMedianMargin: median(referenceMargins),
+        referenceLowerQuartileMargin: quantile(referenceMargins, 0.25),
+        referenceUpperQuartileMargin: quantile(referenceMargins, 0.75),
+        shiftProfiles: shiftProfiles.map((profile) => ({
+            shiftYears: profile.shiftYears,
+            referenceCount: profile.margins.length,
+            partialReferenceSupport: profile.margins.filter(
+                (margin) => margin < 0,
+            ).length,
+            partialReferenceSupportRatio: profile.partialSupportRatio,
+            referenceMedianMargin: profile.medianMargin,
+            referenceUpperQuartileMargin: profile.upperQuartileMargin,
+            masterScore: profile.masterScore,
+        })),
     };
 };
 

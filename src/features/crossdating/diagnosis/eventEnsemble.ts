@@ -9,11 +9,13 @@
 import type { RwlSiteData } from "@/features/rwl/types";
 import { cofechaStyleStandardize } from "../reference";
 import {
+    compareCompletedPartialWithMissingStaircase,
     comparePartialMoveWithMissingStaircase,
     comparePartialMoveWithRobustMissingStaircase,
     compareTwoStepUnitDirections,
     supportsDiscreteMissingStaircase,
     supportsRobustMissingStaircaseCorrection,
+    type CompletedPartialStaircaseCompetition,
     type MissingStaircaseCompetition,
 } from "./discreteMissingStaircaseCompetition";
 import {
@@ -2100,6 +2102,135 @@ const MIN_STABLE_SEQUENTIAL_HEAD_RUN_YEARS = 30;
 const MIN_DISTINCT_PARTIAL_MODE_SEPARATION_YEARS = 9;
 const MAX_CONFIRMED_STAIRCASE_CANDIDATE_DISTANCE_YEARS = 2;
 
+const completedPartialCompetitionNotes = (
+    competition: CompletedPartialStaircaseCompetition,
+): string[] => [
+    `completed_family_partial_shift=${competition.partialShiftYears}`,
+    `completed_family_best_fit_shift=${competition.familyShiftYears}`,
+    `completed_family_shift_selection_source=${competition.shiftSelectionSource}`,
+    `completed_family_partial_first_fixed_year=${competition.partialFirstFixedYear}`,
+    `completed_family_boundary_prior_year=${competition.boundaryPriorYear}`,
+    `completed_family_missing_years=${competition.missingYears.join(",")}`,
+    `completed_family_master_margin=${competition.masterMargin.toFixed(6)}`,
+    `completed_family_partial_reference_support=${
+        competition.partialReferenceSupport
+    }/${competition.referenceCount}`,
+    `completed_family_reference_count=${competition.referenceCount}`,
+    `completed_family_partial_reference_ratio=${
+        competition.partialReferenceSupportRatio.toFixed(6)
+    }`,
+    `completed_family_reference_total=${competition.totalReferenceCount}`,
+    `completed_family_reference_ambiguous=${competition.ambiguousReferenceCount}`,
+    `completed_family_staircase_reference_support=${
+        competition.staircaseReferenceSupport
+    }/${competition.referenceCount}`,
+    `completed_family_reference_median=${competition.referenceMedianMargin.toFixed(6)}`,
+    `completed_family_reference_q25=${
+        competition.referenceLowerQuartileMargin.toFixed(6)
+    }`,
+    `completed_family_reference_q75=${
+        competition.referenceUpperQuartileMargin.toFixed(6)
+    }`,
+    ...competition.shiftProfiles.map((profile) => (
+        `completed_family_shift_profile=${profile.shiftYears}:support=${
+            profile.partialReferenceSupport
+        }/${profile.referenceCount}:median=${
+            profile.referenceMedianMargin.toFixed(6)
+        }:q75=${profile.referenceUpperQuartileMargin.toFixed(6)}:master=${
+            profile.masterScore.toFixed(6)
+        }`
+    )),
+];
+
+const supportsCompletedPartialOverMissingStaircase = (
+    competition: CompletedPartialStaircaseCompetition | null,
+): competition is CompletedPartialStaircaseCompetition => Boolean(
+    competition
+    && competition.referenceCount >= 8
+    && competition.partialReferenceSupportRatio >= 0.8
+    && competition.partialReferenceSupport
+        >= competition.staircaseReferenceSupport + 5
+    && competition.referenceMedianMargin < -1e-9
+    && competition.referenceUpperQuartileMargin <= 0,
+);
+
+const recoverCompletedCandidateBackedPartial = (
+    competition: CompletedPartialStaircaseCompetition,
+    candidateEvents: readonly DiagnosisEvent[],
+    diagnosis: SeriesCoreDiagnosis,
+): DiagnosisEvent | null => {
+    const supporting = candidateEvents.filter((event) => (
+        event.eventType === "partialMove"
+        && event.shiftSide === "older"
+        && event.shiftYears === competition.partialShiftYears
+        && event.evidence.candidateIds.length > 0
+        && event.evidence.notes.includes("candidate_hard_gate_passed")
+    )).sort((left, right) => (
+        Number(right.evidence.algorithmSources.includes("cofecha_segment_lag"))
+            - Number(left.evidence.algorithmSources.includes("cofecha_segment_lag"))
+        || right.evidence.score - left.evidence.score
+    ));
+    const strongest = supporting[0];
+    if (!strongest) return null;
+    const width = Math.min(
+        13,
+        diagnosis.targetRange.endYear - diagnosis.targetRange.startYear + 1,
+    );
+    const startYear = Math.max(
+        diagnosis.targetRange.startYear,
+        Math.min(
+            competition.partialFirstFixedYear - Math.floor(width / 2),
+            diagnosis.targetRange.endYear - width + 1,
+        ),
+    );
+    const endYear = startYear + width - 1;
+    const rankedYears = Array.from({ length: width }, (_, index) => {
+        const year = startYear + index;
+        return {
+            year,
+            score: -Math.abs(year - competition.partialFirstFixedYear),
+            evidenceTags: ["completed_partial_staircase_competition"],
+        };
+    }).sort((left, right) => (
+        right.score - left.score || left.year - right.year
+    )).map((row, index) => ({ ...row, rank: index + 1 }));
+    return {
+        ...strongest,
+        id: `${strongest.id}-completed-family-partial`,
+        eventType: "partialMove",
+        startYear,
+        endYear,
+        reviewCoreRange: { startYear, endYear },
+        rankedYears,
+        confidenceLevel: "medium",
+        alternativeTypes: [],
+        locationAlternatives: undefined,
+        operationAlternatives: undefined,
+        shiftYears: competition.partialShiftYears,
+        shiftSide: "older",
+        evidence: {
+            ...strongest.evidence,
+            algorithmSources: Array.from(new Set([
+                ...supporting.flatMap((event) => event.evidence.algorithmSources),
+                "completed_partial_staircase_competition",
+                "per_reference_completed_correction",
+            ])).sort(),
+            scoreMargin: Math.max(0, -competition.referenceMedianMargin),
+            lagBefore: competition.partialShiftYears,
+            lagAfter: 0,
+            candidateIds: Array.from(new Set(
+                supporting.flatMap((event) => event.evidence.candidateIds),
+            )).sort(),
+            notes: Array.from(new Set([
+                ...strongest.evidence.notes,
+                ...completedPartialCompetitionNotes(competition),
+                "completed_partial_preferred_over_discrete_missing_staircase",
+                "completed_partial_score_is_relative_not_probability",
+            ])),
+        },
+    };
+};
+
 /** A multi-step path needs enough complexity-adjusted gain or one durable unit-lag state. */
 export const supportsSequentialMissingReplacementOfPartial = (
     head: Pick<
@@ -2263,6 +2394,13 @@ const recoverSequentialMissingHeadEvent = (
             candidateCenters,
             confirmedTargetZeroYears,
         );
+        const completedFamilyCompetition = compareCompletedPartialWithMissingStaircase(
+            cofechaDiagnosis,
+            siteData,
+            candidateEvents,
+            head.unitEventYears,
+            true,
+        );
         const replacesNonUnitEvent = detected.some((event) => (
             event.eventType === "partialMove" || event.eventType === "wholeSeriesMove"
         ));
@@ -2297,6 +2435,30 @@ const recoverSequentialMissingHeadEvent = (
             head,
             confirmedTargetZeroYears,
         );
+        const completedFamilySupported = supportsCompletedPartialOverMissingStaircase(
+            completedFamilyCompetition,
+        );
+        const completedFamilyCandidateCount = completedFamilyCompetition
+            ? candidateEvents.filter((event) => (
+                event.eventType === "partialMove"
+                && event.shiftSide === "older"
+                && event.shiftYears === completedFamilyCompetition.partialShiftYears
+                && event.evidence.candidateIds.length > 0
+                && event.evidence.notes.includes("candidate_hard_gate_passed")
+            )).length
+            : 0;
+        const completedPartial = !whole
+            && !hasDistinctConfirmedMissingMode
+            && completedFamilySupported
+            ? recoverCompletedCandidateBackedPartial(
+                completedFamilyCompetition,
+                candidateEvents,
+                diagnosis,
+            )
+            : null;
+        if (completedPartial) {
+            return { event: completedPartial, preserveWholeBaseline: false };
+        }
         if (hasOppositeUnitOnly && !hasIndependentMissingDirection) {
             return recoverRobustCompressedPartial();
         }
@@ -2314,7 +2476,7 @@ const recoverSequentialMissingHeadEvent = (
         if (replacesNonUnitEvent && !hasIndependentStaircaseSupport) {
             return recoverRobustCompressedPartial();
         }
-        const recoveredEvent = makeSequentialMissingHeadEvent(
+        const baseRecoveredEvent = makeSequentialMissingHeadEvent(
             head,
             marker,
             detected,
@@ -2324,6 +2486,29 @@ const recoverSequentialMissingHeadEvent = (
             confirmedTargetZeroYears,
             markerMode,
         );
+        const recoveredEvent = completedFamilyCompetition ? {
+            ...baseRecoveredEvent,
+            evidence: {
+                ...baseRecoveredEvent.evidence,
+                algorithmSources: Array.from(new Set([
+                    ...baseRecoveredEvent.evidence.algorithmSources,
+                    "completed_partial_staircase_competition_audit",
+                ])).sort(),
+                notes: [
+                    ...baseRecoveredEvent.evidence.notes,
+                    ...completedPartialCompetitionNotes(completedFamilyCompetition),
+                    `completed_family_recovery_supported=${completedFamilySupported}`,
+                    `completed_family_recovery_candidate_count=${
+                        completedFamilyCandidateCount
+                    }`,
+                    `completed_family_recovery_blocked_by_whole=${Boolean(whole)}`,
+                    `completed_family_recovery_blocked_by_unit=${hasExistingUnitEvent}`,
+                    `completed_family_recovery_blocked_by_distinct_missing=${
+                        hasDistinctConfirmedMissingMode
+                    }`,
+                ],
+            },
+        } : baseRecoveredEvent;
         return {
             event: hasDistinctConfirmedMissingMode ? {
                 ...recoveredEvent,

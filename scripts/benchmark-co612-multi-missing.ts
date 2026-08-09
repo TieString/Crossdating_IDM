@@ -63,6 +63,7 @@ type EventPreview = {
     lagAfter: number | null;
     score: number;
     sources: string[];
+    notes: string[];
 };
 
 type MissingCandidatePreview = {
@@ -254,6 +255,7 @@ const previewEvent = (event: DiagnosisEvent): EventPreview => ({
     lagAfter: event.evidence.lagAfter,
     score: event.evidence.score,
     sources: event.evidence.algorithmSources,
+    notes: event.evidence.notes,
 });
 
 const runCofecha = (siteData: RwlSiteData): string => {

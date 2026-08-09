@@ -169,6 +169,8 @@ export type SequentialMissingHead = {
     headMeanAdvantage: number;
     fixedTailMeanAdvantage: number;
     pathStartLag: number;
+    /** Displayed-frame transition year for every fitted non-final lag run, oldest to newest. */
+    unitEventYears: number[];
 };
 
 export type SharedExplicitZeroMarker = {
@@ -774,6 +776,9 @@ const locateSequentialUnitHead = (
         headMeanAdvantage,
         fixedTailMeanAdvantage: meanScore(fixed) - meanScore(shiftedFixed),
         pathStartLag: path[0],
+        unitEventYears: runs.slice(0, -1).map((run) => (
+            evidence.years[run.endIndex]
+        )),
     };
 };
 

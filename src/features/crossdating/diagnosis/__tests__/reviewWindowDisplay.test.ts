@@ -325,6 +325,57 @@ describe("lower review-window display gate", () => {
         });
     });
 
+    it("shows a completed partial correction that decisively beats the full missing staircase", () => {
+        const partial = reviewablePartial(-4, {
+            candidateIds: ["partial-candidate"],
+            algorithmSources: [
+                "cofecha_segment_lag",
+                "completed_partial_staircase_competition",
+                "per_reference_completed_correction",
+            ],
+            notes: [
+                "candidate_hard_gate_passed",
+                "completed_family_partial_shift=-4",
+                "completed_family_partial_first_fixed_year=1900",
+                "completed_family_reference_count=13",
+                "completed_family_partial_reference_ratio=0.846154",
+                "completed_family_reference_median=-0.052363",
+                "completed_family_reference_q75=-0.003920",
+                "completed_partial_preferred_over_discrete_missing_staircase",
+            ],
+        });
+
+        expect(selectReviewWindowDisplay(audit([]), [partial])).toMatchObject({
+            status: "strict",
+            event: partial,
+        });
+    });
+
+    it("keeps a weak completed-partial family hidden", () => {
+        const partial = reviewablePartial(-4, {
+            candidateIds: ["partial-candidate"],
+            algorithmSources: [
+                "completed_partial_staircase_competition",
+                "per_reference_completed_correction",
+            ],
+            notes: [
+                "candidate_hard_gate_passed",
+                "completed_family_partial_shift=-4",
+                "completed_family_partial_first_fixed_year=1904",
+                "completed_family_reference_count=13",
+                "completed_family_partial_reference_ratio=0.769231",
+                "completed_family_reference_median=-0.01",
+                "completed_family_reference_q75=0.002",
+                "completed_partial_preferred_over_discrete_missing_staircase",
+            ],
+        });
+
+        expect(selectReviewWindowDisplay(audit([]), [partial])).toMatchObject({
+            status: "refused",
+            reason: "partial_move_evidence_insufficient",
+        });
+    });
+
     it("refuses a lag-path partial when independent votes choose unrelated shifts", () => {
         const partial = reviewablePartial(-4, {
             score: 17.85,

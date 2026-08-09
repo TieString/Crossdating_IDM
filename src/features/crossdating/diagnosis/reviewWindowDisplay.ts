@@ -175,6 +175,45 @@ const hasReviewablePartialMoveEvidence = (
         && (event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY)
             >= config.minimumPartialJointGain) return true;
 
+    const completedShift = numericNote(event, "completed_family_partial_shift");
+    const completedFirstFixedYear = numericNote(
+        event,
+        "completed_family_partial_first_fixed_year",
+    );
+    const completedReferenceCount = numericNote(
+        event,
+        "completed_family_reference_count",
+    ) ?? 0;
+    const completedPartialRatio = numericNote(
+        event,
+        "completed_family_partial_reference_ratio",
+    ) ?? 0;
+    const completedMedian = numericNote(
+        event,
+        "completed_family_reference_median",
+    ) ?? Number.POSITIVE_INFINITY;
+    const completedUpperQuartile = numericNote(
+        event,
+        "completed_family_reference_q75",
+    ) ?? Number.POSITIVE_INFINITY;
+    if (sources.has("completed_partial_staircase_competition")
+        && sources.has("per_reference_completed_correction")
+        && event.evidence.notes.includes(
+            "completed_partial_preferred_over_discrete_missing_staircase",
+        )
+        && event.evidence.notes.includes("candidate_hard_gate_passed")
+        && completedShift === shiftYears
+        && yearSupportsWindow(
+            event,
+            completedFirstFixedYear,
+            config.partialVoteWindowToleranceYears,
+        )
+        && completedReferenceCount >= 8
+        && completedPartialRatio >= 0.8
+        && completedMedian < 0
+        && completedUpperQuartile <= 0
+        && event.evidence.candidateIds.length >= 1) return true;
+
     const gridConsensusShift = numericNote(event, "candidate_grid_partial_shift");
     const gridCandidateYear = numericNote(
         event,
