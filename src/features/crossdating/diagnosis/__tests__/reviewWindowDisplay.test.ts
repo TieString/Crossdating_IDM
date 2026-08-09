@@ -7,6 +7,7 @@ import type {
     DiagnosisEvent,
     DiagnosisEventAuditSnapshot,
     DiagnosisEventDecisionAudit,
+    DiagnosisReviewEventCheckpoint,
 } from "../types";
 
 const snapshot = (
@@ -91,6 +92,42 @@ const strictEvent = (): DiagnosisEvent => ({
         notes: [],
     },
     alternativeTypes: [],
+});
+
+const checkpoint = (
+    source: DiagnosisEventAuditSnapshot,
+    stage: DiagnosisReviewEventCheckpoint["stage"] = "candidate",
+): DiagnosisReviewEventCheckpoint => ({
+    stage,
+    event: {
+        ...strictEvent(),
+        id: `checkpoint-${source.eventType}-${source.startYear}-${source.endYear}`,
+        eventType: source.eventType,
+        startYear: source.startYear,
+        endYear: source.endYear,
+        rankedYears: source.topYear === null ? [] : [{
+            year: source.topYear,
+            rank: 1,
+            score: source.score,
+            evidenceTags: ["upstream_ranked_evidence"],
+        }],
+        confidenceLevel: source.confidenceLevel,
+        evidence: {
+            algorithmSources: [...source.algorithmSources],
+            score: source.score,
+            scoreMargin: source.scoreMargin,
+            baselineCorrelation: source.baselineCorrelation,
+            correctedCorrelation: source.correctedCorrelation,
+            correlationGain: source.correlationGain,
+            lagBefore: source.lagBefore,
+            lagAfter: source.lagAfter,
+            samplePairs: source.samplePairs,
+            candidateIds: ["upstream-candidate"],
+            notes: [...source.notes],
+        },
+        shiftYears: source.shiftYears ?? undefined,
+        shiftSide: source.eventType === "partialMove" ? "older" : undefined,
+    },
 });
 
 const reviewablePartial = (
@@ -499,9 +536,13 @@ describe("lower review-window display gate", () => {
     });
 
     it("recovers one review-only missing-ring window with no alternatives", () => {
-        const result = selectReviewWindowDisplay(audit([
-            snapshot("missingRing"),
-        ]), []);
+        const source = snapshot("missingRing");
+        const sourceCheckpoint = checkpoint(source);
+        const result = selectReviewWindowDisplay(
+            audit([source]),
+            [],
+            [sourceCheckpoint],
+        );
         expect(result).toMatchObject({
             status: "review",
             reason: "lower_display_gate_passed",
@@ -515,57 +556,114 @@ describe("lower review-window display gate", () => {
             alternativeTypes: [],
         });
         expect(result.event?.rankedYears[0].year).toBe(1900);
+        expect(result.event?.id).toBe(sourceCheckpoint.event.id);
+        expect(result.event?.evidence.candidateIds).toEqual(["upstream-candidate"]);
+        expect(result.event?.rankedYears[0].evidenceTags)
+            .toContain("upstream_ranked_evidence");
         expect(result.event?.evidence.notes).toContain("review_only=true");
     });
 
-    it("does not lower the gate for unflagged, partial, or direction-conflicted evidence", () => {
+    it("does not reconstruct a review event from a lossy audit snapshot", () => {
         expect(selectReviewWindowDisplay(audit([
             snapshot("missingRing"),
-        ], { cofechaFlagged: false }), []).reason).toBe("cofecha_target_unflagged");
-        expect(selectReviewWindowDisplay(audit([
-            snapshot("partialMove"),
-        ]), []).reason).toBe("no_unit_hypothesis");
-        expect(selectReviewWindowDisplay(audit([{
+        ]), [])).toMatchObject({
+            status: "refused",
+            reason: "no_unit_hypothesis",
+            event: null,
+        });
+    });
+
+    it("does not lower the gate for unflagged, partial, or direction-conflicted evidence", () => {
+        const missing = snapshot("missingRing");
+        const partial = snapshot("partialMove");
+        const conflicted = {
             ...snapshot("missingRing"),
             lagBefore: 1,
             lagAfter: 0,
-        }]), []).reason).toBe("lag_direction_conflict");
+        };
+        expect(selectReviewWindowDisplay(
+            audit([missing], { cofechaFlagged: false }),
+            [],
+            [checkpoint(missing)],
+        ).reason).toBe("cofecha_target_unflagged");
+        expect(selectReviewWindowDisplay(
+            audit([partial]),
+            [],
+            [checkpoint(partial)],
+        ).reason).toBe("no_unit_hypothesis");
+        expect(selectReviewWindowDisplay(
+            audit([conflicted]),
+            [],
+            [checkpoint(conflicted)],
+        ).reason).toBe("lag_direction_conflict");
     });
 
     it("rejects unresolved operation and remote-mode competition", () => {
-        expect(selectReviewWindowDisplay(audit([
-            snapshot("missingRing"),
-            snapshot("falseRing"),
-        ]), []).reason).toBe("operation_type_conflict");
+        const missing = snapshot("missingRing");
+        const falseRing = snapshot("falseRing");
+        expect(selectReviewWindowDisplay(
+            audit([missing, falseRing]),
+            [],
+            [checkpoint(missing), checkpoint(falseRing)],
+        ).reason).toBe("operation_type_conflict");
 
         const remote = {
             ...snapshot("missingRing", 1937, 1943),
             topYear: 1940,
         };
-        expect(selectReviewWindowDisplay(audit([
-            snapshot("missingRing"),
-            remote,
-        ]), []).reason).toBe("competing_remote_modes");
+        expect(selectReviewWindowDisplay(
+            audit([missing, remote]),
+            [],
+            [checkpoint(missing), checkpoint(remote)],
+        ).reason).toBe("competing_remote_modes");
     });
 
     it("uses only 5, 7, 9, or 13-year windows", () => {
-        const decisions = [
+        const sources = [
             snapshot("missingRing", 1898, 1902),
-            snapshot("missingRing", 1897, 1902),
+            snapshot("missingRing", 1897, 1903),
             snapshot("missingRing", 1896, 1904),
-            snapshot("missingRing", 1895, 1904),
-        ].map((candidate, index) => selectReviewWindowDisplay(
+            snapshot("missingRing", 1894, 1906),
+        ];
+        const checkpoints = sources.map((candidate, index) => {
+            const value = checkpoint(candidate);
+            value.event.seriesId = `T${index}`;
+            return value;
+        });
+        const decisions = sources.map((candidate, index) => selectReviewWindowDisplay(
             audit([candidate], { seriesId: `T${index}` }),
             [],
+            [checkpoints[index]],
         ));
         expect(decisions.map((row) => (
             row.event ? row.event.endYear - row.event.startYear + 1 : null
         ))).toEqual([5, 7, 9, 13]);
         expect(buildReviewWindowDisplays(
-            decisions.map((_, index) => audit([
-                snapshot("missingRing"),
+            sources.map((candidate, index) => audit([
+                candidate,
             ], { seriesId: `T${index}` })),
             [],
+            checkpoints,
         ).events).toHaveLength(4);
+    });
+
+    it("refuses an uncalibrated width instead of recentering it", () => {
+        const source = snapshot("missingRing", 1897, 1902);
+        const sourceCheckpoint = checkpoint(source);
+        const result = selectReviewWindowDisplay(
+            audit([source]),
+            [],
+            [sourceCheckpoint],
+        );
+
+        expect(result).toMatchObject({
+            status: "refused",
+            reason: "window_width_unsafe",
+            event: null,
+        });
+        expect(sourceCheckpoint.event).toMatchObject({
+            startYear: 1897,
+            endYear: 1902,
+        });
     });
 });

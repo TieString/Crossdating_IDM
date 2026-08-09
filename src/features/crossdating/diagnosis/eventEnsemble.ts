@@ -122,6 +122,7 @@ import type {
     DiagnosisEventPassAudit,
     DiagnosisEvent,
     DiagnosisEventType,
+    DiagnosisReviewEventCheckpoint,
     EffectiveDiagnosisConfig,
     NumericSeries,
     SeriesCoreDiagnosis,
@@ -173,6 +174,8 @@ export type DiagnosisEventEnsembleOptions = {
     sharedZeroMarkerMode?: SharedZeroMarkerMode;
     /** Optional caller-owned sink. Recording must never affect event selection. */
     eventDecisionAudits?: DiagnosisEventDecisionAudit[];
+    /** Full immutable hypotheses for review adjudication; never reconstructed from audit snapshots. */
+    reviewEventCheckpoints?: DiagnosisReviewEventCheckpoint[];
     /** Validated candidates recovered during path assembly and required for UI event application. */
     supplementalCandidates?: DiagnosisCandidateOperation[];
 };
@@ -4955,6 +4958,30 @@ export const makeDiagnosisEvents = (
                     automaticSemanticsRejectedCount,
                     finalReason,
                 });
+            }
+            if (options.reviewEventCheckpoints) {
+                const stages: Array<{
+                    stage: DiagnosisReviewEventCheckpoint["stage"];
+                    events: DiagnosisEvent[];
+                }> = [
+                    { stage: "candidate", events: candidateEvents },
+                    { stage: "detected", events: detectedBeforeFusion },
+                    { stage: "fused", events: detected },
+                    { stage: "retained", events: retainedDetected },
+                    { stage: "displayed", events: displayed },
+                    { stage: "final", events: finalEvents },
+                ];
+                stages.forEach(({ stage, events }) => events.forEach((event) => {
+                    options.reviewEventCheckpoints?.push({
+                        stage,
+                        event: stripDiagnosisEventAlternatives({
+                            ...event,
+                            seriesRange: event.seriesRange
+                                ? { ...event.seriesRange }
+                                : { ...diagnosis.targetRange },
+                        }),
+                    });
+                }));
             }
             return finalEvents;
         };

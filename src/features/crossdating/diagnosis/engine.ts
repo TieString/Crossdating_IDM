@@ -53,6 +53,7 @@ import type {
     DiagnosisEvent,
     DiagnosisEventDecisionAudit,
     DiagnosisOptions,
+    DiagnosisReviewEventCheckpoint,
     LocalCrossdatingSimulation,
     LocalSimulationOperationType,
     LocalSimulationOption,
@@ -220,6 +221,9 @@ export function diagnoseCrossdating(
         || options.reviewWindowDisplayMode === "review"
         ? [] as DiagnosisEventDecisionAudit[]
         : undefined;
+    const reviewEventCheckpoints = options.reviewWindowDisplayMode === "review"
+        ? [] as DiagnosisReviewEventCheckpoint[]
+        : undefined;
     const supplementalCandidates: DiagnosisCandidateOperation[] = [];
     const events = makeDiagnosisEvents(
         siteData,
@@ -235,6 +239,7 @@ export function diagnoseCrossdating(
                 options.sharedZeroMarkerMode
                 ?? INTERNAL_EVENT_ENSEMBLE_OPTIONS.sharedZeroMarkerMode,
             ...(eventDecisionAudits ? { eventDecisionAudits } : {}),
+            ...(reviewEventCheckpoints ? { reviewEventCheckpoints } : {}),
             supplementalCandidates,
         },
     );
@@ -297,7 +302,11 @@ export function diagnoseCrossdating(
     }
     const reviewWindowDisplay = options.reviewWindowDisplayMode === "review"
         && eventDecisionAudits
-        ? buildReviewWindowDisplays(eventDecisionAudits, events)
+        ? buildReviewWindowDisplays(
+            eventDecisionAudits,
+            events,
+            reviewEventCheckpoints ?? [],
+        )
         : null;
     const candidateCountByTree = candidates.reduce((counts, candidate) => {
         counts.set(candidate.targetTree, (counts.get(candidate.targetTree) ?? 0) + 1);

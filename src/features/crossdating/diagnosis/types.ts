@@ -200,6 +200,20 @@ export type DiagnosisEventDecisionAudit = {
 
 export type DiagnosisReviewWindowDecisionStatus = "strict" | "review" | "refused";
 
+export type DiagnosisReviewSourceStage =
+    | "final"
+    | "displayed"
+    | "retained"
+    | "fused"
+    | "detected"
+    | "candidate";
+
+/** Full upstream hypothesis retained for review adjudication without snapshot reconstruction. */
+export type DiagnosisReviewEventCheckpoint = {
+    stage: DiagnosisReviewSourceStage;
+    event: DiagnosisEvent;
+};
+
 export type DiagnosisReviewWindowDecisionReason =
     | "strict_event"
     | "lower_display_gate_passed"
@@ -218,7 +232,7 @@ export type DiagnosisReviewWindowDecision = {
     status: DiagnosisReviewWindowDecisionStatus;
     reason: DiagnosisReviewWindowDecisionReason;
     strictReason: DiagnosisEventDecisionReason;
-    sourceStage: "final" | "displayed" | "retained" | "fused" | "detected" | "candidate" | null;
+    sourceStage: DiagnosisReviewSourceStage | null;
     event: DiagnosisEvent | null;
 };
 

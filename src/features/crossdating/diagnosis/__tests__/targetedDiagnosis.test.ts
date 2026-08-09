@@ -78,6 +78,7 @@ describe("targeted crossdating diagnosis", () => {
         expect(targeted.reviewEvents?.length).toBeLessThanOrEqual(1);
         expect(targeted.reviewEvents?.every((event) => (
             event.seriesId === "TARGET"
+            && !event.id.startsWith("diagnosis-review-")
             && event.locationAlternatives === undefined
             && event.operationAlternatives === undefined
         ))).toBe(true);
