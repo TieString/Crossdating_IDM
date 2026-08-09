@@ -649,14 +649,10 @@ const meanScore = (value: { score: number; count: number }): number => (
     value.count > 0 ? value.score / value.count : Number.NEGATIVE_INFINITY
 );
 
-/**
- * Fits the physical lag path created by several discrete missing rings. From pith to bark the
- * state may stay unchanged or advance by exactly one year, so a real staircase can beat a
- * single abrupt partial-move breakpoint without exposing all intermediate events to the UI.
- */
-export const locateSequentialMissingHead = (
+const locateSequentialUnitHead = (
     diagnosis: SeriesCoreDiagnosis,
     siteData: RwlSiteData,
+    unitLag: -1 | 1,
     overrides: Partial<EventPathConfig> = {},
     cache?: LagPathCache,
     transitionPenalty = 0.5,
@@ -664,10 +660,15 @@ export const locateSequentialMissingHead = (
     const config = { ...DEFAULT_EVENT_PATH_CONFIG, ...overrides };
     const evidence = cachedLagEvidence(diagnosis, siteData, config, cache);
     if (evidence.years.length < 12) return null;
+    const maximumDepth = unitLag < 0 ? Math.abs(config.minLag) : config.maxLag;
     const stateRows = evidence.states
-        .map((state, evidenceIndex) => ({ state, evidenceIndex }))
-        .filter(({ state }) => state <= 0 && state >= config.minLag)
-        .sort((left, right) => left.state - right.state);
+        .map((state, evidenceIndex) => ({
+            state,
+            evidenceIndex,
+            depth: state * unitLag,
+        }))
+        .filter(({ depth }) => depth >= 0 && depth <= maximumDepth)
+        .sort((left, right) => right.depth - left.depth);
     const zeroIndex = stateRows.findIndex(({ state }) => state === 0);
     if (zeroIndex < 1) return null;
 
@@ -680,11 +681,11 @@ export const locateSequentialMissingHead = (
     for (let yearIndex = 1; yearIndex < yearCount; yearIndex += 1) {
         const current = new Array(stateCount).fill(Number.NEGATIVE_INFINITY);
         const from = new Array(stateCount).fill(-1);
-        stateRows.forEach(({ state, evidenceIndex }, stateIndex) => {
+        stateRows.forEach(({ depth, evidenceIndex }, stateIndex) => {
             let selectedScore = previous[stateIndex];
             let selectedFrom = stateIndex;
-            const lower = stateRows[stateIndex - 1];
-            if (lower?.state === state - 1) {
+            const deeper = stateRows[stateIndex - 1];
+            if (deeper?.depth === depth + 1) {
                 const stepScore = previous[stateIndex - 1] - transitionPenalty;
                 if (stepScore > selectedScore) {
                     selectedScore = stepScore;
@@ -713,7 +714,7 @@ export const locateSequentialMissingHead = (
     const headRun = runs[runs.length - 2];
     if (
         zeroRun?.state !== 0
-        || headRun?.state !== -1
+        || headRun?.state !== unitLag
         || runs.length < 3
     ) return null;
     const transitionCount = runs.length - 1;
@@ -723,8 +724,8 @@ export const locateSequentialMissingHead = (
     )));
     for (let boundaryIndex = 1; boundaryIndex < yearCount - 2; boundaryIndex += 1) {
         const fixed = segmentScore(evidence, 0, boundaryIndex + 1, yearCount - 1);
-        stateRows.forEach(({ state }) => {
-            if (state >= -1) return;
+        stateRows.forEach(({ state, depth }) => {
+            if (depth <= 1) return;
             directScore = Math.max(
                 directScore,
                 segmentScore(evidence, state, 0, boundaryIndex).score
@@ -736,11 +737,11 @@ export const locateSequentialMissingHead = (
 
     const head = segmentScore(
         evidence,
-        -1,
+        unitLag,
         headRun.startIndex,
         headRun.endIndex,
     );
-    const headAlternatives = [0, -2]
+    const headAlternatives = [0, unitLag * 2]
         .filter((state) => evidence.states.includes(state))
         .map((state) => segmentScore(
             evidence,
@@ -759,7 +760,7 @@ export const locateSequentialMissingHead = (
     );
     const shiftedFixed = segmentScore(
         evidence,
-        -1,
+        unitLag,
         zeroRun.startIndex,
         zeroRun.endIndex,
     );
@@ -775,6 +776,42 @@ export const locateSequentialMissingHead = (
         pathStartLag: path[0],
     };
 };
+
+/**
+ * Fits the physical lag path created by several discrete missing rings. From pith to bark the
+ * state may stay unchanged or advance by exactly one year, so a real staircase can beat a
+ * single abrupt partial-move breakpoint without exposing all intermediate events to the UI.
+ */
+export const locateSequentialMissingHead = (
+    diagnosis: SeriesCoreDiagnosis,
+    siteData: RwlSiteData,
+    overrides: Partial<EventPathConfig> = {},
+    cache?: LagPathCache,
+    transitionPenalty = 0.5,
+): SequentialMissingHead | null => locateSequentialUnitHead(
+    diagnosis,
+    siteData,
+    -1,
+    overrides,
+    cache,
+    transitionPenalty,
+);
+
+/** Fits a cumulative false-ring path whose older-side lag descends +N...+1 -> 0. */
+export const locateSequentialFalseHead = (
+    diagnosis: SeriesCoreDiagnosis,
+    siteData: RwlSiteData,
+    overrides: Partial<EventPathConfig> = {},
+    cache?: LagPathCache,
+    transitionPenalty = 0.5,
+): SequentialMissingHead | null => locateSequentialUnitHead(
+    diagnosis,
+    siteData,
+    1,
+    overrides,
+    cache,
+    transitionPenalty,
+);
 
 export type TwoStepMissingStaircase = {
     olderBoundaryYear: number;

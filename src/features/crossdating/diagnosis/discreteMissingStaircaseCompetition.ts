@@ -29,6 +29,17 @@ export type LocalTwoStepStaircaseEvidence = {
     referenceMedianAdvantage: number;
 };
 
+export type TwoStepUnitDirectionCompetition = {
+    falseYears: number[];
+    missingYears: number[];
+    masterMargin: number;
+    referenceSupport: number;
+    referenceCount: number;
+    referenceSupportRatio: number;
+    referenceMedianMargin: number;
+    referenceLowerQuartileMargin: number;
+};
+
 const MAX_TWO_STEP_SEPARATION_YEARS = 17;
 const MAX_HEAD_BOUNDARY_OFFSET_YEARS = 4;
 
@@ -213,6 +224,22 @@ const simulateMissingRings = (
     .sort((left, right) => right - left)
     .reduce(simulateMissingRing, new Map(series));
 
+const simulateFalseRing = (series: NumericSeries, year: number): NumericSeries => (
+    new Map(Array.from(series).flatMap(([sourceYear, value]) => (
+        sourceYear === year
+            ? []
+            : [[sourceYear < year ? sourceYear + 1 : sourceYear, value] as [number, number]]
+    )))
+);
+
+const simulateFalseRings = (
+    series: NumericSeries,
+    years: number[],
+): NumericSeries => years
+    .slice()
+    .sort((left, right) => left - right)
+    .reduce(simulateFalseRing, new Map(series));
+
 const simulatePartialMove = (
     series: NumericSeries,
     firstFixedYear: number,
@@ -271,6 +298,110 @@ const scoreCorrection = (
         globalScore,
         localScore,
         score: globalScore * 0.35 + localScore * 0.65,
+    };
+};
+
+const twoStepPairsNearHead = (
+    headYear: number,
+    range: { startYear: number; endYear: number },
+): number[][] => {
+    const pairs: number[][] = [];
+    for (let newerYear = headYear - 4; newerYear <= headYear + 4; newerYear += 1) {
+        if (newerYear > range.endYear - 8) continue;
+        for (let separation = 2; separation <= 25; separation += 1) {
+            const olderYear = newerYear - separation;
+            if (olderYear < range.startYear + 8) continue;
+            pairs.push([newerYear, olderYear]);
+        }
+    }
+    return pairs;
+};
+
+/**
+ * Compares the completed two-edit states for opposite signed staircases. A single edit is not a
+ * fair direction test while the second event remains unresolved, so every reference core votes
+ * between its best retained two-delete and two-insert hypotheses.
+ */
+export const compareTwoStepUnitDirections = (
+    diagnosis: SeriesCoreDiagnosis,
+    siteData: RwlSiteData,
+    falseHeadYear: number,
+    missingHeadYear: number,
+    useCofechaStandardization = true,
+): TwoStepUnitDirectionCompetition | null => {
+    const falsePairs = twoStepPairsNearHead(falseHeadYear, diagnosis.targetRange);
+    const missingPairs = twoStepPairsNearHead(missingHeadYear, diagnosis.targetRange);
+    if (falsePairs.length === 0 || missingPairs.length === 0) return null;
+    const localRange = {
+        startYear: Math.max(
+            diagnosis.targetRange.startYear,
+            Math.min(falseHeadYear, missingHeadYear) - 30,
+        ),
+        endYear: Math.min(
+            diagnosis.targetRange.endYear,
+            Math.max(falseHeadYear, missingHeadYear) + 12,
+        ),
+    };
+    const masterViews: Views = {
+        raw: diagnosis.master.data,
+        difference: firstDifferences(diagnosis.master.data),
+        whitened: ar1WhitenSeries(diagnosis.master.data),
+    };
+    const scorePairs = (
+        pairs: number[][],
+        correction: (series: NumericSeries, years: number[]) => NumericSeries,
+    ): ScoredCorrection[] => pairs.map((years): ScoredCorrection => ({
+        years,
+        firstFixedYear: null,
+        ...scoreCorrection(
+            correction(diagnosis.rawTarget, years),
+            masterViews,
+            useCofechaStandardization,
+            diagnosis.targetRange,
+            localRange,
+        ),
+    })).sort((left, right) => right.score - left.score).slice(0, 12);
+    const falseCandidates = scorePairs(falsePairs, simulateFalseRings);
+    const missingCandidates = scorePairs(missingPairs, simulateMissingRings);
+    const selectedFalse = falseCandidates[0];
+    const selectedMissing = missingCandidates[0];
+    if (!selectedFalse || !selectedMissing) return null;
+    const referenceMargins = diagnosis.master.sourceTrees.flatMap((tree) => {
+        const rawReference = toNumericSeries(siteData.get(tree));
+        if (rawReference.size === 0) return [];
+        const reference = makeViews(rawReference, useCofechaStandardization);
+        const scoreAgainstReference = (candidate: ScoredCorrection): number => (
+            scoreViews(
+                candidate.views,
+                reference,
+                diagnosis.targetRange.startYear,
+                diagnosis.targetRange.endYear,
+                20,
+            ) * 0.6
+            + scoreViews(
+                candidate.views,
+                reference,
+                localRange.startYear,
+                localRange.endYear,
+                8,
+            ) * 0.4
+        );
+        const bestFalse = Math.max(...falseCandidates.map(scoreAgainstReference));
+        const bestMissing = Math.max(...missingCandidates.map(scoreAgainstReference));
+        return Number.isFinite(bestFalse) && Number.isFinite(bestMissing)
+            ? [bestFalse - bestMissing]
+            : [];
+    });
+    const referenceSupport = referenceMargins.filter((margin) => margin > 0).length;
+    return {
+        falseYears: selectedFalse.years,
+        missingYears: selectedMissing.years,
+        masterMargin: selectedFalse.score - selectedMissing.score,
+        referenceSupport,
+        referenceCount: referenceMargins.length,
+        referenceSupportRatio: referenceSupport / Math.max(1, referenceMargins.length),
+        referenceMedianMargin: median(referenceMargins),
+        referenceLowerQuartileMargin: quantile(referenceMargins, 0.25),
     };
 };
 

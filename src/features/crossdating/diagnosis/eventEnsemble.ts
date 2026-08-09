@@ -11,6 +11,7 @@ import { cofechaStyleStandardize } from "../reference";
 import {
     comparePartialMoveWithMissingStaircase,
     comparePartialMoveWithRobustMissingStaircase,
+    compareTwoStepUnitDirections,
     supportsDiscreteMissingStaircase,
     supportsRobustMissingStaircaseCorrection,
     type MissingStaircaseCompetition,
@@ -18,6 +19,7 @@ import {
 import {
     createLagPathCache,
     diagnoseLagPath,
+    locateSequentialFalseHead,
     locateSequentialMissingHead,
     locateTwoStepMissingStaircase,
     selectSharedExplicitZeroMarker,
@@ -1940,6 +1942,157 @@ const addExplicitStaircaseCompetitionEvidence = (
 type SequentialMissingRecovery = {
     event: DiagnosisEvent;
     preserveWholeBaseline: boolean;
+};
+
+const MIN_SEQUENTIAL_FALSE_HEAD_RUN_YEARS = 4;
+
+const recoverSequentialFalseHeadEvent = (
+    detected: readonly DiagnosisEvent[],
+    diagnosis: SeriesCoreDiagnosis,
+    cofechaDiagnosis: SeriesCoreDiagnosis,
+    siteData: RwlSiteData,
+    candidates: readonly DiagnosisCandidateOperation[],
+    effectiveConfig: EffectiveDiagnosisConfig,
+    options: DiagnosisEventEnsembleOptions,
+    pathCache: LagPathCache,
+): DiagnosisEvent | null => {
+    if (
+        detected.some((event) => event.eventType === "falseRing")
+        || !isCofechaFlaggedSeries(
+            diagnosis.targetTree,
+            options.cofechaFlaggedSeriesIds,
+        )
+    ) return null;
+    const hasCumulativePositiveCandidate = candidates.some((candidate) => (
+        candidate.targetTree === diagnosis.targetTree
+        && candidate.operationType === "SHIFT_RANGE"
+        && (candidate.deltaYears ?? candidate.suggestedLag) === 2
+    ));
+    if (!hasCumulativePositiveCandidate) return null;
+    const head = locateSequentialFalseHead(
+        cofechaDiagnosis,
+        siteData,
+        {
+            maxLag: 2,
+            maxPartialGapYears: effectiveConfig.maxPartialGapYears,
+        },
+        pathCache,
+        0,
+    );
+    if (
+        !head
+        || head.pathStartLag !== 2
+        || head.transitionCount !== 2
+        || head.headRunYears < MIN_SEQUENTIAL_FALSE_HEAD_RUN_YEARS
+        || head.gainOverDirect <= 0
+        || head.headMeanAdvantage <= 0
+        || head.fixedTailMeanAdvantage <= 0
+    ) return null;
+    const oppositeHead = locateSequentialMissingHead(
+        cofechaDiagnosis,
+        siteData,
+        { minLag: -2, maxPartialGapYears: 2 },
+        pathCache,
+        0,
+    );
+    if (!oppositeHead) return null;
+    const direction = compareTwoStepUnitDirections(
+        cofechaDiagnosis,
+        siteData,
+        head.year,
+        oppositeHead.year,
+        true,
+    );
+    if (
+        !direction
+        || direction.masterMargin <= 0
+        || direction.referenceCount < 8
+        || direction.referenceSupportRatio < 0.8
+        || direction.referenceMedianMargin < 0.02
+        || direction.referenceLowerQuartileMargin < 0.005
+    ) return null;
+    const window = boundedSequentialWindow(head.year, 7, diagnosis.targetRange);
+    const rankedYears = Array.from(
+        { length: window.endYear - window.startYear + 1 },
+        (_, index) => {
+            const year = window.startYear + index;
+            return {
+                year,
+                score: head.gainOverDirect - Math.abs(year - head.year) * 0.01,
+                evidenceTags: [
+                    "sequential_false_staircase_head",
+                    "positive_unit_staircase_direction",
+                ],
+            };
+        },
+    ).sort((left, right) => (
+        right.score - left.score || right.year - left.year
+    )).map((row, index) => ({ ...row, rank: index + 1 }));
+    const template = detected[0];
+    return {
+        id: `diagnosis-event-${diagnosis.targetTree}-sequential-false-${
+            window.startYear
+        }-${window.endYear}`,
+        seriesId: diagnosis.targetTree,
+        eventType: "falseRing",
+        ...window,
+        rankedYears,
+        confidenceLevel: "medium",
+        evidence: {
+            algorithmSources: [
+                "per_reference_two_step_direction_competition",
+                "positive_unit_staircase_direction",
+                "sequential_false_staircase_head",
+            ],
+            score: direction.masterMargin,
+            scoreMargin: Math.max(0, direction.referenceMedianMargin),
+            baselineCorrelation:
+                template?.evidence.baselineCorrelation
+                ?? diagnosis.globalSlidingMatch.currentR,
+            correctedCorrelation:
+                template?.evidence.correctedCorrelation
+                ?? diagnosis.globalSlidingMatch.bestGlobalR,
+            correlationGain: template?.evidence.correlationGain ?? null,
+            lagBefore: 1,
+            lagAfter: 0,
+            samplePairs: diagnosis.rawTarget.size,
+            candidateIds: candidates.filter((candidate) => (
+                candidate.targetTree === diagnosis.targetTree
+                && candidate.operationType === "DELETE_FALSE_RING"
+                && candidate.targetYear !== undefined
+                && candidate.targetYear >= window.startYear
+                && candidate.targetYear <= window.endYear
+            )).map((candidate) => candidate.id),
+            notes: [
+                `sequential_false_head_year=${head.year}`,
+                `sequential_false_path_start_lag=${head.pathStartLag}`,
+                `sequential_false_transition_count=${head.transitionCount}`,
+                `sequential_false_head_run_years=${head.headRunYears}`,
+                `sequential_false_gain_over_direct=${head.gainOverDirect.toFixed(6)}`,
+                `sequential_false_head_mean_advantage=${finiteNote(
+                    head.headMeanAdvantage,
+                )}`,
+                `sequential_false_fixed_tail_advantage=${finiteNote(
+                    head.fixedTailMeanAdvantage,
+                )}`,
+                `sequential_false_delete_years=${direction.falseYears.join(",")}`,
+                `sequential_false_insert_alias_years=${direction.missingYears.join(",")}`,
+                `sequential_false_direction_master_margin=${direction.masterMargin.toFixed(6)}`,
+                `sequential_false_direction_reference_support=${
+                    direction.referenceSupport
+                }/${direction.referenceCount}`,
+                `sequential_false_direction_reference_median=${
+                    direction.referenceMedianMargin.toFixed(6)
+                }`,
+                `sequential_false_direction_reference_q25=${
+                    direction.referenceLowerQuartileMargin.toFixed(6)
+                }`,
+                "sequential_false_score_is_relative_not_probability",
+            ],
+        },
+        alternativeTypes: [],
+        seriesRange: { ...diagnosis.targetRange },
+    };
 };
 
 const MIN_SEQUENTIAL_GAIN_PER_EXTRA_TRANSITION = 0.8;
@@ -3984,6 +4137,19 @@ export const makeDiagnosisEvents = (
             cofechaPreprocess,
         );
         if (!cofechaDiagnosis) return finalize(displayed);
+        const sequentialFalse = recoverSequentialFalseHeadEvent(
+            displayed,
+            diagnosis,
+            cofechaDiagnosis,
+            siteData,
+            ownCandidates,
+            effectiveConfig,
+            options,
+            locatorPathCache,
+        );
+        if (sequentialFalse) {
+            return finalize([sequentialFalse]);
+        }
         if (mayRecoverSequentialMissing && !hasTerminalWholeBaseline) {
             const sequentialMissing = recoverSequentialMissingHeadEvent(
                 displayed,

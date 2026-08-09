@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { deleteYearWithMode } from "@/features/rwl/edit";
+import type { RwlTreeData } from "@/features/rwl/types";
 import {
     createEndAnchoredFalseRingCase,
     createPiecewiseLagMixedCase,
@@ -75,7 +76,7 @@ describe("RDM false-ring fixtures", () => {
         "round-trips two false rings in %s confirmation order",
         (_label, deletionYears) => {
             const source = series();
-            let restored = createPiecewiseLagMixedCase(source, [{
+            let restored: RwlTreeData = createPiecewiseLagMixedCase(source, [{
                 eventType: "falseRing",
                 year: 1903,
                 shiftYears: 1,

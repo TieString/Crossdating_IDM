@@ -20,9 +20,12 @@ import { diagnoseCrossdating } from "@/features/crossdating/diagnosis";
 import { getConfig } from "@/features/crossdating/diagnosis/config";
 import {
     createLagPathCache,
+    locateSequentialFalseHead,
     locateSequentialMissingHead,
 } from "@/features/crossdating/diagnosis/eventPath";
 import { diagnoseSeriesCore } from "@/features/crossdating/diagnosis/segments";
+import { scoreJointCounterfactualOperations } from "@/features/crossdating/diagnosis/jointCounterfactualOperation";
+import { compareTwoStepUnitDirections } from "@/features/crossdating/diagnosis/discreteMissingStaircaseCompetition";
 import { cofechaStyleStandardize } from "@/features/crossdating/reference";
 import type { DiagnosisEvent } from "../types";
 import {
@@ -554,6 +557,116 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
         expect(rows.every((row) => (
             row.head !== null && row.head.gainOverDirect < 0
         )), JSON.stringify(rows)).toBe(true);
+    }, 180_000);
+
+    it("keeps positive staircase and delete counterfactual aligned for two false rings", () => {
+        const falseTargetId = "mon151";
+        const falseTarget = parsed.get(falseTargetId)!;
+        const synthetic = createPiecewiseLagMixedCase(falseTarget, [{
+            eventType: "falseRing",
+            year: 1685,
+            shiftYears: 1,
+            falseMode: "moderate",
+        }, {
+            eventType: "falseRing",
+            year: 1694,
+            shiftYears: 1,
+            falseMode: "moderate",
+        }]);
+        const site = new Map(cleanSite);
+        site.set(falseTargetId, synthetic.corrupted);
+        const outText = runBundledCofecha(site);
+        const parts = splitReportByParts(outText);
+        const targetExcludedFlags = new Set([
+            ...extractPart6FlaggedASeriesIds(parts.get("PART 6") ?? ""),
+            falseTargetId,
+        ]);
+        const passReference = createCofechaPassReferenceConfig({
+            siteData: site,
+            flaggedAIds: targetExcludedFlags,
+            cofechaRunId: "co612-double-false-fresh",
+            rwlHash: "co612-double-false-fresh",
+        });
+        const dynamicReference = passReference.cofechaPassReference
+            ? passReference
+            : createCofechaMasterReferenceConfig({
+                    siteData: site,
+                    flaggedAIds: targetExcludedFlags,
+                    cofechaRunId: "co612-double-false-fresh",
+                    rwlHash: "co612-double-false-fresh",
+                    masterDatingSeries: parseCofechaResult(outText).masterDatingSeries,
+                });
+        const effectiveConfig = getConfig({ referenceConfig: dynamicReference });
+        const core = diagnoseSeriesCore(
+            site,
+            falseTargetId,
+            effectiveConfig,
+            (series) => new Map(cofechaStyleStandardize(series).map(
+                (point) => [point.year, point.value],
+            )),
+        );
+        const positive = core
+            ? locateSequentialFalseHead(
+                    core,
+                    site,
+                    { maxLag: 2 },
+                    createLagPathCache(),
+                    0,
+                )
+            : null;
+        const negative = core
+            ? locateSequentialMissingHead(
+                    core,
+                    site,
+                    { minLag: -2, maxPartialGapYears: 2 },
+                    createLagPathCache(),
+                    0,
+                )
+            : null;
+
+        const operationScores = core
+            ? scoreJointCounterfactualOperations(core, 20, [-1, 1], 0)
+            : [];
+        const falseScore = operationScores.find((score) => (
+            score.eventType === "falseRing"
+        ));
+        const missingScore = operationScores.find((score) => (
+            score.eventType === "missingRing"
+        ));
+        const direction = core && positive && negative
+            ? compareTwoStepUnitDirections(
+                    core,
+                    site,
+                    positive.year,
+                    negative.year,
+                    true,
+                )
+            : null;
+        expect(positive, JSON.stringify({ positive, negative })).not.toBeNull();
+        expect(positive?.pathStartLag).toBe(2);
+        expect(positive?.gainOverDirect ?? 0).toBeGreaterThan(0);
+        expect(falseScore?.bestDifferenceGain ?? Number.NEGATIVE_INFINITY)
+            .toBeLessThan(missingScore?.bestDifferenceGain ?? Number.NEGATIVE_INFINITY);
+        expect(falseScore?.topThreeDifferenceGain ?? Number.NEGATIVE_INFINITY)
+            .toBeLessThan(missingScore?.topThreeDifferenceGain ?? Number.NEGATIVE_INFINITY);
+        expect(direction).not.toBeNull();
+        expect(direction?.masterMargin ?? 0).toBeGreaterThan(0);
+        expect(direction?.referenceSupportRatio ?? 0).toBeGreaterThanOrEqual(0.8);
+        expect(direction?.referenceMedianMargin ?? 0).toBeGreaterThan(0.02);
+        expect(direction?.referenceLowerQuartileMargin ?? 0).toBeGreaterThan(0.005);
+        const recovered = diagnoseCrossdating(site, {
+            referenceConfig: dynamicReference,
+            targetTrees: [falseTargetId],
+            cofechaText: outText,
+        }).events.find((event) => event.seriesId === falseTargetId);
+        expect(recovered, JSON.stringify(summarize(
+            recovered ? [recovered] : [],
+        ))).toBeDefined();
+        expect(recovered?.eventType).toBe("falseRing");
+        expect(recovered?.evidence.algorithmSources)
+            .toContain("sequential_false_staircase_head");
+        expect(recovered?.startYear).toBeLessThanOrEqual(1694);
+        expect(recovered?.endYear).toBeGreaterThanOrEqual(1694);
     }, 180_000);
 
     it("audits sequential-missing evidence on the clean file", () => {
