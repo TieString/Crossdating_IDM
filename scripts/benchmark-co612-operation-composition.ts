@@ -63,7 +63,7 @@ type CombinationSpec = {
 };
 
 type Manifest = {
-    schemaVersion: 3;
+    schemaVersion: 4;
     createdAt: string;
     inputPath: string;
     sourceSha256: string;
@@ -203,6 +203,8 @@ const localShiftYears = localEventType === "missingRing"
         ? 1
         : partialShiftValue;
 const falseRingMode = (valueFor("--false-ring-mode") ?? "moderate") as FalseRingMode;
+const includeClean = valueFor("--include-clean") !== "false";
+const manifestOnly = valueFor("--manifest-only") === "true";
 const wholeShifts = (valueFor("--whole-shifts") ?? "-5,-1,1,5")
     .split(",")
     .map(Number)
@@ -211,11 +213,23 @@ const cofechaExe = resolve(valueFor("--cofecha-exe") ?? fileURLToPath(new URL(
     "../src-tauri/bin/cofecha-x86_64-pc-windows-msvc.exe",
     import.meta.url,
 )));
-const positions: Manifest["positions"] = [
-    { stratum: "older", fraction: 0.2 },
-    { stratum: "middle", fraction: 0.5 },
-    { stratum: "newer", fraction: 0.8 },
-];
+const requestedPositionFractions = (valueFor("--position-fractions") ?? "0.5,0.75")
+    .split(",")
+    .map(Number);
+if ((requestedPositionFractions.length !== 2
+        && requestedPositionFractions.length !== 3)
+    || requestedPositionFractions.some((value) => (
+        !Number.isFinite(value) || value <= 0 || value >= 1
+    ))) {
+    throw new Error("position fractions must contain two or three values between 0 and 1");
+}
+const positionStrata: PositionStratum[] = requestedPositionFractions.length === 2
+    ? ["middle", "newer"]
+    : ["older", "middle", "newer"];
+const positions: Manifest["positions"] = positionStrata.map((stratum, index) => ({
+    stratum,
+    fraction: requestedPositionFractions[index],
+}));
 
 const assertSafeRunDir = (): void => {
     if (!isAbsolute(runDir)) throw new Error(`run directory must be absolute: ${runDir}`);
@@ -375,7 +389,7 @@ const buildManifest = async (): Promise<Manifest> => {
         return spec.caseId;
     };
 
-    allTargets.forEach((series) => {
+    (includeClean ? allTargets : []).forEach((series) => {
         addCase({
             caseId: `${series.id}:clean`,
             targetId: series.id,
@@ -464,7 +478,7 @@ const buildManifest = async (): Promise<Manifest> => {
         windowsHide: true,
     }).trim();
     return {
-        schemaVersion: 3,
+        schemaVersion: 4,
         createdAt: new Date().toISOString(),
         inputPath,
         sourceSha256: loaded.sourceSha256,
@@ -479,7 +493,7 @@ const buildManifest = async (): Promise<Manifest> => {
             requireZeroFreeTarget: true,
             maximumTargets,
             selectedTargetIds: selected.map((series) => series.id),
-            cleanTargetIds: allTargets.map((series) => series.id),
+            cleanTargetIds: includeClean ? allTargets.map((series) => series.id) : [],
         },
         cases,
         combinations,
@@ -784,7 +798,7 @@ const aggregate = async (manifest: Manifest): Promise<void> => {
         && row.finalLocalYear <= row.afterReopen.review.endYear
     );
     const report = {
-        schemaVersion: 3,
+        schemaVersion: 4,
         createdAt: new Date().toISOString(),
         runDir,
         sourceSha256Before: manifest.sourceSha256,
@@ -865,6 +879,20 @@ const runParent = async (): Promise<void> => {
     mkdirSync(runDir, { recursive: true });
     const manifest = await buildManifest();
     writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+    if (manifestOnly) {
+        console.log(`CO612_OPERATION_COMPOSITION_MANIFEST ${JSON.stringify({
+            runDir,
+            targets: manifest.selection.selectedTargetIds,
+            positions: manifest.positions,
+            wholeShifts: manifest.wholeShifts,
+            localEventType: manifest.localEventType,
+            localShiftYears: manifest.localShiftYears,
+            cleanCases: manifest.selection.cleanTargetIds.length,
+            cases: manifest.cases.length,
+            combinations: manifest.combinations.length,
+        })}`);
+        return;
+    }
     const viteNode = resolve(
         dirname(fileURLToPath(import.meta.url)),
         "../node_modules/vite-node/vite-node.mjs",

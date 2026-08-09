@@ -11,6 +11,7 @@ import {
     pruneLocalEventsDisconnectedFromWholeBaseline,
     projectSequentialUnitChainHead,
     recoverCandidateBackedPartialConsensus,
+    selectCompletedPartialMissingSeed,
     shouldReplaceUnanchoredPartialWithReferencePulse,
     shouldPreferWholeSeriesAlias,
     shouldSuppressSelfWorseningCandidateFalseRing,
@@ -249,6 +250,142 @@ describe("recoverCandidateBackedPartialConsensus", () => {
         ], candidateRecoveryDiagnosis, 100);
 
         expect(recovered).toBeNull();
+    });
+});
+
+describe("selectCompletedPartialMissingSeed", () => {
+    it("uses agreeing reference votes instead of a stale -2 path amplitude", () => {
+        const stale = partialMoveEvent(-2);
+        stale.evidence.candidateIds = [];
+        stale.evidence.notes = [
+            "partial_reference_vote_year=1917",
+            "partial_reference_vote_shift=-7",
+            "partial_reference_vote_gain=0.54",
+            "partial_exhaustive_vote_year=1915",
+            "partial_exhaustive_vote_shift=-7",
+            "partial_exhaustive_vote_gain=0.71",
+        ];
+        const seed = selectCompletedPartialMissingSeed([stale], [
+            candidatePartial({
+                shiftYears: -9,
+                anchorYear: 1950,
+                candidateId: "hard-operation-family",
+                source: "cofecha_segment_lag",
+            }),
+        ]);
+
+        expect(seed?.event.shiftYears).toBe(-7);
+        expect(seed?.event.evidence.lagBefore).toBe(-7);
+        expect(seed?.event.evidence.lagAfter).toBe(0);
+        expect(seed?.anchorYears).toEqual([1915, 1917]);
+        expect(seed?.event.evidence.notes).toContain(
+            "completed_mixed_seed=dual_partial_vote",
+        );
+    });
+
+    it("uses two independent candidate anchors when one operation-consistent vote remains", () => {
+        const stale = partialMoveEvent(-2);
+        stale.evidence.candidateIds = [];
+        stale.evidence.notes = [
+            "partial_reference_vote_year=1763",
+            "partial_reference_vote_shift=-98",
+            "partial_reference_vote_gain=0.015",
+            "partial_exhaustive_vote_year=1670",
+            "partial_exhaustive_vote_shift=-7",
+            "partial_exhaustive_vote_gain=0.10",
+        ];
+        const seed = selectCompletedPartialMissingSeed([stale], [
+            candidatePartial({
+                shiftYears: -7,
+                anchorYear: 1675,
+                candidateId: "cofecha-partial",
+                source: "cofecha_segment_lag",
+            }),
+            candidatePartial({
+                shiftYears: -7,
+                anchorYear: 1644,
+                candidateId: "segmented-partial",
+                source: "segmented_diagnosis",
+            }),
+        ]);
+
+        expect(seed?.event.shiftYears).toBe(-7);
+        expect(seed?.event.rankedYears[0]?.year).toBe(1675);
+        expect(seed?.anchorYears).toEqual([1644, 1670, 1675]);
+        expect(seed?.event.evidence.notes).toContain(
+            "completed_mixed_seed=candidate_consensus",
+        );
+    });
+
+    it("recognizes cumulative and one-year-residual candidate amplitudes", () => {
+        const stale = partialMoveEvent(-4);
+        stale.evidence.candidateIds = [];
+        stale.evidence.notes = [];
+        const cumulative = candidatePartial({
+            shiftYears: -7,
+            anchorYear: 1791,
+            candidateId: "cumulative-partial",
+            source: "segmented_diagnosis",
+        });
+        cumulative.evidence.algorithmSources.push("global_sliding_match");
+        const residual = candidatePartial({
+            shiftYears: -6,
+            anchorYear: 1825,
+            candidateId: "residual-partial",
+            source: "cofecha_segment_lag",
+            observedLag: -7,
+        });
+        residual.evidence.lagAfter = -1;
+
+        const seed = selectCompletedPartialMissingSeed(
+            [stale],
+            [residual, cumulative],
+        );
+
+        expect(seed?.event.shiftYears).toBe(-7);
+        expect(seed?.anchorYears).toEqual([1791]);
+        expect(seed?.event.evidence.notes).toContain(
+            "completed_mixed_seed=unit_residual_pair",
+        );
+    });
+
+    it("accepts one hard candidate backed by a strong nearby exhaustive vote", () => {
+        const stale = partialMoveEvent(-2);
+        stale.evidence.candidateIds = [];
+        stale.evidence.notes = [
+            "partial_exhaustive_vote_year=1780",
+            "partial_exhaustive_vote_shift=-21",
+            "partial_exhaustive_vote_gain=0.36",
+        ];
+        const seed = selectCompletedPartialMissingSeed([stale], [
+            candidatePartial({
+                shiftYears: -21,
+                anchorYear: 1774,
+                candidateId: "large-cumulative-partial",
+                source: "segmented_diagnosis",
+            }),
+        ]);
+
+        expect(seed?.event.shiftYears).toBe(-21);
+        expect(seed?.anchorYears).toEqual([1774, 1780]);
+        expect(seed?.event.evidence.notes).toContain(
+            "completed_mixed_seed=single_vote_candidate",
+        );
+    });
+
+    it("does not create a mixed seed without any hard-gated executable candidate", () => {
+        const stale = partialMoveEvent(-2);
+        stale.evidence.candidateIds = [];
+        stale.evidence.notes = [
+            "partial_reference_vote_year=1917",
+            "partial_reference_vote_shift=-7",
+            "partial_reference_vote_gain=0.54",
+            "partial_exhaustive_vote_year=1915",
+            "partial_exhaustive_vote_shift=-7",
+            "partial_exhaustive_vote_gain=0.71",
+        ];
+
+        expect(selectCompletedPartialMissingSeed([stale], [])).toBeNull();
     });
 });
 

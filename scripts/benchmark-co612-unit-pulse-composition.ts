@@ -44,10 +44,16 @@ type Orientation = "missingThenFalse"
     | "missingThenMissing"
     | "falseThenFalse"
     | "missingThenPartial"
-    | "partialThenMissing";
+    | "partialThenMissing"
+    | "falseThenPartial"
+    | "partialThenFalse"
+    | "missingThenPartialThenFalse"
+    | "falseThenPartialThenMissing";
 type PositionStratum = "older" | "middle" | "newer";
-type TruthSide = "older" | "newer";
-type OperationIdentifiability = "operation-identifiable" | "operation-unidentifiable";
+type TruthSide = "older" | "middle" | "newer";
+type OperationIdentifiability = "operation-identifiable"
+    | "operation-stress"
+    | "operation-unidentifiable";
 
 const ALL_ORIENTATIONS: readonly Orientation[] = [
     "missingThenFalse",
@@ -56,6 +62,10 @@ const ALL_ORIENTATIONS: readonly Orientation[] = [
     "falseThenFalse",
     "missingThenPartial",
     "partialThenMissing",
+    "falseThenPartial",
+    "partialThenFalse",
+    "missingThenPartialThenFalse",
+    "falseThenPartialThenMissing",
 ];
 
 type TruthSpec = {
@@ -80,8 +90,8 @@ type ScenarioSpec = {
     partialShiftYears: number | null;
     positionStratum: PositionStratum;
     identifiability: OperationIdentifiability;
-    truths: [TruthSpec, TruthSpec];
-    controlIds: [string, string];
+    truths: TruthSpec[];
+    controlIds: string[];
 };
 
 type WorkItem = {
@@ -91,7 +101,7 @@ type WorkItem = {
 };
 
 type Manifest = {
-    schemaVersion: 3;
+    schemaVersion: 4;
     createdAt: string;
     inputPath: string;
     sourceSha256: string;
@@ -102,6 +112,10 @@ type Manifest = {
     spacings: number[];
     partialShifts: number[];
     positions: Array<{ stratum: PositionStratum; fraction: number }>;
+    execution: {
+        includeClean: boolean;
+        includeControls: boolean;
+    };
     selection: {
         minimumSeriesLength: number;
         requireZeroFreeTarget: true;
@@ -137,6 +151,7 @@ type SnapshotPreview = {
     referenceMode: string;
     referenceAnchorCount: number;
     candidates: Array<Record<string, unknown>>;
+    candidateProjectedEvents: EventPreview[];
     detectedBeforeFusion: EventPreview[];
     detectedAfterFusion: EventPreview[];
     finalEvents: EventPreview[];
@@ -206,7 +221,7 @@ type ScenarioResult = {
     positionStratum: PositionStratum;
     identifiability: OperationIdentifiability;
     initialTruths: TruthSpec[];
-    controlIds: [string, string];
+    controlIds: string[];
     steps: SerialStepResult[];
     finalState: SavedStateResult | null;
     recoveredCount: number;
@@ -264,6 +279,9 @@ const partialShifts = (valueFor("--partial-shifts") ?? "-2,-6,-20")
     .split(",")
     .map(Number)
     .filter((value) => Number.isInteger(value) && value <= -2 && value >= -100);
+const includeClean = valueFor("--include-clean") !== "false";
+const includeControls = valueFor("--include-controls") !== "false";
+const manifestOnly = valueFor("--manifest-only") === "true";
 const requestedOrientations = (valueFor("--orientations")
     ?? "missingThenFalse,falseThenMissing")
     .split(",")
@@ -275,20 +293,20 @@ if (invalidOrientations.length > 0) {
     throw new Error(`invalid orientations: ${invalidOrientations.join(",")}`);
 }
 const orientations = requestedOrientations as Orientation[];
-const requestedPositionFractions = (valueFor("--position-fractions") ?? "0.25,0.5,0.75")
+const requestedPositionFractions = (valueFor("--position-fractions") ?? "0.5,0.75")
     .split(",")
     .map(Number);
-if (requestedPositionFractions.length !== 3
+if ((requestedPositionFractions.length !== 2
+        && requestedPositionFractions.length !== 3)
     || requestedPositionFractions.some((value) => (
         !Number.isFinite(value) || value <= 0 || value >= 1
     ))) {
-    throw new Error("position fractions must contain exactly three values between 0 and 1");
+    throw new Error("position fractions must contain two or three values between 0 and 1");
 }
-const positions: Manifest["positions"] = ([
-    "older",
-    "middle",
-    "newer",
-] as const).map((stratum, index) => ({
+const positionStrata: PositionStratum[] = requestedPositionFractions.length === 2
+    ? ["middle", "newer"]
+    : ["older", "middle", "newer"];
+const positions: Manifest["positions"] = positionStrata.map((stratum, index) => ({
     stratum,
     fraction: requestedPositionFractions[index],
 }));
@@ -354,6 +372,8 @@ const snapshotPreview = (snapshot: LegacyDiagnosisSnapshot): SnapshotPreview => 
     referenceMode: snapshot.referenceMode,
     referenceAnchorCount: snapshot.referenceAnchorCount,
     candidates: snapshot.candidates,
+    candidateProjectedEvents:
+        snapshot.audit?.candidateProjectedEvents.map(auditEventPreview) ?? [],
     detectedBeforeFusion: snapshot.audit?.detectedBeforeFusion.map(auditEventPreview) ?? [],
     detectedAfterFusion: snapshot.audit?.detectedAfterFusion.map(auditEventPreview) ?? [],
     finalEvents: snapshot.audit?.finalEvents.map(auditEventPreview) ?? [],
@@ -487,12 +507,20 @@ const fixtureEvents = (truths: readonly TruthSpec[]): PiecewiseLagEventSpec[] =>
 
 const eventTypesForOrientation = (
     orientation: Orientation,
-): [LocalEventType, LocalEventType] => {
+): LocalEventType[] => {
     if (orientation === "missingThenFalse") return ["missingRing", "falseRing"];
     if (orientation === "falseThenMissing") return ["falseRing", "missingRing"];
     if (orientation === "missingThenMissing") return ["missingRing", "missingRing"];
     if (orientation === "missingThenPartial") return ["missingRing", "partialMove"];
     if (orientation === "partialThenMissing") return ["partialMove", "missingRing"];
+    if (orientation === "falseThenPartial") return ["falseRing", "partialMove"];
+    if (orientation === "partialThenFalse") return ["partialMove", "falseRing"];
+    if (orientation === "missingThenPartialThenFalse") {
+        return ["missingRing", "partialMove", "falseRing"];
+    }
+    if (orientation === "falseThenPartialThenMissing") {
+        return ["falseRing", "partialMove", "missingRing"];
+    }
     return ["falseRing", "falseRing"];
 };
 
@@ -602,12 +630,18 @@ const assertTruthRoundTrip = (
         }
         return final;
     };
-    const olderFirst = verifyOrder(["older", "newer"]);
-    const newerFirst = verifyOrder(["newer", "older"]);
+    const permutations = (values: string[]): string[][] => {
+        if (values.length <= 1) return [values];
+        return values.flatMap((value, index) => permutations([
+            ...values.slice(0, index),
+            ...values.slice(index + 1),
+        ]).map((tail) => [value, ...tail]));
+    };
+    const finals = permutations(truths.map((truth) => truth.truthId)).map(verifyOrder);
     const serialize = (data: Map<number, number | null>): string => JSON.stringify(
         Array.from(data).sort((left, right) => left[0] - right[0]),
     );
-    if (serialize(olderFirst) !== serialize(newerFirst)) {
+    if (finals.some((final) => serialize(final) !== serialize(finals[0]))) {
         throw new Error(`round-trip order mismatch: ${source.id}`);
     }
 };
@@ -648,9 +682,8 @@ const buildManifest = async (): Promise<Manifest> => {
                     || !series.valuesByYear.has(olderYear)
                     || !series.valuesByYear.has(newerYear)) return;
                 orientations.forEach((orientation) => {
-                    const [olderType, newerType] = eventTypesForOrientation(orientation);
-                    const usesPartial = olderType === "partialMove"
-                        || newerType === "partialMove";
+                    const eventTypes = eventTypesForOrientation(orientation);
+                    const usesPartial = eventTypes.includes("partialMove");
                     (usesPartial ? partialShifts : [null]).forEach((partialShiftYears) => {
                         const shiftFor = (eventType: LocalEventType): number => {
                             if (eventType === "missingRing") return -1;
@@ -660,27 +693,28 @@ const buildManifest = async (): Promise<Manifest> => {
                             }
                             return partialShiftYears;
                         };
-                        const truths: [TruthSpec, TruthSpec] = [{
-                            truthId: "older",
-                            side: "older",
-                            eventType: olderType,
-                            year: olderYear,
-                            shiftYears: shiftFor(olderType),
-                        }, {
-                            truthId: "newer",
-                            side: "newer",
-                            eventType: newerType,
-                            year: newerYear,
-                            shiftYears: shiftFor(newerType),
-                        }];
+                        const eventYears = eventTypes.length === 2
+                            ? [olderYear, newerYear]
+                            : [center - spacingYears, center, center + spacingYears];
+                        if (eventYears.some((year) => (
+                            year > series.endYear - 30 || !series.valuesByYear.has(year)
+                        ))) return;
+                        const sides: TruthSide[] = eventTypes.length === 2
+                            ? ["older", "newer"]
+                            : ["older", "middle", "newer"];
+                        const truths: TruthSpec[] = eventTypes.map((eventType, index) => ({
+                            truthId: sides[index],
+                            side: sides[index],
+                            eventType,
+                            year: eventYears[index],
+                            shiftYears: shiftFor(eventType),
+                        }));
                         const displayedStartYear = series.startYear - truths.reduce(
                             (sum, truth) => sum + truth.shiftYears,
                             0,
                         );
                         if (olderYear < displayedStartYear + 30) return;
-                        const controlIds = truths.map((truth) => (
-                            addControl(series.id, truth)
-                        )) as [string, string];
+                        const controlIds = truths.map((truth) => addControl(series.id, truth));
                         assertTruthRoundTrip(series, truths);
                         scenarios.push({
                             scenarioId: [
@@ -697,9 +731,11 @@ const buildManifest = async (): Promise<Manifest> => {
                             spacingYears,
                             partialShiftYears,
                             positionStratum: stratum,
-                            identifiability: spacingYears === 1
+                            identifiability: spacingYears <= 4
                                 ? "operation-unidentifiable"
-                                : "operation-identifiable",
+                                : spacingYears <= 13
+                                    ? "operation-stress"
+                                    : "operation-identifiable",
                             truths,
                             controlIds,
                         });
@@ -709,12 +745,13 @@ const buildManifest = async (): Promise<Manifest> => {
         });
     });
 
-    const controls = Array.from(controlById.values()).sort((left, right) => (
+    const allControls = Array.from(controlById.values()).sort((left, right) => (
         left.controlId.localeCompare(right.controlId)
     ));
+    const controls = includeControls ? allControls : [];
     let workIndex = 0;
     const workItems: WorkItem[] = [
-        ...allTargets.map((series) => ({
+        ...(includeClean ? allTargets : []).map((series) => ({
             workIndex: workIndex++,
             kind: "clean" as const,
             itemId: series.id,
@@ -736,7 +773,7 @@ const buildManifest = async (): Promise<Manifest> => {
         windowsHide: true,
     }).trim();
     return {
-        schemaVersion: 3,
+        schemaVersion: 4,
         createdAt: new Date().toISOString(),
         inputPath,
         sourceSha256: loaded.sourceSha256,
@@ -747,12 +784,13 @@ const buildManifest = async (): Promise<Manifest> => {
         spacings,
         partialShifts,
         positions,
+        execution: { includeClean, includeControls },
         selection: {
             minimumSeriesLength,
             requireZeroFreeTarget: true,
             maximumTargets,
             selectedTargetIds: selected.map((series) => series.id),
-            cleanTargetIds: allTargets.map((series) => series.id),
+            cleanTargetIds: includeClean ? allTargets.map((series) => series.id) : [],
         },
         controls,
         scenarios,
@@ -1000,6 +1038,10 @@ type ScenarioRow = {
     secondOperationCorrect: boolean;
     secondWindowCovered: boolean;
     secondTop1: boolean;
+    thirdEligible: boolean;
+    thirdOperationCorrect: boolean;
+    thirdWindowCovered: boolean;
+    thirdTop1: boolean;
     serialComplete: boolean;
     recoveredCount: number;
     finalResidualResponse: boolean | null;
@@ -1011,6 +1053,7 @@ type ScenarioRow = {
 const summarizeRows = (rows: ScenarioRow[]) => {
     const controlsBoth = rows.filter((row) => row.controlsBothCorrect);
     const secondEligible = rows.filter((row) => row.secondEligible);
+    const thirdEligible = rows.filter((row) => row.thirdEligible);
     const completed = rows.filter((row) => row.serialComplete);
     return {
         scenarios: rows.length,
@@ -1049,6 +1092,11 @@ const summarizeRows = (rows: ScenarioRow[]) => {
         secondWindowCoverageRate: rate(
             secondEligible.filter((row) => row.secondWindowCovered).length,
             secondEligible.length,
+        ),
+        thirdEligible: thirdEligible.length,
+        thirdWindowCoverageRate: rate(
+            thirdEligible.filter((row) => row.thirdWindowCovered).length,
+            thirdEligible.length,
         ),
         serialCompleteRate: rate(completed.length, rows.length),
         serialCompleteWhenControlsBothCorrectRate: rate(
@@ -1094,6 +1142,7 @@ const aggregate = (manifest: Manifest): void => {
     const rows: ScenarioRow[] = scenarios.map((scenario) => {
         const initial = scenario.steps[0]?.evaluation;
         const second = scenario.steps[1]?.evaluation;
+        const third = scenario.steps[2]?.evaluation;
         const controlResults = scenario.controlIds.map((id) => controlById.get(id));
         const controlsBothCorrect = controlResults.every((control) => (
             control?.evaluation.windowCoversAny === true
@@ -1124,6 +1173,10 @@ const aggregate = (manifest: Manifest): void => {
             secondOperationCorrect: second?.operationMatchesAny ?? false,
             secondWindowCovered: second?.windowCoversAny ?? false,
             secondTop1: second?.top1Exact ?? false,
+            thirdEligible: scenario.steps.length >= 3,
+            thirdOperationCorrect: third?.operationMatchesAny ?? false,
+            thirdWindowCovered: third?.windowCoversAny ?? false,
+            thirdTop1: third?.top1Exact ?? false,
             serialComplete: scenario.serialComplete,
             recoveredCount: scenario.recoveredCount,
             finalResidualResponse: scenario.finalState
@@ -1138,7 +1191,7 @@ const aggregate = (manifest: Manifest): void => {
     });
     const sourceSha256After = sha256Bytes(readFileSync(manifest.inputPath));
     const report = {
-        schemaVersion: 3,
+        schemaVersion: 4,
         createdAt: new Date().toISOString(),
         runDir,
         sourceSha256Before: manifest.sourceSha256,
@@ -1152,6 +1205,7 @@ const aggregate = (manifest: Manifest): void => {
         spacings: manifest.spacings,
         partialShifts: manifest.partialShifts,
         positions: manifest.positions,
+        execution: manifest.execution,
         uniqueDiagnosisStates: clean.length
             + controls.length
             + scenarios.reduce((sum, scenario) => (
@@ -1197,7 +1251,11 @@ const aggregate = (manifest: Manifest): void => {
             ]),
         ),
         byIdentifiability: Object.fromEntries(
-            (["operation-identifiable", "operation-unidentifiable"] as const).map(
+            ([
+                "operation-identifiable",
+                "operation-stress",
+                "operation-unidentifiable",
+            ] as const).map(
                 (identifiability) => [
                     identifiability,
                     summarizeRows(rows.filter((row) => (
@@ -1242,6 +1300,21 @@ const runParent = async (): Promise<void> => {
     mkdirSync(runDir, { recursive: true });
     const manifest = await buildManifest();
     writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+    if (manifestOnly) {
+        console.log(`CO612_UNIT_PULSE_MANIFEST ${JSON.stringify({
+            runDir,
+            targets: manifest.selection.selectedTargetIds,
+            positions: manifest.positions,
+            orientations: manifest.orientations,
+            spacings: manifest.spacings,
+            partialShifts: manifest.partialShifts,
+            cleanCases: manifest.selection.cleanTargetIds.length,
+            controls: manifest.controls.length,
+            scenarios: manifest.scenarios.length,
+            workItems: manifest.workItems.length,
+        })}`);
+        return;
+    }
     const viteNode = resolve(repoRoot, "node_modules/vite-node/vite-node.mjs");
     await Promise.all(Array.from({ length: workerCount }, (_, index) => (
         new Promise<void>((resolveWorker, rejectWorker) => {

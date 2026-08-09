@@ -9,6 +9,7 @@
 import type { RwlSiteData } from "@/features/rwl/types";
 import { cofechaStyleStandardize } from "../reference";
 import {
+    compareCompletedPartialWithSingleMissing,
     compareCompletedPartialWithMissingStaircase,
     comparePartialMoveWithMissingStaircase,
     comparePartialMoveWithRobustMissingStaircase,
@@ -16,6 +17,7 @@ import {
     supportsDiscreteMissingStaircase,
     supportsRobustMissingStaircaseCorrection,
     type CompletedPartialStaircaseCompetition,
+    type CompletedPartialMissingComposition,
     type MissingStaircaseCompetition,
 } from "./discreteMissingStaircaseCompetition";
 import {
@@ -2153,6 +2155,339 @@ const supportsCompletedPartialOverMissingStaircase = (
     && competition.referenceMedianMargin < -1e-9
     && competition.referenceUpperQuartileMargin <= 0,
 );
+
+const completedPartialMissingNotes = (
+    competition: CompletedPartialMissingComposition,
+): string[] => [
+    `completed_mixed_cumulative_shift=${competition.cumulativeShiftYears}`,
+    `completed_mixed_partial_shift=${competition.partialShiftYears}`,
+    `completed_mixed_orientation=${competition.orientation}`,
+    `completed_mixed_older_boundary=${competition.olderBoundaryYear}`,
+    `completed_mixed_newer_boundary=${competition.newerBoundaryYear}`,
+    `completed_mixed_frontier_type=${competition.frontierEventType}`,
+    `completed_mixed_frontier_year=${competition.frontierYear}`,
+    `completed_mixed_separation=${competition.separationYears}`,
+    `completed_mixed_master_margin=${competition.masterMargin.toFixed(6)}`,
+    `completed_mixed_reference_support=${competition.mixedReferenceSupport}/${
+        competition.referenceCount
+    }`,
+    `completed_mixed_reference_median=${competition.referenceMedianMargin.toFixed(6)}`,
+    `completed_mixed_reference_q25=${
+        competition.referenceLowerQuartileMargin.toFixed(6)
+    }`,
+    `completed_mixed_orientation_support=${competition.orientationReferenceSupport}/${
+        competition.orientationReferenceCount
+    }`,
+    `completed_mixed_orientation_median=${
+        competition.orientationMedianMargin.toFixed(6)
+    }`,
+    `completed_mixed_orientation_q25=${
+        competition.orientationLowerQuartileMargin.toFixed(6)
+    }`,
+    `completed_mixed_master_orientation_margin=${
+        competition.masterOrientationMargin.toFixed(6)
+    }`,
+    `completed_mixed_compared_with_missing_staircase=${
+        competition.comparedWithMissingStaircase
+    }`,
+];
+
+const supportsCompletedPartialMissingComposition = (
+    competition: CompletedPartialMissingComposition | null,
+): competition is CompletedPartialMissingComposition => {
+    if (!competition || competition.separationYears < 2) return false;
+    const orientationSupported = competition.orientationReferenceCount >= 8
+        && competition.orientationReferenceSupportRatio >= 0.85
+        && competition.orientationMedianMargin >= 0.04
+        && competition.orientationLowerQuartileMargin >= 0.01;
+    const referenceFamilySupported = competition.referenceCount >= 8
+        && competition.mixedReferenceSupportRatio >= 0.75
+        && competition.referenceMedianMargin >= 0.04
+        && competition.referenceLowerQuartileMargin >= 0.01;
+    const masterFamilySupported = competition.masterMargin >= 0.05
+        && competition.masterOrientationMargin >= 0.05
+        && competition.orientationReferenceSupportRatio >= 0.9
+        && competition.orientationMedianMargin >= 0.1
+        && competition.orientationLowerQuartileMargin >= 0.05;
+    return orientationSupported
+        && (referenceFamilySupported || masterFamilySupported);
+};
+
+const latestCompletedMixedNoteNumber = (
+    event: DiagnosisEvent,
+    key: string,
+): number | null => {
+    const prefix = `${key}=`;
+    const note = [...event.evidence.notes]
+        .reverse()
+        .find((value) => value.startsWith(prefix));
+    const value = Number(note?.slice(prefix.length));
+    return Number.isFinite(value) ? value : null;
+};
+
+type CompletedPartialMissingSeed = {
+    event: DiagnosisEvent;
+    anchorYears: number[];
+};
+
+/**
+ * Chooses a cumulative negative-lag seed without trusting the already-localized window. A stale
+ * path peak may have the right operation family but the wrong amplitude and year, while the two
+ * independent partial votes still agree on both. Candidate hard gates remain mandatory.
+ */
+export const selectCompletedPartialMissingSeed = (
+    displayed: readonly DiagnosisEvent[],
+    candidateEvents: readonly DiagnosisEvent[],
+): CompletedPartialMissingSeed | null => {
+    if (displayed.length !== 1
+        || displayed[0].eventType !== "partialMove"
+        || displayed[0].shiftSide !== "older") return null;
+    const current = displayed[0];
+    const hardCandidates = candidateEvents.filter((event) => (
+        event.eventType === "partialMove"
+        && event.shiftSide === "older"
+        && (event.shiftYears ?? 0) <= -3
+        && event.evidence.candidateIds.length > 0
+        && event.evidence.notes.includes("candidate_hard_gate_passed")
+    ));
+    const currentIsHardCandidate = (current.shiftYears ?? 0) <= -3
+        && current.evidence.candidateIds.length > 0
+        && current.evidence.notes.includes("candidate_hard_gate_passed");
+    if (!currentIsHardCandidate && hardCandidates.length === 0) return null;
+
+    const referenceShift = latestCompletedMixedNoteNumber(
+        current,
+        "partial_reference_vote_shift",
+    );
+    const referenceYear = latestCompletedMixedNoteNumber(
+        current,
+        "partial_reference_vote_year",
+    );
+    const referenceGain = latestCompletedMixedNoteNumber(
+        current,
+        "partial_reference_vote_gain",
+    ) ?? Number.NEGATIVE_INFINITY;
+    const exhaustiveShift = latestCompletedMixedNoteNumber(
+        current,
+        "partial_exhaustive_vote_shift",
+    );
+    const exhaustiveYear = latestCompletedMixedNoteNumber(
+        current,
+        "partial_exhaustive_vote_year",
+    );
+    const exhaustiveGain = latestCompletedMixedNoteNumber(
+        current,
+        "partial_exhaustive_vote_gain",
+    ) ?? Number.NEGATIVE_INFINITY;
+    const dualVoteShift = referenceShift !== null
+        && referenceShift === exhaustiveShift
+        && referenceShift <= -3
+        && referenceGain >= 0.04
+        && exhaustiveGain >= 0.04
+        && referenceYear !== null
+        && exhaustiveYear !== null
+        && Math.abs(referenceYear - exhaustiveYear) <= 6
+        ? referenceShift
+        : null;
+
+    const groups = new Map<number, DiagnosisEvent[]>();
+    hardCandidates.forEach((event) => {
+        const shiftYears = event.shiftYears!;
+        const group = groups.get(shiftYears) ?? [];
+        group.push(event);
+        groups.set(shiftYears, group);
+    });
+    const matchingVoteShift = (shiftYears: number): boolean => (
+        (referenceShift === shiftYears && referenceGain >= 0.04)
+        || (exhaustiveShift === shiftYears && exhaustiveGain >= 0.04)
+    );
+    const candidateGroup = Array.from(groups.entries())
+        .filter(([shiftYears, events]) => {
+            const candidateIds = new Set(events.flatMap(
+                (event) => event.evidence.candidateIds,
+            ));
+            const hasCofecha = events.some((event) => (
+                event.evidence.algorithmSources.includes("cofecha_segment_lag")
+            ));
+            const hasIndependent = events.some((event) => (
+                !event.evidence.algorithmSources.includes("cofecha_segment_lag")
+                && event.evidence.algorithmSources.includes("segmented_diagnosis")
+            ));
+            return candidateIds.size >= 2
+                && hasCofecha
+                && hasIndependent
+                && matchingVoteShift(shiftYears);
+        })
+        .sort((left, right) => (
+            right[1].length - left[1].length
+            || Math.max(...right[1].map((event) => event.evidence.score))
+                - Math.max(...left[1].map((event) => event.evidence.score))
+        ))[0] ?? null;
+
+    const residualPair = hardCandidates.flatMap((cumulative) => hardCandidates
+        .filter((partial) => (
+            partial !== cumulative
+            && partial.shiftYears === cumulative.shiftYears! + 1
+            && cumulative.evidence.lagBefore === cumulative.shiftYears
+            && cumulative.evidence.lagAfter === 0
+            && partial.evidence.lagBefore === cumulative.shiftYears
+            && partial.evidence.lagAfter === -1
+        ))
+        .map((partial) => ({ cumulative, partial })))
+        .sort((left, right) => (
+            right.cumulative.evidence.score - left.cumulative.evidence.score
+        ))[0] ?? null;
+    const strongSingleVoteCandidates = hardCandidates.filter((candidate) => {
+        const candidateYear = candidateEventAnchorYear(candidate);
+        if (candidateYear === null) return false;
+        return (referenceShift === candidate.shiftYears
+                && referenceGain >= 0.08
+                && referenceYear !== null
+                && Math.abs(referenceYear - candidateYear) <= 13)
+            || (exhaustiveShift === candidate.shiftYears
+                && exhaustiveGain >= 0.08
+                && exhaustiveYear !== null
+                && Math.abs(exhaustiveYear - candidateYear) <= 13);
+    }).sort((left, right) => right.evidence.score - left.evidence.score);
+
+    const cumulativeShiftYears = currentIsHardCandidate
+        ? current.shiftYears!
+        : dualVoteShift
+            ?? residualPair?.cumulative.shiftYears
+            ?? candidateGroup?.[0]
+            ?? strongSingleVoteCandidates[0]?.shiftYears
+            ?? null;
+    if (cumulativeShiftYears === null) return null;
+    const voteAnchorYears = [
+        ...(referenceShift === cumulativeShiftYears && referenceGain >= 0.04
+            && referenceYear !== null ? [referenceYear] : []),
+        ...(exhaustiveShift === cumulativeShiftYears && exhaustiveGain >= 0.04
+            && exhaustiveYear !== null ? [exhaustiveYear] : []),
+    ];
+    const matchingCandidates = hardCandidates.filter(
+        (event) => event.shiftYears === cumulativeShiftYears,
+    );
+    const anchorYears = Array.from(new Set([
+        ...voteAnchorYears,
+        ...matchingCandidates.flatMap((event) => {
+            const year = candidateEventAnchorYear(event);
+            return year === null ? [] : [year];
+        }),
+    ])).sort((left, right) => left - right);
+    const distanceToVote = (event: DiagnosisEvent): number => {
+        const year = candidateEventAnchorYear(event);
+        if (year === null || voteAnchorYears.length === 0) return 0;
+        return Math.min(...voteAnchorYears.map((voteYear) => Math.abs(year - voteYear)));
+    };
+    const source = (currentIsHardCandidate ? [current] : matchingCandidates)
+        .slice()
+        .sort((left, right) => (
+            distanceToVote(left) - distanceToVote(right)
+            || Number(right.evidence.lagAfter === 0) - Number(left.evidence.lagAfter === 0)
+            || right.evidence.score - left.evidence.score
+        ))[0] ?? current;
+    const candidateIds = Array.from(new Set([
+        ...source.evidence.candidateIds,
+        ...hardCandidates.flatMap((event) => event.evidence.candidateIds),
+    ]));
+    return {
+        event: {
+            ...source,
+            shiftYears: cumulativeShiftYears,
+            shiftSide: "older",
+            evidence: {
+                ...source.evidence,
+                lagBefore: cumulativeShiftYears,
+                lagAfter: 0,
+                candidateIds,
+                notes: Array.from(new Set([
+                    ...source.evidence.notes,
+                    "candidate_hard_gate_passed",
+                    dualVoteShift === cumulativeShiftYears
+                        ? "completed_mixed_seed=dual_partial_vote"
+                        : residualPair?.cumulative.shiftYears === cumulativeShiftYears
+                            ? "completed_mixed_seed=unit_residual_pair"
+                            : candidateGroup?.[0] === cumulativeShiftYears
+                                ? "completed_mixed_seed=candidate_consensus"
+                                : "completed_mixed_seed=single_vote_candidate",
+                ])),
+            },
+        },
+        anchorYears,
+    };
+};
+
+const makeCompletedPartialMissingFrontierEvent = (
+    source: DiagnosisEvent,
+    competition: CompletedPartialMissingComposition,
+    diagnosis: SeriesCoreDiagnosis,
+): DiagnosisEvent => {
+    const width = competition.referenceMedianMargin >= 0.04
+        && competition.orientationMedianMargin >= 0.01
+        ? 7
+        : 9;
+    const startYear = Math.max(
+        diagnosis.targetRange.startYear,
+        Math.min(
+            competition.frontierYear - Math.floor(width / 2),
+            diagnosis.targetRange.endYear - width + 1,
+        ),
+    );
+    const endYear = startYear + width - 1;
+    const rankedYears = Array.from({ length: width }, (_, index) => {
+        const year = startYear + index;
+        return {
+            year,
+            score: -Math.abs(year - competition.frontierYear),
+            evidenceTags: ["completed_partial_missing_composition"],
+        };
+    }).sort((left, right) => (
+        right.score - left.score || left.year - right.year
+    )).map((row, index) => ({ ...row, rank: index + 1 }));
+    const common: DiagnosisEvent = {
+        ...source,
+        id: `${source.id}-completed-partial-missing-frontier`,
+        eventType: competition.frontierEventType,
+        startYear,
+        endYear,
+        reviewCoreRange: { startYear, endYear },
+        rankedYears,
+        confidenceLevel: "medium",
+        alternativeTypes: [],
+        locationAlternatives: undefined,
+        operationAlternatives: undefined,
+        evidence: {
+            ...source.evidence,
+            algorithmSources: Array.from(new Set([
+                ...source.evidence.algorithmSources,
+                "completed_partial_missing_composition",
+                "per_reference_completed_correction",
+            ])).sort(),
+            scoreMargin: Math.max(0, competition.referenceMedianMargin),
+            lagBefore: competition.frontierEventType === "partialMove"
+                ? competition.partialShiftYears
+                : -1,
+            lagAfter: 0,
+            notes: Array.from(new Set([
+                ...source.evidence.notes,
+                ...completedPartialMissingNotes(competition),
+                "completed_mixed_frontier_is_newest_event",
+                "completed_mixed_score_is_relative_not_probability",
+            ])),
+        },
+    };
+    if (competition.frontierEventType === "partialMove") {
+        return {
+            ...common,
+            shiftYears: competition.partialShiftYears,
+            shiftSide: "older",
+        };
+    }
+    const missing = { ...common };
+    delete missing.shiftYears;
+    delete missing.shiftSide;
+    return missing;
+};
 
 const recoverCompletedCandidateBackedPartial = (
     competition: CompletedPartialStaircaseCompetition,
@@ -4322,6 +4657,51 @@ export const makeDiagnosisEvents = (
             cofechaPreprocess,
         );
         if (!cofechaDiagnosis) return finalize(displayed);
+        const completedMixedSeed = mayRecoverSequentialMissing
+            ? selectCompletedPartialMissingSeed(displayed, candidateEvents)
+            : null;
+        if (completedMixedSeed) {
+            const compositionPath = locateSequentialMissingHead(
+                cofechaDiagnosis,
+                siteData,
+                {
+                    minLag: effectiveConfig.lagMin,
+                    maxPartialGapYears: effectiveConfig.maxPartialGapYears,
+                },
+                locatorPathCache,
+            );
+            const baseComposition = compareCompletedPartialWithSingleMissing(
+                cofechaDiagnosis,
+                siteData,
+                completedMixedSeed.event,
+                compositionPath
+                    && supportsSequentialMissingReplacementOfPartial(compositionPath)
+                    ? compositionPath.unitEventYears
+                    : [],
+                true,
+            );
+            const composition = supportsCompletedPartialMissingComposition(baseComposition)
+                || completedMixedSeed.anchorYears.length === 0
+                ? baseComposition
+                : compareCompletedPartialWithSingleMissing(
+                    cofechaDiagnosis,
+                    siteData,
+                    completedMixedSeed.event,
+                    compositionPath
+                        && supportsSequentialMissingReplacementOfPartial(compositionPath)
+                        ? compositionPath.unitEventYears
+                        : [],
+                    true,
+                    completedMixedSeed.anchorYears,
+                ) ?? baseComposition;
+            if (supportsCompletedPartialMissingComposition(composition)) {
+                return finalize([makeCompletedPartialMissingFrontierEvent(
+                    completedMixedSeed.event,
+                    composition,
+                    diagnosis,
+                )]);
+            }
+        }
         const sequentialFalse = recoverSequentialFalseHeadEvent(
             displayed,
             diagnosis,

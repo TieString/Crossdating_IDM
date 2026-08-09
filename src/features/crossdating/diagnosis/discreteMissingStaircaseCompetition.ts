@@ -69,6 +69,30 @@ export type CompletedPartialStaircaseCompetition = {
     }>;
 };
 
+export type CompletedPartialMissingComposition = {
+    cumulativeShiftYears: number;
+    partialShiftYears: number;
+    orientation: "missingThenPartial" | "partialThenMissing";
+    olderBoundaryYear: number;
+    newerBoundaryYear: number;
+    frontierEventType: "missingRing" | "partialMove";
+    frontierYear: number;
+    separationYears: number;
+    masterMargin: number;
+    referenceCount: number;
+    mixedReferenceSupport: number;
+    mixedReferenceSupportRatio: number;
+    referenceMedianMargin: number;
+    referenceLowerQuartileMargin: number;
+    orientationReferenceCount: number;
+    orientationReferenceSupport: number;
+    orientationReferenceSupportRatio: number;
+    orientationMedianMargin: number;
+    orientationLowerQuartileMargin: number;
+    masterOrientationMargin: number;
+    comparedWithMissingStaircase: boolean;
+};
+
 const MAX_TWO_STEP_SEPARATION_YEARS = 17;
 const MAX_HEAD_BOUNDARY_OFFSET_YEARS = 4;
 
@@ -138,6 +162,16 @@ type ScoredCorrection = {
     globalScore: number;
     localScore: number;
     score: number;
+};
+
+type CompletionComparisonCorrection = ScoredCorrection & {
+    comparisonRange: { startYear: number; endYear: number };
+};
+
+type MixedPartialMissingCorrection = CompletionComparisonCorrection & {
+    orientation: CompletedPartialMissingComposition["orientation"];
+    olderBoundaryYear: number;
+    newerBoundaryYear: number;
 };
 
 const median = (values: number[]): number => {
@@ -710,6 +744,353 @@ export const compareCompletedPartialWithMissingStaircase = (
             referenceUpperQuartileMargin: profile.upperQuartileMargin,
             masterScore: profile.masterScore,
         })),
+    };
+};
+
+const simulatePartialMissingComposition = (
+    series: NumericSeries,
+    orientation: CompletedPartialMissingComposition["orientation"],
+    olderBoundaryYear: number,
+    newerBoundaryYear: number,
+    partialShiftYears: number,
+): NumericSeries => {
+    if (orientation === "missingThenPartial") {
+        const afterPartial = simulatePartialMove(
+            series,
+            newerBoundaryYear,
+            partialShiftYears,
+        );
+        return simulateMissingRing(
+            afterPartial,
+            olderBoundaryYear + partialShiftYears,
+        );
+    }
+    const afterMissing = simulateMissingRing(series, newerBoundaryYear);
+    return simulatePartialMove(
+        afterMissing,
+        olderBoundaryYear - 1,
+        partialShiftYears,
+    );
+};
+
+/**
+ * Compares complete corrections when a cumulative negative lag may contain one physical gap and
+ * one missing ring. The two event orders have different middle states, so the winning family also
+ * identifies which operation is the newer, currently executable frontier.
+ */
+export const compareCompletedPartialWithSingleMissing = (
+    diagnosis: SeriesCoreDiagnosis,
+    siteData: RwlSiteData,
+    event: DiagnosisEvent,
+    pathMissingYears: readonly number[] = [],
+    useCofechaStandardization = true,
+    additionalAnchorYears: readonly number[] = [],
+): CompletedPartialMissingComposition | null => {
+    const cumulativeShiftYears = event.shiftYears;
+    if (
+        event.eventType !== "partialMove"
+        || event.shiftSide !== "older"
+        || !Number.isInteger(cumulativeShiftYears)
+        || cumulativeShiftYears! > -3
+        || event.evidence.candidateIds.length === 0
+        || !event.evidence.notes.includes("candidate_hard_gate_passed")
+    ) return null;
+    const partialShiftYears = cumulativeShiftYears! + 1;
+    if (partialShiftYears > -2) return null;
+
+    const range = diagnosis.targetRange;
+    const minimumBoundaryYear = range.startYear + 12;
+    const maximumBoundaryYear = range.endYear - 12;
+    if (maximumBoundaryYear <= minimumBoundaryYear) return null;
+    const topYear = event.rankedYears.slice().sort(
+        (left, right) => left.rank - right.rank,
+    )[0]?.year ?? Math.round((event.startYear + event.endYear) / 2);
+    const anchorYears = new Set<number>();
+    for (
+        let year = Math.max(minimumBoundaryYear, event.startYear);
+        year <= Math.min(maximumBoundaryYear, event.endYear);
+        year += 1
+    ) anchorYears.add(year);
+    for (let offset = -4; offset <= 4; offset += 1) {
+        const year = topYear + offset;
+        if (year >= minimumBoundaryYear && year <= maximumBoundaryYear) {
+            anchorYears.add(year);
+        }
+    }
+    additionalAnchorYears.forEach((anchorYear) => {
+        if (!Number.isInteger(anchorYear)) return;
+        for (let offset = -4; offset <= 4; offset += 1) {
+            const year = anchorYear + offset;
+            if (year >= minimumBoundaryYear && year <= maximumBoundaryYear) {
+                anchorYears.add(year);
+            }
+        }
+    });
+    if (anchorYears.size === 0) return null;
+
+    const boundaryPairs = new Map<string, {
+        olderBoundaryYear: number;
+        newerBoundaryYear: number;
+    }>();
+    const addBoundaryPair = (olderBoundaryYear: number, newerBoundaryYear: number): void => {
+        if (olderBoundaryYear < minimumBoundaryYear
+            || newerBoundaryYear > maximumBoundaryYear
+            || newerBoundaryYear - olderBoundaryYear < 2
+            || newerBoundaryYear - olderBoundaryYear > 25) return;
+        boundaryPairs.set(`${olderBoundaryYear}:${newerBoundaryYear}`, {
+            olderBoundaryYear,
+            newerBoundaryYear,
+        });
+    };
+    anchorYears.forEach((anchorYear) => {
+        for (let separationYears = 2; separationYears <= 25; separationYears += 1) {
+            addBoundaryPair(anchorYear, anchorYear + separationYears);
+            addBoundaryPair(anchorYear - separationYears, anchorYear);
+        }
+    });
+    if (boundaryPairs.size === 0) return null;
+
+    const directYears = new Set<number>();
+    for (
+        let year = Math.max(minimumBoundaryYear, event.startYear - 4);
+        year <= Math.min(maximumBoundaryYear, event.endYear + 4);
+        year += 1
+    ) directYears.add(year);
+    boundaryPairs.forEach(({ olderBoundaryYear, newerBoundaryYear }) => {
+        directYears.add(olderBoundaryYear);
+        directYears.add(newerBoundaryYear);
+    });
+    const comparisonRange = (
+        startYear: number,
+        endYear: number,
+        paddingYears: number,
+    ): { startYear: number; endYear: number } => ({
+        startYear: Math.max(range.startYear, startYear - paddingYears),
+        endYear: Math.min(range.endYear, endYear + paddingYears),
+    });
+    const masterViews: Views = {
+        raw: diagnosis.master.data,
+        difference: firstDifferences(diagnosis.master.data),
+        whitened: ar1WhitenSeries(diagnosis.master.data),
+    };
+    const directCandidates = Array.from(directYears).map(
+        (firstFixedYear): CompletionComparisonCorrection => {
+            const localRange = comparisonRange(firstFixedYear, firstFixedYear, 16);
+            return {
+            years: [],
+            firstFixedYear,
+            shiftYears: cumulativeShiftYears!,
+            comparisonRange: localRange,
+            ...scoreCorrection(
+                simulatePartialMove(
+                    diagnosis.rawTarget,
+                    firstFixedYear,
+                    cumulativeShiftYears!,
+                ),
+                masterViews,
+                useCofechaStandardization,
+                range,
+                localRange,
+            ),
+            };
+        },
+    ).sort((left, right) => right.score - left.score).slice(0, 24);
+    const mixedCandidates = Array.from(boundaryPairs.values()).flatMap((pair) => (
+        (["missingThenPartial", "partialThenMissing"] as const).map(
+            (orientation): MixedPartialMissingCorrection => {
+                const localRange = comparisonRange(
+                    pair.olderBoundaryYear,
+                    pair.newerBoundaryYear,
+                    8,
+                );
+                return {
+                years: [],
+                firstFixedYear: orientation === "missingThenPartial"
+                    ? pair.newerBoundaryYear
+                    : pair.olderBoundaryYear,
+                shiftYears: partialShiftYears,
+                orientation,
+                ...pair,
+                comparisonRange: localRange,
+                ...scoreCorrection(
+                    simulatePartialMissingComposition(
+                        diagnosis.rawTarget,
+                        orientation,
+                        pair.olderBoundaryYear,
+                        pair.newerBoundaryYear,
+                        partialShiftYears,
+                    ),
+                    masterViews,
+                    useCofechaStandardization,
+                    range,
+                    localRange,
+                ),
+                };
+            },
+        )
+    )).sort((left, right) => right.score - left.score);
+    const retainedMixed = (["missingThenPartial", "partialThenMissing"] as const)
+        .flatMap((orientation) => mixedCandidates.filter((candidate) => (
+            candidate.orientation === orientation
+        )).slice(0, 24));
+    if (directCandidates.length === 0 || retainedMixed.length === 0) return null;
+
+    const uniquePathMissingYears = Array.from(new Set(pathMissingYears))
+        .sort((left, right) => left - right);
+    const canCompareMissingStaircase = uniquePathMissingYears.length
+        === Math.abs(cumulativeShiftYears!);
+    const missingStaircaseCandidates = canCompareMissingStaircase
+        ? Array.from({ length: 5 }, (_, index) => (
+            uniquePathMissingYears.map((year) => year + index - 2)
+        )).filter((years) => years.every((year) => (
+            year >= minimumBoundaryYear && year <= maximumBoundaryYear
+        ))).map((years): CompletionComparisonCorrection => {
+            const localRange = comparisonRange(
+                Math.min(...years),
+                Math.max(...years),
+                8,
+            );
+            return {
+            years,
+            firstFixedYear: null,
+            comparisonRange: localRange,
+            ...scoreCorrection(
+                simulateMissingRings(diagnosis.rawTarget, years),
+                masterViews,
+                useCofechaStandardization,
+                range,
+                localRange,
+            ),
+            };
+        }).sort((left, right) => right.score - left.score)
+        : [];
+    const competingCandidates = [
+        ...directCandidates,
+        ...missingStaircaseCandidates,
+    ];
+    const referenceViews = diagnosis.master.sourceTrees.flatMap((tree) => {
+        const rawReference = toNumericSeries(siteData.get(tree));
+        if (rawReference.size === 0) return [];
+        return [makeViews(rawReference, useCofechaStandardization)];
+    });
+    if (referenceViews.length === 0) return null;
+    const scoreAgainstReference = (
+        candidate: CompletionComparisonCorrection,
+        reference: Views,
+    ): number => scoreViews(
+        candidate.views,
+        reference,
+        range.startYear,
+        range.endYear,
+        20,
+    ) * 0.35 + scoreViews(
+        candidate.views,
+        reference,
+        candidate.comparisonRange.startYear,
+        candidate.comparisonRange.endYear,
+        6,
+    ) * 0.65;
+    const referenceScoreCache = new Map<CompletionComparisonCorrection, number[]>();
+    const referenceScoresFor = (
+        candidate: CompletionComparisonCorrection,
+    ): number[] => {
+        const cached = referenceScoreCache.get(candidate);
+        if (cached) return cached;
+        const scores = referenceViews.map((reference) => (
+            scoreAgainstReference(candidate, reference)
+        ));
+        referenceScoreCache.set(candidate, scores);
+        return scores;
+    };
+    const competingScores = referenceViews.map((_reference, index) => Math.max(
+        ...competingCandidates.map((candidate) => referenceScoresFor(candidate)[index]),
+    ));
+    const INFORMATIVE_MARGIN = 1e-9;
+    const profiles = retainedMixed.map((candidate) => {
+        const margins = referenceViews.map((_reference, index) => (
+            referenceScoresFor(candidate)[index] - competingScores[index]
+        )).filter((margin) => (
+            Number.isFinite(margin) && Math.abs(margin) > INFORMATIVE_MARGIN
+        ));
+        return {
+            candidate,
+            margins,
+            support: margins.filter((margin) => margin > 0).length,
+            medianMargin: median(margins),
+            lowerQuartileMargin: quantile(margins, 0.25),
+        };
+    });
+    const bestByOrientation = (["missingThenPartial", "partialThenMissing"] as const)
+        .flatMap((orientation) => profiles.filter((profile) => (
+            profile.candidate.orientation === orientation
+            && profile.margins.length > 0
+        )).sort((left, right) => (
+            right.medianMargin - left.medianMargin
+            || right.lowerQuartileMargin - left.lowerQuartileMargin
+            || right.support - left.support
+            || right.candidate.score - left.candidate.score
+        )).slice(0, 1));
+    const selected = bestByOrientation.slice().sort((left, right) => (
+        right.medianMargin - left.medianMargin
+        || right.lowerQuartileMargin - left.lowerQuartileMargin
+        || right.support - left.support
+        || right.candidate.score - left.candidate.score
+    ))[0];
+    if (!selected) return null;
+    const otherOrientation = selected.candidate.orientation === "missingThenPartial"
+        ? "partialThenMissing"
+        : "missingThenPartial";
+    const selectedOrientationCandidates = retainedMixed.filter((candidate) => (
+        candidate.orientation === selected.candidate.orientation
+    ));
+    const otherOrientationCandidates = retainedMixed.filter((candidate) => (
+        candidate.orientation === otherOrientation
+    ));
+    const orientationMargins = referenceViews.map((_reference, index) => (
+        Math.max(...selectedOrientationCandidates.map((candidate) => (
+            referenceScoresFor(candidate)[index]
+        ))) - Math.max(...otherOrientationCandidates.map((candidate) => (
+            referenceScoresFor(candidate)[index]
+        )))
+    )).filter((margin) => (
+        Number.isFinite(margin) && Math.abs(margin) > INFORMATIVE_MARGIN
+    ));
+    const orientationReferenceSupport = orientationMargins.filter(
+        (margin) => margin > 0,
+    ).length;
+    const bestCompetingMasterScore = Math.max(
+        ...competingCandidates.map((candidate) => candidate.score),
+    );
+    const bestOtherOrientationMasterScore = Math.max(
+        ...otherOrientationCandidates.map((candidate) => candidate.score),
+    );
+    const candidate = selected.candidate;
+    return {
+        cumulativeShiftYears: cumulativeShiftYears!,
+        partialShiftYears,
+        orientation: candidate.orientation,
+        olderBoundaryYear: candidate.olderBoundaryYear,
+        newerBoundaryYear: candidate.newerBoundaryYear,
+        frontierEventType: candidate.orientation === "missingThenPartial"
+            ? "partialMove"
+            : "missingRing",
+        frontierYear: candidate.newerBoundaryYear,
+        separationYears: candidate.newerBoundaryYear - candidate.olderBoundaryYear,
+        masterMargin: candidate.score - bestCompetingMasterScore,
+        referenceCount: selected.margins.length,
+        mixedReferenceSupport: selected.support,
+        mixedReferenceSupportRatio: selected.support
+            / Math.max(1, selected.margins.length),
+        referenceMedianMargin: selected.medianMargin,
+        referenceLowerQuartileMargin: selected.lowerQuartileMargin,
+        orientationReferenceCount: orientationMargins.length,
+        orientationReferenceSupport,
+        orientationReferenceSupportRatio: orientationReferenceSupport
+            / Math.max(1, orientationMargins.length),
+        orientationMedianMargin: median(orientationMargins),
+        orientationLowerQuartileMargin: quantile(orientationMargins, 0.25),
+        masterOrientationMargin: candidate.score - bestOtherOrientationMasterScore,
+        comparedWithMissingStaircase: missingStaircaseCandidates.length > 0,
     };
 };
 

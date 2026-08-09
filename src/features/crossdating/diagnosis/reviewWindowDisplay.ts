@@ -83,6 +83,19 @@ const numericNote = (
     return Number.isFinite(value) ? value : null;
 };
 
+const latestNumericNote = (
+    event: DiagnosisEvent,
+    key: string,
+): number | null => {
+    const prefix = `${key}=`;
+    const values = event.evidence.notes.flatMap((candidate) => {
+        if (!candidate.startsWith(prefix)) return [];
+        const value = Number(candidate.slice(prefix.length));
+        return Number.isFinite(value) ? [value] : [];
+    });
+    return values[values.length - 1] ?? null;
+};
+
 const yearSupportsWindow = (
     event: DiagnosisEvent,
     year: number | null,
@@ -116,7 +129,10 @@ const hasReviewablePartialMoveEvidence = (
         || event.evidence.lagBefore !== shiftYears
         || event.evidence.lagAfter !== 0) return false;
 
-    const counterfactualShift = numericNote(event, "counterfactual_correction_years");
+    const counterfactualShift = latestNumericNote(
+        event,
+        "counterfactual_correction_years",
+    );
     if (counterfactualShift !== null && counterfactualShift !== shiftYears) return false;
 
     const sources = new Set(event.evidence.algorithmSources);
@@ -212,6 +228,88 @@ const hasReviewablePartialMoveEvidence = (
         && completedPartialRatio >= 0.8
         && completedMedian < 0
         && completedUpperQuartile <= 0
+        && event.evidence.candidateIds.length >= 1) return true;
+
+    const completedMixedShift = numericNote(event, "completed_mixed_partial_shift");
+    const completedMixedFrontierYear = numericNote(event, "completed_mixed_frontier_year");
+    const completedMixedMasterMargin = numericNote(
+        event,
+        "completed_mixed_master_margin",
+    ) ?? Number.NEGATIVE_INFINITY;
+    const completedMixedReferenceSupportNote = event.evidence.notes.find(
+        (note) => note.startsWith("completed_mixed_reference_support="),
+    );
+    const completedMixedReference = completedMixedReferenceSupportNote
+        ? (() => {
+            const [support, count] = completedMixedReferenceSupportNote
+                .split("=")[1]?.split("/").map(Number) ?? [];
+            return {
+                count: Number.isFinite(count) ? count : 0,
+                ratio: Number.isFinite(support) && Number.isFinite(count) && count > 0
+                    ? support / count
+                    : 0,
+            };
+        })()
+        : { count: 0, ratio: 0 };
+    const completedMixedMedian = numericNote(
+        event,
+        "completed_mixed_reference_median",
+    ) ?? Number.NEGATIVE_INFINITY;
+    const completedMixedQ25 = numericNote(
+        event,
+        "completed_mixed_reference_q25",
+    ) ?? Number.NEGATIVE_INFINITY;
+    const completedMixedOrientationSupportNote = event.evidence.notes.find(
+        (note) => note.startsWith("completed_mixed_orientation_support="),
+    );
+    const completedMixedOrientation = completedMixedOrientationSupportNote
+        ? (() => {
+            const [support, count] = completedMixedOrientationSupportNote
+                .split("=")[1]?.split("/").map(Number) ?? [];
+            return {
+                count: Number.isFinite(count) ? count : 0,
+                ratio: Number.isFinite(support) && Number.isFinite(count) && count > 0
+                    ? support / count
+                    : 0,
+            };
+        })()
+        : { count: 0, ratio: 0 };
+    const completedMixedOrientationMedian = numericNote(
+        event,
+        "completed_mixed_orientation_median",
+    ) ?? Number.NEGATIVE_INFINITY;
+    const completedMixedOrientationQ25 = numericNote(
+        event,
+        "completed_mixed_orientation_q25",
+    ) ?? Number.NEGATIVE_INFINITY;
+    const completedMixedMasterOrientation = numericNote(
+        event,
+        "completed_mixed_master_orientation_margin",
+    ) ?? Number.NEGATIVE_INFINITY;
+    const completedMixedReferenceFamily = completedMixedReference.count >= 8
+        && completedMixedReference.ratio >= 0.75
+        && completedMixedMedian >= 0.04
+        && completedMixedQ25 >= 0.01;
+    const completedMixedMasterFamily = completedMixedMasterMargin >= 0.05
+        && completedMixedMasterOrientation >= 0.05
+        && completedMixedOrientation.ratio >= 0.9
+        && completedMixedOrientationMedian >= 0.1
+        && completedMixedOrientationQ25 >= 0.05;
+    if (sources.has("completed_partial_missing_composition")
+        && sources.has("per_reference_completed_correction")
+        && event.evidence.notes.includes("completed_mixed_frontier_type=partialMove")
+        && event.evidence.notes.includes("completed_mixed_frontier_is_newest_event")
+        && completedMixedShift === shiftYears
+        && yearSupportsWindow(
+            event,
+            completedMixedFrontierYear,
+            config.partialVoteWindowToleranceYears,
+        )
+        && completedMixedOrientation.count >= 8
+        && completedMixedOrientation.ratio >= 0.85
+        && completedMixedOrientationMedian >= 0.04
+        && completedMixedOrientationQ25 >= 0.01
+        && (completedMixedReferenceFamily || completedMixedMasterFamily)
         && event.evidence.candidateIds.length >= 1) return true;
 
     const gridConsensusShift = numericNote(event, "candidate_grid_partial_shift");

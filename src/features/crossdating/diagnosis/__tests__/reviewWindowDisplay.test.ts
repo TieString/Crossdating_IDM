@@ -141,6 +141,43 @@ describe("lower review-window display gate", () => {
         });
     });
 
+    it("uses the latest counterfactual correction when an earlier locator left a stale shift", () => {
+        const partial = reviewablePartial(-6, {
+            correlationGain: 0.12,
+            algorithmSources: ["decisive_joint_operation_fusion"],
+            notes: [
+                "counterfactual_correction_years=-2",
+                "joint_operation_correction=-6",
+                "joint_operation_best_difference_gain=0.12",
+                "counterfactual_correction_years=-6",
+            ],
+        });
+
+        expect(selectReviewWindowDisplay(audit([]), [partial])).toMatchObject({
+            status: "strict",
+            reason: "strict_event",
+            event: partial,
+        });
+    });
+
+    it("rejects a partial move when the latest correction still disagrees", () => {
+        const partial = reviewablePartial(-6, {
+            correlationGain: 0.12,
+            algorithmSources: ["decisive_joint_operation_fusion"],
+            notes: [
+                "counterfactual_correction_years=-6",
+                "joint_operation_correction=-6",
+                "joint_operation_best_difference_gain=0.12",
+                "counterfactual_correction_years=-2",
+            ],
+        });
+
+        expect(selectReviewWindowDisplay(audit([]), [partial])).toMatchObject({
+            status: "refused",
+            reason: "partial_move_evidence_insufficient",
+        });
+    });
+
     it("shows an independent whole-series baseline before its local partial", () => {
         const partial = reviewablePartial(-4, {
             correlationGain: 0.12,
