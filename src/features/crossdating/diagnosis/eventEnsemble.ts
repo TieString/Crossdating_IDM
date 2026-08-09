@@ -24,6 +24,12 @@ import {
     type MissingStaircaseCompetition,
 } from "./discreteMissingStaircaseCompetition";
 import {
+    attachMissingPartialInterpretation,
+    evaluateMissingPartialInterpretationTie,
+    makeMissingRingInterpretation,
+    makePartialMoveInterpretation,
+} from "./missingPartialInterpretation";
+import {
     createLagPathCache,
     diagnoseLagPath,
     locateSequentialFalseHead,
@@ -1274,6 +1280,7 @@ const addCompressedMissingStaircaseEvidence = (
     siteData: RwlSiteData,
     eventPathConfig: Partial<EventPathConfig>,
     pathCache: LagPathCache,
+    hasIndependentWholeSeriesBaseline = false,
 ): DiagnosisEvent => {
     const staircase = locateTwoStepMissingStaircase(
         diagnosis,
@@ -1298,10 +1305,33 @@ const addCompressedMissingStaircaseEvidence = (
     // A two-boundary fit has more degrees of freedom than one physical -2 gap. Local lag shape
     // alone is therefore insufficient. Confirmed newer missing rings may relax only a borderline
     // unanimous vote; first-pass cases still need the stronger independent operation margin.
-    if (!supportsDiscreteMissingStaircase(competition, staircase, {
-        allowConfirmedHistoryRelaxation:
-            confirmedNewerMissingCount >= MIN_CONFIRMED_NEWER_MISSING_MARKERS,
-    })) return event;
+    const discreteMissingSupported = supportsDiscreteMissingStaircase(
+        competition,
+        staircase,
+        {
+            allowConfirmedHistoryRelaxation:
+                confirmedNewerMissingCount >= MIN_CONFIRMED_NEWER_MISSING_MARKERS,
+        },
+    );
+    if (!discreteMissingSupported) {
+        const tieEvidence = evaluateMissingPartialInterpretationTie(competition, {
+            missingReviewPassed: true,
+            partialReviewPassed: event.eventType === "partialMove"
+                && event.shiftSide === "older",
+            hasIndependentWholeSeriesBaseline,
+        });
+        return tieEvidence
+            ? attachMissingPartialInterpretation(
+                event,
+                makeMissingRingInterpretation(
+                    event,
+                    tieEvidence,
+                    diagnosis.targetRange,
+                ),
+                tieEvidence,
+            )
+            : event;
+    }
     const sharedUnitAnchor = selectSharedExplicitZeroMarker(
         siteData,
         event.seriesId,
@@ -2611,6 +2641,7 @@ const recoverCompletedCandidateBackedPartial = (
     competition: CompletedPartialStaircaseCompetition,
     candidateEvents: readonly DiagnosisEvent[],
     diagnosis: SeriesCoreDiagnosis,
+    interpretationRole: "preferred" | "tied-alternative" = "preferred",
 ): DiagnosisEvent | null => {
     const supporting = candidateEvents.filter((event) => (
         event.eventType === "partialMove"
@@ -2677,7 +2708,9 @@ const recoverCompletedCandidateBackedPartial = (
             notes: Array.from(new Set([
                 ...strongest.evidence.notes,
                 ...completedPartialCompetitionNotes(competition),
-                "completed_partial_preferred_over_discrete_missing_staircase",
+                interpretationRole === "preferred"
+                    ? "completed_partial_preferred_over_discrete_missing_staircase"
+                    : "completed_partial_tied_with_discrete_missing_staircase",
                 "completed_partial_score_is_relative_not_probability",
             ])),
         },
@@ -2931,14 +2964,18 @@ const recoverSequentialMissingHeadEvent = (
                 && event.evidence.notes.includes("candidate_hard_gate_passed")
             )).length
             : 0;
-        const completedPartial = !whole
+        const completedPartialCandidate = completedFamilyCompetition
+            && !whole
             && !hasDistinctConfirmedMissingMode
-            && completedFamilySupported
             ? recoverCompletedCandidateBackedPartial(
                 completedFamilyCompetition,
                 candidateEvents,
                 diagnosis,
+                completedFamilySupported ? "preferred" : "tied-alternative",
             )
+            : null;
+        const completedPartial = completedFamilySupported
+            ? completedPartialCandidate
             : null;
         if (completedPartial) {
             return { event: completedPartial, preserveWholeBaseline: false };
@@ -2993,8 +3030,7 @@ const recoverSequentialMissingHeadEvent = (
                 ],
             },
         } : baseRecoveredEvent;
-        return {
-            event: hasDistinctConfirmedMissingMode ? {
+        const preferredMissingEvent = hasDistinctConfirmedMissingMode ? {
                 ...recoveredEvent,
                 evidence: {
                     ...recoveredEvent.evidence,
@@ -3010,7 +3046,61 @@ const recoverSequentialMissingHeadEvent = (
                         "sequential_missing_distinct_partial_mode=true",
                     ],
                 },
-            } : recoveredEvent,
+            } : recoveredEvent;
+        const completedTieEvidence = evaluateMissingPartialInterpretationTie(
+            completedFamilyCompetition,
+            {
+                missingReviewPassed: hasIndependentStaircaseSupport,
+                partialReviewPassed: completedPartialCandidate !== null,
+                hasIndependentWholeSeriesBaseline: independentWholeBaseline,
+            },
+        );
+        const smallStaircase = compressedPartial
+            ? locateTwoStepMissingStaircase(
+                cofechaDiagnosis,
+                siteData,
+                compressedPartial,
+                { minLag: -2, maxPartialGapYears: 2 },
+                pathCache,
+            )
+            : null;
+        const smallCompetition = compressedPartial
+            ? comparePartialMoveWithMissingStaircase(
+                cofechaDiagnosis,
+                siteData,
+                compressedPartial,
+                true,
+                head.year,
+            )
+            : null;
+        const smallTieEvidence = evaluateMissingPartialInterpretationTie(
+            smallCompetition,
+            {
+                missingReviewPassed: supportsCompressedMissingStaircase(smallStaircase)
+                    && hasIndependentStaircaseSupport,
+                partialReviewPassed: compressedPartial !== undefined
+                    && !hasDistinctConfirmedMissingMode,
+                hasIndependentWholeSeriesBaseline: independentWholeBaseline,
+            },
+        );
+        const interpretationEvidence = completedTieEvidence ?? smallTieEvidence;
+        const partialInterpretation = completedTieEvidence
+            ? completedPartialCandidate
+            : smallTieEvidence && compressedPartial
+                ? makePartialMoveInterpretation(
+                    compressedPartial,
+                    smallTieEvidence,
+                    diagnosis.targetRange,
+                )
+                : null;
+        return {
+            event: interpretationEvidence && partialInterpretation
+                ? attachMissingPartialInterpretation(
+                    preferredMissingEvent,
+                    partialInterpretation,
+                    interpretationEvidence,
+                )
+                : preferredMissingEvent,
             preserveWholeBaseline: independentWholeBaseline,
         };
     }
@@ -3490,6 +3580,9 @@ const eventsForSeriesPass = (
         eventPathConfig,
         pathCache,
     );
+    const pathHasWholeSeriesBaseline = pathDiagnosis.events.some(
+        (event) => event.eventType === "wholeSeriesMove",
+    );
     let pathEvents = pathDiagnosis.events.map((event) => (
         addCompressedMissingStaircaseEvidence(
             event,
@@ -3497,6 +3590,7 @@ const eventsForSeriesPass = (
             siteData,
             eventPathConfig,
             pathCache,
+            pathHasWholeSeriesBaseline,
         )
     ));
     const primaryCollapsedMissingHead = recoverCollapsedMissingStaircaseHead(
@@ -5025,6 +5119,7 @@ export const makeDiagnosisEvents = (
                 siteData,
                 locatorEventPathConfig,
                 locatorPathCache,
+                hasWholeSeriesBaseline,
             );
         });
         const completedFalseSeed = mayRecoverSequentialMissing

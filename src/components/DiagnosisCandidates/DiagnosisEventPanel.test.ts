@@ -2,7 +2,10 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { DiagnosisEvent } from "@/features/crossdating/diagnosis";
-import { DiagnosisEventPanel } from "./DiagnosisEventPanel";
+import {
+  DiagnosisEventPanel,
+  selectDiagnosisEventInterpretation,
+} from "./DiagnosisEventPanel";
 
 describe("DiagnosisEventPanel", () => {
   it("renders only the current event-level diagnosis surface", () => {
@@ -215,5 +218,142 @@ describe("DiagnosisEventPanel", () => {
     expect(html).toContain("在 1903 年插入缺轮");
     expect(html).not.toContain("确认应用");
     expect(html).not.toContain("查看并确认所选年份的编辑操作");
+  });
+
+  it("shows one constrained interpretation switch without rendering a candidate list", () => {
+    const partial: DiagnosisEvent = {
+      id: "partial-interpretation",
+      seriesId: "ABC01A",
+      eventType: "partialMove",
+      startYear: 1901,
+      endYear: 1907,
+      rankedYears: [{ year: 1905, rank: 1, score: 0.2, evidenceTags: [] }],
+      confidenceLevel: "medium",
+      shiftYears: -2,
+      shiftSide: "older",
+      evidence: {
+        algorithmSources: ["continuous_partial_gap_interpretation"],
+        score: 0.2,
+        scoreMargin: 0.01,
+        baselineCorrelation: 0.2,
+        correctedCorrelation: 0.5,
+        correlationGain: 0.3,
+        lagBefore: -2,
+        lagAfter: 0,
+        samplePairs: 40,
+        candidateIds: ["partial"],
+        notes: [],
+      },
+      alternativeTypes: [],
+    };
+    const primary: DiagnosisEvent = {
+      ...partial,
+      id: "missing-primary",
+      eventType: "missingRing",
+      startYear: 1900,
+      endYear: 1906,
+      rankedYears: [{ year: 1904, rank: 1, score: 0.21, evidenceTags: [] }],
+      shiftYears: undefined,
+      shiftSide: undefined,
+      evidence: {
+        ...partial.evidence,
+        algorithmSources: ["discrete_missing_staircase_interpretation"],
+        lagBefore: -1,
+      },
+      interpretationAmbiguity: {
+        kind: "missingRingsOrPartialMove",
+        alternative: partial,
+        evidence: {
+          missingRingCount: 2,
+          cumulativeShiftYears: -2,
+          missingYears: [1901, 1904],
+          partialFirstFixedYear: 1905,
+          normalizedCounterfactualGainDifference: 0.4,
+          masterMargin: 0.01,
+          referenceMedianMargin: 0.005,
+          referenceCount: 10,
+          missingReferenceSupport: 5,
+          partialReferenceSupport: 5,
+        },
+      },
+    };
+
+    const html = renderToStaticMarkup(createElement(DiagnosisEventPanel, {
+      events: [primary],
+      onApplyEvent: () => true,
+    }));
+
+    expect(html).toContain("可能缺轮");
+    expect(html).toContain("预计包含 2 个缺轮事件");
+    expect(html).toContain("按连续缺段处理");
+    expect(html).toContain("缺轮/连续缺段参考芯支持 5/5");
+    expect(html).not.toContain("可能局部移动");
+    expect(html).not.toContain("1901-1907（7 年）");
+    expect(html).not.toContain("role=\"tab\"");
+    expect(html).not.toContain("候选编辑操作");
+    expect(selectDiagnosisEventInterpretation(primary, "alternative")).toBe(partial);
+    expect(selectDiagnosisEventInterpretation(primary, "primary")).toBe(primary);
+  });
+
+  it("labels the reverse switch as iterative missing-ring review", () => {
+    const missing: DiagnosisEvent = {
+      id: "missing-interpretation",
+      seriesId: "ABC01A",
+      eventType: "missingRing",
+      startYear: 1900,
+      endYear: 1906,
+      rankedYears: [{ year: 1904, rank: 1, score: 0.2, evidenceTags: [] }],
+      confidenceLevel: "medium",
+      evidence: {
+        algorithmSources: ["discrete_missing_staircase_interpretation"],
+        score: 0.2,
+        scoreMargin: 0.01,
+        baselineCorrelation: 0.2,
+        correctedCorrelation: 0.5,
+        correlationGain: 0.3,
+        lagBefore: -1,
+        lagAfter: 0,
+        samplePairs: 40,
+        candidateIds: [],
+        notes: [],
+      },
+      alternativeTypes: [],
+    };
+    const primary: DiagnosisEvent = {
+      ...missing,
+      id: "partial-primary",
+      eventType: "partialMove",
+      startYear: 1901,
+      endYear: 1907,
+      rankedYears: [{ year: 1905, rank: 1, score: 0.2, evidenceTags: [] }],
+      shiftYears: -2,
+      shiftSide: "older",
+      evidence: { ...missing.evidence, lagBefore: -2 },
+      interpretationAmbiguity: {
+        kind: "missingRingsOrPartialMove",
+        alternative: missing,
+        evidence: {
+          missingRingCount: 2,
+          cumulativeShiftYears: -2,
+          missingYears: [1901, 1904],
+          partialFirstFixedYear: 1905,
+          normalizedCounterfactualGainDifference: 0.4,
+          masterMargin: -0.01,
+          referenceMedianMargin: -0.005,
+          referenceCount: 10,
+          missingReferenceSupport: 5,
+          partialReferenceSupport: 5,
+        },
+      },
+    };
+
+    const html = renderToStaticMarkup(createElement(DiagnosisEventPanel, {
+      events: [primary],
+    }));
+
+    expect(html).toContain("可能局部移动");
+    expect(html).toContain("按 2 个缺轮逐轮复核");
+    expect(html).not.toContain("可能缺轮");
+    expect(html).not.toContain("1900-1906（7 年）");
   });
 });

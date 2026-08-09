@@ -53,6 +53,30 @@ export type DiagnosisEventLocationAlternative = {
 };
 
 /**
+ * A calibrated tie between two independently evaluated explanations of the same local
+ * cumulative negative lag. The UI may switch between these two event objects, but must never
+ * expose this as a general operation picker.
+ */
+export type DiagnosisMissingPartialInterpretationEvidence = {
+    missingRingCount: number;
+    cumulativeShiftYears: number;
+    missingYears: number[];
+    partialFirstFixedYear: number;
+    normalizedCounterfactualGainDifference: number;
+    masterMargin: number;
+    referenceMedianMargin: number;
+    referenceCount: number;
+    missingReferenceSupport: number;
+    partialReferenceSupport: number;
+};
+
+export type DiagnosisEventInterpretationAmbiguity = {
+    kind: "missingRingsOrPartialMove";
+    alternative: DiagnosisEvent;
+    evidence: DiagnosisMissingPartialInterpretationEvidence;
+};
+
+/**
  * 人工复核事件。用户选定窗口内年份并确认后，事件会转换成受约束的 RWL 编辑；
  * whole-series 事件仍必须复用通过 before/after hard gate 的原始 candidate。
  */
@@ -69,6 +93,7 @@ export type DiagnosisEvent = {
     alternativeTypes: DiagnosisEventType[];
     locationAlternatives?: DiagnosisEventLocationAlternative[];
     operationAlternatives?: DiagnosisEvent[];
+    interpretationAmbiguity?: DiagnosisEventInterpretationAmbiguity;
     shiftYears?: number;
     shiftSide?: DiagnosisEventShiftSide;
     seriesRange?: YearRange;

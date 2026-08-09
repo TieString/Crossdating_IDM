@@ -38,6 +38,14 @@ const applyButtonStyle: CSSProperties = {
   color: "#fff",
 };
 
+const interpretationButtonStyle: CSSProperties = {
+  ...buttonStyle,
+  padding: "2px 7px",
+  borderColor: "#8da68e",
+  background: "#f8fbf7",
+  color: "#315d36",
+};
+
 const yearButtonStyle: CSSProperties = {
   appearance: "none",
   padding: "1px 4px",
@@ -139,13 +147,36 @@ const applyPreview = (event: DiagnosisEvent, selectedYear: number) => {
   return "按已验证的整体移动候选应用整条序列。";
 };
 
+type InterpretationSelection = "primary" | "alternative";
+
+export const selectDiagnosisEventInterpretation = (
+  event: DiagnosisEvent,
+  selection: InterpretationSelection,
+): DiagnosisEvent => (
+  selection === "alternative" && event.interpretationAmbiguity
+    ? event.interpretationAmbiguity.alternative
+    : event
+);
+
 export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Props) {
   const [selectedYears, setSelectedYears] = useState<Record<string, number>>({});
+  const [selectedInterpretations, setSelectedInterpretations] = useState<
+    Record<string, InterpretationSelection>
+  >({});
 
   useEffect(() => {
-    const currentIds = new Set(events.map((event) => event.id));
+    const currentIds = new Set(events.flatMap((event) => [
+      event.id,
+      ...(event.interpretationAmbiguity
+        ? [event.interpretationAmbiguity.alternative.id]
+        : []),
+    ]));
     setSelectedYears((previous) => Object.fromEntries(
       Object.entries(previous).filter(([eventId]) => currentIds.has(eventId)),
+    ));
+    const currentPrimaryIds = new Set(events.map((event) => event.id));
+    setSelectedInterpretations((previous) => Object.fromEntries(
+      Object.entries(previous).filter(([eventId]) => currentPrimaryIds.has(eventId)),
     ));
   }, [events]);
 
@@ -179,9 +210,14 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
       </div>
 
       {events.map((event) => {
-        const selectedEvent = event;
+        const interpretationSelection = selectedInterpretations[event.id] ?? "primary";
+        const selectedEvent = selectDiagnosisEventInterpretation(
+          event,
+          interpretationSelection,
+        );
+        const interpretation = event.interpretationAmbiguity;
         const width = selectedEvent.endYear - selectedEvent.startYear + 1;
-        const savedYear = selectedYears[event.id];
+        const savedYear = selectedYears[selectedEvent.id];
         const rankedYears = [...selectedEvent.rankedYears]
           .filter((row, index, rows) => (
             row.year >= selectedEvent.startYear
@@ -264,7 +300,7 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
                         onClick={() => {
                           setSelectedYears((previous) => ({
                             ...previous,
-                            [event.id]: row.year,
+                            [selectedEvent.id]: row.year,
                           }));
                         }}
                         style={{
@@ -289,6 +325,55 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
                 <div style={{ marginTop: 2, color: "#45694a" }}>
                   断点 {selectedYear} · {selectedYear} 年起保持不动 · 移动后{" "}
                   {selectedYear + selectedEvent.shiftYears}-{selectedYear - 1} 年为空白
+                </div>
+              ) : null}
+              {interpretation ? (
+                <div
+                  title={`完整反事实收益差 ${
+                    interpretation.evidence.normalizedCounterfactualGainDifference.toFixed(2)
+                  }；缺轮/连续缺段参考芯支持 ${
+                    interpretation.evidence.missingReferenceSupport
+                  }/${interpretation.evidence.partialReferenceSupport}`}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: 5,
+                    marginTop: 5,
+                    paddingTop: 5,
+                    borderTop: "1px solid #e0ebe0",
+                    color: "#45694a",
+                  }}
+                >
+                  <span>
+                    {selectedEvent.eventType === "missingRing"
+                      ? `该区域预计包含 ${interpretation.evidence.missingRingCount} 个缺轮事件；当前先复核最靠树皮的一处。`
+                      : `连续缺段 ${Math.abs(interpretation.evidence.cumulativeShiftYears)} 年与 ${interpretation.evidence.missingRingCount} 个缺轮的证据接近。`}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={event.stale === true}
+                    title={selectedEvent.eventType === "missingRing"
+                      ? "仅在样本存在断裂、腐朽等连续缺段证据时采用算法已验证的局部移动解释"
+                      : "未发现连续缺段证据时，返回算法已验证的逐轮缺轮解释"}
+                    onClick={() => {
+                      const nextSelection: InterpretationSelection = interpretationSelection
+                        === "primary" ? "alternative" : "primary";
+                      const nextEvent = selectDiagnosisEventInterpretation(event, nextSelection);
+                      setSelectedInterpretations((previous) => ({
+                        ...previous,
+                        [event.id]: nextSelection,
+                      }));
+                      const nextYear = [...nextEvent.rankedYears]
+                        .sort((left, right) => left.rank - right.rank)[0]?.year;
+                      onFocusEvent?.(nextEvent, nextYear);
+                    }}
+                    style={event.stale ? disabledButtonStyle : interpretationButtonStyle}
+                  >
+                    {selectedEvent.eventType === "missingRing"
+                      ? "按连续缺段处理"
+                      : `按 ${interpretation.evidence.missingRingCount} 个缺轮逐轮复核`}
+                  </button>
                 </div>
               ) : null}
               <div style={{ marginTop: 2, color: "#56745a" }}>

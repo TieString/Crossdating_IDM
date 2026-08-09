@@ -75,6 +75,26 @@ describe("event-level one-to-one matching", () => {
 
     it("marks old review windows stale without mutating the completed result", () => {
         const completed = event("fresh", "missingRing", 1897, 1903);
+        const alternative = event("partial", "partialMove", 1897, 1903, {
+            shiftYears: -2,
+            shiftSide: "older",
+        });
+        completed.interpretationAmbiguity = {
+            kind: "missingRingsOrPartialMove",
+            alternative,
+            evidence: {
+                missingRingCount: 2,
+                cumulativeShiftYears: -2,
+                missingYears: [1899, 1901],
+                partialFirstFixedYear: 1902,
+                normalizedCounterfactualGainDifference: 0.5,
+                masterMargin: 0.01,
+                referenceMedianMargin: 0.005,
+                referenceCount: 10,
+                missingReferenceSupport: 5,
+                partialReferenceSupport: 5,
+            },
+        };
         const original = [completed];
         const stale = markDiagnosisEventsStale(original);
 
@@ -82,5 +102,8 @@ describe("event-level one-to-one matching", () => {
         expect(stale).not.toBe(original);
         expect(stale[0]).not.toBe(completed);
         expect(stale[0].stale).toBe(true);
+        expect(alternative.stale).toBeUndefined();
+        expect(stale[0].interpretationAmbiguity?.alternative).not.toBe(alternative);
+        expect(stale[0].interpretationAmbiguity?.alternative.stale).toBe(true);
     });
 });

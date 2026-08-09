@@ -132,6 +132,7 @@
 - 候选 evidence 需要保留 algorithmSource、before/after metrics、relative confidence（rank/probabilityLike/confidenceLevel），其中 probabilityLike 只表示内部候选相对置信度，不是严格贝叶斯后验概率。
 - 应用诊断候选时必须复用 [src/features/rwl/edit.ts](src/features/rwl/edit.ts) 的编辑路径，并以 `auto-suggested` 来源写入既有操作记录，保留 reason、候选年份、side/shift、selectedRange/missingRange 与 before/after metrics。
 - 每次接受候选后仍然只应用一个候选，随后必须基于当前 working series 重新诊断；旧候选必须 stale。不要恢复 hover 分析，不要新增持久化操作日志/恢复机制，不要把无约束 DTW 作为主算法。
+- 多缺轮与连续缺段只有在两个完整事件族都独立通过复核门槛、累计负 lag 一致、位置同区、参考芯分票接近且不存在独立整体移动基线时，才可附带一个受约束的解释切换。界面始终只显示当前解释的一个操作和一个窗口；切换不编辑数据，应用后必须重新诊断。
 - 自动建议预览只在命中诊断主窗口时出现，不得把内部位移网格转成按钮、菜单或手工选项。独立手工片段移动工具可继续存在，但不能反向参与或覆盖自动事件选择。所有写入仍需二次确认、进入撤销栈/操作日志并立即使旧事件诊断 stale。
 - Current-event V1 采用独立协议和会话：Top5 的 `rankingScore` 不是概率；用户在 ±1 范围内确认精确年份后只进入 `confirmedInsertions` 并计算下一轮，点击“应用到当前 RWL 工作区”后才复用 `insertMissingYearAtSide(..., "right")`。保存后清空会话确认，避免磁盘数据与 confirmed insertion 双重应用。
 - Current-event V1 保存触发绑定实际写盘快照；文件写入按发起顺序串行，保存期间继续编辑不会把未写盘数据误标为已保存，旧文件/旧序列的迟到保存也不会重新激活模型。Rust 的冷启动、握手、预测和一次重试共用 60 秒异常保护上限；它不是固定等待时间，长驻后的请求通常更快。
