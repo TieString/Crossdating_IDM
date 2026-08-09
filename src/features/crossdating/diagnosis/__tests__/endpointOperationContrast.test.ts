@@ -129,4 +129,36 @@ describe("newer-side endpoint operation contrast", () => {
             global.siteData,
         )).toEqual([global.whole, global.missing]);
     });
+
+    it("removes a score-recovered terminal whole competitor when its newer side is fixed", () => {
+        const local = fixture(true);
+        local.missing.evidence.algorithmSources = [
+            "newer_endpoint_unit_competitor_of_global_lag",
+        ];
+        const localResult = prioritizeEndpointUnitAgainstWhole(
+            [local.whole, local.missing],
+            local.diagnosis,
+            local.siteData,
+        );
+        expect(localResult).toHaveLength(1);
+        expect(localResult[0]).toMatchObject({
+            eventType: "missingRing",
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "newer_fixed_side_lag_contrast",
+                    "terminal_whole_alias_removed",
+                ]),
+            },
+        });
+
+        const global = fixture(false);
+        global.missing.evidence.algorithmSources = [
+            "newer_endpoint_unit_competitor_of_global_lag",
+        ];
+        expect(prioritizeEndpointUnitAgainstWhole(
+            [global.whole, global.missing],
+            global.diagnosis,
+            global.siteData,
+        )).toEqual([global.whole, global.missing]);
+    });
 });

@@ -328,6 +328,115 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
         });
     }, 180_000);
 
+    bundledCofechaIt("keeps mtr642 all-zero removal at the newest missing-ring frontier", () => {
+        const seriesId = "mtr642";
+        const series = parsed.get(seriesId)!;
+        const truths = Array.from(series.valuesByYear)
+            .filter(([, value]) => value === 0)
+            .map(([year]) => year)
+            .sort((left, right) => left - right);
+        const newestTruth = truths[truths.length - 1];
+        const buildState = (removed: number[]) => {
+            const site = new Map(cleanSite);
+            site.set(seriesId, buildMultiMissingCorrupted(
+                series.valuesByYear,
+                removed,
+            ));
+            return site;
+        };
+        const referenceForState = (site: RwlSiteData, runId: string) => {
+            const outText = runBundledCofecha(site);
+            const parts = splitReportByParts(outText);
+            return {
+                outText,
+                reference: createCofechaMasterReferenceConfig({
+                    siteData: site,
+                    flaggedAIds: extractPart6FlaggedASeriesIds(
+                        parts.get("PART 6") ?? "",
+                    ),
+                    cofechaRunId: runId,
+                    rwlHash: runId,
+                    masterDatingSeries: parseCofechaResult(outText).masterDatingSeries,
+                }),
+            };
+        };
+        const diagnoseState = (
+            site: RwlSiteData,
+            stateReference = referenceConfig,
+            cofechaText?: string,
+        ) => diagnoseCrossdating(site, {
+            referenceConfig: stateReference,
+            targetTrees: [seriesId],
+            reviewWindowDisplayMode: "review",
+            includeEventDecisionAudits: true,
+            ...(cofechaText ? { cofechaText } : {}),
+        });
+        const beforeNewestSite = buildState(truths.slice(0, -1));
+        const afterAllSite = buildState(truths);
+        const previousSaved = referenceForState(
+            beforeNewestSite,
+            "co612-mtr642-before-newest-removal",
+        );
+        const freshAll = referenceForState(
+            afterAllSite,
+            "co612-mtr642-after-all-removals",
+        );
+        const states = [
+            {
+                name: "clean_reference_before_save",
+                diagnosis: diagnoseState(afterAllSite),
+            },
+            {
+                name: "previous_saved_reference_before_save",
+                diagnosis: diagnoseState(afterAllSite, previousSaved.reference),
+            },
+            {
+                name: "fresh_reference_after_save",
+                diagnosis: diagnoseState(
+                    afterAllSite,
+                    freshAll.reference,
+                    freshAll.outText,
+                ),
+            },
+        ].map((state) => ({
+            ...state,
+            displayed: getDisplayedDiagnosisEvents(state.diagnosis)
+                .filter((event) => event.seriesId === seriesId),
+        }));
+        const failureContext = JSON.stringify({
+            truths,
+            states: states.map((state) => ({
+                name: state.name,
+                displayed: summarize(state.displayed),
+                strict: summarize(state.diagnosis.events),
+                audit: state.diagnosis.eventDecisionAudits?.map((audit) => ({
+                    finalReason: audit.finalReason,
+                    candidates: audit.candidateProjectedEvents,
+                    detectedBeforeFusion: audit.detectedBeforeFusion,
+                    detectedAfterFusion: audit.detectedAfterFusion,
+                    retained: audit.retainedAfterEndpointGuard,
+                    displayed: audit.displayedBeforeLocator,
+                    final: audit.finalEvents,
+                })),
+                review: state.diagnosis.reviewWindowDecisions,
+            })),
+        });
+
+        expect(truths).toEqual([1714, 1748, 1773, 1778, 1851, 1861, 1902, 1977]);
+        states.forEach(({ displayed }) => {
+            expect(displayed, failureContext).toHaveLength(1);
+            expect(displayed[0].eventType, failureContext).toBe("missingRing");
+            expect(displayed[0].rankedYears[0], failureContext).toMatchObject({
+                year: newestTruth,
+                rank: 1,
+            });
+            expect(displayed[0].startYear, failureContext)
+                .toBeLessThanOrEqual(newestTruth);
+            expect(displayed[0].endYear, failureContext)
+                .toBeGreaterThanOrEqual(newestTruth);
+        });
+    }, 180_000);
+
     bundledCofechaIt("keeps the first two bark-side mtr721 zero removals as one missing-ring frontier", () => {
         const seriesId = "mtr721";
         const mtr721 = parsed.get(seriesId)!;

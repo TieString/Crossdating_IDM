@@ -1584,6 +1584,9 @@ export const prioritizeEndpointUnitAgainstWhole = (
             || event.evidence.algorithmSources.includes(
                 "newer_endpoint_unit_alias_of_global_lag",
             )
+            || event.evidence.algorithmSources.includes(
+                "newer_endpoint_unit_competitor_of_global_lag",
+            )
         )
         && (
             event.eventType === "missingRing"
@@ -1613,9 +1616,10 @@ export const prioritizeEndpointUnitAgainstWhole = (
     }
     const removeTerminalWholeAlias = terminalWhole
         && decisiveFixedSide
-        && endpointUnit.evidence.algorithmSources.includes(
-            "newer_endpoint_unit_alias_of_global_lag",
-        );
+        && endpointUnit.evidence.algorithmSources.some((source) => (
+            source === "newer_endpoint_unit_alias_of_global_lag"
+            || source === "newer_endpoint_unit_competitor_of_global_lag"
+        ));
     const preferredUnit = {
         ...endpointUnit,
         evidence: {
@@ -4799,6 +4803,24 @@ export const makeDiagnosisEvents = (
             )
             ? endpointUnits[0].id
             : null;
+        const endpointPrepared = forcedEndpointUnitId
+            ? retainedDetected.map((event) => event.id === forcedEndpointUnitId
+                ? {
+                    ...event,
+                    evidence: {
+                        ...event.evidence,
+                        algorithmSources: Array.from(new Set([
+                            ...event.evidence.algorithmSources,
+                            "newer_endpoint_unit_competitor_of_global_lag",
+                        ])).sort(),
+                        notes: [
+                            ...event.evidence.notes,
+                            "endpoint_test=unit_competitor_of_global_lag",
+                        ],
+                    },
+                }
+                : event)
+            : retainedDetected;
         const endpointRefined = options.enableEndpointResidualWindow === true
             && endpointUnits.length === 1
             && !hasMultipleCoherentLocalTransitions(retainedDetected)
@@ -4806,32 +4828,17 @@ export const makeDiagnosisEvents = (
             && !endpointUnits[0].evidence.algorithmSources.includes(
                 "collapsed_missing_staircase_head",
             )
-            ? retainedDetected.map((event) => (
+            ? endpointPrepared.map((event) => (
                 event.id === endpointUnits[0].id
                     ? refineUnitEventWithEndpointResidualWindow(
-                        event.id === forcedEndpointUnitId
-                            ? {
-                                ...event,
-                                evidence: {
-                                    ...event.evidence,
-                                    algorithmSources: Array.from(new Set([
-                                        ...event.evidence.algorithmSources,
-                                        "newer_endpoint_unit_competitor_of_global_lag",
-                                    ])).sort(),
-                                    notes: [
-                                        ...event.evidence.notes,
-                                        "endpoint_test=unit_competitor_of_global_lag",
-                                    ],
-                                },
-                            }
-                            : event,
+                        event,
                         diagnosis,
                         siteData,
                         endpointCache,
                     )
                     : event
             ))
-            : retainedDetected;
+            : endpointPrepared;
         const displayed = rerankMissingEventsNearExplicitZeros(
             addDiagnosisReviewWindowPadding(
                 endpointRefined,
