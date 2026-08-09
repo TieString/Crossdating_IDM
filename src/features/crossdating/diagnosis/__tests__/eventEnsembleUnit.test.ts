@@ -11,6 +11,7 @@ import {
     pruneLocalEventsDisconnectedFromWholeBaseline,
     projectSequentialUnitChainHead,
     recoverCandidateBackedPartialConsensus,
+    selectCompletedPartialFalseSeed,
     selectCompletedPartialMissingSeed,
     shouldReplaceUnanchoredPartialWithReferencePulse,
     shouldPreferWholeSeriesAlias,
@@ -387,6 +388,88 @@ describe("selectCompletedPartialMissingSeed", () => {
         ];
 
         expect(selectCompletedPartialMissingSeed([stale], [])).toBeNull();
+    });
+});
+
+describe("selectCompletedPartialFalseSeed", () => {
+    it("joins a full-interval cumulative result to a same-amplitude hard candidate", () => {
+        const displayed = partialMoveEvent(-19);
+        displayed.evidence.candidateIds = [];
+        displayed.evidence.notes = [];
+        displayed.evidence.algorithmSources = [
+            "decisive_joint_operation_fusion",
+            "full_interval_counterfactual_locator",
+        ];
+        const seed = selectCompletedPartialFalseSeed([displayed], [
+            candidatePartial({
+                shiftYears: -19,
+                anchorYear: 1783,
+                candidateId: "cumulative-partial",
+                source: "segmented_diagnosis",
+            }),
+        ]);
+
+        expect(seed?.event.shiftYears).toBe(-19);
+        expect(seed?.event.evidence.candidateIds).toEqual(["cumulative-partial"]);
+        expect(seed?.anchorYears).toEqual([1783]);
+        expect(seed?.event.evidence.notes).toContain(
+            "completed_mixed_seed=displayed_candidate_amplitude_consensus",
+        );
+    });
+
+    it("rejects an amplitude mismatch or an unanchored displayed partial", () => {
+        const displayed = partialMoveEvent(-19);
+        displayed.evidence.candidateIds = [];
+        displayed.evidence.notes = [];
+        displayed.evidence.algorithmSources = [
+            "decisive_joint_operation_fusion",
+            "full_interval_counterfactual_locator",
+        ];
+        const wrongAmplitude = candidatePartial({
+            shiftYears: -20,
+            anchorYear: 1783,
+            candidateId: "wrong-amplitude",
+            source: "segmented_diagnosis",
+        });
+
+        expect(selectCompletedPartialFalseSeed([displayed], [wrongAmplitude]))
+            .toBeNull();
+        displayed.evidence.algorithmSources = ["joint_year_operation_evidence"];
+        expect(selectCompletedPartialFalseSeed([displayed], [
+            candidatePartial({
+                shiftYears: -19,
+                anchorYear: 1783,
+                candidateId: "right-amplitude",
+                source: "segmented_diagnosis",
+            }),
+        ])).toBeNull();
+    });
+
+    it("accepts an explicit hard false-ring frontier beside the cumulative result", () => {
+        const displayed = partialMoveEvent(-19);
+        displayed.evidence.candidateIds = [];
+        displayed.evidence.notes = [];
+        displayed.evidence.algorithmSources = [
+            "decisive_joint_operation_fusion",
+            "full_interval_counterfactual_locator",
+        ];
+        const explicitFalse = falseRingEvent(1904, true);
+        explicitFalse.rankedYears = [{
+            year: 1907,
+            rank: 1,
+            score: 1,
+            evidenceTags: ["cofecha_segment_lag"],
+        }];
+        explicitFalse.evidence.lagBefore = 1;
+        explicitFalse.evidence.lagAfter = 0;
+        explicitFalse.evidence.notes = ["candidate_hard_gate_passed"];
+
+        const seed = selectCompletedPartialFalseSeed([displayed], [explicitFalse]);
+
+        expect(seed?.anchorYears).toEqual([1907]);
+        expect(seed?.event.evidence.notes).toContain(
+            "completed_mixed_seed=explicit_false_frontier_candidate",
+        );
     });
 });
 

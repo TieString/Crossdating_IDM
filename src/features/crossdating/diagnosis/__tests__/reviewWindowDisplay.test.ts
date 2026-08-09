@@ -388,6 +388,46 @@ describe("lower review-window display gate", () => {
         });
     });
 
+    it("uses the final completed partial amplitude instead of its stale cumulative seed", () => {
+        const notes = [
+            "counterfactual_correction_years=-19",
+            "completed_mixed_partial_shift=-20",
+            "completed_mixed_frontier_year=1900",
+            "completed_mixed_frontier_type=partialMove",
+            "completed_mixed_frontier_is_newest_event",
+            "completed_mixed_master_margin=0.106143",
+            "completed_mixed_reference_support=18/54",
+            "completed_mixed_reference_median=-0.028553",
+            "completed_mixed_reference_q25=-0.066097",
+            "completed_mixed_orientation_support=54/54",
+            "completed_mixed_orientation_median=0.280473",
+            "completed_mixed_orientation_q25=0.249770",
+            "completed_mixed_master_orientation_margin=0.147521",
+        ];
+        const evidence = {
+            candidateIds: ["cumulative-partial"],
+            algorithmSources: [
+                "completed_partial_false_composition",
+                "per_reference_completed_correction",
+            ],
+            notes,
+        };
+        const stale = reviewablePartial(-20, evidence);
+        expect(selectReviewWindowDisplay(audit([]), [stale])).toMatchObject({
+            status: "refused",
+            reason: "partial_move_evidence_insufficient",
+        });
+
+        const completed = reviewablePartial(-20, {
+            ...evidence,
+            notes: [...notes, "counterfactual_correction_years=-20"],
+        });
+        expect(selectReviewWindowDisplay(audit([]), [completed])).toMatchObject({
+            status: "strict",
+            event: completed,
+        });
+    });
+
     it("keeps a weak completed-partial family hidden", () => {
         const partial = reviewablePartial(-4, {
             candidateIds: ["partial-candidate"],

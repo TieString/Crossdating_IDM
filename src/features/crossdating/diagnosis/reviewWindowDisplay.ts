@@ -295,7 +295,8 @@ const hasReviewablePartialMoveEvidence = (
         && completedMixedOrientation.ratio >= 0.9
         && completedMixedOrientationMedian >= 0.1
         && completedMixedOrientationQ25 >= 0.05;
-    if (sources.has("completed_partial_missing_composition")
+    if ((sources.has("completed_partial_missing_composition")
+            || sources.has("completed_partial_false_composition"))
         && sources.has("per_reference_completed_correction")
         && event.evidence.notes.includes("completed_mixed_frontier_type=partialMove")
         && event.evidence.notes.includes("completed_mixed_frontier_is_newest_event")

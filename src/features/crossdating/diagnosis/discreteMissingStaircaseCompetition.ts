@@ -69,13 +69,20 @@ export type CompletedPartialStaircaseCompetition = {
     }>;
 };
 
-export type CompletedPartialMissingComposition = {
+type CompletedPartialUnitEventType = "missingRing" | "falseRing";
+type CompletedPartialUnitOrientation = "missingThenPartial"
+    | "partialThenMissing"
+    | "falseThenPartial"
+    | "partialThenFalse";
+
+type CompletedPartialUnitComposition = {
+    unitEventType: CompletedPartialUnitEventType;
     cumulativeShiftYears: number;
     partialShiftYears: number;
-    orientation: "missingThenPartial" | "partialThenMissing";
+    orientation: CompletedPartialUnitOrientation;
     olderBoundaryYear: number;
     newerBoundaryYear: number;
-    frontierEventType: "missingRing" | "partialMove";
+    frontierEventType: CompletedPartialUnitEventType | "partialMove";
     frontierYear: number;
     separationYears: number;
     masterMargin: number;
@@ -91,6 +98,18 @@ export type CompletedPartialMissingComposition = {
     orientationLowerQuartileMargin: number;
     masterOrientationMargin: number;
     comparedWithMissingStaircase: boolean;
+};
+
+export type CompletedPartialMissingComposition = CompletedPartialUnitComposition & {
+    unitEventType: "missingRing";
+    orientation: "missingThenPartial" | "partialThenMissing";
+    frontierEventType: "missingRing" | "partialMove";
+};
+
+export type CompletedPartialFalseComposition = CompletedPartialUnitComposition & {
+    unitEventType: "falseRing";
+    orientation: "falseThenPartial" | "partialThenFalse";
+    frontierEventType: "falseRing" | "partialMove";
 };
 
 const MAX_TWO_STEP_SEPARATION_YEARS = 17;
@@ -168,8 +187,8 @@ type CompletionComparisonCorrection = ScoredCorrection & {
     comparisonRange: { startYear: number; endYear: number };
 };
 
-type MixedPartialMissingCorrection = CompletionComparisonCorrection & {
-    orientation: CompletedPartialMissingComposition["orientation"];
+type MixedPartialUnitCorrection = CompletionComparisonCorrection & {
+    orientation: CompletedPartialUnitOrientation;
     olderBoundaryYear: number;
     newerBoundaryYear: number;
 };
@@ -747,45 +766,53 @@ export const compareCompletedPartialWithMissingStaircase = (
     };
 };
 
-const simulatePartialMissingComposition = (
+const simulatePartialUnitComposition = (
     series: NumericSeries,
-    orientation: CompletedPartialMissingComposition["orientation"],
+    unitEventType: CompletedPartialUnitEventType,
+    orientation: CompletedPartialUnitOrientation,
     olderBoundaryYear: number,
     newerBoundaryYear: number,
     partialShiftYears: number,
 ): NumericSeries => {
-    if (orientation === "missingThenPartial") {
+    const simulateUnit = unitEventType === "missingRing"
+        ? simulateMissingRing
+        : simulateFalseRing;
+    const unitShiftYears = unitEventType === "missingRing" ? -1 : 1;
+    const unitThenPartial = orientation === "missingThenPartial"
+        || orientation === "falseThenPartial";
+    if (unitThenPartial) {
         const afterPartial = simulatePartialMove(
             series,
             newerBoundaryYear,
             partialShiftYears,
         );
-        return simulateMissingRing(
+        return simulateUnit(
             afterPartial,
             olderBoundaryYear + partialShiftYears,
         );
     }
-    const afterMissing = simulateMissingRing(series, newerBoundaryYear);
+    const afterUnit = simulateUnit(series, newerBoundaryYear);
     return simulatePartialMove(
-        afterMissing,
-        olderBoundaryYear - 1,
+        afterUnit,
+        olderBoundaryYear + unitShiftYears,
         partialShiftYears,
     );
 };
 
 /**
  * Compares complete corrections when a cumulative negative lag may contain one physical gap and
- * one missing ring. The two event orders have different middle states, so the winning family also
- * identifies which operation is the newer, currently executable frontier.
+ * one unit ring edit. The two event orders have different middle states, so the winning family
+ * also identifies which operation is the newer, currently executable frontier.
  */
-export const compareCompletedPartialWithSingleMissing = (
+const compareCompletedPartialWithSingleUnit = (
     diagnosis: SeriesCoreDiagnosis,
     siteData: RwlSiteData,
     event: DiagnosisEvent,
     pathMissingYears: readonly number[] = [],
     useCofechaStandardization = true,
     additionalAnchorYears: readonly number[] = [],
-): CompletedPartialMissingComposition | null => {
+    unitEventType: CompletedPartialUnitEventType,
+): CompletedPartialUnitComposition | null => {
     const cumulativeShiftYears = event.shiftYears;
     if (
         event.eventType !== "partialMove"
@@ -795,8 +822,14 @@ export const compareCompletedPartialWithSingleMissing = (
         || event.evidence.candidateIds.length === 0
         || !event.evidence.notes.includes("candidate_hard_gate_passed")
     ) return null;
-    const partialShiftYears = cumulativeShiftYears! + 1;
+    const unitShiftYears = unitEventType === "missingRing" ? -1 : 1;
+    const partialShiftYears = cumulativeShiftYears! - unitShiftYears;
     if (partialShiftYears > -2) return null;
+
+    const orientations: readonly CompletedPartialUnitOrientation[] = unitEventType
+        === "missingRing"
+        ? ["missingThenPartial", "partialThenMissing"]
+        : ["falseThenPartial", "partialThenFalse"];
 
     const range = diagnosis.targetRange;
     const minimumBoundaryYear = range.startYear + 12;
@@ -896,16 +929,18 @@ export const compareCompletedPartialWithSingleMissing = (
         },
     ).sort((left, right) => right.score - left.score).slice(0, 24);
     const mixedCandidates = Array.from(boundaryPairs.values()).flatMap((pair) => (
-        (["missingThenPartial", "partialThenMissing"] as const).map(
-            (orientation): MixedPartialMissingCorrection => {
+        orientations.map(
+            (orientation): MixedPartialUnitCorrection => {
                 const localRange = comparisonRange(
                     pair.olderBoundaryYear,
                     pair.newerBoundaryYear,
                     8,
                 );
+                const unitThenPartial = orientation === "missingThenPartial"
+                    || orientation === "falseThenPartial";
                 return {
                 years: [],
-                firstFixedYear: orientation === "missingThenPartial"
+                firstFixedYear: unitThenPartial
                     ? pair.newerBoundaryYear
                     : pair.olderBoundaryYear,
                 shiftYears: partialShiftYears,
@@ -913,8 +948,9 @@ export const compareCompletedPartialWithSingleMissing = (
                 ...pair,
                 comparisonRange: localRange,
                 ...scoreCorrection(
-                    simulatePartialMissingComposition(
+                    simulatePartialUnitComposition(
                         diagnosis.rawTarget,
+                        unitEventType,
                         orientation,
                         pair.olderBoundaryYear,
                         pair.newerBoundaryYear,
@@ -929,7 +965,7 @@ export const compareCompletedPartialWithSingleMissing = (
             },
         )
     )).sort((left, right) => right.score - left.score);
-    const retainedMixed = (["missingThenPartial", "partialThenMissing"] as const)
+    const retainedMixed = orientations
         .flatMap((orientation) => mixedCandidates.filter((candidate) => (
             candidate.orientation === orientation
         )).slice(0, 24));
@@ -937,7 +973,8 @@ export const compareCompletedPartialWithSingleMissing = (
 
     const uniquePathMissingYears = Array.from(new Set(pathMissingYears))
         .sort((left, right) => left - right);
-    const canCompareMissingStaircase = uniquePathMissingYears.length
+    const canCompareMissingStaircase = unitEventType === "missingRing"
+        && uniquePathMissingYears.length
         === Math.abs(cumulativeShiftYears!);
     const missingStaircaseCandidates = canCompareMissingStaircase
         ? Array.from({ length: 5 }, (_, index) => (
@@ -1020,7 +1057,7 @@ export const compareCompletedPartialWithSingleMissing = (
             lowerQuartileMargin: quantile(margins, 0.25),
         };
     });
-    const bestByOrientation = (["missingThenPartial", "partialThenMissing"] as const)
+    const bestByOrientation = orientations
         .flatMap((orientation) => profiles.filter((profile) => (
             profile.candidate.orientation === orientation
             && profile.margins.length > 0
@@ -1037,9 +1074,10 @@ export const compareCompletedPartialWithSingleMissing = (
         || right.candidate.score - left.candidate.score
     ))[0];
     if (!selected) return null;
-    const otherOrientation = selected.candidate.orientation === "missingThenPartial"
-        ? "partialThenMissing"
-        : "missingThenPartial";
+    const otherOrientation = orientations.find(
+        (orientation) => orientation !== selected.candidate.orientation,
+    );
+    if (!otherOrientation) return null;
     const selectedOrientationCandidates = retainedMixed.filter((candidate) => (
         candidate.orientation === selected.candidate.orientation
     ));
@@ -1065,15 +1103,18 @@ export const compareCompletedPartialWithSingleMissing = (
         ...otherOrientationCandidates.map((candidate) => candidate.score),
     );
     const candidate = selected.candidate;
+    const unitThenPartial = candidate.orientation === "missingThenPartial"
+        || candidate.orientation === "falseThenPartial";
     return {
+        unitEventType,
         cumulativeShiftYears: cumulativeShiftYears!,
         partialShiftYears,
         orientation: candidate.orientation,
         olderBoundaryYear: candidate.olderBoundaryYear,
         newerBoundaryYear: candidate.newerBoundaryYear,
-        frontierEventType: candidate.orientation === "missingThenPartial"
+        frontierEventType: unitThenPartial
             ? "partialMove"
-            : "missingRing",
+            : unitEventType,
         frontierYear: candidate.newerBoundaryYear,
         separationYears: candidate.newerBoundaryYear - candidate.olderBoundaryYear,
         masterMargin: candidate.score - bestCompetingMasterScore,
@@ -1093,6 +1134,39 @@ export const compareCompletedPartialWithSingleMissing = (
         comparedWithMissingStaircase: missingStaircaseCandidates.length > 0,
     };
 };
+
+export const compareCompletedPartialWithSingleMissing = (
+    diagnosis: SeriesCoreDiagnosis,
+    siteData: RwlSiteData,
+    event: DiagnosisEvent,
+    pathMissingYears: readonly number[] = [],
+    useCofechaStandardization = true,
+    additionalAnchorYears: readonly number[] = [],
+): CompletedPartialMissingComposition | null => compareCompletedPartialWithSingleUnit(
+    diagnosis,
+    siteData,
+    event,
+    pathMissingYears,
+    useCofechaStandardization,
+    additionalAnchorYears,
+    "missingRing",
+) as CompletedPartialMissingComposition | null;
+
+export const compareCompletedPartialWithSingleFalse = (
+    diagnosis: SeriesCoreDiagnosis,
+    siteData: RwlSiteData,
+    event: DiagnosisEvent,
+    useCofechaStandardization = true,
+    additionalAnchorYears: readonly number[] = [],
+): CompletedPartialFalseComposition | null => compareCompletedPartialWithSingleUnit(
+    diagnosis,
+    siteData,
+    event,
+    [],
+    useCofechaStandardization,
+    additionalAnchorYears,
+    "falseRing",
+) as CompletedPartialFalseComposition | null;
 
 export const comparePartialMoveWithMissingStaircase = (
     diagnosis: SeriesCoreDiagnosis,
