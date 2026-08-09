@@ -518,6 +518,115 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
         ]);
     }, 180_000);
 
+    bundledCofechaIt("keeps the mtr721 three- and four-year physical gaps visible", () => {
+        const seriesId = "mtr721";
+        const firstFixedYear = 1803;
+        const source = parsed.get(seriesId)!;
+        const compact = (diagnosis: ReturnType<typeof diagnoseCrossdating>) => {
+            const audit = diagnosis.eventDecisionAudits?.[0];
+            const events = (rows: NonNullable<typeof audit>["finalEvents"]) => rows.map(
+                (event) => ({
+                    type: event.eventType,
+                    range: [event.startYear, event.endYear],
+                    topYear: event.topYear,
+                    shiftYears: event.shiftYears,
+                    lag: [event.lagBefore, event.lagAfter],
+                    sources: event.algorithmSources,
+                }),
+            );
+            return {
+                shown: summarize(getDisplayedDiagnosisEvents(diagnosis)),
+                strict: summarize(diagnosis.events),
+                audit: audit ? {
+                    finalReason: audit.finalReason,
+                    candidates: audit.candidates,
+                    candidateProjected: events(audit.candidateProjectedEvents),
+                    detectedBeforeFusion: events(audit.detectedBeforeFusion),
+                    detectedAfterFusion: events(audit.detectedAfterFusion),
+                    retained: events(audit.retainedAfterEndpointGuard),
+                    displayed: events(audit.displayedBeforeLocator),
+                    final: events(audit.finalEvents),
+                    finalNotes: diagnosis.events[0]?.evidence.notes.filter((note) => (
+                        note.startsWith("counterfactual_")
+                        || note.startsWith("candidate_")
+                        || note.startsWith("partial_")
+                        || note.startsWith("local_")
+                        || note.startsWith("joint_")
+                    )),
+                } : null,
+            };
+        };
+        const scenarios = [3, 4].map((gapYears) => {
+            const physical = createPartialRangeMoveCase(
+                source,
+                firstFixedYear,
+                gapYears,
+            );
+            const site = new Map(cleanSite);
+            site.set(seriesId, physical.corrupted);
+            const beforeSave = diagnoseCrossdating(site, {
+                referenceConfig,
+                targetTrees: [seriesId],
+                reviewWindowDisplayMode: "review",
+                includeEventDecisionAudits: true,
+            });
+            const outText = runBundledCofecha(site);
+            const parts = splitReportByParts(outText);
+            const freshReference = createCofechaMasterReferenceConfig({
+                siteData: site,
+                flaggedAIds: extractPart6FlaggedASeriesIds(
+                    parts.get("PART 6") ?? "",
+                ),
+                cofechaRunId: `co612-mtr721-physical-gap-${gapYears}`,
+                rwlHash: `co612-mtr721-physical-gap-${gapYears}`,
+                masterDatingSeries: parseCofechaResult(outText).masterDatingSeries,
+            });
+            const afterSave = diagnoseCrossdating(site, {
+                referenceConfig: freshReference,
+                targetTrees: [seriesId],
+                cofechaText: outText,
+                reviewWindowDisplayMode: "review",
+                includeEventDecisionAudits: true,
+            });
+            return { gapYears, beforeSave, afterSave };
+        });
+        const failureContext = JSON.stringify(scenarios.map((scenario) => ({
+            gapYears: scenario.gapYears,
+            beforeSave: compact(scenario.beforeSave),
+            afterSave: compact(scenario.afterSave),
+        })));
+
+        scenarios.forEach(({ gapYears, beforeSave, afterSave }) => {
+            const displayedStates = [beforeSave, afterSave].map((diagnosis) => (
+                getDisplayedDiagnosisEvents(diagnosis).filter(
+                    (event) => event.seriesId === seriesId,
+                )
+            ));
+            displayedStates.forEach((events) => {
+                const [event] = events;
+                expect(events, failureContext).toHaveLength(1);
+                expect(event.eventType, failureContext).toBe("partialMove");
+                expect(event.shiftYears, failureContext).toBe(-gapYears);
+                expect(event.startYear, failureContext)
+                    .toBeLessThanOrEqual(firstFixedYear);
+                expect(event.endYear, failureContext)
+                    .toBeGreaterThanOrEqual(firstFixedYear);
+                expect([5, 7, 9, 13], failureContext).toContain(
+                    event.endYear - event.startYear + 1,
+                );
+                expect(event.evidence.algorithmSources, failureContext)
+                    .toContain("partial_local_consensus_recenter");
+            });
+            expect([
+                displayedStates[1][0].startYear,
+                displayedStates[1][0].endYear,
+            ], failureContext).toEqual([
+                displayedStates[0][0].startYear,
+                displayedStates[0][0].endYear,
+            ]);
+        });
+    }, 240_000);
+
     bundledCofechaIt("reveals all mtr841 missing rings without a partial-move detour", () => {
         const mtr841 = parsed.get("mtr841")!;
         const mtrZeroYears = Array.from(mtr841.valuesByYear)

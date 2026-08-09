@@ -226,7 +226,88 @@ describe("counterfactual coarse-mode selection", () => {
             window: { startYear: 1795, endYear: 1803 },
             centerYear: 1800,
             supportCount: 4,
+            consensusKind: "local_votes",
             discardedWindow: { startYear: 1805, endYear: 1817 },
+        });
+    });
+
+    it("keeps reference-core and multiview partial modes when only their tail overlaps", () => {
+        const referenceBase = localPartialEvent([
+            "reference_vote_year=1803",
+            "reference_vote_gain=0.181398",
+            "reference_vote_remote_margin=0.010144",
+            "reference_partialMove_peak_year=1803",
+        ]);
+        const referenceEvent: DiagnosisEvent = {
+            ...referenceBase,
+            startYear: 1799,
+            endYear: 1807,
+            shiftYears: -3,
+            rankedYears: [{
+                year: 1803,
+                rank: 1,
+                score: 1,
+                evidenceTags: [],
+            }],
+            evidence: {
+                ...referenceBase.evidence,
+                algorithmSources: ["reference_core_voting"],
+                correlationGain: 0.181398,
+                lagBefore: -3,
+            },
+        };
+        expect(selectPartialMoveLocalConsensusRecenter({
+            event: referenceEvent,
+            correctionYears: -3,
+            proposedWindow: { startYear: 1788, endYear: 1800 },
+            calibrationRule: "calibrated_default_13",
+        })).toMatchObject({
+            window: { startYear: 1799, endYear: 1807 },
+            centerYear: 1803,
+            consensusKind: "reference_core",
+        });
+
+        const multiviewBase = localPartialEvent([
+            "partial_consensus_year=1804",
+            "partial_consensus_support=3",
+            "partial_reference_vote_year=1806",
+            "partial_reference_vote_shift=-4",
+            "partial_reference_vote_gain=0.146087",
+            "partial_reference_vote_margin=0.009807",
+            "partial_exhaustive_vote_year=1802",
+            "partial_exhaustive_vote_shift=-4",
+            "partial_exhaustive_vote_gain=0.223684",
+            "partial_exhaustive_vote_margin=0.012685",
+        ]);
+        const multiviewEvent: DiagnosisEvent = {
+            ...multiviewBase,
+            startYear: 1800,
+            endYear: 1808,
+            shiftYears: -4,
+            rankedYears: [{
+                year: 1804,
+                rank: 1,
+                score: 1,
+                evidenceTags: [],
+            }],
+            evidence: {
+                ...multiviewBase.evidence,
+                algorithmSources: [
+                    "negative_partial_multiview_consensus",
+                    "piecewise_lag_path",
+                ],
+                lagBefore: -4,
+            },
+        };
+        expect(selectPartialMoveLocalConsensusRecenter({
+            event: multiviewEvent,
+            correctionYears: -4,
+            proposedWindow: { startYear: 1806, endYear: 1818 },
+            calibrationRule: "calibrated_default_13",
+        })).toMatchObject({
+            window: { startYear: 1800, endYear: 1808 },
+            centerYear: 1804,
+            consensusKind: "multiview_votes",
         });
     });
 
@@ -245,7 +326,7 @@ describe("counterfactual coarse-mode selection", () => {
         })).toBeNull();
         expect(selectPartialMoveLocalConsensusRecenter({
             ...input,
-            proposedWindow: { startYear: 1803, endYear: 1815 },
+            proposedWindow: { startYear: 1799, endYear: 1811 },
         })).toBeNull();
         expect(selectPartialMoveLocalConsensusRecenter({
             ...input,

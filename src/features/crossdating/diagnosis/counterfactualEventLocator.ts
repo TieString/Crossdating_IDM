@@ -626,14 +626,15 @@ type PartialMoveLocalConsensusRecenter = {
     window: { startYear: number; endYear: number };
     centerYear: number;
     supportCount: number;
+    consensusKind: "local_votes" | "multiview_votes" | "reference_core";
     discardedWindow: { startYear: number; endYear: number };
 };
 
 /**
  * A diffuse full-interval profile may drift onto the newer-side plateau even when the
  * pre-locator breakpoint, local raw residual, and per-reference votes agree locally.
- * Keep the already calibrated local window only when all operation-consistent channels
- * agree and the default 13-year mode has become completely disconnected from it.
+ * Keep the already calibrated local window only when operation-consistent channels agree,
+ * the default 13-year mode retains at most a short tail, and it excludes their center.
  */
 export const selectPartialMoveLocalConsensusRecenter = (input: {
     event: DiagnosisEvent;
@@ -645,19 +646,74 @@ export const selectPartialMoveLocalConsensusRecenter = (input: {
     if (
         event.eventType !== "partialMove"
         || input.calibrationRule !== "calibrated_default_13"
-        || proposedWindow.startYear <= event.endYear
-        || !event.evidence.algorithmSources.includes(
-            "local_corrected_raw_breakpoint",
-        )
-        || !event.evidence.algorithmSources.includes("piecewise_lag_path")
+        || event.shiftYears !== correctionYears
+        || event.evidence.lagBefore !== correctionYears
+        || event.evidence.lagAfter !== 0
     ) return null;
 
     const currentWidth = event.endYear - event.startYear + 1;
     if (![5, 7, 9, 13].includes(currentWidth)) return null;
+    const overlapYears = Math.max(
+        0,
+        Math.min(event.endYear, proposedWindow.endYear)
+            - Math.max(event.startYear, proposedWindow.startYear)
+            + 1,
+    );
+    if (overlapYears > 3) return null;
     const currentPrimaryYear = event.rankedYears
         .slice()
         .sort((left, right) => left.rank - right.rank)[0]?.year;
     if (currentPrimaryYear === undefined) return null;
+
+    const finish = (
+        evidenceYears: number[],
+        consensusKind: PartialMoveLocalConsensusRecenter["consensusKind"],
+    ): PartialMoveLocalConsensusRecenter | null => {
+        if (evidenceYears.some((year) => (
+            year < event.startYear - 1 || year > event.endYear + 1
+        ))) return null;
+        if (Math.max(...evidenceYears) - Math.min(...evidenceYears) > 4) return null;
+        const centerYear = Math.floor(median(evidenceYears));
+        if (
+            centerYear >= proposedWindow.startYear - 1
+            && centerYear <= proposedWindow.endYear + 1
+        ) return null;
+        return {
+            window: { startYear: event.startYear, endYear: event.endYear },
+            centerYear,
+            supportCount: evidenceYears.length,
+            consensusKind,
+            discardedWindow: { ...proposedWindow },
+        };
+    };
+
+    const sources = new Set(event.evidence.algorithmSources);
+    const referenceCoreYear = evidenceNoteNumber(event, "reference_vote_year=");
+    const referencePartialYear = evidenceNoteNumber(
+        event,
+        "reference_partialMove_peak_year=",
+    );
+    const referenceCoreGain = Math.max(
+        evidenceNoteNumber(event, "reference_vote_gain=")
+            ?? Number.NEGATIVE_INFINITY,
+        event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY,
+    );
+    const referenceCoreMargin = evidenceNoteNumber(
+        event,
+        "reference_vote_remote_margin=",
+    ) ?? Number.NEGATIVE_INFINITY;
+    if (
+        sources.has("reference_core_voting")
+        && referenceCoreYear === currentPrimaryYear
+        && referencePartialYear === currentPrimaryYear
+        && referenceCoreGain >= 0.05
+        && referenceCoreMargin >= 0.01
+    ) {
+        return finish(
+            [currentPrimaryYear, referenceCoreYear, referencePartialYear],
+            "reference_core",
+        );
+    }
 
     const consistentVoteYear = (
         prefix: "partial_reference_vote" | "partial_exhaustive_vote",
@@ -669,7 +725,7 @@ export const selectPartialMoveLocalConsensusRecenter = (input: {
         return Number.isInteger(year)
             && shift === correctionYears
             && (gain ?? Number.NEGATIVE_INFINITY) >= 0.02
-            && (margin ?? Number.NEGATIVE_INFINITY) >= 0.01
+            && (margin ?? Number.NEGATIVE_INFINITY) >= 0.009
             ? year
             : undefined;
     };
@@ -680,30 +736,32 @@ export const selectPartialMoveLocalConsensusRecenter = (input: {
         event,
         "local_raw_boundary_support=",
     ) ?? 0;
+    const multiviewYear = evidenceNoteNumber(event, "partial_consensus_year=");
+    const multiviewSupport = evidenceNoteNumber(
+        event,
+        "partial_consensus_support=",
+    ) ?? 0;
+    const localBoundarySupported = sources.has("local_corrected_raw_breakpoint")
+        && localBoundaryYear !== undefined
+        && localBoundarySupport >= 2;
+    const multiviewSupported = sources.has("negative_partial_multiview_consensus")
+        && multiviewYear !== undefined
+        && multiviewSupport >= 3;
     if (
         referenceVoteYear === undefined
         || exhaustiveVoteYear === undefined
-        || localBoundaryYear === undefined
-        || localBoundarySupport < 2
+        || !sources.has("piecewise_lag_path")
+        || (!localBoundarySupported && !multiviewSupported)
     ) return null;
 
-    const evidenceYears = [
-        currentPrimaryYear,
-        localBoundaryYear,
-        referenceVoteYear,
-        exhaustiveVoteYear,
-    ];
-    if (evidenceYears.some((year) => (
-        year < event.startYear - 1 || year > event.endYear + 1
-    ))) return null;
-    if (Math.max(...evidenceYears) - Math.min(...evidenceYears) > 4) return null;
-
-    return {
-        window: { startYear: event.startYear, endYear: event.endYear },
-        centerYear: Math.floor(median(evidenceYears)),
-        supportCount: evidenceYears.length,
-        discardedWindow: { ...proposedWindow },
-    };
+    const evidenceYears = [currentPrimaryYear];
+    if (localBoundarySupported) evidenceYears.push(localBoundaryYear!);
+    if (multiviewSupported) evidenceYears.push(multiviewYear!);
+    evidenceYears.push(referenceVoteYear, exhaustiveVoteYear);
+    return finish(
+        evidenceYears,
+        multiviewSupported ? "multiview_votes" : "local_votes",
+    );
 };
 
 const valueForCumulative = (
@@ -2121,6 +2179,9 @@ export const refineEventWithCounterfactualLocator = (
                         }`,
                         `partial_local_consensus_support_count=${
                             partialLocalConsensusRecenter.supportCount
+                        }`,
+                        `partial_local_consensus_kind=${
+                            partialLocalConsensusRecenter.consensusKind
                         }`,
                         `partial_local_consensus_discarded_window=${
                             partialLocalConsensusRecenter.discardedWindow.startYear
