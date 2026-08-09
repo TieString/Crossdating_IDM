@@ -1541,8 +1541,13 @@ export const prioritizeEndpointUnitAgainstWhole = (
     const whole = events.find((event) => event.eventType === "wholeSeriesMove");
     if (!whole) return events;
     const endpointUnit = events.find((event) => (
-        event.evidence.algorithmSources.includes(
-            "series_endpoint_review_window",
+        (
+            event.evidence.algorithmSources.includes(
+                "series_endpoint_review_window",
+            )
+            || event.evidence.algorithmSources.includes(
+                "newer_endpoint_unit_alias_of_global_lag",
+            )
         )
         && (
             event.eventType === "missingRing"
@@ -1562,11 +1567,19 @@ export const prioritizeEndpointUnitAgainstWhole = (
             endpointUnit,
         )
         : null;
-    if (isTerminalWholeBaselineEvent(whole)
-        && (!fixedSideContrast
-            || !hasDecisiveNewerSideFixedEvidence(fixedSideContrast))) {
+    const terminalWhole = isTerminalWholeBaselineEvent(whole);
+    const decisiveFixedSide = Boolean(
+        fixedSideContrast
+        && hasDecisiveNewerSideFixedEvidence(fixedSideContrast),
+    );
+    if (terminalWhole && !decisiveFixedSide) {
         return events;
     }
+    const removeTerminalWholeAlias = terminalWhole
+        && decisiveFixedSide
+        && endpointUnit.evidence.algorithmSources.includes(
+            "newer_endpoint_unit_alias_of_global_lag",
+        );
     const preferredUnit = {
         ...endpointUnit,
         evidence: {
@@ -1574,13 +1587,19 @@ export const prioritizeEndpointUnitAgainstWhole = (
             algorithmSources: Array.from(new Set([
                 ...endpointUnit.evidence.algorithmSources,
                 "newer_endpoint_unit_preferred_over_global_lag",
-                ...(isTerminalWholeBaselineEvent(whole)
+                ...(terminalWhole
                     ? ["newer_fixed_side_lag_contrast"] as const
+                    : []),
+                ...(removeTerminalWholeAlias
+                    ? ["terminal_whole_alias_removed"] as const
                     : []),
             ])).sort(),
             notes: [
                 ...endpointUnit.evidence.notes,
                 "event_order=newer_endpoint_unit_before_global_lag",
+                ...(removeTerminalWholeAlias
+                    ? ["whole_series_candidate=removed_terminal_unit_alias"]
+                    : []),
                 ...(fixedSideContrast ? [
                     `newer_fixed_side_boundary_year=${fixedSideContrast.boundaryYear}`,
                     `newer_fixed_side_range=${fixedSideContrast.startYear}-${fixedSideContrast.endYear}`,
@@ -1596,7 +1615,10 @@ export const prioritizeEndpointUnitAgainstWhole = (
     };
     return [
         preferredUnit,
-        ...events.filter((event) => event.id !== endpointUnit.id),
+        ...events.filter((event) => (
+            event.id !== endpointUnit.id
+            && (!removeTerminalWholeAlias || event.id !== whole.id)
+        )),
     ];
 };
 
@@ -4923,9 +4945,14 @@ export const makeDiagnosisEvents = (
             }
         }
         if (!hasLocalEvent) return finalize(displayed);
-        const jointStateEvents = preserveJointLagStateWindows(displayed);
+        const locatedInputEvents = prioritizeEndpointUnitAgainstWhole(
+            displayed,
+            diagnosis,
+            siteData,
+        );
+        const jointStateEvents = preserveJointLagStateWindows(locatedInputEvents);
         if (jointStateEvents) return finalize(jointStateEvents);
-        const hasWholeSeriesBaseline = displayed.some(
+        const hasWholeSeriesBaseline = locatedInputEvents.some(
             (event) => event.eventType === "wholeSeriesMove",
         );
         const locatorEventPathConfig = {
@@ -4933,7 +4960,7 @@ export const makeDiagnosisEvents = (
             maxPartialGapYears: effectiveConfig.maxPartialGapYears,
             ...options.eventPathConfig,
         };
-        const locatedEvents = displayed.map((event) => {
+        const locatedEvents = locatedInputEvents.map((event) => {
             if (event.eventType === "wholeSeriesMove") return event;
             if (event.evidence.algorithmSources.includes(
                 "collapsed_missing_staircase_head",

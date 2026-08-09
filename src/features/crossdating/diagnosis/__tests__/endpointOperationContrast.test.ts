@@ -4,6 +4,7 @@ import {
     hasDecisiveNewerSideFixedEvidence,
     scoreNewerSideEndpointOperationContrast,
 } from "../endpointOperationContrast";
+import { prioritizeEndpointUnitAgainstWhole } from "../eventEnsemble";
 import { preprocessSeries } from "../series";
 import type { DiagnosisEvent, SeriesCoreDiagnosis } from "../types";
 
@@ -77,27 +78,55 @@ const fixture = (fixedNewerSide: boolean) => {
             sourceTrees: referenceIds,
         },
     } as SeriesCoreDiagnosis;
+    const whole = event("wholeSeriesMove", boundaryYear);
+    const missing = event("missingRing", boundaryYear);
     const contrast = scoreNewerSideEndpointOperationContrast(
         diagnosis,
         siteData,
-        event("wholeSeriesMove", boundaryYear),
-        event("missingRing", boundaryYear),
+        whole,
+        missing,
     );
-    return contrast;
+    return { contrast, diagnosis, siteData, whole, missing };
 };
 
 describe("newer-side endpoint operation contrast", () => {
     it("accepts a local unit event whose newer side remains at lag zero", () => {
-        const contrast = fixture(true);
+        const { contrast } = fixture(true);
         expect(contrast).not.toBeNull();
         expect(hasDecisiveNewerSideFixedEvidence(contrast!)).toBe(true);
         expect(contrast!.positiveReferenceFraction).toBe(1);
     });
 
     it("retains a real whole-series lag when the newer side is shifted too", () => {
-        const contrast = fixture(false);
+        const { contrast } = fixture(false);
         expect(contrast).not.toBeNull();
         expect(hasDecisiveNewerSideFixedEvidence(contrast!)).toBe(false);
         expect(contrast!.positiveReferenceFraction).toBe(0);
+    });
+
+    it("removes a terminal whole alias only when the newer side stays fixed", () => {
+        const local = fixture(true);
+        local.missing.evidence.algorithmSources = [
+            "newer_endpoint_unit_alias_of_global_lag",
+        ];
+        const localResult = prioritizeEndpointUnitAgainstWhole(
+            [local.whole, local.missing],
+            local.diagnosis,
+            local.siteData,
+        );
+        expect(localResult).toHaveLength(1);
+        expect(localResult[0].eventType).toBe("missingRing");
+        expect(localResult[0].evidence.algorithmSources)
+            .toContain("terminal_whole_alias_removed");
+
+        const global = fixture(false);
+        global.missing.evidence.algorithmSources = [
+            "newer_endpoint_unit_alias_of_global_lag",
+        ];
+        expect(prioritizeEndpointUnitAgainstWhole(
+            [global.whole, global.missing],
+            global.diagnosis,
+            global.siteData,
+        )).toEqual([global.whole, global.missing]);
     });
 });

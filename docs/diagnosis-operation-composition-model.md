@@ -2099,3 +2099,34 @@ C2 基线中，真实 `partial(p) + falseRing(+1)` 经常被全区间融合压�
 
 上述门禁均源文件未变、错误 0、保存重开 100%。Vitest 共 103/103，包括事件集成、复核显示、
 唯一主窗、`mon052` 九轮恢复、`mtr841` 多缺轮、双伪轮方向以及 physical gap `-2...-100`。
+
+### Round 7F：新端单位缺轮压制 terminal whole 别名
+
+`co612.rwl` 的 `mon062` 删除树皮侧第一个自然 0（1977）后，内部同时形成
+`missingRing (-1 -> 0)` 与 `wholeSeriesMove -1`。后者来自较长旧侧对全序列 lag 的支配，
+虽然缺轮已带有 `newer_endpoint_unit_alias_of_global_lag`，旧管线只让
+`series_endpoint_review_window` 进入较新固定侧对比，因此 review 主建议错误显示整体移动。
+
+修复将已有 alias 证据接入同一固定侧仲裁。只有较新侧 master 和逐参考芯对比同时达到决定性
+门槛，且单位事件明确解释同幅 terminal whole 时，才移除该 whole 别名；随后不再把两者误当成
+联合 lag 状态提前返回，而让唯一单位事件继续完成全区间定位。真实整体移动若较新侧也保持非零
+lag，或缺少 alias 关系，仍保留 whole。没有加入样芯编号或固定年份特例。
+
+因果对照中，撤掉该入口会稳定复现唯一主建议 `wholeSeriesMove -1`；恢复后保存前、保存并重跑
+COFECHA 后均只显示 `missingRing 1971--1979`，Top1 为 1977，窗口宽 9 年，严格事件中不再残留
+whole。新增合成回归同时断言：较新侧保持 lag 0 时移除 alias，较新侧也整体偏移时保留 whole。
+
+安全门禁：
+
+- `mon062-whole-alias-b1-safety-2026-08-09`：clean review **2/55**；A1 4/4、A4 4/4、
+  B1 8/8，whole 转 partial/unit 均为 0，串行第二步 8/8，保存重开 100%。
+- `mon062-whole-alias-b2-safety-2026-08-09`：A2 4/4、A4 4/4、B2 8/8，whole 转
+  partial/unit 均为 0，串行第二步 8/8，保存重开 100%。
+- `mon062-unit-whole-b1-safety-2026-08-09` 与
+  `mon062-unit-whole-b2-safety-2026-08-09`：专门改测 whole `-1/+1`；B1、B2 各 8/8
+  保持精确 whole 首步，串行第二步各 8/8，whole 转 partial/unit 均为 0。
+- 四轮错误和残余映射不一致均为 0；源 SHA-256 前后均为
+  `36e6c6a9d0cbc16d1870a1662da553a7b40d5578ea9ede25ff790c556c34667d`。
+
+完整 `co612MultiMissingRegression` 为 14/14；事件仲裁、固定侧对比与 review 显示为 82/82。
+ZSL 文件级套件仍因既有 RAW OUT 夹具为 null 而在收集阶段失败，本轮没有把它计作算法回归。

@@ -16,7 +16,10 @@ import {
 } from "@/features/crossdating/reference";
 import { formatTucson } from "@/features/rwl/parsers/tucson";
 import type { RwlSiteData } from "@/features/rwl/types";
-import { diagnoseCrossdating } from "@/features/crossdating/diagnosis";
+import {
+    diagnoseCrossdating,
+    getDisplayedDiagnosisEvents,
+} from "@/features/crossdating/diagnosis";
 import { getConfig } from "@/features/crossdating/diagnosis/config";
 import {
     createLagPathCache,
@@ -256,6 +259,73 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
         expect(event.startYear).toBeLessThanOrEqual(1902);
         expect(event.endYear).toBeGreaterThanOrEqual(1902);
         expect(events.some((candidate) => candidate.eventType === "partialMove")).toBe(false);
+    }, 180_000);
+
+    bundledCofechaIt("keeps the bark-most mon062 zero removal as a missing ring", () => {
+        const seriesId = "mon062";
+        const mon062 = parsed.get(seriesId)!;
+        const newestZeroYear = Math.max(...Array.from(mon062.valuesByYear)
+            .filter(([, value]) => value === 0)
+            .map(([year]) => year));
+        const corrupted = reconstructMissingFromZero(
+            mon062.valuesByYear,
+            newestZeroYear,
+        );
+        const site = new Map(cleanSite);
+        site.set(seriesId, corrupted);
+        const beforeSave = diagnoseCrossdating(site, {
+            referenceConfig,
+            targetTrees: [seriesId],
+            reviewWindowDisplayMode: "review",
+        });
+
+        const outText = runBundledCofecha(site);
+        const parts = splitReportByParts(outText);
+        const freshReference = createCofechaMasterReferenceConfig({
+            siteData: site,
+            flaggedAIds: extractPart6FlaggedASeriesIds(parts.get("PART 6") ?? ""),
+            cofechaRunId: "co612-mon062-after-zero-removal",
+            rwlHash: "co612-mon062-after-zero-removal",
+            masterDatingSeries: parseCofechaResult(outText).masterDatingSeries,
+        });
+        const afterSave = diagnoseCrossdating(site, {
+            referenceConfig: freshReference,
+            targetTrees: [seriesId],
+            cofechaText: outText,
+            reviewWindowDisplayMode: "review",
+        });
+
+        expect(newestZeroYear).toBe(1977);
+        const displayedByState = [beforeSave, afterSave].map((diagnosis) => (
+            getDisplayedDiagnosisEvents(diagnosis)
+                .filter((event) => event.seriesId === seriesId)
+        ));
+        displayedByState.forEach((events) => {
+            const [event] = events;
+            expect(events, JSON.stringify(summarize(events))).toHaveLength(1);
+            expect(event.eventType, JSON.stringify(summarize(events))).toBe("missingRing");
+            expect(event.startYear, JSON.stringify(summarize(events)))
+                .toBeLessThanOrEqual(newestZeroYear);
+            expect(event.endYear, JSON.stringify(summarize(events)))
+                .toBeGreaterThanOrEqual(newestZeroYear);
+            expect(event.rankedYears[0]?.year, JSON.stringify(summarize(events)))
+                .toBe(newestZeroYear);
+            expect(event.endYear - event.startYear + 1, JSON.stringify(summarize(events)))
+                .toBeLessThanOrEqual(13);
+        });
+        [beforeSave, afterSave].forEach((diagnosis) => {
+            expect(diagnosis.events.some((event) => (
+                event.eventType === "wholeSeriesMove"
+            )), JSON.stringify(summarize(diagnosis.events))).toBe(false);
+        });
+        expect(displayedByState[1][0], JSON.stringify({
+            before: summarize(displayedByState[0]),
+            after: summarize(displayedByState[1]),
+        })).toMatchObject({
+            eventType: displayedByState[0][0].eventType,
+            startYear: displayedByState[0][0].startYear,
+            endYear: displayedByState[0][0].endYear,
+        });
     }, 180_000);
 
     bundledCofechaIt("reveals all mtr841 missing rings without a partial-move detour", () => {
