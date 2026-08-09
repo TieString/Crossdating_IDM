@@ -41,6 +41,12 @@ import {
     type RollingCellAnimation,
     type ShiftedCellAnimation,
 } from "./widthGridAnimationPlan";
+import {
+    createOlderSidePartialMovePlan,
+    createWholeSeriesMovePlan,
+    type ManualSeriesMovePlan,
+    type WholeSeriesMoveDirection,
+} from "./manualMovePlan";
 
 interface YearCell {
     year: number;
@@ -2034,6 +2040,61 @@ function WidthContainer({
         handleInsertMissingYearAtSide(tree, year, side);
     }, [handleInsertMissingYearAtSide]);
 
+    const applyContextMenuMovePlan = useCallback((tree: string, plan: ManualSeriesMovePlan) => {
+        if (!onMoveSeriesTailByOffset) {
+            return;
+        }
+
+        onMoveSeriesTailByOffset(
+            tree,
+            plan.selectedStartYear,
+            plan.selectedEndYear,
+            plan.yearOffset,
+        );
+        setSelection(normalizeSelection(
+            tree,
+            plan.selectedStartYear + plan.yearOffset,
+            plan.selectedEndYear + plan.yearOffset,
+        ));
+    }, [onMoveSeriesTailByOffset]);
+
+    const handleContextMenuMoveWholeSeries = useCallback((
+        tree: string,
+        direction: WholeSeriesMoveDirection,
+        yearCount: number,
+    ) => {
+        const range = getTreeYearRange(visibleSite.get(tree));
+        if (!range) {
+            return;
+        }
+        const plan = createWholeSeriesMovePlan(range[0], range[1], direction, yearCount);
+        if (plan) {
+            applyContextMenuMovePlan(tree, plan);
+        }
+    }, [applyContextMenuMovePlan, visibleSite]);
+
+    const handleContextMenuMoveOlderSide = useCallback((
+        tree: string,
+        firstFixedYear: number,
+        yearCount: number,
+    ) => {
+        const range = getTreeYearRange(visibleSite.get(tree));
+        if (!range) {
+            return;
+        }
+        const plan = createOlderSidePartialMovePlan(
+            range[0],
+            range[1],
+            firstFixedYear,
+            yearCount,
+        );
+        if (!plan) {
+            window.alert(`断点年份必须位于 ${range[0] + 1} 至 ${range[1]}；断点年及较新侧保持不动。`);
+            return;
+        }
+        applyContextMenuMovePlan(tree, plan);
+    }, [applyContextMenuMovePlan, visibleSite]);
+
     const handleContextMenuDelete = useCallback((tree: string, year: number, mode: DeleteMode, shift: DeleteShift = "right") => {
         if (!shouldAnimateDeleteYear) {
             onDeleteYearWithMode?.(tree, year, mode, shift);
@@ -2818,6 +2879,8 @@ function WidthContainer({
                 onInsert={handleContextMenuInsert}
                 onDelete={handleContextMenuDelete}
                 onDeleteRange={handleContextMenuDeleteRange}
+                onMoveWholeSeries={handleContextMenuMoveWholeSeries}
+                onMoveOlderSide={handleContextMenuMoveOlderSide}
                 onDeleteSeries={handleContextMenuDeleteSeries}
                 onEditAsText={handleContextMenuEditAsText}
                 onJumpToChart={onJumpToChart ? handleContextMenuJumpToChart : undefined}

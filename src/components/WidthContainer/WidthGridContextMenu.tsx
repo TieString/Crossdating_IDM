@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { DeleteMode, DeleteShift, MissingInsertSide } from "@/features/rwl/edit";
+import type { WholeSeriesMoveDirection } from "./manualMovePlan";
 import style from "./WidthGridContextMenu.module.css";
 
-type DropdownKind = "insert" | "delete" | "shift" | null;
+type DropdownKind = "insert" | "delete" | "shift" | "whole-move" | null;
 
 export interface WidthGridContextMenuProps {
     open: boolean;
@@ -16,6 +17,8 @@ export interface WidthGridContextMenuProps {
     onInsert: (tree: string, year: number, side: MissingInsertSide) => void;
     onDelete: (tree: string, year: number, mode: DeleteMode, shift: DeleteShift) => void;
     onDeleteRange?: (tree: string, startYear: number, endYear: number) => void;
+    onMoveWholeSeries: (tree: string, direction: WholeSeriesMoveDirection, yearCount: number) => void;
+    onMoveOlderSide: (tree: string, firstFixedYear: number, yearCount: number) => void;
     onDeleteSeries?: (tree: string) => void;
     onEditAsText?: (tree: string) => void;
     onJumpToWidth?: (tree: string, year: number) => void;
@@ -46,6 +49,11 @@ const SHIFT_OPTIONS: Array<{ shift: DeleteShift; label: string; chip: string }> 
     { shift: "left", label: "右侧向左补位", chip: "右侧" },
 ];
 
+const WHOLE_MOVE_DIRECTION_OPTIONS: Array<{ direction: WholeSeriesMoveDirection; label: string; chip: string }> = [
+    { direction: "older", label: "向老年份移动", chip: "向老" },
+    { direction: "newer", label: "向新年份移动", chip: "向新" },
+];
+
 const DROPDOWN_GAP = 4;
 const VIEWPORT_MARGIN = 8;
 
@@ -56,6 +64,11 @@ const parseYear = (input: string): number | null => {
     }
     const value = Number(trimmed);
     return Number.isFinite(value) && Number.isInteger(value) ? value : null;
+};
+
+const parsePositiveYearCount = (input: string): number | null => {
+    const value = parseYear(input);
+    return value !== null && value > 0 ? value : null;
 };
 
 export default function WidthGridContextMenu({
@@ -69,6 +82,8 @@ export default function WidthGridContextMenu({
     onInsert,
     onDelete,
     onDeleteRange,
+    onMoveWholeSeries,
+    onMoveOlderSide,
     onDeleteSeries,
     onEditAsText,
     onJumpToWidth,
@@ -89,6 +104,10 @@ export default function WidthGridContextMenu({
     const [insertSide, setInsertSide] = useState<MissingInsertSide>("right");
     const [deleteMode, setDeleteMode] = useState<DeleteMode>("direct");
     const [deleteShift, setDeleteShift] = useState<DeleteShift>("right");
+    const [wholeMoveYears, setWholeMoveYears] = useState("1");
+    const [wholeMoveDirection, setWholeMoveDirection] = useState<WholeSeriesMoveDirection>("older");
+    const [partialFirstFixedYear, setPartialFirstFixedYear] = useState(defaultYear.toString());
+    const [partialMoveYears, setPartialMoveYears] = useState("1");
     const [dropdown, setDropdown] = useState<DropdownKind>(null);
     const [dropdownPosition, setDropdownPosition] = useState<{ left: number; top: number; alignRight: boolean; flipY: boolean }>({
         left: 0,
@@ -107,6 +126,7 @@ export default function WidthGridContextMenu({
     const insertChipRef = useRef<HTMLButtonElement | null>(null);
     const deleteChipRef = useRef<HTMLButtonElement | null>(null);
     const shiftChipRef = useRef<HTMLButtonElement | null>(null);
+    const wholeMoveChipRef = useRef<HTMLButtonElement | null>(null);
     const dropdownRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
@@ -117,6 +137,10 @@ export default function WidthGridContextMenu({
         setDeleteYear(defaultYear.toString());
         setDeleteStartYear(resolvedDefaultDeleteStartYear.toString());
         setDeleteEndYear(resolvedDefaultDeleteEndYear.toString());
+        setWholeMoveYears("1");
+        setWholeMoveDirection("older");
+        setPartialFirstFixedYear(defaultYear.toString());
+        setPartialMoveYears("1");
         if (isRangeDelete) {
             setDeleteMode("direct");
         }
@@ -175,7 +199,9 @@ export default function WidthGridContextMenu({
             ? insertChipRef.current
             : dropdown === "shift"
                 ? shiftChipRef.current
-                : deleteChipRef.current;
+                : dropdown === "whole-move"
+                    ? wholeMoveChipRef.current
+                    : deleteChipRef.current;
         const dropdownNode = dropdownRef.current;
         if (!triggerChip || !dropdownNode) {
             return;
@@ -213,7 +239,7 @@ export default function WidthGridContextMenu({
                 ? previous
                 : { left, top, alignRight, flipY }
         ));
-    }, [open, dropdown, menuPosition.left, menuPosition.top, insertSide, deleteMode, deleteShift]);
+    }, [open, dropdown, menuPosition.left, menuPosition.top, insertSide, deleteMode, deleteShift, wholeMoveDirection]);
 
     useEffect(() => {
         if (!open) {
@@ -237,7 +263,9 @@ export default function WidthGridContextMenu({
                         ? insertChipRef.current
                         : dropdown === "shift"
                             ? shiftChipRef.current
-                            : deleteChipRef.current;
+                            : dropdown === "whole-move"
+                                ? wholeMoveChipRef.current
+                                : deleteChipRef.current;
                     if (!triggerChip?.contains(target)) {
                         setDropdown(null);
                     }
@@ -283,6 +311,9 @@ export default function WidthGridContextMenu({
     const parsedDeleteYear = useMemo(() => parseYear(deleteYear), [deleteYear]);
     const parsedDeleteStartYear = useMemo(() => parseYear(deleteStartYear), [deleteStartYear]);
     const parsedDeleteEndYear = useMemo(() => parseYear(deleteEndYear), [deleteEndYear]);
+    const parsedWholeMoveYears = useMemo(() => parsePositiveYearCount(wholeMoveYears), [wholeMoveYears]);
+    const parsedPartialFirstFixedYear = useMemo(() => parseYear(partialFirstFixedYear), [partialFirstFixedYear]);
+    const parsedPartialMoveYears = useMemo(() => parsePositiveYearCount(partialMoveYears), [partialMoveYears]);
     const parsedDeleteRange = useMemo(() => {
         if (parsedDeleteStartYear === null || parsedDeleteEndYear === null) {
             return null;
@@ -302,6 +333,9 @@ export default function WidthGridContextMenu({
             : DELETE_OPTIONS.find((option) => option.mode === deleteMode)?.chip ?? ""
     ), [deleteMode, directDeleteChipLabel, isRangeDelete]);
     const shiftChipLabel = useMemo(() => SHIFT_OPTIONS.find((option) => option.shift === deleteShift)?.chip ?? "", [deleteShift]);
+    const wholeMoveChipLabel = useMemo(() => (
+        WHOLE_MOVE_DIRECTION_OPTIONS.find((option) => option.direction === wholeMoveDirection)?.chip ?? ""
+    ), [wholeMoveDirection]);
 
     const previewYear = useCallback((nextYear: number | null) => {
         if (nextYear !== null) {
@@ -343,6 +377,12 @@ export default function WidthGridContextMenu({
         previewYearRange(parsedDeleteStartYear, parseYear(nextValue));
     }, [parsedDeleteStartYear, previewYearRange]);
 
+    const handlePartialFirstFixedYearChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        const nextValue = event.target.value;
+        setPartialFirstFixedYear(nextValue);
+        previewYear(parseYear(nextValue));
+    }, [previewYear]);
+
     const handleInsertActivate = useCallback(() => {
         if (parsedInsertYear === null) {
             return;
@@ -368,6 +408,22 @@ export default function WidthGridContextMenu({
         onClose();
     }, [deleteMode, deleteShift, isRangeDelete, onClose, onDelete, onDeleteRange, parsedDeleteRange, parsedDeleteYear, tree]);
 
+    const handleWholeMoveActivate = useCallback(() => {
+        if (parsedWholeMoveYears === null) {
+            return;
+        }
+        onMoveWholeSeries(tree, wholeMoveDirection, parsedWholeMoveYears);
+        onClose();
+    }, [onClose, onMoveWholeSeries, parsedWholeMoveYears, tree, wholeMoveDirection]);
+
+    const handlePartialMoveActivate = useCallback(() => {
+        if (parsedPartialFirstFixedYear === null || parsedPartialMoveYears === null) {
+            return;
+        }
+        onMoveOlderSide(tree, parsedPartialFirstFixedYear, parsedPartialMoveYears);
+        onClose();
+    }, [onClose, onMoveOlderSide, parsedPartialFirstFixedYear, parsedPartialMoveYears, tree]);
+
     const handleInsertKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
         if (event.key === "Enter") {
             event.preventDefault();
@@ -383,6 +439,22 @@ export default function WidthGridContextMenu({
             handleDeleteActivate();
         }
     }, [handleDeleteActivate]);
+
+    const handleWholeMoveKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            event.stopPropagation();
+            handleWholeMoveActivate();
+        }
+    }, [handleWholeMoveActivate]);
+
+    const handlePartialMoveKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            event.stopPropagation();
+            handlePartialMoveActivate();
+        }
+    }, [handlePartialMoveActivate]);
 
     const toggleDropdown = useCallback((kind: Exclude<DropdownKind, null>) => {
         setDropdown((previous) => (previous === kind ? null : kind));
@@ -585,6 +657,101 @@ export default function WidthGridContextMenu({
                     </span>
                 </div>
 
+                <div
+                    className={`${style["menu-row"]} ${dropdown === "whole-move" ? style["menu-row-active"] : ""}`}
+                    role="menuitem"
+                    onClick={(event) => {
+                        const target = event.target as HTMLElement;
+                        if (target.tagName === "INPUT" || target.closest(`.${style["menu-row-mode-chip"]}`)) {
+                            return;
+                        }
+                        handleWholeMoveActivate();
+                    }}
+                >
+                    <span className={style["menu-row-icon"]} aria-hidden="true">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M8 7 3 12l5 5"/><path d="M3 12h18"/><path d="m16 7 5 5-5 5"/>
+                        </svg>
+                    </span>
+                    <span className={style["menu-row-label"]}>整体移动</span>
+                    <input
+                        className={`${style["menu-row-input"]} ${style["menu-row-input-amount"]} ${parsedWholeMoveYears === null ? style["menu-row-input-invalid"] : ""}`}
+                        type="number"
+                        min={1}
+                        step={1}
+                        value={wholeMoveYears}
+                        onChange={(event) => setWholeMoveYears(event.target.value)}
+                        onKeyDown={handleWholeMoveKeyDown}
+                        onClick={(event) => event.stopPropagation()}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        inputMode="numeric"
+                        aria-label="整体移动年份数量"
+                    />
+                    <span className={style["menu-row-field-label"]}>年</span>
+                    <button
+                        ref={wholeMoveChipRef}
+                        type="button"
+                        className={`${style["menu-row-mode-chip"]} ${dropdown === "whole-move" ? style["menu-row-mode-chip-open"] : ""}`}
+                        aria-haspopup="menu"
+                        aria-expanded={dropdown === "whole-move"}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            toggleDropdown("whole-move");
+                        }}
+                    >
+                        <span>{wholeMoveChipLabel}</span>
+                        <span className={style["menu-row-mode-chip-arrow"]} aria-hidden="true">▾</span>
+                    </button>
+                </div>
+
+                <div
+                    className={style["menu-row"]}
+                    role="menuitem"
+                    onClick={(event) => {
+                        const target = event.target as HTMLElement;
+                        if (target.tagName === "INPUT") {
+                            return;
+                        }
+                        handlePartialMoveActivate();
+                    }}
+                >
+                    <span className={style["menu-row-icon"]} aria-hidden="true">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M14 4v16"/><path d="M10 8 6 12l4 4"/><path d="M6 12h6"/><path d="M18 7v10"/>
+                        </svg>
+                    </span>
+                    <span className={style["menu-row-label"]}>局部移动</span>
+                    <span className={style["menu-row-field-label"]}>断点</span>
+                    <input
+                        className={`${style["menu-row-input"]} ${parsedPartialFirstFixedYear === null ? style["menu-row-input-invalid"] : ""}`}
+                        type="text"
+                        value={partialFirstFixedYear}
+                        onChange={handlePartialFirstFixedYearChange}
+                        onFocus={() => previewYear(parsedPartialFirstFixedYear)}
+                        onKeyDown={handlePartialMoveKeyDown}
+                        onClick={(event) => event.stopPropagation()}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        spellCheck={false}
+                        inputMode="numeric"
+                        aria-label="局部移动断点年份"
+                    />
+                    <span className={style["menu-row-fixed-direction"]}>老侧左移</span>
+                    <input
+                        className={`${style["menu-row-input"]} ${style["menu-row-input-amount"]} ${parsedPartialMoveYears === null ? style["menu-row-input-invalid"] : ""}`}
+                        type="number"
+                        min={1}
+                        step={1}
+                        value={partialMoveYears}
+                        onChange={(event) => setPartialMoveYears(event.target.value)}
+                        onKeyDown={handlePartialMoveKeyDown}
+                        onClick={(event) => event.stopPropagation()}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        inputMode="numeric"
+                        aria-label="局部移动年份数量"
+                    />
+                    <span className={style["menu-row-field-label"]}>年</span>
+                </div>
+
                 <div className={style["menu-separator"]} role="separator" />
 
                 {onJumpToWidth ? (
@@ -762,6 +929,33 @@ export default function WidthGridContextMenu({
                             aria-checked={deleteShift === option.shift}
                             onClick={() => {
                                 setDeleteShift(option.shift);
+                                setDropdown(null);
+                            }}
+                        >
+                            <span className={style["dropdown-item-label"]}>{option.label}</span>
+                        </div>
+                    ))}
+                </div>
+            ) : null}
+
+            {dropdown === "whole-move" ? (
+                <div
+                    ref={dropdownRef}
+                    className={style["dropdown"]}
+                    style={dropdownStyle}
+                    role="menu"
+                    onPointerDown={stopPortalPropagation}
+                    onClick={stopPortalPropagation}
+                    onContextMenu={(event) => event.preventDefault()}
+                >
+                    {WHOLE_MOVE_DIRECTION_OPTIONS.map((option) => (
+                        <div
+                            key={option.direction}
+                            className={`${style["dropdown-item"]} ${wholeMoveDirection === option.direction ? style["dropdown-item-checked"] : ""}`}
+                            role="menuitemradio"
+                            aria-checked={wholeMoveDirection === option.direction}
+                            onClick={() => {
+                                setWholeMoveDirection(option.direction);
                                 setDropdown(null);
                             }}
                         >

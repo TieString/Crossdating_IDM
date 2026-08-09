@@ -943,6 +943,13 @@ export default function Home() {
                     handleInsertMissingYearAtSideFromChart(command.tree, command.year, command.side);
                 } else if (command.type === "delete-year") {
                     handleDeleteYearWithModeFromChart(command.tree, command.year, command.mode, command.shift);
+                } else if (command.type === "move-series-range") {
+                    handleMoveSeriesTailByOffset(
+                        command.tree,
+                        command.selectedStartYear,
+                        command.selectedEndYear,
+                        command.yearOffset,
+                    );
                 } else if (command.type === "delete-series") {
                     handleDeleteSeriesFromChart(command.tree);
                 }
@@ -960,6 +967,7 @@ export default function Home() {
         handleApplyDiagnosisCandidateBatch,
         handleApplyLocalSimulation,
         handleInsertMissingYearAtSideFromChart,
+        handleMoveSeriesTailByOffset,
         handleReferenceConfigChange,
         handleResetReferenceToDynamic,
         handleRunCofechaValidation,
@@ -1783,6 +1791,7 @@ export default function Home() {
                                                     onApplyLocalSimulation={handleApplyLocalSimulation}
                                                     onInsertMissingYearAtSide={handleInsertMissingYearAtSideFromChart}
                                                     onDeleteYearWithMode={handleDeleteYearWithModeFromChart}
+                                                    onMoveSeriesTailByOffset={handleMoveSeriesTailByOffset}
                                                     onDeleteSeries={handleDeleteSeriesFromChart}
                                                     onSelectedTreesChange={handleChartSelectedTreesChange}
                                                     onLocateWidth={handleChartLocateWidth}

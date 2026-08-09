@@ -458,6 +458,7 @@ type ExpandedChartPageProps = {
     onApplyLocalSimulation: (request: LocalSimulationApplyRequest) => void;
     onInsertMissingYearAtSide: (tree: string, year: number, side: MissingInsertSide) => void;
     onDeleteYearWithMode: (tree: string, year: number, mode: DeleteMode, shift?: DeleteShift) => void;
+    onMoveSeriesTailByOffset: (tree: string, selectedStartYear: number, selectedEndYear: number, yearOffset: number) => void;
     onDeleteSeries: (tree: string) => void;
     onSelectedTreesChange: (trees: string[]) => void;
     onLocateWidth: (tree: string, year: number) => void;
@@ -484,6 +485,7 @@ export function ExpandedChartPage({
     onApplyLocalSimulation,
     onInsertMissingYearAtSide,
     onDeleteYearWithMode,
+    onMoveSeriesTailByOffset,
     onDeleteSeries,
     onSelectedTreesChange,
     onLocateWidth,
@@ -544,6 +546,7 @@ export function ExpandedChartPage({
                         onApplyLocalSimulation={onApplyLocalSimulation}
                         onInsertMissingYearAtSide={onInsertMissingYearAtSide}
                         onDeleteYearWithMode={onDeleteYearWithMode}
+                        onMoveSeriesTailByOffset={onMoveSeriesTailByOffset}
                         onDeleteSeries={onDeleteSeries}
                         onSelectedTreesChange={onSelectedTreesChange}
                         onLocateWidth={onLocateWidth}

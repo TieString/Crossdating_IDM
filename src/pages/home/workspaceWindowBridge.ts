@@ -195,6 +195,7 @@ export type WorkspaceWindowCommand =
     | { kind: "line-chart"; type: "apply-local-simulation"; request: LocalSimulationApplyRequest }
     | { kind: "line-chart"; type: "insert-missing"; tree: string; year: number; side: MissingInsertSide }
     | { kind: "line-chart"; type: "delete-year"; tree: string; year: number; mode: DeleteMode; shift?: DeleteShift }
+    | { kind: "line-chart"; type: "move-series-range"; tree: string; selectedStartYear: number; selectedEndYear: number; yearOffset: number }
     | { kind: "line-chart"; type: "delete-series"; tree: string };
 
 export function serializeRwlSiteData(siteData: RwlSiteData): SerializedRwlSiteData {

@@ -222,6 +222,16 @@ export default function WorkspaceWindowPage() {
             onDeleteYearWithMode={(tree: string, year: number, mode: DeleteMode, shift?: DeleteShift) => {
                 void sendCommand({ kind: "line-chart", type: "delete-year", tree, year, mode, shift });
             }}
+            onMoveSeriesTailByOffset={(tree, selectedStartYear, selectedEndYear, yearOffset) => {
+                void sendCommand({
+                    kind: "line-chart",
+                    type: "move-series-range",
+                    tree,
+                    selectedStartYear,
+                    selectedEndYear,
+                    yearOffset,
+                });
+            }}
             onDeleteSeries={(tree: string) => {
                 void sendCommand({ kind: "line-chart", type: "delete-series", tree });
             }}

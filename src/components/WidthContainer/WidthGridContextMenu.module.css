@@ -1,7 +1,7 @@
 .menu-root {
     position: fixed;
     z-index: 1000;
-    width: 236px;
+    width: 286px;
     padding: 3px;
     border-radius: 6px;
     background: #ffffff;
@@ -64,6 +64,38 @@
     outline: none;
     box-shadow: none;
     transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.menu-row-input[type="number"] {
+    appearance: textfield;
+}
+
+.menu-row-input[type="number"]::-webkit-inner-spin-button,
+.menu-row-input[type="number"]::-webkit-outer-spin-button {
+    margin: 0;
+    appearance: none;
+}
+
+.menu-row-input-amount {
+    width: 30px;
+}
+
+.menu-row-field-label {
+    flex: 0 0 auto;
+    color: #64748b;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.menu-row-fixed-direction {
+    flex: 0 0 auto;
+    padding: 2px 4px;
+    border-radius: 4px;
+    background: rgba(76, 142, 218, 0.1);
+    color: #1d4ed8;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
 }
 
 .menu-row-input-invalid {

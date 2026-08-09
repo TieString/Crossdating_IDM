@@ -23,6 +23,11 @@ import { stopMarker } from '@/shared/constants'
 import { normalizeCofechaSeriesId } from '@/features/cofecha/seriesId'
 import type { ChartJumpTarget } from './chartNavigation'
 import { buildStableSeriesColorMap } from './seriesColors'
+import {
+  createOlderSidePartialMovePlan,
+  createWholeSeriesMovePlan,
+  type WholeSeriesMoveDirection,
+} from '@/components/WidthContainer/manualMovePlan'
 
 // 树种图表管理器。
 // 这个组件负责把当前 RWL 数据拆成”可选树种列表 + 选中后的多折线图”两部分：
@@ -51,6 +56,20 @@ const readStoredPickerHeight = () => {
   }
 }
 
+const getEditableTreeYearRange = (treeData: Map<number, number | null> | undefined): [number, number] | null => {
+  if (!treeData) return null
+  let startYear: number | undefined
+  let endYear: number | undefined
+
+  treeData.forEach((value, year) => {
+    if (value === stopMarker.value) return
+    startYear = startYear === undefined ? year : Math.min(startYear, year)
+    endYear = endYear === undefined ? year : Math.max(endYear, year)
+  })
+
+  return startYear !== undefined && endYear !== undefined ? [startYear, endYear] : null
+}
+
 const localOptionKey = (option: LocalSimulationOption | null) => (
   option
     ? `${option.operationType}:${option.side ?? ''}:${option.shift ?? ''}`
@@ -75,6 +94,7 @@ type Props = {
   onApplyLocalSimulation?: (request: LocalSimulationApplyRequest) => void
   onInsertMissingYearAtSide?: (tree: string, year: number, side: MissingInsertSide) => void
   onDeleteYearWithMode?: (tree: string, year: number, mode: DeleteMode, shift?: DeleteShift) => void
+  onMoveSeriesTailByOffset?: (tree: string, selectedStartYear: number, selectedEndYear: number, yearOffset: number) => void
   onDeleteSeries?: (tree: string) => void
   onSelectedTreesChange?: (trees: string[]) => void
   onLocateWidth?: (tree: string, year: number) => void
@@ -98,6 +118,7 @@ function TreeChartManagerBase({
   onResetReferenceToDynamic: _onResetReferenceToDynamic,
   onInsertMissingYearAtSide,
   onDeleteYearWithMode,
+  onMoveSeriesTailByOffset,
   onDeleteSeries,
   onSelectedTreesChange,
   onLocateWidth,
@@ -290,6 +311,43 @@ function TreeChartManagerBase({
     setSelectedLocalOption(null)
     setIsConfirmingLocalApply(false)
   }, [])
+
+  const clearTreeOffset = useCallback((treeCode: string) => {
+    setTreeOffsets((previous) => {
+      if (!previous.has(treeCode)) return previous
+      const next = new Map(previous)
+      next.delete(treeCode)
+      return next
+    })
+  }, [])
+
+  const handleMoveWholeSeries = useCallback((
+    tree: string,
+    direction: WholeSeriesMoveDirection,
+    yearCount: number,
+  ) => {
+    const range = getEditableTreeYearRange(fullData.get(tree))
+    if (!range || !onMoveSeriesTailByOffset) return
+    const plan = createWholeSeriesMovePlan(range[0], range[1], direction, yearCount)
+    if (!plan) return
+
+    onMoveSeriesTailByOffset(tree, plan.selectedStartYear, plan.selectedEndYear, plan.yearOffset)
+    clearTreeOffset(tree)
+  }, [clearTreeOffset, fullData, onMoveSeriesTailByOffset])
+
+  const handleMoveOlderSide = useCallback((tree: string, firstFixedYear: number, yearCount: number) => {
+    const range = getEditableTreeYearRange(fullData.get(tree))
+    if (!range || !onMoveSeriesTailByOffset) return
+    const sourceFirstFixedYear = firstFixedYear - (treeOffsets.get(tree) ?? 0)
+    const plan = createOlderSidePartialMovePlan(range[0], range[1], sourceFirstFixedYear, yearCount)
+    if (!plan) {
+      window.alert(`断点年份必须位于 ${range[0] + 1} 至 ${range[1]}；断点年及较新侧保持不动。`)
+      return
+    }
+
+    onMoveSeriesTailByOffset(tree, plan.selectedStartYear, plan.selectedEndYear, plan.yearOffset)
+    clearTreeOffset(tree)
+  }, [clearTreeOffset, fullData, onMoveSeriesTailByOffset, treeOffsets])
 
   const handleLinePointClick = useCallback((target: { tree: string; year: number }) => {
     const sourceYear = target.year - (treeOffsets.get(target.tree) ?? 0)
@@ -831,6 +889,8 @@ function TreeChartManagerBase({
           onShiftHighlightedTree={shiftHighlightedTree}
           onInsertMissingYearAtSide={onInsertMissingYearAtSide}
           onDeleteYearWithMode={onDeleteYearWithMode}
+          onMoveWholeSeries={handleMoveWholeSeries}
+          onMoveOlderSide={handleMoveOlderSide}
           onDeleteSeries={onDeleteSeries}
         />
       </div>

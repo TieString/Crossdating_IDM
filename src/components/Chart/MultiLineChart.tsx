@@ -17,6 +17,7 @@ import {
 } from 'chart.js'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import WidthGridContextMenu from '@/components/WidthContainer/WidthGridContextMenu'
+import type { WholeSeriesMoveDirection } from '@/components/WidthContainer/manualMovePlan'
 import type { DiagnosisEventType, LocalCrossdatingSimulation } from '@/features/crossdating/diagnosis'
 import type { ReferenceSeries } from '@/features/crossdating/reference'
 import { REFERENCE_SERIES_LABEL } from '@/features/crossdating/reference'
@@ -827,6 +828,8 @@ type Props = {
   onShiftHighlightedTree?: (treeCode: string, direction: -1 | 1) => void
   onInsertMissingYearAtSide?: (tree: string, year: number, side: MissingInsertSide) => void
   onDeleteYearWithMode?: (tree: string, year: number, mode: DeleteMode, shift?: DeleteShift) => void
+  onMoveWholeSeries: (tree: string, direction: WholeSeriesMoveDirection, yearCount: number) => void
+  onMoveOlderSide: (tree: string, firstFixedYear: number, yearCount: number) => void
   onDeleteSeries?: (tree: string) => void
 }
 
@@ -869,6 +872,8 @@ export function MultiLineChart({
   onShiftHighlightedTree,
   onInsertMissingYearAtSide,
   onDeleteYearWithMode,
+  onMoveWholeSeries,
+  onMoveOlderSide,
   onDeleteSeries,
 }: Props) {
   const chartRef = useRef<ChartJSInstance<'line'> | null>(null)
@@ -1867,6 +1872,8 @@ export function MultiLineChart({
             onDeleteYearWithMode?.(tree, year, mode, shift)
             setContextMenu(null)
           }}
+          onMoveWholeSeries={onMoveWholeSeries}
+          onMoveOlderSide={onMoveOlderSide}
           onDeleteSeries={(tree) => {
             onDeleteSeries?.(tree)
             setContextMenu(null)
