@@ -105,6 +105,7 @@ import {
     scoreNewerSideEndpointOperationContrast,
 } from "./endpointOperationContrast";
 import { refineEventWithCounterfactualLocator } from "./counterfactualEventLocator";
+import { adjudicateLocatorProposal } from "./eventAdjudicator";
 import { refineEventWithAdjacentBoundaryConsensus } from "./eventBoundaryConsensus";
 import { getJointCounterfactualOperationScores } from "./jointCounterfactualOperation";
 import {
@@ -117,6 +118,7 @@ import type {
     DiagnosisEventAuditSnapshot,
     DiagnosisEventDecisionAudit,
     DiagnosisEventDecisionReason,
+    DiagnosisLocatorDecisionAudit,
     DiagnosisEventPassAudit,
     DiagnosisEvent,
     DiagnosisEventType,
@@ -4840,6 +4842,7 @@ export const makeDiagnosisEvents = (
                 ? stripDiagnosisEventAlternatives
                 : keepSingleMainWindow,
         );
+        const locatorDecisionAudits: DiagnosisLocatorDecisionAudit[] = [];
         const isValidAutomaticEvent = (event: DiagnosisEvent): boolean => (
             event.eventType !== "partialMove"
             || (
@@ -4941,6 +4944,14 @@ export const makeDiagnosisEvents = (
                     retainedAfterEndpointGuard: retainedDetected.map(auditEvent),
                     displayedBeforeLocator: displayed.map(auditEvent),
                     finalEvents: finalEvents.map(auditEvent),
+                    locatorDecisions: locatorDecisionAudits.map((decision) => ({
+                        ...decision,
+                        preLocatorEvent: { ...decision.preLocatorEvent },
+                        proposedEvent: decision.proposedEvent
+                            ? { ...decision.proposedEvent }
+                            : null,
+                        selectedEvent: { ...decision.selectedEvent },
+                    })),
                     automaticSemanticsRejectedCount,
                     finalReason,
                 });
@@ -5083,38 +5094,25 @@ export const makeDiagnosisEvents = (
                 locatorPathCache,
                 fixedSideBaselineLag,
             );
-            const firstLocated = located?.event ?? event;
-            let finalLocated = firstLocated;
-            if (
-                firstLocated.eventType === "partialMove"
-                && !hasWholeSeriesBaseline
-            ) {
-                const operationRefined = applyDecisiveJointOperationFusion(
-                    [firstLocated],
-                    diagnosis,
-                    {
-                        maxPartialGapYears: effectiveConfig.maxPartialGapYears,
-                        ...options.eventOperationRecoveryConfig,
-                    },
-                    siteData,
-                )[0] ?? firstLocated;
-                if (
-                    operationRefined.eventType !== firstLocated.eventType
-                    || operationRefined.shiftYears !== firstLocated.shiftYears
-                ) {
-                    finalLocated = refineEventWithCounterfactualLocator(
-                        operationRefined,
-                        diagnosis,
-                        cofechaDiagnosis,
-                        siteData,
-                        locatorEventPathConfig,
-                        locatorPathCache,
-                        fixedSideBaselineLag,
-                    )?.event ?? operationRefined;
-                }
-            }
+            const decision = adjudicateLocatorProposal(
+                event,
+                located?.event ?? null,
+            );
+            locatorDecisionAudits.push({
+                reason: decision.reason,
+                accepted: decision.accepted,
+                overlapYears: decision.overlapYears,
+                centerDistanceYears: decision.centerDistanceYears,
+                operationContractValid: decision.operationContractValid,
+                detachedEvidenceStrong: decision.detachedEvidenceStrong,
+                preLocatorEvent: auditEvent(event),
+                proposedEvent: decision.proposedEvent
+                    ? auditEvent(decision.proposedEvent)
+                    : null,
+                selectedEvent: auditEvent(decision.event),
+            });
             return addCompressedMissingStaircaseEvidence(
-                finalLocated,
+                decision.event,
                 cofechaDiagnosis,
                 siteData,
                 locatorEventPathConfig,

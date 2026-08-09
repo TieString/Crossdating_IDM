@@ -145,6 +145,25 @@ export type DiagnosisEventPassAudit = {
     finalEventCount: number;
 };
 
+export type DiagnosisLocatorDecisionReason =
+    | "no_locator_proposal"
+    | "accepted_overlapping_mode"
+    | "accepted_detached_strong_mode"
+    | "fallback_operation_contract"
+    | "fallback_detached_locator_mode";
+
+export type DiagnosisLocatorDecisionAudit = {
+    reason: DiagnosisLocatorDecisionReason;
+    accepted: boolean;
+    overlapYears: number;
+    centerDistanceYears: number;
+    operationContractValid: boolean;
+    detachedEvidenceStrong: boolean;
+    preLocatorEvent: DiagnosisEventAuditSnapshot;
+    proposedEvent: DiagnosisEventAuditSnapshot | null;
+    selectedEvent: DiagnosisEventAuditSnapshot;
+};
+
 export type DiagnosisEventDecisionReason =
     | "emitted"
     | "insufficient_reference_depth"
@@ -174,6 +193,7 @@ export type DiagnosisEventDecisionAudit = {
     retainedAfterEndpointGuard: DiagnosisEventAuditSnapshot[];
     displayedBeforeLocator: DiagnosisEventAuditSnapshot[];
     finalEvents: DiagnosisEventAuditSnapshot[];
+    locatorDecisions?: DiagnosisLocatorDecisionAudit[];
     automaticSemanticsRejectedCount: number;
     finalReason: DiagnosisEventDecisionReason;
 };

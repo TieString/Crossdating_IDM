@@ -629,6 +629,20 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
                 expect(event.evidence.algorithmSources, failureContext)
                     .toContain("partial_local_consensus_recenter");
             });
+            [beforeSave, afterSave].forEach((diagnosis) => {
+                const locatorDecisions = diagnosis.eventDecisionAudits?.find(
+                    (audit) => audit.seriesId === seriesId,
+                )?.locatorDecisions ?? [];
+                expect(locatorDecisions.length, failureContext)
+                    .toBeGreaterThan(0);
+                expect(locatorDecisions.every((decision) => (
+                    decision.operationContractValid
+                    && decision.preLocatorEvent.eventType
+                        === decision.selectedEvent.eventType
+                    && decision.preLocatorEvent.shiftYears
+                        === decision.selectedEvent.shiftYears
+                )), failureContext).toBe(true);
+            });
             expect([
                 displayedStates[1][0].startYear,
                 displayedStates[1][0].endYear,
