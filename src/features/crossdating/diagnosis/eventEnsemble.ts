@@ -2818,6 +2818,60 @@ export const supportsSequentialMissingReplacementOfPartial = (
     || head.gainOverDirect / Math.max(1, head.transitionCount - 1)
         >= MIN_SEQUENTIAL_GAIN_PER_EXTRA_TRANSITION;
 
+/**
+ * A deep one-year staircase is target-specific direction evidence: a single false ring or whole
+ * shift cannot explain several successive -1 lag states. Keep this deliberately above the
+ * two/three-step range where a physical local gap can overfit as discrete missing rings.
+ */
+export const supportsCumulativeSequentialMissingStaircase = (
+    head: Pick<
+        SequentialMissingHead,
+        "gainOverDirect" | "transitionCount" | "headMeanAdvantage" | "pathStartLag"
+    >,
+): boolean => head.pathStartLag <= -4
+    && head.transitionCount >= 4
+    && head.gainOverDirect >= 8
+    && head.headMeanAdvantage >= 0.02;
+
+/**
+ * A local zero-year marker may anchor either a high-gain deep staircase or an exact
+ * unit-depth staircase with a durable corrected tail. The latter recovers late serial
+ * frontiers whose individual head contrast is weak after most other events are fixed.
+ */
+export const supportsMarkerAnchoredSequentialMissingStaircase = (
+    head: Pick<
+        SequentialMissingHead,
+        | "gainOverDirect"
+        | "transitionCount"
+        | "headMeanAdvantage"
+        | "fixedTailMeanAdvantage"
+        | "pathStartLag"
+    >,
+    sharedZeroSupport: number,
+): boolean => {
+    if (sharedZeroSupport < 1) return false;
+    const highGainDeepStaircase = head.pathStartLag <= -4
+        && head.transitionCount >= 4
+        && head.gainOverDirect >= 6
+        && head.headMeanAdvantage >= 0.1;
+    const durableExactStaircase = sharedZeroSupport >= 5
+        && head.pathStartLag <= -3
+        && head.transitionCount >= 3
+        && Math.abs(head.pathStartLag) === head.transitionCount
+        && head.fixedTailMeanAdvantage >= 0.33
+        && (sharedZeroSupport >= 10 || head.gainOverDirect >= 1);
+    const concentratedFourMarkerStaircase = sharedZeroSupport >= 4
+        && head.pathStartLag <= -4
+        && head.transitionCount >= 4
+        && Math.abs(head.pathStartLag) === head.transitionCount
+        && head.gainOverDirect >= 1.2
+        && head.headMeanAdvantage >= 0.05
+        && head.fixedTailMeanAdvantage >= 0.4;
+    return highGainDeepStaircase
+        || durableExactStaircase
+        || concentratedFourMarkerStaircase;
+};
+
 type SequentialMissingDirectionEvidence = {
     hasOppositeUnitOnly: boolean;
     hasDetectedMissing: boolean;
@@ -3025,18 +3079,32 @@ const recoverSequentialMissingHeadEvent = (
         const hasOppositeUnitOnly = detected.some(
             (event) => event.eventType === "falseRing",
         ) && !detected.some((event) => event.eventType === "missingRing");
-        const hasIndependentMissingDirection = supportsSequentialMissingDirectionOverride({
-            hasOppositeUnitOnly,
-            hasDetectedMissing: detected.some(
-                (event) => event.eventType === "missingRing",
-            ),
-            hasMissingCandidate: candidateEvents.some(
-                (event) => event.eventType === "missingRing",
-            ),
-            hasConfirmedTargetStaircase:
-                presentation.confirmedTargetStaircaseYear !== null,
-            sharedZeroSupport: marker?.support ?? 0,
-        });
+        const hasCumulativeMissingStaircase =
+            supportsCumulativeSequentialMissingStaircase(head);
+        const hasMarkerAnchoredMissingStaircase =
+            supportsMarkerAnchoredSequentialMissingStaircase(
+                head,
+                marker?.support ?? 0,
+            );
+        const hasCandidateBackedExactPartial = detected.some(
+            isCandidateBackedExactPartial,
+        );
+        const hasStrongMarkerAgainstUnbackedPartial = (marker?.support ?? 0) >= 10
+            && !hasCandidateBackedExactPartial;
+        const hasIndependentMissingDirection = hasCumulativeMissingStaircase
+            || hasMarkerAnchoredMissingStaircase
+            || supportsSequentialMissingDirectionOverride({
+                hasOppositeUnitOnly,
+                hasDetectedMissing: detected.some(
+                    (event) => event.eventType === "missingRing",
+                ),
+                hasMissingCandidate: candidateEvents.some(
+                    (event) => event.eventType === "missingRing",
+                ),
+                hasConfirmedTargetStaircase:
+                    presentation.confirmedTargetStaircaseYear !== null,
+                sharedZeroSupport: marker?.support ?? 0,
+            });
         const whole = detected.find((event) => event.eventType === "wholeSeriesMove");
         const wholeShift = wholeSeriesMoveShiftYears(whole);
         const independentWholeBaseline = wholeShift !== null
@@ -3046,6 +3114,8 @@ const recoverSequentialMissingHeadEvent = (
                 && event.evidence.lagAfter === wholeShift
             ));
         const hasIndependentStaircaseSupport = hasExistingUnitEvent
+            || hasCumulativeMissingStaircase
+            || hasMarkerAnchoredMissingStaircase
             || head.headRunYears >= 7
             || hasDepthConsistentSequentialMissingCandidate(candidateEvents, head)
             || presentation.confirmedTargetStaircaseYear !== null
@@ -3089,6 +3159,9 @@ const recoverSequentialMissingHeadEvent = (
         }
         if (replacesPartial
             && !supportsSequentialMissingReplacementOfPartial(head)
+            && !hasCumulativeMissingStaircase
+            && !hasMarkerAnchoredMissingStaircase
+            && !hasStrongMarkerAgainstUnbackedPartial
             && !hasDistinctConfirmedMissingMode) {
             return recoverRobustCompressedPartial();
         }
@@ -3134,23 +3207,39 @@ const recoverSequentialMissingHeadEvent = (
                 ],
             },
         } : baseRecoveredEvent;
-        const preferredMissingEvent = hasDistinctConfirmedMissingMode ? {
+        const evidencedRecoveredEvent = hasCumulativeMissingStaircase
+            || hasMarkerAnchoredMissingStaircase ? {
                 ...recoveredEvent,
                 evidence: {
                     ...recoveredEvent.evidence,
                     algorithmSources: Array.from(new Set([
                         ...recoveredEvent.evidence.algorithmSources,
+                        ...(hasCumulativeMissingStaircase
+                            ? ["cumulative_sequential_missing_staircase"]
+                            : []),
+                        ...(hasMarkerAnchoredMissingStaircase
+                            ? ["marker_anchored_sequential_missing_staircase"]
+                            : []),
+                    ])).sort(),
+                },
+            } : recoveredEvent;
+        const preferredMissingEvent = hasDistinctConfirmedMissingMode ? {
+                ...evidencedRecoveredEvent,
+                evidence: {
+                    ...evidencedRecoveredEvent.evidence,
+                    algorithmSources: Array.from(new Set([
+                        ...evidencedRecoveredEvent.evidence.algorithmSources,
                         "confirmed_missing_history_distinct_mode",
                     ])).sort(),
                     notes: [
-                        ...recoveredEvent.evidence.notes,
+                        ...evidencedRecoveredEvent.evidence.notes,
                         `sequential_missing_confirmed_newer_zero_count=${
                             confirmedTargetZeroYears.filter((year) => year > head.year).length
                         }`,
                         "sequential_missing_distinct_partial_mode=true",
                     ],
                 },
-            } : recoveredEvent;
+            } : evidencedRecoveredEvent;
         const completedTieEvidence = evaluateMissingPartialInterpretationTie(
             completedFamilyCompetition,
             {
@@ -5113,7 +5202,6 @@ export const makeDiagnosisEvents = (
             diagnosis.targetTree,
             options.cofechaFlaggedSeriesIds,
         );
-        const hasTerminalWholeBaseline = displayed.some(isTerminalWholeBaselineEvent);
         if (options.enableCounterfactualEventLocator !== true
             || (!hasLocalEvent && !mayRecoverSequentialMissing)) {
             return finalize(displayed);
@@ -5125,6 +5213,32 @@ export const makeDiagnosisEvents = (
             cofechaPreprocess,
         );
         if (!cofechaDiagnosis) return finalize(displayed);
+        const sequentialMissing = mayRecoverSequentialMissing
+            ? recoverSequentialMissingHeadEvent(
+                displayed,
+                diagnosis,
+                cofechaDiagnosis,
+                siteData,
+                candidates,
+                candidateEvents,
+                effectiveConfig,
+                options,
+                locatorPathCache,
+            )
+            : null;
+        const sequentialMissingPreemptsComposition = sequentialMissing
+            && !displayed.some((event) => event.eventType === "falseRing")
+            && sequentialMissing.event.evidence.algorithmSources.some((source) => (
+                source === "cumulative_sequential_missing_staircase"
+                || source === "marker_anchored_sequential_missing_staircase"
+                || source === "shared_explicit_zero_marker"
+            ));
+        if (sequentialMissingPreemptsComposition) {
+            const preservedWhole = sequentialMissing.preserveWholeBaseline
+                ? displayed.filter((event) => event.eventType === "wholeSeriesMove")
+                : [];
+            return finalize([...preservedWhole, sequentialMissing.event]);
+        }
         const completedMixedSeed = mayRecoverSequentialMissing
             ? selectCompletedPartialMissingSeed(displayed, candidateEvents)
             : null;
@@ -5183,24 +5297,14 @@ export const makeDiagnosisEvents = (
         if (sequentialFalse) {
             return finalize([sequentialFalse]);
         }
-        if (mayRecoverSequentialMissing && !hasTerminalWholeBaseline) {
-            const sequentialMissing = recoverSequentialMissingHeadEvent(
-                displayed,
-                diagnosis,
-                cofechaDiagnosis,
-                siteData,
-                candidates,
-                candidateEvents,
-                effectiveConfig,
-                options,
-                locatorPathCache,
-            );
-            if (sequentialMissing) {
-                const preservedWhole = sequentialMissing.preserveWholeBaseline
-                    ? displayed.filter((event) => event.eventType === "wholeSeriesMove")
-                    : [];
-                return finalize([...preservedWhole, sequentialMissing.event]);
-            }
+        // A terminal whole baseline and a newer unit frontier can coexist. The sequential
+        // counterfactual decides whether the unit event survives; the whole baseline is retained
+        // as an alternative only when it has independent support.
+        if (sequentialMissing) {
+            const preservedWhole = sequentialMissing.preserveWholeBaseline
+                ? displayed.filter((event) => event.eventType === "wholeSeriesMove")
+                : [];
+            return finalize([...preservedWhole, sequentialMissing.event]);
         }
         if (!hasLocalEvent) return finalize(displayed);
         const locatedInputEvents = prioritizeEndpointUnitAgainstWhole(

@@ -149,7 +149,19 @@ const workerCount = Math.max(1, Math.min(
     16,
     Number(valueFor("--workers") ?? 8),
 ));
+const minimumFirstSweepCorrectWindowsValue = valueFor(
+    "--minimum-first-sweep-correct-windows",
+);
+const minimumFirstSweepCorrectWindows = minimumFirstSweepCorrectWindowsValue === null
+    ? null
+    : Number(minimumFirstSweepCorrectWindowsValue);
 const resume = hasFlag("--resume");
+
+if (minimumFirstSweepCorrectWindows !== null
+    && (!Number.isInteger(minimumFirstSweepCorrectWindows)
+        || minimumFirstSweepCorrectWindows < 0)) {
+    throw new Error("--minimum-first-sweep-correct-windows must be a non-negative integer");
+}
 
 if (!existsSync(inputPath)) throw new Error(`RWL not found: ${inputPath}`);
 if (!existsSync(cofechaExe)) throw new Error(`COFECHA not found: ${cofechaExe}`);
@@ -558,6 +570,13 @@ if (resume && existsSync(checkpointPath) && existsSync(checkpointSitePath)) {
         if (existsSync(path)) rmSync(path);
     });
 }
+const firstExecutedRound = nextRound;
+let firstSweepGate: {
+    round: number;
+    correctWindows: number;
+    minimumCorrectWindows: number;
+    passed: boolean;
+} | null = null;
 
 if (resume) {
     const retainCompletedRounds = (path: string) => {
@@ -721,6 +740,23 @@ try {
             durationMs: Date.now() - roundStartedAt,
         };
         appendFileSync(roundsPath, `${JSON.stringify(roundAudit)}\n`, "utf8");
+        if (round === firstExecutedRound && minimumFirstSweepCorrectWindows !== null) {
+            const correctWindows = activeObservations.filter((row) => (
+                row.absoluteIdentifiable
+                && row.review.operationCorrect
+                && row.review.windowCovered
+            )).length;
+            firstSweepGate = {
+                round,
+                correctWindows,
+                minimumCorrectWindows: minimumFirstSweepCorrectWindows,
+                passed: correctWindows >= minimumFirstSweepCorrectWindows,
+            };
+            if (!firstSweepGate.passed) {
+                stopReason = "first_sweep_regression_gate_failed";
+                break;
+            }
+        }
         if (!selected) {
             stopReason = "no_new_correct_review_window_after_full_sweep";
             break;
@@ -807,6 +843,13 @@ const summary = {
         initial: initialPairwiseAlignment,
         final: finalPairwiseAlignment,
     },
+    firstSweepGate,
 };
 writeFileSync(join(runDir, "run-summary.json"), JSON.stringify(summary, null, 2), "utf8");
 console.log(`CO612_REVIEW_BOOTSTRAP_SUMMARY ${JSON.stringify(summary)}`);
+if (firstSweepGate && !firstSweepGate.passed) {
+    throw new Error(
+        `first sweep correct review windows ${firstSweepGate.correctWindows}`
+        + ` < required ${firstSweepGate.minimumCorrectWindows}`,
+    );
+}

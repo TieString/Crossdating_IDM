@@ -20,6 +20,7 @@
     "validate:auto-crossdating": "node scripts/validate-auto-crossdating.mjs",
     "validate:cofecha-reference": "node scripts/validate-cofecha-reference.mjs",
     "validate:current-event-ranker": "node scripts/validate-current-event-integration.mjs && D:\\Programming\\Python\\Python310\\python.exe tools/verify_current_event_bundle.py --bundle src-tauri/resources/current_event_ranker/models/current-event-range-v1.0.0/bundle && D:\\Programming\\Python\\Python310\\python.exe tools/verify_current_event_bundle.py --bundle src-tauri/resources/current_event_ranker/models/current-event-adaptive-range-v1/bundle && D:\\Programming\\Python\\Python310\\python.exe tools/verify_current_event_bundle.py --bundle src-tauri/resources/current_event_ranker/models/current-event-missing-rrf-v1/bundle",
+    "validate:co612-recovery-regression": "node scripts/validate-co612-recovery-regression.mjs",
     "analyze:unit-window-stability": "node scripts/analyze-unit-window-stability.mjs",
     "benchmark:zsl-exhaustive": "node scripts/run-zsl-exhaustive-window-coverage.mjs",
     "benchmark:co612-multi-missing": "node scripts/run-co612-multi-missing.mjs",

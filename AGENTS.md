@@ -171,6 +171,7 @@
 - `npm run analyze:unit-window-stability -- <audit.json> [...]` — 汇总单位事件的响应、粗区间、13 年模式和最终单窗口分层覆盖；输入需由 `ITRDB_COUNTERFACTUAL_LOCATOR_AUDIT=1` 生成
 - `npm run benchmark:co612-review-bootstrap -- --input <source-copy.rwl> --max-rounds 400 --workers 16 --run-id <id>` — 同时删除 co612 全部自然 0，以最早待复核窗口优先逐轮恢复一个经用户模拟确认的事件；隐藏真值不得进入诊断或参考
 - `npm run analyze:co612-review-bootstrap -- --run-dir <result-dir>` — 输出四组复核门槛/重试对照、逐案状态路径、拒答恢复、终局前沿、响应曲线与分层指标
+- `npm run validate:co612-recovery-regression` — 独立于冻结 production differential，在固定 co612 358 事件输入上要求首轮至少 22/45 个正确复核窗
 - `npm run prepare:legacy-generalization` — 按冻结 seed、文件和样芯选择规则生成 Legacy 跨文件 config 对应的只读 manifest
 - `npm run validate:legacy-generalization -- --phase <co612|pilot|single|serial|all> [--quick]` — 执行 co612 复现门禁、外部单次/串行泛化、文件级 bootstrap、checkpoint 与产物校验
 - `npm run typecheck:legacy-generalization` — 独立类型检查 Legacy manifest、worker、runner、汇总和评估器脚本

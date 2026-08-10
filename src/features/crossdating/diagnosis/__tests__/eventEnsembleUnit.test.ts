@@ -17,6 +17,8 @@ import {
     shouldPreferWholeSeriesAlias,
     shouldSuppressSelfWorseningCandidateFalseRing,
     hasDistinctConfirmedSequentialMissingMode,
+    supportsCumulativeSequentialMissingStaircase,
+    supportsMarkerAnchoredSequentialMissingStaircase,
     supportsSequentialMissingDirectionOverride,
     supportsSequentialMissingReplacementOfPartial,
     pruneWholeSeriesPartialAliases,
@@ -577,6 +579,116 @@ describe("supportsSequentialMissingReplacementOfPartial", () => {
             transitionCount: 11,
             headRunYears: 30,
         })).toBe(true);
+    });
+});
+
+describe("supportsCumulativeSequentialMissingStaircase", () => {
+    it("accepts a deep, clearly better sequence of one-year lag states", () => {
+        expect(supportsCumulativeSequentialMissingStaircase({
+            pathStartLag: -8,
+            transitionCount: 8,
+            gainOverDirect: 11.4,
+            headMeanAdvantage: 0.021,
+        })).toBe(true);
+    });
+
+    it("does not reinterpret shallow or weak physical gaps as missing-ring staircases", () => {
+        expect(supportsCumulativeSequentialMissingStaircase({
+            pathStartLag: -2,
+            transitionCount: 2,
+            gainOverDirect: 20,
+            headMeanAdvantage: 0.2,
+        })).toBe(false);
+        expect(supportsCumulativeSequentialMissingStaircase({
+            pathStartLag: -12,
+            transitionCount: 12,
+            gainOverDirect: 2,
+            headMeanAdvantage: 0.2,
+        })).toBe(false);
+    });
+});
+
+describe("supportsMarkerAnchoredSequentialMissingStaircase", () => {
+    it("accepts a slightly weaker deep staircase when another core anchors the year", () => {
+        expect(supportsMarkerAnchoredSequentialMissingStaircase({
+            pathStartLag: -12,
+            transitionCount: 12,
+            gainOverDirect: 7,
+            headMeanAdvantage: 0.14,
+            fixedTailMeanAdvantage: 0.1,
+        }, 1)).toBe(true);
+    });
+
+    it("accepts a durable exact staircase at late serial-recovery frontiers", () => {
+        expect(supportsMarkerAnchoredSequentialMissingStaircase({
+            pathStartLag: -5,
+            transitionCount: 5,
+            gainOverDirect: 1.44,
+            headMeanAdvantage: 0.055,
+            fixedTailMeanAdvantage: 0.427,
+        }, 6)).toBe(true);
+        expect(supportsMarkerAnchoredSequentialMissingStaircase({
+            pathStartLag: -11,
+            transitionCount: 11,
+            gainOverDirect: 7.91,
+            headMeanAdvantage: -0.016,
+            fixedTailMeanAdvantage: 0.398,
+        }, 5)).toBe(true);
+        expect(supportsMarkerAnchoredSequentialMissingStaircase({
+            pathStartLag: -3,
+            transitionCount: 3,
+            gainOverDirect: 0.64,
+            headMeanAdvantage: 0.015,
+            fixedTailMeanAdvantage: 0.349,
+        }, 30)).toBe(true);
+        expect(supportsMarkerAnchoredSequentialMissingStaircase({
+            pathStartLag: -4,
+            transitionCount: 4,
+            gainOverDirect: 1.32,
+            headMeanAdvantage: 0.052,
+            fixedTailMeanAdvantage: 0.421,
+        }, 4)).toBe(true);
+    });
+
+    it("still rejects an unanchored or shallow gap", () => {
+        const weak = {
+            pathStartLag: -12,
+            transitionCount: 12,
+            gainOverDirect: 7,
+            headMeanAdvantage: 0.14,
+            fixedTailMeanAdvantage: 0.4,
+        };
+        expect(supportsMarkerAnchoredSequentialMissingStaircase(weak, 0)).toBe(false);
+        expect(supportsMarkerAnchoredSequentialMissingStaircase({
+            ...weak,
+            pathStartLag: -2,
+            transitionCount: 2,
+        }, 20)).toBe(false);
+    });
+
+    it("requires an exact unit depth and stable fixed tail for a weak marker-backed path", () => {
+        const weak = {
+            pathStartLag: -5,
+            transitionCount: 4,
+            gainOverDirect: 1.5,
+            headMeanAdvantage: 0.02,
+            fixedTailMeanAdvantage: 0.4,
+        };
+        expect(supportsMarkerAnchoredSequentialMissingStaircase(weak, 6)).toBe(false);
+        expect(supportsMarkerAnchoredSequentialMissingStaircase({
+            ...weak,
+            transitionCount: 5,
+            fixedTailMeanAdvantage: 0.32,
+        }, 6)).toBe(false);
+        expect(supportsMarkerAnchoredSequentialMissingStaircase({
+            ...weak,
+            transitionCount: 5,
+        }, 4)).toBe(false);
+        expect(supportsMarkerAnchoredSequentialMissingStaircase({
+            ...weak,
+            transitionCount: 5,
+            headMeanAdvantage: 0.049,
+        }, 4)).toBe(false);
     });
 });
 
