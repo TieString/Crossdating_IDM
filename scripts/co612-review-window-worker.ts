@@ -66,7 +66,8 @@ const handle = (request: WorkerRequest) => {
         });
         const audit = diagnosis.eventDecisionAudits?.[0];
         const reviewDecision = diagnosis.reviewWindowDecisions?.[0];
-        if (!audit || !reviewDecision) {
+        const jointDecision = diagnosis.jointEventDecisions?.[0];
+        if (!audit || !reviewDecision || !jointDecision) {
             throw new Error(`missing review decision for ${seriesId}`);
         }
         return {
@@ -74,6 +75,7 @@ const handle = (request: WorkerRequest) => {
             strictEvent: diagnosis.events[0] ?? null,
             reviewEvent: diagnosis.reviewEvents?.[0] ?? null,
             reviewDecision,
+            jointDecision,
             audit,
             referenceAnchorCount:
                 referenceConfig.classification?.anchorPassIds.length ?? 0,

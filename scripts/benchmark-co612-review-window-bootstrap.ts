@@ -22,6 +22,7 @@ import {
 import type {
     DiagnosisEvent,
     DiagnosisEventDecisionAudit,
+    DiagnosisJointEventDecision,
     DiagnosisReviewWindowDecision,
 } from "@/features/crossdating/diagnosis/types";
 import { cofechaStyleStandardize } from "@/features/crossdating/reference";
@@ -38,6 +39,7 @@ type WorkerTargetResult = {
     strictEvent: DiagnosisEvent | null;
     reviewEvent: DiagnosisEvent | null;
     reviewDecision: DiagnosisReviewWindowDecision;
+    jointDecision: DiagnosisJointEventDecision;
     audit: DiagnosisEventDecisionAudit;
     referenceAnchorCount: number;
     durationMs: number;
@@ -103,6 +105,9 @@ type EventObservation = {
     strictReason: DiagnosisEventDecisionAudit["finalReason"];
     reviewDecisionReason: DiagnosisReviewWindowDecision["reason"];
     reviewDecisionStatus: DiagnosisReviewWindowDecision["status"];
+    jointDecisionStatus: DiagnosisJointEventDecision["status"];
+    jointDecisionReason: DiagnosisJointEventDecision["reason"];
+    jointProductionAgreement: DiagnosisJointEventDecision["productionAgreement"];
     candidateCount: number;
     candidateModeCount: number;
     reviewQueueEnteredRound: number | null;
@@ -576,6 +581,11 @@ let firstSweepGate: {
     correctWindows: number;
     minimumCorrectWindows: number;
     passed: boolean;
+    jointCompared: number;
+    jointSame: number;
+    jointOperationMismatches: number;
+    jointLocationMismatches: number;
+    jointPresenceMismatches: number;
 } | null = null;
 
 if (resume) {
@@ -686,6 +696,9 @@ try {
                 strictReason: result.audit.finalReason,
                 reviewDecisionReason: result.reviewDecision.reason,
                 reviewDecisionStatus: result.reviewDecision.status,
+                jointDecisionStatus: result.jointDecision.status,
+                jointDecisionReason: result.jointDecision.reason,
+                jointProductionAgreement: result.jointDecision.productionAgreement,
                 candidateCount: result.audit.candidateCount,
                 candidateModeCount: result.audit.candidateModeCount,
                 reviewQueueEnteredRound: firstReviewableRoundByEventId.get(eventId) ?? null,
@@ -751,6 +764,19 @@ try {
                 correctWindows,
                 minimumCorrectWindows: minimumFirstSweepCorrectWindows,
                 passed: correctWindows >= minimumFirstSweepCorrectWindows,
+                jointCompared: activeObservations.length,
+                jointSame: activeObservations.filter((row) => (
+                    row.jointProductionAgreement === "same"
+                )).length,
+                jointOperationMismatches: activeObservations.filter((row) => (
+                    row.jointProductionAgreement === "operation_mismatch"
+                )).length,
+                jointLocationMismatches: activeObservations.filter((row) => (
+                    row.jointProductionAgreement === "location_mismatch"
+                )).length,
+                jointPresenceMismatches: activeObservations.filter((row) => (
+                    row.jointProductionAgreement === "presence_mismatch"
+                )).length,
             };
             if (!firstSweepGate.passed) {
                 stopReason = "first_sweep_regression_gate_failed";
@@ -837,6 +863,12 @@ const summary = {
             / Math.max(1, cleanBaseline.length),
         reviewFalsePositiveRate: cleanBaseline.filter((row) => row.reviewEvent !== null).length
             / Math.max(1, cleanBaseline.length),
+        jointSelectedRate: cleanBaseline.filter((row) => (
+            row.jointDecision.event !== null
+        )).length / Math.max(1, cleanBaseline.length),
+        jointProductionAgreementRate: cleanBaseline.filter((row) => (
+            row.jointDecision.productionAgreement === "same"
+        )).length / Math.max(1, cleanBaseline.length),
     },
     relativeAlignment: {
         original: summarizePairwiseAlignment(originalSite),

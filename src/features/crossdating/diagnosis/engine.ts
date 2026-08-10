@@ -59,6 +59,7 @@ import type {
     LocalSimulationOption,
     SeriesCoreDiagnosis,
 } from "./types";
+import { adjudicateJointEventHypotheses } from "./jointEventAdjudicator";
 
 export {
     getDiagnosisCandidateLabel,
@@ -311,6 +312,15 @@ export function diagnoseCrossdating(
             reviewEventCheckpoints ?? [],
         )
         : null;
+    const jointEventDecisions = reviewEventCheckpoints && eventDecisionAudits
+        ? eventDecisionAudits.map((audit) => adjudicateJointEventHypotheses(
+            audit.seriesId,
+            reviewEventCheckpoints,
+            reviewWindowDisplay?.events.find((event) => (
+                event.seriesId === audit.seriesId
+            )) ?? null,
+        ))
+        : null;
     const candidateCountByTree = candidates.reduce((counts, candidate) => {
         counts.set(candidate.targetTree, (counts.get(candidate.targetTree) ?? 0) + 1);
         return counts;
@@ -352,6 +362,7 @@ export function diagnoseCrossdating(
             reviewEvents: reviewWindowDisplay.events,
             reviewWindowDecisions: reviewWindowDisplay.decisions,
         } : {}),
+        ...(jointEventDecisions ? { jointEventDecisions } : {}),
     };
 }
 

@@ -311,6 +311,44 @@ export type DiagnosisReviewWindowDecision = {
     event: DiagnosisEvent | null;
 };
 
+export type DiagnosisJointAdjudicationReason =
+    | "selected"
+    | "no_complete_hypothesis"
+    | "operation_conflict"
+    | "remote_mode_conflict";
+
+export type DiagnosisJointProductionAgreement =
+    | "same"
+    | "presence_mismatch"
+    | "operation_mismatch"
+    | "location_mismatch";
+
+export type DiagnosisJointHypothesisSummary = {
+    id: string;
+    eventType: DiagnosisEventType;
+    shiftYears: number | null;
+    startYear: number;
+    endYear: number;
+    topYear: number | null;
+    sourceStage: DiagnosisReviewSourceStage;
+    supportStages: DiagnosisReviewSourceStage[];
+    claimCount: number;
+    locationEvidenceCount: number;
+    score: number;
+};
+
+export type DiagnosisJointEventDecision = {
+    seriesId: string;
+    status: "selected" | "refused";
+    reason: DiagnosisJointAdjudicationReason;
+    sourceStage: DiagnosisReviewSourceStage | null;
+    event: DiagnosisEvent | null;
+    hypotheses: DiagnosisJointHypothesisSummary[];
+    operationMargin: number | null;
+    remoteModeMargin: number | null;
+    productionAgreement: DiagnosisJointProductionAgreement;
+};
+
 export type ReviewWindowDisplayMode = "strict" | "review";
 export type CandidateRankingConfidence = DiagnosisConfidence | "ambiguous";
 
@@ -685,6 +723,8 @@ export type CrossdatingDiagnosis = {
     eventDecisionAudits?: DiagnosisEventDecisionAudit[];
     reviewEvents?: DiagnosisEvent[];
     reviewWindowDecisions?: DiagnosisReviewWindowDecision[];
+    /** Shadow until the single adjudicator passes the frozen production gates. */
+    jointEventDecisions?: DiagnosisJointEventDecision[];
 };
 
 export type LocalSimulationOperationType =
