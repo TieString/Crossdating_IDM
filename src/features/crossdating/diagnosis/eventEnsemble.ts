@@ -2918,6 +2918,38 @@ export const hasCoherentSequentialFalseStaircase = (
     return [...positiveLevels].some((level) => positiveLevels.has(level - 1));
 };
 
+/** One remaining false ring is authoritative only when candidate and path evidence agree. */
+export const hasCandidateBackedSequentialFalseDirection = (
+    events: readonly DiagnosisEvent[],
+): boolean => events.some((event) => (
+    event.eventType === "falseRing"
+    && event.evidence.lagBefore === 1
+    && event.evidence.lagAfter === 0
+    && event.evidence.algorithmSources.includes("piecewise_lag_path")
+    && event.evidence.algorithmSources.includes("joint_event_counterfactual")
+    && (
+        event.evidence.notes.includes("counterfactual_candidate_support")
+        || event.evidence.notes.includes(
+            "window_refinement=raw_path_candidate_consensus",
+        )
+    )
+));
+
+/** A compressed +2 range candidate can carry the older step of a two-false-ring staircase. */
+export const hasCompressedSequentialFalseDirection = (
+    events: readonly DiagnosisEvent[],
+    candidates: readonly DiagnosisCandidateOperation[],
+    targetTree: string,
+): boolean => events.some((event) => (
+    event.eventType === "falseRing"
+    && event.evidence.lagBefore === 1
+    && event.evidence.lagAfter === 0
+)) && candidates.some((candidate) => (
+    candidate.targetTree === targetTree
+    && candidate.operationType === "SHIFT_RANGE"
+    && (candidate.deltaYears ?? candidate.suggestedLag) === 2
+));
+
 type SequentialMissingDirectionEvidence = {
     hasOppositeUnitOnly: boolean;
     hasDetectedMissing: boolean;
@@ -3128,7 +3160,15 @@ const recoverSequentialMissingHeadEvent = (
         const hasExistingUnitEvent = detected.some((event) => (
             event.eventType === "missingRing" || event.eventType === "falseRing"
         ));
-        const hasOppositeUnitOnly = hasCoherentSequentialFalseStaircase(detected)
+        const hasOppositeUnitOnly = (
+            hasCoherentSequentialFalseStaircase(detected)
+            || hasCandidateBackedSequentialFalseDirection(detected)
+            || hasCompressedSequentialFalseDirection(
+                detected,
+                candidates,
+                diagnosis.targetTree,
+            )
+        )
             && !detected.some((event) => event.eventType === "missingRing");
         const hasCumulativeMissingStaircase =
             supportsCumulativeSequentialMissingStaircase(head);

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { DiagnosisEvent, SeriesCoreDiagnosis } from "../types";
 import {
     hasIndependentPartialBoundaryAnchor,
+    hasCandidateBackedSequentialFalseDirection,
+    hasCompressedSequentialFalseDirection,
     hasCoherentSequentialFalseStaircase,
     hasMultipleCoherentLocalTransitions,
     partialMoveExplainsWholeSeriesCandidate,
@@ -775,6 +777,82 @@ describe("hasCoherentSequentialFalseStaircase", () => {
 
         expect(hasCoherentSequentialFalseStaircase([isolated])).toBe(false);
         expect(hasCoherentSequentialFalseStaircase([isolated, negative])).toBe(false);
+    });
+});
+
+describe("hasCandidateBackedSequentialFalseDirection", () => {
+    it("accepts a direct unit path with independent candidate support", () => {
+        const candidateBacked = falseRingEvent(1900, true);
+        candidateBacked.evidence.algorithmSources.push("joint_event_counterfactual");
+        candidateBacked.evidence.notes.push("counterfactual_candidate_support");
+
+        expect(hasCandidateBackedSequentialFalseDirection([candidateBacked]))
+            .toBe(true);
+    });
+
+    it("rejects isolated joint and candidate aliases without cross-channel agreement", () => {
+        const jointOnly = falseRingEvent(1900, false);
+        jointOnly.evidence.algorithmSources.push("joint_event_counterfactual");
+        const candidateOnly = falseRingEvent(1870, true);
+        candidateOnly.evidence.notes.push("counterfactual_candidate_support");
+
+        expect(hasCandidateBackedSequentialFalseDirection([jointOnly])).toBe(false);
+        expect(hasCandidateBackedSequentialFalseDirection([candidateOnly])).toBe(false);
+    });
+});
+
+describe("hasCompressedSequentialFalseDirection", () => {
+    it("accepts a +1 unit frontier paired with a +2 range candidate", () => {
+        expect(hasCompressedSequentialFalseDirection(
+            [falseRingEvent(1900, false)],
+            [{
+                id: "range-2",
+                targetTree: "TEST",
+                operationType: "SHIFT_RANGE",
+                mode: "partialRangeMove",
+                deltaYears: 2,
+                suggestedLag: 2,
+                score: 1,
+                algorithmSource: [],
+                evidence: {
+                    currentCorrelation: 0,
+                    simulatedCorrelation: 0,
+                    delta: 0,
+                    samplePairs: 0,
+                    overlapYears: 0,
+                    reason: "test",
+                },
+            }],
+            "TEST",
+        )).toBe(true);
+    });
+
+    it("rejects the same range candidate without a positive false frontier", () => {
+        const negative = falseRingEvent(1900, false);
+        negative.evidence.lagBefore = -2;
+        negative.evidence.lagAfter = -3;
+        expect(hasCompressedSequentialFalseDirection(
+            [negative],
+            [{
+                id: "range-2",
+                targetTree: "TEST",
+                operationType: "SHIFT_RANGE",
+                mode: "partialRangeMove",
+                deltaYears: 2,
+                suggestedLag: 2,
+                score: 1,
+                algorithmSource: [],
+                evidence: {
+                    currentCorrelation: 0,
+                    simulatedCorrelation: 0,
+                    delta: 0,
+                    samplePairs: 0,
+                    overlapYears: 0,
+                    reason: "test",
+                },
+            }],
+            "TEST",
+        )).toBe(false);
     });
 });
 
