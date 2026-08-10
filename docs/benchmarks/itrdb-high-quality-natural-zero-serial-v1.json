@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": "itrdb-high-quality-natural-zero-serial-v1",
+  "frozenDate": "2026-08-11",
+  "selection": {
+    "minimumChronologyYears": 563,
+    "minimumIntercorrelation": 0.845,
+    "maximumProblemSegments": 0,
+    "note": "User-supplied high-quality files; selection metadata is descriptive and is not recomputed during diagnosis."
+  },
+  "itrdbRoot": "D:/软件测试/数据/ITRDB/itrdb_download/measurements",
+  "fileIds": [
+    "az086",
+    "ca612",
+    "ca646",
+    "ca660",
+    "co021",
+    "co583",
+    "co589",
+    "co593",
+    "co604",
+    "co605",
+    "co612",
+    "co616",
+    "co617",
+    "co624",
+    "co629",
+    "co631",
+    "co632",
+    "co647",
+    "co649",
+    "co650",
+    "co651",
+    "co658",
+    "co699",
+    "mt001",
+    "nm025",
+    "nm026",
+    "nm560",
+    "nm565",
+    "nm572",
+    "nm580",
+    "or093",
+    "paki033",
+    "ut529",
+    "ut530"
+  ],
+  "runtime": {
+    "fileConcurrency": 2,
+    "diagnosisWorkersPerFile": 8
+  }
+}
