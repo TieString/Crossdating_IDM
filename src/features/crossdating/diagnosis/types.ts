@@ -40,6 +40,55 @@ export type DiagnosisEventLocationEvidence = {
     calibrated: boolean;
 };
 
+export type DiagnosisEvidenceClaim =
+    | "explicit_missing_staircase"
+    | "independent_reference_staircase"
+    | "fixed_side_resolution"
+    | "joint_operation"
+    | "continuous_gap_consensus"
+    | "whole_global_lag";
+
+export type DiagnosisPresenceEvidenceEntry = {
+    kind: "presence";
+    source: string;
+    score: number;
+    scoreMargin: number;
+    samplePairs: number;
+};
+
+export type DiagnosisOperationEvidenceEntry = {
+    kind: "operation";
+    source: string;
+    operationType: DiagnosisEventType;
+    shiftYears: number | null;
+    lagBefore: number | null;
+    lagAfter: number | null;
+    normalizedGain: number | null;
+    claims: DiagnosisEvidenceClaim[];
+};
+
+export type DiagnosisLocationEvidenceEntry = DiagnosisEventLocationEvidence & {
+    kind: "location";
+};
+
+export type DiagnosisReferenceEvidenceEntry = {
+    kind: "reference";
+    source: string;
+    referenceCount: number;
+    samplePairs: number;
+};
+
+export type DiagnosisEvidenceLedgerEntry =
+    | DiagnosisPresenceEvidenceEntry
+    | DiagnosisOperationEvidenceEntry
+    | DiagnosisLocationEvidenceEntry
+    | DiagnosisReferenceEvidenceEntry;
+
+export type DiagnosisEvidenceLedger = {
+    version: 1;
+    entries: DiagnosisEvidenceLedgerEntry[];
+};
+
 export type DiagnosisEventEvidence = {
     algorithmSources: string[];
     score: number;
@@ -53,6 +102,7 @@ export type DiagnosisEventEvidence = {
     candidateIds: string[];
     notes: string[];
     locationEvidence?: DiagnosisEventLocationEvidence[];
+    ledger?: DiagnosisEvidenceLedger;
 };
 
 export type DiagnosisEventLocationAlternative = {

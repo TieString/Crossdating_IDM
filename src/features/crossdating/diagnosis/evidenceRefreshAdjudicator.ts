@@ -1,4 +1,5 @@
 import { getDisplayedDiagnosisEvents } from "./eventDisplay";
+import { evidenceClaimsFor } from "./evidenceLedger";
 import type {
     CrossdatingDiagnosis,
     DiagnosisEvent,
@@ -99,36 +100,22 @@ const diagnosisSupports = (
     ));
 };
 
-const evidenceTokens = (event: DiagnosisEvent): Set<string> => new Set([
-    ...event.evidence.algorithmSources,
-    ...event.evidence.notes,
-]);
-
-const hasToken = (tokens: Set<string>, token: string): boolean => (
-    tokens.has(token)
-    || [...tokens].some((value) => value.startsWith(`${token}=`))
-);
-
 const hasDecisiveOperationEvidence = (
     event: DiagnosisEvent,
     previousEvent: DiagnosisEvent,
 ): boolean => {
-    const tokens = evidenceTokens(event);
+    const claims = evidenceClaimsFor(event);
     const transition = event.evidence.lagBefore !== null
         && event.evidence.lagAfter !== null
         ? event.evidence.lagAfter - event.evidence.lagBefore
         : null;
 
     if (event.eventType === "missingRing") {
-        const explicitStaircase = hasToken(tokens, "explicit_partial_vs_missing_staircase")
-            || hasToken(tokens, "sequential_missing_staircase_head");
-        const independentSupport = hasToken(tokens, "robust_per_reference_missing_staircase")
-            || hasToken(tokens, "per_reference_intermediate_lag_consensus");
-        const fixedSideResolution = hasToken(tokens, "newer_fixed_side_lag_contrast")
-            && hasToken(tokens, "terminal_whole_alias_removed");
+        const explicitStaircase = claims.has("explicit_missing_staircase");
+        const independentSupport = claims.has("independent_reference_staircase");
+        const fixedSideResolution = claims.has("fixed_side_resolution");
         const jointDirection = transition === 1
-            && hasToken(tokens, "decisive_joint_operation_fusion")
-            && hasToken(tokens, "joint_year_operation_evidence");
+            && claims.has("joint_operation");
         if (previousEvent.eventType === "partialMove") {
             return explicitStaircase && independentSupport;
         }
@@ -140,21 +127,15 @@ const hasDecisiveOperationEvidence = (
 
     if (event.eventType === "falseRing") {
         return transition === -1
-            && hasToken(tokens, "decisive_joint_operation_fusion")
-            && hasToken(tokens, "joint_year_operation_evidence");
+            && claims.has("joint_operation");
     }
 
     if (event.eventType === "partialMove") {
         return (event.shiftYears ?? 0) < -1
-            && (
-                hasToken(tokens, "negative_partial_multiview_consensus")
-                || hasToken(tokens, "candidate_grid_reference_partial_consensus")
-                || hasToken(tokens, "completed_partial_preferred_over_discrete_missing_staircase")
-            );
+            && claims.has("continuous_gap_consensus");
     }
 
-    return hasToken(tokens, "whole_state_global_lag_matches_shift")
-        && [...tokens].some((value) => value === "whole_state_global_lag_matches_shift=true");
+    return claims.has("whole_global_lag");
 };
 
 const hasDecisiveDetachedLocation = (

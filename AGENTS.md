@@ -13,6 +13,7 @@
 - [src/features/crossdating/diagnosis/endpointResidualWindow.ts](src/features/crossdating/diagnosis/endpointResidualWindow.ts)：单缺轮/伪轮的多参考残差后验窄窗入口
 - [src/features/crossdating/diagnosis/eventPath.ts](src/features/crossdating/diagnosis/eventPath.ts)：受约束 piecewise lag path 与事件边界定位入口
 - [src/features/crossdating/diagnosis/eventAdjudicator.ts](src/features/crossdating/diagnosis/eventAdjudicator.ts)：定位提案字段契约、证据优势判断与弱定位回退入口
+- [src/features/crossdating/diagnosis/evidenceLedger.ts](src/features/crossdating/diagnosis/evidenceLedger.ts)：事件存在、操作/lag、位置和参考支持的类型化只追加证据边界；旧 notes 仅在此兼容转换
 - [docs/js-internal-diagnosis-events-report.md](docs/js-internal-diagnosis-events-report.md)：JS 内部诊断的指标定义、数据拆分、冻结保留集和广域 ITRDB 准确度
 - [src/services/fs/io.ts](src/services/fs/io.ts)：文件读写辅助与解析桥接
 - [src/services/cofecha/runner.ts](src/services/cofecha/runner.ts)：COFECHA 执行与 OUT 文件处理

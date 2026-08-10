@@ -106,6 +106,7 @@ import {
 } from "./endpointOperationContrast";
 import { refineEventWithCounterfactualLocator } from "./counterfactualEventLocator";
 import { adjudicateLocatorProposal } from "./eventAdjudicator";
+import { withEvidenceLedger } from "./evidenceLedger";
 import { refineEventWithAdjacentBoundaryConsensus } from "./eventBoundaryConsensus";
 import { getJointCounterfactualOperationScores } from "./jointCounterfactualOperation";
 import {
@@ -5142,7 +5143,8 @@ export const makeDiagnosisEvents = (
             const automaticSemanticsRejectedCount = sourceEvents.filter(
                 (event) => !isValidAutomaticEvent(event),
             ).length;
-            const finalEvents = validAutomaticEvents(sourceEvents);
+            const finalEvents = validAutomaticEvents(sourceEvents)
+                .map(withEvidenceLedger);
             let finalReason: DiagnosisEventDecisionReason = "post_location_rejected";
             if (finalEvents.length > 0) {
                 finalReason = "emitted";
@@ -5225,12 +5227,12 @@ export const makeDiagnosisEvents = (
                 stages.forEach(({ stage, events }) => events.forEach((event) => {
                     options.reviewEventCheckpoints?.push({
                         stage,
-                        event: stripDiagnosisEventAlternatives({
+                        event: withEvidenceLedger(stripDiagnosisEventAlternatives({
                             ...event,
                             seriesRange: event.seriesRange
                                 ? { ...event.seriesRange }
                                 : { ...diagnosis.targetRange },
-                        }),
+                        })),
                     });
                 }));
             }

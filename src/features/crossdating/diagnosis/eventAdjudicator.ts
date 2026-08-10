@@ -4,6 +4,7 @@ import type {
     DiagnosisReviewEventCheckpoint,
     DiagnosisReviewSourceStage,
 } from "./types";
+import { locationEvidenceFor, withEvidenceLedger } from "./evidenceLedger";
 
 export type LocatorAdjudicationEvidence = {
     concentration: number;
@@ -100,7 +101,7 @@ const windowWidth = (
 const structuredLocationEvidenceForWindow = (
     event: DiagnosisEvent,
     window: Pick<DiagnosisEvent, "startYear" | "endYear">,
-) => [...(event.evidence.locationEvidence ?? [])].reverse().find((entry) => (
+) => [...locationEvidenceFor(event)].reverse().find((entry) => (
     entry.startYear === window.startYear && entry.endYear === window.endYear
 )) ?? null;
 
@@ -297,7 +298,7 @@ const annotateDecision = (
     event: DiagnosisEvent,
     reason: DiagnosisLocatorDecisionReason,
     proposal: DiagnosisEvent | null,
-): DiagnosisEvent => ({
+): DiagnosisEvent => withEvidenceLedger({
     ...event,
     evidence: {
         ...event.evidence,
