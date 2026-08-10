@@ -3,6 +3,7 @@ import { adjudicateReviewEventHypothesis } from "./eventAdjudicator";
 import type {
     DiagnosisEvent,
     DiagnosisEventDecisionAudit,
+    DiagnosisJointEventDecision,
     DiagnosisReviewEventCheckpoint,
     DiagnosisReviewSourceStage,
     DiagnosisReviewWindowDecision,
@@ -372,13 +373,80 @@ const refused = (
     event: null,
 });
 
+const selectAdjudicatedReviewWindowDisplay = (
+    audit: DiagnosisEventDecisionAudit,
+    decision: DiagnosisJointEventDecision,
+    config: ReviewWindowDisplayConfig,
+): DiagnosisReviewWindowDecision => {
+    const event = decision.event;
+    if (!event || !decision.sourceStage) {
+        const reason = decision.reason === "operation_conflict"
+            ? "operation_type_conflict"
+            : decision.reason === "remote_mode_conflict"
+                ? "competing_remote_modes"
+                : "no_unit_hypothesis";
+        return refused(audit, reason);
+    }
+    const width = event.endYear - event.startYear + 1;
+    if (event.eventType !== "wholeSeriesMove"
+        && !config.allowedWindowWidths.includes(width)) {
+        return refused(audit, "window_width_unsafe");
+    }
+    if (decision.sourceStage === "final") {
+        if (event.eventType === "partialMove"
+            && !hasReviewablePartialMoveEvidence(event, config)) {
+            return refused(audit, "partial_move_evidence_insufficient");
+        }
+        return {
+            seriesId: audit.seriesId,
+            status: "strict",
+            reason: "strict_event",
+            strictReason: audit.finalReason,
+            sourceStage: decision.sourceStage,
+            event,
+        };
+    }
+    if (event.eventType === "partialMove") {
+        return refused(audit, "partial_move_evidence_insufficient");
+    }
+    if (event.eventType === "wholeSeriesMove") {
+        return refused(audit, "operation_type_conflict");
+    }
+    if (audit.finalReason === "older_endpoint_context") {
+        return refused(audit, "endpoint_context_insufficient");
+    }
+    if (!audit.cofechaFlagged) {
+        return refused(audit, "cofecha_target_unflagged");
+    }
+    if (audit.referenceSourceCount < config.minimumReferenceSources
+        || audit.medianReferenceDepth < config.minimumMedianReferenceDepth) {
+        return refused(audit, "insufficient_reference_support");
+    }
+    return {
+        seriesId: audit.seriesId,
+        status: "review",
+        reason: "lower_display_gate_passed",
+        strictReason: audit.finalReason,
+        sourceStage: decision.sourceStage,
+        event: markReviewOnly(audit, event, decision.sourceStage),
+    };
+};
+
 export const selectReviewWindowDisplay = (
     audit: DiagnosisEventDecisionAudit,
     strictEvents: readonly DiagnosisEvent[],
     reviewCheckpoints: readonly DiagnosisReviewEventCheckpoint[] = [],
     overrides: Partial<ReviewWindowDisplayConfig> = {},
+    jointDecision: DiagnosisJointEventDecision | null = null,
 ): DiagnosisReviewWindowDecision => {
     const config = { ...DEFAULT_REVIEW_WINDOW_DISPLAY_CONFIG, ...overrides };
+    if (jointDecision) {
+        return selectAdjudicatedReviewWindowDisplay(
+            audit,
+            jointDecision,
+            config,
+        );
+    }
     const strictUnit = strictEvents.find((event) => (
         event.eventType === "missingRing" || event.eventType === "falseRing"
     )) ?? null;
@@ -463,6 +531,7 @@ export const buildReviewWindowDisplays = (
     strictEvents: readonly DiagnosisEvent[],
     reviewCheckpoints: readonly DiagnosisReviewEventCheckpoint[] = [],
     overrides: Partial<ReviewWindowDisplayConfig> = {},
+    jointDecisions: readonly DiagnosisJointEventDecision[] = [],
 ): {
     decisions: DiagnosisReviewWindowDecision[];
     events: DiagnosisEvent[];
@@ -479,11 +548,16 @@ export const buildReviewWindowDisplays = (
         group.push(checkpoint);
         checkpointsBySeries.set(checkpoint.event.seriesId, group);
     });
+    const jointBySeries = new Map(jointDecisions.map((decision) => [
+        decision.seriesId,
+        decision,
+    ]));
     const decisions = audits.map((audit) => selectReviewWindowDisplay(
         audit,
         strictBySeries.get(audit.seriesId) ?? [],
         checkpointsBySeries.get(audit.seriesId) ?? [],
         overrides,
+        jointBySeries.get(audit.seriesId) ?? null,
     ));
     return {
         decisions,

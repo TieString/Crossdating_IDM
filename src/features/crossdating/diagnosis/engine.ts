@@ -304,7 +304,7 @@ export function diagnoseCrossdating(
             - (treeOrder.get(right.seriesId) ?? Infinity)
         ));
     }
-    const reviewWindowDisplay = options.reviewWindowDisplayMode === "review"
+    const legacyReviewWindowDisplay = options.reviewWindowDisplayMode === "review"
         && eventDecisionAudits
         ? buildReviewWindowDisplays(
             eventDecisionAudits,
@@ -316,11 +316,22 @@ export function diagnoseCrossdating(
         ? eventDecisionAudits.map((audit) => adjudicateJointEventHypotheses(
             audit.seriesId,
             reviewEventCheckpoints,
-            reviewWindowDisplay?.events.find((event) => (
+            legacyReviewWindowDisplay?.events.find((event) => (
                 event.seriesId === audit.seriesId
             )) ?? null,
         ))
         : null;
+    const reviewWindowDisplay = legacyReviewWindowDisplay
+        && jointEventDecisions
+        && eventDecisionAudits
+        ? buildReviewWindowDisplays(
+            eventDecisionAudits,
+            events,
+            reviewEventCheckpoints ?? [],
+            {},
+            jointEventDecisions,
+        )
+        : legacyReviewWindowDisplay;
     const candidateCountByTree = candidates.reduce((counts, candidate) => {
         counts.set(candidate.targetTree, (counts.get(candidate.targetTree) ?? 0) + 1);
         return counts;

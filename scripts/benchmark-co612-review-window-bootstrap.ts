@@ -108,6 +108,7 @@ type EventObservation = {
     jointDecisionStatus: DiagnosisJointEventDecision["status"];
     jointDecisionReason: DiagnosisJointEventDecision["reason"];
     jointProductionAgreement: DiagnosisJointEventDecision["productionAgreement"];
+    jointProductionExactMatch: boolean;
     candidateCount: number;
     candidateModeCount: number;
     reviewQueueEnteredRound: number | null;
@@ -586,6 +587,8 @@ let firstSweepGate: {
     jointOperationMismatches: number;
     jointLocationMismatches: number;
     jointPresenceMismatches: number;
+    jointExactMatches: number;
+    jointNonExactSeriesIds: string[];
 } | null = null;
 
 if (resume) {
@@ -699,6 +702,7 @@ try {
                 jointDecisionStatus: result.jointDecision.status,
                 jointDecisionReason: result.jointDecision.reason,
                 jointProductionAgreement: result.jointDecision.productionAgreement,
+                jointProductionExactMatch: result.jointDecision.productionExactMatch,
                 candidateCount: result.audit.candidateCount,
                 candidateModeCount: result.audit.candidateModeCount,
                 reviewQueueEnteredRound: firstReviewableRoundByEventId.get(eventId) ?? null,
@@ -777,6 +781,12 @@ try {
                 jointPresenceMismatches: activeObservations.filter((row) => (
                     row.jointProductionAgreement === "presence_mismatch"
                 )).length,
+                jointExactMatches: activeObservations.filter((row) => (
+                    row.jointProductionExactMatch
+                )).length,
+                jointNonExactSeriesIds: activeObservations.filter((row) => (
+                    !row.jointProductionExactMatch
+                )).map((row) => row.seriesId),
             };
             if (!firstSweepGate.passed) {
                 stopReason = "first_sweep_regression_gate_failed";

@@ -7,6 +7,7 @@ import type {
     DiagnosisEvent,
     DiagnosisEventAuditSnapshot,
     DiagnosisEventDecisionAudit,
+    DiagnosisJointEventDecision,
     DiagnosisReviewEventCheckpoint,
 } from "../types";
 
@@ -128,6 +129,22 @@ const checkpoint = (
         shiftYears: source.shiftYears ?? undefined,
         shiftSide: source.eventType === "partialMove" ? "older" : undefined,
     },
+});
+
+const jointDecision = (
+    event: DiagnosisEvent | null,
+    sourceStage: DiagnosisJointEventDecision["sourceStage"] = "final",
+): DiagnosisJointEventDecision => ({
+    seriesId: "T",
+    status: event ? "selected" : "refused",
+    reason: event ? "selected" : "operation_conflict",
+    sourceStage: event ? sourceStage : null,
+    event,
+    hypotheses: [],
+    operationMargin: event ? 0.2 : 0,
+    remoteModeMargin: null,
+    productionAgreement: "same",
+    productionExactMatch: true,
 });
 
 const reviewablePartial = (
@@ -683,6 +700,68 @@ describe("lower review-window display gate", () => {
         expect(sourceCheckpoint.event).toMatchObject({
             startYear: 1897,
             endYear: 1902,
+        });
+    });
+
+    it("projects a final joint hypothesis without rebuilding any event field", () => {
+        const selected = strictEvent();
+        const result = selectReviewWindowDisplay(
+            audit([], { finalReason: "emitted" }),
+            [],
+            [],
+            {},
+            jointDecision(selected),
+        );
+
+        expect(result).toMatchObject({
+            status: "strict",
+            sourceStage: "final",
+            event: {
+                id: "strict",
+                eventType: "missingRing",
+                startYear: 1898,
+                endYear: 1902,
+            },
+        });
+        expect(result.event).toBe(selected);
+    });
+
+    it("uses display gates only for a non-final joint hypothesis", () => {
+        const selected = strictEvent();
+        const result = selectReviewWindowDisplay(
+            audit([]),
+            [],
+            [],
+            {},
+            jointDecision(selected, "displayed"),
+        );
+
+        expect(result).toMatchObject({
+            status: "review",
+            reason: "lower_display_gate_passed",
+            sourceStage: "displayed",
+            event: {
+                eventType: "missingRing",
+                startYear: 1898,
+                endYear: 1902,
+                reviewOnly: true,
+            },
+        });
+    });
+
+    it("does not recover another checkpoint after the joint adjudicator refuses", () => {
+        const result = selectReviewWindowDisplay(
+            audit([snapshot("missingRing")]),
+            [strictEvent()],
+            [checkpoint(snapshot("missingRing"))],
+            {},
+            jointDecision(null),
+        );
+
+        expect(result).toMatchObject({
+            status: "refused",
+            reason: "operation_type_conflict",
+            event: null,
         });
     });
 });

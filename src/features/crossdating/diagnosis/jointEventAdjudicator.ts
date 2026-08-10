@@ -251,6 +251,17 @@ const productionAgreement = (
     return sameLocationMode(selected, production) ? "same" : "location_mismatch";
 };
 
+const productionExactMatch = (
+    selected: DiagnosisEvent | null,
+    production: DiagnosisEvent | null,
+): boolean => {
+    if (!selected || !production) return selected === production;
+    return sameOperation(selected, production)
+        && selected.startYear === production.startYear
+        && selected.endYear === production.endYear
+        && topYear(selected) === topYear(production);
+};
+
 export const adjudicateJointEventHypotheses = (
     seriesId: string,
     checkpoints: readonly DiagnosisReviewEventCheckpoint[],
@@ -278,6 +289,7 @@ export const adjudicateJointEventHypotheses = (
             operationMargin: null,
             remoteModeMargin: null,
             productionAgreement: productionAgreement(null, productionEvent),
+            productionExactMatch: productionExactMatch(null, productionEvent),
         };
     }
 
@@ -304,6 +316,7 @@ export const adjudicateJointEventHypotheses = (
             operationMargin,
             remoteModeMargin: null,
             productionAgreement: productionAgreement(null, productionEvent),
+            productionExactMatch: productionExactMatch(null, productionEvent),
         };
     }
 
@@ -345,5 +358,6 @@ export const adjudicateJointEventHypotheses = (
         operationMargin,
         remoteModeMargin,
         productionAgreement: productionAgreement(selectedEvent, productionEvent),
+        productionExactMatch: productionExactMatch(selectedEvent, productionEvent),
     };
 };

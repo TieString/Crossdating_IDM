@@ -122,6 +122,7 @@ describe("joint event adjudicator", () => {
         expect(decision).toMatchObject({
             status: "selected",
             productionAgreement: "same",
+            productionExactMatch: false,
             event: {
                 eventType: "partialMove",
                 shiftYears: -6,

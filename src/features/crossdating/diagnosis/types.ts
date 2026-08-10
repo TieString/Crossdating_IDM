@@ -347,6 +347,7 @@ export type DiagnosisJointEventDecision = {
     operationMargin: number | null;
     remoteModeMargin: number | null;
     productionAgreement: DiagnosisJointProductionAgreement;
+    productionExactMatch: boolean;
 };
 
 export type ReviewWindowDisplayMode = "strict" | "review";
