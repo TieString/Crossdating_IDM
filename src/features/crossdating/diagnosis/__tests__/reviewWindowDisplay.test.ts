@@ -814,6 +814,39 @@ describe("lower review-window display gate", () => {
         });
     });
 
+    it("displays an independently verified terminal whole from an earlier stage", () => {
+        const selected = {
+            ...strictEvent(),
+            eventType: "wholeSeriesMove" as const,
+            shiftYears: -5,
+            startYear: 1600,
+            endYear: 2000,
+            evidence: {
+                ...strictEvent().evidence,
+                notes: [
+                    "whole_baseline_source=cofecha_terminal_lag",
+                    "cofecha_terminal_segments=3",
+                    "cofecha_terminal_consistency=1.000000",
+                ],
+            },
+        };
+        const result = selectReviewWindowDisplay(
+            audit([], { finalReason: "emitted" }),
+            [],
+            [],
+            {},
+            jointDecision(selected, "detected"),
+        );
+
+        expect(result).toMatchObject({
+            status: "strict",
+            reason: "strict_event",
+            sourceStage: "detected",
+            event: { eventType: "wholeSeriesMove", shiftYears: -5 },
+        });
+        expect(result.event).toBe(selected);
+    });
+
     it("does not recover another checkpoint after the joint adjudicator refuses", () => {
         const result = selectReviewWindowDisplay(
             audit([snapshot("missingRing")]),

@@ -170,4 +170,72 @@ describe("joint event adjudicator", () => {
             event: null,
         });
     });
+
+    it("lets a sequential head resolve an unverified whole alias", () => {
+        const whole = event("whole", "wholeSeriesMove", 1600, 2000, 0);
+        whole.shiftYears = -5;
+        const genericHead = event("generic-head", "missingRing", 1899, 1905, 1902);
+        genericHead.evidence.algorithmSources = ["sequential_missing_staircase_head"];
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("final", whole),
+            checkpoint("final", genericHead),
+        ]);
+
+        expect(decision.event?.eventType).toBe("missingRing");
+    });
+
+    it("allows independent per-reference missing evidence to resolve a whole alias", () => {
+        const whole = event("whole", "wholeSeriesMove", 1600, 2000, 0);
+        whole.shiftYears = -5;
+        const independent = event("independent", "missingRing", 1899, 1905, 1902);
+        independent.evidence.algorithmSources = [
+            "per_reference_intermediate_lag_consensus",
+        ];
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("final", whole),
+            checkpoint("final", independent),
+        ]);
+
+        expect(decision.event?.eventType).toBe("missingRing");
+    });
+
+    it("retains an earlier terminal whole baseline when final synthesis drops it", () => {
+        const whole = event("terminal-whole", "wholeSeriesMove", 1600, 2000, 0);
+        whole.shiftYears = -5;
+        whole.evidence.notes = [
+            "whole_baseline_source=cofecha_terminal_lag",
+            "cofecha_terminal_segments=3",
+            "cofecha_terminal_consistency=1.000000",
+        ];
+        const genericHead = event("generic-head", "missingRing", 1899, 1905, 1902);
+        genericHead.evidence.algorithmSources = ["sequential_missing_staircase_head"];
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("detected", whole),
+            checkpoint("final", genericHead),
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "detected",
+            event: { eventType: "wholeSeriesMove", shiftYears: -5 },
+        });
+    });
+
+    it("resolves a terminal unit whole alias with a matching newer-end staircase", () => {
+        const whole = event("terminal-unit", "wholeSeriesMove", 1600, 2000, 0);
+        whole.shiftYears = -1;
+        whole.evidence.notes = [
+            "whole_baseline_source=cofecha_terminal_lag",
+            "cofecha_terminal_segments=3",
+            "cofecha_terminal_consistency=1.000000",
+        ];
+        const endpoint = event("endpoint", "missingRing", 1994, 2000, 1999);
+        endpoint.evidence.algorithmSources = ["sequential_missing_staircase_head"];
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("detected", whole),
+            checkpoint("final", endpoint),
+        ]);
+
+        expect(decision.event?.eventType).toBe("missingRing");
+    });
 });

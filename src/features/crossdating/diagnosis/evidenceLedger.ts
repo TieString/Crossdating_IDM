@@ -73,6 +73,13 @@ const operationClaims = (event: DiagnosisEvent): DiagnosisEvidenceClaim[] => {
         && tokens.has("whole_state_global_lag_matches_shift=true")) {
         claims.push("whole_global_lag");
     }
+    if (event.eventType === "wholeSeriesMove"
+        && tokens.has("whole_baseline_source=cofecha_terminal_lag")
+        && (numberFromNotes(event, ["cofecha_terminal_segments="]) ?? 0) >= 2
+        && (numberFromNotes(event, ["cofecha_terminal_consistency="]) ?? 0) >= 0.9
+        && (event.shiftYears ?? 0) !== 0) {
+        claims.push("whole_terminal_baseline");
+    }
     return claims;
 };
 

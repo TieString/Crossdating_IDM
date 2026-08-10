@@ -111,6 +111,7 @@ const claimWeight: Record<DiagnosisEvidenceClaim, number> = {
     joint_operation: 0.8,
     continuous_gap_consensus: 0.9,
     whole_global_lag: 0.6,
+    whole_terminal_baseline: 0.9,
 };
 
 const claimStrength = (events: readonly DiagnosisEvent[]): number => Math.max(
@@ -254,18 +255,56 @@ const hasFinalCheckpoint = (cluster: HypothesisCluster): boolean => (
     cluster.checkpoints.some(({ stage }) => stage === "final")
 );
 
+const isNewerEndpointUnitAlias = (
+    whole: DiagnosisEvent,
+    local: DiagnosisEvent,
+): boolean => {
+    const year = topYear(local);
+    const operationMatches = whole.shiftYears === -1
+        ? local.eventType === "missingRing"
+        : whole.shiftYears === 1 && local.eventType === "falseRing";
+    return operationMatches
+        && year !== null
+        && year >= whole.endYear - 3;
+};
+
 const finalFrontierClusters = (
     clusters: readonly HypothesisCluster[],
     config: JointEventAdjudicationConfig,
 ): HypothesisCluster[] | null => {
     const finalClusters = clusters.filter(hasFinalCheckpoint);
     if (finalClusters.length === 0) return null;
+    const protectedWholeClusters = clusters.filter((cluster) => {
+        const event = representative(cluster).event;
+        return event.eventType === "wholeSeriesMove"
+            && evidenceClaimsFor(event).has("whole_terminal_baseline");
+    });
     const wholeClusters = finalClusters.filter((cluster) => (
         representative(cluster).event.eventType === "wholeSeriesMove"
     ));
     const localClusters = finalClusters.filter((cluster) => (
         representative(cluster).event.eventType !== "wholeSeriesMove"
     ));
+    if (protectedWholeClusters.length > 0) {
+        const decisiveLocal = localClusters.filter((cluster) => {
+            const local = representative(cluster).event;
+            const claims = evidenceClaimsFor(local);
+            return claims.has("fixed_side_resolution")
+                || claims.has("independent_reference_staircase")
+                || (
+                    claims.has("explicit_missing_staircase")
+                    && protectedWholeClusters.every((wholeCluster) => (
+                        isNewerEndpointUnitAlias(
+                            representative(wholeCluster).event,
+                            local,
+                        )
+                    ))
+                );
+        });
+        return decisiveLocal.length > 0
+            ? decisiveLocal
+            : protectedWholeClusters;
+    }
     if (wholeClusters.length > 0) {
         const decisiveLocal = localClusters.filter((cluster) => {
             const claims = evidenceClaimsFor(representative(cluster).event);

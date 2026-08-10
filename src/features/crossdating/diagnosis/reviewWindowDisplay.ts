@@ -1,3 +1,4 @@
+import { evidenceClaimsFor } from "./evidenceLedger";
 import type {
     DiagnosisEvent,
     DiagnosisEventDecisionAudit,
@@ -385,7 +386,9 @@ const selectAdjudicatedReviewWindowDisplay = (
         && !config.allowedWindowWidths.includes(width)) {
         return refused(audit, "window_width_unsafe");
     }
-    if (decision.sourceStage === "final") {
+    const independentlyStrictWhole = event.eventType === "wholeSeriesMove"
+        && evidenceClaimsFor(event).has("whole_terminal_baseline");
+    if (decision.sourceStage === "final" || independentlyStrictWhole) {
         if (event.eventType === "partialMove"
             && !hasReviewablePartialMoveEvidence(event, config)) {
             return refused(audit, "partial_move_evidence_insufficient");

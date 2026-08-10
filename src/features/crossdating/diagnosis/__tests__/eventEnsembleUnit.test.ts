@@ -790,6 +790,26 @@ describe("hasCandidateBackedSequentialFalseDirection", () => {
             .toBe(true);
     });
 
+    it("accepts a hard-gated candidate even without a piecewise path event", () => {
+        const candidateBacked = falseRingEvent(1900, false);
+        candidateBacked.evidence.algorithmSources = ["joint_event_counterfactual"];
+        candidateBacked.evidence.notes = ["candidate_hard_gate_passed"];
+
+        expect(hasCandidateBackedSequentialFalseDirection([candidateBacked]))
+            .toBe(true);
+    });
+
+    it("interprets a false-ring step relative to a non-zero whole baseline", () => {
+        const candidateBacked = falseRingEvent(1900, false);
+        candidateBacked.evidence.lagBefore = -4;
+        candidateBacked.evidence.lagAfter = -5;
+        candidateBacked.evidence.algorithmSources = ["joint_event_counterfactual"];
+        candidateBacked.evidence.notes = ["candidate_hard_gate_passed"];
+
+        expect(hasCandidateBackedSequentialFalseDirection([candidateBacked]))
+            .toBe(true);
+    });
+
     it("rejects isolated joint and candidate aliases without cross-channel agreement", () => {
         const jointOnly = falseRingEvent(1900, false);
         jointOnly.evidence.algorithmSources.push("joint_event_counterfactual");
@@ -829,8 +849,8 @@ describe("hasCompressedSequentialFalseDirection", () => {
 
     it("rejects the same range candidate without a positive false frontier", () => {
         const negative = falseRingEvent(1900, false);
-        negative.evidence.lagBefore = -2;
-        negative.evidence.lagAfter = -3;
+        negative.evidence.lagBefore = -3;
+        negative.evidence.lagAfter = -2;
         expect(hasCompressedSequentialFalseDirection(
             [negative],
             [{

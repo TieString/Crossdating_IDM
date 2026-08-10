@@ -2923,12 +2923,13 @@ export const hasCandidateBackedSequentialFalseDirection = (
     events: readonly DiagnosisEvent[],
 ): boolean => events.some((event) => (
     event.eventType === "falseRing"
-    && event.evidence.lagBefore === 1
-    && event.evidence.lagAfter === 0
-    && event.evidence.algorithmSources.includes("piecewise_lag_path")
+    && event.evidence.lagBefore !== null
+    && event.evidence.lagAfter !== null
+    && event.evidence.lagBefore === event.evidence.lagAfter + 1
     && event.evidence.algorithmSources.includes("joint_event_counterfactual")
     && (
         event.evidence.notes.includes("counterfactual_candidate_support")
+        || event.evidence.notes.includes("candidate_hard_gate_passed")
         || event.evidence.notes.includes(
             "window_refinement=raw_path_candidate_consensus",
         )
@@ -2942,8 +2943,9 @@ export const hasCompressedSequentialFalseDirection = (
     targetTree: string,
 ): boolean => events.some((event) => (
     event.eventType === "falseRing"
-    && event.evidence.lagBefore === 1
-    && event.evidence.lagAfter === 0
+    && event.evidence.lagBefore !== null
+    && event.evidence.lagAfter !== null
+    && event.evidence.lagBefore === event.evidence.lagAfter + 1
 )) && candidates.some((candidate) => (
     candidate.targetTree === targetTree
     && candidate.operationType === "SHIFT_RANGE"
