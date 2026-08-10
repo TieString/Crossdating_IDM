@@ -238,6 +238,9 @@ export function diagnoseCrossdating(
             sharedZeroMarkerMode:
                 options.sharedZeroMarkerMode
                 ?? INTERNAL_EVENT_ENSEMBLE_OPTIONS.sharedZeroMarkerMode,
+            preferRemotePairedMissingFrontier:
+                options.referenceConfig?.cofechaPassReference?.source
+                === "pairwise_bootstrap",
             ...(eventDecisionAudits ? { eventDecisionAudits } : {}),
             ...(reviewEventCheckpoints ? { reviewEventCheckpoints } : {}),
             supplementalCandidates,

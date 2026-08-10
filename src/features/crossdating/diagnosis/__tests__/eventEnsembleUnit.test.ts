@@ -24,6 +24,7 @@ import {
     supportsSequentialMissingReplacementOfPartial,
     pruneWholeSeriesPartialAliases,
     pruneUnsupportedFalseRingPathSupplements,
+    preserveNewestCandidateUnitCheckpoint,
     shouldPreserveCandidateBackedUnitFromRemoteSequentialHead,
     unitEventCompetesWithWholeAtNewerEndpoint,
     unitEventExplainsWholeSeriesCandidate,
@@ -1289,6 +1290,57 @@ describe("remote sequential missing-head protection", () => {
             [pathCandidate],
             1994,
         )).toBe(false);
+    });
+
+    it("protects a low-confidence paired cold-start frontier from a remote path head", () => {
+        const detected = missingAt(1902, true);
+        detected.confidenceLevel = "low";
+        detected.evidence.algorithmSources.push(
+            "paired_core_cold_start_frontier",
+        );
+
+        expect(shouldPreserveCandidateBackedUnitFromRemoteSequentialHead(
+            [detected],
+            [missingAt(1789, true)],
+            1851,
+        )).toBe(true);
+    });
+
+    it("keeps the newest hard-gated unit candidate even without a COFECHA source", () => {
+        const incumbent = missingAt(1851, false);
+        const newer = missingAt(1977, true);
+        newer.evidence.notes = ["candidate_hard_gate_passed"];
+        newer.evidence.score = 16;
+        const olderCofecha = missingAt(1900, true);
+        olderCofecha.evidence.algorithmSources.push("cofecha_segment_lag");
+        olderCofecha.evidence.notes = ["candidate_hard_gate_passed"];
+        olderCofecha.evidence.score = 20;
+
+        const [selected] = preserveNewestCandidateUnitCheckpoint(
+            [incumbent],
+            [olderCofecha, newer],
+            true,
+        );
+
+        expect(selected.rankedYears[0]?.year).toBe(1977);
+        expect(selected.evidence.algorithmSources)
+            .toContain("candidate_frontier_checkpoint");
+    });
+
+    it("keeps independent frontier candidates disabled outside pairwise cold start", () => {
+        const incumbent = missingAt(1851, false);
+        const newer = missingAt(1977, true);
+        newer.evidence.notes = ["candidate_hard_gate_passed"];
+        const olderCofecha = missingAt(1900, true);
+        olderCofecha.evidence.algorithmSources.push("cofecha_segment_lag");
+        olderCofecha.evidence.notes = ["candidate_hard_gate_passed"];
+
+        const [selected] = preserveNewestCandidateUnitCheckpoint(
+            [incumbent],
+            [olderCofecha, newer],
+        );
+
+        expect(selected.rankedYears[0]?.year).toBe(1900);
     });
 });
 

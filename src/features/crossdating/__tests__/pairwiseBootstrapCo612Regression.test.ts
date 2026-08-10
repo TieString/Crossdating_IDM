@@ -20,7 +20,7 @@ const outPath = `${fixtureRoot}/VERYCOF.OUT`;
 describe.skipIf(!existsSync(statePath) || !existsSync(outPath))(
     "co612 all-flagged pairwise bootstrap",
     () => {
-        it("recovers the 1977 review frontier without target self-correlation", () => {
+        it("recovers newest review frontiers without target self-correlation", () => {
             const siteData: RwlSiteData = new Map(Array.from(
                 parseRwl(readFileSync(statePath, "utf8")),
                 ([seriesId, series]) => [seriesId, new Map(series.valuesByYear)],
@@ -38,7 +38,14 @@ describe.skipIf(!existsSync(statePath) || !existsSync(outPath))(
 
             expect(flaggedAIds).toHaveLength(55);
             expect(sharedReference?.selectedTrees).toHaveLength(41);
-            for (const targetTree of ["mon031", "mon121", "mon122"]) {
+            const expectedFrontiers = new Map([
+                ["mon031", 1977],
+                ["mon032", 1977],
+                ["mon121", 1977],
+                ["mon122", 1977],
+                ["mon221", 1902],
+            ]);
+            for (const [targetTree, truthYear] of expectedFrontiers) {
                 const targetReference = createPairwiseBootstrapTargetReferenceConfig(
                     siteData,
                     sharedReference,
@@ -50,11 +57,24 @@ describe.skipIf(!existsSync(statePath) || !existsSync(outPath))(
                     targetTrees: [targetTree],
                     cofechaText,
                     reviewWindowDisplayMode: "review",
+                    includeEventDecisionAudits: true,
                 });
                 const event = diagnosis.reviewEvents?.[0] ?? diagnosis.events[0];
-                expect(event?.eventType).toBe("missingRing");
-                expect(event?.startYear).toBeLessThanOrEqual(1977);
-                expect(event?.endYear).toBeGreaterThanOrEqual(1977);
+                const context = JSON.stringify({
+                    targetTree,
+                    event,
+                    audit: diagnosis.eventDecisionAudits?.[0],
+                });
+                expect(event?.eventType, context).toBe("missingRing");
+                expect(event?.startYear, context).toBeLessThanOrEqual(truthYear);
+                expect(event?.endYear, context).toBeGreaterThanOrEqual(truthYear);
+                if (
+                    targetTree === "mon031"
+                    || targetTree === "mon032"
+                    || targetTree === "mon221"
+                ) {
+                    expect(event?.rankedYears[0]?.year, context).toBe(truthYear);
+                }
             }
         }, 30_000);
     },

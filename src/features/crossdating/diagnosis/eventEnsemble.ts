@@ -172,6 +172,8 @@ export type DiagnosisEventEnsembleOptions = {
     cofechaFlaggedSeriesIds?: readonly string[];
     /** Shared zeros may only rerank a lag-derived head in production local2 mode. */
     sharedZeroMarkerMode?: SharedZeroMarkerMode;
+    /** All-flagged cold start may use a target-specific paired core as a relative frontier. */
+    preferRemotePairedMissingFrontier?: boolean;
     /** Optional caller-owned sink. Recording must never affect event selection. */
     eventDecisionAudits?: DiagnosisEventDecisionAudit[];
     /** Full immutable hypotheses for review adjudication; never reconstructed from audit snapshots. */
@@ -1844,13 +1846,15 @@ export const shouldPreserveCandidateBackedUnitFromRemoteSequentialHead = (
     if (candidateSupportsHead) return false;
 
     return detected.some((event) => {
+        const hasIndependentLocation = event.evidence.algorithmSources.includes(
+            "cofecha_segment_lag",
+        ) || event.evidence.algorithmSources.includes(
+            "paired_core_cold_start_frontier",
+        );
         if (event.eventType !== "missingRing"
-            || (
-                event.confidenceLevel === "low"
-                && !event.evidence.algorithmSources.includes(
-                    "cofecha_segment_lag",
-                )
-            )) return false;
+            || (event.confidenceLevel === "low" && !hasIndependentLocation)) {
+            return false;
+        }
         const candidateBacked = event.evidence.candidateIds.length > 0
             || candidateEvents.some((candidate) => (
                 candidate.eventType === "missingRing"
@@ -1864,19 +1868,27 @@ export const shouldPreserveCandidateBackedUnitFromRemoteSequentialHead = (
     });
 };
 
-/** Keeps the newest COFECHA transition checkpoint from being absorbed by an older lag plateau. */
-const preserveNewestCofechaUnitCheckpoint = (
+/** Keeps the newest hard-gated unit frontier from being absorbed by an older lag plateau. */
+export const preserveNewestCandidateUnitCheckpoint = (
     events: DiagnosisEvent[],
     candidateEvents: readonly DiagnosisEvent[],
+    allowIndependentCandidates = false,
 ): DiagnosisEvent[] => {
     const checkpoints = candidateEvents.filter((event) => (
         event.eventType === "missingRing"
-        && event.evidence.algorithmSources.includes("cofecha_segment_lag")
         && event.evidence.notes.includes("candidate_hard_gate_passed")
-    )).sort((left, right) => (
-        right.evidence.score - left.evidence.score
-        || rankedEventYear(right) - rankedEventYear(left)
-    ));
+        && (
+            event.evidence.algorithmSources.includes("cofecha_segment_lag")
+            || (
+                allowIndependentCandidates
+                && event.evidence.candidateIds.length > 0
+            )
+        )
+    )).sort((left, right) => allowIndependentCandidates
+        ? rankedEventYear(right) - rankedEventYear(left)
+            || right.evidence.score - left.evidence.score
+        : right.evidence.score - left.evidence.score
+            || rankedEventYear(right) - rankedEventYear(left));
     const checkpoint = checkpoints[0];
     if (!checkpoint) return events;
     const incumbent = events.find((event) => (
@@ -1886,18 +1898,24 @@ const preserveNewestCofechaUnitCheckpoint = (
     ));
     if (!incumbent) return events;
 
+    const checkpointSource = allowIndependentCandidates
+        ? "candidate_frontier_checkpoint"
+        : "cofecha_boundary_checkpoint";
+    const notePrefix = allowIndependentCandidates
+        ? "candidate_frontier"
+        : "cofecha_boundary";
     const retained: DiagnosisEvent = {
         ...checkpoint,
         evidence: {
             ...checkpoint.evidence,
             algorithmSources: Array.from(new Set([
                 ...checkpoint.evidence.algorithmSources,
-                "cofecha_boundary_checkpoint",
+                checkpointSource,
             ])).sort(),
             notes: [
                 ...checkpoint.evidence.notes,
-                `cofecha_boundary_replaced_remote_top=${rankedEventYear(incumbent)}`,
-                `cofecha_boundary_checkpoint_top=${rankedEventYear(checkpoint)}`,
+                `${notePrefix}_replaced_remote_top=${rankedEventYear(incumbent)}`,
+                `${notePrefix}_checkpoint_top=${rankedEventYear(checkpoint)}`,
             ],
         },
     };
@@ -4256,6 +4274,10 @@ const eventsForSeriesPass = (
                 diagnosis,
                 siteData,
                 directEvents.find((candidate) => candidate.eventType === event.eventType) ?? null,
+                {
+                    preferRemotePairedMissingFrontier:
+                        options.preferRemotePairedMissingFrontier === true,
+                },
             ));
         })()
         : refinedUnitEvents;
@@ -5063,9 +5085,10 @@ export const makeDiagnosisEvents = (
                 ? stripDiagnosisEventAlternatives
                 : keepSingleMainWindow,
         );
-        const displayed = preserveNewestCofechaUnitCheckpoint(
+        const displayed = preserveNewestCandidateUnitCheckpoint(
             projectedDisplayed,
             candidateEvents,
+            options.preferRemotePairedMissingFrontier === true,
         );
         const isValidAutomaticEvent = (event: DiagnosisEvent): boolean => (
             event.eventType !== "partialMove"
@@ -5342,6 +5365,11 @@ export const makeDiagnosisEvents = (
             }
             if (event.evidence.algorithmSources.includes(
                 "series_endpoint_review_window",
+            )) {
+                return event;
+            }
+            if (event.evidence.algorithmSources.includes(
+                "paired_core_cold_start_frontier",
             )) {
                 return event;
             }

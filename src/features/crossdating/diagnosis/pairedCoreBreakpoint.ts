@@ -27,6 +27,30 @@ export type PairedCoreBreakpoint = {
     referenceCount: number;
 };
 
+export type IndependentBreakpointRefinementOptions = {
+    preferRemotePairedMissingFrontier?: boolean;
+};
+
+const MIN_COLD_START_PAIRED_REMOTE_MARGIN = 0.005;
+const MIN_COLD_START_PAIRED_FRONTIER_DISTANCE_YEARS = 14;
+
+/** A target-specific paired core can anchor a frontier while the all-flagged master is unstable. */
+export const shouldPreferRemotePairedMissingFrontier = (
+    event: DiagnosisEvent,
+    paired: PairedCoreBreakpoint,
+    directYear: number,
+    enabled: boolean,
+): boolean => {
+    if (!enabled || event.eventType !== "missingRing") return false;
+    const currentCenter = Math.round((event.startYear + event.endYear) / 2);
+    return paired.referenceCount >= 1
+        && paired.remoteMargin >= MIN_COLD_START_PAIRED_REMOTE_MARGIN
+        && paired.year - currentCenter
+            >= MIN_COLD_START_PAIRED_FRONTIER_DISTANCE_YEARS
+        && Math.abs(paired.year - directYear) > 5
+        && (event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY) <= 0;
+};
+
 const firstDifferences = (series: NumericSeries): NumericSeries => {
     const entries = Array.from(series.entries()).sort((a, b) => a[0] - b[0]);
     const result = new Map<number, number>();
@@ -557,6 +581,7 @@ export const refineUnitEventWithIndependentBreakpoints = (
     diagnosis: SeriesCoreDiagnosis,
     siteData: RwlSiteData,
     directEvent: DiagnosisEvent | null,
+    options: IndependentBreakpointRefinementOptions = {},
 ): DiagnosisEvent => {
     if (event.eventType !== "missingRing" && event.eventType !== "falseRing") return event;
     const directYear = directEvent?.rankedYears[0]?.year;
@@ -601,6 +626,47 @@ export const refineUnitEventWithIndependentBreakpoints = (
     const currentCenter = Math.round((event.startYear + event.endYear) / 2);
     const pairDirectDistance = Math.abs(paired.year - directYear);
     const pairCurrentDistance = Math.abs(paired.year - currentCenter);
+    if (shouldPreferRemotePairedMissingFrontier(
+        auditedEvent,
+        paired,
+        directYear,
+        options.preferRemotePairedMissingFrontier === true,
+    )) {
+        const width = event.endYear - event.startYear + 1;
+        const window = boundedWindow(
+            paired.year,
+            width,
+            diagnosis.targetRange.startYear,
+            diagnosis.targetRange.endYear,
+        );
+        return {
+            ...auditedEvent,
+            id: `${event.id}-paired-cold-start-${window.startYear}-${window.endYear}`,
+            ...window,
+            rankedYears: Array.from({ length: width }, (_, index) => {
+                const year = window.startYear + index;
+                return {
+                    year,
+                    rank: index + 1,
+                    score: 1 / (1 + Math.abs(year - paired.year)),
+                    evidenceTags: ["paired_core_cold_start_frontier"],
+                };
+            }).sort((a, b) => b.score - a.score || b.year - a.year)
+                .map((row, index) => ({ ...row, rank: index + 1 })),
+            evidence: {
+                ...auditedEvent.evidence,
+                algorithmSources: Array.from(new Set([
+                    ...auditedEvent.evidence.algorithmSources,
+                    "paired_core_cold_start_frontier",
+                ])).sort(),
+                notes: [
+                    ...auditedEvent.evidence.notes,
+                    "window_refinement=paired_core_cold_start_frontier",
+                    `window_before=${event.startYear}-${event.endYear}`,
+                ],
+            },
+        };
+    }
     const accepted = event.eventType === "missingRing"
         ? pairDirectDistance <= 5 && pairCurrentDistance >= 4
         : pairDirectDistance <= 1
