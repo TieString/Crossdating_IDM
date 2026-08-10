@@ -2336,6 +2336,24 @@ export const refineEventWithCounterfactualLocator = (
                         Math.max(0, ...pairRows.map((row) => row.referenceCount))
                     }`,
                 ],
+                locationEvidence: [
+                    ...(event.evidence.locationEvidence ?? []),
+                    {
+                        source: "full_interval_counterfactual_locator",
+                        startYear: finalWindow.startYear,
+                        endYear: finalWindow.endYear,
+                        topYear: rankedYears[0]?.year ?? null,
+                        referenceCount: Math.max(
+                            0,
+                            ...pairRows.map((row) => row.referenceCount),
+                        ),
+                        concentration: learnedUnitWindow?.nineYearSafety
+                            ?? calibratedWindow!.concentration,
+                        remoteMargin: learnedUnitWindow?.remoteMargin
+                            ?? calibratedWindow!.remoteMargin,
+                        calibrated: learnedUnitWindow !== null,
+                    },
+                ],
             },
         },
     };

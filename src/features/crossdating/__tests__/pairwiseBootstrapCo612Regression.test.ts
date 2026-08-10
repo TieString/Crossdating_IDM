@@ -38,14 +38,44 @@ describe.skipIf(!existsSync(statePath) || !existsSync(outPath))(
 
             expect(flaggedAIds).toHaveLength(55);
             expect(sharedReference?.selectedTrees).toHaveLength(41);
-            const expectedFrontiers = new Map([
-                ["mon031", 1977],
-                ["mon032", 1977],
-                ["mon121", 1977],
-                ["mon122", 1977],
-                ["mon221", 1902],
+            const expectedFrontiers = new Map<string, {
+                truthYear: number;
+                startYear: number;
+                endYear: number;
+                topYear: number;
+            }>([
+                ["mon031", {
+                    truthYear: 1977,
+                    startYear: 1967,
+                    endYear: 1979,
+                    topYear: 1977,
+                }],
+                ["mon032", {
+                    truthYear: 1977,
+                    startYear: 1969,
+                    endYear: 1981,
+                    topYear: 1977,
+                }],
+                ["mon121", {
+                    truthYear: 1979,
+                    startYear: 1976,
+                    endYear: 1982,
+                    topYear: 1979,
+                }],
+                ["mon122", {
+                    truthYear: 1977,
+                    startYear: 1974,
+                    endYear: 1980,
+                    topYear: 1977,
+                }],
+                ["mon221", {
+                    truthYear: 1902,
+                    startYear: 1899,
+                    endYear: 1905,
+                    topYear: 1902,
+                }],
             ]);
-            for (const [targetTree, truthYear] of expectedFrontiers) {
+            for (const [targetTree, expected] of expectedFrontiers) {
                 const targetReference = createPairwiseBootstrapTargetReferenceConfig(
                     siteData,
                     sharedReference,
@@ -66,14 +96,41 @@ describe.skipIf(!existsSync(statePath) || !existsSync(outPath))(
                     audit: diagnosis.eventDecisionAudits?.[0],
                 });
                 expect(event?.eventType, context).toBe("missingRing");
-                expect(event?.startYear, context).toBeLessThanOrEqual(truthYear);
-                expect(event?.endYear, context).toBeGreaterThanOrEqual(truthYear);
-                if (
-                    targetTree === "mon031"
-                    || targetTree === "mon032"
-                    || targetTree === "mon221"
-                ) {
-                    expect(event?.rankedYears[0]?.year, context).toBe(truthYear);
+                expect(event?.startYear, context).toBe(expected.startYear);
+                expect(event?.endYear, context).toBe(expected.endYear);
+                expect(event?.startYear, context)
+                    .toBeLessThanOrEqual(expected.truthYear);
+                expect(event?.endYear, context)
+                    .toBeGreaterThanOrEqual(expected.truthYear);
+                expect(event?.rankedYears[0]?.year, context).toBe(expected.topYear);
+                if (targetTree === "mon221") {
+                    const decision = diagnosis.eventDecisionAudits?.[0]
+                        ?.locatorDecisions?.find((candidate) => (
+                            candidate.reason
+                                === "fallback_overlapping_precision_regression"
+                        ));
+                    expect(decision, context).toMatchObject({
+                        accepted: false,
+                        structuredCheckpoint: true,
+                        structuredProposal: true,
+                        precisionRegression: true,
+                        checkpointTopYear: 1902,
+                        proposedTopYear: 1898,
+                        checkpointWidth: 7,
+                        proposedWidth: 13,
+                        preLocatorEvent: {
+                            startYear: 1899,
+                            endYear: 1905,
+                        },
+                        proposedEvent: {
+                            startYear: 1893,
+                            endYear: 1905,
+                        },
+                        selectedEvent: {
+                            startYear: 1899,
+                            endYear: 1905,
+                        },
+                    });
                 }
             }
         }, 30_000);

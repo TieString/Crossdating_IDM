@@ -12,6 +12,7 @@
 - [src/features/crossdating/diagnosis/eventOperationRecovery.ts](src/features/crossdating/diagnosis/eventOperationRecovery.ts)：事件操作恢复、单主窗口快速验证与窗口内多证据年份共识入口
 - [src/features/crossdating/diagnosis/endpointResidualWindow.ts](src/features/crossdating/diagnosis/endpointResidualWindow.ts)：单缺轮/伪轮的多参考残差后验窄窗入口
 - [src/features/crossdating/diagnosis/eventPath.ts](src/features/crossdating/diagnosis/eventPath.ts)：受约束 piecewise lag path 与事件边界定位入口
+- [src/features/crossdating/diagnosis/eventAdjudicator.ts](src/features/crossdating/diagnosis/eventAdjudicator.ts)：定位提案字段契约、证据优势判断与弱定位回退入口
 - [docs/js-internal-diagnosis-events-report.md](docs/js-internal-diagnosis-events-report.md)：JS 内部诊断的指标定义、数据拆分、冻结保留集和广域 ITRDB 准确度
 - [src/services/fs/io.ts](src/services/fs/io.ts)：文件读写辅助与解析桥接
 - [src/services/cofecha/runner.ts](src/services/cofecha/runner.ts)：COFECHA 执行与 OUT 文件处理
@@ -131,6 +132,7 @@
 - 2026-08-03 唯一一次 untouched holdout-v8 最终生产审计（615 个文件，120 个任意日历位置，`ITRDB_UNIT_EVENTS_ONLY=1`）：排除 8 个注入前已有内部标记的样本后，正式分母为 112。缺轮响应 111/112=99.11%，唯一主窗口覆盖 102/112=91.07%，已回答精度 102/111=91.89%，窗口直方图 `7:1 / 9:65 / 13:45`；伪轮响应 110/112=98.21%，覆盖 101/112=90.18%，已回答精度 101/110=91.82%，窗口直方图 `7:8 / 9:66 / 13:36`。两类中位/P90 均为 9/13 年，正式干净误报 0/112。缺轮 Top1/Top1±1/Top3 为 28.57%/58.93%/67.86%，伪轮为 33.93%/54.46%/64.29%，覆盖案例真值中位排名均为 2；Top1 仍不是精确事件年保证。包含 8 个基线异常样本的全采样压力口径中，缺轮/伪轮覆盖为 89.17%/87.50%，干净误报为 8/120=6.67%，必须与正式基线干净指标分开。v8 已消费且规则冻结，禁止据此调参或重跑；局部移动 case 为 0，仍未修改或验收。
 - COFECHA-pass reference 与 COFECHA run/rwlHash 绑定；RWL 编辑后动态 reference 标记为 stale，直到重新运行 COFECHA。`anchor_pass` 不进入后续整体 offset 检查目标，预留检查入口只使用 `candidate_flagged`。
 - 自动候选仍只允许落到三类可执行编辑：`insertMissingYear`、`deleteFalseYear`、`batchMoveYears`（包含 `wholeSeriesMove` 与 `partialRangeMove`）。`wholeSeriesMove` 必须来自整条序列移动证据，`partialRangeMove` 必须保留 selectedRange/missingRange evidence，不能退化成插入一串 0。
+- 定位器只能在保持操作类型、位移量和 lag 契约时提出位置修改；扩大窗口或改变 Top1 属于精度退化风险，必须由 [src/features/crossdating/diagnosis/eventAdjudicator.ts](src/features/crossdating/diagnosis/eventAdjudicator.ts) 依据类型化 `locationEvidence` 和独立证据优势统一裁决。`locationEvidence.source` 只用于溯源，不得按来源名称直接授予覆盖权。
 - 候选 evidence 需要保留 algorithmSource、before/after metrics、relative confidence（rank/probabilityLike/confidenceLevel），其中 probabilityLike 只表示内部候选相对置信度，不是严格贝叶斯后验概率。
 - 应用诊断候选时必须复用 [src/features/rwl/edit.ts](src/features/rwl/edit.ts) 的编辑路径，并以 `auto-suggested` 来源写入既有操作记录，保留 reason、候选年份、side/shift、selectedRange/missingRange 与 before/after metrics。
 - 每次接受候选后仍然只应用一个候选，随后必须基于当前 working series 重新诊断；旧候选必须 stale。不要恢复 hover 分析，不要新增持久化操作日志/恢复机制，不要把无约束 DTW 作为主算法。

@@ -10,6 +10,8 @@ const event = (
     startYear: number,
     endYear: number,
     notes: string[] = [],
+    topYear = Math.floor((startYear + endYear) / 2),
+    structured = false,
 ): DiagnosisEvent => ({
     id: `partial-${startYear}-${endYear}`,
     seriesId: "TARGET",
@@ -17,7 +19,7 @@ const event = (
     startYear,
     endYear,
     rankedYears: [{
-        year: Math.floor((startYear + endYear) / 2),
+        year: topYear,
         rank: 1,
         score: 1,
         evidenceTags: [],
@@ -35,6 +37,16 @@ const event = (
         samplePairs: 80,
         candidateIds: ["candidate-1"],
         notes,
+        locationEvidence: structured ? [{
+            source: "test_locator",
+            startYear,
+            endYear,
+            topYear,
+            referenceCount: 5,
+            concentration: null,
+            remoteMargin: null,
+            calibrated: false,
+        }] : undefined,
     },
     alternativeTypes: [],
     shiftYears: -4,
@@ -54,6 +66,53 @@ describe("event hypothesis locator adjudication", () => {
             overlapYears: 7,
         });
         expect(result.event.startYear).toBe(1797);
+    });
+
+    it("keeps a structured checkpoint when an overlapping weak locator widens it and degrades Top1", () => {
+        const sharedNotes = [
+            "paired_breakpoint_year=1902",
+            "local_raw_boundary_year=1902",
+            "reference_vote_year=1901",
+        ];
+        const checkpoint = event(1899, 1905, sharedNotes, 1902, true);
+        const proposal = event(1893, 1905, [
+            ...sharedNotes,
+            "counterfactual_window_concentration=0",
+            "counterfactual_window_remote_margin=0",
+            "counterfactual_coarse_overlap_consensus=0",
+            "counterfactual_pair_reference_count=10",
+        ], 1898, true);
+        const result = adjudicateLocatorProposal(checkpoint, proposal);
+
+        expect(result).toMatchObject({
+            accepted: false,
+            reason: "fallback_overlapping_precision_regression",
+            precisionRegression: true,
+        });
+        expect(result.event).toMatchObject({
+            startYear: 1899,
+            endYear: 1905,
+        });
+        expect(result.event.rankedYears[0]?.year).toBe(1902);
+    });
+
+    it("allows a precision-changing overlapping proposal when calibrated channels dominate", () => {
+        const checkpoint = event(1899, 1905, [], 1902, true);
+        const proposal = event(1897, 1909, [
+            "counterfactual_window_concentration=0.72",
+            "counterfactual_window_remote_margin=0.11",
+            "counterfactual_coarse_overlap_consensus=0.67",
+            "counterfactual_coarse_model_margin=0.10",
+            "counterfactual_pair_reference_count=8",
+        ], 1904, true);
+        const result = adjudicateLocatorProposal(checkpoint, proposal);
+
+        expect(result).toMatchObject({
+            accepted: true,
+            reason: "accepted_overlapping_strong_mode",
+            precisionRegression: true,
+        });
+        expect(result.event.rankedYears[0]?.year).toBe(1904);
     });
 
     it("falls back when a locator proposal changes operation or shift", () => {

@@ -16,6 +16,15 @@ export type LocatorAdjudicationEvidence = {
     checkpointLocationFamilyCount: number;
     locationFamilyAdvantage: number;
     operationLocationGain: number;
+    structuredCheckpoint: boolean;
+    structuredProposal: boolean;
+    checkpointTopYear: number | null;
+    proposedTopYear: number | null;
+    checkpointWidth: number;
+    proposedWidth: number;
+    checkpointTopFamilyCount: number;
+    proposedTopFamilyCount: number;
+    precisionRegression: boolean;
 };
 
 export type LocatorProposalAdjudication = {
@@ -27,6 +36,7 @@ export type LocatorProposalAdjudication = {
     centerDistanceYears: number;
     operationContractValid: boolean;
     detachedEvidenceStrong: boolean;
+    precisionRegression: boolean;
     evidence: LocatorAdjudicationEvidence;
 };
 
@@ -77,6 +87,23 @@ const centerYear = (
     event: Pick<DiagnosisEvent, "startYear" | "endYear">,
 ): number => (event.startYear + event.endYear) / 2;
 
+const primaryYear = (event: DiagnosisEvent): number | null => (
+    [...event.rankedYears].sort((left, right) => (
+        left.rank - right.rank || right.score - left.score || right.year - left.year
+    ))[0]?.year ?? null
+);
+
+const windowWidth = (
+    event: Pick<DiagnosisEvent, "startYear" | "endYear">,
+): number => event.endYear - event.startYear + 1;
+
+const structuredLocationEvidenceForWindow = (
+    event: DiagnosisEvent,
+    window: Pick<DiagnosisEvent, "startYear" | "endYear">,
+) => [...(event.evidence.locationEvidence ?? [])].reverse().find((entry) => (
+    entry.startYear === window.startYear && entry.endYear === window.endYear
+)) ?? null;
+
 const noteYear = (
     event: DiagnosisEvent,
     prefixes: readonly string[],
@@ -126,6 +153,13 @@ const locationFamilySupport = (
     year >= window.startYear - 1 && year <= window.endYear + 1
 )).length;
 
+const locationFamilyTopSupport = (
+    event: DiagnosisEvent,
+    year: number | null,
+): number => year === null ? 0 : locationFamilyYears(event).filter((candidate) => (
+    Math.abs(candidate - year) <= 1
+)).length;
+
 const sameStringSet = (
     left: readonly string[],
     right: readonly string[],
@@ -164,15 +198,35 @@ const locatorEvidence = (
         proposal,
         checkpoint,
     );
+    const checkpointTopYear = primaryYear(checkpoint);
+    const proposedTopYear = primaryYear(proposal);
+    const checkpointWidth = windowWidth(checkpoint);
+    const proposedWidth = windowWidth(proposal);
+    const checkpointTopFamilyCount = locationFamilyTopSupport(
+        proposal,
+        checkpointTopYear,
+    );
+    const proposedTopFamilyCount = locationFamilyTopSupport(
+        proposal,
+        proposedTopYear,
+    );
+    const checkpointLocationEvidence = structuredLocationEvidenceForWindow(
+        checkpoint,
+        checkpoint,
+    );
+    const proposalLocationEvidence = structuredLocationEvidenceForWindow(
+        proposal,
+        proposal,
+    );
+    const structuredCheckpoint = checkpointLocationEvidence !== null;
+    const structuredProposal = proposalLocationEvidence !== null;
+    const precisionRegression = proposedWidth > checkpointWidth
+        || proposedTopYear !== checkpointTopYear;
     return {
-        concentration: noteNumber(
-        proposal,
-        "counterfactual_window_concentration=",
-        ),
-        remoteMargin: noteNumber(
-        proposal,
-        "counterfactual_window_remote_margin=",
-        ),
+        concentration: proposalLocationEvidence?.concentration
+            ?? noteNumber(proposal, "counterfactual_window_concentration="),
+        remoteMargin: proposalLocationEvidence?.remoteMargin
+            ?? noteNumber(proposal, "counterfactual_window_remote_margin="),
         coarseOverlapConsensus: noteNumber(
         proposal,
         "counterfactual_coarse_overlap_consensus=",
@@ -181,10 +235,8 @@ const locatorEvidence = (
         proposal,
         "counterfactual_coarse_model_margin=",
         ),
-        pairReferenceCount: noteNumber(
-        proposal,
-        "counterfactual_pair_reference_count=",
-        ),
+        pairReferenceCount: proposalLocationEvidence?.referenceCount
+            ?? noteNumber(proposal, "counterfactual_pair_reference_count="),
         partialSideStepRemoteMargin: noteNumber(
         proposal,
         "partial_side_step_remote_margin=",
@@ -199,6 +251,15 @@ const locatorEvidence = (
             noteNumber(proposal, "partial_exhaustive_vote_gain="),
             noteNumber(proposal, "joint_operation_top3_difference_gain="),
         ),
+        structuredCheckpoint,
+        structuredProposal,
+        checkpointTopYear,
+        proposedTopYear,
+        checkpointWidth,
+        proposedWidth,
+        checkpointTopFamilyCount,
+        proposedTopFamilyCount,
+        precisionRegression,
     };
 };
 
@@ -270,6 +331,7 @@ export const adjudicateLocatorProposal = (
             centerDistanceYears: 0,
             operationContractValid: true,
             detachedEvidenceStrong: false,
+            precisionRegression: false,
             evidence,
         };
     }
@@ -287,14 +349,22 @@ export const adjudicateLocatorProposal = (
         evidence,
         overrides,
     );
+    const protectedPrecisionRegression = evidence.structuredCheckpoint
+        && evidence.precisionRegression
+        && !detachedEvidenceStrong;
     const reason: DiagnosisLocatorDecisionReason = !operationContractValid
         ? "fallback_operation_contract"
         : sharedYears > 0
-            ? "accepted_overlapping_mode"
+            ? protectedPrecisionRegression
+                ? "fallback_overlapping_precision_regression"
+                : evidence.precisionRegression && detachedEvidenceStrong
+                    ? "accepted_overlapping_strong_mode"
+                    : "accepted_overlapping_mode"
             : detachedEvidenceStrong
                 ? "accepted_detached_strong_mode"
                 : "fallback_detached_locator_mode";
     const accepted = reason === "accepted_overlapping_mode"
+        || reason === "accepted_overlapping_strong_mode"
         || reason === "accepted_detached_strong_mode";
     const selected = accepted ? proposal : checkpoint;
     return {
@@ -306,6 +376,7 @@ export const adjudicateLocatorProposal = (
         centerDistanceYears,
         operationContractValid,
         detachedEvidenceStrong,
+        precisionRegression: evidence.precisionRegression,
         evidence,
     };
 };

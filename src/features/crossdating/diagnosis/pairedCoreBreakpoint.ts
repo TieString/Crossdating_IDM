@@ -664,6 +664,19 @@ export const refineUnitEventWithIndependentBreakpoints = (
                     "window_refinement=paired_core_cold_start_frontier",
                     `window_before=${event.startYear}-${event.endYear}`,
                 ],
+                locationEvidence: [
+                    ...(auditedEvent.evidence.locationEvidence ?? []),
+                    {
+                        source: "paired_core_breakpoint",
+                        startYear: window.startYear,
+                        endYear: window.endYear,
+                        topYear: paired.year,
+                        referenceCount: paired.referenceCount,
+                        concentration: null,
+                        remoteMargin: paired.remoteMargin,
+                        calibrated: false,
+                    },
+                ],
             },
         };
     }

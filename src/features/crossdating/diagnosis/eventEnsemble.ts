@@ -5063,6 +5063,13 @@ export const makeDiagnosisEvents = (
                     centerDistanceYears: decision.centerDistanceYears,
                     operationContractValid: decision.operationContractValid,
                     detachedEvidenceStrong: decision.detachedEvidenceStrong,
+                    structuredCheckpoint: decision.evidence.structuredCheckpoint,
+                    structuredProposal: decision.evidence.structuredProposal,
+                    precisionRegression: decision.precisionRegression,
+                    checkpointTopYear: decision.evidence.checkpointTopYear,
+                    proposedTopYear: decision.evidence.proposedTopYear,
+                    checkpointWidth: decision.evidence.checkpointWidth,
+                    proposedWidth: decision.evidence.proposedWidth,
                     preLocatorEvent: auditEvent(event),
                     proposedEvent: decision.proposedEvent
                         ? auditEvent(decision.proposedEvent)
@@ -5368,11 +5375,6 @@ export const makeDiagnosisEvents = (
             )) {
                 return event;
             }
-            if (event.evidence.algorithmSources.includes(
-                "paired_core_cold_start_frontier",
-            )) {
-                return event;
-            }
             const fixedSideBaselineLag = hasWholeSeriesBaseline
                 ? event.evidence.lagAfter ?? 0
                 : 0;
@@ -5396,6 +5398,13 @@ export const makeDiagnosisEvents = (
                 centerDistanceYears: decision.centerDistanceYears,
                 operationContractValid: decision.operationContractValid,
                 detachedEvidenceStrong: decision.detachedEvidenceStrong,
+                structuredCheckpoint: decision.evidence.structuredCheckpoint,
+                structuredProposal: decision.evidence.structuredProposal,
+                precisionRegression: decision.precisionRegression,
+                checkpointTopYear: decision.evidence.checkpointTopYear,
+                proposedTopYear: decision.evidence.proposedTopYear,
+                checkpointWidth: decision.evidence.checkpointWidth,
+                proposedWidth: decision.evidence.proposedWidth,
                 preLocatorEvent: auditEvent(event),
                 proposedEvent: decision.proposedEvent
                     ? auditEvent(decision.proposedEvent)

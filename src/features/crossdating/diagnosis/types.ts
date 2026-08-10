@@ -25,6 +25,21 @@ export type DiagnosisRankedYear = {
     evidenceTags: string[];
 };
 
+/**
+ * Append-only, typed localization evidence. `source` is provenance only; adjudication must
+ * compare the numeric quality fields instead of granting authority to a source name.
+ */
+export type DiagnosisEventLocationEvidence = {
+    source: string;
+    startYear: number;
+    endYear: number;
+    topYear: number | null;
+    referenceCount: number;
+    concentration: number | null;
+    remoteMargin: number | null;
+    calibrated: boolean;
+};
+
 export type DiagnosisEventEvidence = {
     algorithmSources: string[];
     score: number;
@@ -37,6 +52,7 @@ export type DiagnosisEventEvidence = {
     samplePairs: number;
     candidateIds: string[];
     notes: string[];
+    locationEvidence?: DiagnosisEventLocationEvidence[];
 };
 
 export type DiagnosisEventLocationAlternative = {
@@ -148,8 +164,10 @@ export type DiagnosisEventPassAudit = {
 export type DiagnosisLocatorDecisionReason =
     | "no_locator_proposal"
     | "accepted_overlapping_mode"
+    | "accepted_overlapping_strong_mode"
     | "accepted_detached_strong_mode"
     | "fallback_operation_contract"
+    | "fallback_overlapping_precision_regression"
     | "fallback_detached_locator_mode";
 
 export type DiagnosisLocatorDecisionAudit = {
@@ -159,6 +177,13 @@ export type DiagnosisLocatorDecisionAudit = {
     centerDistanceYears: number;
     operationContractValid: boolean;
     detachedEvidenceStrong: boolean;
+    structuredCheckpoint?: boolean;
+    structuredProposal?: boolean;
+    precisionRegression?: boolean;
+    checkpointTopYear?: number | null;
+    proposedTopYear?: number | null;
+    checkpointWidth?: number;
+    proposedWidth?: number;
     preLocatorEvent: DiagnosisEventAuditSnapshot;
     proposedEvent: DiagnosisEventAuditSnapshot | null;
     selectedEvent: DiagnosisEventAuditSnapshot;
