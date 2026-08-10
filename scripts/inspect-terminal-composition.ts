@@ -9,12 +9,17 @@ import { getConfig } from "@/features/crossdating/diagnosis/config";
 import { parseCofechaHints } from "@/features/crossdating/diagnosis/cofechaHints";
 import { makeCofechaTerminalWholeDrafts } from "@/features/crossdating/diagnosis/drafts";
 import { evaluateDraft } from "@/features/crossdating/diagnosis/evaluation";
+import {
+    createLagPathCache,
+    locateSequentialMissingHead,
+} from "@/features/crossdating/diagnosis/eventPath";
 import { diagnoseSeriesCore } from "@/features/crossdating/diagnosis/segments";
 import {
     createSeriesPreprocessCache,
     preprocessSeries,
 } from "@/features/crossdating/diagnosis/series";
 import {
+    cofechaStyleStandardize,
     createCofechaMasterReferenceConfig,
     createCofechaPassReferenceConfig,
 } from "@/features/crossdating/reference";
@@ -81,6 +86,25 @@ const diagnosis = diagnoseSeriesCore(
     cache,
 );
 if (!diagnosis) throw new Error(`diagnosis unavailable: ${targetId}`);
+const cofechaDiagnosis = diagnoseSeriesCore(
+    loaded.siteData,
+    targetId,
+    config,
+    (series) => new Map(
+        cofechaStyleStandardize(series).map((point) => [point.year, point.value]),
+    ),
+);
+const sequentialMissingHead = cofechaDiagnosis
+    ? locateSequentialMissingHead(
+        cofechaDiagnosis,
+        loaded.siteData,
+        {
+            minLag: config.lagMin,
+            maxPartialGapYears: config.maxPartialGapYears,
+        },
+        createLagPathCache(),
+    )
+    : null;
 const hints = parseCofechaHints(outText);
 const drafts = makeCofechaTerminalWholeDrafts(diagnosis, config, hints);
 const result = {
@@ -88,6 +112,7 @@ const result = {
     targetId,
     targetRange: diagnosis.targetRange,
     globalLag: diagnosis.globalSlidingMatch.bestGlobalLag,
+    sequentialMissingHead,
     propagationPatterns: diagnosis.propagationPatterns.map((pattern) => ({
         dominantLag: pattern.dominantLag,
         patternType: pattern.patternType,

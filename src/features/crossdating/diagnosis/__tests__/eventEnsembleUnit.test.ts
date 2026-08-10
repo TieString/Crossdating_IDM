@@ -11,6 +11,7 @@ import {
     pruneLocalEventsDisconnectedFromWholeBaseline,
     projectSequentialUnitChainHead,
     recoverCandidateBackedPartialConsensus,
+    resolveSequentialMissingPresentation,
     selectCompletedPartialFalseSeed,
     selectCompletedPartialMissingSeed,
     shouldReplaceUnanchoredPartialWithReferencePulse,
@@ -814,6 +815,94 @@ describe("hasDistinctConfirmedSequentialMissingMode", () => {
             weakHead,
             [],
         )).toBe(false);
+    });
+
+    it("accepts a depth-consistent cumulative candidate within the calibrated 13-year mode", () => {
+        const selectedPartial = candidatePartial({
+            shiftYears: -6,
+            anchorYear: 1724,
+            candidateId: "selected-partial",
+            source: "cofecha_segment_lag",
+        });
+        const cumulativeCandidate = candidatePartial({
+            shiftYears: -6,
+            anchorYear: 1725,
+            candidateId: "cumulative-candidate",
+            source: "segmented_diagnosis",
+        });
+
+        expect(hasDistinctConfirmedSequentialMissingMode(
+            [selectedPartial],
+            [cumulativeCandidate],
+            { year: 1738, transitionCount: 9, headRunYears: 4 },
+            [1748, 1767],
+        )).toBe(true);
+    });
+});
+
+describe("resolveSequentialMissingPresentation", () => {
+    const head = (overrides: Partial<Parameters<
+        typeof resolveSequentialMissingPresentation
+    >[0]> = {}) => ({
+        year: 1681,
+        score: 10,
+        directScore: 0,
+        gainOverDirect: 10,
+        transitionCount: 9,
+        headRunYears: 12,
+        headMeanAdvantage: 0.15,
+        fixedTailMeanAdvantage: 0.3,
+        pathStartLag: -9,
+        unitEventYears: [1669, 1681],
+        ...overrides,
+    });
+
+    it("centers a calibrated window across the fitted final unit-lag run", () => {
+        expect(resolveSequentialMissingPresentation(
+            head(),
+            null,
+            "local2",
+        )).toMatchObject({
+            selectedYear: 1681,
+            windowCenterYear: 1676,
+            width: 13,
+        });
+        expect(resolveSequentialMissingPresentation(
+            head({
+                year: 1739,
+                transitionCount: 5,
+                headRunYears: 9,
+                headMeanAdvantage: 0.52,
+                pathStartLag: -5,
+                unitEventYears: [1730, 1739],
+            }),
+            null,
+            "local2",
+        )).toMatchObject({
+            windowCenterYear: 1735,
+            width: 9,
+        });
+    });
+
+    it("keeps a nearby depth candidate as the center of a distinct cumulative mode", () => {
+        expect(resolveSequentialMissingPresentation(
+            head({
+                year: 1738,
+                transitionCount: 9,
+                headRunYears: 4,
+                headMeanAdvantage: 0.04,
+                fixedTailMeanAdvantage: 0.41,
+                unitEventYears: [1734, 1738],
+            }),
+            null,
+            "local2",
+            [1725],
+            [1748, 1767],
+        )).toMatchObject({
+            selectedYear: 1732,
+            windowCenterYear: 1732,
+            width: 13,
+        });
     });
 });
 

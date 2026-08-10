@@ -1708,6 +1708,12 @@ const lagHeadSequentialWindowWidth = (
     return 5;
 };
 
+const calibratedSequentialWindowWidth = (
+    minimumWidth: number,
+): 5 | 7 | 9 | 13 => (
+    ([5, 7, 9, 13] as const).find((width) => width >= minimumWidth) ?? 13
+);
+
 export type SequentialMissingPresentation = {
     marker: SharedExplicitZeroMarker | null;
     selectedYear: number;
@@ -1753,18 +1759,25 @@ export const resolveSequentialMissingPresentation = (
         && nearbyOlderConfirmedZeros.length >= 2
         ? (nearbyOlderConfirmedZeros[0] ?? head.year) - 1
         : null;
-    const lagWidth = mode === "legacy6"
+    const baseLagWidth = mode === "legacy6"
         ? legacySequentialWindowWidth(head, marker)
         : lagHeadSequentialWindowWidth(head);
+    const boundedHeadRun = head.headRunYears >= 3 && head.headRunYears <= 13;
+    const headRunStartYear = head.year - head.headRunYears + 1;
+    const lagOnlyCenterYear = boundedHeadRun
+        ? Math.round((headRunStartYear + head.year) / 2)
+        : head.headRunYears <= 2 && candidateWindowSupportYear === null
+            ? head.year - 2
+            : head.year;
+    const lagWidth = calibratedSequentialWindowWidth(Math.max(
+        baseLagWidth,
+        boundedHeadRun ? head.headRunYears : 0,
+    ));
     const width = candidateDistance === null
         ? lagWidth
         : candidateDistance <= 2
             ? Math.max(9, lagWidth) as 9 | 13
             : 13;
-    const lagOnlyCenterYear = head.headRunYears <= 2
-        && candidateWindowSupportYear === null
-        ? head.year - 2
-        : head.year;
     const selectedYear = confirmedTargetStaircaseYear
         ?? marker?.year
         ?? candidateConsensusYear
@@ -2909,12 +2922,10 @@ export const hasDistinctConfirmedSequentialMissingMode = (
     const newerConfirmedMissingCount = confirmedTargetZeroYears.filter(
         (year) => year > head.year,
     ).length;
-    const hasHeadCandidate = candidateEvents.some((event) => (
-        partialMoveSupportsSequentialMissingDepth(event, head)
-        && event.rankedYears[0]?.year !== undefined
-        && Math.abs(event.rankedYears[0].year - head.year)
-            <= MAX_CONFIRMED_STAIRCASE_CANDIDATE_DISTANCE_YEARS
-    ));
+    const hasHeadCandidate = hasDepthConsistentSequentialMissingCandidate(
+        candidateEvents,
+        head,
+    );
     return nearestPartialDistance >= MIN_DISTINCT_PARTIAL_MODE_SEPARATION_YEARS
         && newerConfirmedMissingCount >= MIN_CONFIRMED_NEWER_MISSING_MARKERS
         && hasHeadCandidate;
