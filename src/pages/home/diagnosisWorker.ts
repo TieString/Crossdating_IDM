@@ -6,6 +6,7 @@ import type {
     ReviewWindowDisplayMode,
 } from "@/features/crossdating/diagnosis/types";
 import type { ReferenceSeriesConfig } from "@/features/crossdating/reference";
+import { createPairwiseBootstrapTargetReferenceConfig } from "@/features/crossdating/pairwiseBootstrap";
 import type { RwlSiteData } from "@/features/rwl/types";
 
 export type DiagnosisWorkerRequest = {
@@ -47,10 +48,15 @@ ctx.addEventListener("message", (event: MessageEvent<DiagnosisWorkerRequest>) =>
 
     try {
         const startedAt = performance.now();
+        const targetReferenceConfig = createPairwiseBootstrapTargetReferenceConfig(
+            siteData,
+            referenceConfig,
+            targetTree,
+        );
         ctx.postMessage({
             id,
             diagnosis: diagnoseCrossdating(siteData, {
-                referenceConfig,
+                referenceConfig: targetReferenceConfig,
                 targetTrees: targetTree ? [targetTree] : [],
                 cofechaText,
                 reviewWindowDisplayMode,

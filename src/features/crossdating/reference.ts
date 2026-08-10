@@ -49,7 +49,7 @@ export type CofechaReferencePoint = {
 
 export type CofechaPassReference = {
     id: string;
-    source: "cofecha_pass_anchor" | "cofecha_master_series";
+    source: "cofecha_pass_anchor" | "cofecha_master_series" | "pairwise_bootstrap";
     cofechaRunId: string;
     includedSeriesIds: string[];
     candidateSeriesIds: string[];

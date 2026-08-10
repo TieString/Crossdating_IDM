@@ -432,6 +432,7 @@ function TreeChartManagerBase({
   }, [allTreeCodes, cofechaClassification])
   const dynamicReferenceStatusLabel = useMemo(() => {
     if (!dynamicReferenceConfig) return null
+    const pairwiseBootstrap = dynamicReferenceConfig.cofechaPassReference?.source === 'pairwise_bootstrap'
     const total = dynamicReferenceConfig.classification?.allSeriesIds.length ?? allTreeCodes.length
     const anchorCount = dynamicReferenceConfig.classification?.anchorPassIds.length ?? dynamicReferenceConfig.selectedTrees.length
     const candidateCount = dynamicReferenceConfig.classification?.candidateFlaggedIds.length ?? 0
@@ -443,7 +444,8 @@ function TreeChartManagerBase({
     const replication = dynamicReferenceSummary?.meanReplication != null
       ? ` mean n=${dynamicReferenceSummary.meanReplication.toFixed(1)}`
       : ''
-    return `COFECHA-pass algorithm reference ${anchorCount} / ${total}; candidates ${candidateCount}${range}${replication}${stale}${invalid}`
+    const label = pairwiseBootstrap ? 'Pairwise-bootstrap 临时参考' : 'COFECHA-pass algorithm reference'
+    return `${label} ${anchorCount} / ${total}; candidates ${candidateCount}${range}${replication}${stale}${invalid}`
   }, [allTreeCodes.length, dynamicReferenceConfig, dynamicReferenceSummary])
   const referenceSummary = referenceSeries?.summary
   const referenceStatusLabel = useMemo(() => {
@@ -933,7 +935,9 @@ function TreeChartManagerBase({
             onClick={selectCofechaNoATrees}
             disabled={cofechaNoATrees.length === 0}
             title={cofechaClassification
-              ? `${dynamicReferenceConfig?.isStale ? '基于最近一次已过期的 COFECHA 结果；' : ''}选择 PART 6 中没有 A 标记的全部序列`
+              ? dynamicReferenceConfig?.cofechaPassReference?.source === 'pairwise_bootstrap'
+                ? '选择冷启动时样芯间 lag=0 最大相互一致簇中的全部序列'
+                : `${dynamicReferenceConfig?.isStale ? '基于最近一次已过期的 COFECHA 结果；' : ''}选择 PART 6 中没有 A 标记的全部序列`
               : '请先运行 COFECHA，以获得 PART 6 A 标记分类'}
             style={cofechaNoATrees.length === 0 ? btnDisabled : {
               ...btnBase,

@@ -19,7 +19,9 @@ import {
     type LocalSimulationApplyRequest,
 } from "@/features/crossdating/diagnosis";
 import { buildCrossdatingValidationSummary } from "@/features/crossdating/validation";
+import { createPairwiseBootstrapReferenceConfig } from "@/features/crossdating/pairwiseBootstrap";
 import {
+    classifyCofechaPart6Series,
     createCofechaMasterReferenceConfig,
     hashRwlSiteData,
     normalizeReferenceSeriesConfig,
@@ -500,15 +502,29 @@ export function useHomeWorkspace() {
             const nextParts = splitReportByParts(nextOutText);
             const cofechaRunId = `cofecha-${Date.now()}`;
             const flaggedAIds = extractPart6FlaggedASeriesIds(nextParts.get("PART 6") ?? "");
-            // Temporary experiment: drive automatic crossdating from COFECHA's
-            // own PART 3 master dating series instead of our anchor-pass rebuild.
-            const dynamicReferenceConfig = createCofechaMasterReferenceConfig({
-                siteData: inputData,
+            const classification = classifyCofechaPart6Series(
+                Array.from(inputData.keys()),
                 flaggedAIds,
                 cofechaRunId,
-                rwlHash: inputSignature,
-                masterDatingSeries: nextResult.masterDatingSeries,
-            });
+            );
+            const pairwiseBootstrapReference = classification.anchorPassIds.length < 3
+                ? createPairwiseBootstrapReferenceConfig({
+                    siteData: inputData,
+                    flaggedAIds,
+                    cofechaRunId,
+                    rwlHash: inputSignature,
+                })
+                : null;
+            // Preserve the current PART 3 master path when COFECHA has a usable pass group.
+            // A pairwise zero-lag cluster is used only for the all-flagged cold start.
+            const dynamicReferenceConfig = pairwiseBootstrapReference
+                ?? createCofechaMasterReferenceConfig({
+                    siteData: inputData,
+                    flaggedAIds,
+                    cofechaRunId,
+                    rwlHash: inputSignature,
+                    masterDatingSeries: nextResult.masterDatingSeries,
+                });
             logCofechaReferenceComparison(nextResult.masterDatingSeries, dynamicReferenceConfig);
 
             const isLatestRequest = requestId === cofechaRequestIdRef.current;
