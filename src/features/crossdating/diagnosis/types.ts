@@ -314,6 +314,7 @@ export type DiagnosisReviewWindowDecision = {
 export type DiagnosisJointAdjudicationReason =
     | "selected"
     | "no_complete_hypothesis"
+    | "operation_contract_conflict"
     | "operation_conflict"
     | "remote_mode_conflict";
 

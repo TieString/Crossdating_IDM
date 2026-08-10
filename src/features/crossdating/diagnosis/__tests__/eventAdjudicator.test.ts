@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-    adjudicateReviewEventHypothesis,
     adjudicateLocatorProposal,
     locatorPreservesOperationContract,
 } from "../eventAdjudicator";
-import type { DiagnosisEvent, DiagnosisReviewEventCheckpoint } from "../types";
+import type { DiagnosisEvent } from "../types";
 
 const event = (
     startYear: number,
@@ -208,37 +207,4 @@ describe("event hypothesis locator adjudication", () => {
         });
     });
 
-    it("selects the highest-stage full review hypothesis without rebuilding it", () => {
-        const unit = (id: string): DiagnosisEvent => ({
-            ...event(1897, 1903),
-            id,
-            eventType: "missingRing",
-            shiftYears: undefined,
-            shiftSide: undefined,
-            evidence: {
-                ...event(1897, 1903).evidence,
-                lagBefore: -1,
-                lagAfter: 0,
-                candidateIds: [id],
-            },
-        });
-        const candidate = unit("candidate-event");
-        const displayed = unit("displayed-event");
-        const checkpoints: DiagnosisReviewEventCheckpoint[] = [
-            { stage: "candidate", event: candidate },
-            { stage: "displayed", event: displayed },
-        ];
-        const result = adjudicateReviewEventHypothesis(checkpoints, {
-            remoteModeDistanceYears: 13,
-            minimumRemoteModeStrengthMargin: 0.05,
-            minimumOperationStrengthMargin: 0.05,
-        });
-
-        expect(result).toMatchObject({
-            reason: "selected",
-            sourceStage: "displayed",
-        });
-        expect(result.event).toBe(displayed);
-        expect(result.event?.evidence.candidateIds).toEqual(["displayed-event"]);
-    });
 });

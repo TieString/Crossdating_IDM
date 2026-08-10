@@ -59,7 +59,10 @@ import type {
     LocalSimulationOption,
     SeriesCoreDiagnosis,
 } from "./types";
-import { adjudicateJointEventHypotheses } from "./jointEventAdjudicator";
+import {
+    adjudicateJointEventHypotheses,
+    compareJointDecisionToProduction,
+} from "./jointEventAdjudicator";
 
 export {
     getDiagnosisCandidateLabel,
@@ -304,34 +307,28 @@ export function diagnoseCrossdating(
             - (treeOrder.get(right.seriesId) ?? Infinity)
         ));
     }
-    const legacyReviewWindowDisplay = options.reviewWindowDisplayMode === "review"
-        && eventDecisionAudits
-        ? buildReviewWindowDisplays(
-            eventDecisionAudits,
-            events,
-            reviewEventCheckpoints ?? [],
-        )
-        : null;
-    const jointEventDecisions = reviewEventCheckpoints && eventDecisionAudits
+    const selectedJointEventDecisions = reviewEventCheckpoints && eventDecisionAudits
         ? eventDecisionAudits.map((audit) => adjudicateJointEventHypotheses(
             audit.seriesId,
             reviewEventCheckpoints,
-            legacyReviewWindowDisplay?.events.find((event) => (
-                event.seriesId === audit.seriesId
-            )) ?? null,
         ))
         : null;
-    const reviewWindowDisplay = legacyReviewWindowDisplay
-        && jointEventDecisions
+    const reviewWindowDisplay = options.reviewWindowDisplayMode === "review"
+        && selectedJointEventDecisions
         && eventDecisionAudits
         ? buildReviewWindowDisplays(
             eventDecisionAudits,
-            events,
-            reviewEventCheckpoints ?? [],
-            {},
-            jointEventDecisions,
+            selectedJointEventDecisions,
         )
-        : legacyReviewWindowDisplay;
+        : null;
+    const jointEventDecisions = selectedJointEventDecisions?.map((decision) => (
+        compareJointDecisionToProduction(
+            decision,
+            reviewWindowDisplay?.events.find((event) => (
+                event.seriesId === decision.seriesId
+            )) ?? null,
+        )
+    )) ?? null;
     const candidateCountByTree = candidates.reduce((counts, candidate) => {
         counts.set(candidate.targetTree, (counts.get(candidate.targetTree) ?? 0) + 1);
         return counts;

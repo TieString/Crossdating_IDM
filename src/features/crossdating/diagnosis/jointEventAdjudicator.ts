@@ -218,6 +218,16 @@ const operationKey = (event: DiagnosisEvent): string => [
         : event.shiftYears ?? "none",
 ].join(":");
 
+const operationContractValid = (event: DiagnosisEvent): boolean => {
+    if (event.eventType !== "missingRing" && event.eventType !== "falseRing") {
+        return true;
+    }
+    const { lagBefore, lagAfter } = event.evidence;
+    if (lagBefore === null || lagAfter === null) return false;
+    const transition = lagAfter - lagBefore;
+    return event.eventType === "missingRing" ? transition > 0 : transition < 0;
+};
+
 const groupOperations = (clusters: readonly HypothesisCluster[]): OperationGroup[] => {
     const groups = new Map<string, OperationGroup>();
     clusters.forEach((cluster) => {
@@ -269,20 +279,26 @@ export const adjudicateJointEventHypotheses = (
     overrides: Partial<JointEventAdjudicationConfig> = {},
 ): DiagnosisJointEventDecision => {
     const config = { ...DEFAULT_JOINT_EVENT_ADJUDICATION_CONFIG, ...overrides };
-    const clusters = clusterCheckpoints(checkpoints.filter(({ event }) => (
+    const submitted = checkpoints.filter(({ event }) => (
         event.seriesId === seriesId
+    ));
+    const submittedClusters = clusterCheckpoints(submitted);
+    const hypotheses = submittedClusters.map(summary);
+    const clusters = clusterCheckpoints(submitted.filter(({ event }) => (
+        operationContractValid(event)
     ))).sort((left, right) => (
         locationScore(right) - locationScore(left)
         || stagePriority[representative(right).stage]
             - stagePriority[representative(left).stage]
         || clusterId(left).localeCompare(clusterId(right))
     ));
-    const hypotheses = clusters.map(summary);
     if (clusters.length === 0) {
         return {
             seriesId,
             status: "refused",
-            reason: "no_complete_hypothesis",
+            reason: submittedClusters.length > 0
+                ? "operation_contract_conflict"
+                : "no_complete_hypothesis",
             sourceStage: null,
             event: null,
             hypotheses,
@@ -361,3 +377,13 @@ export const adjudicateJointEventHypotheses = (
         productionExactMatch: productionExactMatch(selectedEvent, productionEvent),
     };
 };
+
+/** Adds an audit-only comparison without changing the selected hypothesis. */
+export const compareJointDecisionToProduction = (
+    decision: DiagnosisJointEventDecision,
+    productionEvent: DiagnosisEvent | null,
+): DiagnosisJointEventDecision => ({
+    ...decision,
+    productionAgreement: productionAgreement(decision.event, productionEvent),
+    productionExactMatch: productionExactMatch(decision.event, productionEvent),
+});

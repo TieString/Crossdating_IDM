@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-    buildReviewWindowDisplays,
-    selectReviewWindowDisplay,
+    buildReviewWindowDisplays as buildJointReviewWindowDisplays,
+    selectReviewWindowDisplay as selectJointReviewWindowDisplay,
+    type ReviewWindowDisplayConfig,
 } from "../reviewWindowDisplay";
+import { adjudicateJointEventHypotheses } from "../jointEventAdjudicator";
 import type {
     DiagnosisEvent,
     DiagnosisEventAuditSnapshot,
@@ -147,6 +149,46 @@ const jointDecision = (
     productionExactMatch: true,
 });
 
+// Existing cases keep their compact fixture shape, but every assertion now traverses the
+// production joint adjudicator before the display-only gate.
+const selectReviewWindowDisplay = (
+    decisionAudit: DiagnosisEventDecisionAudit,
+    strictEvents: readonly DiagnosisEvent[],
+    reviewCheckpoints: readonly DiagnosisReviewEventCheckpoint[] = [],
+    overrides: Partial<ReviewWindowDisplayConfig> = {},
+    explicitDecision: DiagnosisJointEventDecision | null = null,
+) => selectJointReviewWindowDisplay(
+    decisionAudit,
+    explicitDecision ?? adjudicateJointEventHypotheses(
+        decisionAudit.seriesId,
+        [
+            ...strictEvents.map((event) => ({ stage: "final" as const, event })),
+            ...reviewCheckpoints,
+        ],
+    ),
+    overrides,
+);
+
+const buildReviewWindowDisplays = (
+    audits: readonly DiagnosisEventDecisionAudit[],
+    strictEvents: readonly DiagnosisEvent[],
+    reviewCheckpoints: readonly DiagnosisReviewEventCheckpoint[] = [],
+    overrides: Partial<ReviewWindowDisplayConfig> = {},
+) => {
+    const decisions = audits.map((decisionAudit) => adjudicateJointEventHypotheses(
+        decisionAudit.seriesId,
+        [
+            ...strictEvents
+                .filter((event) => event.seriesId === decisionAudit.seriesId)
+                .map((event) => ({ stage: "final" as const, event })),
+            ...reviewCheckpoints.filter(({ event }) => (
+                event.seriesId === decisionAudit.seriesId
+            )),
+        ],
+    ));
+    return buildJointReviewWindowDisplays(audits, decisions, overrides);
+};
+
 const reviewablePartial = (
     shiftYears = -2,
     evidence: Partial<DiagnosisEvent["evidence"]> = {},
@@ -174,7 +216,13 @@ const reviewablePartial = (
 describe("lower review-window display gate", () => {
     it("keeps an existing strict event unchanged", () => {
         const strict = strictEvent();
-        const result = selectReviewWindowDisplay(audit([]), [strict]);
+        const result = selectReviewWindowDisplay(
+            audit([]),
+            [strict],
+            [],
+            {},
+            jointDecision(strict),
+        );
         expect(result).toMatchObject({
             status: "strict",
             reason: "strict_event",
@@ -248,6 +296,10 @@ describe("lower review-window display gate", () => {
             eventType: "wholeSeriesMove" as const,
             startYear: 1800,
             endYear: 2000,
+            evidence: {
+                ...strictEvent().evidence,
+                notes: ["whole_state_global_lag_matches_shift=true"],
+            },
         };
         const result = selectReviewWindowDisplay(audit([]), [whole, partial]);
 
@@ -267,6 +319,10 @@ describe("lower review-window display gate", () => {
             shiftYears: -5,
             startYear: 1800,
             endYear: 2000,
+            evidence: {
+                ...strictEvent().evidence,
+                notes: ["whole_state_global_lag_matches_shift=true"],
+            },
         };
 
         expect(selectReviewWindowDisplay(audit([]), [unit, whole])).toMatchObject({
@@ -281,6 +337,7 @@ describe("lower review-window display gate", () => {
         unit.evidence.algorithmSources = [
             "series_endpoint_review_window",
             "newer_fixed_side_lag_contrast",
+            "terminal_whole_alias_removed",
         ];
         const whole = {
             ...strictEvent(),
@@ -289,6 +346,10 @@ describe("lower review-window display gate", () => {
             shiftYears: -1,
             startYear: 1800,
             endYear: 2000,
+            evidence: {
+                ...strictEvent().evidence,
+                notes: ["whole_state_global_lag_matches_shift=true"],
+            },
         };
 
         expect(selectReviewWindowDisplay(audit([]), [whole, unit])).toMatchObject({
@@ -332,6 +393,10 @@ describe("lower review-window display gate", () => {
             eventType: "wholeSeriesMove" as const,
             startYear: 1800,
             endYear: 2000,
+            evidence: {
+                ...strictEvent().evidence,
+                notes: ["whole_state_global_lag_matches_shift=true"],
+            },
         };
 
         expect(selectReviewWindowDisplay(audit([]), [whole, partial]))
@@ -626,7 +691,7 @@ describe("lower review-window display gate", () => {
             audit([partial]),
             [],
             [checkpoint(partial)],
-        ).reason).toBe("no_unit_hypothesis");
+        ).reason).toBe("partial_move_evidence_insufficient");
         expect(selectReviewWindowDisplay(
             audit([conflicted]),
             [],
