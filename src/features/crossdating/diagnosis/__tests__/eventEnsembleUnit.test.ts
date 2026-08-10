@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DiagnosisEvent, SeriesCoreDiagnosis } from "../types";
 import {
     hasIndependentPartialBoundaryAnchor,
+    hasCoherentSequentialFalseStaircase,
     hasMultipleCoherentLocalTransitions,
     partialMoveExplainsWholeSeriesCandidate,
     partialMoveSupportsSequentialMissingDepth,
@@ -730,6 +731,50 @@ describe("supportsSequentialMissingDirectionOverride", () => {
             hasConfirmedTargetStaircase: false,
             sharedZeroSupport: 10,
         })).toBe(true);
+    });
+
+    it("does not let an aggregate staircase reverse explicit false-ring steps", () => {
+        expect(supportsSequentialMissingDirectionOverride({
+            hasOppositeUnitOnly: true,
+            hasDetectedMissing: false,
+            hasMissingCandidate: false,
+            hasConfirmedTargetStaircase: false,
+            sharedZeroSupport: 12,
+            hasCumulativeStaircase: true,
+            hasMarkerAnchoredStaircase: true,
+        })).toBe(false);
+    });
+
+    it("allows aggregate staircase evidence when no opposite unit step exists", () => {
+        expect(supportsSequentialMissingDirectionOverride({
+            hasOppositeUnitOnly: false,
+            hasDetectedMissing: false,
+            hasMissingCandidate: false,
+            hasConfirmedTargetStaircase: false,
+            sharedZeroSupport: 0,
+            hasCumulativeStaircase: true,
+        })).toBe(true);
+    });
+});
+
+describe("hasCoherentSequentialFalseStaircase", () => {
+    it("requires two adjacent positive false-ring states", () => {
+        const newest = falseRingEvent(1900, true);
+        const older = falseRingEvent(1870, true);
+        older.evidence.lagBefore = 2;
+        older.evidence.lagAfter = 1;
+
+        expect(hasCoherentSequentialFalseStaircase([newest, older])).toBe(true);
+    });
+
+    it("rejects isolated and non-positive false-ring drafts", () => {
+        const isolated = falseRingEvent(1900, true);
+        const negative = falseRingEvent(1870, true);
+        negative.evidence.lagBefore = -3;
+        negative.evidence.lagAfter = -4;
+
+        expect(hasCoherentSequentialFalseStaircase([isolated])).toBe(false);
+        expect(hasCoherentSequentialFalseStaircase([isolated, negative])).toBe(false);
     });
 });
 

@@ -134,4 +134,40 @@ describe("joint event adjudicator", () => {
         expect(decision.event?.evidence.candidateIds).toEqual(["selected"]);
         expect(decision.hypotheses).toHaveLength(1);
     });
+
+    it("selects the newest final serial mode without treating older events as conflicts", () => {
+        const olderPartial = event("older-partial", "partialMove", 1700, 1712, 1706);
+        const olderFalse = event("older-false", "falseRing", 1790, 1798, 1794);
+        const frontierFalse = event("frontier-false", "falseRing", 1810, 1818, 1814);
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("final", olderPartial),
+            checkpoint("final", olderFalse),
+            checkpoint("final", frontierFalse),
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "final",
+            event: {
+                eventType: "falseRing",
+                startYear: 1810,
+                endYear: 1818,
+            },
+        });
+    });
+
+    it("still refuses incompatible operations inside the same final frontier", () => {
+        const missing = event("missing", "missingRing", 1899, 1905, 1902);
+        const falseRing = event("false", "falseRing", 1900, 1906, 1903);
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("final", missing),
+            checkpoint("final", falseRing),
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "refused",
+            reason: "operation_conflict",
+            event: null,
+        });
+    });
 });

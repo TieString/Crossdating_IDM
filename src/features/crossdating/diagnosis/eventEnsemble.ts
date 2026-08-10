@@ -2904,12 +2904,28 @@ export const supportsMarkerAnchoredSequentialMissingStaircase = (
         || concentratedFourMarkerStaircase;
 };
 
+/** A single opposite unit draft is often a local alias; two positive adjacent states are not. */
+export const hasCoherentSequentialFalseStaircase = (
+    events: readonly DiagnosisEvent[],
+): boolean => {
+    const positiveLevels = new Set(events.filter((event) => (
+        event.eventType === "falseRing"
+        && event.evidence.lagBefore !== null
+        && event.evidence.lagAfter !== null
+        && event.evidence.lagBefore > 0
+        && event.evidence.lagAfter === event.evidence.lagBefore - 1
+    )).map((event) => event.evidence.lagBefore as number));
+    return [...positiveLevels].some((level) => positiveLevels.has(level - 1));
+};
+
 type SequentialMissingDirectionEvidence = {
     hasOppositeUnitOnly: boolean;
     hasDetectedMissing: boolean;
     hasMissingCandidate: boolean;
     hasConfirmedTargetStaircase: boolean;
     sharedZeroSupport: number;
+    hasCumulativeStaircase?: boolean;
+    hasMarkerAnchoredStaircase?: boolean;
 };
 
 /** Shared reference zeros may locate a missing event, but cannot reverse explicit +1 lag evidence. */
@@ -2919,10 +2935,16 @@ export const supportsSequentialMissingDirectionOverride = ({
     hasMissingCandidate,
     hasConfirmedTargetStaircase,
     sharedZeroSupport,
+    hasCumulativeStaircase = false,
+    hasMarkerAnchoredStaircase = false,
 }: SequentialMissingDirectionEvidence): boolean => hasDetectedMissing
     || hasMissingCandidate
     || hasConfirmedTargetStaircase
-    || (!hasOppositeUnitOnly && sharedZeroSupport >= 10);
+    || (!hasOppositeUnitOnly && (
+        hasCumulativeStaircase
+        || hasMarkerAnchoredStaircase
+        || sharedZeroSupport >= 10
+    ));
 
 /** Keeps a confirmed unit-event frontier separate from a distant partial-move mode. */
 export const hasDistinctConfirmedSequentialMissingMode = (
@@ -3106,9 +3128,8 @@ const recoverSequentialMissingHeadEvent = (
         const hasExistingUnitEvent = detected.some((event) => (
             event.eventType === "missingRing" || event.eventType === "falseRing"
         ));
-        const hasOppositeUnitOnly = detected.some(
-            (event) => event.eventType === "falseRing",
-        ) && !detected.some((event) => event.eventType === "missingRing");
+        const hasOppositeUnitOnly = hasCoherentSequentialFalseStaircase(detected)
+            && !detected.some((event) => event.eventType === "missingRing");
         const hasCumulativeMissingStaircase =
             supportsCumulativeSequentialMissingStaircase(head);
         const hasMarkerAnchoredMissingStaircase =
@@ -3121,9 +3142,8 @@ const recoverSequentialMissingHeadEvent = (
         );
         const hasStrongMarkerAgainstUnbackedPartial = (marker?.support ?? 0) >= 10
             && !hasCandidateBackedExactPartial;
-        const hasIndependentMissingDirection = hasCumulativeMissingStaircase
-            || hasMarkerAnchoredMissingStaircase
-            || supportsSequentialMissingDirectionOverride({
+        const hasIndependentMissingDirection =
+            supportsSequentialMissingDirectionOverride({
                 hasOppositeUnitOnly,
                 hasDetectedMissing: detected.some(
                     (event) => event.eventType === "missingRing",
@@ -3134,6 +3154,8 @@ const recoverSequentialMissingHeadEvent = (
                 hasConfirmedTargetStaircase:
                     presentation.confirmedTargetStaircaseYear !== null,
                 sharedZeroSupport: marker?.support ?? 0,
+                hasCumulativeStaircase: hasCumulativeMissingStaircase,
+                hasMarkerAnchoredStaircase: hasMarkerAnchoredMissingStaircase,
             });
         const whole = detected.find((event) => event.eventType === "wholeSeriesMove");
         const wholeShift = wholeSeriesMoveShiftYears(whole);
@@ -5269,6 +5291,21 @@ export const makeDiagnosisEvents = (
                 locatorPathCache,
             )
             : null;
+        // A directly validated positive unit staircase is the operation-direction authority.
+        // Evaluate it before a deep aggregate missing path can claim the same serial frontier.
+        const sequentialFalse = recoverSequentialFalseHeadEvent(
+            displayed,
+            diagnosis,
+            cofechaDiagnosis,
+            siteData,
+            ownCandidates,
+            effectiveConfig,
+            options,
+            locatorPathCache,
+        );
+        if (sequentialFalse) {
+            return finalize([sequentialFalse]);
+        }
         const sequentialMissingPreemptsComposition = sequentialMissing
             && !displayed.some((event) => event.eventType === "falseRing")
             && sequentialMissing.event.evidence.algorithmSources.some((source) => (
@@ -5326,19 +5363,6 @@ export const makeDiagnosisEvents = (
                     diagnosis,
                 )]);
             }
-        }
-        const sequentialFalse = recoverSequentialFalseHeadEvent(
-            displayed,
-            diagnosis,
-            cofechaDiagnosis,
-            siteData,
-            ownCandidates,
-            effectiveConfig,
-            options,
-            locatorPathCache,
-        );
-        if (sequentialFalse) {
-            return finalize([sequentialFalse]);
         }
         // A terminal whole baseline and a newer unit frontier can coexist. The sequential
         // counterfactual decides whether the unit event survives; the whole baseline is retained

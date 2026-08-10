@@ -250,6 +250,42 @@ const operationScore = (group: OperationGroup): number => {
         + confidence * 0.05;
 };
 
+const hasFinalCheckpoint = (cluster: HypothesisCluster): boolean => (
+    cluster.checkpoints.some(({ stage }) => stage === "final")
+);
+
+const finalFrontierClusters = (
+    clusters: readonly HypothesisCluster[],
+    config: JointEventAdjudicationConfig,
+): HypothesisCluster[] | null => {
+    const finalClusters = clusters.filter(hasFinalCheckpoint);
+    if (finalClusters.length === 0) return null;
+    const wholeClusters = finalClusters.filter((cluster) => (
+        representative(cluster).event.eventType === "wholeSeriesMove"
+    ));
+    const localClusters = finalClusters.filter((cluster) => (
+        representative(cluster).event.eventType !== "wholeSeriesMove"
+    ));
+    if (wholeClusters.length > 0) {
+        const decisiveLocal = localClusters.filter((cluster) => {
+            const claims = evidenceClaimsFor(representative(cluster).event);
+            return claims.has("fixed_side_resolution")
+                || claims.has("explicit_missing_staircase")
+                || claims.has("independent_reference_staircase");
+        });
+        return decisiveLocal.length > 0 ? decisiveLocal : wholeClusters;
+    }
+    if (localClusters.length <= 1) return localClusters;
+    const newestYear = Math.max(...localClusters.map((cluster) => (
+        topYear(representative(cluster).event) ?? Number.NEGATIVE_INFINITY
+    )));
+    return localClusters.filter((cluster) => {
+        const year = topYear(representative(cluster).event);
+        return year !== null
+            && newestYear - year <= config.remoteModeDistanceYears;
+    });
+};
+
 const productionAgreement = (
     selected: DiagnosisEvent | null,
     production: DiagnosisEvent | null,
@@ -309,7 +345,10 @@ export const adjudicateJointEventHypotheses = (
         };
     }
 
-    const operationGroups = groupOperations(clusters).sort((left, right) => (
+    // Final output may contain several serial events. Only the newest local mode is the current
+    // user-facing frontier; older modes stay immutable and are reconsidered after one edit.
+    const frontierClusters = finalFrontierClusters(clusters, config) ?? clusters;
+    const operationGroups = groupOperations(frontierClusters).sort((left, right) => (
         operationScore(right) - operationScore(left)
         || operationKey(representative(left.clusters[0]).event).localeCompare(
             operationKey(representative(right.clusters[0]).event),
