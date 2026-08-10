@@ -1809,6 +1809,88 @@ const sequentialMissingCandidateCenters = (
     .map((event) => event.rankedYears[0]?.year)
     .filter((year): year is number => year !== undefined);
 
+const MAX_REMOTE_SEQUENTIAL_UNIT_REPLACEMENT_DISTANCE_YEARS = 13;
+
+const rankedEventYear = (event: DiagnosisEvent): number => (
+    event.rankedYears.slice().sort((left, right) => (
+        left.rank - right.rank || right.score - left.score || right.year - left.year
+    ))[0]?.year ?? Math.round((event.startYear + event.endYear) / 2)
+);
+
+/** A lag-path head cannot relocate an independently evaluated unit event to a remote mode. */
+export const shouldPreserveCandidateBackedUnitFromRemoteSequentialHead = (
+    detected: readonly DiagnosisEvent[],
+    candidateEvents: readonly DiagnosisEvent[],
+    headYear: number,
+): boolean => {
+    const candidateSupportsHead = candidateEvents.some((event) => (
+        event.eventType === "missingRing"
+        && Math.abs(rankedEventYear(event) - headYear)
+            <= MAX_CONFIRMED_STAIRCASE_CANDIDATE_DISTANCE_YEARS
+    ));
+    if (candidateSupportsHead) return false;
+
+    return detected.some((event) => {
+        if (event.eventType !== "missingRing"
+            || (
+                event.confidenceLevel === "low"
+                && !event.evidence.algorithmSources.includes(
+                    "cofecha_segment_lag",
+                )
+            )) return false;
+        const candidateBacked = event.evidence.candidateIds.length > 0
+            || candidateEvents.some((candidate) => (
+                candidate.eventType === "missingRing"
+                && Math.abs(
+                    rankedEventYear(candidate) - rankedEventYear(event),
+                ) <= 4
+            ));
+        return candidateBacked
+            && Math.abs(rankedEventYear(event) - headYear)
+                > MAX_REMOTE_SEQUENTIAL_UNIT_REPLACEMENT_DISTANCE_YEARS;
+    });
+};
+
+/** Keeps the newest COFECHA transition checkpoint from being absorbed by an older lag plateau. */
+const preserveNewestCofechaUnitCheckpoint = (
+    events: DiagnosisEvent[],
+    candidateEvents: readonly DiagnosisEvent[],
+): DiagnosisEvent[] => {
+    const checkpoints = candidateEvents.filter((event) => (
+        event.eventType === "missingRing"
+        && event.evidence.algorithmSources.includes("cofecha_segment_lag")
+        && event.evidence.notes.includes("candidate_hard_gate_passed")
+    )).sort((left, right) => (
+        right.evidence.score - left.evidence.score
+        || rankedEventYear(right) - rankedEventYear(left)
+    ));
+    const checkpoint = checkpoints[0];
+    if (!checkpoint) return events;
+    const incumbent = events.find((event) => (
+        event.eventType === checkpoint.eventType
+        && rankedEventYear(checkpoint) - rankedEventYear(event)
+            > MAX_REMOTE_SEQUENTIAL_UNIT_REPLACEMENT_DISTANCE_YEARS
+    ));
+    if (!incumbent) return events;
+
+    const retained: DiagnosisEvent = {
+        ...checkpoint,
+        evidence: {
+            ...checkpoint.evidence,
+            algorithmSources: Array.from(new Set([
+                ...checkpoint.evidence.algorithmSources,
+                "cofecha_boundary_checkpoint",
+            ])).sort(),
+            notes: [
+                ...checkpoint.evidence.notes,
+                `cofecha_boundary_replaced_remote_top=${rankedEventYear(incumbent)}`,
+                `cofecha_boundary_checkpoint_top=${rankedEventYear(checkpoint)}`,
+            ],
+        },
+    };
+    return events.map((event) => event.id === incumbent.id ? retained : event);
+};
+
 const hasDepthConsistentSequentialMissingCandidate = (
     candidateEvents: readonly DiagnosisEvent[],
     head: Pick<SequentialMissingHead, "transitionCount" | "headRunYears" | "year">,
@@ -2913,6 +2995,19 @@ const recoverSequentialMissingHeadEvent = (
             candidateCenters,
             confirmedTargetZeroYears,
         );
+        const preserveCandidateBackedUnit =
+            shouldPreserveCandidateBackedUnitFromRemoteSequentialHead(
+                detected,
+                candidateEvents,
+                head.year,
+            )
+            && presentation.confirmedTargetStaircaseYear === null
+            && (marker?.support ?? 0) < 10
+            && !hasDepthConsistentSequentialMissingCandidate(
+                candidateEvents,
+                head,
+            );
+        if (preserveCandidateBackedUnit) return null;
         const completedFamilyCompetition = compareCompletedPartialWithMissingStaircase(
             cofechaDiagnosis,
             siteData,
@@ -4821,6 +4916,7 @@ export const makeDiagnosisEvents = (
                 }
                 : event)
             : retainedDetected;
+        const locatorDecisionAudits: DiagnosisLocatorDecisionAudit[] = [];
         const endpointRefined = options.enableEndpointResidualWindow === true
             && endpointUnits.length === 1
             && !hasMultipleCoherentLocalTransitions(retainedDetected)
@@ -4828,18 +4924,33 @@ export const makeDiagnosisEvents = (
             && !endpointUnits[0].evidence.algorithmSources.includes(
                 "collapsed_missing_staircase_head",
             )
-            ? endpointPrepared.map((event) => (
-                event.id === endpointUnits[0].id
-                    ? refineUnitEventWithEndpointResidualWindow(
-                        event,
-                        diagnosis,
-                        siteData,
-                        endpointCache,
-                    )
-                    : event
-            ))
+            ? endpointPrepared.map((event) => {
+                if (event.id !== endpointUnits[0].id) return event;
+                const proposed = refineUnitEventWithEndpointResidualWindow(
+                    event,
+                    diagnosis,
+                    siteData,
+                    endpointCache,
+                );
+                if (event.eventType !== "missingRing") return proposed;
+                const decision = adjudicateLocatorProposal(event, proposed);
+                locatorDecisionAudits.push({
+                    reason: decision.reason,
+                    accepted: decision.accepted,
+                    overlapYears: decision.overlapYears,
+                    centerDistanceYears: decision.centerDistanceYears,
+                    operationContractValid: decision.operationContractValid,
+                    detachedEvidenceStrong: decision.detachedEvidenceStrong,
+                    preLocatorEvent: auditEvent(event),
+                    proposedEvent: decision.proposedEvent
+                        ? auditEvent(decision.proposedEvent)
+                        : null,
+                    selectedEvent: auditEvent(decision.event),
+                });
+                return decision.event;
+            })
             : endpointPrepared;
-        const displayed = rerankMissingEventsNearExplicitZeros(
+        const projectedDisplayed = rerankMissingEventsNearExplicitZeros(
             addDiagnosisReviewWindowPadding(
                 endpointRefined,
                 diagnosis.targetRange,
@@ -4852,7 +4963,10 @@ export const makeDiagnosisEvents = (
                 ? stripDiagnosisEventAlternatives
                 : keepSingleMainWindow,
         );
-        const locatorDecisionAudits: DiagnosisLocatorDecisionAudit[] = [];
+        const displayed = preserveNewestCofechaUnitCheckpoint(
+            projectedDisplayed,
+            candidateEvents,
+        );
         const isValidAutomaticEvent = (event: DiagnosisEvent): boolean => (
             event.eventType !== "partialMove"
             || (

@@ -21,6 +21,7 @@ import {
     supportsSequentialMissingReplacementOfPartial,
     pruneWholeSeriesPartialAliases,
     pruneUnsupportedFalseRingPathSupplements,
+    shouldPreserveCandidateBackedUnitFromRemoteSequentialHead,
     unitEventCompetesWithWholeAtNewerEndpoint,
     unitEventExplainsWholeSeriesCandidate,
     wholeSeriesEventIsLocalUnitAlias,
@@ -1045,6 +1046,48 @@ describe("projectSequentialUnitChainHead", () => {
         expect(projected.startYear).toBe(1778);
         expect(projected.endYear).toBe(1786);
         expect(projected.rankedYears[0]?.year).toBe(1778);
+    });
+});
+
+describe("remote sequential missing-head protection", () => {
+    const missingAt = (
+        year: number,
+        candidateBacked: boolean,
+    ): DiagnosisEvent => {
+        const event = falseRingEvent(year - 3, candidateBacked);
+        event.eventType = "missingRing";
+        event.confidenceLevel = "high";
+        event.rankedYears = [{
+            year,
+            rank: 1,
+            score: 2,
+            evidenceTags: ["candidate_ranking"],
+        }];
+        event.evidence.lagBefore = -1;
+        event.evidence.lagAfter = 0;
+        return event;
+    };
+
+    it("keeps a candidate-backed 1977 event when a path-only head jumps to 1994", () => {
+        const detected = missingAt(1977, true);
+        const candidate = missingAt(1977, true);
+
+        expect(shouldPreserveCandidateBackedUnitFromRemoteSequentialHead(
+            [detected],
+            [candidate],
+            1994,
+        )).toBe(true);
+    });
+
+    it("allows the path head when an independent unit candidate supports its location", () => {
+        const detected = missingAt(1977, true);
+        const pathCandidate = missingAt(1993, true);
+
+        expect(shouldPreserveCandidateBackedUnitFromRemoteSequentialHead(
+            [detected],
+            [pathCandidate],
+            1994,
+        )).toBe(false);
     });
 });
 

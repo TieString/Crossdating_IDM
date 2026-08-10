@@ -22,6 +22,10 @@ import {
 } from "@/features/crossdating/diagnosis";
 import { getConfig } from "@/features/crossdating/diagnosis/config";
 import {
+    getNewestFlaggedCofechaSegment,
+    parseCofechaHints,
+} from "@/features/crossdating/diagnosis/cofechaHints";
+import {
     createLagPathCache,
     locateSequentialFalseHead,
     locateSequentialMissingHead,
@@ -192,6 +196,82 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
         expect(event.rankedYears[0]?.year).toBe(1977);
         expect(event.evidence.algorithmSources)
             .toContain("sequential_missing_staircase_head");
+    }, 180_000);
+
+    bundledCofechaIt("keeps mon031 at 1977 when every natural zero is removed", () => {
+        const seriesId = "mon031";
+        const source = parsed.get(seriesId)!;
+        const truthYears = Array.from(source.valuesByYear)
+            .filter(([, value]) => value === 0)
+            .map(([year]) => year);
+        const allMissingSite: RwlSiteData = new Map(Array.from(
+            parsed,
+            ([id, series]) => {
+                const missingYears = Array.from(series.valuesByYear)
+                    .filter(([, value]) => value === 0)
+                    .map(([year]) => year);
+                return [
+                    id,
+                    buildMultiMissingCorrupted(
+                        series.valuesByYear,
+                        missingYears,
+                    ),
+                ];
+            },
+        ));
+        const outText = runBundledCofecha(allMissingSite);
+        const parts = splitReportByParts(outText);
+        const flaggedIds = extractPart6FlaggedASeriesIds(
+            parts.get("PART 6") ?? "",
+        );
+        const freshReference = createCofechaMasterReferenceConfig({
+            siteData: allMissingSite,
+            flaggedAIds: flaggedIds,
+            cofechaRunId: "co612-all-natural-zeros-removed-mon031",
+            rwlHash: "co612-all-natural-zeros-removed-mon031",
+            masterDatingSeries: parseCofechaResult(outText).masterDatingSeries,
+        });
+        const diagnosis = diagnoseCrossdating(allMissingSite, {
+            referenceConfig: freshReference,
+            targetTrees: [seriesId],
+            cofechaText: outText,
+            reviewWindowDisplayMode: "review",
+            includeEventDecisionAudits: true,
+        });
+        const events = getDisplayedDiagnosisEvents(diagnosis).filter(
+            (event) => event.seriesId === seriesId,
+        );
+        const region = getNewestFlaggedCofechaSegment(
+            parseCofechaHints(outText),
+            seriesId,
+        );
+        const audit = diagnosis.eventDecisionAudits?.find(
+            (candidate) => candidate.seriesId === seriesId,
+        );
+        const context = JSON.stringify({
+            events: summarize(events),
+            region,
+            audit,
+        });
+
+        expect(truthYears).toEqual([1977]);
+        expect(region).toMatchObject({
+            editType: "insert",
+            lag: 1,
+            startYear: 1925,
+            endYear: 1974,
+        });
+        expect(audit?.candidateProjectedEvents.some((event) => (
+            event.eventType === "missingRing" && event.topYear === 1977
+        )), context).toBe(true);
+        expect(events, context).toHaveLength(1);
+        expect(events[0].eventType, context).toBe("missingRing");
+        expect(events[0].startYear, context).toBeLessThanOrEqual(1977);
+        expect(events[0].endYear, context).toBeGreaterThanOrEqual(1977);
+        expect(events[0].rankedYears[0]?.year, context).toBe(1977);
+        expect([5, 7, 9, 13], context).toContain(
+            events[0].endYear - events[0].startYear + 1,
+        );
     }, 180_000);
 
     bundledCofechaIt("reveals all nine missing rings from bark to pith", () => {
