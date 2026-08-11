@@ -8,6 +8,7 @@ import styles from "../Home.module.css";
 
 type Props = {
     navigator: BreadthDiagnosisNavigatorState;
+    scanAvailable: boolean;
     onRunScan: () => void;
     onSelectSuggestion: (suggestion: BreadthDiagnosisSuggestion) => void;
 };
@@ -27,7 +28,11 @@ const getPauseText = (navigator: BreadthDiagnosisNavigatorState) => {
     }
 };
 
-const getStatusText = (navigator: BreadthDiagnosisNavigatorState) => {
+const getStatusText = (
+    navigator: BreadthDiagnosisNavigatorState,
+    scanAvailable: boolean,
+) => {
+    if (!scanAvailable) return "等待 COFECHA 自动参考";
     switch (navigator.status) {
         case "idle":
             return "点击扫描分析全文件";
@@ -54,7 +59,12 @@ const getSeverityClass = (navigator: BreadthDiagnosisNavigatorState) => {
     return styles["validation-neutral"];
 };
 
-export function BreadthDiagnosisNavigator({ navigator, onRunScan, onSelectSuggestion }: Props) {
+export function BreadthDiagnosisNavigator({
+    navigator,
+    scanAvailable,
+    onRunScan,
+    onSelectSuggestion,
+}: Props) {
     const visibleSuggestions = navigator.suggestions.slice(0, 3);
     const remainingCount = Math.max(0, navigator.suggestions.length - visibleSuggestions.length);
     const scanIsRunning = navigator.status === "scanning" || navigator.status === "paused";
@@ -79,13 +89,14 @@ export function BreadthDiagnosisNavigator({ navigator, onRunScan, onSelectSugges
                     <button
                         type="button"
                         className={styles["breadth-scan-button"]}
-                        disabled={scanIsRunning || navigator.totalCount === 0}
+                        disabled={!scanAvailable || scanIsRunning || navigator.totalCount === 0}
+                        title={scanAvailable ? "扫描全文件复核窗口" : "等待 COFECHA 自动参考生成完成"}
                         onClick={onRunScan}
                     >
                         {scanButtonLabel}
                     </button>
                 </strong>
-                <span>{getStatusText(navigator)}</span>
+                <span>{getStatusText(navigator, scanAvailable)}</span>
                 {navigator.totalCount > 0
                     && (navigator.status === "scanning" || navigator.status === "paused") ? (
                     <span

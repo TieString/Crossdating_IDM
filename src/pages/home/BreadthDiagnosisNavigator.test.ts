@@ -32,6 +32,7 @@ describe("BreadthDiagnosisNavigator", () => {
                     makeSuggestion("mtr841", 4),
                 ],
             },
+            scanAvailable: true,
             onRunScan: () => undefined,
             onSelectSuggestion: () => undefined,
         }));
@@ -56,6 +57,7 @@ describe("BreadthDiagnosisNavigator", () => {
                 totalCount: 55,
                 suggestions: [],
             },
+            scanAvailable: true,
             onRunScan: () => undefined,
             onSelectSuggestion: () => undefined,
         }));
@@ -66,6 +68,7 @@ describe("BreadthDiagnosisNavigator", () => {
                 totalCount: 55,
                 suggestions: [],
             },
+            scanAvailable: true,
             onRunScan: () => undefined,
             onSelectSuggestion: () => undefined,
         }));
@@ -76,5 +79,22 @@ describe("BreadthDiagnosisNavigator", () => {
         expect(staleHtml).not.toContain("role=\"progressbar\"");
         expect(completeHtml).toContain("暂未发现其他复核窗口");
         expect(completeHtml).toContain(">重新扫描</button>");
+    });
+
+    it("waits for the automatic COFECHA reference instead of offering LOO scanning", () => {
+        const html = renderToStaticMarkup(createElement(BreadthDiagnosisNavigator, {
+            navigator: {
+                status: "stale",
+                scannedCount: 0,
+                totalCount: 55,
+                suggestions: [],
+            },
+            scanAvailable: false,
+            onRunScan: () => undefined,
+            onSelectSuggestion: () => undefined,
+        }));
+
+        expect(html).toContain("等待 COFECHA 自动参考");
+        expect(html).toContain("disabled");
     });
 });

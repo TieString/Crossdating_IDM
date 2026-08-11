@@ -106,7 +106,7 @@
 - [src/components/Chart/TreeChartManager.tsx](src/components/Chart/TreeChartManager.tsx)：点击诊断窗口内折线时，只预览最终自动事件，不列出内部 `-2..-100` 假设或备选位移。局部移动直接使用事件的唯一 `firstFixedYear + shiftYears`；预览与应用共享精确范围，临时整序列视觉偏移必须换算回源年份。
 - [src/components/DiagnosisCandidates/DiagnosisEventPanel.tsx](src/components/DiagnosisCandidates/DiagnosisEventPanel.tsx)：只展示最新 JS 事件级复核窗口；局部移动只显示首选断点和唯一位移量，不把窗口内年份或内部位移假设渲染为候选组。应用前仍须展示精确操作预览并再次确认。
 - [src/features/crossdating/diagnosis/eventApply.ts](src/features/crossdating/diagnosis/eventApply.ts)：把用户复核事件转换为既有编辑语义；局部移动的公开年份是 `firstFixedYear`，应用范围严格结束于 `firstFixedYear - 1`，且自动位移必须小于 -1。
-- 主窗口诊断 worker 在 40 ms 防抖后只诊断当前选中序列，整站其它序列仍全部参与参考 chronology；选择“全部”时不启动诊断。成功 worker 会保留复用，未变化的 site/reference/COFECHA/target 直接复用诊断结果。`targetTrees` 限定不改变目标序列结果，并避免大站点对每条不可见序列重复运行完整事件管线。
+- 主窗口诊断 worker 在 40 ms 防抖后只诊断当前选中序列，选择“全部”时不启动诊断。Tauri 生产入口必须先获得带有非空 chronology points 的 dynamic reference；COFECHA 自动参考尚未生成时保持无建议，不得静默用全站其它序列构造 leave-one-out master。成功 worker 会保留复用，未变化的 site/reference/COFECHA/target 直接复用诊断结果。`targetTrees` 限定不改变目标序列结果，并避免大站点对每条不可见序列重复运行完整事件管线。
 - [src/pages/home/BreadthDiagnosisNavigator.tsx](src/pages/home/BreadthDiagnosisNavigator.tsx) 与 [src/pages/home/breadthDiagnosis.ts](src/pages/home/breadthDiagnosis.ts)：主窗口右上角是全文件广度复核导航器。当前选中序列仍由高优先级深度诊断负责；只有用户点击导航器中的扫描按钮后，后台 worker 才逐条扫描其他序列，只收集通过 review 显示门槛的唯一窗口，COFECHA 标记序列优先计算，展示顺序按窗口首次进入队列的 FIFO 时间。编辑、保存、参考或 COFECHA 状态变化只会终止旧扫描并令结果失效，不会自动启动新扫描；当前诊断、保存、载入和 COFECHA 运行期间已启动的后台扫描暂停。
 - 一次目标诊断内部会缓存 series preprocess 和 lag path 证据；局部反事实编辑复用固定 reference master，整条移动仍重建 master。Pearson 段相关不创建 pair 数组，piecewise 的零 lag 新旧段基线在候选 lag 间复用。正式单主窗口模式后台验证前三个高分操作假设，但跳过最终不会显示的位置/操作备选及其补充验证，出口仍只保留一个主操作和一个主窗口。
 - 缺轮和伪轮的完整区间定位器保留约 25 年粗搜索证据；逐年虚拟纠正只计算四条冻结定位曲线，预处理、参考拟合和纠正结果均按诊断实例缓存。UI 只接收一个主窗口，不接收内部模式或逐年候选。学习定位器先输出 9/13 年窗，随后独立物理定位器只能在当前 9 年窗内部提出 7/5 年窗：7 年要求完整嵌套，缺轮 5 年还要求 operation remote margin ≥0.13，伪轮 5 年要求 margin ≥0.09 且 side-step 锚点距当前主年份 ≤4 年。13 年窗不直接收窄，旧 `adaptiveWindowRisk` 的 17 年或粗区间回退不进入正式入口。
@@ -117,7 +117,7 @@
 
 **约束**：
 - reference series 是 derived series，不进入 RWL 数据本体，不允许作为普通序列编辑。
-- 手工 reference 只用于图表叠加和人工对照，不得进入自动定年建议；自动诊断只使用机器生成的 dynamic reference，缺少可用 dynamic reference 时走内部 leave-one-out / pairwise 路径。
+- 手工 reference 只用于图表叠加和人工对照，不得进入自动定年建议；自动诊断只使用带有有效 chronology points 的机器 dynamic reference。缺少可用 dynamic reference 时等待 COFECHA，不得自动退回 leave-one-out；pairwise-bootstrap 仍可作为 COFECHA 全标记冷启动时生成的 dynamic reference。
 - 手动 reference 计算按年份对齐并直接 arithmetic mean；COFECHA-pass 动态 reference 只能平均转换后的 residual index，最终输出 mean=0、sd=1 的 residual chronology，低于最小 replication 的年份不绘制。
 - 参考变更写入操作日志，但不参与 RwlEditor 的撤销/恢复栈。
 - 内部诊断是 COFECHA-like 快速提示，不替代外部 COFECHA 最终验证；候选项必须由用户确认后才能通过 edit.ts 操作落地。

@@ -15,6 +15,7 @@ import {
 } from "@/features/crossdating/pairwiseBootstrap";
 import type { RwlSiteData } from "@/features/rwl/types";
 import { selectAutomaticDiagnosisReferenceConfig } from "./diagnosisReferencePolicy";
+import { createEmptyCrossdatingDiagnosis } from "./workspaceState";
 
 export type DiagnosisWorkerRequest = {
     id: number;
@@ -56,6 +57,14 @@ ctx.addEventListener("message", (event: MessageEvent<DiagnosisWorkerRequest>) =>
     try {
         const startedAt = performance.now();
         const automaticReferenceConfig = selectAutomaticDiagnosisReferenceConfig(referenceConfig);
+        if (!automaticReferenceConfig) {
+            ctx.postMessage({
+                id,
+                diagnosis: createEmptyCrossdatingDiagnosis(),
+                elapsedMs: performance.now() - startedAt,
+            } satisfies DiagnosisWorkerResponse);
+            return;
+        }
         const targetReferenceConfig = createPairwiseBootstrapTargetReferenceConfig(
             siteData,
             automaticReferenceConfig,

@@ -350,6 +350,7 @@ export default function Home() {
         cofechaResult,
         cofechaVersion,
         breadthDiagnosisNavigator,
+        canRunBreadthDiagnosis,
         crossdatingValidationSummary,
         crossdatingDiagnosis,
         currentEventRankerSession,
@@ -1660,6 +1661,7 @@ export default function Home() {
                     </FloatingScrollArea>
                     <BreadthDiagnosisNavigator
                         navigator={breadthDiagnosisNavigator}
+                        scanAvailable={canRunBreadthDiagnosis}
                         onRunScan={handleRunBreadthDiagnosis}
                         onSelectSuggestion={handleBreadthSuggestionSelect}
                     />

@@ -716,7 +716,13 @@ export function useHomeWorkspace() {
     const handleRunBreadthDiagnosis = useCallback(() => {
         const filePath = filePathRef.current;
         const currentData = rwlEditorRef.current.getData();
-        if (!filePath || currentData.size === 0 || isFileLoadingRef.current) return;
+        const automaticReference = selectAutomaticDiagnosisReferenceConfig(
+            latestDynamicReferenceConfigRef.current,
+        );
+        if (!filePath
+            || currentData.size === 0
+            || isFileLoadingRef.current
+            || !automaticReference) return;
         setBreadthScanRequest({
             id: ++breadthScanRequestCounterRef.current,
             filePath,
@@ -1790,6 +1796,15 @@ export function useHomeWorkspace() {
             return undefined;
         }
 
+        if (!diagnosisReferenceConfig) {
+            diagnosisWorkerRef.current?.terminate();
+            diagnosisWorkerRef.current = null;
+            diagnosisEvidenceSnapshotRef.current = null;
+            setIsEventDiagnosisRunning(false);
+            startTransition(() => setCrossdatingDiagnosis(createEmptyCrossdatingDiagnosis()));
+            return undefined;
+        }
+
         const lastValidation = lastCofechaValidationRef.current;
         const cofechaFresh = Boolean(outFileContent)
             && lastValidation !== null
@@ -2291,11 +2306,13 @@ export function useHomeWorkspace() {
         : cofechaParts.get(selectedPart);
     const cofechaPart6Text = cofechaParts.get("PART 6");
     const windowTitle = formatTitle(fileName, isModified);
+    const canRunBreadthDiagnosis = diagnosisReferenceConfig !== null && siteData.size > 0;
 
     return {
         cofechaResult,
         cofechaVersion,
         breadthDiagnosisNavigator,
+        canRunBreadthDiagnosis,
         crossdatingValidationSummary,
         canResetToRawData,
         crossdatingDiagnosis,
