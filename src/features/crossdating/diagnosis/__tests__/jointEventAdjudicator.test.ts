@@ -73,6 +73,105 @@ describe("joint event adjudicator", () => {
         expect(decision.event?.evidence.candidateIds).toEqual(["stable"]);
     });
 
+    it("keeps the persisted local window when a final-only nearby variant arrives later", () => {
+        const persisted = event("persisted", "missingRing", 1899, 1905, 1902);
+        const finalOnly = event("final-only", "missingRing", 1902, 1908, 1905);
+        finalOnly.confidenceLevel = "high";
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", persisted),
+            checkpoint("detected", persisted),
+            checkpoint("fused", persisted),
+            checkpoint("retained", persisted),
+            checkpoint("displayed", persisted),
+            checkpoint("final", persisted),
+            checkpoint("final", finalOnly),
+        ]);
+
+        expect(decision.event).toMatchObject({
+            startYear: 1899,
+            endYear: 1905,
+        });
+    });
+
+    it("keeps a protected candidate frontier when final synthesis returns to a remote plateau", () => {
+        const checkpointEvent = event(
+            "candidate-frontier",
+            "missingRing",
+            1969,
+            1981,
+            1977,
+        );
+        checkpointEvent.evidence.algorithmSources = ["candidate_frontier_checkpoint"];
+        checkpointEvent.evidence.notes = ["candidate_hard_gate_passed"];
+        checkpointEvent.evidence.lagBefore = -1;
+        checkpointEvent.evidence.lagAfter = -1;
+        const remoteFinal = event(
+            "remote-final",
+            "missingRing",
+            1845,
+            1851,
+            1851,
+        );
+        remoteFinal.evidence.algorithmSources = [
+            "decisive_joint_operation_fusion",
+            "joint_year_operation_evidence",
+        ];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("displayed", checkpointEvent),
+            checkpoint("final", remoteFinal),
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "displayed",
+            event: {
+                eventType: "missingRing",
+                startYear: 1969,
+                endYear: 1981,
+            },
+        });
+    });
+
+    it("lets independent final location evidence supersede a protected candidate frontier", () => {
+        const checkpointEvent = event(
+            "candidate-frontier",
+            "missingRing",
+            1969,
+            1981,
+            1977,
+        );
+        checkpointEvent.evidence.algorithmSources = ["candidate_frontier_checkpoint"];
+        checkpointEvent.evidence.notes = ["candidate_hard_gate_passed"];
+        checkpointEvent.evidence.lagBefore = -1;
+        checkpointEvent.evidence.lagAfter = -1;
+        const independentlyLocated = event(
+            "independent-final",
+            "missingRing",
+            1845,
+            1851,
+            1851,
+        );
+        independentlyLocated.evidence.algorithmSources = [
+            "sequential_missing_staircase_head",
+            "robust_per_reference_missing_staircase",
+        ];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("displayed", checkpointEvent),
+            checkpoint("final", independentlyLocated),
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "final",
+            event: {
+                startYear: 1845,
+                endYear: 1851,
+            },
+        });
+    });
+
     it("refuses equally supported incompatible operations", () => {
         const missing = event("missing", "missingRing", 1899, 1905, 1902);
         const falseRing = event("false", "falseRing", 1899, 1905, 1902);

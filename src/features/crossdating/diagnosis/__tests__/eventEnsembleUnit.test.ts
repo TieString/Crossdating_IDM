@@ -29,6 +29,7 @@ import {
     pruneWholeSeriesPartialAliases,
     pruneUnsupportedFalseRingPathSupplements,
     preserveNewestCandidateUnitCheckpoint,
+    retainDisplayedMissingHypothesesDuringSequentialRecovery,
     shouldPreserveCandidateBackedUnitFromRemoteSequentialHead,
     unitEventCompetesWithWholeAtNewerEndpoint,
     unitEventExplainsWholeSeriesCandidate,
@@ -134,6 +135,67 @@ const candidateRecoveryDiagnosis = {
     targetTree: "TEST",
     targetRange: { startYear: 1800, endYear: 2020 },
 } as SeriesCoreDiagnosis;
+
+describe("sequential missing hypothesis retention", () => {
+    it("keeps a displayed hard-gated missing window beside a later staircase hypothesis", () => {
+        const displayed = candidatePartial({
+            shiftYears: -1,
+            anchorYear: 1902,
+            candidateId: "candidate-1902",
+            source: "cofecha_segment_lag",
+        });
+        displayed.eventType = "missingRing";
+        displayed.startYear = 1899;
+        displayed.endYear = 1905;
+        displayed.rankedYears = [{
+            year: 1902,
+            rank: 1,
+            score: 1,
+            evidenceTags: [],
+        }];
+        const recovered = {
+            ...displayed,
+            id: "sequential-remote",
+            startYear: 1920,
+            endYear: 1932,
+            rankedYears: [{
+                year: 1926,
+                rank: 1,
+                score: 2,
+                evidenceTags: [],
+            }],
+            evidence: {
+                ...displayed.evidence,
+                algorithmSources: ["sequential_missing_staircase_head"],
+                candidateIds: [],
+                notes: [],
+            },
+        };
+
+        expect(retainDisplayedMissingHypothesesDuringSequentialRecovery(
+            [displayed],
+            recovered,
+        ).map((event) => event.id)).toEqual([displayed.id]);
+    });
+
+    it("does not retain an unanchored path draft as a competing final hypothesis", () => {
+        const unanchored = falseRingEvent(1900, false);
+        unanchored.eventType = "missingRing";
+        const recovered = {
+            ...unanchored,
+            id: "sequential",
+            evidence: {
+                ...unanchored.evidence,
+                algorithmSources: ["sequential_missing_staircase_head"],
+            },
+        };
+
+        expect(retainDisplayedMissingHypothesesDuringSequentialRecovery(
+            [unanchored],
+            recovered,
+        )).toEqual([]);
+    });
+});
 
 const verifiedPulse = (): DiagnosisEvent[] => ([
     {

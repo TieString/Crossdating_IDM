@@ -1898,6 +1898,44 @@ export const shouldPreserveCandidateBackedUnitFromRemoteSequentialHead = (
     });
 };
 
+const hasIndependentDisplayedMissingAnchor = (event: DiagnosisEvent): boolean => {
+    if (event.eventType !== "missingRing") return false;
+    const sources = new Set(event.evidence.algorithmSources);
+    const hardGatedCandidate = event.evidence.notes.includes("candidate_hard_gate_passed")
+        && (
+            event.evidence.candidateIds.length > 0
+            || sources.has("candidate_ranking")
+            || sources.has("cofecha_boundary_checkpoint")
+            || sources.has("candidate_frontier_checkpoint")
+        );
+    const jointUnitLocation = sources.has("decisive_joint_operation_fusion")
+        && sources.has("joint_year_operation_evidence");
+    return hardGatedCandidate
+        || jointUnitLocation
+        || sources.has("paired_core_cold_start_frontier")
+        || sources.has("paired_direct_breakpoint_consensus");
+};
+
+/**
+ * Sequential recovery contributes another complete hypothesis. It must not erase a unit event
+ * that already survived the candidate, operation and display gates with an independent anchor.
+ */
+export const retainDisplayedMissingHypothesesDuringSequentialRecovery = (
+    displayed: readonly DiagnosisEvent[],
+    recovered: DiagnosisEvent,
+): DiagnosisEvent[] => {
+    const recoveredYear = rankedEventYear(recovered);
+    const retained = displayed.filter((event) => (
+        hasIndependentDisplayedMissingAnchor(event)
+        && !(
+            event.startYear === recovered.startYear
+            && event.endYear === recovered.endYear
+            && rankedEventYear(event) === recoveredYear
+        )
+    ));
+    return retained;
+};
+
 /** Keeps the newest hard-gated unit frontier from being absorbed by an older lag plateau. */
 export const preserveNewestCandidateUnitCheckpoint = (
     events: DiagnosisEvent[],
@@ -5291,12 +5329,18 @@ export const makeDiagnosisEvents = (
                 siteData,
             );
         };
-        const finalize = (sourceEvents: DiagnosisEvent[]): DiagnosisEvent[] => {
+        const finalize = (
+            sourceEvents: DiagnosisEvent[],
+            supplementalFinalHypotheses: DiagnosisEvent[] = [],
+        ): DiagnosisEvent[] => {
             const automaticSemanticsRejectedCount = sourceEvents.filter(
                 (event) => !isValidAutomaticEvent(event),
             ).length;
             const finalEvents = validAutomaticEvents(sourceEvents)
                 .map(withEvidenceLedger);
+            const supplementalFinalEvents = validAutomaticEvents(
+                supplementalFinalHypotheses,
+            ).map(withEvidenceLedger);
             let finalReason: DiagnosisEventDecisionReason = "post_location_rejected";
             if (finalEvents.length > 0) {
                 finalReason = "emitted";
@@ -5374,7 +5418,10 @@ export const makeDiagnosisEvents = (
                     { stage: "fused", events: detected },
                     { stage: "retained", events: retainedDetected },
                     { stage: "displayed", events: displayed },
-                    { stage: "final", events: finalEvents },
+                    {
+                        stage: "final",
+                        events: [...finalEvents, ...supplementalFinalEvents],
+                    },
                 ];
                 stages.forEach(({ stage, events }) => events.forEach((event) => {
                     options.reviewEventCheckpoints?.push({
@@ -5447,7 +5494,13 @@ export const makeDiagnosisEvents = (
             const preservedWhole = sequentialMissing.preserveWholeBaseline
                 ? displayed.filter((event) => event.eventType === "wholeSeriesMove")
                 : [];
-            return finalize([...preservedWhole, sequentialMissing.event]);
+            return finalize(
+                [...preservedWhole, sequentialMissing.event],
+                retainDisplayedMissingHypothesesDuringSequentialRecovery(
+                    displayed,
+                    sequentialMissing.event,
+                ),
+            );
         }
         const completedMixedSeed = mayRecoverSequentialMissing
             ? selectCompletedPartialMissingSeed(displayed, candidateEvents)
@@ -5501,7 +5554,13 @@ export const makeDiagnosisEvents = (
             const preservedWhole = sequentialMissing.preserveWholeBaseline
                 ? displayed.filter((event) => event.eventType === "wholeSeriesMove")
                 : [];
-            return finalize([...preservedWhole, sequentialMissing.event]);
+            return finalize(
+                [...preservedWhole, sequentialMissing.event],
+                retainDisplayedMissingHypothesesDuringSequentialRecovery(
+                    displayed,
+                    sequentialMissing.event,
+                ),
+            );
         }
         if (!hasLocalEvent) return finalize(displayed);
         const locatedInputEvents = prioritizeEndpointUnitAgainstWhole(

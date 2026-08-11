@@ -122,18 +122,39 @@ const claimStrength = (events: readonly DiagnosisEvent[]): number => Math.max(
     ))),
 );
 
+const samePersistedLocation = (left: DiagnosisEvent, right: DiagnosisEvent): boolean => {
+    if (!sameOperation(left, right)) return false;
+    if (left.eventType === "wholeSeriesMove") return true;
+    const leftTop = topYear(left);
+    const rightTop = topYear(right);
+    return windowsOverlap(left, right)
+        && leftTop !== null
+        && rightTop !== null
+        && Math.abs(leftTop - rightTop) <= 2;
+};
+
+const persistedStageCount = (
+    cluster: HypothesisCluster,
+    checkpoint: DiagnosisReviewEventCheckpoint,
+): number => new Set(cluster.checkpoints.filter((candidate) => (
+    samePersistedLocation(checkpoint.event, candidate.event)
+)).map(({ stage }) => stage)).size;
+
 const representativeQuality = (
+    cluster: HypothesisCluster,
     checkpoint: DiagnosisReviewEventCheckpoint,
 ): number => (
-    stagePriority[checkpoint.stage] / 6 * 0.55
-    + confidenceScore(checkpoint.event) * 0.2
-    + eventLocationQuality(checkpoint.event) * 0.25
+    stagePriority[checkpoint.stage] / 6 * 0.4
+    + persistedStageCount(cluster, checkpoint) / 6 * 0.3
+    + confidenceScore(checkpoint.event) * 0.1
+    + eventLocationQuality(checkpoint.event) * 0.2
 );
 
 const representative = (
     cluster: HypothesisCluster,
 ): DiagnosisReviewEventCheckpoint => [...cluster.checkpoints].sort((left, right) => (
-    representativeQuality(right) - representativeQuality(left)
+    representativeQuality(cluster, right) - representativeQuality(cluster, left)
+    || persistedStageCount(cluster, right) - persistedStageCount(cluster, left)
     || stagePriority[right.stage] - stagePriority[left.stage]
     || (topYear(right.event) ?? Number.NEGATIVE_INFINITY)
         - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
@@ -227,7 +248,18 @@ const operationContractValid = (event: DiagnosisEvent): boolean => {
     const { lagBefore, lagAfter } = event.evidence;
     if (lagBefore === null || lagAfter === null) return false;
     const transition = lagAfter - lagBefore;
-    return event.eventType === "missingRing" ? transition > 0 : transition < 0;
+    if (event.eventType === "missingRing" ? transition > 0 : transition < 0) {
+        return true;
+    }
+    const protectedCandidateCheckpoint = event.evidence.notes.includes(
+        "candidate_hard_gate_passed",
+    ) && event.evidence.algorithmSources.some((source) => (
+        source === "candidate_frontier_checkpoint"
+        || source === "cofecha_boundary_checkpoint"
+    ));
+    return protectedCandidateCheckpoint
+        && lagBefore === lagAfter
+        && (event.eventType === "missingRing" ? lagBefore < 0 : lagBefore > 0);
 };
 
 const groupOperations = (clusters: readonly HypothesisCluster[]): OperationGroup[] => {
@@ -255,6 +287,36 @@ const operationScore = (group: OperationGroup): number => {
 const hasFinalCheckpoint = (cluster: HypothesisCluster): boolean => (
     cluster.checkpoints.some(({ stage }) => stage === "final")
 );
+
+const isProtectedCandidateFrontier = (cluster: HypothesisCluster): boolean => (
+    cluster.checkpoints.some(({ event }) => (
+        (event.eventType === "missingRing" || event.eventType === "falseRing")
+        && event.evidence.notes.includes("candidate_hard_gate_passed")
+        && event.evidence.algorithmSources.some((source) => (
+            source === "candidate_frontier_checkpoint"
+            || source === "cofecha_boundary_checkpoint"
+        ))
+    ))
+);
+
+const hasIndependentLocationAuthority = (cluster: HypothesisCluster): boolean => {
+    const event = representative(cluster).event;
+    const claims = evidenceClaimsFor(event);
+    if (claims.has("explicit_missing_staircase")
+        || claims.has("independent_reference_staircase")
+        || claims.has("fixed_side_resolution")
+        || claims.has("whole_baseline_exhausted_by_missing_staircase")) {
+        return true;
+    }
+    return matchingLocationEvidence(event).some((entry) => (
+        entry.calibrated
+        || (
+            entry.referenceCount >= 3
+            && (entry.concentration ?? 0) >= 0.2
+            && (entry.remoteMargin ?? 0) >= 0.04
+        )
+    ));
+};
 
 const finalFrontierClusters = (
     clusters: readonly HypothesisCluster[],
@@ -294,6 +356,28 @@ const finalFrontierClusters = (
         });
         return decisiveLocal.length > 0 ? decisiveLocal : wholeClusters;
     }
+    const protectedCandidate = clusters
+        .filter((cluster) => !hasFinalCheckpoint(cluster))
+        .filter(isProtectedCandidateFrontier)
+        .filter((cluster) => localClusters.some((finalCluster) => {
+            if (hasIndependentLocationAuthority(finalCluster)) return false;
+            const candidate = representative(cluster).event;
+            const finalEvent = representative(finalCluster).event;
+            const candidateTop = topYear(candidate);
+            const finalTop = topYear(finalEvent);
+            return sameOperation(candidate, finalEvent)
+                && candidateTop !== null
+                && finalTop !== null
+                && candidateTop - finalTop > config.remoteModeDistanceYears;
+        }))
+        .sort((left, right) => (
+            stagePriority[representative(right).stage]
+                - stagePriority[representative(left).stage]
+            || locationScore(right) - locationScore(left)
+            || (topYear(representative(right).event) ?? Number.NEGATIVE_INFINITY)
+                - (topYear(representative(left).event) ?? Number.NEGATIVE_INFINITY)
+        ))[0];
+    if (protectedCandidate) return [protectedCandidate];
     if (localClusters.length <= 1) return localClusters;
     const newestYear = Math.max(...localClusters.map((cluster) => (
         topYear(representative(cluster).event) ?? Number.NEGATIVE_INFINITY
