@@ -1,5 +1,6 @@
 /** Conservative tie policy for discrete missing rings versus one continuous partial gap. */
 import type {
+    CompletedPartialMissingComposition,
     CompletedPartialStaircaseCompetition,
     MissingStaircaseCompetition,
 } from "./discreteMissingStaircaseCompetition";
@@ -122,6 +123,7 @@ export const evaluateMissingPartialInterpretationTie = (
     ) return null;
 
     return {
+        interpretationBasis: "counterfactualTie",
         missingRingCount: missingYears.length,
         cumulativeShiftYears: normalized.cumulativeShiftYears,
         missingYears,
@@ -132,6 +134,67 @@ export const evaluateMissingPartialInterpretationTie = (
         referenceCount: normalized.referenceCount,
         missingReferenceSupport: normalized.missingReferenceSupport,
         partialReferenceSupport: normalized.partialReferenceSupport,
+    };
+};
+
+/**
+ * A validated partial+missing composition can leave the newest -N frontier observationally
+ * equivalent to N nearby missing rings. The exact unit years remain unresolved; the user only
+ * receives the independently localized frontier window and confirms the physical explanation.
+ */
+export const evaluateCompletedPartialMissingInterpretation = (
+    partial: DiagnosisEvent,
+    competition: CompletedPartialMissingComposition,
+    gate: {
+        compositionReviewPassed: boolean;
+        hasIndependentWholeSeriesBaseline: boolean;
+    },
+): DiagnosisMissingPartialInterpretationEvidence | null => {
+    const shiftYears = partial.shiftYears ?? 0;
+    const missingRingCount = Math.abs(shiftYears);
+    if (
+        !gate.compositionReviewPassed
+        || gate.hasIndependentWholeSeriesBaseline
+        || partial.eventType !== "partialMove"
+        || partial.shiftSide !== "older"
+        || shiftYears >= -1
+        || competition.frontierEventType !== "partialMove"
+        || competition.orientation !== "missingThenPartial"
+        || competition.partialShiftYears !== shiftYears
+        || missingRingCount
+            > MISSING_PARTIAL_INTERPRETATION_CALIBRATION.maximumMissingRegionWidthYears
+        || competition.separationYears
+            > MISSING_PARTIAL_INTERPRETATION_CALIBRATION.maximumMissingRegionWidthYears
+        || competition.referenceCount
+            < MISSING_PARTIAL_INTERPRETATION_CALIBRATION.minimumReferenceCount
+        || competition.orientationReferenceCount
+            < MISSING_PARTIAL_INTERPRETATION_CALIBRATION.minimumReferenceCount
+        || competition.mixedReferenceSupport
+            < MISSING_PARTIAL_INTERPRETATION_CALIBRATION.minimumSupportPerExplanation
+        || competition.orientationReferenceSupport
+            < MISSING_PARTIAL_INTERPRETATION_CALIBRATION.minimumSupportPerExplanation
+    ) return null;
+
+    return {
+        interpretationBasis: "completedPartialMissingComposition",
+        missingRingCount,
+        cumulativeShiftYears: shiftYears,
+        // The composition locates the shared frontier, not each individual absent ring.
+        missingYears: [],
+        partialFirstFixedYear: competition.frontierYear,
+        normalizedCounterfactualGainDifference: 0,
+        masterMargin: competition.masterMargin,
+        referenceMedianMargin: competition.referenceMedianMargin,
+        referenceCount: competition.referenceCount,
+        missingReferenceSupport: competition.orientationReferenceSupport,
+        partialReferenceSupport: competition.mixedReferenceSupport,
+        completedComposition: {
+            separationYears: competition.separationYears,
+            mixedReferenceSupport: competition.mixedReferenceSupport,
+            mixedReferenceCount: competition.referenceCount,
+            orientationReferenceSupport: competition.orientationReferenceSupport,
+            orientationReferenceCount: competition.orientationReferenceCount,
+        },
     };
 };
 
@@ -159,6 +222,9 @@ const boundedWindow = (
 const interpretationNotes = (
     evidence: DiagnosisMissingPartialInterpretationEvidence,
 ): string[] => [
+    `missing_partial_interpretation_basis=${
+        evidence.interpretationBasis ?? "counterfactualTie"
+    }`,
     `missing_partial_tie_count=${evidence.missingRingCount}`,
     `missing_partial_tie_shift=${evidence.cumulativeShiftYears}`,
     `missing_partial_tie_missing_years=${evidence.missingYears.join(",")}`,
@@ -176,7 +242,12 @@ export const makeMissingRingInterpretation = (
     evidence: DiagnosisMissingPartialInterpretationEvidence,
     range: YearRange,
 ): DiagnosisEvent => {
-    const selectedYear = evidence.missingYears[evidence.missingYears.length - 1]!;
+    const selectedYear = evidence.missingYears[evidence.missingYears.length - 1]
+        ?? evidence.partialFirstFixedYear;
+    const interpretationSource = evidence.interpretationBasis
+        === "completedPartialMissingComposition"
+        ? "completed_partial_missing_interpretation"
+        : "missing_partial_interpretation_tie";
     const window = boundedWindow(
         selectedYear,
         partial.endYear - partial.startYear + 1,
@@ -189,7 +260,7 @@ export const makeMissingRingInterpretation = (
             return {
                 year,
                 score: partial.evidence.score - Math.abs(year - selectedYear) * 0.01,
-                evidenceTags: ["missing_partial_interpretation_tie"],
+                evidenceTags: [interpretationSource],
             };
         },
     ).sort((left, right) => (
@@ -209,7 +280,7 @@ export const makeMissingRingInterpretation = (
             ...partial.evidence,
             algorithmSources: Array.from(new Set([
                 ...partial.evidence.algorithmSources,
-                "missing_partial_interpretation_tie",
+                interpretationSource,
                 "discrete_missing_staircase_interpretation",
             ])).sort(),
             scoreMargin: Math.max(0, evidence.referenceMedianMargin),
@@ -221,6 +292,9 @@ export const makeMissingRingInterpretation = (
             notes: Array.from(new Set([
                 ...partial.evidence.notes,
                 ...interpretationNotes(evidence),
+                ...(evidence.missingYears.length === 0
+                    ? ["interpretation_missing_years=unresolved_frontier_sequence"]
+                    : []),
                 "interpretation=discrete_missing_ring_frontier",
             ])),
         },

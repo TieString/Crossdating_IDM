@@ -25,6 +25,7 @@ import {
 } from "./discreteMissingStaircaseCompetition";
 import {
     attachMissingPartialInterpretation,
+    evaluateCompletedPartialMissingInterpretation,
     evaluateMissingPartialInterpretationTie,
     makeMissingRingInterpretation,
     makePartialMoveInterpretation,
@@ -1884,6 +1885,12 @@ const sequentialMissingCandidateCenters = (
     .map((event) => event.rankedYears[0]?.year)
     .filter((year): year is number => year !== undefined);
 
+/** A raw partial peak on the fixed/newer side cannot relocate a lag head without stage support. */
+export const rawCandidateMayRecenterSequentialMissing = (
+    headYear: number,
+    candidateYear: number,
+): boolean => candidateYear <= headYear + 2;
+
 const sequentialMissingPreferredLocationCenters = (
     displayedEvents: readonly DiagnosisEvent[],
     earlierCheckpoints: readonly DiagnosisEvent[],
@@ -2112,7 +2119,9 @@ const makeSequentialMissingHeadEvent = (
     confirmedTargetZeroYears: readonly number[],
     markerMode: SharedZeroMarkerMode,
 ): DiagnosisEvent => {
-    const candidateCenters = sequentialMissingCandidateCenters(candidateEvents);
+    const candidateCenters = sequentialMissingCandidateCenters(candidateEvents).filter(
+        (year) => rawCandidateMayRecenterSequentialMissing(head.year, year),
+    );
     const {
         marker,
         selectedYear,
@@ -2922,11 +2931,31 @@ const makeCompletedPartialUnitFrontierEvent = (
         },
     };
     if (competition.frontierEventType === "partialMove") {
-        return {
+        const partial: DiagnosisEvent = {
             ...common,
             shiftYears: competition.partialShiftYears,
             shiftSide: "older",
         };
+        if (competition.unitEventType !== "missingRing") return partial;
+        const interpretationEvidence = evaluateCompletedPartialMissingInterpretation(
+            partial,
+            competition,
+            {
+                compositionReviewPassed: true,
+                hasIndependentWholeSeriesBaseline: false,
+            },
+        );
+        return interpretationEvidence
+            ? attachMissingPartialInterpretation(
+                partial,
+                makeMissingRingInterpretation(
+                    partial,
+                    interpretationEvidence,
+                    diagnosis.targetRange,
+                ),
+                interpretationEvidence,
+            )
+            : partial;
     }
     const unit = { ...common };
     delete unit.shiftYears;

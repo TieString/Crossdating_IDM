@@ -9,6 +9,7 @@ import {
     partialMoveExplainsWholeSeriesCandidate,
     partialMoveSupportsSequentialMissingDepth,
     prioritizeEndpointUnitAgainstWhole,
+    rawCandidateMayRecenterSequentialMissing,
     unitEventUsesWholeSeriesBaseline,
     pruneUnanchoredUnitAlternativesToCandidatePartial,
     pruneLocalEventsDisconnectedFromWholeBaseline,
@@ -1195,6 +1196,12 @@ describe("resolveSequentialMissingPresentation", () => {
             windowCenterYear: 1632,
             width: 13,
         });
+    });
+
+    it("does not let an unsupported newer raw partial peak recenter the lag head", () => {
+        expect(rawCandidateMayRecenterSequentialMissing(1784, 1792)).toBe(false);
+        expect(rawCandidateMayRecenterSequentialMissing(1784, 1786)).toBe(true);
+        expect(rawCandidateMayRecenterSequentialMissing(1784, 1771)).toBe(true);
     });
 });
 

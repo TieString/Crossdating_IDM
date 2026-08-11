@@ -343,6 +343,17 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
                     ? `树皮端距窗口 ${interpretation.evidence.endpointDistanceYears} 年；整体/缺轮操作分差 ${
                       interpretation.evidence.operationScoreMargin?.toFixed(2) ?? "-"
                     }`
+                    : interpretation.evidence.interpretationBasis
+                      === "completedPartialMissingComposition"
+                      ? `复合校正支持 ${
+                        interpretation.evidence.completedComposition?.mixedReferenceSupport ?? "-"
+                      }/${
+                        interpretation.evidence.completedComposition?.mixedReferenceCount ?? "-"
+                      }；事件顺序支持 ${
+                        interpretation.evidence.completedComposition?.orientationReferenceSupport ?? "-"
+                      }/${
+                        interpretation.evidence.completedComposition?.orientationReferenceCount ?? "-"
+                      }`
                     : `完整反事实收益差 ${
                       interpretation.evidence.normalizedCounterfactualGainDifference.toFixed(2)
                     }；缺轮/连续缺段参考芯支持 ${

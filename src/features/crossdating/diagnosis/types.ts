@@ -127,8 +127,11 @@ export type DiagnosisEventLocationAlternative = {
  * expose this as a general operation picker.
  */
 export type DiagnosisMissingPartialInterpretationEvidence = {
+    interpretationBasis?: "counterfactualTie"
+        | "completedPartialMissingComposition";
     missingRingCount: number;
     cumulativeShiftYears: number;
+    /** Exact unit years are present only when the staircase locator resolved them. */
     missingYears: number[];
     partialFirstFixedYear: number;
     normalizedCounterfactualGainDifference: number;
@@ -137,6 +140,13 @@ export type DiagnosisMissingPartialInterpretationEvidence = {
     referenceCount: number;
     missingReferenceSupport: number;
     partialReferenceSupport: number;
+    completedComposition?: {
+        separationYears: number;
+        mixedReferenceSupport: number;
+        mixedReferenceCount: number;
+        orientationReferenceSupport: number;
+        orientationReferenceCount: number;
+    };
 };
 
 export type DiagnosisWholeMissingInterpretationEvidence = {

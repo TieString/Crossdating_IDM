@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type {
+    CompletedPartialMissingComposition,
     CompletedPartialStaircaseCompetition,
     MissingStaircaseCompetition,
 } from "../discreteMissingStaircaseCompetition";
 import {
     attachMissingPartialInterpretation,
+    evaluateCompletedPartialMissingInterpretation,
     evaluateMissingPartialInterpretationTie,
     makeMissingRingInterpretation,
     makePartialMoveInterpretation,
@@ -57,6 +59,34 @@ const completedCompetition = (
     referenceLowerQuartileMargin: -0.012,
     referenceUpperQuartileMargin: 0.008,
     shiftProfiles: [],
+    ...overrides,
+});
+
+const completedComposition = (
+    overrides: Partial<CompletedPartialMissingComposition> = {},
+): CompletedPartialMissingComposition => ({
+    unitEventType: "missingRing",
+    cumulativeShiftYears: -3,
+    partialShiftYears: -2,
+    orientation: "missingThenPartial",
+    olderBoundaryYear: 1898,
+    newerBoundaryYear: 1905,
+    frontierEventType: "partialMove",
+    frontierYear: 1905,
+    separationYears: 7,
+    masterMargin: 0.002,
+    referenceCount: 48,
+    mixedReferenceSupport: 43,
+    mixedReferenceSupportRatio: 43 / 48,
+    referenceMedianMargin: 0.12,
+    referenceLowerQuartileMargin: 0.08,
+    orientationReferenceCount: 46,
+    orientationReferenceSupport: 45,
+    orientationReferenceSupportRatio: 45 / 46,
+    orientationMedianMargin: 0.14,
+    orientationLowerQuartileMargin: 0.09,
+    masterOrientationMargin: -0.07,
+    comparedWithMissingStaircase: false,
     ...overrides,
 });
 
@@ -196,5 +226,66 @@ describe("missing/partial interpretation tie", () => {
         expect(
             primary.interpretationAmbiguity?.alternative.interpretationAmbiguity,
         ).toBeUndefined();
+    });
+
+    it("exposes a nearby missing-ring interpretation for a validated mixed frontier", () => {
+        const partial = partialEvent();
+        const evidence = evaluateCompletedPartialMissingInterpretation(
+            partial,
+            completedComposition(),
+            {
+                compositionReviewPassed: true,
+                hasIndependentWholeSeriesBaseline: false,
+            },
+        );
+
+        expect(evidence).toMatchObject({
+            interpretationBasis: "completedPartialMissingComposition",
+            missingRingCount: 2,
+            cumulativeShiftYears: -2,
+            missingYears: [],
+            partialFirstFixedYear: 1905,
+            completedComposition: {
+                separationYears: 7,
+                mixedReferenceSupport: 43,
+                orientationReferenceSupport: 45,
+            },
+        });
+        const missing = makeMissingRingInterpretation(
+            partial,
+            evidence!,
+            partial.seriesRange!,
+        );
+        expect(missing).toMatchObject({
+            eventType: "missingRing",
+            startYear: 1901,
+            endYear: 1909,
+        });
+        expect(missing.rankedYears[0]?.year).toBe(1905);
+        expect(missing.evidence.algorithmSources).toContain(
+            "completed_partial_missing_interpretation",
+        );
+    });
+
+    it.each([
+        ["whole baseline", completedComposition(), true],
+        ["distant composition", completedComposition({ separationYears: 14 }), false],
+        ["false-first orientation", completedComposition({
+            orientation: "partialThenMissing",
+            frontierEventType: "missingRing",
+        }), false],
+    ])("does not expose the composition interpretation for %s", (
+        _name,
+        competition,
+        hasIndependentWholeSeriesBaseline,
+    ) => {
+        expect(evaluateCompletedPartialMissingInterpretation(
+            partialEvent(),
+            competition as CompletedPartialMissingComposition,
+            {
+                compositionReviewPassed: true,
+                hasIndependentWholeSeriesBaseline,
+            },
+        )).toBeNull();
     });
 });
