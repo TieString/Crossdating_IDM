@@ -133,6 +133,98 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("keeps a hard-gated unit location that persisted from candidate through display", () => {
+        const checkpointEvent = event(
+            "candidate-frontier",
+            "missingRing",
+            1947,
+            1953,
+            1950,
+        );
+        checkpointEvent.evidence.algorithmSources = [
+            "candidate_ranking",
+            "cofecha_boundary_checkpoint",
+        ];
+        checkpointEvent.evidence.notes = ["candidate_hard_gate_passed"];
+        // Segment lags describe the surrounding diagnostic blocks, not a unit transition.
+        checkpointEvent.evidence.lagBefore = -1;
+        checkpointEvent.evidence.lagAfter = -3;
+        const relocatedFinal = event(
+            "sequential-relocation",
+            "missingRing",
+            1936,
+            1948,
+            1942,
+        );
+        relocatedFinal.evidence.algorithmSources = ["sequential_missing_staircase_head"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", checkpointEvent),
+            checkpoint("displayed", checkpointEvent),
+            checkpoint("final", checkpointEvent),
+            checkpoint("final", relocatedFinal),
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "final",
+            event: {
+                startYear: 1947,
+                endYear: 1953,
+            },
+        });
+    });
+
+    it("does not admit a hard-gated unit location that never reached display", () => {
+        const unreviewed = event(
+            "unreviewed-candidate",
+            "missingRing",
+            1947,
+            1953,
+            1950,
+        );
+        unreviewed.evidence.algorithmSources = ["candidate_ranking"];
+        unreviewed.evidence.notes = ["candidate_hard_gate_passed"];
+        unreviewed.evidence.lagBefore = -1;
+        unreviewed.evidence.lagAfter = -3;
+        const finalEvent = event(
+            "final",
+            "missingRing",
+            1936,
+            1948,
+            1942,
+        );
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", unreviewed),
+            checkpoint("final", finalEvent),
+        ]);
+
+        expect(decision.event).toMatchObject({
+            startYear: 1936,
+            endYear: 1948,
+        });
+    });
+
+    it("uses cross-stage location persistence instead of operation claims to place a unit event", () => {
+        const persisted = event("persisted", "missingRing", 1841, 1849, 1843);
+        const relocated = event("relocated", "missingRing", 1852, 1856, 1854);
+        relocated.evidence.algorithmSources = ["sequential_missing_staircase_head"];
+        const stages: DiagnosisReviewSourceStage[] = [
+            "candidate", "detected", "fused", "retained", "displayed", "final",
+        ];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            ...stages.map((stage) => checkpoint(stage, persisted)),
+            checkpoint("final", relocated),
+        ]);
+
+        expect(decision.event).toMatchObject({
+            startYear: 1841,
+            endYear: 1849,
+        });
+    });
+
     it("lets independent final location evidence supersede a protected candidate frontier", () => {
         const checkpointEvent = event(
             "candidate-frontier",

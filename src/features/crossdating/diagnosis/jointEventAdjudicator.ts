@@ -104,6 +104,23 @@ const eventLocationQuality = (event: DiagnosisEvent): number => {
     )));
 };
 
+const eventHasIndependentLocationAuthority = (event: DiagnosisEvent): boolean => {
+    const claims = evidenceClaimsFor(event);
+    if (claims.has("independent_reference_staircase")
+        || claims.has("fixed_side_resolution")
+        || claims.has("endpoint_unit_resolution")) {
+        return true;
+    }
+    return matchingLocationEvidence(event).some((entry) => (
+        entry.calibrated
+        || (
+            entry.referenceCount >= 3
+            && (entry.concentration ?? 0) >= 0.2
+            && (entry.remoteMargin ?? 0) >= 0.04
+        )
+    ));
+};
+
 const claimWeight: Record<DiagnosisEvidenceClaim, number> = {
     explicit_missing_staircase: 1,
     whole_baseline_exhausted_by_missing_staircase: 1,
@@ -161,15 +178,19 @@ const representative = (
         - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
 ))[0];
 
+const hasIndependentLocationAuthority = (cluster: HypothesisCluster): boolean => (
+    cluster.checkpoints.some(({ event }) => eventHasIndependentLocationAuthority(event))
+);
+
 const locationScore = (cluster: HypothesisCluster): number => {
     const selected = representative(cluster);
     const supportStages = new Set(cluster.checkpoints.map(({ stage }) => stage));
     const maxStage = Math.max(...[...supportStages].map((stage) => stagePriority[stage]));
-    return maxStage / 6 * 0.55
-        + supportStages.size / 6 * 0.1
-        + claimStrength(cluster.checkpoints.map(({ event }) => event)) * 0.15
-        + eventLocationQuality(selected.event) * 0.15
-        + confidenceScore(selected.event) * 0.05;
+    return maxStage / 6 * 0.35
+        + supportStages.size / 6 * 0.35
+        + (hasIndependentLocationAuthority(cluster) ? 0.2 : 0)
+        + eventLocationQuality(selected.event) * 0.07
+        + confidenceScore(selected.event) * 0.03;
 };
 
 const clusterId = (cluster: HypothesisCluster): string => {
@@ -242,7 +263,34 @@ const operationKey = (event: DiagnosisEvent): string => [
         : event.shiftYears ?? "none",
 ].join(":");
 
-const operationContractValid = (event: DiagnosisEvent): boolean => {
+const isHardGatedUnitLocationCheckpoint = (event: DiagnosisEvent): boolean => (
+    (event.eventType === "missingRing" || event.eventType === "falseRing")
+    && event.evidence.notes.includes("candidate_hard_gate_passed")
+    && event.evidence.algorithmSources.some((source) => (
+        source === "candidate_ranking"
+        || source === "candidate_frontier_checkpoint"
+        || source === "cofecha_boundary_checkpoint"
+    ))
+);
+
+const hasPersistedDisplayedUnitLocation = (
+    checkpoint: DiagnosisReviewEventCheckpoint,
+    submitted: readonly DiagnosisReviewEventCheckpoint[],
+): boolean => {
+    if (!isHardGatedUnitLocationCheckpoint(checkpoint.event)) return false;
+    const matches = (candidate: DiagnosisReviewEventCheckpoint): boolean => (
+        isHardGatedUnitLocationCheckpoint(candidate.event)
+        && samePersistedLocation(checkpoint.event, candidate.event)
+    );
+    return submitted.some((candidate) => candidate.stage === "candidate" && matches(candidate))
+        && submitted.some((candidate) => candidate.stage === "displayed" && matches(candidate));
+};
+
+const operationContractValid = (
+    checkpoint: DiagnosisReviewEventCheckpoint,
+    submitted: readonly DiagnosisReviewEventCheckpoint[],
+): boolean => {
+    const { event } = checkpoint;
     if (event.eventType !== "missingRing" && event.eventType !== "falseRing") {
         return true;
     }
@@ -266,9 +314,12 @@ const operationContractValid = (event: DiagnosisEvent): boolean => {
         source === "candidate_frontier_checkpoint"
         || source === "cofecha_boundary_checkpoint"
     ));
-    return protectedCandidateCheckpoint
+    return (
+        protectedCandidateCheckpoint
         && lagBefore === lagAfter
-        && (event.eventType === "missingRing" ? lagBefore < 0 : lagBefore > 0);
+        && (event.eventType === "missingRing" ? lagBefore < 0 : lagBefore > 0)
+    )
+        || hasPersistedDisplayedUnitLocation(checkpoint, submitted);
 };
 
 const groupOperations = (clusters: readonly HypothesisCluster[]): OperationGroup[] => {
@@ -307,26 +358,6 @@ const isProtectedCandidateFrontier = (cluster: HypothesisCluster): boolean => (
         ))
     ))
 );
-
-const hasIndependentLocationAuthority = (cluster: HypothesisCluster): boolean => {
-    const event = representative(cluster).event;
-    const claims = evidenceClaimsFor(event);
-    if (claims.has("explicit_missing_staircase")
-        || claims.has("independent_reference_staircase")
-        || claims.has("fixed_side_resolution")
-        || claims.has("endpoint_unit_resolution")
-        || claims.has("whole_baseline_exhausted_by_missing_staircase")) {
-        return true;
-    }
-    return matchingLocationEvidence(event).some((entry) => (
-        entry.calibrated
-        || (
-            entry.referenceCount >= 3
-            && (entry.concentration ?? 0) >= 0.2
-            && (entry.remoteMargin ?? 0) >= 0.04
-        )
-    ));
-};
 
 const finalFrontierClusters = (
     clusters: readonly HypothesisCluster[],
@@ -435,8 +466,8 @@ export const adjudicateJointEventHypotheses = (
     ));
     const submittedClusters = clusterCheckpoints(submitted);
     const hypotheses = submittedClusters.map(summary);
-    const clusters = clusterCheckpoints(submitted.filter(({ event }) => (
-        operationContractValid(event)
+    const clusters = clusterCheckpoints(submitted.filter((checkpoint) => (
+        operationContractValid(checkpoint, submitted)
     ))).sort((left, right) => (
         locationScore(right) - locationScore(left)
         || stagePriority[representative(right).stage]
