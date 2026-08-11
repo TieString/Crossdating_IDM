@@ -353,6 +353,20 @@ const isHardGatedUnitLocationCheckpoint = (event: DiagnosisEvent): boolean => (
     ))
 );
 
+const MAXIMUM_ENDPOINT_CANDIDATE_WINDOW_DISTANCE = 2;
+
+const isHardGatedEndpointMissingCandidate = (
+    event: DiagnosisEvent,
+): boolean => {
+    if (event.eventType !== "missingRing" || !event.seriesRange) return false;
+    const endpointDistance = event.seriesRange.endYear - event.endYear;
+    return endpointDistance >= 0
+        && endpointDistance <= MAXIMUM_ENDPOINT_CANDIDATE_WINDOW_DISTANCE
+        && event.evidence.notes.includes("candidate_hard_gate_passed")
+        && event.evidence.algorithmSources.includes("candidate_ranking")
+        && event.evidence.algorithmSources.includes("local_edit_alignment");
+};
+
 const hasPersistedDisplayedUnitLocation = (
     checkpoint: DiagnosisReviewEventCheckpoint,
     submitted: readonly DiagnosisReviewEventCheckpoint[],
@@ -388,6 +402,7 @@ const operationContractValid = (
         )) {
         return true;
     }
+    if (isHardGatedEndpointMissingCandidate(event)) return true;
     const protectedCandidateCheckpoint = event.evidence.notes.includes(
         "candidate_hard_gate_passed",
     ) && event.evidence.algorithmSources.some((source) => (
@@ -629,6 +644,77 @@ const selectPathAnchoredCandidate = (
     return matches.length === 1 ? matches[0] : null;
 };
 
+const annotateEndpointCandidate = (
+    cluster: HypothesisCluster,
+    finalEvent: DiagnosisEvent,
+    endpointDistance: number,
+): HypothesisCluster => ({
+    checkpoints: cluster.checkpoints.map((checkpoint) => ({
+        ...checkpoint,
+        event: withEvidenceLedger({
+            ...checkpoint.event,
+            evidence: {
+                ...checkpoint.event.evidence,
+                algorithmSources: Array.from(new Set([
+                    ...checkpoint.event.evidence.algorithmSources,
+                    "endpoint_candidate_location_authority",
+                ])).sort(),
+                notes: Array.from(new Set([
+                    ...checkpoint.event.evidence.notes,
+                    `endpoint_candidate_authority_distance=${endpointDistance}`,
+                    `endpoint_candidate_authority_discarded_window=${
+                        finalEvent.startYear
+                    }-${finalEvent.endYear}`,
+                ])),
+            },
+        }),
+    })),
+});
+
+const selectEndpointCandidate = (
+    clusters: readonly HypothesisCluster[],
+    finalClusters: readonly HypothesisCluster[],
+    config: JointEventAdjudicationConfig,
+): HypothesisCluster | null => {
+    const matches = finalClusters.flatMap((finalCluster) => {
+        const finalEvent = representative(finalCluster).event;
+        const finalTopYear = topYear(finalEvent);
+        const seriesEndYear = finalEvent.seriesRange?.endYear;
+        if (
+            finalEvent.eventType !== "missingRing"
+            || finalTopYear === null
+            || seriesEndYear === undefined
+        ) return [];
+        const candidates = clusters.filter((cluster) => {
+            if (hasFinalCheckpoint(cluster)) return false;
+            const checkpoint = representative(cluster);
+            const candidate = checkpoint.event;
+            const candidateTopYear = topYear(candidate);
+            const endpointDistance = seriesEndYear - candidate.endYear;
+            return checkpoint.stage === "candidate"
+                && sameOperation(candidate, finalEvent)
+                && PATH_ANCHORED_REVIEW_WIDTHS.has(eventWidth(candidate))
+                && endpointDistance >= 0
+                && endpointDistance
+                    <= MAXIMUM_ENDPOINT_CANDIDATE_WINDOW_DISTANCE
+                && candidateTopYear !== null
+                && candidateTopYear - finalTopYear
+                    > config.remoteModeDistanceYears
+                && candidate.evidence.notes.includes("candidate_hard_gate_passed")
+                && candidate.evidence.algorithmSources.includes("candidate_ranking")
+                && candidate.evidence.algorithmSources.includes("local_edit_alignment");
+        });
+        if (candidates.length !== 1) return [];
+        const candidate = representative(candidates[0]!).event;
+        return [annotateEndpointCandidate(
+            candidates[0]!,
+            finalEvent,
+            seriesEndYear - candidate.endYear,
+        )];
+    });
+    return matches.length === 1 ? matches[0] : null;
+};
+
 const finalFrontierClusters = (
     clusters: readonly HypothesisCluster[],
     config: JointEventAdjudicationConfig,
@@ -680,6 +766,12 @@ const finalFrontierClusters = (
         config,
     );
     if (pathAnchoredCandidate) return [pathAnchoredCandidate];
+    const endpointCandidate = selectEndpointCandidate(
+        clusters,
+        localClusters,
+        config,
+    );
+    if (endpointCandidate) return [endpointCandidate];
     const protectedCandidate = clusters
         .filter((cluster) => !hasFinalCheckpoint(cluster))
         .filter(isProtectedCandidateFrontier)

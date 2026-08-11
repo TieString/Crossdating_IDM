@@ -216,6 +216,97 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("selects a unique hard-gated candidate whose window reaches the bark endpoint", () => {
+        const endpointCandidate = event(
+            "endpoint-candidate",
+            "missingRing",
+            1987,
+            1993,
+            1990,
+        );
+        endpointCandidate.evidence.algorithmSources = [
+            "candidate_ranking",
+            "local_edit_alignment",
+        ];
+        endpointCandidate.evidence.notes = ["candidate_hard_gate_passed"];
+        endpointCandidate.evidence.lagBefore = 0;
+        endpointCandidate.evidence.lagAfter = -1;
+        endpointCandidate.seriesRange = { startYear: 1700, endYear: 1994 };
+        const olderCandidate = event(
+            "older-candidate",
+            "missingRing",
+            1975,
+            1981,
+            1978,
+        );
+        olderCandidate.evidence.algorithmSources = [
+            "candidate_ranking",
+            "local_edit_alignment",
+        ];
+        olderCandidate.evidence.notes = ["candidate_hard_gate_passed"];
+        const remoteFinal = event(
+            "remote-final",
+            "missingRing",
+            1784,
+            1796,
+            1795,
+        );
+        remoteFinal.seriesRange = { startYear: 1700, endYear: 1994 };
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", endpointCandidate),
+            checkpoint("candidate", olderCandidate),
+            checkpoint("final", remoteFinal),
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "candidate",
+            event: {
+                id: "endpoint-candidate",
+                startYear: 1987,
+                endYear: 1993,
+            },
+        });
+        expect(decision.event?.evidence.algorithmSources).toContain(
+            "endpoint_candidate_location_authority",
+        );
+    });
+
+    it("does not promote a remote candidate whose window stops short of the endpoint", () => {
+        const candidate = event(
+            "near-end-candidate",
+            "missingRing",
+            1985,
+            1991,
+            1988,
+        );
+        candidate.evidence.algorithmSources = [
+            "candidate_ranking",
+            "local_edit_alignment",
+        ];
+        candidate.evidence.notes = ["candidate_hard_gate_passed"];
+        const remoteFinal = event(
+            "remote-final",
+            "missingRing",
+            1784,
+            1796,
+            1795,
+        );
+        remoteFinal.seriesRange = { startYear: 1700, endYear: 1994 };
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", candidate),
+            checkpoint("final", remoteFinal),
+        ]);
+
+        expect(decision.event).toMatchObject({
+            id: "remote-final",
+            startYear: 1784,
+            endYear: 1796,
+        });
+    });
+
     it("keeps the persisted local window when a final-only nearby variant arrives later", () => {
         const persisted = event("persisted", "missingRing", 1899, 1905, 1902);
         const finalOnly = event("final-only", "missingRing", 1902, 1908, 1905);
