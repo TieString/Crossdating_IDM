@@ -32,6 +32,7 @@ describe("BreadthDiagnosisNavigator", () => {
                     makeSuggestion("mtr841", 4),
                 ],
             },
+            onRunScan: () => undefined,
             onSelectSuggestion: () => undefined,
         }));
 
@@ -43,6 +44,8 @@ describe("BreadthDiagnosisNavigator", () => {
         expect(html).toContain("还有 1 条");
         expect(html).toContain("可能缺轮");
         expect(html).toContain("role=\"progressbar\"");
+        expect(html).toContain(">扫描中</button>");
+        expect(html).toContain("disabled");
     });
 
     it("distinguishes stale and completed-empty states", () => {
@@ -53,6 +56,7 @@ describe("BreadthDiagnosisNavigator", () => {
                 totalCount: 55,
                 suggestions: [],
             },
+            onRunScan: () => undefined,
             onSelectSuggestion: () => undefined,
         }));
         const completeHtml = renderToStaticMarkup(createElement(BreadthDiagnosisNavigator, {
@@ -62,11 +66,15 @@ describe("BreadthDiagnosisNavigator", () => {
                 totalCount: 55,
                 suggestions: [],
             },
+            onRunScan: () => undefined,
             onSelectSuggestion: () => undefined,
         }));
 
-        expect(staleHtml).toContain("数据有变化，保存后重新扫描");
+        expect(staleHtml).toContain("结果已过期，点击重新扫描");
+        expect(staleHtml).toContain(">扫描</button>");
+        expect(staleHtml).not.toContain("disabled");
         expect(staleHtml).not.toContain("role=\"progressbar\"");
         expect(completeHtml).toContain("暂未发现其他复核窗口");
+        expect(completeHtml).toContain(">重新扫描</button>");
     });
 });

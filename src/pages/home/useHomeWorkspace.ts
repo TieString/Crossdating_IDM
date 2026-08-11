@@ -713,16 +713,14 @@ export function useHomeWorkspace() {
         });
     }, []);
 
-    const requestBreadthScanAfterSave = useCallback((filePath: string, dataSignature: string) => {
-        if (filePathRef.current !== filePath
-            || hashRwlSiteData(rwlEditorRef.current.getData()) !== dataSignature) {
-            return;
-        }
-
+    const handleRunBreadthDiagnosis = useCallback(() => {
+        const filePath = filePathRef.current;
+        const currentData = rwlEditorRef.current.getData();
+        if (!filePath || currentData.size === 0 || isFileLoadingRef.current) return;
         setBreadthScanRequest({
             id: ++breadthScanRequestCounterRef.current,
             filePath,
-            dataSignature,
+            dataSignature: hashRwlSiteData(currentData),
         });
     }, []);
 
@@ -853,11 +851,10 @@ export function useHomeWorkspace() {
             } catch (error) {
                 console.error("cofecha 执行失败", error);
             }
-            requestBreadthScanAfterSave(filePath, sourceHash);
         } catch (error) {
             console.error("写入文件时出错:", error);
         }
-    }, [enqueueSave, markDataSnapshotAsSaved, requestBreadthScanAfterSave, runCofechaAndApplyResult, runCurrentEventRankerForSavedFile]);
+    }, [enqueueSave, markDataSnapshotAsSaved, runCofechaAndApplyResult, runCurrentEventRankerForSavedFile]);
 
     const handleRunCofechaValidation = useCallback(async () => {
         const filePath = filePathRef.current;
@@ -934,12 +931,11 @@ export function useHomeWorkspace() {
             } catch (error) {
                 console.error("cofecha 执行失败", error);
             }
-            requestBreadthScanAfterSave(filePath, sourceHash);
         } catch (error) {
             console.error("写入文本编辑内容时出错:", error);
             throw error;
         }
-    }, [applyParsedRwlText, enqueueSave, markDataSnapshotAsSaved, requestBreadthScanAfterSave, runCofechaAndApplyResult, runCurrentEventRankerForSavedFile]);
+    }, [applyParsedRwlText, enqueueSave, markDataSnapshotAsSaved, runCofechaAndApplyResult, runCurrentEventRankerForSavedFile]);
 
     const handleSaveAs = useCallback(async () => {
         if (isFileLoadingRef.current) {
@@ -1015,11 +1011,10 @@ export function useHomeWorkspace() {
             } catch (error) {
                 console.error("cofecha 执行失败", error);
             }
-            requestBreadthScanAfterSave(filePathToSave, sourceHash);
         } catch (error) {
             console.error("写入文件时出错:", error);
         }
-    }, [dynamicReferenceConfig, enqueueSave, markDataSnapshotAsSaved, referenceConfig, referenceOperationLog, requestBreadthScanAfterSave, resetCurrentEventRanker, runCofechaAndApplyResult, runCurrentEventRankerForSavedFile]);
+    }, [dynamicReferenceConfig, enqueueSave, markDataSnapshotAsSaved, referenceConfig, referenceOperationLog, resetCurrentEventRanker, runCofechaAndApplyResult, runCurrentEventRankerForSavedFile]);
 
     const handleSaveRawTextAs = useCallback(async (rawText: string) => {
         if (isFileLoadingRef.current) {
@@ -1095,12 +1090,11 @@ export function useHomeWorkspace() {
             } catch (error) {
                 console.error("cofecha 执行失败", error);
             }
-            requestBreadthScanAfterSave(filePathToSave, sourceHash);
         } catch (error) {
             console.error("写入文本编辑内容时出错:", error);
             throw error;
         }
-    }, [applyParsedRwlText, dynamicReferenceConfig, enqueueSave, markDataSnapshotAsSaved, referenceConfig, referenceOperationLog, requestBreadthScanAfterSave, resetCurrentEventRanker, runCofechaAndApplyResult, runCurrentEventRankerForSavedFile]);
+    }, [applyParsedRwlText, dynamicReferenceConfig, enqueueSave, markDataSnapshotAsSaved, referenceConfig, referenceOperationLog, resetCurrentEventRanker, runCofechaAndApplyResult, runCurrentEventRankerForSavedFile]);
 
     const handleUndo = useCallback(() => {
         triggerHistoryAnimation(rwlEditorRef.current.undo());
@@ -1954,8 +1948,8 @@ export function useHomeWorkspace() {
         // 逐个（bark-to-pith）迭代工作流生效。
     }, [diagnosisReferenceConfig, historyAnimation?.id, markCurrentDiagnosisStale, outFileContent, selectedTree, siteData, siteDataSignature]);
 
-    // Edits invalidate the file-level view immediately, but never start expensive breadth work.
-    // A successful save explicitly creates the only scan request, after its COFECHA run settles.
+    // Data or evidence changes invalidate the file-level view immediately. Only an explicit click
+    // on the breadth navigator creates a new scan request.
     useEffect(() => {
         breadthDiagnosisWorkerRef.current?.terminate();
         breadthDiagnosisWorkerRef.current = null;
@@ -2336,6 +2330,7 @@ export function useHomeWorkspace() {
         handleResetToRawData,
         handleRestoreDeletion,
         handleRunCofechaValidation,
+        handleRunBreadthDiagnosis,
         handleRunCurrentEventRanker,
         handleSaveRawText,
         handleSaveRawTextAs,

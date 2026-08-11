@@ -8,6 +8,7 @@ import styles from "../Home.module.css";
 
 type Props = {
     navigator: BreadthDiagnosisNavigatorState;
+    onRunScan: () => void;
     onSelectSuggestion: (suggestion: BreadthDiagnosisSuggestion) => void;
 };
 
@@ -29,9 +30,9 @@ const getPauseText = (navigator: BreadthDiagnosisNavigatorState) => {
 const getStatusText = (navigator: BreadthDiagnosisNavigatorState) => {
     switch (navigator.status) {
         case "idle":
-            return "保存后开始全文件扫描";
+            return "点击扫描分析全文件";
         case "stale":
-            return "数据有变化，保存后重新扫描";
+            return "结果已过期，点击重新扫描";
         case "paused":
             return getPauseText(navigator);
         case "scanning":
@@ -53,9 +54,15 @@ const getSeverityClass = (navigator: BreadthDiagnosisNavigatorState) => {
     return styles["validation-neutral"];
 };
 
-export function BreadthDiagnosisNavigator({ navigator, onSelectSuggestion }: Props) {
+export function BreadthDiagnosisNavigator({ navigator, onRunScan, onSelectSuggestion }: Props) {
     const visibleSuggestions = navigator.suggestions.slice(0, 3);
     const remainingCount = Math.max(0, navigator.suggestions.length - visibleSuggestions.length);
+    const scanIsRunning = navigator.status === "scanning" || navigator.status === "paused";
+    const scanButtonLabel = scanIsRunning
+        ? "扫描中"
+        : navigator.status === "complete"
+            ? "重新扫描"
+            : "扫描";
     const makeClickHandler = (
         suggestion: BreadthDiagnosisSuggestion,
     ): MouseEventHandler<HTMLButtonElement> => () => onSelectSuggestion(suggestion);
@@ -69,6 +76,14 @@ export function BreadthDiagnosisNavigator({ navigator, onSelectSuggestion }: Pro
                 <strong>
                     待复核序列
                     <span className={styles["breadth-count"]}>{navigator.suggestions.length}</span>
+                    <button
+                        type="button"
+                        className={styles["breadth-scan-button"]}
+                        disabled={scanIsRunning || navigator.totalCount === 0}
+                        onClick={onRunScan}
+                    >
+                        {scanButtonLabel}
+                    </button>
                 </strong>
                 <span>{getStatusText(navigator)}</span>
                 {navigator.totalCount > 0

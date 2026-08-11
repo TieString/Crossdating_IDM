@@ -383,6 +383,7 @@ export default function Home() {
         handleReplaceTreeData,
         handleResetToRawData,
         handleRestoreDeletion,
+        handleRunBreadthDiagnosis,
         handleRunCofechaValidation,
         handleRunCurrentEventRanker,
         handleSave: handleStructuredSave,
@@ -1659,6 +1660,7 @@ export default function Home() {
                     </FloatingScrollArea>
                     <BreadthDiagnosisNavigator
                         navigator={breadthDiagnosisNavigator}
+                        onRunScan={handleRunBreadthDiagnosis}
                         onSelectSuggestion={handleBreadthSuggestionSelect}
                     />
 

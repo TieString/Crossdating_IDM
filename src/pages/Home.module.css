@@ -280,6 +280,31 @@
     font-variant-numeric: tabular-nums;
 }
 
+.breadth-scan-button {
+    min-height: 25px;
+    margin-left: auto;
+    padding: 2px 9px;
+    border: 1px solid #9dbdab;
+    border-radius: 4px;
+    background: #ffffff;
+    color: #245f46;
+    font: 600 12px/1.2 "Segoe UI", system-ui, sans-serif;
+    letter-spacing: 0;
+    cursor: pointer;
+}
+
+.breadth-scan-button:hover:not(:disabled),
+.breadth-scan-button:focus-visible:not(:disabled) {
+    border-color: #5f9275;
+    background: #eef7f2;
+    outline: none;
+}
+
+.breadth-scan-button:disabled {
+    cursor: default;
+    opacity: 0.55;
+}
+
 .breadth-progress-track {
     position: relative;
     display: block;
