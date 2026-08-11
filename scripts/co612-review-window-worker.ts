@@ -9,6 +9,10 @@ import {
     createCofechaMasterReferenceConfig,
     createCofechaPassReferenceConfig,
 } from "@/features/crossdating/reference";
+import {
+    createPairwiseBootstrapReferenceConfig,
+    createPairwiseBootstrapTargetReferenceConfig,
+} from "@/features/crossdating/pairwiseBootstrap";
 import type { RwlSiteData } from "@/features/rwl/types";
 import { parseRwl } from "@/features/crossdating/diagnosis/__tests__/rdmFixture";
 
@@ -35,6 +39,14 @@ const handle = (request: WorkerRequest) => {
     const cofechaResult = parseCofechaResult(outText);
     const cofechaFlagged = new Set(request.cofechaFlaggedIds);
     const pairwiseCluster = new Set(request.pairwiseClusterIds);
+    const pairwiseBootstrapReference = request.usePairwiseBootstrap
+        ? createPairwiseBootstrapReferenceConfig({
+            siteData,
+            flaggedAIds: request.cofechaFlaggedIds,
+            cofechaRunId: request.runId,
+            rwlHash: request.rwlHash,
+        })
+        : null;
     const targets = request.targetIds.map((seriesId) => {
         const startedAt = Date.now();
         const effectiveFlagged = request.usePairwiseBootstrap
@@ -42,12 +54,18 @@ const handle = (request: WorkerRequest) => {
                 !pairwiseCluster.has(candidateId) || candidateId === seriesId
             )))
             : new Set([...cofechaFlagged, seriesId]);
-        let referenceConfig = createCofechaPassReferenceConfig({
-            siteData,
-            flaggedAIds: effectiveFlagged,
-            cofechaRunId: `${request.runId}-${seriesId}`,
-            rwlHash: request.rwlHash,
-        });
+        let referenceConfig = pairwiseBootstrapReference
+            ? createPairwiseBootstrapTargetReferenceConfig(
+                siteData,
+                pairwiseBootstrapReference,
+                seriesId,
+            )
+            : createCofechaPassReferenceConfig({
+                siteData,
+                flaggedAIds: effectiveFlagged,
+                cofechaRunId: `${request.runId}-${seriesId}`,
+                rwlHash: request.rwlHash,
+            });
         if (!referenceConfig.cofechaPassReference) {
             referenceConfig = createCofechaMasterReferenceConfig({
                 siteData,
