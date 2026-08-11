@@ -141,6 +141,43 @@ describe("shared explicit zero locality", () => {
         ).confirmedTargetStaircaseYear).toBeNull();
     });
 
+    it("advances past an already confirmed path head instead of suggesting it twice", () => {
+        expect(resolveSequentialMissingPresentation(
+            {
+                ...head,
+                unitEventYears: [1878, 1892, 1899, 1900],
+            },
+            marker(1900),
+            "local2",
+            [1900],
+            [1900],
+        )).toMatchObject({
+            marker: null,
+            selectedYear: 1892,
+            windowCenterYear: 1892,
+            width: 13,
+            candidateWindowSupportYear: null,
+            advancedSequentialPathYear: 1892,
+        });
+    });
+
+    it("widens a deep staircase when its marker sits near a seven-year edge", () => {
+        expect(resolveSequentialMissingPresentation(
+            {
+                ...head,
+                transitionCount: 13,
+                headRunYears: 3,
+                headMeanAdvantage: 0.3,
+            },
+            marker(1902),
+            "local2",
+        )).toMatchObject({
+            selectedYear: 1902,
+            windowCenterYear: 1899,
+            width: 9,
+        });
+    });
+
     it("keeps legacy recentering only for the explicit baseline ablation", () => {
         expect(resolveSequentialMissingPresentation(head, marker(1906), "local2"))
             .toMatchObject({
