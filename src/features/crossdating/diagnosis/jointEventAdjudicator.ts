@@ -454,6 +454,7 @@ const retainFinalClaimAuthority = (
 };
 
 const ENDPOINT_REVIEW_WIDTHS = new Set([5, 7, 9, 13]);
+const MAX_CANDIDATE_ENDPOINT_INTERPRETATION_DISTANCE_YEARS = 15;
 const ENDPOINT_MISSING_CLAIMS = new Set<DiagnosisEvidenceClaim>([
     "endpoint_unit_resolution",
     "fixed_side_resolution",
@@ -485,24 +486,33 @@ const selectEndpointMissingInterpretation = (
 ): DiagnosisEvent | null => {
     if (whole.eventType !== "wholeSeriesMove" || whole.shiftYears !== -1) return null;
     return clusters.flatMap((cluster) => cluster.checkpoints)
-        .filter((checkpoint) => checkpoint.stage === "final")
-        .map(({ event }) => event)
-        .filter((event) => {
+        .filter((checkpoint) => {
+            const { event } = checkpoint;
             if (event.eventType !== "missingRing") return false;
             const width = event.endYear - event.startYear + 1;
             const endpointDistance = whole.endYear - event.endYear;
-            return ENDPOINT_REVIEW_WIDTHS.has(width)
-                && endpointDistance >= 0
-                && endpointDistance <= 29
-                && endpointMissingAuthority(event) >= 0;
+            if (!ENDPOINT_REVIEW_WIDTHS.has(width) || endpointDistance < 0) return false;
+            if (checkpoint.stage === "final") {
+                return endpointDistance <= 29 && endpointMissingAuthority(event) >= 0;
+            }
+            return checkpoint.stage === "candidate"
+                && endpointDistance
+                    <= MAX_CANDIDATE_ENDPOINT_INTERPRETATION_DISTANCE_YEARS
+                && event.evidence.notes.includes("candidate_hard_gate_passed")
+                && event.evidence.algorithmSources.includes("candidate_ranking")
+                && event.evidence.algorithmSources.includes("local_edit_alignment");
         })
         .sort((left, right) => (
-            endpointMissingAuthority(right) - endpointMissingAuthority(left)
-            || confidenceScore(right) - confidenceScore(left)
-            || right.endYear - left.endYear
-            || (topYear(right) ?? Number.NEGATIVE_INFINITY)
-                - (topYear(left) ?? Number.NEGATIVE_INFINITY)
-        ))[0] ?? null;
+            (right.stage === "final" ? 1 : 0) - (left.stage === "final" ? 1 : 0)
+            || endpointMissingAuthority(right.event)
+                - endpointMissingAuthority(left.event)
+            || confidenceScore(right.event) - confidenceScore(left.event)
+            || right.event.endYear - left.event.endYear
+            || (topYear(right.event) ?? Number.NEGATIVE_INFINITY)
+                - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
+        ))
+        .map(({ event }) => event)
+        [0] ?? null;
 };
 
 const isProtectedCandidateFrontier = (cluster: HypothesisCluster): boolean => (

@@ -592,6 +592,73 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("exposes a hard-gated near-bark candidate as the missing-ring interpretation", () => {
+        const whole = event("terminal-unit", "wholeSeriesMove", 1732, 1994, 0);
+        whole.shiftYears = -1;
+        whole.evidence.notes = [
+            "whole_baseline_source=cofecha_terminal_lag",
+            "cofecha_terminal_segments=2",
+            "cofecha_terminal_consistency=1.000000",
+        ];
+        const endpoint = event("endpoint-candidate", "missingRing", 1987, 1993, 1990);
+        endpoint.evidence.algorithmSources = [
+            "candidate_ranking",
+            "cofecha_segment_lag",
+            "local_edit_alignment",
+            "segmented_diagnosis",
+        ];
+        endpoint.evidence.notes = ["candidate_hard_gate_passed"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", whole),
+            checkpoint("candidate", endpoint),
+            checkpoint("detected", whole),
+            checkpoint("displayed", whole),
+            checkpoint("final", whole),
+        ]);
+
+        expect(decision.event).toMatchObject({
+            eventType: "wholeSeriesMove",
+            shiftYears: -1,
+            interpretationAmbiguity: {
+                kind: "wholeSeriesMoveOrMissingRing",
+                alternative: {
+                    id: "endpoint-candidate",
+                    eventType: "missingRing",
+                    startYear: 1987,
+                    endYear: 1993,
+                },
+            },
+        });
+    });
+
+    it("does not expose a remote candidate as a bark-end missing interpretation", () => {
+        const whole = event("terminal-unit", "wholeSeriesMove", 1732, 1994, 0);
+        whole.shiftYears = -1;
+        whole.evidence.notes = [
+            "whole_baseline_source=cofecha_terminal_lag",
+            "cofecha_terminal_segments=2",
+            "cofecha_terminal_consistency=1.000000",
+        ];
+        const remote = event("remote-candidate", "missingRing", 1957, 1963, 1960);
+        remote.evidence.algorithmSources = [
+            "candidate_ranking",
+            "local_edit_alignment",
+        ];
+        remote.evidence.notes = ["candidate_hard_gate_passed"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", remote),
+            checkpoint("final", whole),
+        ]);
+
+        expect(decision.event).toMatchObject({
+            eventType: "wholeSeriesMove",
+            shiftYears: -1,
+        });
+        expect(decision.event?.interpretationAmbiguity).toBeUndefined();
+    });
+
     it("selects a hard-gated endpoint unit hypothesis over its terminal -1 alias", () => {
         const whole = event("terminal-unit", "wholeSeriesMove", 1800, 2004, 0);
         whole.shiftYears = -1;
