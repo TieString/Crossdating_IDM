@@ -107,7 +107,7 @@ import {
 import { refineEventWithCounterfactualLocator } from "./counterfactualEventLocator";
 import { adjudicateLocatorProposal } from "./eventAdjudicator";
 import { withEvidenceLedger } from "./evidenceLedger";
-import { refineEventWithAdjacentBoundaryConsensus } from "./eventBoundaryConsensus";
+import { refineEventWithBoundaryConsensus } from "./eventBoundaryConsensus";
 import { getJointCounterfactualOperationScores } from "./jointCounterfactualOperation";
 import {
     isExactPartialLagTransition,
@@ -5407,7 +5407,7 @@ export const makeDiagnosisEvents = (
                     ...event,
                     seriesRange: { ...diagnosis.targetRange },
                 }))
-                .map(refineEventWithAdjacentBoundaryConsensus);
+                .map(refineEventWithBoundaryConsensus);
             const projected = projectSequentialUnitChainHead(valid);
             return prioritizeEndpointUnitAgainstWhole(
                 projected,

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
     refineEventWithAdjacentBoundaryConsensus,
+    refineEventWithBoundaryConsensus,
     selectAdjacentBoundaryShift,
+    selectSequentialMissingEndpointBridge,
 } from "../eventBoundaryConsensus";
 import type { DiagnosisEvent } from "../types";
 
@@ -42,6 +44,57 @@ const event = (): DiagnosisEvent => ({
 });
 
 describe("final adjacent boundary consensus", () => {
+    const sequentialEndpointEvent = (
+        fixedTailAdvantage = -0.1,
+    ): DiagnosisEvent => {
+        const candidate = event();
+        candidate.id = "sequential-endpoint";
+        candidate.startYear = 1994;
+        candidate.endYear = 2000;
+        candidate.seriesRange = { startYear: 1700, endYear: 2002 };
+        candidate.rankedYears = Array.from({ length: 7 }, (_, index) => ({
+            year: 1994 + index,
+            rank: index === 3 ? 1 : index < 3 ? index + 2 : index + 1,
+            score: 7 - index,
+            evidenceTags: ["fixture"],
+        }));
+        candidate.evidence.algorithmSources = [
+            "sequential_missing_exhausts_whole_baseline",
+            "sequential_missing_staircase_head",
+        ];
+        candidate.evidence.notes = [
+            "sequential_missing_head_year=1997",
+            `sequential_missing_fixed_tail_advantage=${fixedTailAdvantage}`,
+        ];
+        return candidate;
+    };
+
+    it("bridges a weak fixed tail to a nearby bark endpoint", () => {
+        const candidate = sequentialEndpointEvent();
+
+        expect(selectSequentialMissingEndpointBridge(candidate)).toEqual({
+            startYear: 1996,
+            endYear: 2002,
+            endpointYear: 2002,
+            shiftYears: 2,
+            fixedTailAdvantage: -0.1,
+        });
+        const refined = refineEventWithBoundaryConsensus(candidate);
+        expect([refined.startYear, refined.endYear]).toEqual([1996, 2002]);
+        expect(refined.rankedYears).toHaveLength(7);
+        expect(refined.rankedYears[0]?.year).toBe(2002);
+        expect(refined.evidence.algorithmSources).toContain(
+            "sequential_missing_endpoint_bridge",
+        );
+    });
+
+    it("keeps a sequential window when its fixed tail remains supportive", () => {
+        const candidate = sequentialEndpointEvent(0.12);
+
+        expect(selectSequentialMissingEndpointBridge(candidate)).toBeNull();
+        expect(refineEventWithBoundaryConsensus(candidate)).toBe(candidate);
+    });
+
     it("shifts an endpoint window with three older-edge votes", () => {
         expect(selectAdjacentBoundaryShift(event())).toMatchObject({
             shiftYears: -1,
