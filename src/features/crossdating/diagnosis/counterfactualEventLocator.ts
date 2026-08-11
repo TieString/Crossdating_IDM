@@ -14,6 +14,7 @@ import {
     selectFalseRingMergeOlderRecenter,
 } from "./falseRingPhysicalRecenter";
 import { scoreMissingRingCoarseCounterfactual } from "./missingRingCoarseCounterfactual";
+import { selectMissingRingDirectTransitionBridge } from "./missingRingDirectTransitionBridge";
 import {
     selectMissingRingPhysicalRecenter,
     type MissingRingPhysicalRecenterRule,
@@ -1856,6 +1857,25 @@ export const refineEventWithCounterfactualLocator = (
     if (localConsensusBoundaryShift) {
         finalWindow = localConsensusBoundaryShift.window;
     }
+    const missingDirectTransitionBridge = unitEventType === "missingRing"
+        && !missingPhysicalRecenter
+        && !localConsensusBoundaryShift
+        ? selectMissingRingDirectTransitionBridge({
+                currentWindow: finalWindow,
+                coarseWindow,
+                currentPrimaryYear,
+                directTransitionYear: evidenceNoteYear(
+                    event,
+                    "direct_transition_year=",
+                ),
+                locationAmbiguous: preliminaryCalibrationRule
+                    === "unit_event_short_window_missing_ambiguous_remote_side_13",
+            })
+        : null;
+    if (missingDirectTransitionBridge) {
+        finalWindow = missingDirectTransitionBridge.window;
+        finalCalibratedWidth = 13;
+    }
     const finalCalibrationRule = partialLocalConsensusRecenter
         ? "partial_local_consensus_recenter"
         : missingPhysicalRecenter
@@ -1866,7 +1886,9 @@ export const refineEventWithCounterfactualLocator = (
                 ? "unit_event_false_direct_consensus_recenter"
                 : localConsensusBoundaryShift
                     ? "unit_event_local_consensus_boundary_shift"
-                    : preliminaryCalibrationRule;
+                    : missingDirectTransitionBridge
+                        ? "unit_event_missing_direct_transition_bridge_13"
+                        : preliminaryCalibrationRule;
     const finalYears = Array.from(
         {
             length:
@@ -2162,6 +2184,9 @@ export const refineEventWithCounterfactualLocator = (
                     ...(localConsensusBoundaryShift
                         ? ["local_consensus_boundary_shift"]
                         : []),
+                    ...(missingDirectTransitionBridge
+                        ? ["missing_ring_direct_transition_bridge"]
+                        : []),
                     ...(partialLocalConsensusRecenter
                         ? ["partial_local_consensus_recenter"]
                         : []),
@@ -2244,6 +2269,22 @@ export const refineEventWithCounterfactualLocator = (
                         }`,
                         `local_consensus_boundary_shift_years=${
                             localConsensusBoundaryShift.shiftYears
+                        }`,
+                    ] : []),
+                    ...(missingDirectTransitionBridge ? [
+                        `missing_direct_transition_bridge_primary_year=${
+                            missingDirectTransitionBridge.currentPrimaryYear
+                        }`,
+                        `missing_direct_transition_bridge_year=${
+                            missingDirectTransitionBridge.directTransitionYear
+                        }`,
+                        `missing_direct_transition_bridge_previous_window=${
+                            missingDirectTransitionBridge.discardedWindow.startYear
+                        }-${
+                            missingDirectTransitionBridge.discardedWindow.endYear
+                        }`,
+                        `missing_direct_transition_bridge_shift_years=${
+                            missingDirectTransitionBridge.shiftYears
                         }`,
                     ] : []),
                     ...(partialLocalConsensusRecenter ? [

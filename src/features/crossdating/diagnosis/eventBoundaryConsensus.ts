@@ -75,8 +75,13 @@ export const selectAdjacentBoundaryShift = (
     );
     const width = event.endYear - event.startYear + 1;
     const removedYear = shiftYears < 0 ? event.endYear : event.startYear;
+    const protectedBridgeYears = [
+        noteYear(event, "missing_direct_transition_bridge_primary_year="),
+        noteYear(event, "missing_direct_transition_bridge_year="),
+    ].filter((year): year is number => year !== null);
     const standardConsensus = support >= 3
         && posteriorYear !== removedYear
+        && !protectedBridgeYears.includes(removedYear)
         && (
             endpointWindow
             || (

@@ -75,6 +75,26 @@ describe("final adjacent boundary consensus", () => {
         expect(selectAdjacentBoundaryShift(guarded)).toBeNull();
     });
 
+    it("does not remove either anchor retained by a direct-transition bridge", () => {
+        const guarded = event();
+        guarded.startYear = 1851;
+        guarded.endYear = 1863;
+        guarded.evidence.algorithmSources = [
+            "full_interval_counterfactual_locator",
+            "missing_ring_direct_transition_bridge",
+        ];
+        guarded.evidence.notes = [
+            "scan_top_year=1850",
+            "candidate_top_year=1851",
+            "endpoint_residual_previous_top_year=1851",
+            "reference_vote_year=1850",
+            "missing_direct_transition_bridge_primary_year=1851",
+            "missing_direct_transition_bridge_year=1863",
+        ];
+
+        expect(selectAdjacentBoundaryShift(guarded)).toBeNull();
+    });
+
     it("accepts exact false-ring direct evidence outside the newer edge", () => {
         const falseRing = event();
         falseRing.eventType = "falseRing";
