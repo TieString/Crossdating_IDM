@@ -85,6 +85,10 @@ type EventOutcome = {
     reviewOnly: boolean;
 };
 
+type ReviewChoiceOutcome = EventOutcome & {
+    interpretation: "primary" | "alternative" | null;
+};
+
 type EventObservation = {
     round: number;
     eventId: string;
@@ -114,6 +118,7 @@ type EventObservation = {
     reviewQueueEnteredRound: number | null;
     strict: EventOutcome;
     review: EventOutcome;
+    reviewChoice: ReviewChoiceOutcome;
 };
 
 type ApplicationRow = {
@@ -124,6 +129,7 @@ type ApplicationRow = {
     sourceStatus: DiagnosisReviewWindowDecision["status"];
     suggestedWindow: { startYear: number; endYear: number };
     suggestedTopYear: number | null;
+    interpretation: Exclude<ReviewChoiceOutcome["interpretation"], null>;
     recoveredBefore: number;
     recoveredAfter: number;
 };
@@ -253,6 +259,24 @@ const eventOutcome = (
         score: event?.evidence.score ?? null,
         scoreMargin: event?.evidence.scoreMargin ?? null,
         reviewOnly: event?.reviewOnly === true,
+    };
+};
+
+const reviewChoiceOutcome = (
+    event: DiagnosisEvent | null,
+    truthYear: number,
+): ReviewChoiceOutcome => {
+    const primary = eventOutcome(event, truthYear);
+    const alternativeEvent = event?.interpretationAmbiguity?.alternative ?? null;
+    const alternative = eventOutcome(alternativeEvent, truthYear);
+    if ((!primary.operationCorrect || !primary.windowCovered)
+        && alternative.operationCorrect
+        && alternative.windowCovered) {
+        return { ...alternative, interpretation: "alternative" };
+    }
+    return {
+        ...primary,
+        interpretation: event ? "primary" : null,
     };
 };
 
@@ -674,6 +698,7 @@ try {
             const eventId = `${state.seriesId}:${truthYear}`;
             const strict = eventOutcome(result.strictEvent, truthYear);
             const review = eventOutcome(result.reviewEvent, truthYear);
+            const reviewChoice = reviewChoiceOutcome(result.reviewEvent, truthYear);
             if (review.response && !firstReviewableRoundByEventId.has(eventId)) {
                 firstReviewableRoundByEventId.set(eventId, round);
             }
@@ -708,6 +733,7 @@ try {
                 reviewQueueEnteredRound: firstReviewableRoundByEventId.get(eventId) ?? null,
                 strict,
                 review,
+                reviewChoice,
             });
         });
         activeObservations.forEach((row) => {
@@ -715,8 +741,8 @@ try {
         });
         const eligible = activeObservations.filter((row) => (
             row.absoluteIdentifiable
-            && row.review.operationCorrect
-            && row.review.windowCovered
+            && row.reviewChoice.operationCorrect
+            && row.reviewChoice.windowCovered
         )).sort((left, right) => {
             const leftResult = bySeries.get(left.seriesId)!;
             const rightResult = bySeries.get(right.seriesId)!;
@@ -724,12 +750,12 @@ try {
                 seriesId: left.seriesId,
                 reviewQueueEnteredRound: left.reviewQueueEnteredRound,
                 reviewStatus: leftResult.reviewDecision.status,
-                score: left.review.score,
+                score: left.reviewChoice.score,
             }, {
                 seriesId: right.seriesId,
                 reviewQueueEnteredRound: right.reviewQueueEnteredRound,
                 reviewStatus: rightResult.reviewDecision.status,
-                score: right.review.score,
+                score: right.reviewChoice.score,
             });
         });
         const selected = eligible[0] ?? null;
@@ -753,6 +779,12 @@ try {
                 / Math.max(1, activeObservations.length),
             reviewCoverageRate: activeObservations.filter((row) => row.review.windowCovered).length
                 / Math.max(1, activeObservations.length),
+            reviewChoiceCoverageRate: activeObservations.filter(
+                (row) => row.reviewChoice.windowCovered,
+            ).length / Math.max(1, activeObservations.length),
+            alternativeChoiceCount: activeObservations.filter(
+                (row) => row.reviewChoice.interpretation === "alternative",
+            ).length,
             selectedEventId: selected?.eventId ?? null,
             durationMs: Date.now() - roundStartedAt,
         };
@@ -812,10 +844,11 @@ try {
             truthYear: selected.truthYear,
             sourceStatus: selectedResult.reviewDecision.status,
             suggestedWindow: {
-                startYear: selected.review.windowStart!,
-                endYear: selected.review.windowEnd!,
+                startYear: selected.reviewChoice.windowStart!,
+                endYear: selected.reviewChoice.windowEnd!,
             },
-            suggestedTopYear: selected.review.topYear,
+            suggestedTopYear: selected.reviewChoice.topYear,
+            interpretation: selected.reviewChoice.interpretation!,
             recoveredBefore: recoveredEvents,
             recoveredAfter: recoveredEvents + 1,
         };

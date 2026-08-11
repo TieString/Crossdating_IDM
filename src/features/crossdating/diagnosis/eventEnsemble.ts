@@ -3175,18 +3175,67 @@ const recoverSequentialMissingHeadEvent = (
     const hasDetectedUnitEvent = detected.some((event) => (
         event.eventType === "missingRing" || event.eventType === "falseRing"
     ));
-    const compressedPartial = detected.find((event) => (
+    const compactPartial = detected.find((event) => (
         event.eventType === "partialMove"
-        && event.shiftYears === -2
-        && event.evidence.lagBefore === -2
-        && event.evidence.lagAfter === 0
+        && (event.shiftYears === -2 || event.shiftYears === -3)
+        && isExactPartialLagTransition(
+            event.shiftYears,
+            event.evidence.lagBefore,
+            event.evidence.lagAfter,
+        )
     ));
-    const recoverRobustCompressedPartial = (): SequentialMissingRecovery | null => {
+    const compressedPartial = compactPartial?.shiftYears === -2
+        ? compactPartial
+        : undefined;
+    const recoverRobustCompactPartial = (): SequentialMissingRecovery | null => {
         if (
-            !compressedPartial
+            !compactPartial
             || hasDetectedUnitEvent
             || detected.some((event) => event.eventType === "wholeSeriesMove")
         ) return null;
+        const compactShift = compactPartial.shiftYears!;
+        const compactCache = createLagPathCache();
+        const compactHead = locateSequentialMissingHead(
+            cofechaDiagnosis,
+            siteData,
+            {
+                minLag: compactShift,
+                maxPartialGapYears: Math.abs(compactShift),
+            },
+            compactCache,
+            0,
+        );
+        if (!compactHead) return null;
+        const compactCompetition = comparePartialMoveWithMissingStaircase(
+            cofechaDiagnosis,
+            siteData,
+            compactPartial,
+            true,
+            compactHead.year,
+        );
+        const tieEvidence = evaluateMissingPartialInterpretationTie(
+            compactCompetition,
+            {
+                missingReviewPassed: true,
+                partialReviewPassed: true,
+                hasIndependentWholeSeriesBaseline: false,
+            },
+        );
+        if (tieEvidence) {
+            return {
+                event: attachMissingPartialInterpretation(
+                    compactPartial,
+                    makeMissingRingInterpretation(
+                        compactPartial,
+                        tieEvidence,
+                        diagnosis.targetRange,
+                    ),
+                    tieEvidence,
+                ),
+                preserveWholeBaseline: false,
+            };
+        }
+        if (!compressedPartial) return null;
         const robustCache = createLagPathCache();
         const robustHead = locateSequentialMissingHead(
             cofechaDiagnosis,
@@ -3397,7 +3446,7 @@ const recoverSequentialMissingHeadEvent = (
             return { event: completedPartial, preserveWholeBaseline: false };
         }
         if (hasOppositeUnitOnly && !hasIndependentMissingDirection) {
-            return recoverRobustCompressedPartial();
+            return recoverRobustCompactPartial();
         }
         if (replacesPartial
             && !supportsSequentialMissingReplacementOfPartial(head)
@@ -3405,16 +3454,16 @@ const recoverSequentialMissingHeadEvent = (
             && !hasMarkerAnchoredMissingStaircase
             && !hasStrongMarkerAgainstUnbackedPartial
             && !hasDistinctConfirmedMissingMode) {
-            return recoverRobustCompressedPartial();
+            return recoverRobustCompactPartial();
         }
         // A staircase may be an endpoint artefact of a non-zero global baseline. It may replace a
         // whole candidate only when that candidate is the staircase's older state. An independently
         // connected baseline needs its own missing-direction evidence and remains in the event set.
         if (independentWholeBaseline && !hasIndependentMissingDirection) {
-            return recoverRobustCompressedPartial();
+            return recoverRobustCompactPartial();
         }
         if (replacesNonUnitEvent && !hasIndependentStaircaseSupport) {
-            return recoverRobustCompressedPartial();
+            return recoverRobustCompactPartial();
         }
         const baseRecoveredEvent = makeSequentialMissingHeadEvent(
             head,
@@ -3555,7 +3604,7 @@ const recoverSequentialMissingHeadEvent = (
         };
     }
     const partial = compressedPartial;
-    if (!partial) return recoverRobustCompressedPartial();
+    if (!partial) return recoverRobustCompactPartial();
     const constrainedCache = createLagPathCache();
     const constrainedHead = locateSequentialMissingHead(
         cofechaDiagnosis,
@@ -3564,7 +3613,7 @@ const recoverSequentialMissingHeadEvent = (
         constrainedCache,
         0,
     );
-    if (!constrainedHead) return recoverRobustCompressedPartial();
+    if (!constrainedHead) return recoverRobustCompactPartial();
     const staircase = locateTwoStepMissingStaircase(
         cofechaDiagnosis,
         siteData,
@@ -3580,7 +3629,7 @@ const recoverSequentialMissingHeadEvent = (
         constrainedHead.year,
     );
     if (!supportsDiscreteMissingStaircase(competition, staircase)) {
-        return recoverRobustCompressedPartial();
+        return recoverRobustCompactPartial();
     }
     const marker = selectSharedZeroMarkerForMode(
         siteData,
@@ -3598,7 +3647,7 @@ const recoverSequentialMissingHeadEvent = (
     // anchor before replacing it with a missing-ring operation.
     if (hasCandidateBackedExactPartial
         && !hasIndependentMissingCandidate
-        && marker === null) return recoverRobustCompressedPartial();
+        && marker === null) return recoverRobustCompactPartial();
     return {
         event: addExplicitStaircaseCompetitionEvidence(makeSequentialMissingHeadEvent(
             constrainedHead,
