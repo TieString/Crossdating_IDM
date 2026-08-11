@@ -90,8 +90,10 @@ const handle = (request: WorkerRequest) => {
         });
         const needsPairwiseFallback = !request.usePairwiseBootstrap
             && (diagnosis.reviewEvents?.length ?? 0) === 0
-            && diagnosis.eventDecisionAudits?.[0]?.finalReason
-                === "insufficient_reference_depth";
+            && (diagnosis.eventDecisionAudits?.[0]?.finalReason
+                === "insufficient_reference_depth"
+                || diagnosis.reviewWindowDecisions?.[0]?.reason
+                    === "partial_move_evidence_insufficient");
         if (needsPairwiseFallback) {
             fallbackPairwiseReference ??= createPairwiseBootstrapReferenceConfig({
                 siteData,
@@ -116,6 +118,7 @@ const handle = (request: WorkerRequest) => {
                 const selected = selectInsufficientReferencePairwiseFallback(
                     diagnosis,
                     pairwiseDiagnosis,
+                    siteData.get(seriesId),
                 );
                 if (selected === pairwiseDiagnosis) {
                     diagnosis = pairwiseDiagnosis;

@@ -71,15 +71,45 @@ const diagnosis = ({
     reviewEvent = null,
     finalReason = "insufficient_reference_depth",
     selected = false,
+    reviewReason = "insufficient_reference_support",
 }: {
     reviewEvent?: DiagnosisEvent | null;
     finalReason?: DiagnosisEventDecisionAudit["finalReason"];
     selected?: boolean;
+    reviewReason?: "insufficient_reference_support" | "partial_move_evidence_insufficient";
 } = {}): CrossdatingDiagnosis => ({
     reviewEvents: reviewEvent ? [reviewEvent] : [],
     eventDecisionAudits: [audit(finalReason)],
     jointEventDecisions: [{ status: selected ? "selected" : "refused" }],
+    reviewWindowDecisions: [{
+        seriesId: "TARGET",
+        status: reviewEvent ? "review" : "refused",
+        reason: reviewEvent ? "lower_display_gate_passed" : reviewReason,
+        strictReason: finalReason,
+        sourceStage: reviewEvent ? "final" : null,
+        event: reviewEvent,
+    }],
 } as unknown as CrossdatingDiagnosis);
+
+const sharedMarkerEvent = (): DiagnosisEvent => {
+    const result = event();
+    result.startYear = 1579;
+    result.endYear = 1587;
+    result.rankedYears = [{ year: 1585, rank: 1, score: 1, evidenceTags: [] }];
+    result.evidence.algorithmSources = [
+        "sequential_missing_staircase_head",
+        "shared_explicit_zero_marker",
+    ];
+    result.evidence.samplePairs = 559;
+    result.evidence.notes = [
+        "shared_zero_marker_year=1585",
+        "shared_zero_marker_support=8",
+        "shared_zero_marker_distance=1",
+        "shared_zero_marker_weighted_support=4.000000",
+        "sequential_missing_fixed_tail_advantage=0.316325",
+    ];
+    return result;
+};
 
 describe("insufficient-reference pairwise fallback", () => {
     it("uses one verified endpoint unit event after a zero-depth refusal", () => {
@@ -134,6 +164,55 @@ describe("insufficient-reference pairwise fallback", () => {
         expect(selectInsufficientReferencePairwiseFallback(
             primary,
             pairwise,
+        )).toBe(primary);
+    });
+
+    it("recovers a refused partial alias from a strongly shared missing marker", () => {
+        const primary = diagnosis({
+            finalReason: "emitted",
+            reviewReason: "partial_move_evidence_insufficient",
+        });
+        const pairwise = diagnosis({ reviewEvent: sharedMarkerEvent(), selected: true });
+        const target = new Map([[1585, 87]]);
+
+        expect(selectInsufficientReferencePairwiseFallback(
+            primary,
+            pairwise,
+            target,
+        )).toBe(pairwise);
+    });
+
+    it("does not revisit an explicit zero that was already restored", () => {
+        const primary = diagnosis({
+            finalReason: "emitted",
+            reviewReason: "partial_move_evidence_insufficient",
+        });
+        const pairwise = diagnosis({ reviewEvent: sharedMarkerEvent(), selected: true });
+
+        expect(selectInsufficientReferencePairwiseFallback(
+            primary,
+            pairwise,
+            new Map([[1585, 0]]),
+        )).toBe(primary);
+    });
+
+    it("keeps refusing weak shared-marker support", () => {
+        const primary = diagnosis({
+            finalReason: "emitted",
+            reviewReason: "partial_move_evidence_insufficient",
+        });
+        const weak = sharedMarkerEvent();
+        weak.evidence.notes = weak.evidence.notes.map((note) => (
+            note === "shared_zero_marker_support=8"
+                ? "shared_zero_marker_support=5"
+                : note
+        ));
+        const pairwise = diagnosis({ reviewEvent: weak, selected: true });
+
+        expect(selectInsufficientReferencePairwiseFallback(
+            primary,
+            pairwise,
+            new Map([[1585, 87]]),
         )).toBe(primary);
     });
 });

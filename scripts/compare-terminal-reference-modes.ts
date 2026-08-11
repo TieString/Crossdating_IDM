@@ -28,20 +28,29 @@ const valueFor = (name: string): string | null => {
 
 const runDir = resolve(valueFor("--run-dir") ?? "");
 if (!runDir) throw new Error("usage: --run-dir <serial checkpoint directory>");
+const snapshotMode = valueFor("--snapshot") ?? "terminal";
+if (snapshotMode !== "terminal" && snapshotMode !== "clean") {
+    throw new Error("--snapshot must be terminal or clean");
+}
 
-const roundDir = readdirSync(join(runDir, "rounds"), { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name))
-    .sort((left, right) => Number(right.name) - Number(left.name))[0];
-if (!roundDir) throw new Error(`no round directory found: ${runDir}`);
+const roundDir = snapshotMode === "terminal"
+    ? readdirSync(join(runDir, "rounds"), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name))
+        .sort((left, right) => Number(right.name) - Number(left.name))[0]
+    : null;
+if (snapshotMode === "terminal" && !roundDir) {
+    throw new Error(`no round directory found: ${runDir}`);
+}
 
-const statePath = join(runDir, "rounds", roundDir.name, "state.rwl");
-const outPath = join(runDir, "rounds", roundDir.name, "VERYCOF.OUT");
-const currentDiagnosisPath = join(
-    runDir,
-    "rounds",
-    roundDir.name,
-    "target-diagnoses.json",
-);
+const statePath = snapshotMode === "clean"
+    ? join(runDir, "clean-original", "state.rwl")
+    : join(runDir, "rounds", roundDir!.name, "state.rwl");
+const outPath = snapshotMode === "clean"
+    ? join(runDir, "clean-original", "VERYCOF.OUT")
+    : join(runDir, "rounds", roundDir!.name, "VERYCOF.OUT");
+const currentDiagnosisPath = snapshotMode === "clean"
+    ? join(runDir, "clean-original-targets.json")
+    : join(runDir, "rounds", roundDir!.name, "target-diagnoses.json");
 const checkpointPath = join(runDir, "checkpoint.json");
 const siteData = new Map(Array.from(
     parseRwl(readFileSync(statePath, "utf8")),
@@ -62,7 +71,7 @@ const rwlHash = createHash("sha256").update(readFileSync(statePath)).digest("hex
 const pairwiseReference = createPairwiseBootstrapReferenceConfig({
     siteData,
     flaggedAIds: flaggedIds,
-    cofechaRunId: `terminal-reference-audit-${roundDir.name}`,
+    cofechaRunId: `${snapshotMode}-reference-audit-${roundDir?.name ?? "original"}`,
     rwlHash,
 });
 if (!pairwiseReference?.cofechaPassReference) {
@@ -78,8 +87,13 @@ type Checkpoint = {
 type SavedTarget = {
     seriesId: string;
     reviewEvent: DiagnosisEvent | null;
+    reviewDecision?: {
+        reason?: string;
+    };
 };
-const checkpoint = JSON.parse(readFileSync(checkpointPath, "utf8")) as Checkpoint;
+const checkpoint = snapshotMode === "terminal"
+    ? JSON.parse(readFileSync(checkpointPath, "utf8")) as Checkpoint
+    : null;
 const currentTargets = JSON.parse(
     readFileSync(currentDiagnosisPath, "utf8"),
 ) as SavedTarget[];
@@ -91,14 +105,16 @@ const topYear = (event: DiagnosisEvent | null): number | null => event
     ))[0]?.year ?? null
     : null;
 
-const snapshot = (event: DiagnosisEvent | null, truthYear: number) => ({
+const snapshot = (event: DiagnosisEvent | null, truthYear: number | null) => ({
     response: event !== null,
     eventType: event?.eventType ?? null,
     startYear: event?.startYear ?? null,
     endYear: event?.endYear ?? null,
     topYear: topYear(event),
     operationCorrect: event?.eventType === "missingRing",
-    windowCovered: event?.eventType === "missingRing"
+    windowCovered: truthYear === null
+        ? null
+        : event?.eventType === "missingRing"
         && event.startYear <= truthYear
         && event.endYear >= truthYear,
     confidenceLevel: event?.confidenceLevel ?? null,
@@ -112,9 +128,20 @@ const snapshot = (event: DiagnosisEvent | null, truthYear: number) => ({
     notes: event ? [...event.evidence.notes] : [],
 });
 
-const cases = checkpoint.states.flatMap((state) => {
-    const truthYear = state.remainingTruthYears[0];
-    if (!Number.isInteger(truthYear)) return [];
+const targetStates = snapshotMode === "terminal"
+    ? checkpoint!.states.flatMap((state) => {
+        const truthYear = state.remainingTruthYears[0];
+        return Number.isInteger(truthYear)
+            ? [{ seriesId: state.seriesId, truthYear }]
+            : [];
+    })
+    : currentTargets
+        .filter((target) => target.reviewEvent === null
+            && target.reviewDecision?.reason === "partial_move_evidence_insufficient")
+        .map((target) => ({ seriesId: target.seriesId, truthYear: null }));
+
+const cases = targetStates.flatMap((state) => {
+    const truthYear = state.truthYear;
     const targetReference = createPairwiseBootstrapTargetReferenceConfig(
         siteData,
         pairwiseReference,
@@ -142,28 +169,44 @@ const cases = checkpoint.states.flatMap((state) => {
         targetEndYear,
         current,
         pairwise,
-        gainedCorrectWindow: !current.windowCovered && pairwise.windowCovered,
-        lostCorrectWindow: current.windowCovered && !pairwise.windowCovered,
+        gainedCorrectWindow: truthYear === null
+            ? null
+            : !current.windowCovered && pairwise.windowCovered,
+        lostCorrectWindow: truthYear === null
+            ? null
+            : current.windowCovered && !pairwise.windowCovered,
     }];
 });
 
 const summary = {
     runDir,
-    round: Number(roundDir.name),
+    snapshotMode,
+    round: roundDir ? Number(roundDir.name) : null,
     frontierCases: cases.length,
     pairwiseAnchorCount: pairwiseReference.selectedTrees.length,
     currentResponses: cases.filter((row) => row.current.response).length,
-    currentCorrectWindows: cases.filter((row) => row.current.windowCovered).length,
+    currentCorrectWindows: snapshotMode === "terminal"
+        ? cases.filter((row) => row.current.windowCovered).length
+        : null,
     pairwiseResponses: cases.filter((row) => row.pairwise.response).length,
-    pairwiseCorrectWindows: cases.filter((row) => row.pairwise.windowCovered).length,
+    pairwiseCorrectWindows: snapshotMode === "terminal"
+        ? cases.filter((row) => row.pairwise.windowCovered).length
+        : null,
     pairwiseIncorrectOperations: cases.filter((row) => (
         row.pairwise.response && !row.pairwise.operationCorrect
     )).length,
-    gainedCorrectWindows: cases.filter((row) => row.gainedCorrectWindow).length,
-    lostCorrectWindows: cases.filter((row) => row.lostCorrectWindow).length,
+    gainedCorrectWindows: snapshotMode === "terminal"
+        ? cases.filter((row) => row.gainedCorrectWindow).length
+        : null,
+    lostCorrectWindows: snapshotMode === "terminal"
+        ? cases.filter((row) => row.lostCorrectWindow).length
+        : null,
 };
 const outputDir = join(runDir, "analysis");
 mkdirSync(outputDir, { recursive: true });
-const outputPath = join(outputDir, "terminal-reference-mode-audit.json");
+const outputPath = join(
+    outputDir,
+    `${snapshotMode}-reference-mode-audit.json`,
+);
 writeFileSync(outputPath, JSON.stringify({ summary, cases }, null, 2), "utf8");
 console.log(JSON.stringify(summary));

@@ -69,8 +69,10 @@ ctx.addEventListener("message", (event: MessageEvent<DiagnosisWorkerRequest>) =>
         const needsPairwiseFallback = targetTree !== undefined
             && targetReferenceConfig?.cofechaPassReference?.source !== "pairwise_bootstrap"
             && (diagnosis.reviewEvents?.length ?? 0) === 0
-            && diagnosis.eventDecisionAudits?.[0]?.finalReason
-                === "insufficient_reference_depth";
+            && (diagnosis.eventDecisionAudits?.[0]?.finalReason
+                === "insufficient_reference_depth"
+                || diagnosis.reviewWindowDecisions?.[0]?.reason
+                    === "partial_move_evidence_insufficient");
         if (needsPairwiseFallback
             && targetTree !== undefined
             && referenceConfig?.classification) {
@@ -96,6 +98,7 @@ ctx.addEventListener("message", (event: MessageEvent<DiagnosisWorkerRequest>) =>
                 diagnosis = selectInsufficientReferencePairwiseFallback(
                     diagnosis,
                     pairwiseDiagnosis,
+                    siteData.get(targetTree),
                 );
             }
         }
