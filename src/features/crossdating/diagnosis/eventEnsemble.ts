@@ -1916,6 +1916,39 @@ const hasIndependentDisplayedMissingAnchor = (event: DiagnosisEvent): boolean =>
         || sources.has("paired_direct_breakpoint_consensus");
 };
 
+const coherentPartialConditionedLagPathHead = (
+    displayed: readonly DiagnosisEvent[],
+): DiagnosisEvent | null => {
+    const unitTransitions = displayed.filter((event) => (
+        event.eventType === "missingRing"
+        && event.evidence.algorithmSources.includes("piecewise_lag_path")
+        && event.evidence.notes.includes("mixed_reference_counterfactual_selected")
+        && event.evidence.lagBefore !== null
+        && event.evidence.lagAfter !== null
+        && event.evidence.lagAfter - event.evidence.lagBefore === 1
+        && event.evidence.lagAfter <= 0
+        && (event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY) >= 0.15
+        && event.evidence.samplePairs >= 50
+    ));
+    const head = unitTransitions.find((event) => (
+        event.evidence.lagBefore === -1
+        && event.evidence.lagAfter === 0
+        && event.evidence.notes.includes("partial_conditioned_unit_transition")
+    ));
+    if (!head) return null;
+    const transitionLags = new Set(unitTransitions.map((event) => (
+        event.evidence.lagBefore
+    )));
+    const sameCorrection = unitTransitions.every((event) => Math.abs(
+        (event.evidence.correlationGain ?? 0)
+        - (head.evidence.correlationGain ?? 0),
+    ) <= 1e-9);
+    return sameCorrection
+        && [-1, -2, -3, -4].every((lag) => transitionLags.has(lag))
+        ? head
+        : null;
+};
+
 /**
  * Sequential recovery contributes another complete hypothesis. It must not erase a unit event
  * that already survived the candidate, operation and display gates with an independent anchor.
@@ -1925,8 +1958,12 @@ export const retainDisplayedMissingHypothesesDuringSequentialRecovery = (
     recovered: DiagnosisEvent,
 ): DiagnosisEvent[] => {
     const recoveredYear = rankedEventYear(recovered);
+    const coherentPathHead = coherentPartialConditionedLagPathHead(displayed);
     const retained = displayed.filter((event) => (
-        hasIndependentDisplayedMissingAnchor(event)
+        (
+            hasIndependentDisplayedMissingAnchor(event)
+            || event.id === coherentPathHead?.id
+        )
         && !(
             event.startYear === recovered.startYear
             && event.endYear === recovered.endYear

@@ -137,6 +137,23 @@ const candidateRecoveryDiagnosis = {
 } as SeriesCoreDiagnosis;
 
 describe("sequential missing hypothesis retention", () => {
+    const lagPathUnit = (lagBefore: number, year: number): DiagnosisEvent => {
+        const event = falseRingEvent(year - 3, false);
+        event.id = `path-${lagBefore}-${year}`;
+        event.eventType = "missingRing";
+        event.rankedYears = [{ year, rank: 1, score: 1, evidenceTags: [] }];
+        event.evidence.algorithmSources = ["piecewise_lag_path"];
+        event.evidence.lagBefore = lagBefore;
+        event.evidence.lagAfter = lagBefore + 1;
+        event.evidence.correlationGain = 0.2;
+        event.evidence.samplePairs = 60;
+        event.evidence.notes = [
+            "mixed_reference_counterfactual_selected",
+            ...(lagBefore === -1 ? ["partial_conditioned_unit_transition"] : []),
+        ];
+        return event;
+    };
+
     it("keeps a displayed hard-gated missing window beside a later staircase hypothesis", () => {
         const displayed = candidatePartial({
             shiftYears: -1,
@@ -192,6 +209,51 @@ describe("sequential missing hypothesis retention", () => {
 
         expect(retainDisplayedMissingHypothesesDuringSequentialRecovery(
             [unanchored],
+            recovered,
+        )).toEqual([]);
+    });
+
+    it("retains only the head of a coherent partial-conditioned lag path", () => {
+        const displayed = [
+            lagPathUnit(-1, 1958),
+            lagPathUnit(-2, 1931),
+            lagPathUnit(-3, 1910),
+            lagPathUnit(-4, 1805),
+        ];
+        const recovered = {
+            ...lagPathUnit(-1, 1946),
+            id: "sequential-relocation",
+            evidence: {
+                ...lagPathUnit(-1, 1946).evidence,
+                algorithmSources: ["sequential_missing_staircase_head"],
+                notes: [],
+            },
+        };
+
+        expect(retainDisplayedMissingHypothesesDuringSequentialRecovery(
+            displayed,
+            recovered,
+        ).map((event) => event.id)).toEqual([displayed[0].id]);
+    });
+
+    it("does not promote an incomplete partial-conditioned lag path", () => {
+        const displayed = [
+            lagPathUnit(-1, 1958),
+            lagPathUnit(-2, 1931),
+            lagPathUnit(-3, 1910),
+        ];
+        const recovered = {
+            ...lagPathUnit(-1, 1946),
+            id: "sequential-relocation",
+            evidence: {
+                ...lagPathUnit(-1, 1946).evidence,
+                algorithmSources: ["sequential_missing_staircase_head"],
+                notes: [],
+            },
+        };
+
+        expect(retainDisplayedMissingHypothesesDuringSequentialRecovery(
+            displayed,
             recovered,
         )).toEqual([]);
     });
