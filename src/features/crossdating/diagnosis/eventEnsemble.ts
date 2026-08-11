@@ -3285,15 +3285,68 @@ export const hasCandidateBackedSequentialFalseDirection = (
     && event.evidence.lagBefore !== null
     && event.evidence.lagAfter !== null
     && event.evidence.lagBefore === event.evidence.lagAfter + 1
-    && event.evidence.algorithmSources.includes("joint_event_counterfactual")
     && (
-        event.evidence.notes.includes("counterfactual_candidate_support")
-        || event.evidence.notes.includes("candidate_hard_gate_passed")
-        || event.evidence.notes.includes(
-            "window_refinement=raw_path_candidate_consensus",
+        (
+            event.evidence.algorithmSources.includes("joint_event_counterfactual")
+            && (
+                event.evidence.notes.includes("counterfactual_candidate_support")
+                || event.evidence.notes.includes("candidate_hard_gate_passed")
+                || event.evidence.notes.includes(
+                    "window_refinement=raw_path_candidate_consensus",
+                )
+            )
+        )
+        || (
+            event.evidence.notes.includes("candidate_hard_gate_passed")
+            && event.evidence.algorithmSources.includes("candidate_ranking")
+            && event.evidence.algorithmSources.includes("local_edit_alignment")
         )
     )
 ));
+
+const latestEventNoteNumber = (
+    event: DiagnosisEvent,
+    prefix: string,
+): number | null => {
+    const note = [...event.evidence.notes]
+        .reverse()
+        .find((value) => value.startsWith(prefix));
+    const value = Number(note?.slice(prefix.length));
+    return Number.isFinite(value) ? value : null;
+};
+
+/** Protects a complete whole-series operation, not a terminal lag alias. */
+export const isAuthoritativeWholeSeriesCheckpoint = (
+    event: DiagnosisEvent,
+): boolean => {
+    if (event.eventType !== "wholeSeriesMove"
+        || !event.shiftYears
+        || !event.evidence.notes.includes("candidate_hard_gate_passed")
+        || !event.evidence.notes.includes(
+            "whole_state_global_lag_matches_shift=true",
+        )
+        || event.evidence.score <= 0) return false;
+    const terminalSegments = latestEventNoteNumber(
+        event,
+        "cofecha_terminal_segments=",
+    ) ?? 0;
+    const terminalConsistency = latestEventNoteNumber(
+        event,
+        "cofecha_terminal_consistency=",
+    ) ?? 0;
+    const terminalResidualLag = latestEventNoteNumber(
+        event,
+        "cofecha_terminal_residual_lag=",
+    );
+    const stateSupport = latestEventNoteNumber(
+        event,
+        "whole_state_support_fraction=",
+    ) ?? 0;
+    return terminalSegments >= 2
+        && terminalConsistency >= 0.9
+        && terminalResidualLag === 0
+        && stateSupport >= 0.5;
+};
 
 /** A compressed +2 range candidate can carry the older step of a two-false-ring staircase. */
 export const hasCompressedSequentialFalseDirection = (
@@ -3316,6 +3369,7 @@ export const hasCompressedSequentialFalseDirection = (
 
 type SequentialMissingDirectionEvidence = {
     hasOppositeUnitOnly: boolean;
+    hasAuthoritativeOppositeUnit?: boolean;
     hasDetectedMissing: boolean;
     hasMissingCandidate: boolean;
     hasConfirmedTargetStaircase: boolean;
@@ -3327,13 +3381,21 @@ type SequentialMissingDirectionEvidence = {
 /** Shared reference zeros may locate a missing event, but cannot reverse explicit +1 lag evidence. */
 export const supportsSequentialMissingDirectionOverride = ({
     hasOppositeUnitOnly,
+    hasAuthoritativeOppositeUnit = false,
     hasDetectedMissing,
     hasMissingCandidate,
     hasConfirmedTargetStaircase,
     sharedZeroSupport,
     hasCumulativeStaircase = false,
     hasMarkerAnchoredStaircase = false,
-}: SequentialMissingDirectionEvidence): boolean => hasDetectedMissing
+}: SequentialMissingDirectionEvidence): boolean => {
+    // Historical zero markers describe already accepted missing rings. They can locate another
+    // missing frontier, but cannot by themselves reverse a current, independently hard-gated
+    // false-ring operation. A competing missing operation needs its own current candidate.
+    if (hasAuthoritativeOppositeUnit) {
+        return hasDetectedMissing || hasMissingCandidate;
+    }
+    return hasDetectedMissing
     || hasMissingCandidate
     || hasConfirmedTargetStaircase
     || (!hasOppositeUnitOnly && (
@@ -3341,6 +3403,7 @@ export const supportsSequentialMissingDirectionOverride = ({
         || hasMarkerAnchoredStaircase
         || sharedZeroSupport >= 10
     ));
+};
 
 /** Keeps a confirmed unit-event frontier separate from a distant partial-move mode. */
 export const hasDistinctConfirmedSequentialMissingMode = (
@@ -3599,9 +3662,14 @@ const recoverSequentialMissingHeadEvent = (
         const hasExistingUnitEvent = detected.some((event) => (
             event.eventType === "missingRing" || event.eventType === "falseRing"
         ));
+        const hasAuthoritativeOppositeUnit =
+            hasCandidateBackedSequentialFalseDirection([
+                ...detected,
+                ...candidateEvents,
+            ]);
         const hasOppositeUnitOnly = (
             hasCoherentSequentialFalseStaircase(detected)
-            || hasCandidateBackedSequentialFalseDirection(detected)
+            || hasAuthoritativeOppositeUnit
             || hasCompressedSequentialFalseDirection(
                 detected,
                 candidates,
@@ -3624,6 +3692,7 @@ const recoverSequentialMissingHeadEvent = (
         const hasIndependentMissingDirection =
             supportsSequentialMissingDirectionOverride({
                 hasOppositeUnitOnly,
+                hasAuthoritativeOppositeUnit,
                 hasDetectedMissing: detected.some(
                     (event) => event.eventType === "missingRing",
                 ),
@@ -3638,6 +3707,9 @@ const recoverSequentialMissingHeadEvent = (
             });
         const whole = detected.find((event) => event.eventType === "wholeSeriesMove");
         const wholeShift = wholeSeriesMoveShiftYears(whole);
+        const hasAuthoritativeWholeCheckpoint = whole
+            ? isAuthoritativeWholeSeriesCheckpoint(whole)
+            : false;
         const zeroLagFixedTailResolvesWhole = Number.isFinite(
             head.fixedTailMeanAdvantage,
         ) && head.fixedTailMeanAdvantage >= 0.05;
@@ -3647,14 +3719,18 @@ const recoverSequentialMissingHeadEvent = (
                 wholeShift,
                 diagnosis.targetRange.endYear,
             );
-        const independentWholeBaseline = wholeShift !== null
-            && wholeShift !== head.pathStartLag
-            && detected.some((event) => (
-                event.eventType !== "wholeSeriesMove"
-                && event.evidence.lagAfter === wholeShift
-            ))
-            && !zeroLagFixedTailResolvesWhole
-            && !terminalCumulativeStaircaseResolvesWhole;
+        const independentWholeBaseline = wholeShift !== null && (
+            hasAuthoritativeWholeCheckpoint
+            || (
+                wholeShift !== head.pathStartLag
+                && detected.some((event) => (
+                    event.eventType !== "wholeSeriesMove"
+                    && event.evidence.lagAfter === wholeShift
+                ))
+                && !zeroLagFixedTailResolvesWhole
+                && !terminalCumulativeStaircaseResolvesWhole
+            )
+        );
         const hasIndependentStaircaseSupport = hasExistingUnitEvent
             || hasCumulativeMissingStaircase
             || hasMarkerAnchoredMissingStaircase

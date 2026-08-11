@@ -6,6 +6,7 @@ import {
     hasCompressedSequentialFalseDirection,
     hasCoherentSequentialFalseStaircase,
     hasMultipleCoherentLocalTransitions,
+    isAuthoritativeWholeSeriesCheckpoint,
     partialMoveExplainsWholeSeriesCandidate,
     partialMoveSupportsSequentialMissingDepth,
     prioritizeEndpointUnitAgainstWhole,
@@ -967,6 +968,27 @@ describe("supportsSequentialMissingDirectionOverride", () => {
         })).toBe(false);
     });
 
+    it("requires a current missing candidate to reverse an authoritative false ring", () => {
+        expect(supportsSequentialMissingDirectionOverride({
+            hasOppositeUnitOnly: true,
+            hasAuthoritativeOppositeUnit: true,
+            hasDetectedMissing: false,
+            hasMissingCandidate: false,
+            hasConfirmedTargetStaircase: true,
+            sharedZeroSupport: 23,
+            hasCumulativeStaircase: true,
+            hasMarkerAnchoredStaircase: true,
+        })).toBe(false);
+        expect(supportsSequentialMissingDirectionOverride({
+            hasOppositeUnitOnly: true,
+            hasAuthoritativeOppositeUnit: true,
+            hasDetectedMissing: false,
+            hasMissingCandidate: true,
+            hasConfirmedTargetStaircase: true,
+            sharedZeroSupport: 23,
+        })).toBe(true);
+    });
+
     it("allows aggregate staircase evidence when no opposite unit step exists", () => {
         expect(supportsSequentialMissingDirectionOverride({
             hasOppositeUnitOnly: false,
@@ -1019,6 +1041,19 @@ describe("hasCandidateBackedSequentialFalseDirection", () => {
             .toBe(true);
     });
 
+    it("accepts the production hard-gated candidate ranking path", () => {
+        const candidateBacked = falseRingEvent(1900, false);
+        candidateBacked.evidence.algorithmSources = [
+            "candidate_ranking",
+            "local_edit_alignment",
+            "segmented_diagnosis",
+        ];
+        candidateBacked.evidence.notes = ["candidate_hard_gate_passed"];
+
+        expect(hasCandidateBackedSequentialFalseDirection([candidateBacked]))
+            .toBe(true);
+    });
+
     it("interprets a false-ring step relative to a non-zero whole baseline", () => {
         const candidateBacked = falseRingEvent(1900, false);
         candidateBacked.evidence.lagBefore = -4;
@@ -1038,6 +1073,47 @@ describe("hasCandidateBackedSequentialFalseDirection", () => {
 
         expect(hasCandidateBackedSequentialFalseDirection([jointOnly])).toBe(false);
         expect(hasCandidateBackedSequentialFalseDirection([candidateOnly])).toBe(false);
+    });
+});
+
+describe("isAuthoritativeWholeSeriesCheckpoint", () => {
+    const whole = (): DiagnosisEvent => ({
+        ...falseRingEvent(1800, true),
+        id: "whole",
+        eventType: "wholeSeriesMove",
+        startYear: 1600,
+        endYear: 2000,
+        shiftYears: 4,
+        confidenceLevel: "high",
+        evidence: {
+            ...falseRingEvent(1800, true).evidence,
+            score: 19,
+            notes: [
+                "candidate_hard_gate_passed",
+                "cofecha_terminal_segments=2",
+                "cofecha_terminal_consistency=1.000000",
+                "cofecha_terminal_residual_lag=0",
+                "whole_state_support_fraction=0.769231",
+                "whole_state_global_lag_matches_shift=true",
+            ],
+        },
+    });
+
+    it("protects a globally consistent whole-series operation", () => {
+        expect(isAuthoritativeWholeSeriesCheckpoint(whole())).toBe(true);
+    });
+
+    it("does not protect a weak cumulative-lag alias", () => {
+        const alias = whole();
+        alias.evidence.score = -24;
+        alias.evidence.notes = alias.evidence.notes.map((note) => (
+            note === "whole_state_support_fraction=0.769231"
+                ? "whole_state_support_fraction=0.055556"
+                : note === "whole_state_global_lag_matches_shift=true"
+                    ? "whole_state_global_lag_matches_shift=false"
+                    : note
+        ));
+        expect(isAuthoritativeWholeSeriesCheckpoint(alias)).toBe(false);
     });
 });
 
