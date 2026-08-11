@@ -14,6 +14,7 @@ import {
     createPairwiseBootstrapTargetReferenceConfig,
 } from "@/features/crossdating/pairwiseBootstrap";
 import type { RwlSiteData } from "@/features/rwl/types";
+import { selectAutomaticDiagnosisReferenceConfig } from "./diagnosisReferencePolicy";
 
 export type DiagnosisWorkerRequest = {
     id: number;
@@ -54,9 +55,10 @@ ctx.addEventListener("message", (event: MessageEvent<DiagnosisWorkerRequest>) =>
 
     try {
         const startedAt = performance.now();
+        const automaticReferenceConfig = selectAutomaticDiagnosisReferenceConfig(referenceConfig);
         const targetReferenceConfig = createPairwiseBootstrapTargetReferenceConfig(
             siteData,
-            referenceConfig,
+            automaticReferenceConfig,
             targetTree,
         );
         let diagnosis = diagnoseCrossdating(siteData, {
@@ -75,12 +77,12 @@ ctx.addEventListener("message", (event: MessageEvent<DiagnosisWorkerRequest>) =>
                     === "partial_move_evidence_insufficient");
         if (needsPairwiseFallback
             && targetTree !== undefined
-            && referenceConfig?.classification) {
+            && automaticReferenceConfig?.classification) {
             const pairwiseReference = createPairwiseBootstrapReferenceConfig({
                 siteData,
-                flaggedAIds: referenceConfig.classification.candidateFlaggedIds,
-                cofechaRunId: `${referenceConfig.cofechaRunId ?? "diagnosis"}-insufficient-reference`,
-                rwlHash: referenceConfig.rwlHash ?? "",
+                flaggedAIds: automaticReferenceConfig.classification.candidateFlaggedIds,
+                cofechaRunId: `${automaticReferenceConfig.cofechaRunId ?? "diagnosis"}-insufficient-reference`,
+                rwlHash: automaticReferenceConfig.rwlHash ?? "",
             });
             const targetPairwiseReference = createPairwiseBootstrapTargetReferenceConfig(
                 siteData,

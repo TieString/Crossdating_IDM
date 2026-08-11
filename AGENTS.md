@@ -117,6 +117,7 @@
 
 **约束**：
 - reference series 是 derived series，不进入 RWL 数据本体，不允许作为普通序列编辑。
+- 手工 reference 只用于图表叠加和人工对照，不得进入自动定年建议；自动诊断只使用机器生成的 dynamic reference，缺少可用 dynamic reference 时走内部 leave-one-out / pairwise 路径。
 - 手动 reference 计算按年份对齐并直接 arithmetic mean；COFECHA-pass 动态 reference 只能平均转换后的 residual index，最终输出 mean=0、sd=1 的 residual chronology，低于最小 replication 的年份不绘制。
 - 参考变更写入操作日志，但不参与 RwlEditor 的撤销/恢复栈。
 - 内部诊断是 COFECHA-like 快速提示，不替代外部 COFECHA 最终验证；候选项必须由用户确认后才能通过 edit.ts 操作落地。

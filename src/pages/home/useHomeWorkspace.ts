@@ -49,6 +49,7 @@ import { CURRENT_EVENT_PYTHON_MODELS_ENABLED } from "@/shared/featureFlags";
 import { useSettings } from "@/features/settings/SettingsContext";
 import { ALL_OPTION_VALUE, CofechaVersion, formatTitle } from "./homeShared";
 import type { DiagnosisWorkerRequest, DiagnosisWorkerResponse } from "./diagnosisWorker";
+import { selectAutomaticDiagnosisReferenceConfig } from "./diagnosisReferencePolicy";
 import {
     createBreadthDiagnosisSuggestion,
     createEmptyBreadthDiagnosisNavigator,
@@ -1776,7 +1777,7 @@ export function useHomeWorkspace() {
                 new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
             ))
     ), [fileName, operationLog]);
-    const diagnosisReferenceConfig = referenceConfig ?? dynamicReferenceConfig;
+    const diagnosisReferenceConfig = selectAutomaticDiagnosisReferenceConfig(dynamicReferenceConfig);
     useEffect(() => {
         let cancelled = false;
         let startTimer: number | null = null;
