@@ -386,4 +386,59 @@ describe("joint event adjudicator", () => {
             shiftYears: -1,
         });
     });
+
+    it("selects a hard-gated endpoint unit hypothesis over its terminal -1 alias", () => {
+        const whole = event("terminal-unit", "wholeSeriesMove", 1800, 2004, 0);
+        whole.shiftYears = -1;
+        whole.evidence.notes = [
+            "whole_baseline_source=cofecha_terminal_lag",
+            "cofecha_terminal_segments=3",
+            "cofecha_terminal_consistency=1.000000",
+        ];
+        const endpoint = event("endpoint", "missingRing", 1998, 2004, 2002);
+        endpoint.seriesRange = { startYear: 1800, endYear: 2004 };
+        endpoint.evidence.algorithmSources = [
+            "newer_endpoint_unit_alias_of_global_lag",
+            "newer_endpoint_unit_competitor_of_global_lag",
+        ];
+        endpoint.evidence.notes = ["candidate_hard_gate_passed"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("displayed", whole),
+            checkpoint("final", whole),
+            checkpoint("final", endpoint),
+        ]);
+
+        expect(decision.event).toMatchObject({
+            eventType: "missingRing",
+            startYear: 1998,
+            endYear: 2004,
+        });
+    });
+
+    it("does not reinterpret a terminal whole from an unreviewed endpoint alias", () => {
+        const whole = event("terminal-unit", "wholeSeriesMove", 1800, 2004, 0);
+        whole.shiftYears = -1;
+        whole.evidence.notes = [
+            "whole_baseline_source=cofecha_terminal_lag",
+            "cofecha_terminal_segments=3",
+            "cofecha_terminal_consistency=1.000000",
+        ];
+        const endpoint = event("endpoint", "missingRing", 1998, 2004, 2002);
+        endpoint.seriesRange = { startYear: 1800, endYear: 2004 };
+        endpoint.evidence.algorithmSources = [
+            "newer_endpoint_unit_alias_of_global_lag",
+            "newer_endpoint_unit_competitor_of_global_lag",
+        ];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("final", whole),
+            checkpoint("final", endpoint),
+        ]);
+
+        expect(decision.event).toMatchObject({
+            eventType: "wholeSeriesMove",
+            shiftYears: -1,
+        });
+    });
 });

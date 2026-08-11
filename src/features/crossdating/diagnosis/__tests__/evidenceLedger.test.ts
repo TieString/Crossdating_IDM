@@ -107,6 +107,23 @@ describe("diagnosis evidence ledger", () => {
         );
     });
 
+    it("records a hard-gated unit resolution at the newer endpoint", () => {
+        const endpoint = event();
+        endpoint.startYear = 1998;
+        endpoint.endYear = 2004;
+        endpoint.seriesRange = { startYear: 1800, endYear: 2004 };
+        endpoint.evidence.algorithmSources.push(
+            "newer_endpoint_unit_alias_of_global_lag",
+            "newer_endpoint_unit_competitor_of_global_lag",
+        );
+        endpoint.evidence.notes.push("candidate_hard_gate_passed");
+
+        expect(evidenceClaimsFor(endpoint)).toContain("endpoint_unit_resolution");
+
+        endpoint.endYear = 1970;
+        expect(evidenceClaimsFor(endpoint)).not.toContain("endpoint_unit_resolution");
+    });
+
     it("is append-only and idempotent across repeated normalization", () => {
         const once = withEvidenceLedger(event());
         const twice = withEvidenceLedger(once);

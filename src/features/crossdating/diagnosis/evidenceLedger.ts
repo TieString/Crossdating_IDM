@@ -59,6 +59,18 @@ const operationClaims = (event: DiagnosisEvent): DiagnosisEvidenceClaim[] => {
         && hasToken(tokens, "terminal_whole_alias_removed")) {
         claims.push("fixed_side_resolution");
     }
+    const nearNewerEndpoint = event.seriesRange !== undefined
+        && event.endYear >= event.seriesRange.endYear - 2;
+    if (event.eventType === "missingRing"
+        && nearNewerEndpoint
+        && event.evidence.lagBefore === -1
+        && event.evidence.samplePairs >= 30
+        && (event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY) >= 0.05
+        && hasToken(tokens, "candidate_hard_gate_passed")
+        && hasToken(tokens, "newer_endpoint_unit_alias_of_global_lag")
+        && hasToken(tokens, "newer_endpoint_unit_competitor_of_global_lag")) {
+        claims.push("endpoint_unit_resolution");
+    }
     if ((event.eventType === "missingRing" || event.eventType === "falseRing")
         && hasToken(tokens, "decisive_joint_operation_fusion")
         && hasToken(tokens, "joint_year_operation_evidence")) {

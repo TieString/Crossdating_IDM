@@ -109,6 +109,7 @@ const claimWeight: Record<DiagnosisEvidenceClaim, number> = {
     whole_baseline_exhausted_by_missing_staircase: 1,
     independent_reference_staircase: 0.9,
     fixed_side_resolution: 1,
+    endpoint_unit_resolution: 1,
     joint_operation: 0.8,
     continuous_gap_consensus: 0.9,
     whole_global_lag: 0.6,
@@ -251,6 +252,14 @@ const operationContractValid = (event: DiagnosisEvent): boolean => {
     if (event.eventType === "missingRing" ? transition > 0 : transition < 0) {
         return true;
     }
+    const claims = evidenceClaimsFor(event);
+    if (event.eventType === "missingRing"
+        && (
+            claims.has("fixed_side_resolution")
+            || claims.has("endpoint_unit_resolution")
+        )) {
+        return true;
+    }
     const protectedCandidateCheckpoint = event.evidence.notes.includes(
         "candidate_hard_gate_passed",
     ) && event.evidence.algorithmSources.some((source) => (
@@ -305,6 +314,7 @@ const hasIndependentLocationAuthority = (cluster: HypothesisCluster): boolean =>
     if (claims.has("explicit_missing_staircase")
         || claims.has("independent_reference_staircase")
         || claims.has("fixed_side_resolution")
+        || claims.has("endpoint_unit_resolution")
         || claims.has("whole_baseline_exhausted_by_missing_staircase")) {
         return true;
     }
@@ -340,6 +350,7 @@ const finalFrontierClusters = (
             const local = representative(cluster).event;
             const claims = evidenceClaimsFor(local);
             return claims.has("fixed_side_resolution")
+                || claims.has("endpoint_unit_resolution")
                 || claims.has("independent_reference_staircase")
                 || claims.has("whole_baseline_exhausted_by_missing_staircase");
         });
@@ -351,6 +362,7 @@ const finalFrontierClusters = (
         const decisiveLocal = localClusters.filter((cluster) => {
             const claims = evidenceClaimsFor(representative(cluster).event);
             return claims.has("fixed_side_resolution")
+                || claims.has("endpoint_unit_resolution")
                 || claims.has("explicit_missing_staircase")
                 || claims.has("independent_reference_staircase");
         });

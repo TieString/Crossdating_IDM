@@ -45,6 +45,7 @@ export type DiagnosisEvidenceClaim =
     | "whole_baseline_exhausted_by_missing_staircase"
     | "independent_reference_staircase"
     | "fixed_side_resolution"
+    | "endpoint_unit_resolution"
     | "joint_operation"
     | "continuous_gap_consensus"
     | "whole_global_lag"
