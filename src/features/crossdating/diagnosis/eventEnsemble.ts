@@ -3380,14 +3380,29 @@ const recoverSequentialMissingHeadEvent = (
                     diagnosis.targetRange,
                 )
                 : null;
-        return {
-            event: interpretationEvidence && partialInterpretation
+        const selectedMissingEvent = interpretationEvidence && partialInterpretation
                 ? attachMissingPartialInterpretation(
                     preferredMissingEvent,
                     partialInterpretation,
                     interpretationEvidence,
                 )
-                : preferredMissingEvent,
+                : preferredMissingEvent;
+        const resolvedMissingEvent = whole && !independentWholeBaseline ? {
+            ...selectedMissingEvent,
+            evidence: {
+                ...selectedMissingEvent.evidence,
+                algorithmSources: Array.from(new Set([
+                    ...selectedMissingEvent.evidence.algorithmSources,
+                    "sequential_missing_exhausts_whole_baseline",
+                ])).sort(),
+                notes: [
+                    ...selectedMissingEvent.evidence.notes,
+                    "sequential_missing_preserve_whole_baseline=false",
+                ],
+            },
+        } : selectedMissingEvent;
+        return {
+            event: resolvedMissingEvent,
             preserveWholeBaseline: independentWholeBaseline,
         };
     }

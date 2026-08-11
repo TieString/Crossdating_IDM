@@ -221,6 +221,31 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("does not resurrect a terminal whole baseline already explained by a missing staircase", () => {
+        const whole = event("terminal-whole", "wholeSeriesMove", 1600, 2000, 0);
+        whole.shiftYears = -5;
+        whole.evidence.notes = [
+            "whole_baseline_source=cofecha_terminal_lag",
+            "cofecha_terminal_segments=3",
+            "cofecha_terminal_consistency=1.000000",
+        ];
+        const resolvedHead = event("resolved-head", "missingRing", 1899, 1905, 1902);
+        resolvedHead.evidence.algorithmSources = [
+            "sequential_missing_staircase_head",
+            "sequential_missing_exhausts_whole_baseline",
+        ];
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("detected", whole),
+            checkpoint("final", resolvedHead),
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "final",
+            event: { eventType: "missingRing" },
+        });
+    });
+
     it("resolves a terminal unit whole alias with a matching newer-end staircase", () => {
         const whole = event("terminal-unit", "wholeSeriesMove", 1600, 2000, 0);
         whole.shiftYears = -1;

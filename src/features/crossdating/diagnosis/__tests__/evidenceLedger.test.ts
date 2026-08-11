@@ -96,6 +96,17 @@ describe("diagnosis evidence ledger", () => {
         ]);
     });
 
+    it("records when a sequential staircase fully explains an earlier whole baseline", () => {
+        const resolved = event();
+        resolved.evidence.algorithmSources.push(
+            "sequential_missing_exhausts_whole_baseline",
+        );
+
+        expect(evidenceClaimsFor(resolved)).toContain(
+            "whole_baseline_exhausted_by_missing_staircase",
+        );
+    });
+
     it("is append-only and idempotent across repeated normalization", () => {
         const once = withEvidenceLedger(event());
         const twice = withEvidenceLedger(once);

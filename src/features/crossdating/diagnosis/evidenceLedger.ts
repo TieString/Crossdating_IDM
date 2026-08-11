@@ -44,6 +44,10 @@ const operationClaims = (event: DiagnosisEvent): DiagnosisEvidenceClaim[] => {
     )) {
         claims.push("explicit_missing_staircase");
     }
+    if (event.eventType === "missingRing"
+        && hasToken(tokens, "sequential_missing_exhausts_whole_baseline")) {
+        claims.push("whole_baseline_exhausted_by_missing_staircase");
+    }
     if (event.eventType === "missingRing" && (
         hasToken(tokens, "robust_per_reference_missing_staircase")
         || hasToken(tokens, "per_reference_intermediate_lag_consensus")

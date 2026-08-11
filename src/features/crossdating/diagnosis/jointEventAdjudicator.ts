@@ -106,6 +106,7 @@ const eventLocationQuality = (event: DiagnosisEvent): number => {
 
 const claimWeight: Record<DiagnosisEvidenceClaim, number> = {
     explicit_missing_staircase: 1,
+    whole_baseline_exhausted_by_missing_staircase: 1,
     independent_reference_staircase: 0.9,
     fixed_side_resolution: 1,
     joint_operation: 0.8,
@@ -291,6 +292,7 @@ const finalFrontierClusters = (
             const claims = evidenceClaimsFor(local);
             return claims.has("fixed_side_resolution")
                 || claims.has("independent_reference_staircase")
+                || claims.has("whole_baseline_exhausted_by_missing_staircase")
                 || (
                     claims.has("explicit_missing_staircase")
                     && protectedWholeClusters.every((wholeCluster) => (
