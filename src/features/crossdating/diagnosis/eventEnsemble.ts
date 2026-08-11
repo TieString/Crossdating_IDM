@@ -2998,7 +2998,10 @@ export const hasCandidateBackedSequentialFalseDirection = (
 /** A compressed +2 range candidate can carry the older step of a two-false-ring staircase. */
 export const hasCompressedSequentialFalseDirection = (
     events: readonly DiagnosisEvent[],
-    candidates: readonly DiagnosisCandidateOperation[],
+    candidates: readonly Pick<
+        DiagnosisCandidateOperation,
+        "targetTree" | "operationType" | "deltaYears" | "suggestedLag"
+    >[],
     targetTree: string,
 ): boolean => events.some((event) => (
     event.eventType === "falseRing"

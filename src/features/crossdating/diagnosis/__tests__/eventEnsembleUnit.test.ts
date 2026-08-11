@@ -854,22 +854,10 @@ describe("hasCompressedSequentialFalseDirection", () => {
         expect(hasCompressedSequentialFalseDirection(
             [falseRingEvent(1900, false)],
             [{
-                id: "range-2",
                 targetTree: "TEST",
                 operationType: "SHIFT_RANGE",
-                mode: "partialRangeMove",
                 deltaYears: 2,
                 suggestedLag: 2,
-                score: 1,
-                algorithmSource: [],
-                evidence: {
-                    currentCorrelation: 0,
-                    simulatedCorrelation: 0,
-                    delta: 0,
-                    samplePairs: 0,
-                    overlapYears: 0,
-                    reason: "test",
-                },
             }],
             "TEST",
         )).toBe(true);
@@ -882,22 +870,10 @@ describe("hasCompressedSequentialFalseDirection", () => {
         expect(hasCompressedSequentialFalseDirection(
             [negative],
             [{
-                id: "range-2",
                 targetTree: "TEST",
                 operationType: "SHIFT_RANGE",
-                mode: "partialRangeMove",
                 deltaYears: 2,
                 suggestedLag: 2,
-                score: 1,
-                algorithmSource: [],
-                evidence: {
-                    currentCorrelation: 0,
-                    simulatedCorrelation: 0,
-                    delta: 0,
-                    samplePairs: 0,
-                    overlapYears: 0,
-                    reason: "test",
-                },
             }],
             "TEST",
         )).toBe(false);
