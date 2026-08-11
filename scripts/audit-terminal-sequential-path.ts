@@ -111,7 +111,7 @@ const targetStates = snapshotMode === "terminal"
         const strictEvent = savedBySeries.get(state.seriesId)?.strictEvent;
         return Number.isInteger(truthYear)
             && strictEvent?.eventType === "partialMove"
-            && (strictEvent.shiftYears === -2 || strictEvent.shiftYears === -3)
+            && (strictEvent.shiftYears ?? 0) < -1
             ? [{
                 seriesId: state.seriesId,
                 truthYear,
@@ -121,8 +121,7 @@ const targetStates = snapshotMode === "terminal"
     })
     : savedDiagnoses.flatMap((saved) => (
         saved.strictEvent?.eventType === "partialMove"
-        && (saved.strictEvent.shiftYears === -2
-            || saved.strictEvent.shiftYears === -3)
+        && (saved.strictEvent.shiftYears ?? 0) < -1
             ? [{
                 seriesId: saved.seriesId,
                 truthYear: null,
@@ -180,7 +179,7 @@ const cases = targetStates.flatMap((state) => {
     ) : null;
     const strictEvent = savedBySeries.get(state.seriesId)?.strictEvent ?? null;
     const compactShift = strictEvent?.eventType === "partialMove"
-        && (strictEvent.shiftYears === -2 || strictEvent.shiftYears === -3)
+        && (strictEvent.shiftYears ?? 0) < -1
         ? strictEvent.shiftYears
         : null;
     const compactHead = diagnosis && compactShift !== null

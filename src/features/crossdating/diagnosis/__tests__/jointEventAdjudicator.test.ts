@@ -93,6 +93,71 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("does not asymmetrically narrow an unlocated sequential window below its support", () => {
+        const supported = event("supported", "missingRing", 1612, 1618, 1615);
+        supported.evidence.algorithmSources = ["piecewise_lag_path"];
+        const narrowed = event("narrowed", "missingRing", 1614, 1618, 1616);
+        narrowed.evidence.algorithmSources = ["sequential_missing_staircase_head"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("detected", supported),
+            checkpoint("final", narrowed),
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "detected",
+            event: { startYear: 1612, endYear: 1618, eventType: "missingRing" },
+        });
+    });
+
+    it("keeps a calibrated final five-year sequential window", () => {
+        const supported = event("supported", "missingRing", 1612, 1618, 1615);
+        const calibrated = event("calibrated", "missingRing", 1614, 1618, 1616);
+        calibrated.evidence.algorithmSources = ["sequential_missing_staircase_head"];
+        calibrated.evidence.locationEvidence = [{
+            source: "calibrated-test",
+            startYear: 1614,
+            endYear: 1618,
+            topYear: 1616,
+            referenceCount: 8,
+            concentration: 0.8,
+            remoteMargin: 0.2,
+            calibrated: true,
+        }];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("detected", supported),
+            checkpoint("final", calibrated),
+        ]);
+
+        expect(decision.event).toMatchObject({ startYear: 1614, endYear: 1618 });
+    });
+
+    it("keeps a hard-gated bark endpoint candidate from weak older recentering", () => {
+        const candidate = event("endpoint-candidate", "missingRing", 1996, 2002, 2002);
+        candidate.seriesRange = { startYear: 1785, endYear: 2002 };
+        candidate.evidence.algorithmSources = ["candidate_ranking", "local_edit_alignment"];
+        candidate.evidence.notes = ["candidate_hard_gate_passed"];
+        const recentered = event("endpoint-recentered", "missingRing", 1994, 2000, 2000);
+        recentered.seriesRange = { startYear: 1785, endYear: 2002 };
+        recentered.evidence.algorithmSources = [
+            "newer_endpoint_unit_alias_of_global_lag",
+            "counterfactual_window_refinement",
+        ];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", candidate),
+            checkpoint("final", recentered),
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "candidate",
+            event: { startYear: 1996, endYear: 2002, eventType: "missingRing" },
+        });
+    });
+
     it("keeps a protected candidate frontier when final synthesis returns to a remote plateau", () => {
         const checkpointEvent = event(
             "candidate-frontier",

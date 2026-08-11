@@ -169,15 +169,86 @@ const representativeQuality = (
     + eventLocationQuality(checkpoint.event) * 0.2
 );
 
+const eventWidth = (event: DiagnosisEvent): number => (
+    event.endYear - event.startYear + 1
+);
+
+const preferredSequentialSupport = (
+    cluster: HypothesisCluster,
+    selected: DiagnosisReviewEventCheckpoint,
+): DiagnosisReviewEventCheckpoint | null => {
+    const event = selected.event;
+    if (selected.stage !== "final"
+        || (event.eventType !== "missingRing" && event.eventType !== "falseRing")
+        || eventWidth(event) !== 5
+        || !event.evidence.algorithmSources.includes("sequential_missing_staircase_head")
+        || eventHasIndependentLocationAuthority(event)) return null;
+    return cluster.checkpoints.filter((checkpoint) => {
+        const support = checkpoint.event;
+        const width = eventWidth(support);
+        const supportTop = topYear(support);
+        const selectedTop = topYear(event);
+        return stagePriority[checkpoint.stage] >= stagePriority.detected
+            && checkpoint.stage !== "final"
+            && sameOperation(support, event)
+            && width > 5
+            && width <= 9
+            && support.startYear <= event.startYear
+            && support.endYear >= event.endYear
+            && supportTop !== null
+            && selectedTop !== null
+            && Math.abs(supportTop - selectedTop) <= 2;
+    }).sort((left, right) => (
+        eventWidth(left.event) - eventWidth(right.event)
+        || stagePriority[right.stage] - stagePriority[left.stage]
+    ))[0] ?? null;
+};
+
+const preferredEndpointCandidate = (
+    cluster: HypothesisCluster,
+    selected: DiagnosisReviewEventCheckpoint,
+): DiagnosisReviewEventCheckpoint | null => {
+    const event = selected.event;
+    if (selected.stage !== "final"
+        || event.eventType !== "missingRing"
+        || !event.evidence.algorithmSources.includes(
+            "newer_endpoint_unit_alias_of_global_lag",
+        )) return null;
+    return cluster.checkpoints.filter((checkpoint) => {
+        const candidate = checkpoint.event;
+        const candidateTop = topYear(candidate);
+        const selectedTop = topYear(event);
+        return checkpoint.stage === "candidate"
+            && candidate.eventType === "missingRing"
+            && candidate.evidence.notes.includes("candidate_hard_gate_passed")
+            && candidate.evidence.algorithmSources.includes("candidate_ranking")
+            && candidate.endYear > event.endYear
+            && windowsOverlap(candidate, event)
+            && candidateTop !== null
+            && selectedTop !== null
+            && candidateTop > selectedTop
+            && candidateTop - selectedTop <= 4;
+    }).sort((left, right) => (
+        (topYear(right.event) ?? Number.NEGATIVE_INFINITY)
+            - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
+        || right.event.endYear - left.event.endYear
+    ))[0] ?? null;
+};
+
 const representative = (
     cluster: HypothesisCluster,
-): DiagnosisReviewEventCheckpoint => [...cluster.checkpoints].sort((left, right) => (
-    representativeQuality(cluster, right) - representativeQuality(cluster, left)
-    || persistedStageCount(cluster, right) - persistedStageCount(cluster, left)
-    || stagePriority[right.stage] - stagePriority[left.stage]
-    || (topYear(right.event) ?? Number.NEGATIVE_INFINITY)
-        - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
-))[0];
+): DiagnosisReviewEventCheckpoint => {
+    const selected = [...cluster.checkpoints].sort((left, right) => (
+        representativeQuality(cluster, right) - representativeQuality(cluster, left)
+        || persistedStageCount(cluster, right) - persistedStageCount(cluster, left)
+        || stagePriority[right.stage] - stagePriority[left.stage]
+        || (topYear(right.event) ?? Number.NEGATIVE_INFINITY)
+            - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
+    ))[0];
+    return preferredEndpointCandidate(cluster, selected)
+        ?? preferredSequentialSupport(cluster, selected)
+        ?? selected;
+};
 
 const hasIndependentLocationAuthority = (cluster: HypothesisCluster): boolean => (
     cluster.checkpoints.some(({ event }) => eventHasIndependentLocationAuthority(event))
@@ -362,7 +433,24 @@ const retainFinalClaimAuthority = (
     claims: ReadonlySet<DiagnosisEvidenceClaim>,
 ): HypothesisCluster | null => {
     const checkpoints = checkpointsWithFinalClaim(cluster, claims);
-    return checkpoints.length > 0 ? { checkpoints } : null;
+    if (checkpoints.length === 0) return null;
+    const endpointAuthority = checkpoints.some(({ event }) => (
+        evidenceClaimsFor(event).has("endpoint_unit_resolution")
+    ));
+    if (!endpointAuthority) return { checkpoints };
+    const endpointLocationCheckpoints = cluster.checkpoints.filter((checkpoint) => (
+        checkpoint.stage === "candidate"
+        && checkpoint.event.eventType === "missingRing"
+        && checkpoint.event.evidence.notes.includes("candidate_hard_gate_passed")
+        && checkpoint.event.evidence.algorithmSources.includes("candidate_ranking")
+        && checkpoints.some((authority) => (
+            sameOperation(authority.event, checkpoint.event)
+            && sameLocationMode(authority.event, checkpoint.event)
+        ))
+    ));
+    return {
+        checkpoints: [...checkpoints, ...endpointLocationCheckpoints],
+    };
 };
 
 const ENDPOINT_REVIEW_WIDTHS = new Set([5, 7, 9, 13]);

@@ -23,6 +23,7 @@
     "validate:co612-recovery-regression": "node scripts/validate-co612-recovery-regression.mjs",
     "benchmark:itrdb-natural-zero-serial": "node scripts/run-itrdb-natural-zero-serial-generalization.mjs",
     "analyze:itrdb-reference-structure": "node scripts/run-analyze-itrdb-reference-structure.mjs",
+    "audit:itrdb-terminal-frontiers": "node scripts/run-audit-itrdb-terminal-frontiers.mjs",
     "analyze:unit-window-stability": "node scripts/analyze-unit-window-stability.mjs",
     "benchmark:zsl-exhaustive": "node scripts/run-zsl-exhaustive-window-coverage.mjs",
     "benchmark:co612-multi-missing": "node scripts/run-co612-multi-missing.mjs",
