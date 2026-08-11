@@ -73,6 +73,149 @@ describe("joint event adjudicator", () => {
         expect(decision.event?.evidence.candidateIds).toEqual(["stable"]);
     });
 
+    it("selects the unique hard-gated candidate supported by raw path and direct transition", () => {
+        const correctCandidate = event(
+            "path-candidate",
+            "missingRing",
+            1577,
+            1583,
+            1580,
+        );
+        correctCandidate.evidence.algorithmSources = [
+            "candidate_ranking",
+            "local_edit_alignment",
+        ];
+        correctCandidate.evidence.notes = ["candidate_hard_gate_passed"];
+        const adjacentCandidate = event(
+            "adjacent-candidate",
+            "missingRing",
+            1569,
+            1575,
+            1572,
+        );
+        adjacentCandidate.evidence.algorithmSources = [
+            "candidate_ranking",
+            "local_edit_alignment",
+        ];
+        adjacentCandidate.evidence.notes = ["candidate_hard_gate_passed"];
+        const remoteFinal = event(
+            "remote-final",
+            "missingRing",
+            1498,
+            1506,
+            1500,
+        );
+        remoteFinal.evidence.notes = [
+            "raw_path_top_year=1578",
+            "direct_transition_year=1577",
+        ];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", correctCandidate),
+            checkpoint("candidate", adjacentCandidate),
+            checkpoint("detected", remoteFinal),
+            checkpoint("displayed", remoteFinal),
+            checkpoint("final", remoteFinal),
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "candidate",
+            event: {
+                id: "path-candidate",
+                startYear: 1577,
+                endYear: 1583,
+            },
+        });
+        expect(decision.event?.evidence.algorithmSources).toContain(
+            "path_transition_candidate_authority",
+        );
+    });
+
+    it("keeps an independently localized final mode over a remote path candidate", () => {
+        const candidate = event(
+            "path-candidate",
+            "missingRing",
+            1577,
+            1583,
+            1580,
+        );
+        candidate.evidence.algorithmSources = [
+            "candidate_ranking",
+            "local_edit_alignment",
+        ];
+        candidate.evidence.notes = ["candidate_hard_gate_passed"];
+        const finalEvent = event(
+            "calibrated-final",
+            "missingRing",
+            1498,
+            1506,
+            1500,
+        );
+        finalEvent.evidence.notes = [
+            "raw_path_top_year=1578",
+            "direct_transition_year=1577",
+        ];
+        finalEvent.evidence.locationEvidence = [{
+            source: "calibrated-test",
+            startYear: 1498,
+            endYear: 1506,
+            topYear: 1500,
+            referenceCount: 8,
+            concentration: 0.8,
+            remoteMargin: 0.2,
+            calibrated: true,
+        }];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", candidate),
+            checkpoint("final", finalEvent),
+        ]);
+
+        expect(decision.event).toMatchObject({
+            id: "calibrated-final",
+            startYear: 1498,
+            endYear: 1506,
+        });
+    });
+
+    it("does not promote a candidate when the path anchors disagree", () => {
+        const candidate = event(
+            "path-candidate",
+            "missingRing",
+            1577,
+            1583,
+            1580,
+        );
+        candidate.evidence.algorithmSources = [
+            "candidate_ranking",
+            "local_edit_alignment",
+        ];
+        candidate.evidence.notes = ["candidate_hard_gate_passed"];
+        const finalEvent = event(
+            "remote-final",
+            "missingRing",
+            1498,
+            1506,
+            1500,
+        );
+        finalEvent.evidence.notes = [
+            "raw_path_top_year=1578",
+            "direct_transition_year=1581",
+        ];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", candidate),
+            checkpoint("final", finalEvent),
+        ]);
+
+        expect(decision.event).toMatchObject({
+            id: "remote-final",
+            startYear: 1498,
+            endYear: 1506,
+        });
+    });
+
     it("keeps the persisted local window when a final-only nearby variant arrives later", () => {
         const persisted = event("persisted", "missingRing", 1899, 1905, 1902);
         const finalOnly = event("final-only", "missingRing", 1902, 1908, 1905);

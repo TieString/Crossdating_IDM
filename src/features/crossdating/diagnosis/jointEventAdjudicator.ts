@@ -53,6 +53,14 @@ const topYear = (event: DiagnosisEvent): number | null => (
     ))[0]?.year ?? null
 );
 
+const noteYear = (event: DiagnosisEvent, prefix: string): number | null => {
+    const note = [...event.evidence.notes]
+        .reverse()
+        .find((value) => value.startsWith(prefix));
+    const year = Number(note?.slice(prefix.length));
+    return Number.isInteger(year) ? year : null;
+};
+
 const sameOperation = (left: DiagnosisEvent, right: DiagnosisEvent): boolean => (
     left.eventType === right.eventType
     && (
@@ -526,6 +534,101 @@ const isProtectedCandidateFrontier = (cluster: HypothesisCluster): boolean => (
     ))
 );
 
+const PATH_ANCHORED_REVIEW_WIDTHS = new Set([5, 7, 9, 13]);
+const MAXIMUM_PATH_ANCHOR_SPREAD = 2;
+const MAXIMUM_CANDIDATE_TOP_ANCHOR_DISTANCE = 4;
+
+const annotatePathAnchoredCandidate = (
+    cluster: HypothesisCluster,
+    finalEvent: DiagnosisEvent,
+    rawPathYear: number,
+    directTransitionYear: number,
+): HypothesisCluster => ({
+    checkpoints: cluster.checkpoints.map((checkpoint) => ({
+        ...checkpoint,
+        event: withEvidenceLedger({
+            ...checkpoint.event,
+            evidence: {
+                ...checkpoint.event.evidence,
+                algorithmSources: Array.from(new Set([
+                    ...checkpoint.event.evidence.algorithmSources,
+                    "path_transition_candidate_authority",
+                ])).sort(),
+                notes: Array.from(new Set([
+                    ...checkpoint.event.evidence.notes,
+                    `path_transition_authority_raw_year=${rawPathYear}`,
+                    `path_transition_authority_direct_year=${directTransitionYear}`,
+                    `path_transition_authority_discarded_window=${
+                        finalEvent.startYear
+                    }-${finalEvent.endYear}`,
+                ])),
+            },
+        }),
+    })),
+});
+
+const selectPathAnchoredCandidate = (
+    clusters: readonly HypothesisCluster[],
+    finalClusters: readonly HypothesisCluster[],
+    config: JointEventAdjudicationConfig,
+): HypothesisCluster | null => {
+    const matches = finalClusters.flatMap((finalCluster) => {
+        const finalEvent = representative(finalCluster).event;
+        if (
+            finalEvent.eventType !== "missingRing"
+            || hasIndependentLocationAuthority(finalCluster)
+        ) return [];
+        const rawPathYear = noteYear(finalEvent, "raw_path_top_year=");
+        const directTransitionYear = noteYear(
+            finalEvent,
+            "direct_transition_year=",
+        );
+        const finalTopYear = topYear(finalEvent);
+        if (
+            rawPathYear === null
+            || directTransitionYear === null
+            || finalTopYear === null
+            || Math.abs(rawPathYear - directTransitionYear)
+                > MAXIMUM_PATH_ANCHOR_SPREAD
+            || Math.abs(
+                finalTopYear - (rawPathYear + directTransitionYear) / 2,
+            ) <= config.remoteModeDistanceYears
+        ) return [];
+
+        const candidates = clusters.filter((cluster) => {
+            if (hasFinalCheckpoint(cluster)) return false;
+            const checkpoint = representative(cluster);
+            const candidate = checkpoint.event;
+            const candidateTopYear = topYear(candidate);
+            const width = eventWidth(candidate);
+            return checkpoint.stage === "candidate"
+                && sameOperation(candidate, finalEvent)
+                && PATH_ANCHORED_REVIEW_WIDTHS.has(width)
+                && candidate.evidence.notes.includes("candidate_hard_gate_passed")
+                && candidate.evidence.algorithmSources.includes("candidate_ranking")
+                && candidate.evidence.algorithmSources.includes("local_edit_alignment")
+                && rawPathYear >= candidate.startYear
+                && rawPathYear <= candidate.endYear
+                && directTransitionYear >= candidate.startYear
+                && directTransitionYear <= candidate.endYear
+                && candidateTopYear !== null
+                && Math.max(
+                    Math.abs(candidateTopYear - rawPathYear),
+                    Math.abs(candidateTopYear - directTransitionYear),
+                ) <= MAXIMUM_CANDIDATE_TOP_ANCHOR_DISTANCE;
+        });
+        return candidates.length === 1
+            ? [annotatePathAnchoredCandidate(
+                    candidates[0]!,
+                    finalEvent,
+                    rawPathYear,
+                    directTransitionYear,
+                )]
+            : [];
+    });
+    return matches.length === 1 ? matches[0] : null;
+};
+
 const finalFrontierClusters = (
     clusters: readonly HypothesisCluster[],
     config: JointEventAdjudicationConfig,
@@ -571,6 +674,12 @@ const finalFrontierClusters = (
         });
         return decisiveLocal.length > 0 ? decisiveLocal : wholeClusters;
     }
+    const pathAnchoredCandidate = selectPathAnchoredCandidate(
+        clusters,
+        localClusters,
+        config,
+    );
+    if (pathAnchoredCandidate) return [pathAnchoredCandidate];
     const protectedCandidate = clusters
         .filter((cluster) => !hasFinalCheckpoint(cluster))
         .filter(isProtectedCandidateFrontier)
