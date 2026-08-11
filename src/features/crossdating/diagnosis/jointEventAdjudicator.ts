@@ -7,6 +7,7 @@ import {
     locationEvidenceFor,
     withEvidenceLedger,
 } from "./evidenceLedger";
+import { attachEndpointWholeMissingInterpretation } from "./endpointWholeMissingInterpretation";
 import type {
     DiagnosisEvidenceClaim,
     DiagnosisEvent,
@@ -348,6 +349,74 @@ const hasFinalCheckpoint = (cluster: HypothesisCluster): boolean => (
     cluster.checkpoints.some(({ stage }) => stage === "final")
 );
 
+const checkpointsWithFinalClaim = (
+    cluster: HypothesisCluster,
+    claims: ReadonlySet<DiagnosisEvidenceClaim>,
+): DiagnosisReviewEventCheckpoint[] => cluster.checkpoints.filter((checkpoint) => (
+    checkpoint.stage === "final"
+    && [...evidenceClaimsFor(checkpoint.event)].some((claim) => claims.has(claim))
+));
+
+const retainFinalClaimAuthority = (
+    cluster: HypothesisCluster,
+    claims: ReadonlySet<DiagnosisEvidenceClaim>,
+): HypothesisCluster | null => {
+    const checkpoints = checkpointsWithFinalClaim(cluster, claims);
+    return checkpoints.length > 0 ? { checkpoints } : null;
+};
+
+const ENDPOINT_REVIEW_WIDTHS = new Set([5, 7, 9, 13]);
+const ENDPOINT_MISSING_CLAIMS = new Set<DiagnosisEvidenceClaim>([
+    "endpoint_unit_resolution",
+    "fixed_side_resolution",
+    "explicit_missing_staircase",
+    "independent_reference_staircase",
+    "whole_baseline_exhausted_by_missing_staircase",
+]);
+
+const endpointMissingAuthority = (event: DiagnosisEvent): number => {
+    const claims = evidenceClaimsFor(event);
+    if (claims.has("whole_baseline_exhausted_by_missing_staircase")) return 5;
+    if (claims.has("endpoint_unit_resolution")) return 4;
+    if (claims.has("fixed_side_resolution")) return 3;
+    if (claims.has("independent_reference_staircase")) return 2;
+    if (claims.has("explicit_missing_staircase")) return 1;
+    const independentlyReviewedUnit = event.evidence.algorithmSources.includes(
+        "sequential_missing_staircase_head",
+    ) || event.evidence.notes.includes("candidate_hard_gate_passed");
+    return independentlyReviewedUnit
+        && event.evidence.lagBefore === -1
+        && event.evidence.lagAfter === 0
+        ? 0
+        : -1;
+};
+
+const selectEndpointMissingInterpretation = (
+    clusters: readonly HypothesisCluster[],
+    whole: DiagnosisEvent,
+): DiagnosisEvent | null => {
+    if (whole.eventType !== "wholeSeriesMove" || whole.shiftYears !== -1) return null;
+    return clusters.flatMap((cluster) => cluster.checkpoints)
+        .filter((checkpoint) => checkpoint.stage === "final")
+        .map(({ event }) => event)
+        .filter((event) => {
+            if (event.eventType !== "missingRing") return false;
+            const width = event.endYear - event.startYear + 1;
+            const endpointDistance = whole.endYear - event.endYear;
+            return ENDPOINT_REVIEW_WIDTHS.has(width)
+                && endpointDistance >= 0
+                && endpointDistance <= 29
+                && endpointMissingAuthority(event) >= 0;
+        })
+        .sort((left, right) => (
+            endpointMissingAuthority(right) - endpointMissingAuthority(left)
+            || confidenceScore(right) - confidenceScore(left)
+            || right.endYear - left.endYear
+            || (topYear(right) ?? Number.NEGATIVE_INFINITY)
+                - (topYear(left) ?? Number.NEGATIVE_INFINITY)
+        ))[0] ?? null;
+};
+
 const isProtectedCandidateFrontier = (cluster: HypothesisCluster): boolean => (
     cluster.checkpoints.some(({ event }) => (
         (event.eventType === "missingRing" || event.eventType === "falseRing")
@@ -377,25 +446,30 @@ const finalFrontierClusters = (
         representative(cluster).event.eventType !== "wholeSeriesMove"
     ));
     if (protectedWholeClusters.length > 0) {
-        const decisiveLocal = localClusters.filter((cluster) => {
-            const local = representative(cluster).event;
-            const claims = evidenceClaimsFor(local);
-            return claims.has("fixed_side_resolution")
-                || claims.has("endpoint_unit_resolution")
-                || claims.has("independent_reference_staircase")
-                || claims.has("whole_baseline_exhausted_by_missing_staircase");
+        const decisiveClaims = new Set<DiagnosisEvidenceClaim>([
+            "fixed_side_resolution",
+            "endpoint_unit_resolution",
+            "independent_reference_staircase",
+            "whole_baseline_exhausted_by_missing_staircase",
+        ]);
+        const decisiveLocal = localClusters.flatMap((cluster) => {
+            const authoritative = retainFinalClaimAuthority(cluster, decisiveClaims);
+            return authoritative ? [authoritative] : [];
         });
         return decisiveLocal.length > 0
             ? decisiveLocal
             : protectedWholeClusters;
     }
     if (wholeClusters.length > 0) {
-        const decisiveLocal = localClusters.filter((cluster) => {
-            const claims = evidenceClaimsFor(representative(cluster).event);
-            return claims.has("fixed_side_resolution")
-                || claims.has("endpoint_unit_resolution")
-                || claims.has("explicit_missing_staircase")
-                || claims.has("independent_reference_staircase");
+        const decisiveClaims = new Set<DiagnosisEvidenceClaim>([
+            "fixed_side_resolution",
+            "endpoint_unit_resolution",
+            "explicit_missing_staircase",
+            "independent_reference_staircase",
+        ]);
+        const decisiveLocal = localClusters.flatMap((cluster) => {
+            const authoritative = retainFinalClaimAuthority(cluster, decisiveClaims);
+            return authoritative ? [authoritative] : [];
         });
         return decisiveLocal.length > 0 ? decisiveLocal : wholeClusters;
     }
@@ -548,7 +622,27 @@ export const adjudicateJointEventHypotheses = (
         && remoteModeMargin < config.minimumRemoteModeMargin
         ? "remote_mode_conflict"
         : "selected";
-    const selectedEvent = reason === "selected" ? winnerEvent : null;
+    const baseSelectedEvent = reason === "selected" ? winnerEvent : null;
+    const endpointMissing = baseSelectedEvent
+        ? selectEndpointMissingInterpretation(clusters, baseSelectedEvent)
+        : null;
+    const selectedEvent = baseSelectedEvent && endpointMissing
+        ? attachEndpointWholeMissingInterpretation(
+            baseSelectedEvent,
+            endpointMissing,
+            {
+                wholeShiftYears: -1,
+                endpointDistanceYears: baseSelectedEvent.endYear - endpointMissing.endYear,
+                missingWindowWidth: (
+                    endpointMissing.endYear - endpointMissing.startYear + 1
+                ) as 5 | 7 | 9 | 13,
+                operationScoreMargin: operationMargin,
+                finalEvidenceClaims: [...evidenceClaimsFor(endpointMissing)]
+                    .filter((claim) => ENDPOINT_MISSING_CLAIMS.has(claim))
+                    .sort(),
+            },
+        )
+        : baseSelectedEvent;
     return {
         seriesId,
         status: selectedEvent ? "selected" : "refused",

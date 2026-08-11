@@ -233,8 +233,10 @@ const cases = targetStates.flatMap((state) => {
             alternativeTopYear:
                 productionAlternative?.rankedYears[0]?.year ?? null,
             missingRingCount:
-                productionEvent?.interpretationAmbiguity?.evidence.missingRingCount
-                ?? null,
+                productionEvent?.interpretationAmbiguity?.kind
+                    === "missingRingsOrPartialMove"
+                    ? productionEvent.interpretationAmbiguity.evidence.missingRingCount
+                    : null,
         },
     }];
 });

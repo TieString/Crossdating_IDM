@@ -458,7 +458,47 @@ describe("joint event adjudicator", () => {
         expect(decision.event?.eventType).toBe("missingRing");
     });
 
-    it("keeps a terminal unit whole when a nearby staircase has no fixed-side resolution", () => {
+    it("keeps the final baseline-exhausting endpoint window inside a persisted unit cluster", () => {
+        const whole = event("terminal-unit", "wholeSeriesMove", 1768, 2002, 0);
+        whole.shiftYears = -1;
+        whole.evidence.notes = [
+            "whole_baseline_source=cofecha_terminal_lag",
+            "cofecha_terminal_segments=2",
+            "cofecha_terminal_consistency=1.000000",
+        ];
+        const persisted = event("persisted-unit", "missingRing", 1995, 2001, 1997);
+        persisted.evidence.notes = ["candidate_hard_gate_passed"];
+        const resolved = event("resolved-endpoint", "missingRing", 1998, 2002, 2002);
+        resolved.confidenceLevel = "high";
+        resolved.evidence.algorithmSources = [
+            "sequential_missing_staircase_head",
+            "sequential_missing_exhausts_whole_baseline",
+        ];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", persisted),
+            checkpoint("detected", persisted),
+            checkpoint("fused", persisted),
+            checkpoint("retained", persisted),
+            checkpoint("displayed", whole),
+            checkpoint("displayed", persisted),
+            checkpoint("final", persisted),
+            checkpoint("final", resolved),
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "final",
+            event: {
+                id: "resolved-endpoint",
+                eventType: "missingRing",
+                startYear: 1998,
+                endYear: 2002,
+            },
+        });
+    });
+
+    it("keeps a terminal unit whole but exposes a reviewed endpoint missing interpretation", () => {
         const whole = event("terminal-unit", "wholeSeriesMove", 1600, 2000, 0);
         whole.shiftYears = -1;
         whole.evidence.notes = [
@@ -476,6 +516,14 @@ describe("joint event adjudicator", () => {
         expect(decision.event).toMatchObject({
             eventType: "wholeSeriesMove",
             shiftYears: -1,
+            interpretationAmbiguity: {
+                kind: "wholeSeriesMoveOrMissingRing",
+                alternative: {
+                    eventType: "missingRing",
+                    startYear: 1994,
+                    endYear: 2000,
+                },
+            },
         });
     });
 
@@ -532,5 +580,6 @@ describe("joint event adjudicator", () => {
             eventType: "wholeSeriesMove",
             shiftYears: -1,
         });
+        expect(decision.event?.interpretationAmbiguity).toBeUndefined();
     });
 });

@@ -339,11 +339,15 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
               ) : null}
               {interpretation ? (
                 <div
-                  title={`完整反事实收益差 ${
-                    interpretation.evidence.normalizedCounterfactualGainDifference.toFixed(2)
-                  }；缺轮/连续缺段参考芯支持 ${
-                    interpretation.evidence.missingReferenceSupport
-                  }/${interpretation.evidence.partialReferenceSupport}`}
+                  title={interpretation.kind === "wholeSeriesMoveOrMissingRing"
+                    ? `树皮端距窗口 ${interpretation.evidence.endpointDistanceYears} 年；整体/缺轮操作分差 ${
+                      interpretation.evidence.operationScoreMargin?.toFixed(2) ?? "-"
+                    }`
+                    : `完整反事实收益差 ${
+                      interpretation.evidence.normalizedCounterfactualGainDifference.toFixed(2)
+                    }；缺轮/连续缺段参考芯支持 ${
+                      interpretation.evidence.missingReferenceSupport
+                    }/${interpretation.evidence.partialReferenceSupport}`}
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -356,16 +360,24 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
                   }}
                 >
                   <span>
-                    {selectedEvent.eventType === "missingRing"
-                      ? `该区域预计包含 ${interpretation.evidence.missingRingCount} 个缺轮事件；当前先复核最靠树皮的一处。`
-                      : `连续缺段 ${Math.abs(interpretation.evidence.cumulativeShiftYears)} 年与 ${interpretation.evidence.missingRingCount} 个缺轮的证据接近。`}
+                    {interpretation.kind === "wholeSeriesMoveOrMissingRing"
+                      ? selectedEvent.eventType === "wholeSeriesMove"
+                        ? "树皮端整体移动与一个缺轮的证据接近；也可能是缺轮，需结合样本确认。"
+                        : "当前按树皮端缺轮窗口复核；内部证据也允许整条序列移动 1 年的解释。"
+                      : selectedEvent.eventType === "missingRing"
+                        ? `该区域预计包含 ${interpretation.evidence.missingRingCount} 个缺轮事件；当前先复核最靠树皮的一处。`
+                        : `连续缺段 ${Math.abs(interpretation.evidence.cumulativeShiftYears)} 年与 ${interpretation.evidence.missingRingCount} 个缺轮的证据接近。`}
                   </span>
                   <button
                     type="button"
                     disabled={event.stale === true}
-                    title={selectedEvent.eventType === "missingRing"
-                      ? "仅在样本存在断裂、腐朽等连续缺段证据时采用算法已验证的局部移动解释"
-                      : "未发现连续缺段证据时，返回算法已验证的逐轮缺轮解释"}
+                    title={interpretation.kind === "wholeSeriesMoveOrMissingRing"
+                      ? selectedEvent.eventType === "wholeSeriesMove"
+                        ? "切换到算法已独立验证的树皮端缺轮窗口，仅改变复核解释"
+                        : "返回算法保留的整条序列移动解释"
+                      : selectedEvent.eventType === "missingRing"
+                        ? "仅在样本存在断裂、腐朽等连续缺段证据时采用算法已验证的局部移动解释"
+                        : "未发现连续缺段证据时，返回算法已验证的逐轮缺轮解释"}
                     onClick={() => {
                       const nextSelection: InterpretationSelection = interpretationSelection
                         === "primary" ? "alternative" : "primary";
@@ -380,9 +392,13 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
                     }}
                     style={event.stale ? disabledButtonStyle : interpretationButtonStyle}
                   >
-                    {selectedEvent.eventType === "missingRing"
-                      ? "按连续缺段处理"
-                      : `按 ${interpretation.evidence.missingRingCount} 个缺轮逐轮复核`}
+                    {interpretation.kind === "wholeSeriesMoveOrMissingRing"
+                      ? selectedEvent.eventType === "wholeSeriesMove"
+                        ? "按可能缺轮复核"
+                        : "返回整体移动解释"
+                      : selectedEvent.eventType === "missingRing"
+                        ? "按连续缺段处理"
+                        : `按 ${interpretation.evidence.missingRingCount} 个缺轮逐轮复核`}
                   </button>
                 </div>
               ) : null}

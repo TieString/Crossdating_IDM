@@ -139,11 +139,25 @@ export type DiagnosisMissingPartialInterpretationEvidence = {
     partialReferenceSupport: number;
 };
 
-export type DiagnosisEventInterpretationAmbiguity = {
-    kind: "missingRingsOrPartialMove";
-    alternative: DiagnosisEvent;
-    evidence: DiagnosisMissingPartialInterpretationEvidence;
+export type DiagnosisWholeMissingInterpretationEvidence = {
+    wholeShiftYears: -1;
+    endpointDistanceYears: number;
+    missingWindowWidth: 5 | 7 | 9 | 13;
+    operationScoreMargin: number | null;
+    finalEvidenceClaims: DiagnosisEvidenceClaim[];
 };
+
+export type DiagnosisEventInterpretationAmbiguity =
+    | {
+        kind: "missingRingsOrPartialMove";
+        alternative: DiagnosisEvent;
+        evidence: DiagnosisMissingPartialInterpretationEvidence;
+    }
+    | {
+        kind: "wholeSeriesMoveOrMissingRing";
+        alternative: DiagnosisEvent;
+        evidence: DiagnosisWholeMissingInterpretationEvidence;
+    };
 
 /**
  * 人工复核事件。用户选定窗口内年份并确认后，事件会转换成受约束的 RWL 编辑；

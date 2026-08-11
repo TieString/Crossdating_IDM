@@ -356,4 +356,59 @@ describe("DiagnosisEventPanel", () => {
     expect(html).not.toContain("可能缺轮");
     expect(html).not.toContain("1900-1906（7 年）");
   });
+
+  it("offers one reviewed missing-ring interpretation for an endpoint whole alias", () => {
+    const missing: DiagnosisEvent = {
+      id: "endpoint-missing",
+      seriesId: "ABC01A",
+      eventType: "missingRing",
+      startYear: 1998,
+      endYear: 2002,
+      rankedYears: [{ year: 2002, rank: 1, score: 1, evidenceTags: [] }],
+      confidenceLevel: "medium",
+      evidence: {
+        algorithmSources: ["sequential_missing_staircase_head"],
+        score: 1,
+        scoreMargin: 0.1,
+        baselineCorrelation: 0.2,
+        correctedCorrelation: 0.5,
+        correlationGain: 0.3,
+        lagBefore: -1,
+        lagAfter: 0,
+        samplePairs: 80,
+        candidateIds: [],
+        notes: [],
+      },
+      alternativeTypes: [],
+    };
+    const whole: DiagnosisEvent = {
+      ...missing,
+      id: "terminal-whole",
+      eventType: "wholeSeriesMove",
+      startYear: 1768,
+      endYear: 2002,
+      rankedYears: [],
+      shiftYears: -1,
+      interpretationAmbiguity: {
+        kind: "wholeSeriesMoveOrMissingRing",
+        alternative: missing,
+        evidence: {
+          wholeShiftYears: -1,
+          endpointDistanceYears: 0,
+          missingWindowWidth: 5,
+          operationScoreMargin: 0.08,
+          finalEvidenceClaims: [],
+        },
+      },
+    };
+
+    const html = renderToStaticMarkup(createElement(DiagnosisEventPanel, {
+      events: [whole],
+    }));
+
+    expect(html).toContain("也可能是缺轮");
+    expect(html).toContain("按可能缺轮复核");
+    expect(html).not.toContain("按连续缺段处理");
+    expect(selectDiagnosisEventInterpretation(whole, "alternative")).toBe(missing);
+  });
 });

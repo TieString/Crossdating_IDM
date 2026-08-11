@@ -33,9 +33,15 @@ if (snapshotMode !== "terminal" && snapshotMode !== "clean") {
     throw new Error("--snapshot must be terminal or clean");
 }
 
+const requestedRound = valueFor("--round");
+const requestedSeries = new Set(
+    (valueFor("--series") ?? "").split(",").map((value) => value.trim()).filter(Boolean),
+);
 const roundDir = snapshotMode === "terminal"
     ? readdirSync(join(runDir, "rounds"), { withFileTypes: true })
         .filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name))
+        .filter((entry) => requestedRound === null
+            || Number(entry.name) === Number(requestedRound))
         .sort((left, right) => Number(right.name) - Number(left.name))[0]
     : null;
 if (snapshotMode === "terminal" && !roundDir) {
@@ -139,8 +145,11 @@ const targetStates = snapshotMode === "terminal"
         .filter((target) => target.reviewEvent === null
             && target.reviewDecision?.reason === "partial_move_evidence_insufficient")
         .map((target) => ({ seriesId: target.seriesId, truthYear: null }));
+const selectedTargetStates = targetStates.filter((state) => (
+    requestedSeries.size === 0 || requestedSeries.has(state.seriesId)
+));
 
-const cases = targetStates.flatMap((state) => {
+const cases = selectedTargetStates.flatMap((state) => {
     const truthYear = state.truthYear;
     const targetReference = createPairwiseBootstrapTargetReferenceConfig(
         siteData,
