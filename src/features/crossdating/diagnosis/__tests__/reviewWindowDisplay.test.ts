@@ -359,6 +359,45 @@ describe("lower review-window display gate", () => {
         });
     });
 
+    it("shows a partial with an independently validated missing-ring interpretation", () => {
+        const partial = reviewablePartial(-2, {
+            algorithmSources: ["full_interval_counterfactual_locator"],
+            notes: [
+                "counterfactual_correction_years=-2",
+                "locator_adjudication=accepted_detached_strong_mode",
+            ],
+        });
+        const alternative = {
+            ...strictEvent(),
+            id: "structured-missing-alternative",
+            startYear: 1898,
+            endYear: 1902,
+        };
+        partial.interpretationAmbiguity = {
+            kind: "missingRingsOrPartialMove",
+            alternative,
+            evidence: {
+                interpretationBasis: "structuredLocatorCumulativeLagAlternative",
+                missingRingCount: 2,
+                cumulativeShiftYears: -2,
+                missingYears: [1896, 1900],
+                partialFirstFixedYear: 1900,
+                normalizedCounterfactualGainDifference: 0,
+                masterMargin: 0,
+                referenceMedianMargin: 0,
+                referenceCount: 55,
+                missingReferenceSupport: 7,
+                partialReferenceSupport: 48,
+            },
+        };
+
+        expect(selectReviewWindowDisplay(audit([]), [partial])).toMatchObject({
+            status: "strict",
+            reason: "strict_event",
+            event: partial,
+        });
+    });
+
     it("shows a recovered sequential missing frontier before a competing whole baseline", () => {
         const unit = strictEvent();
         unit.evidence.algorithmSources = ["sequential_missing_staircase_head"];

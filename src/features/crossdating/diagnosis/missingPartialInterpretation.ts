@@ -4,6 +4,7 @@ import type {
     CompletedPartialStaircaseCompetition,
     MissingStaircaseCompetition,
 } from "./discreteMissingStaircaseCompetition";
+import type { SequentialMissingHead } from "./eventPath";
 import type {
     DiagnosisEvent,
     DiagnosisMissingPartialInterpretationEvidence,
@@ -36,6 +37,14 @@ export type MissingPartialInterpretationGate = {
     missingReviewPassed: boolean;
     partialReviewPassed: boolean;
     hasIndependentWholeSeriesBaseline: boolean;
+};
+
+const eventNoteNumber = (event: DiagnosisEvent, prefix: string): number => {
+    const note = [...event.evidence.notes].reverse().find((value) => (
+        value.startsWith(prefix)
+    ));
+    const value = Number(note?.slice(prefix.length));
+    return Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY;
 };
 
 const normalizeCompetition = (
@@ -198,6 +207,112 @@ export const evaluateCompletedPartialMissingInterpretation = (
     };
 };
 
+/**
+ * Keeps a directly localized unit staircase as a review alternative when a nearby partial move
+ * remains the stronger primary explanation. This never changes the primary operation.
+ */
+export const evaluateExactSequentialMissingInterpretation = (
+    partial: DiagnosisEvent,
+    competition: MissingStaircaseCompetition | null,
+    head: SequentialMissingHead | null,
+    gate: MissingPartialInterpretationGate,
+): DiagnosisMissingPartialInterpretationEvidence | null => {
+    if (!competition
+        || !head
+        || !gate.missingReviewPassed
+        || !gate.partialReviewPassed
+        || gate.hasIndependentWholeSeriesBaseline
+        || partial.eventType !== "partialMove"
+        || partial.shiftSide !== "older") return null;
+
+    const shiftYears = partial.shiftYears ?? 0;
+    const missingRingCount = Math.abs(shiftYears);
+    const missingYears = [...head.unitEventYears].sort((left, right) => left - right);
+    const topYear = partial.rankedYears.slice().sort(
+        (left, right) => left.rank - right.rank,
+    )[0]?.year ?? Math.round((partial.startYear + partial.endYear) / 2);
+    const newestMissingYear = missingYears[missingYears.length - 1];
+    const oldestMissingYear = missingYears[0];
+    if (newestMissingYear === undefined || oldestMissingYear === undefined) return null;
+    const missingRegionWidth = newestMissingYear - oldestMissingYear + 1;
+    const distanceFromPrimaryWindow = head.year < partial.startYear
+        ? partial.startYear - head.year
+        : head.year > partial.endYear ? head.year - partial.endYear : 0;
+    const dominantReferenceRatio = Math.max(
+        competition.referenceSupport,
+        competition.referenceCount - competition.referenceSupport,
+    ) / Math.max(1, competition.referenceCount);
+    const normalizedCounterfactualGainDifference = Math.max(
+        Math.abs(competition.masterMargin)
+            / MISSING_PARTIAL_INTERPRETATION_CALIBRATION.maximumMasterMargin,
+        Math.abs(competition.referenceMedianMargin)
+            / MISSING_PARTIAL_INTERPRETATION_CALIBRATION.maximumReferenceMedianMargin,
+    );
+    const structuredLocatorAlternative = shiftYears === -2
+        && partial.evidence.algorithmSources.includes(
+            "full_interval_counterfactual_locator",
+        )
+        && partial.evidence.notes.includes(
+            "locator_adjudication=accepted_detached_strong_mode",
+        )
+        && eventNoteNumber(partial, "counterfactual_window_concentration=") >= 0.6
+        && eventNoteNumber(partial, "counterfactual_window_remote_margin=") >= 0.2
+        && eventNoteNumber(partial, "counterfactual_pair_reference_count=") >= 8
+        && head.gainOverDirect >= -0.6
+        && head.headRunYears >= 2
+        && head.headRunYears <= 13
+        && head.fixedTailMeanAdvantage >= 0.25
+        && competition.referenceSupport >= 6
+        && competition.referenceCount - competition.referenceSupport
+            >= MISSING_PARTIAL_INTERPRETATION_CALIBRATION.minimumSupportPerExplanation
+        && normalizedCounterfactualGainDifference
+            <= MISSING_PARTIAL_INTERPRETATION_CALIBRATION.maximumNormalizedGainDifference;
+    const directExactAlternative = head.gainOverDirect > 0
+        && head.headRunYears >= 2
+        && head.headMeanAdvantage >= 0.02
+        && head.fixedTailMeanAdvantage >= 0.3
+        && competition.referenceSupport >= 8
+        && competition.referenceCount - competition.referenceSupport
+            >= MISSING_PARTIAL_INTERPRETATION_CALIBRATION.minimumSupportPerExplanation
+        && dominantReferenceRatio <= 0.85
+        && normalizedCounterfactualGainDifference
+            <= MISSING_PARTIAL_INTERPRETATION_CALIBRATION.maximumNormalizedGainDifference;
+
+    if (
+        shiftYears >= -1
+        || competition.cumulativeShiftYears !== shiftYears
+        || head.pathStartLag !== shiftYears
+        || head.transitionCount !== missingRingCount
+        || missingYears.length !== missingRingCount
+        || newestMissingYear !== head.year
+        || missingRegionWidth
+            > MISSING_PARTIAL_INTERPRETATION_CALIBRATION.maximumMissingRegionWidthYears
+        || Math.abs(topYear - (newestMissingYear + 1))
+            > MISSING_PARTIAL_INTERPRETATION_CALIBRATION.maximumBoundaryDistanceYears
+        || distanceFromPrimaryWindow > 2
+        || competition.referenceCount
+            < MISSING_PARTIAL_INTERPRETATION_CALIBRATION.minimumReferenceCount
+        || (!directExactAlternative && !structuredLocatorAlternative)
+    ) return null;
+
+    return {
+        interpretationBasis: structuredLocatorAlternative && !directExactAlternative
+            ? "structuredLocatorCumulativeLagAlternative"
+            : "exactSequentialStaircaseAlternative",
+        missingRingCount,
+        cumulativeShiftYears: shiftYears,
+        missingYears,
+        partialFirstFixedYear: topYear,
+        normalizedCounterfactualGainDifference,
+        masterMargin: competition.masterMargin,
+        referenceMedianMargin: competition.referenceMedianMargin,
+        referenceCount: competition.referenceCount,
+        missingReferenceSupport: competition.referenceSupport,
+        partialReferenceSupport:
+            competition.referenceCount - competition.referenceSupport,
+    };
+};
+
 const supportedWindowWidth = (width: number): 5 | 7 | 9 | 13 => (
     width <= 5 ? 5 : width <= 7 ? 7 : width <= 9 ? 9 : 13
 );
@@ -247,6 +362,10 @@ export const makeMissingRingInterpretation = (
     const interpretationSource = evidence.interpretationBasis
         === "completedPartialMissingComposition"
         ? "completed_partial_missing_interpretation"
+        : evidence.interpretationBasis === "exactSequentialStaircaseAlternative"
+            ? "exact_sequential_missing_interpretation"
+        : evidence.interpretationBasis === "structuredLocatorCumulativeLagAlternative"
+            ? "structured_locator_missing_interpretation"
         : "missing_partial_interpretation_tie";
     const window = boundedWindow(
         selectedYear,

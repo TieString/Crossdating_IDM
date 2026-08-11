@@ -128,7 +128,9 @@ export type DiagnosisEventLocationAlternative = {
  */
 export type DiagnosisMissingPartialInterpretationEvidence = {
     interpretationBasis?: "counterfactualTie"
-        | "completedPartialMissingComposition";
+        | "completedPartialMissingComposition"
+        | "exactSequentialStaircaseAlternative"
+        | "structuredLocatorCumulativeLagAlternative";
     missingRingCount: number;
     cumulativeShiftYears: number;
     /** Exact unit years are present only when the staircase locator resolved them. */

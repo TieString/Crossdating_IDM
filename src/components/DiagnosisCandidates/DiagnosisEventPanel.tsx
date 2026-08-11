@@ -354,6 +354,18 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
                       }/${
                         interpretation.evidence.completedComposition?.orientationReferenceCount ?? "-"
                       }`
+                    : interpretation.evidence.interpretationBasis
+                      === "exactSequentialStaircaseAlternative"
+                      ? `精确单位阶梯支持 ${
+                        interpretation.evidence.missingReferenceSupport
+                      }/${interpretation.evidence.referenceCount}；连续缺段支持 ${
+                        interpretation.evidence.partialReferenceSupport
+                      }/${interpretation.evidence.referenceCount}`
+                    : interpretation.evidence.interpretationBasis
+                      === "structuredLocatorCumulativeLagAlternative"
+                      ? `结构化定位已确认同一区域；累计位移对应 ${
+                        interpretation.evidence.missingRingCount
+                      } 个缺轮，连续缺段与逐轮缺轮收益接近`
                     : `完整反事实收益差 ${
                       interpretation.evidence.normalizedCounterfactualGainDifference.toFixed(2)
                     }；缺轮/连续缺段参考芯支持 ${

@@ -329,6 +329,30 @@ const hasReviewablePartialMoveEvidence = (
         && referenceCoreGain >= config.minimumPartialReferenceCoreGain;
 };
 
+const hasReviewableMissingPartialInterpretation = (
+    event: DiagnosisEvent,
+    config: ReviewWindowDisplayConfig,
+): boolean => {
+    const ambiguity = event.interpretationAmbiguity;
+    if (!ambiguity
+        || ambiguity.kind !== "missingRingsOrPartialMove"
+        || event.eventType !== "partialMove"
+        || ambiguity.alternative.eventType !== "missingRing"
+        || ![
+            "exactSequentialStaircaseAlternative",
+            "structuredLocatorCumulativeLagAlternative",
+        ].includes(ambiguity.evidence.interpretationBasis ?? "")
+        || ambiguity.evidence.cumulativeShiftYears !== event.shiftYears
+        || ambiguity.evidence.missingRingCount !== Math.abs(event.shiftYears ?? 0)) {
+        return false;
+    }
+    const alternativeWidth = ambiguity.alternative.endYear
+        - ambiguity.alternative.startYear + 1;
+    return config.allowedWindowWidths.includes(alternativeWidth)
+        && ambiguity.alternative.evidence.lagBefore === -1
+        && ambiguity.alternative.evidence.lagAfter === 0;
+};
+
 const markReviewOnly = (
     audit: DiagnosisEventDecisionAudit,
     event: DiagnosisEvent,
@@ -390,7 +414,8 @@ const selectAdjudicatedReviewWindowDisplay = (
         && evidenceClaimsFor(event).has("whole_terminal_baseline");
     if (decision.sourceStage === "final" || independentlyStrictWhole) {
         if (event.eventType === "partialMove"
-            && !hasReviewablePartialMoveEvidence(event, config)) {
+            && !hasReviewablePartialMoveEvidence(event, config)
+            && !hasReviewableMissingPartialInterpretation(event, config)) {
             return refused(audit, "partial_move_evidence_insufficient");
         }
         return {

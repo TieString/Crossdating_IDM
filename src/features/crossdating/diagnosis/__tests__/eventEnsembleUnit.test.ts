@@ -22,6 +22,8 @@ import {
     shouldPreferWholeSeriesAlias,
     shouldSuppressSelfWorseningCandidateFalseRing,
     hasDistinctConfirmedSequentialMissingMode,
+    supportsConfirmedSequentialMissingPathAdvance,
+    supportsConsensusAnchoredSequentialMissingStaircase,
     supportsCumulativeSequentialMissingStaircase,
     supportsMarkerAnchoredSequentialMissingStaircase,
     terminalCumulativeMissingExhaustsUnitWhole,
@@ -847,6 +849,71 @@ describe("supportsMarkerAnchoredSequentialMissingStaircase", () => {
             transitionCount: 5,
             headMeanAdvantage: 0.049,
         }, 4)).toBe(false);
+    });
+});
+
+describe("supportsConsensusAnchoredSequentialMissingStaircase", () => {
+    const head = {
+        year: 1778,
+        pathStartLag: -3,
+        transitionCount: 3,
+        unitEventYears: [1776, 1777, 1778],
+        headMeanAdvantage: 0.046,
+        fixedTailMeanAdvantage: 0.299,
+    };
+
+    it("accepts one compact exact path at an overwhelming shared marker", () => {
+        expect(supportsConsensusAnchoredSequentialMissingStaircase(
+            head,
+            34,
+        )).toBe(true);
+    });
+
+    it("rejects weak markers, shallow paths and remote unit modes", () => {
+        expect(supportsConsensusAnchoredSequentialMissingStaircase(head, 9)).toBe(false);
+        expect(supportsConsensusAnchoredSequentialMissingStaircase({
+            ...head,
+            pathStartLag: -2,
+            transitionCount: 2,
+            unitEventYears: [1777, 1778],
+        }, 34)).toBe(false);
+        expect(supportsConsensusAnchoredSequentialMissingStaircase({
+            ...head,
+            unitEventYears: [1565, 1777, 1778],
+        }, 34)).toBe(false);
+    });
+});
+
+describe("supportsConfirmedSequentialMissingPathAdvance", () => {
+    const head = {
+        year: 1778,
+        pathStartLag: -2,
+        transitionCount: 2,
+        unitEventYears: [1777, 1778],
+        headRunYears: 1,
+        gainOverDirect: -0.5,
+        fixedTailMeanAdvantage: 0.3,
+    };
+
+    it("advances one exact local step after the anchored head was confirmed", () => {
+        expect(supportsConfirmedSequentialMissingPathAdvance(
+            head,
+            [1778, 1845],
+            34,
+        )).toBe(true);
+    });
+
+    it("rejects untouched, weakly anchored or unstable paths", () => {
+        expect(supportsConfirmedSequentialMissingPathAdvance(head, [], 34)).toBe(false);
+        expect(supportsConfirmedSequentialMissingPathAdvance(head, [1778], 9)).toBe(false);
+        expect(supportsConfirmedSequentialMissingPathAdvance({
+            ...head,
+            fixedTailMeanAdvantage: 0.27,
+        }, [1778], 34)).toBe(false);
+        expect(supportsConfirmedSequentialMissingPathAdvance({
+            ...head,
+            unitEventYears: [1750, 1778],
+        }, [1778], 34)).toBe(false);
     });
 });
 

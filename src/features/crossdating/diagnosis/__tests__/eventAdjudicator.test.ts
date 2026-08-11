@@ -176,6 +176,65 @@ describe("event hypothesis locator adjudication", () => {
         expect(result.event.startYear).toBe(1805);
     });
 
+    it("lets a concentrated structured locator replace an unstructured remote checkpoint", () => {
+        const checkpoint = event(1609, 1617, [], 1613, false);
+        const proposal = event(1582, 1594, [
+            "counterfactual_coarse_overlap_consensus=0.54",
+        ], 1582, true);
+        proposal.evidence.locationEvidence = [{
+            source: "full_interval_counterfactual_locator",
+            startYear: 1582,
+            endYear: 1594,
+            topYear: 1582,
+            referenceCount: 16,
+            concentration: 0.63,
+            remoteMargin: 1.96,
+            calibrated: false,
+        }];
+        const result = adjudicateLocatorProposal(checkpoint, proposal);
+
+        expect(result.evidence).toMatchObject({
+            structuredCheckpoint: false,
+            structuredProposal: true,
+            pairReferenceCount: 16,
+        });
+        expect(result).toMatchObject({
+            accepted: true,
+            reason: "accepted_detached_strong_mode",
+            detachedEvidenceStrong: true,
+        });
+        expect(result.event).toMatchObject({
+            startYear: 1582,
+            endYear: 1594,
+        });
+    });
+
+    it("accepts a remote unit window when candidate, transition and endpoint posterior agree", () => {
+        const checkpoint = event(1608, 1614, [], 1612, false);
+        const proposal = event(1575, 1581, [
+            "candidate_top_year=1580",
+            "candidate_top_probability=0.633216",
+            "candidate_top_margin=0.811073",
+            "direct_transition_year=1579",
+            "endpoint_residual_posterior_top_year=1580",
+            "endpoint_residual_reference_count=24",
+        ], 1580, false);
+        const result = adjudicateLocatorProposal(checkpoint, proposal);
+
+        expect(result.evidence).toMatchObject({
+            candidateTopYear: 1580,
+            directTransitionYear: 1579,
+            endpointPosteriorTopYear: 1580,
+            endpointReferenceCount: 24,
+        });
+        expect(result).toMatchObject({
+            accepted: true,
+            reason: "accepted_detached_strong_mode",
+            detachedEvidenceStrong: true,
+        });
+        expect(result.event.rankedYears[0]?.year).toBe(1580);
+    });
+
     it("accepts a detached locator mode that wins independent location families", () => {
         const notes = [
             "profile_boundary_year=1858",

@@ -26,6 +26,7 @@ import {
 import {
     attachMissingPartialInterpretation,
     evaluateCompletedPartialMissingInterpretation,
+    evaluateExactSequentialMissingInterpretation,
     evaluateMissingPartialInterpretationTie,
     makeMissingRingInterpretation,
     makePartialMoveInterpretation,
@@ -1235,6 +1236,76 @@ const supportsCompressedMissingStaircase = (
         && (aggregateGainSupport || perReferenceSupport);
 };
 
+/**
+ * An overwhelming same-year marker may recover an exact staircase even when one direct partial
+ * fit wins the aggregate score. Every fitted unit boundary must remain in one local mode.
+ */
+export const supportsConsensusAnchoredSequentialMissingStaircase = (
+    head: Pick<
+        SequentialMissingHead,
+        | "year"
+        | "pathStartLag"
+        | "transitionCount"
+        | "unitEventYears"
+        | "headMeanAdvantage"
+        | "fixedTailMeanAdvantage"
+    >,
+    sharedZeroSupport: number,
+): boolean => {
+    const unitYears = [...head.unitEventYears].sort((left, right) => left - right);
+    const oldestYear = unitYears[0];
+    const newestYear = unitYears[unitYears.length - 1];
+    return sharedZeroSupport >= 10
+        && head.pathStartLag <= -3
+        && Math.abs(head.pathStartLag) === head.transitionCount
+        && unitYears.length === head.transitionCount
+        && oldestYear !== undefined
+        && newestYear === head.year
+        && newestYear - oldestYear <= 12
+        && head.headMeanAdvantage >= 0.04
+        && head.fixedTailMeanAdvantage >= 0.28;
+};
+
+/**
+ * After one missing ring is confirmed, a compact exact path may remain tied with one aggregate
+ * partial fit. Advance only when the confirmed head is externally anchored and the fixed side is
+ * stable; this keeps the rule unavailable on an untouched or weakly referenced series.
+ */
+export const supportsConfirmedSequentialMissingPathAdvance = (
+    head: Pick<
+        SequentialMissingHead,
+        | "year"
+        | "pathStartLag"
+        | "transitionCount"
+        | "unitEventYears"
+        | "headRunYears"
+        | "gainOverDirect"
+        | "fixedTailMeanAdvantage"
+    >,
+    confirmedTargetZeroYears: readonly number[],
+    sharedZeroSupport: number,
+): boolean => {
+    const confirmedYears = new Set(confirmedTargetZeroYears);
+    const isConfirmedBoundary = (year: number): boolean => (
+        confirmedYears.has(year) || confirmedYears.has(year + 1)
+    );
+    const unitYears = [...head.unitEventYears].sort((left, right) => left - right);
+    const hasLocalOlderBoundary = unitYears.some((year) => (
+        year < head.year
+        && head.year - year <= MAX_LOCAL_CONFIRMED_PATH_ADVANCE_YEARS
+    ));
+    return sharedZeroSupport >= 10
+        && head.pathStartLag <= -2
+        && Math.abs(head.pathStartLag) === head.transitionCount
+        && unitYears.length === head.transitionCount
+        && unitYears[unitYears.length - 1] === head.year
+        && head.headRunYears <= 2
+        && head.gainOverDirect >= -0.5
+        && head.fixedTailMeanAdvantage >= 0.28
+        && isConfirmedBoundary(head.year)
+        && hasLocalOlderBoundary;
+};
+
 const isCandidateBackedExactPartial = (event: DiagnosisEvent): boolean => (
     event.eventType === "partialMove"
     && event.evidence.candidateIds.length > 0
@@ -1291,14 +1362,27 @@ const addCompressedMissingStaircaseEvidence = (
     pathCache: LagPathCache,
     hasIndependentWholeSeriesBaseline = false,
 ): DiagnosisEvent => {
+    const compressedShift = event.eventType === "partialMove"
+        && event.shiftSide === "older"
+        && event.shiftYears === -2
+        ? -2
+        : null;
+    const staircaseConfig = compressedShift === null ? eventPathConfig : {
+        ...eventPathConfig,
+        minLag: compressedShift,
+        maxPartialGapYears: 2,
+    };
+    const staircaseCache = compressedShift === null
+        ? pathCache
+        : createLagPathCache();
     const staircase = locateTwoStepMissingStaircase(
         diagnosis,
         siteData,
         event,
-        eventPathConfig,
-        pathCache,
+        staircaseConfig,
+        staircaseCache,
     );
-    if (!supportsCompressedMissingStaircase(staircase)) return event;
+    if (!staircase) return event;
     const competition = comparePartialMoveWithMissingStaircase(
         diagnosis,
         siteData,
@@ -1306,6 +1390,56 @@ const addCompressedMissingStaircaseEvidence = (
         true,
         staircase.newerBoundaryYear,
     );
+    const exactHead = event.eventType === "partialMove"
+        && event.shiftSide === "older"
+        && (event.shiftYears ?? 0) < -1
+        ? locateSequentialMissingHead(
+            diagnosis,
+            siteData,
+            {
+                minLag: event.shiftYears,
+                maxPartialGapYears: Math.abs(event.shiftYears!),
+            },
+            createLagPathCache(),
+            0,
+        )
+        : null;
+    const exactCompetition = exactHead
+        && exactHead.year !== staircase.newerBoundaryYear
+        ? comparePartialMoveWithMissingStaircase(
+            diagnosis,
+            siteData,
+            event,
+            true,
+            exactHead.year,
+        )
+        : competition;
+    const exactEvidence = evaluateExactSequentialMissingInterpretation(
+        event,
+        exactCompetition,
+        exactHead,
+        {
+            missingReviewPassed: true,
+            partialReviewPassed: event.eventType === "partialMove"
+                && event.shiftSide === "older",
+            hasIndependentWholeSeriesBaseline,
+        },
+    );
+    // A compact 1-3 year run is too ambiguous to replace the physical-gap primary operation,
+    // but an independently verified exact unit path may remain available for sample inspection.
+    if (!supportsCompressedMissingStaircase(staircase)) {
+        return exactEvidence
+            ? attachMissingPartialInterpretation(
+                event,
+                makeMissingRingInterpretation(
+                    event,
+                    exactEvidence,
+                    diagnosis.targetRange,
+                ),
+                exactEvidence,
+            )
+            : event;
+    }
     const confirmedNewerMissingCount = Array.from(
         siteData.get(event.seriesId) ?? [],
     ).filter(([year, value]) => (
@@ -1329,15 +1463,16 @@ const addCompressedMissingStaircaseEvidence = (
                 && event.shiftSide === "older",
             hasIndependentWholeSeriesBaseline,
         });
-        return tieEvidence
+        const interpretationEvidence = tieEvidence ?? exactEvidence;
+        return interpretationEvidence
             ? attachMissingPartialInterpretation(
                 event,
                 makeMissingRingInterpretation(
                     event,
-                    tieEvidence,
+                    interpretationEvidence,
                     diagnosis.targetRange,
                 ),
-                tieEvidence,
+                interpretationEvidence,
             )
             : event;
     }
@@ -3401,14 +3536,33 @@ const recoverSequentialMissingHeadEvent = (
             preserveWholeBaseline: false,
         };
     };
-    // A true continuous gap is normally better explained by one direct breakpoint.
-    if (head && head.gainOverDirect > 0) {
-        const marker = selectSharedZeroMarkerForMode(
-            siteData,
-            diagnosis.targetTree,
-            head.year,
-            markerMode,
-        );
+    const headMarker = head ? selectSharedZeroMarkerForMode(
+        siteData,
+        diagnosis.targetTree,
+        head.year,
+        markerMode,
+    ) : null;
+    const hasConsensusAnchoredMissingStaircase = head
+        ? supportsConsensusAnchoredSequentialMissingStaircase(
+            head,
+            headMarker?.support ?? 0,
+        )
+        : false;
+    const hasConfirmedPathAdvance = head
+        ? supportsConfirmedSequentialMissingPathAdvance(
+            head,
+            confirmedTargetZeroYears,
+            headMarker?.support ?? 0,
+        )
+        : false;
+    // A true continuous gap normally wins the direct fit. A dense external zero marker plus one
+    // local exact unit staircase is independent evidence that the aggregate score cannot erase.
+    if (head && (
+        head.gainOverDirect > 0
+        || hasConsensusAnchoredMissingStaircase
+        || hasConfirmedPathAdvance
+    )) {
+        const marker = headMarker;
         const candidateCenters = sequentialMissingCandidateCenters(candidateEvents);
         const presentation = resolveSequentialMissingPresentation(
             head,
@@ -3461,7 +3615,7 @@ const recoverSequentialMissingHeadEvent = (
             supportsMarkerAnchoredSequentialMissingStaircase(
                 head,
                 marker?.support ?? 0,
-            );
+            ) || hasConsensusAnchoredMissingStaircase;
         const hasCandidateBackedExactPartial = detected.some(
             isCandidateBackedExactPartial,
         );
@@ -3529,6 +3683,7 @@ const recoverSequentialMissingHeadEvent = (
         const completedPartialCandidate = completedFamilyCompetition
             && !whole
             && !hasDistinctConfirmedMissingMode
+            && !hasConsensusAnchoredMissingStaircase
             ? recoverCompletedCandidateBackedPartial(
                 completedFamilyCompetition,
                 candidateEvents,
@@ -3562,9 +3717,21 @@ const recoverSequentialMissingHeadEvent = (
         if (replacesNonUnitEvent && !hasIndependentStaircaseSupport) {
             return recoverRobustCompactPartial();
         }
+        const localConfirmedYears = confirmedTargetZeroYears.filter((year) => (
+            year <= head.year
+            && head.year - year <= MAX_LOCAL_CONFIRMED_PATH_ADVANCE_YEARS
+        ));
+        const collapsedAdvanceYear = hasConfirmedPathAdvance
+            && localConfirmedYears.length > 0
+            ? Math.min(...localConfirmedYears) - 2
+            : null;
+        const presentationHead = collapsedAdvanceYear === null ? head : {
+            ...head,
+            year: collapsedAdvanceYear,
+        };
         const baseRecoveredEvent = makeSequentialMissingHeadEvent(
-            head,
-            marker,
+            presentationHead,
+            collapsedAdvanceYear === null ? marker : null,
             detected,
             diagnosis,
             candidates,
@@ -3597,7 +3764,8 @@ const recoverSequentialMissingHeadEvent = (
             },
         } : baseRecoveredEvent;
         const evidencedRecoveredEvent = hasCumulativeMissingStaircase
-            || hasMarkerAnchoredMissingStaircase ? {
+            || hasMarkerAnchoredMissingStaircase
+            || hasConfirmedPathAdvance ? {
                 ...recoveredEvent,
                 evidence: {
                     ...recoveredEvent.evidence,
@@ -3609,7 +3777,20 @@ const recoverSequentialMissingHeadEvent = (
                         ...(hasMarkerAnchoredMissingStaircase
                             ? ["marker_anchored_sequential_missing_staircase"]
                             : []),
+                        ...(hasConsensusAnchoredMissingStaircase
+                            ? ["consensus_anchored_sequential_missing_staircase"]
+                            : []),
+                        ...(hasConfirmedPathAdvance
+                            ? ["confirmed_sequential_missing_path_advance"]
+                            : []),
                     ])).sort(),
+                    notes: [
+                        ...recoveredEvent.evidence.notes,
+                        ...(collapsedAdvanceYear === null ? [] : [
+                            `confirmed_path_advance_from=${head.year}`,
+                            `confirmed_path_advance_to=${collapsedAdvanceYear}`,
+                        ]),
+                    ],
                 },
             } : recoveredEvent;
         const preferredMissingEvent = hasDistinctConfirmedMissingMode ? {

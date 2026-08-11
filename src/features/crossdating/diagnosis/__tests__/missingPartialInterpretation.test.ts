@@ -7,6 +7,7 @@ import type {
 import {
     attachMissingPartialInterpretation,
     evaluateCompletedPartialMissingInterpretation,
+    evaluateExactSequentialMissingInterpretation,
     evaluateMissingPartialInterpretationTie,
     makeMissingRingInterpretation,
     makePartialMoveInterpretation,
@@ -286,6 +287,138 @@ describe("missing/partial interpretation tie", () => {
                 compositionReviewPassed: true,
                 hasIndependentWholeSeriesBaseline,
             },
+        )).toBeNull();
+    });
+
+    it("keeps an exact nearby unit staircase as the secondary interpretation", () => {
+        const partial = partialEvent();
+        const evidence = evaluateExactSequentialMissingInterpretation(
+            partial,
+            smallCompetition({
+                directFirstFixedYear: 1905,
+                referenceSupport: 12,
+                referenceCount: 53,
+                referenceSupportRatio: 12 / 53,
+                masterMargin: -0.046,
+                referenceMedianMargin: -0.016,
+            }),
+            {
+                year: 1909,
+                score: 1,
+                directScore: 0.8,
+                gainOverDirect: 0.2,
+                transitionCount: 2,
+                headRunYears: 3,
+                headMeanAdvantage: 0.031,
+                fixedTailMeanAdvantage: 0.38,
+                pathStartLag: -2,
+                unitEventYears: [1906, 1909],
+            },
+            gate,
+        );
+
+        expect(evidence).toMatchObject({
+            interpretationBasis: "exactSequentialStaircaseAlternative",
+            missingRingCount: 2,
+            cumulativeShiftYears: -2,
+            missingYears: [1906, 1909],
+            missingReferenceSupport: 12,
+            partialReferenceSupport: 41,
+        });
+        expect(makeMissingRingInterpretation(
+            partial,
+            evidence!,
+            partial.seriesRange!,
+        ).rankedYears[0]?.year).toBe(1909);
+    });
+
+    it("keeps a tied cumulative -2 path behind a strong structured locator", () => {
+        const partial = partialEvent();
+        partial.startYear = 1582;
+        partial.endYear = 1594;
+        partial.seriesRange = { startYear: 1442, endYear: 1995 };
+        partial.rankedYears = [{
+            year: 1582,
+            rank: 1,
+            score: 1,
+            evidenceTags: ["full_interval_counterfactual_locator"],
+        }];
+        partial.evidence.algorithmSources = ["full_interval_counterfactual_locator"];
+        partial.evidence.notes = [
+            "locator_adjudication=accepted_detached_strong_mode",
+            "counterfactual_window_concentration=0.630811",
+            "counterfactual_window_remote_margin=1.964287",
+            "counterfactual_pair_reference_count=16",
+        ];
+        const evidence = evaluateExactSequentialMissingInterpretation(
+            partial,
+            smallCompetition({
+                directFirstFixedYear: 1584,
+                missingYears: [1583, 1582],
+                missingSpanYears: 1,
+                masterMargin: 0,
+                referenceMedianMargin: 0,
+                referenceSupport: 7,
+                referenceCount: 55,
+                referenceSupportRatio: 7 / 55,
+            }),
+            {
+                year: 1581,
+                score: 1,
+                directScore: 1.48,
+                gainOverDirect: -0.48,
+                transitionCount: 2,
+                headRunYears: 12,
+                headMeanAdvantage: 0.001,
+                fixedTailMeanAdvantage: 0.287,
+                pathStartLag: -2,
+                unitEventYears: [1569, 1581],
+            },
+            gate,
+        );
+
+        expect(evidence).toMatchObject({
+            interpretationBasis: "structuredLocatorCumulativeLagAlternative",
+            missingRingCount: 2,
+            cumulativeShiftYears: -2,
+            missingYears: [1569, 1581],
+        });
+        expect(makeMissingRingInterpretation(
+            partial,
+            evidence!,
+            partial.seriesRange!,
+        )).toMatchObject({
+            eventType: "missingRing",
+            startYear: 1575,
+            endYear: 1587,
+        });
+    });
+
+    it("rejects a weak or remotely located staircase alternative", () => {
+        const partial = partialEvent();
+        const competition = smallCompetition({
+            referenceSupport: 7,
+            referenceCount: 53,
+            referenceSupportRatio: 7 / 53,
+        });
+        const head = {
+            year: 1912,
+            score: 1,
+            directScore: 0.8,
+            gainOverDirect: 0.2,
+            transitionCount: 2,
+            headRunYears: 3,
+            headMeanAdvantage: 0.031,
+            fixedTailMeanAdvantage: 0.38,
+            pathStartLag: -2,
+            unitEventYears: [1906, 1912],
+        };
+
+        expect(evaluateExactSequentialMissingInterpretation(
+            partial,
+            competition,
+            head,
+            gate,
         )).toBeNull();
     });
 });

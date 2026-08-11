@@ -23,6 +23,12 @@ export type LocatorAdjudicationEvidence = {
     proposedWidth: number;
     checkpointTopFamilyCount: number;
     proposedTopFamilyCount: number;
+    candidateTopYear: number | null;
+    candidateTopProbability: number;
+    candidateTopMargin: number;
+    directTransitionYear: number | null;
+    endpointPosteriorTopYear: number | null;
+    endpointReferenceCount: number;
     precisionRegression: boolean;
 };
 
@@ -258,6 +264,18 @@ const locatorEvidence = (
         proposedWidth,
         checkpointTopFamilyCount,
         proposedTopFamilyCount,
+        candidateTopYear: noteYear(proposal, ["candidate_top_year="]),
+        candidateTopProbability: noteNumber(proposal, "candidate_top_probability="),
+        candidateTopMargin: noteNumber(proposal, "candidate_top_margin="),
+        directTransitionYear: noteYear(proposal, ["direct_transition_year="]),
+        endpointPosteriorTopYear: noteYear(
+            proposal,
+            ["endpoint_residual_posterior_top_year="],
+        ),
+        endpointReferenceCount: noteNumber(
+            proposal,
+            "endpoint_residual_reference_count=",
+        ),
         precisionRegression,
     };
 };
@@ -289,7 +307,28 @@ export const hasStrongDetachedLocatorEvidence = (
             >= config.minimumLocationFamilyAdvantage
         && evidence.operationLocationGain
             >= config.minimumOperationLocationGain;
-    return calibratedLocatorStrength || independentlyLocatedOperation;
+    const replacesUnstructuredCheckpoint = evidence.structuredProposal
+        && !evidence.structuredCheckpoint
+        && evidence.pairReferenceCount >= Math.max(
+            8,
+            config.minimumPairReferenceCount * 2,
+        )
+        && evidence.concentration >= Math.max(0.6, config.minimumConcentration)
+        && evidence.remoteMargin >= Math.max(0.2, config.minimumRemoteMargin);
+    const candidateTransitionConsensus = evidence.proposedTopYear !== null
+        && evidence.candidateTopYear !== null
+        && evidence.directTransitionYear !== null
+        && evidence.endpointPosteriorTopYear !== null
+        && Math.abs(evidence.candidateTopYear - evidence.proposedTopYear) <= 1
+        && Math.abs(evidence.directTransitionYear - evidence.proposedTopYear) <= 1
+        && Math.abs(evidence.endpointPosteriorTopYear - evidence.proposedTopYear) <= 1
+        && evidence.candidateTopProbability >= 0.6
+        && evidence.candidateTopMargin >= 0.5
+        && evidence.endpointReferenceCount >= 8;
+    return calibratedLocatorStrength
+        || independentlyLocatedOperation
+        || replacesUnstructuredCheckpoint
+        || candidateTransitionConsensus;
 };
 
 const annotateDecision = (
