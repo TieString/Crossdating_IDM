@@ -1176,6 +1176,26 @@ describe("resolveSequentialMissingPresentation", () => {
             width: 13,
         });
     });
+
+    it("uses the difficult 13-year window for a deep unanchored staircase", () => {
+        expect(resolveSequentialMissingPresentation(
+            head({
+                year: 1636,
+                transitionCount: 4,
+                headRunYears: 9,
+                headMeanAdvantage: 0.36,
+                fixedTailMeanAdvantage: 0.28,
+                pathStartLag: -4,
+                unitEventYears: [1574, 1583, 1627, 1636],
+            }),
+            null,
+            "local2",
+        )).toMatchObject({
+            selectedYear: 1636,
+            windowCenterYear: 1632,
+            width: 13,
+        });
+    });
 });
 
 describe("partialMoveSupportsSequentialMissingDepth", () => {

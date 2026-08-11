@@ -1717,6 +1717,9 @@ const calibratedSequentialWindowWidth = (
     ([5, 7, 9, 13] as const).find((width) => width >= minimumWidth) ?? 13
 );
 
+// A local advance must leave one year of context on both sides inside the 13-year review window.
+const MAX_LOCAL_CONFIRMED_PATH_ADVANCE_YEARS = 10;
+
 export type SequentialMissingPresentation = {
     marker: SharedExplicitZeroMarker | null;
     selectedYear: number;
@@ -1724,8 +1727,10 @@ export type SequentialMissingPresentation = {
     width: 5 | 7 | 9 | 13;
     candidateConsensusYear: number | null;
     candidateWindowSupportYear: number | null;
+    preferredLocationSupportYear: number | null;
     confirmedTargetStaircaseYear: number | null;
     advancedSequentialPathYear: number | null;
+    rejectedRemoteSequentialPathYear: number | null;
 };
 
 /** Shared zeros can reorder only the local lag head; production windows stay lag-centered. */
@@ -1735,6 +1740,7 @@ export const resolveSequentialMissingPresentation = (
     mode: SharedZeroMarkerMode,
     candidateCenters: readonly number[] = [],
     confirmedTargetZeroYears: readonly number[] = [],
+    preferredLocationCenters: readonly number[] = [],
 ): SequentialMissingPresentation => {
     const confirmedTargetYears = new Set(confirmedTargetZeroYears);
     const isConfirmedPathBoundary = (year: number): boolean => (
@@ -1742,20 +1748,35 @@ export const resolveSequentialMissingPresentation = (
         || confirmedTargetYears.has(year + 1)
     );
     const currentHeadAlreadyConfirmed = isConfirmedPathBoundary(head.year);
-    const advancedSequentialPathYear = currentHeadAlreadyConfirmed
+    const candidateAdvancedSequentialPathYear = currentHeadAlreadyConfirmed
         ? [...head.unitEventYears].reverse().find((year) => (
             year < head.year && !isConfirmedPathBoundary(year)
         )) ?? null
+        : null;
+    const advancedSequentialPathYear = candidateAdvancedSequentialPathYear !== null
+        && head.year - candidateAdvancedSequentialPathYear
+            <= MAX_LOCAL_CONFIRMED_PATH_ADVANCE_YEARS
+        ? candidateAdvancedSequentialPathYear
+        : null;
+    const rejectedRemoteSequentialPathYear = candidateAdvancedSequentialPathYear !== null
+        && advancedSequentialPathYear === null
+        ? candidateAdvancedSequentialPathYear
         : null;
     const marker = currentHeadAlreadyConfirmed
         || mode === "none"
         || (mode === "local2" && (candidateMarker?.distanceFromHead ?? 0) > 2)
         ? null
         : candidateMarker;
+    const preferredLocationSupportYear = mode === "legacy6"
+        || advancedSequentialPathYear !== null
+        ? null
+        : preferredLocationCenters.find((year) => (
+            Math.abs(year - head.year) <= 13
+        )) ?? null;
     const candidateWindowSupportYear = mode === "legacy6"
         || advancedSequentialPathYear !== null
         ? null
-        : candidateCenters
+        : preferredLocationSupportYear ?? candidateCenters
             .filter((year) => Math.abs(year - head.year) <= 13)
             .sort((left, right) => (
                 Math.abs(left - head.year) - Math.abs(right - head.year)
@@ -1794,10 +1815,17 @@ export const resolveSequentialMissingPresentation = (
         && markerDistanceFromLagCenter >= 2
         ? 9
         : 0;
+    const deepUnanchoredStaircaseWidth = head.transitionCount >= 4
+        && marker === null
+        && candidateWindowSupportYear === null
+        && (!Number.isFinite(head.headMeanAdvantage) || head.headMeanAdvantage < 0.4)
+        ? 13
+        : 0;
     const lagWidth = calibratedSequentialWindowWidth(Math.max(
         baseLagWidth,
         boundedHeadRun ? head.headRunYears : 0,
         deepStaircaseMarkerWidth,
+        deepUnanchoredStaircaseWidth,
     ));
     const width = candidateDistance === null
         ? lagWidth
@@ -1824,8 +1852,10 @@ export const resolveSequentialMissingPresentation = (
             : 13,
         candidateConsensusYear,
         candidateWindowSupportYear,
+        preferredLocationSupportYear,
         confirmedTargetStaircaseYear,
         advancedSequentialPathYear,
+        rejectedRemoteSequentialPathYear,
     };
 };
 
@@ -1853,6 +1883,21 @@ const sequentialMissingCandidateCenters = (
     .filter((event) => event.eventType === "partialMove")
     .map((event) => event.rankedYears[0]?.year)
     .filter((year): year is number => year !== undefined);
+
+const sequentialMissingPreferredLocationCenters = (
+    displayedEvents: readonly DiagnosisEvent[],
+    earlierCheckpoints: readonly DiagnosisEvent[],
+): number[] => Array.from(new Set([
+    ...earlierCheckpoints
+        .filter((event) => event.eventType === "missingRing")
+        .map(rankedEventYear),
+    ...displayedEvents
+        .filter((event) => event.eventType === "missingRing")
+        .map(rankedEventYear),
+    ...displayedEvents
+        .filter((event) => event.eventType === "partialMove")
+        .map(rankedEventYear),
+]));
 
 const MAX_REMOTE_SEQUENTIAL_UNIT_REPLACEMENT_DISTANCE_YEARS = 13;
 
@@ -2063,6 +2108,7 @@ const makeSequentialMissingHeadEvent = (
     diagnosis: SeriesCoreDiagnosis,
     candidates: DiagnosisCandidateOperation[],
     candidateEvents: DiagnosisEvent[],
+    preferredLocationCenters: readonly number[],
     confirmedTargetZeroYears: readonly number[],
     markerMode: SharedZeroMarkerMode,
 ): DiagnosisEvent => {
@@ -2074,14 +2120,17 @@ const makeSequentialMissingHeadEvent = (
         width,
         candidateConsensusYear,
         candidateWindowSupportYear,
+        preferredLocationSupportYear,
         confirmedTargetStaircaseYear,
         advancedSequentialPathYear,
+        rejectedRemoteSequentialPathYear,
     } = resolveSequentialMissingPresentation(
         head,
         candidateMarker,
         markerMode,
         candidateCenters,
         confirmedTargetZeroYears,
+        preferredLocationCenters,
     );
     const window = boundedSequentialWindow(
         windowCenterYear,
@@ -2138,6 +2187,9 @@ const makeSequentialMissingHeadEvent = (
                 ...(advancedSequentialPathYear !== null
                     ? ["confirmed_target_zero_path_advance"]
                     : []),
+                ...(preferredLocationSupportYear !== null
+                    ? ["sequential_missing_checkpoint_location"]
+                    : []),
                 ...(marker ? ["shared_explicit_zero_marker"] : []),
             ].sort(),
             score: head.gainOverDirect,
@@ -2180,12 +2232,21 @@ const makeSequentialMissingHeadEvent = (
                 ...(candidateWindowSupportYear !== null ? [
                     `sequential_missing_candidate_window_support_year=${candidateWindowSupportYear}`,
                 ] : []),
+                ...(preferredLocationSupportYear !== null ? [
+                    `sequential_missing_preferred_location_support_year=${preferredLocationSupportYear}`,
+                ] : []),
                 ...(confirmedTargetStaircaseYear !== null ? [
                     `confirmed_target_staircase_year=${confirmedTargetStaircaseYear}`,
                 ] : []),
                 ...(advancedSequentialPathYear !== null ? [
                     `sequential_missing_confirmed_head_year=${head.year}`,
                     `sequential_missing_advanced_path_year=${advancedSequentialPathYear}`,
+                ] : []),
+                ...(rejectedRemoteSequentialPathYear !== null ? [
+                    `sequential_missing_remote_path_advance_rejected=${rejectedRemoteSequentialPathYear}`,
+                    `sequential_missing_remote_path_advance_distance=${
+                        head.year - rejectedRemoteSequentialPathYear
+                    }`,
                 ] : []),
                 `sequential_missing_unit_event_years=${head.unitEventYears.join(",")}`,
                 `shared_zero_marker_mode=${markerMode}`,
@@ -3145,6 +3206,7 @@ export const hasDistinctConfirmedSequentialMissingMode = (
 
 const recoverSequentialMissingHeadEvent = (
     detected: DiagnosisEvent[],
+    earlierLocationCheckpoints: readonly DiagnosisEvent[],
     diagnosis: SeriesCoreDiagnosis,
     cofechaDiagnosis: SeriesCoreDiagnosis,
     siteData: RwlSiteData,
@@ -3158,6 +3220,10 @@ const recoverSequentialMissingHeadEvent = (
     const confirmedTargetZeroYears = Array.from(
         siteData.get(diagnosis.targetTree) ?? [],
     ).filter(([, value]) => value === 0).map(([year]) => year);
+    const preferredLocationCenters = sequentialMissingPreferredLocationCenters(
+        detected,
+        earlierLocationCheckpoints,
+    );
     const allowedByCofecha = isCofechaFlaggedSeries(
         diagnosis.targetTree,
         options.cofechaFlaggedSeriesIds,
@@ -3285,6 +3351,7 @@ const recoverSequentialMissingHeadEvent = (
                 diagnosis,
                 candidates,
                 [],
+                preferredLocationCenters,
                 confirmedTargetZeroYears,
                 markerMode,
             ),
@@ -3320,6 +3387,7 @@ const recoverSequentialMissingHeadEvent = (
             markerMode,
             candidateCenters,
             confirmedTargetZeroYears,
+            preferredLocationCenters,
         );
         const preserveCandidateBackedUnit =
             shouldPreserveCandidateBackedUnitFromRemoteSequentialHead(
@@ -3472,6 +3540,7 @@ const recoverSequentialMissingHeadEvent = (
             diagnosis,
             candidates,
             candidateEvents,
+            preferredLocationCenters,
             confirmedTargetZeroYears,
             markerMode,
         );
@@ -3656,6 +3725,7 @@ const recoverSequentialMissingHeadEvent = (
             diagnosis,
             candidates,
             [],
+            preferredLocationCenters,
             confirmedTargetZeroYears,
             markerMode,
         ), competition!, staircase!),
@@ -5544,6 +5614,7 @@ export const makeDiagnosisEvents = (
         const sequentialMissing = mayRecoverSequentialMissing
             ? recoverSequentialMissingHeadEvent(
                 displayed,
+                detectedBeforeFusion,
                 diagnosis,
                 cofechaDiagnosis,
                 siteData,

@@ -161,6 +161,88 @@ describe("shared explicit zero locality", () => {
         });
     });
 
+    it("does not skip an unresolved consecutive head for a remote prior path transition", () => {
+        expect(resolveSequentialMissingPresentation(
+            {
+                ...head,
+                year: 1899,
+                transitionCount: 20,
+                headRunYears: 11,
+                headMeanAdvantage: 0.2,
+                fixedTailMeanAdvantage: 0.4,
+                pathStartLag: -20,
+                unitEventYears: [1888, 1899],
+            },
+            null,
+            "local2",
+            [],
+            [1900],
+        )).toMatchObject({
+            selectedYear: 1899,
+            windowCenterYear: 1894,
+            width: 13,
+            advancedSequentialPathYear: null,
+            rejectedRemoteSequentialPathYear: 1888,
+        });
+    });
+
+    it("uses an earlier validated location checkpoint before a raw candidate mode", () => {
+        expect(resolveSequentialMissingPresentation(
+            {
+                ...head,
+                year: 1738,
+                transitionCount: 8,
+                headRunYears: 4,
+                headMeanAdvantage: 0.03,
+                fixedTailMeanAdvantage: 0.4,
+                pathStartLag: -8,
+                unitEventYears: [1727, 1734, 1738],
+            },
+            null,
+            "local2",
+            [1750],
+            [],
+            [1725],
+        )).toMatchObject({
+            selectedYear: 1732,
+            windowCenterYear: 1732,
+            width: 13,
+            candidateWindowSupportYear: 1725,
+            preferredLocationSupportYear: 1725,
+        });
+    });
+
+    it("widens around a strong marker when a prior missing checkpoint supports its older side", () => {
+        expect(resolveSequentialMissingPresentation(
+            {
+                ...head,
+                year: 1903,
+                transitionCount: 4,
+                headRunYears: 22,
+                headMeanAdvantage: 0.26,
+                fixedTailMeanAdvantage: 0.37,
+                pathStartLag: -4,
+                unitEventYears: [1881, 1903],
+            },
+            {
+                year: 1902,
+                support: 22,
+                distanceFromHead: 1,
+                weightedSupport: 11,
+            },
+            "local2",
+            [1875],
+            [],
+            [1901],
+        )).toMatchObject({
+            selectedYear: 1902,
+            windowCenterYear: 1903,
+            width: 9,
+            candidateWindowSupportYear: 1901,
+            preferredLocationSupportYear: 1901,
+        });
+    });
+
     it("widens a deep staircase when its marker sits near a seven-year edge", () => {
         expect(resolveSequentialMissingPresentation(
             {
