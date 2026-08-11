@@ -38,6 +38,8 @@
     "benchmark:itrdb:prepare": "node scripts/run-prepare-itrdb-validation-manifest.mjs",
     "benchmark:itrdb:formal": "node scripts/run-itrdb-formal-holdout.mjs",
     "benchmark:itrdb:complex": "node scripts/run-itrdb-complex-events.mjs",
+    "benchmark:itrdb:capability:prepare": "node scripts/run-prepare-itrdb-operation-capability.mjs",
+    "benchmark:itrdb:capability": "node scripts/run-itrdb-operation-capability.mjs",
     "prepare:legacy-generalization": "node scripts/run-prepare-legacy-generalization-manifest.mjs",
     "validate:legacy-generalization": "node scripts/run-legacy-generalization.mjs",
     "typecheck:legacy-generalization": "tsc -p tsconfig.legacy-generalization.json",
