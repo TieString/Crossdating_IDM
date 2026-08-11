@@ -512,6 +512,89 @@ describe("lower review-window display gate", () => {
         });
     });
 
+    it("shows an exact high-gain partial supported by four independent views", () => {
+        const partial = reviewablePartial(-6, {
+            score: 12.39,
+            scoreMargin: 2.68,
+            correlationGain: 0.396,
+            algorithmSources: [
+                "negative_partial_multiview_consensus",
+                "piecewise_lag_path",
+            ],
+            notes: [
+                "counterfactual_correction_years=-6",
+                "partial_consensus_year=1900",
+                "partial_consensus_support=4",
+            ],
+        });
+
+        expect(selectReviewWindowDisplay(audit([]), [partial])).toMatchObject({
+            status: "strict",
+            event: partial,
+        });
+    });
+
+    it("keeps weak four-view partials hidden", () => {
+        const partial = reviewablePartial(-6, {
+            scoreMargin: 0.01,
+            correlationGain: 0.04,
+            algorithmSources: [
+                "negative_partial_multiview_consensus",
+                "piecewise_lag_path",
+            ],
+            notes: [
+                "counterfactual_correction_years=-6",
+                "partial_consensus_year=1900",
+                "partial_consensus_support=4",
+            ],
+        });
+
+        expect(selectReviewWindowDisplay(audit([]), [partial])).toMatchObject({
+            status: "refused",
+            reason: "partial_move_evidence_insufficient",
+        });
+    });
+
+    it("shows a uniquely decomposed cumulative partial component", () => {
+        const partial = reviewablePartial(-6, {
+            correlationGain: 0.1,
+            algorithmSources: ["cumulative_partial_component_decomposition"],
+            notes: [
+                "counterfactual_correction_years=-6",
+                "cumulative_partial_aggregate_shift=-26",
+                "cumulative_partial_component_shift=-6",
+                "cumulative_partial_companion_shift=-20",
+                "cumulative_partial_component_year=1900",
+                "cumulative_partial_component_difference_gain=0.06",
+            ],
+        });
+
+        expect(selectReviewWindowDisplay(audit([]), [partial])).toMatchObject({
+            status: "strict",
+            event: partial,
+        });
+    });
+
+    it("shows the newest exact component from a two-step cumulative lag path", () => {
+        const partial = reviewablePartial(-6, {
+            algorithmSources: ["cumulative_lag_path_frontier", "piecewise_lag_path"],
+            notes: [
+                "counterfactual_correction_years=-6",
+                "cumulative_path_aggregate_shift=-26",
+                "cumulative_path_component_shift=-6",
+                "cumulative_path_companion_shift=-20",
+                "cumulative_path_component_year=1900",
+                "cumulative_path_component_score=8.200000",
+                "cumulative_path_transition_count=2",
+            ],
+        });
+
+        expect(selectReviewWindowDisplay(audit([]), [partial])).toMatchObject({
+            status: "strict",
+            event: partial,
+        });
+    });
+
     it("refuses a candidate-grid partial with diffuse reference breakpoints", () => {
         const partial = reviewablePartial(-10, {
             candidateIds: ["partial-candidate"],

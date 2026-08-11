@@ -16,7 +16,9 @@ import {
     pruneLocalEventsDisconnectedFromWholeBaseline,
     projectSequentialUnitChainHead,
     recoverCandidateBackedPartialConsensus,
+    selectCumulativeLagPathFrontier,
     resolveSequentialMissingPresentation,
+    selectCumulativePartialFrontier,
     selectCompletedPartialFalseSeed,
     selectCompletedPartialMissingSeed,
     shouldReplaceUnanchoredPartialWithReferencePulse,
@@ -39,6 +41,7 @@ import {
     unitEventExplainsWholeSeriesCandidate,
     wholeSeriesEventIsLocalUnitAlias,
 } from "../eventEnsemble";
+import type { JointCounterfactualOperationScore } from "../jointCounterfactualOperation";
 
 const falseRingEvent = (
     startYear: number,
@@ -1114,6 +1117,144 @@ describe("isAuthoritativeWholeSeriesCheckpoint", () => {
                     : note
         ));
         expect(isAuthoritativeWholeSeriesCheckpoint(alias)).toBe(false);
+    });
+});
+
+describe("selectCumulativePartialFrontier", () => {
+    const candidate = (
+        id: string,
+        shiftYears: number,
+        lagBefore: number,
+        lagAfter: number,
+        year: number,
+    ): DiagnosisEvent => ({
+        ...falseRingEvent(year, true),
+        id,
+        eventType: "partialMove",
+        shiftYears,
+        shiftSide: "older",
+        rankedYears: [{ year, score: 1, rank: 1, evidenceTags: [] }],
+        evidence: {
+            ...falseRingEvent(year, true).evidence,
+            lagBefore,
+            lagAfter,
+            notes: ["candidate_hard_gate_passed"],
+        },
+    });
+    const operation = (
+        shiftYears: number,
+        bestYear: number,
+    ): JointCounterfactualOperationScore => ({
+        eventType: "partialMove",
+        shiftYears,
+        bestYear,
+        bestRawGain: 0.05,
+        bestDifferenceGain: 0.06,
+        bestCombinedGain: 0.0575,
+        topThreeDifferenceGain: 0.05,
+        remoteDifferenceMargin: 0.03,
+        sideStepBestYear: bestYear,
+        bestSideStepScore: 0.1,
+        topThreeSideStepScore: 0.09,
+        bestSideMinimumAdvantage: 0.05,
+        bestCorrectedSideSupport: 0.1,
+        sideStepRemoteMargin: 0.03,
+        baselineLag: 0,
+        rows: [],
+    });
+    const pathEvent = (
+        shiftYears: number,
+        lagBefore: number,
+        lagAfter: number,
+        year: number,
+        score = 8,
+    ): DiagnosisEvent => {
+        const event = candidate(`path-${year}`, shiftYears, lagBefore, lagAfter, year);
+        return {
+            ...event,
+            evidence: {
+                ...event.evidence,
+                algorithmSources: ["piecewise_lag_path"],
+                score,
+                notes: [`lag transition ${lagBefore} -> ${lagAfter}`],
+            },
+        };
+    };
+
+    it("returns the newer component of two independently separated partial steps", () => {
+        const aggregate = candidate("aggregate", -26, -26, 0, 1772);
+        const selected = selectCumulativePartialFrontier(
+            aggregate,
+            [
+                candidate("newer", -6, -26, -20, 1800),
+                candidate("older", -26, -26, -6, 1740),
+            ],
+            [operation(-6, 1777), operation(-20, 1755)],
+        );
+
+        expect(selected).toMatchObject({ shiftYears: -6 });
+        expect(selected?.operation.bestYear).toBe(1777);
+    });
+
+    it("does not split two operation modes that are not spatially distinct", () => {
+        const aggregate = candidate("aggregate", -26, -26, 0, 1772);
+        expect(selectCumulativePartialFrontier(
+            aggregate,
+            [
+                candidate("newer", -6, -26, -20, 1777),
+                candidate("older", -26, -26, -6, 1770),
+            ],
+            [operation(-6, 1777), operation(-20, 1770)],
+        )).toBeNull();
+    });
+
+    it("selects the newest operation from an exact two-step raw lag chain", () => {
+        const aggregate = candidate("aggregate", -26, -26, 0, 1772);
+        const selected = selectCumulativeLagPathFrontier(aggregate, [
+            pathEvent(-6, -6, 0, 1818),
+            pathEvent(-20, -26, -6, 1786),
+        ]);
+
+        expect(selected).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -6,
+        });
+        expect(selected?.rankedYears[0]?.year).toBe(1818);
+    });
+
+    it("selects a newer false ring instead of the aggregate negative partial shift", () => {
+        const aggregate = candidate("aggregate", -19, -19, 0, 1772);
+        const newerFalse = falseRingEvent(1771, true);
+        const selected = selectCumulativeLagPathFrontier(aggregate, [
+            pathEvent(-20, -19, 1, 1739),
+            {
+                ...newerFalse,
+                rankedYears: [{
+                    year: 1771,
+                    score: 6.17,
+                    rank: 1,
+                    evidenceTags: ["piecewise_lag_path"],
+                }],
+                evidence: {
+                    ...newerFalse.evidence,
+                    algorithmSources: ["piecewise_lag_path"],
+                    score: 6.17,
+                    lagBefore: 1,
+                    lagAfter: 0,
+                },
+            },
+        ]);
+
+        expect(selected).toMatchObject({ eventType: "falseRing" });
+        expect(selected?.rankedYears[0]?.year).toBe(1771);
+    });
+
+    it("rejects a raw lag path that does not exactly explain the aggregate", () => {
+        const aggregate = candidate("aggregate", -26, -26, 0, 1772);
+        expect(selectCumulativeLagPathFrontier(aggregate, [
+            pathEvent(-3, -26, -23, 1786),
+            pathEvent(-20, -23, -3, 1818),
+        ])).toBeNull();
     });
 });
 

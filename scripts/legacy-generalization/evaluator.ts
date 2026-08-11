@@ -14,6 +14,8 @@ import {
 } from "@/features/cofecha/formatter";
 import { diagnoseCrossdating } from "@/features/crossdating/diagnosis/engine";
 import { getConfig } from "@/features/crossdating/diagnosis/config";
+import { INTERNAL_EVENT_PATH_CONFIG } from "@/features/crossdating/diagnosis/eventEnsemble";
+import { diagnoseLagPath } from "@/features/crossdating/diagnosis/eventPath";
 import { getJointCounterfactualOperationScores } from "@/features/crossdating/diagnosis/jointCounterfactualOperation";
 import { DEFAULT_MAX_PARTIAL_GAP_YEARS } from "@/features/crossdating/diagnosis/partialMoveSemantics";
 import {
@@ -295,6 +297,28 @@ export const diagnoseTruthBlind = (input: {
                     DEFAULT_MAX_PARTIAL_GAP_YEARS,
                     productionBaselineLag,
                 );
+                const cofechaCore = diagnoseSeriesCore(
+                    input.siteData,
+                    input.targetId,
+                    getConfig({ referenceConfig }),
+                    (series) => new Map(cofechaStyleStandardize(series).map((point) => (
+                        [point.year, point.value]
+                    ))),
+                );
+                const pathConfig = {
+                    ...INTERNAL_EVENT_PATH_CONFIG,
+                    maxPartialGapYears: DEFAULT_MAX_PARTIAL_GAP_YEARS,
+                };
+                const pathAudit = (events: readonly DiagnosisEvent[]) => events.map((event) => ({
+                    eventType: event.eventType,
+                    shiftYears: effectiveShift(event),
+                    startYear: event.startYear,
+                    endYear: event.endYear,
+                    topYear: event.rankedYears[0]?.year ?? null,
+                    lagBefore: event.evidence.lagBefore,
+                    lagAfter: event.evidence.lagAfter,
+                    score: event.evidence.score,
+                }));
                 const dynamicSelection = selectDynamicJointOperation(operations);
                 const unitSelection = selectDynamicUnitOperation(operations);
                 const perReferenceSelection = dynamicSelection?.operation.eventType
@@ -347,6 +371,18 @@ export const diagnoseTruthBlind = (input: {
                         scoreMargin: unitSelection.scoreMargin,
                     } : null,
                     perReferenceSelection,
+                    rawPathEvents: pathAudit(diagnoseLagPath(core, input.siteData, {
+                        ...pathConfig,
+                        useCofechaStandardization: false,
+                        enablePulseScan: false,
+                    }).events),
+                    cofechaPathEvents: cofechaCore
+                        ? pathAudit(diagnoseLagPath(
+                            cofechaCore,
+                            input.siteData,
+                            pathConfig,
+                        ).events)
+                        : [],
                 };
             })()
             : null;

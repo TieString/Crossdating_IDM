@@ -110,7 +110,10 @@ import { refineEventWithCounterfactualLocator } from "./counterfactualEventLocat
 import { adjudicateLocatorProposal } from "./eventAdjudicator";
 import { withEvidenceLedger } from "./evidenceLedger";
 import { refineEventWithBoundaryConsensus } from "./eventBoundaryConsensus";
-import { getJointCounterfactualOperationScores } from "./jointCounterfactualOperation";
+import {
+    getJointCounterfactualOperationScores,
+    type JointCounterfactualOperationScore,
+} from "./jointCounterfactualOperation";
 import {
     isExactPartialLagTransition,
     isAutomaticPartialShift,
@@ -3348,6 +3351,280 @@ export const isAuthoritativeWholeSeriesCheckpoint = (
         && stateSupport >= 0.5;
 };
 
+type CumulativePartialComponent = {
+    event: DiagnosisEvent;
+    operation: JointCounterfactualOperationScore;
+    shiftYears: number;
+};
+
+const lagPathTransitionShift = (event: DiagnosisEvent): number | null => {
+    const lagBefore = event.evidence.lagBefore;
+    const lagAfter = event.evidence.lagAfter;
+    if (lagBefore === null || lagAfter === null || lagBefore === lagAfter) return null;
+    const shiftYears = lagBefore - lagAfter;
+    if (event.eventType === "missingRing") return shiftYears === -1 ? shiftYears : null;
+    if (event.eventType === "falseRing") return shiftYears === 1 ? shiftYears : null;
+    if (event.eventType !== "partialMove"
+        || event.shiftSide !== "older"
+        || event.shiftYears !== shiftYears) return null;
+    return isAutomaticPartialShift(shiftYears, {
+        maxPartialGapYears: 100,
+        lagMin: -100,
+    }) ? shiftYears : null;
+};
+
+/**
+ * Recovers the newest operation from an exact two-step raw lag chain. The aggregate operation
+ * may score best because it fixes the longest old segment, but it is not the next serial edit.
+ */
+export const selectCumulativeLagPathFrontier = (
+    aggregate: DiagnosisEvent,
+    pathEvents: readonly DiagnosisEvent[],
+    minimumSeparationYears = 14,
+    minimumTransitionScore = 4.5,
+): DiagnosisEvent | null => {
+    if (aggregate.eventType !== "partialMove"
+        || aggregate.shiftYears === undefined
+        || aggregate.shiftYears > -2) return null;
+    const transitions = pathEvents.flatMap((event) => {
+        const shiftYears = lagPathTransitionShift(event);
+        const topYear = event.rankedYears[0]?.year;
+        return shiftYears !== null
+            && topYear !== undefined
+            && event.evidence.algorithmSources.includes("piecewise_lag_path")
+            && event.evidence.score >= minimumTransitionScore
+            ? [{ event, shiftYears, topYear }]
+            : [];
+    }).sort((left, right) => left.topYear - right.topYear);
+    if (transitions.length !== 2) return null;
+    const [older, newer] = transitions;
+    if (newer.topYear - older.topYear < minimumSeparationYears
+        || older.event.evidence.lagBefore !== aggregate.shiftYears
+        || older.event.evidence.lagAfter !== newer.event.evidence.lagBefore
+        || newer.event.evidence.lagAfter !== 0
+        || older.shiftYears + newer.shiftYears !== aggregate.shiftYears) return null;
+    return newer.event;
+};
+
+const partialTransitionShift = (event: DiagnosisEvent): number | null => {
+    if (event.eventType !== "partialMove"
+        || !event.evidence.notes.includes("candidate_hard_gate_passed")
+        || event.evidence.lagBefore === null
+        || event.evidence.lagAfter === null) return null;
+    const transitionShift = event.evidence.lagBefore - event.evidence.lagAfter;
+    return isAutomaticPartialShift(transitionShift, {
+        maxPartialGapYears: 100,
+        lagMin: -100,
+    }) ? transitionShift : null;
+};
+
+/**
+ * Splits a cumulative partial state only when two hard-gated candidate transitions and two
+ * full-interval counterfactual modes independently recover the same decomposition.
+ */
+export const selectCumulativePartialFrontier = (
+    aggregate: DiagnosisEvent,
+    candidateEvents: readonly DiagnosisEvent[],
+    operations: readonly JointCounterfactualOperationScore[],
+    minimumSeparationYears = 14,
+): CumulativePartialComponent | null => {
+    if (aggregate.eventType !== "partialMove"
+        || aggregate.shiftYears === undefined
+        || aggregate.evidence.lagBefore !== aggregate.shiftYears
+        || aggregate.evidence.lagAfter !== 0) return null;
+    const operationByShift = new Map(operations
+        .filter((operation) => operation.eventType === "partialMove")
+        .map((operation) => [operation.shiftYears, operation]));
+    const components = candidateEvents.flatMap<CumulativePartialComponent>((event) => {
+        const shiftYears = partialTransitionShift(event);
+        if (shiftYears === null) return [];
+        const operation = operationByShift.get(shiftYears);
+        return operation ? [{ event, operation, shiftYears }] : [];
+    });
+    const pairs = components.flatMap((left, index) => components.slice(index + 1)
+        .flatMap((right) => {
+            if (left.shiftYears === right.shiftYears
+                || left.shiftYears + right.shiftYears !== aggregate.shiftYears) return [];
+            const leftCandidateYear = left.event.rankedYears[0]?.year;
+            const rightCandidateYear = right.event.rankedYears[0]?.year;
+            if (leftCandidateYear === undefined
+                || rightCandidateYear === undefined
+                || Math.abs(leftCandidateYear - rightCandidateYear)
+                    < minimumSeparationYears
+                || Math.abs(left.operation.bestYear - right.operation.bestYear)
+                    < minimumSeparationYears) return [];
+            const operationEvidencePasses = [left.operation, right.operation].every(
+                (operation) => operation.bestDifferenceGain >= 0.02
+                    && operation.topThreeDifferenceGain >= 0.015
+                    && operation.bestCombinedGain > 0,
+            );
+            return operationEvidencePasses ? [{ left, right }] : [];
+        }));
+    if (pairs.length !== 1) return null;
+    const pair = pairs[0];
+    return pair.left.operation.bestYear >= pair.right.operation.bestYear
+        ? pair.left
+        : pair.right;
+};
+
+const recoverCumulativePartialFrontier = (
+    displayed: readonly DiagnosisEvent[],
+    candidateEvents: readonly DiagnosisEvent[],
+    diagnosis: SeriesCoreDiagnosis,
+    maxPartialGapYears: number,
+): DiagnosisEvent | null => {
+    if (displayed.some((event) => event.eventType === "wholeSeriesMove")) return null;
+    const aggregate = displayed.filter((event) => event.eventType === "partialMove")
+        .sort((left, right) => (
+            Math.abs(right.shiftYears ?? 0) - Math.abs(left.shiftYears ?? 0)
+        ))[0];
+    if (!aggregate) return null;
+    const operations = getJointCounterfactualOperationScores(
+        diagnosis,
+        15,
+        maxPartialGapYears,
+        0,
+    );
+    const selected = selectCumulativePartialFrontier(
+        aggregate,
+        candidateEvents,
+        operations,
+    );
+    if (!selected) return null;
+    const componentPairs = candidateEvents.flatMap((event) => {
+        const shiftYears = partialTransitionShift(event);
+        return shiftYears === null ? [] : [shiftYears];
+    }).filter((shiftYears) => shiftYears !== selected.shiftYears);
+    const companionShift = componentPairs.find((shiftYears) => (
+        shiftYears + selected.shiftYears === aggregate.shiftYears
+    ));
+    if (companionShift === undefined) return null;
+    const width = 9;
+    const startYear = Math.max(
+        diagnosis.targetRange.startYear,
+        Math.min(
+            selected.operation.bestYear - Math.floor(width / 2),
+            diagnosis.targetRange.endYear - width + 1,
+        ),
+    );
+    const endYear = startYear + width - 1;
+    const rowsByYear = new Map(selected.operation.rows.map((row) => [row.year, row]));
+    const rankedYears = Array.from({ length: width }, (_, index) => {
+        const year = startYear + index;
+        const row = rowsByYear.get(year);
+        return {
+            year,
+            score: row?.combinedGain ?? selected.operation.bestCombinedGain - 1,
+            evidenceTags: ["cumulative_partial_component_decomposition"],
+        };
+    }).sort((left, right) => (
+        right.score - left.score
+        || Math.abs(left.year - selected.operation.bestYear)
+            - Math.abs(right.year - selected.operation.bestYear)
+        || left.year - right.year
+    )).map((row, index) => ({ ...row, rank: index + 1 }));
+    return {
+        ...aggregate,
+        id: `${aggregate.id}-cumulative-partial-component-${selected.shiftYears}`,
+        startYear,
+        endYear,
+        reviewCoreRange: { startYear, endYear },
+        rankedYears,
+        confidenceLevel: "medium",
+        shiftYears: selected.shiftYears,
+        shiftSide: "older",
+        alternativeTypes: [],
+        locationAlternatives: undefined,
+        operationAlternatives: undefined,
+        evidence: {
+            ...aggregate.evidence,
+            algorithmSources: Array.from(new Set([
+                ...aggregate.evidence.algorithmSources,
+                "cumulative_partial_component_decomposition",
+                "joint_counterfactual_operation",
+            ])).sort(),
+            score: selected.operation.bestCombinedGain,
+            scoreMargin: selected.operation.remoteDifferenceMargin,
+            correlationGain: Math.max(
+                aggregate.evidence.correlationGain ?? 0,
+                selected.operation.bestCombinedGain,
+            ),
+            lagBefore: selected.shiftYears,
+            lagAfter: 0,
+            candidateIds: Array.from(new Set([
+                ...aggregate.evidence.candidateIds,
+                ...candidateEvents.flatMap((event) => event.evidence.candidateIds),
+            ])),
+            notes: Array.from(new Set([
+                ...aggregate.evidence.notes,
+                `cumulative_partial_aggregate_shift=${aggregate.shiftYears}`,
+                `cumulative_partial_component_shift=${selected.shiftYears}`,
+                `cumulative_partial_companion_shift=${companionShift}`,
+                `cumulative_partial_component_year=${selected.operation.bestYear}`,
+                `cumulative_partial_component_difference_gain=${
+                    selected.operation.bestDifferenceGain.toFixed(6)
+                }`,
+                `cumulative_partial_component_remote_margin=${
+                    selected.operation.remoteDifferenceMargin.toFixed(6)
+                }`,
+                "cumulative_partial_component_count=2",
+                `counterfactual_correction_years=${selected.shiftYears}`,
+            ])),
+        },
+    };
+};
+
+const recoverCumulativeLagPathFrontier = (
+    displayed: readonly DiagnosisEvent[],
+    rawPathEvents: readonly DiagnosisEvent[],
+): DiagnosisEvent | null => {
+    const aggregate = displayed.filter((event) => event.eventType === "partialMove")
+        .sort((left, right) => (
+            Math.abs(right.shiftYears ?? 0) - Math.abs(left.shiftYears ?? 0)
+    ))[0];
+    if (!aggregate) return null;
+    const selected = selectCumulativeLagPathFrontier(aggregate, rawPathEvents);
+    if (!selected) return null;
+    const componentShift = lagPathTransitionShift(selected);
+    if (componentShift === null || aggregate.shiftYears === undefined) return null;
+    const companionShift = aggregate.shiftYears - componentShift;
+    const componentYear = selected.rankedYears[0]?.year;
+    if (componentYear === undefined) return null;
+    return {
+        ...selected,
+        id: `${aggregate.id}-cumulative-lag-path-frontier-${selected.eventType}-${componentShift}`,
+        confidenceLevel: selected.confidenceLevel === "low" ? "medium" : selected.confidenceLevel,
+        alternativeTypes: [],
+        locationAlternatives: undefined,
+        operationAlternatives: undefined,
+        evidence: {
+            ...selected.evidence,
+            algorithmSources: Array.from(new Set([
+                ...selected.evidence.algorithmSources,
+                "cumulative_lag_path_frontier",
+            ])).sort(),
+            correlationGain: Math.max(
+                selected.evidence.correlationGain ?? 0,
+                aggregate.evidence.correlationGain ?? 0,
+            ),
+            candidateIds: Array.from(new Set([
+                ...selected.evidence.candidateIds,
+                ...aggregate.evidence.candidateIds,
+            ])),
+            notes: Array.from(new Set([
+                ...selected.evidence.notes,
+                `cumulative_path_aggregate_shift=${aggregate.shiftYears}`,
+                `cumulative_path_component_shift=${componentShift}`,
+                `cumulative_path_companion_shift=${companionShift}`,
+                `cumulative_path_component_year=${componentYear}`,
+                `cumulative_path_component_score=${selected.evidence.score.toFixed(6)}`,
+                "cumulative_path_transition_count=2",
+                `counterfactual_correction_years=${componentShift}`,
+            ])),
+        },
+    };
+};
+
 /** A compressed +2 range candidate can carry the older step of a two-false-ring staircase. */
 export const hasCompressedSequentialFalseDirection = (
     events: readonly DiagnosisEvent[],
@@ -4405,6 +4682,7 @@ const eventsForSeriesPass = (
     effectiveConfig: EffectiveDiagnosisConfig,
     options: DiagnosisEventEnsembleOptions,
     audit?: DiagnosisEventPassAudit,
+    rawPathEventsOut?: { events: DiagnosisEvent[] },
 ): DiagnosisEvent[] => {
     const pathCache = createLagPathCache();
     const eventPathConfig = {
@@ -4506,6 +4784,7 @@ const eventsForSeriesPass = (
         useCofechaStandardization: false,
         enablePulseScan: false,
     }, pathCache).events;
+    if (rawPathEventsOut) rawPathEventsOut.events = rawPathEvents;
     if (audit) audit.rawLagPathEventCount = rawPathEvents.length;
     // Local event extraction uses the COFECHA-core diagnosis above. The fixed-side baseline must
     // retain the original diagnosis identity, otherwise mixed events can be standardized twice
@@ -5075,6 +5354,7 @@ const eventsForSeries = (
     effectiveConfig: EffectiveDiagnosisConfig,
     options: DiagnosisEventEnsembleOptions,
     audit?: DiagnosisEventPassAudit,
+    rawPathEventsOut?: { events: DiagnosisEvent[] },
 ): DiagnosisEvent[] => {
     const keepStrongestPartialMove = (
         events: DiagnosisEvent[],
@@ -5097,6 +5377,7 @@ const eventsForSeries = (
         enableMixedReferenceSupplement: false,
     };
     const primaryAudit = emptyEventPassAudit();
+    const primaryRawPathEvents = { events: [] as DiagnosisEvent[] };
     const primary = eventsForSeriesPass(
         siteData,
         diagnosis,
@@ -5104,20 +5385,24 @@ const eventsForSeries = (
         effectiveConfig,
         passOptions,
         primaryAudit,
+        primaryRawPathEvents,
     );
     if (options.enableMixedReferenceSupplement !== true || primary.length === 0) {
         const selected = keepStrongestPartialMove(primary);
         primaryAudit.finalEventCount = selected.length;
         if (audit) copyEventPassAudit(audit, primaryAudit, "primary");
+        if (rawPathEventsOut) rawPathEventsOut.events = primaryRawPathEvents.events;
         return selected;
     }
     if (!shouldRunMixedReferencePass(primary)) {
         const selected = keepStrongestPartialMove(primary);
         primaryAudit.finalEventCount = selected.length;
         if (audit) copyEventPassAudit(audit, primaryAudit, "primary");
+        if (rawPathEventsOut) rawPathEventsOut.events = primaryRawPathEvents.events;
         return selected;
     }
     const alternateAudit = emptyEventPassAudit();
+    const alternateRawPathEvents = { events: [] as DiagnosisEvent[] };
     const alternate = eventsForSeriesPass(
         siteData,
         diagnosis,
@@ -5134,6 +5419,7 @@ const eventsForSeries = (
             },
         },
         alternateAudit,
+        alternateRawPathEvents,
     );
     const [primaryScore, alternateScore] = scoreDiagnosisEventSets(
         [primary, alternate],
@@ -5149,6 +5435,7 @@ const eventsForSeries = (
         const selected = keepStrongestPartialMove(primary);
         primaryAudit.finalEventCount = selected.length;
         if (audit) copyEventPassAudit(audit, primaryAudit, "primary");
+        if (rawPathEventsOut) rawPathEventsOut.events = primaryRawPathEvents.events;
         return selected;
     }
     const selected = keepStrongestPartialMove(alternate.map((event) => ({
@@ -5163,6 +5450,7 @@ const eventsForSeries = (
     })));
     alternateAudit.finalEventCount = selected.length;
     if (audit) copyEventPassAudit(audit, alternateAudit, "mixed");
+    if (rawPathEventsOut) rawPathEventsOut.events = alternateRawPathEvents.events;
     return selected;
 };
 
@@ -5608,6 +5896,7 @@ export const makeDiagnosisEvents = (
             [diagnosis],
             ownCandidates,
         );
+        const passRawPathEvents = { events: [] as DiagnosisEvent[] };
         const detectedBeforeFusion = eventsForSeries(
             siteData,
             diagnosis,
@@ -5615,6 +5904,7 @@ export const makeDiagnosisEvents = (
             effectiveConfig,
             options,
             passAudit,
+            passRawPathEvents,
         );
         const fusedDetected = options.enableDecisiveJointOperationFusion === true
             ? applyDecisiveJointOperationFusion(
@@ -5897,6 +6187,24 @@ export const makeDiagnosisEvents = (
             cofechaPreprocess,
         );
         if (!cofechaDiagnosis) return finalize(displayed);
+        const cumulativeLagPathFrontier = recoverCumulativeLagPathFrontier(
+            displayed,
+            passRawPathEvents.events,
+        );
+        if (cumulativeLagPathFrontier?.eventType === "partialMove") {
+            return finalize([cumulativeLagPathFrontier]);
+        }
+        const cumulativePartialFrontier = cumulativeLagPathFrontier === null
+            ? recoverCumulativePartialFrontier(
+                displayed,
+                candidateEvents,
+                diagnosis,
+                effectiveConfig.maxPartialGapYears,
+            )
+            : null;
+        if (cumulativePartialFrontier) {
+            return finalize([cumulativePartialFrontier]);
+        }
         const sequentialMissing = mayRecoverSequentialMissing
             ? recoverSequentialMissingHeadEvent(
                 displayed,
@@ -6004,6 +6312,9 @@ export const makeDiagnosisEvents = (
                     sequentialMissing.event,
                 ),
             );
+        }
+        if (cumulativeLagPathFrontier) {
+            return finalize([cumulativeLagPathFrontier]);
         }
         if (!hasLocalEvent) return finalize(displayed);
         const locatedInputEvents = prioritizeEndpointUnitAgainstWhole(

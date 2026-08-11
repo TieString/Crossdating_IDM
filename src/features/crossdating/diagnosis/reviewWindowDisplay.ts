@@ -119,11 +119,83 @@ const hasReviewablePartialMoveEvidence = (
 
     const multiviewConsensusYear = numericNote(event, "partial_consensus_year");
     const multiviewSupport = numericNote(event, "partial_consensus_support") ?? 0;
+    const strongFourChannelConsensus = multiviewSupport >= 4
+        && event.confidenceLevel === "high"
+        && sources.has("piecewise_lag_path")
+        && (event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY) >= 0.1
+        && event.evidence.scoreMargin >= 0.05;
     if (sources.has("negative_partial_multiview_consensus")
-        && multiviewSupport >= config.minimumPartialMultiviewSupport
+        && (
+            multiviewSupport >= config.minimumPartialMultiviewSupport
+            || strongFourChannelConsensus
+        )
         && yearSupportsWindow(
             event,
             multiviewConsensusYear,
+            config.partialVoteWindowToleranceYears,
+        )) return true;
+
+    const cumulativeComponentShift = numericNote(
+        event,
+        "cumulative_partial_component_shift",
+    );
+    const cumulativeCompanionShift = numericNote(
+        event,
+        "cumulative_partial_companion_shift",
+    );
+    const cumulativeAggregateShift = numericNote(
+        event,
+        "cumulative_partial_aggregate_shift",
+    );
+    const cumulativeComponentYear = numericNote(
+        event,
+        "cumulative_partial_component_year",
+    );
+    const cumulativeDifferenceGain = numericNote(
+        event,
+        "cumulative_partial_component_difference_gain",
+    ) ?? Number.NEGATIVE_INFINITY;
+    if (sources.has("cumulative_partial_component_decomposition")
+        && cumulativeComponentShift === shiftYears
+        && cumulativeCompanionShift !== null
+        && cumulativeAggregateShift === shiftYears + cumulativeCompanionShift
+        && cumulativeDifferenceGain >= 0.02
+        && yearSupportsWindow(
+            event,
+            cumulativeComponentYear,
+            config.partialVoteWindowToleranceYears,
+        )) return true;
+
+    const cumulativePathComponentShift = numericNote(
+        event,
+        "cumulative_path_component_shift",
+    );
+    const cumulativePathCompanionShift = numericNote(
+        event,
+        "cumulative_path_companion_shift",
+    );
+    const cumulativePathAggregateShift = numericNote(
+        event,
+        "cumulative_path_aggregate_shift",
+    );
+    const cumulativePathComponentYear = numericNote(
+        event,
+        "cumulative_path_component_year",
+    );
+    const cumulativePathComponentScore = numericNote(
+        event,
+        "cumulative_path_component_score",
+    ) ?? Number.NEGATIVE_INFINITY;
+    if (sources.has("cumulative_lag_path_frontier")
+        && cumulativePathComponentShift === shiftYears
+        && cumulativePathCompanionShift !== null
+        && cumulativePathAggregateShift
+            === shiftYears + cumulativePathCompanionShift
+        && numericNote(event, "cumulative_path_transition_count") === 2
+        && cumulativePathComponentScore >= 4.5
+        && yearSupportsWindow(
+            event,
+            cumulativePathComponentYear,
             config.partialVoteWindowToleranceYears,
         )) return true;
 
