@@ -246,7 +246,28 @@ describe("joint event adjudicator", () => {
         });
     });
 
-    it("resolves a terminal unit whole alias with a matching newer-end staircase", () => {
+    it("resolves a terminal unit whole alias only after fixed-side evidence exhausts it", () => {
+        const whole = event("terminal-unit", "wholeSeriesMove", 1600, 2000, 0);
+        whole.shiftYears = -1;
+        whole.evidence.notes = [
+            "whole_baseline_source=cofecha_terminal_lag",
+            "cofecha_terminal_segments=3",
+            "cofecha_terminal_consistency=1.000000",
+        ];
+        const endpoint = event("endpoint", "missingRing", 1994, 2000, 1999);
+        endpoint.evidence.algorithmSources = [
+            "sequential_missing_staircase_head",
+            "sequential_missing_exhausts_whole_baseline",
+        ];
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("detected", whole),
+            checkpoint("final", endpoint),
+        ]);
+
+        expect(decision.event?.eventType).toBe("missingRing");
+    });
+
+    it("keeps a terminal unit whole when a nearby staircase has no fixed-side resolution", () => {
         const whole = event("terminal-unit", "wholeSeriesMove", 1600, 2000, 0);
         whole.shiftYears = -1;
         whole.evidence.notes = [
@@ -261,6 +282,9 @@ describe("joint event adjudicator", () => {
             checkpoint("final", endpoint),
         ]);
 
-        expect(decision.event?.eventType).toBe("missingRing");
+        expect(decision.event).toMatchObject({
+            eventType: "wholeSeriesMove",
+            shiftYears: -1,
+        });
     });
 });

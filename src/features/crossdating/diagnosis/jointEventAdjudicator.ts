@@ -256,19 +256,6 @@ const hasFinalCheckpoint = (cluster: HypothesisCluster): boolean => (
     cluster.checkpoints.some(({ stage }) => stage === "final")
 );
 
-const isNewerEndpointUnitAlias = (
-    whole: DiagnosisEvent,
-    local: DiagnosisEvent,
-): boolean => {
-    const year = topYear(local);
-    const operationMatches = whole.shiftYears === -1
-        ? local.eventType === "missingRing"
-        : whole.shiftYears === 1 && local.eventType === "falseRing";
-    return operationMatches
-        && year !== null
-        && year >= whole.endYear - 3;
-};
-
 const finalFrontierClusters = (
     clusters: readonly HypothesisCluster[],
     config: JointEventAdjudicationConfig,
@@ -292,16 +279,7 @@ const finalFrontierClusters = (
             const claims = evidenceClaimsFor(local);
             return claims.has("fixed_side_resolution")
                 || claims.has("independent_reference_staircase")
-                || claims.has("whole_baseline_exhausted_by_missing_staircase")
-                || (
-                    claims.has("explicit_missing_staircase")
-                    && protectedWholeClusters.every((wholeCluster) => (
-                        isNewerEndpointUnitAlias(
-                            representative(wholeCluster).event,
-                            local,
-                        )
-                    ))
-                );
+                || claims.has("whole_baseline_exhausted_by_missing_staircase");
         });
         return decisiveLocal.length > 0
             ? decisiveLocal

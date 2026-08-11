@@ -23,6 +23,7 @@ import {
     hasDistinctConfirmedSequentialMissingMode,
     supportsCumulativeSequentialMissingStaircase,
     supportsMarkerAnchoredSequentialMissingStaircase,
+    terminalCumulativeMissingExhaustsUnitWhole,
     supportsSequentialMissingDirectionOverride,
     supportsSequentialMissingReplacementOfPartial,
     pruneWholeSeriesPartialAliases,
@@ -610,6 +611,33 @@ describe("supportsCumulativeSequentialMissingStaircase", () => {
             gainOverDirect: 2,
             headMeanAdvantage: 0.2,
         })).toBe(false);
+    });
+});
+
+describe("terminalCumulativeMissingExhaustsUnitWhole", () => {
+    const head = {
+        pathStartLag: -18,
+        transitionCount: 18,
+        gainOverDirect: 63,
+        headMeanAdvantage: 0.21,
+        year: 2001,
+    };
+
+    it("resolves the terminal -1 alias of a deep exact cumulative staircase", () => {
+        expect(terminalCumulativeMissingExhaustsUnitWhole(head, -1, 2002)).toBe(true);
+    });
+
+    it("does not use endpoint proximity to rewrite a real whole-series baseline", () => {
+        expect(terminalCumulativeMissingExhaustsUnitWhole({
+            ...head,
+            pathStartLag: -2,
+            transitionCount: 2,
+        }, -1, 2002)).toBe(false);
+        expect(terminalCumulativeMissingExhaustsUnitWhole(head, -5, 2002)).toBe(false);
+        expect(terminalCumulativeMissingExhaustsUnitWhole({
+            ...head,
+            year: 1980,
+        }, -1, 2002)).toBe(false);
     });
 });
 

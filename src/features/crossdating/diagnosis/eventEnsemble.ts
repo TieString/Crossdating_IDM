@@ -2904,6 +2904,27 @@ export const supportsCumulativeSequentialMissingStaircase = (
     && head.headMeanAdvantage >= 0.02;
 
 /**
+ * At the newest boundary, the last unit step of a deep exact missing-ring staircase is
+ * observationally aliased with a whole-series -1 lag. The staircase may exhaust that alias only
+ * when it accounts for every accumulated lag level; endpoint proximity alone is not evidence.
+ */
+export const terminalCumulativeMissingExhaustsUnitWhole = (
+    head: Pick<
+        SequentialMissingHead,
+        | "gainOverDirect"
+        | "headMeanAdvantage"
+        | "pathStartLag"
+        | "transitionCount"
+        | "year"
+    >,
+    wholeShiftYears: number | null,
+    targetEndYear: number,
+): boolean => wholeShiftYears === -1
+    && head.year >= targetEndYear - 1
+    && Math.abs(head.pathStartLag) === head.transitionCount
+    && supportsCumulativeSequentialMissingStaircase(head);
+
+/**
  * A local zero-year marker may anchor either a high-gain deep staircase or an exact
  * unit-depth staircase with a durable corrected tail. The latter recovers late serial
  * frontiers whose individual head contrast is weak after most other events are fixed.
@@ -3239,12 +3260,23 @@ const recoverSequentialMissingHeadEvent = (
             });
         const whole = detected.find((event) => event.eventType === "wholeSeriesMove");
         const wholeShift = wholeSeriesMoveShiftYears(whole);
+        const zeroLagFixedTailResolvesWhole = Number.isFinite(
+            head.fixedTailMeanAdvantage,
+        ) && head.fixedTailMeanAdvantage >= 0.05;
+        const terminalCumulativeStaircaseResolvesWhole =
+            terminalCumulativeMissingExhaustsUnitWhole(
+                head,
+                wholeShift,
+                diagnosis.targetRange.endYear,
+            );
         const independentWholeBaseline = wholeShift !== null
             && wholeShift !== head.pathStartLag
             && detected.some((event) => (
                 event.eventType !== "wholeSeriesMove"
                 && event.evidence.lagAfter === wholeShift
-            ));
+            ))
+            && !zeroLagFixedTailResolvesWhole
+            && !terminalCumulativeStaircaseResolvesWhole;
         const hasIndependentStaircaseSupport = hasExistingUnitEvent
             || hasCumulativeMissingStaircase
             || hasMarkerAnchoredMissingStaircase
