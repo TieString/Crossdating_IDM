@@ -711,6 +711,35 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("applies a protected whole baseline before an exact local path", () => {
+        const whole = event("terminal-whole", "wholeSeriesMove", 1600, 2000, 0);
+        whole.shiftYears = -4;
+        whole.evidence.notes = [
+            "whole_baseline_source=cofecha_terminal_lag",
+            "cofecha_terminal_segments=3",
+            "cofecha_terminal_consistency=1.000000",
+        ];
+        const local = event("exact-local", "partialMove", 1910, 1918, 1914);
+        local.shiftYears = -6;
+        local.evidence.lagBefore = -6;
+        local.evidence.lagAfter = 0;
+        local.evidence.algorithmSources = ["cumulative_lag_path_frontier"];
+        local.evidence.notes = [
+            "cumulative_path_baseline_lag=-4",
+            "cumulative_path_component_shift=-6",
+            "cumulative_path_transition_count=2",
+        ];
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("detected", whole),
+            checkpoint("final", local),
+        ]);
+
+        expect(decision).toMatchObject({
+            sourceStage: "detected",
+            event: { eventType: "wholeSeriesMove", shiftYears: -4 },
+        });
+    });
+
     it("does not resurrect a terminal whole baseline already explained by a missing staircase", () => {
         const whole = event("terminal-whole", "wholeSeriesMove", 1600, 2000, 0);
         whole.shiftYears = -5;

@@ -3377,33 +3377,85 @@ const lagPathTransitionShift = (event: DiagnosisEvent): number | null => {
  * Recovers the newest operation from an exact two-step raw lag chain. The aggregate operation
  * may score best because it fixes the longest old segment, but it is not the next serial edit.
  */
+type ExactLagPathTransition = {
+    event: DiagnosisEvent;
+    shiftYears: number;
+    topYear: number;
+};
+
+const exactLagPathTransitions = (
+    pathEvents: readonly DiagnosisEvent[],
+    minimumTransitionScore: number,
+): ExactLagPathTransition[] => pathEvents.flatMap((event) => {
+    const shiftYears = lagPathTransitionShift(event);
+    const topYear = event.rankedYears[0]?.year;
+    return shiftYears !== null
+        && topYear !== undefined
+        && event.evidence.algorithmSources.includes("piecewise_lag_path")
+        && event.evidence.score >= minimumTransitionScore
+        ? [{ event, shiftYears, topYear }]
+        : [];
+}).sort((left, right) => left.topYear - right.topYear);
+
+const exactTwoStepFrontier = (
+    transitions: readonly ExactLagPathTransition[],
+    aggregateShiftYears: number,
+    baselineLag: number,
+    minimumSeparationYears: number,
+): DiagnosisEvent | null => {
+    if (transitions.length !== 2) return null;
+    const [older, newer] = transitions;
+    if (newer.topYear - older.topYear < minimumSeparationYears
+        || older.event.evidence.lagBefore !== baselineLag + aggregateShiftYears
+        || older.event.evidence.lagAfter !== newer.event.evidence.lagBefore
+        || newer.event.evidence.lagAfter !== baselineLag
+        || older.shiftYears + newer.shiftYears !== aggregateShiftYears) return null;
+    return newer.event;
+};
+
 export const selectCumulativeLagPathFrontier = (
     aggregate: DiagnosisEvent,
     pathEvents: readonly DiagnosisEvent[],
     minimumSeparationYears = 14,
     minimumTransitionScore = 4.5,
+    baselineLag = 0,
 ): DiagnosisEvent | null => {
     if (aggregate.eventType !== "partialMove"
         || aggregate.shiftYears === undefined
         || aggregate.shiftYears > -2) return null;
-    const transitions = pathEvents.flatMap((event) => {
-        const shiftYears = lagPathTransitionShift(event);
-        const topYear = event.rankedYears[0]?.year;
-        return shiftYears !== null
-            && topYear !== undefined
-            && event.evidence.algorithmSources.includes("piecewise_lag_path")
-            && event.evidence.score >= minimumTransitionScore
-            ? [{ event, shiftYears, topYear }]
-            : [];
-    }).sort((left, right) => left.topYear - right.topYear);
+    return exactTwoStepFrontier(
+        exactLagPathTransitions(pathEvents, minimumTransitionScore),
+        aggregate.shiftYears,
+        baselineLag,
+        minimumSeparationYears,
+    );
+};
+
+export const selectWholeBaselineLagPathFrontier = (
+    whole: DiagnosisEvent,
+    pathEvents: readonly DiagnosisEvent[],
+    minimumSeparationYears = 14,
+    minimumTransitionScore = 4.5,
+): { event: DiagnosisEvent; aggregateShiftYears: number } | null => {
+    if (whole.eventType !== "wholeSeriesMove"
+        || whole.shiftYears === undefined
+        || whole.shiftYears === 0) return null;
+    const transitions = exactLagPathTransitions(pathEvents, minimumTransitionScore);
     if (transitions.length !== 2) return null;
-    const [older, newer] = transitions;
-    if (newer.topYear - older.topYear < minimumSeparationYears
-        || older.event.evidence.lagBefore !== aggregate.shiftYears
-        || older.event.evidence.lagAfter !== newer.event.evidence.lagBefore
-        || newer.event.evidence.lagAfter !== 0
-        || older.shiftYears + newer.shiftYears !== aggregate.shiftYears) return null;
-    return newer.event;
+    const oldestLag = transitions[0].event.evidence.lagBefore;
+    if (oldestLag === null) return null;
+    const aggregateShiftYears = oldestLag - whole.shiftYears;
+    if (!isAutomaticPartialShift(aggregateShiftYears, {
+        maxPartialGapYears: 100,
+        lagMin: -100,
+    })) return null;
+    const event = exactTwoStepFrontier(
+        transitions,
+        aggregateShiftYears,
+        whole.shiftYears,
+        minimumSeparationYears,
+    );
+    return event ? { event, aggregateShiftYears } : null;
 };
 
 const partialTransitionShift = (event: DiagnosisEvent): number | null => {
@@ -3578,21 +3630,38 @@ const recoverCumulativeLagPathFrontier = (
     displayed: readonly DiagnosisEvent[],
     rawPathEvents: readonly DiagnosisEvent[],
 ): DiagnosisEvent | null => {
+    const whole = displayed.find((event) => event.eventType === "wholeSeriesMove");
+    const baselineLag = whole?.shiftYears ?? 0;
     const aggregate = displayed.filter((event) => event.eventType === "partialMove")
         .sort((left, right) => (
             Math.abs(right.shiftYears ?? 0) - Math.abs(left.shiftYears ?? 0)
     ))[0];
-    if (!aggregate) return null;
-    const selected = selectCumulativeLagPathFrontier(aggregate, rawPathEvents);
+    const selectedWithShift = aggregate
+        ? {
+            event: selectCumulativeLagPathFrontier(
+                aggregate,
+                rawPathEvents,
+                14,
+                4.5,
+                baselineLag,
+            ),
+            aggregateShiftYears: aggregate.shiftYears,
+        }
+        : whole
+            ? selectWholeBaselineLagPathFrontier(whole, rawPathEvents)
+            : null;
+    const selected = selectedWithShift?.event ?? null;
     if (!selected) return null;
     const componentShift = lagPathTransitionShift(selected);
-    if (componentShift === null || aggregate.shiftYears === undefined) return null;
-    const companionShift = aggregate.shiftYears - componentShift;
+    const aggregateShiftYears = selectedWithShift?.aggregateShiftYears;
+    if (componentShift === null || aggregateShiftYears === undefined) return null;
+    const companionShift = aggregateShiftYears - componentShift;
     const componentYear = selected.rankedYears[0]?.year;
     if (componentYear === undefined) return null;
+    const authority = aggregate ?? whole!;
     return {
         ...selected,
-        id: `${aggregate.id}-cumulative-lag-path-frontier-${selected.eventType}-${componentShift}`,
+        id: `${authority.id}-cumulative-lag-path-frontier-${selected.eventType}-${componentShift}`,
         confidenceLevel: selected.confidenceLevel === "low" ? "medium" : selected.confidenceLevel,
         alternativeTypes: [],
         locationAlternatives: undefined,
@@ -3605,15 +3674,18 @@ const recoverCumulativeLagPathFrontier = (
             ])).sort(),
             correlationGain: Math.max(
                 selected.evidence.correlationGain ?? 0,
-                aggregate.evidence.correlationGain ?? 0,
+                authority.evidence.correlationGain ?? 0,
             ),
+            lagBefore: componentShift,
+            lagAfter: 0,
             candidateIds: Array.from(new Set([
                 ...selected.evidence.candidateIds,
-                ...aggregate.evidence.candidateIds,
+                ...authority.evidence.candidateIds,
             ])),
             notes: Array.from(new Set([
                 ...selected.evidence.notes,
-                `cumulative_path_aggregate_shift=${aggregate.shiftYears}`,
+                `cumulative_path_baseline_lag=${baselineLag}`,
+                `cumulative_path_aggregate_shift=${aggregateShiftYears}`,
                 `cumulative_path_component_shift=${componentShift}`,
                 `cumulative_path_companion_shift=${companionShift}`,
                 `cumulative_path_component_year=${componentYear}`,
@@ -6191,7 +6263,13 @@ export const makeDiagnosisEvents = (
             displayed,
             passRawPathEvents.events,
         );
-        if (cumulativeLagPathFrontier?.eventType === "partialMove") {
+        const cumulativePathHasWholeBaseline = displayed.some(
+            (event) => event.eventType === "wholeSeriesMove",
+        );
+        if (cumulativeLagPathFrontier && (
+            cumulativeLagPathFrontier.eventType === "partialMove"
+            || cumulativePathHasWholeBaseline
+        )) {
             return finalize([cumulativeLagPathFrontier]);
         }
         const cumulativePartialFrontier = cumulativeLagPathFrontier === null

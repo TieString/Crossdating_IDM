@@ -17,6 +17,7 @@ import {
     projectSequentialUnitChainHead,
     recoverCandidateBackedPartialConsensus,
     selectCumulativeLagPathFrontier,
+    selectWholeBaselineLagPathFrontier,
     resolveSequentialMissingPresentation,
     selectCumulativePartialFrontier,
     selectCompletedPartialFalseSeed,
@@ -1255,6 +1256,38 @@ describe("selectCumulativePartialFrontier", () => {
             pathEvent(-3, -26, -23, 1786),
             pathEvent(-20, -23, -3, 1818),
         ])).toBeNull();
+    });
+
+    it("selects the newest local event relative to a non-zero whole-series baseline", () => {
+        const whole = { ...wholeSeriesEvent(4), shiftYears: 4 };
+        const missing = falseRingEvent(1788, true);
+        const selected = selectWholeBaselineLagPathFrontier(whole, [{
+            ...missing,
+            eventType: "missingRing",
+            rankedYears: [{
+                year: 1788,
+                score: 7.48,
+                rank: 1,
+                evidenceTags: ["piecewise_lag_path"],
+            }],
+            evidence: {
+                ...missing.evidence,
+                score: 7.48,
+                lagBefore: -3,
+                lagAfter: -2,
+            },
+        },
+            pathEvent(-6, -2, 4, 1819, 9.84),
+        ]);
+
+        expect(selected).toMatchObject({
+            aggregateShiftYears: -7,
+            event: {
+                eventType: "partialMove",
+                shiftYears: -6,
+            },
+        });
+        expect(selected?.event.rankedYears[0]?.year).toBe(1819);
     });
 });
 
