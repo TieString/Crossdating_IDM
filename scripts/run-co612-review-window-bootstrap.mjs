@@ -15,6 +15,7 @@ const npmValueOptions = [
     ["max-rounds", "--max-rounds"],
     ["workers", "--workers"],
     ["minimum-first-sweep-correct-windows", "--minimum-first-sweep-correct-windows"],
+    ["reference-mode", "--reference-mode"],
 ];
 const npmPositionalValues = [...rawArgs];
 const npmForwardedArgs = npmValueOptions.flatMap(([name, flag]) => {

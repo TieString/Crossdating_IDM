@@ -89,6 +89,8 @@ type ReviewChoiceOutcome = EventOutcome & {
     interpretation: "primary" | "alternative" | null;
 };
 
+type BenchmarkReferenceMode = "adaptive" | "pairwise-only";
+
 type EventObservation = {
     round: number;
     eventId: string;
@@ -168,6 +170,11 @@ const minimumFirstSweepCorrectWindows = minimumFirstSweepCorrectWindowsValue ===
     ? null
     : Number(minimumFirstSweepCorrectWindowsValue);
 const resume = hasFlag("--resume");
+const referenceModeValue = valueFor("--reference-mode") ?? "adaptive";
+if (referenceModeValue !== "adaptive" && referenceModeValue !== "pairwise-only") {
+    throw new Error("--reference-mode must be adaptive or pairwise-only");
+}
+const referenceMode: BenchmarkReferenceMode = referenceModeValue;
 
 if (minimumFirstSweepCorrectWindows !== null
     && (!Number.isInteger(minimumFirstSweepCorrectWindows)
@@ -536,7 +543,8 @@ const runCofechaState = (label: string, siteData: RwlSiteData) => {
         outPath,
         flaggedIds,
         pairwiseClusterIds,
-        usePairwiseBootstrap: siteData.size - new Set(flaggedIds).size < 3,
+        usePairwiseBootstrap: referenceMode === "pairwise-only"
+            || siteData.size - new Set(flaggedIds).size < 3,
         rwlHash: createHash("sha256").update(readFileSync(sitePath)).digest("hex"),
     };
 };
@@ -579,9 +587,16 @@ if (resume && existsSync(checkpointPath) && existsSync(checkpointSitePath)) {
         recoveredEvents: number;
         states: TruthState[];
         initialPairwiseAlignment?: PairwiseAlignmentSummary;
+        referenceMode?: BenchmarkReferenceMode;
     };
     if (checkpoint.sourceSha256 !== sourceSha256) {
         throw new Error("resume source hash does not match current co612.rwl");
+    }
+    if ((checkpoint.referenceMode ?? "adaptive") !== referenceMode) {
+        throw new Error(
+            `resume reference mode ${checkpoint.referenceMode ?? "adaptive"}`
+            + ` does not match requested ${referenceMode}`,
+        );
     }
     siteData = parseSitePath(checkpointSitePath);
     states = new Map(checkpoint.states.map((state) => [state.seriesId, state]));
@@ -861,6 +876,7 @@ try {
             recoveredEvents,
             states: [...states.values()],
             initialPairwiseAlignment,
+            referenceMode,
         }, null, 2), "utf8");
         console.log(
             `CO612_REVIEW_BOOTSTRAP_PROGRESS round=${round}`
@@ -888,6 +904,7 @@ const summary = {
     sourceSha256,
     sourceUnchanged: true,
     stopReason,
+    referenceMode,
     workerCount,
     maxRounds,
     totalSeries: originalSite.size,
