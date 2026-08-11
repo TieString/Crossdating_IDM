@@ -1,12 +1,18 @@
 /// <reference lib="webworker" />
 
 import { diagnoseCrossdating } from "@/features/crossdating/diagnosis/engine";
+import {
+    selectInsufficientReferencePairwiseFallback,
+} from "@/features/crossdating/diagnosis/insufficientReferenceFallback";
 import type {
     CrossdatingDiagnosis,
     ReviewWindowDisplayMode,
 } from "@/features/crossdating/diagnosis/types";
 import type { ReferenceSeriesConfig } from "@/features/crossdating/reference";
-import { createPairwiseBootstrapTargetReferenceConfig } from "@/features/crossdating/pairwiseBootstrap";
+import {
+    createPairwiseBootstrapReferenceConfig,
+    createPairwiseBootstrapTargetReferenceConfig,
+} from "@/features/crossdating/pairwiseBootstrap";
 import type { RwlSiteData } from "@/features/rwl/types";
 
 export type DiagnosisWorkerRequest = {
@@ -53,15 +59,49 @@ ctx.addEventListener("message", (event: MessageEvent<DiagnosisWorkerRequest>) =>
             referenceConfig,
             targetTree,
         );
+        let diagnosis = diagnoseCrossdating(siteData, {
+            referenceConfig: targetReferenceConfig,
+            targetTrees: targetTree ? [targetTree] : [],
+            cofechaText,
+            reviewWindowDisplayMode,
+            includeEventDecisionAudits,
+        });
+        const needsPairwiseFallback = targetTree !== undefined
+            && targetReferenceConfig?.cofechaPassReference?.source !== "pairwise_bootstrap"
+            && (diagnosis.reviewEvents?.length ?? 0) === 0
+            && diagnosis.eventDecisionAudits?.[0]?.finalReason
+                === "insufficient_reference_depth";
+        if (needsPairwiseFallback
+            && targetTree !== undefined
+            && referenceConfig?.classification) {
+            const pairwiseReference = createPairwiseBootstrapReferenceConfig({
+                siteData,
+                flaggedAIds: referenceConfig.classification.candidateFlaggedIds,
+                cofechaRunId: `${referenceConfig.cofechaRunId ?? "diagnosis"}-insufficient-reference`,
+                rwlHash: referenceConfig.rwlHash ?? "",
+            });
+            const targetPairwiseReference = createPairwiseBootstrapTargetReferenceConfig(
+                siteData,
+                pairwiseReference,
+                targetTree,
+            );
+            if (targetPairwiseReference?.cofechaPassReference) {
+                const pairwiseDiagnosis = diagnoseCrossdating(siteData, {
+                    referenceConfig: targetPairwiseReference,
+                    targetTrees: [targetTree],
+                    cofechaText,
+                    reviewWindowDisplayMode,
+                    includeEventDecisionAudits,
+                });
+                diagnosis = selectInsufficientReferencePairwiseFallback(
+                    diagnosis,
+                    pairwiseDiagnosis,
+                );
+            }
+        }
         ctx.postMessage({
             id,
-            diagnosis: diagnoseCrossdating(siteData, {
-                referenceConfig: targetReferenceConfig,
-                targetTrees: targetTree ? [targetTree] : [],
-                cofechaText,
-                reviewWindowDisplayMode,
-                includeEventDecisionAudits,
-            }),
+            diagnosis,
             elapsedMs: performance.now() - startedAt,
         } satisfies DiagnosisWorkerResponse);
     } catch (error) {

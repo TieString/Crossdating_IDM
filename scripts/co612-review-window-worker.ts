@@ -6,6 +6,9 @@ import {
 } from "@/features/cofecha/formatter";
 import { diagnoseCrossdating } from "@/features/crossdating/diagnosis/engine";
 import {
+    selectInsufficientReferencePairwiseFallback,
+} from "@/features/crossdating/diagnosis/insufficientReferenceFallback";
+import {
     createCofechaMasterReferenceConfig,
     createCofechaPassReferenceConfig,
 } from "@/features/crossdating/reference";
@@ -45,8 +48,10 @@ const handle = (request: WorkerRequest) => {
             flaggedAIds: request.cofechaFlaggedIds,
             cofechaRunId: request.runId,
             rwlHash: request.rwlHash,
+            clusterIds: request.pairwiseClusterIds,
         })
         : null;
+    let fallbackPairwiseReference = pairwiseBootstrapReference;
     const targets = request.targetIds.map((seriesId) => {
         const startedAt = Date.now();
         const effectiveFlagged = request.usePairwiseBootstrap
@@ -75,13 +80,49 @@ const handle = (request: WorkerRequest) => {
                 masterDatingSeries: cofechaResult.masterDatingSeries,
             });
         }
-        const diagnosis = diagnoseCrossdating(siteData, {
+        let diagnosisReferenceConfig = referenceConfig;
+        let diagnosis = diagnoseCrossdating(siteData, {
             referenceConfig,
             targetTrees: [seriesId],
             cofechaText: outText,
             includeEventDecisionAudits: true,
             reviewWindowDisplayMode: "review",
         });
+        const needsPairwiseFallback = !request.usePairwiseBootstrap
+            && (diagnosis.reviewEvents?.length ?? 0) === 0
+            && diagnosis.eventDecisionAudits?.[0]?.finalReason
+                === "insufficient_reference_depth";
+        if (needsPairwiseFallback) {
+            fallbackPairwiseReference ??= createPairwiseBootstrapReferenceConfig({
+                siteData,
+                flaggedAIds: request.cofechaFlaggedIds,
+                cofechaRunId: `${request.runId}-insufficient-reference`,
+                rwlHash: request.rwlHash,
+                clusterIds: request.pairwiseClusterIds,
+            });
+            const targetPairwiseReference = createPairwiseBootstrapTargetReferenceConfig(
+                siteData,
+                fallbackPairwiseReference,
+                seriesId,
+            );
+            if (targetPairwiseReference?.cofechaPassReference) {
+                const pairwiseDiagnosis = diagnoseCrossdating(siteData, {
+                    referenceConfig: targetPairwiseReference,
+                    targetTrees: [seriesId],
+                    cofechaText: outText,
+                    includeEventDecisionAudits: true,
+                    reviewWindowDisplayMode: "review",
+                });
+                const selected = selectInsufficientReferencePairwiseFallback(
+                    diagnosis,
+                    pairwiseDiagnosis,
+                );
+                if (selected === pairwiseDiagnosis) {
+                    diagnosis = pairwiseDiagnosis;
+                    diagnosisReferenceConfig = targetPairwiseReference;
+                }
+            }
+        }
         const audit = diagnosis.eventDecisionAudits?.[0];
         const reviewDecision = diagnosis.reviewWindowDecisions?.[0];
         const jointDecision = diagnosis.jointEventDecisions?.[0];
@@ -96,7 +137,7 @@ const handle = (request: WorkerRequest) => {
             jointDecision,
             audit,
             referenceAnchorCount:
-                referenceConfig.classification?.anchorPassIds.length ?? 0,
+                diagnosisReferenceConfig.classification?.anchorPassIds.length ?? 0,
             durationMs: Date.now() - startedAt,
         };
     });

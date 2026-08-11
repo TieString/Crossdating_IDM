@@ -107,8 +107,11 @@ export const createPairwiseBootstrapReferenceConfig = (params: {
     flaggedAIds: Iterable<string>;
     cofechaRunId: string;
     rwlHash: string;
+    clusterIds?: readonly string[];
 }): ReferenceSeriesConfig | null => {
-    const clusterIds = selectPairwiseBootstrapCluster(params.siteData);
+    const clusterIds = params.clusterIds
+        ? [...params.clusterIds]
+        : selectPairwiseBootstrapCluster(params.siteData);
     const clusterSet = new Set(clusterIds);
     const allSeriesIds = Array.from(params.siteData.keys());
     const base = createCofechaPassReferenceConfig({
