@@ -5,6 +5,8 @@ import type {
 import { locationEvidenceFor, withEvidenceLedger } from "./evidenceLedger";
 
 export type LocatorAdjudicationEvidence = {
+    operationType: DiagnosisEvent["eventType"];
+    shiftYears: number | null;
     concentration: number;
     remoteMargin: number;
     coarseOverlapConsensus: number;
@@ -228,6 +230,8 @@ const locatorEvidence = (
     const precisionRegression = proposedWidth > checkpointWidth
         || proposedTopYear !== checkpointTopYear;
     return {
+        operationType: checkpoint.eventType,
+        shiftYears: checkpoint.shiftYears ?? null,
         concentration: proposalLocationEvidence?.concentration
             ?? noteNumber(proposal, "counterfactual_window_concentration="),
         remoteMargin: proposalLocationEvidence?.remoteMargin
@@ -315,6 +319,19 @@ export const hasStrongDetachedLocatorEvidence = (
         )
         && evidence.concentration >= Math.max(0.6, config.minimumConcentration)
         && evidence.remoteMargin >= Math.max(0.2, config.minimumRemoteMargin);
+    const deepReferenceTransitionReplacesUnstructuredCheckpoint =
+        evidence.operationType === "partialMove"
+        && (evidence.shiftYears ?? 0) <= -10
+        && evidence.structuredProposal
+        && !evidence.structuredCheckpoint
+        && evidence.pairReferenceCount >= Math.max(
+            12,
+            config.minimumPairReferenceCount * 3,
+        )
+        && evidence.concentration >= 0.45
+        && evidence.coarseOverlapConsensus >= 0.5
+        && evidence.operationLocationGain >= 0.12
+        && evidence.proposedWidth <= 13;
     const candidateTransitionConsensus = evidence.proposedTopYear !== null
         && evidence.candidateTopYear !== null
         && evidence.directTransitionYear !== null
@@ -328,6 +345,7 @@ export const hasStrongDetachedLocatorEvidence = (
     return calibratedLocatorStrength
         || independentlyLocatedOperation
         || replacesUnstructuredCheckpoint
+        || deepReferenceTransitionReplacesUnstructuredCheckpoint
         || candidateTransitionConsensus;
 };
 

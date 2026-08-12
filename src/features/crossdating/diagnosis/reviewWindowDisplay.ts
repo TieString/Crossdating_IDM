@@ -1,4 +1,5 @@
 import { evidenceClaimsFor } from "./evidenceLedger";
+import { supportsCompletedPartialUnitCompositionEvidence } from "./discreteMissingStaircaseCompetition";
 import type {
     DiagnosisEvent,
     DiagnosisEventDecisionAudit,
@@ -261,6 +262,10 @@ const hasReviewablePartialMoveEvidence = (
 
     const completedMixedShift = numericNote(event, "completed_mixed_partial_shift");
     const completedMixedFrontierYear = numericNote(event, "completed_mixed_frontier_year");
+    const completedMixedSeparation = numericNote(
+        event,
+        "completed_mixed_separation",
+    ) ?? 0;
     const completedMixedMasterMargin = numericNote(
         event,
         "completed_mixed_master_margin",
@@ -315,15 +320,25 @@ const hasReviewablePartialMoveEvidence = (
         event,
         "completed_mixed_master_orientation_margin",
     ) ?? Number.NEGATIVE_INFINITY;
-    const completedMixedReferenceFamily = completedMixedReference.count >= 8
-        && completedMixedReference.ratio >= 0.75
-        && completedMixedMedian >= 0.04
-        && completedMixedQ25 >= 0.01;
-    const completedMixedMasterFamily = completedMixedMasterMargin >= 0.05
-        && completedMixedMasterOrientation >= 0.05
-        && completedMixedOrientation.ratio >= 0.9
-        && completedMixedOrientationMedian >= 0.1
-        && completedMixedOrientationQ25 >= 0.05;
+    const completedMixedSupported = supportsCompletedPartialUnitCompositionEvidence({
+        unitEventType: event.evidence.notes.includes("completed_mixed_unit_type=falseRing")
+            ? "falseRing"
+            : "missingRing",
+        sourceSegmentAnchored: event.evidence.notes.includes(
+            "completed_mixed_source_segment_anchored=true",
+        ),
+        separationYears: completedMixedSeparation,
+        masterMargin: completedMixedMasterMargin,
+        referenceCount: completedMixedReference.count,
+        mixedReferenceSupportRatio: completedMixedReference.ratio,
+        referenceMedianMargin: completedMixedMedian,
+        referenceLowerQuartileMargin: completedMixedQ25,
+        orientationReferenceCount: completedMixedOrientation.count,
+        orientationReferenceSupportRatio: completedMixedOrientation.ratio,
+        orientationMedianMargin: completedMixedOrientationMedian,
+        orientationLowerQuartileMargin: completedMixedOrientationQ25,
+        masterOrientationMargin: completedMixedMasterOrientation,
+    });
     if ((sources.has("completed_partial_missing_composition")
             || sources.has("completed_partial_false_composition"))
         && sources.has("per_reference_completed_correction")
@@ -335,11 +350,7 @@ const hasReviewablePartialMoveEvidence = (
             completedMixedFrontierYear,
             config.partialVoteWindowToleranceYears,
         )
-        && completedMixedOrientation.count >= 8
-        && completedMixedOrientation.ratio >= 0.85
-        && completedMixedOrientationMedian >= 0.04
-        && completedMixedOrientationQ25 >= 0.01
-        && (completedMixedReferenceFamily || completedMixedMasterFamily)
+        && completedMixedSupported
         && event.evidence.candidateIds.length >= 1) return true;
 
     const gridConsensusShift = numericNote(event, "candidate_grid_partial_shift");

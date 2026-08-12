@@ -22,6 +22,7 @@ import {
     selectCumulativePartialFrontier,
     selectCompletedPartialFalseSeed,
     selectCompletedPartialMissingSeed,
+    supportsCompletedPartialUnitComposition,
     shouldReplaceUnanchoredPartialWithReferencePulse,
     shouldPreferWholeSeriesAlias,
     shouldSuppressSelfWorseningCandidateFalseRing,
@@ -396,7 +397,110 @@ describe("recoverCandidateBackedPartialConsensus", () => {
     });
 });
 
+describe("supportsCompletedPartialUnitComposition", () => {
+    const shortPlateau = () => ({
+        unitEventType: "missingRing" as "missingRing" | "falseRing",
+        cumulativeShiftYears: -7,
+        partialShiftYears: -6,
+        orientation: "missingThenPartial" as
+            | "missingThenPartial"
+            | "falseThenPartial",
+        olderBoundaryYear: 1827,
+        newerBoundaryYear: 1832,
+        frontierEventType: "partialMove" as const,
+        frontierYear: 1832,
+        separationYears: 5,
+        masterMargin: -0.024,
+        referenceCount: 28,
+        mixedReferenceSupport: 17,
+        mixedReferenceSupportRatio: 17 / 28,
+        referenceMedianMargin: 0.0026,
+        referenceLowerQuartileMargin: -0.0138,
+        orientationReferenceCount: 28,
+        orientationReferenceSupport: 26,
+        orientationReferenceSupportRatio: 26 / 28,
+        orientationMedianMargin: 0.0295,
+        orientationLowerQuartileMargin: 0.0085,
+        masterOrientationMargin: -0.024,
+        comparedWithMissingStaircase: false,
+        sourceSegmentAnchored: false,
+    });
+
+    it("does not split a single partial from orientation evidence alone", () => {
+        expect(supportsCompletedPartialUnitComposition(shortPlateau())).toBe(false);
+    });
+
+    it("keeps a strong short-plateau family refused when orientation is weak", () => {
+        const weak = shortPlateau();
+        weak.mixedReferenceSupport = 19;
+        weak.mixedReferenceSupportRatio = 19 / 28;
+        weak.referenceMedianMargin = 0.072;
+        weak.referenceLowerQuartileMargin = -0.008;
+        weak.orientationReferenceSupport = 23;
+        weak.orientationReferenceSupportRatio = 23 / 28;
+
+        expect(supportsCompletedPartialUnitComposition(weak)).toBe(false);
+    });
+
+    it("accepts a short plateau with strong orientation and family medians", () => {
+        const supported = shortPlateau();
+        supported.mixedReferenceSupport = 19;
+        supported.mixedReferenceSupportRatio = 19 / 28;
+        supported.referenceMedianMargin = 0.072;
+        supported.referenceLowerQuartileMargin = -0.008;
+        supported.orientationReferenceSupport = 24;
+        supported.orientationReferenceSupportRatio = 24 / 28;
+        supported.orientationMedianMargin = 0.056;
+        supported.orientationLowerQuartileMargin = 0.025;
+
+        expect(supportsCompletedPartialUnitComposition(supported)).toBe(true);
+    });
+
+    it("accepts a source-segment anchored false+partial family", () => {
+        const supported = shortPlateau();
+        supported.unitEventType = "falseRing";
+        supported.orientation = "falseThenPartial";
+        supported.mixedReferenceSupport = 19;
+        supported.mixedReferenceSupportRatio = 19 / 28;
+        supported.referenceMedianMargin = 0.133;
+        supported.referenceLowerQuartileMargin = -0.022;
+        supported.orientationReferenceSupport = 24;
+        supported.orientationReferenceSupportRatio = 24 / 28;
+        supported.orientationMedianMargin = 0.07;
+        supported.orientationLowerQuartileMargin = 0.012;
+        supported.sourceSegmentAnchored = true;
+
+        expect(supportsCompletedPartialUnitComposition(supported)).toBe(true);
+    });
+});
+
 describe("selectCompletedPartialMissingSeed", () => {
+    it("uses a joint distribution corroborated by one fused COFECHA and segmented candidate", () => {
+        const aggregate = partialMoveEvent(-7);
+        aggregate.evidence.candidateIds = [];
+        aggregate.evidence.notes = [];
+        aggregate.evidence.algorithmSources = [
+            "decisive_joint_operation_fusion",
+            "full_interval_counterfactual_scan",
+            "joint_year_operation_evidence",
+        ];
+        const corroborating = candidatePartial({
+            shiftYears: -7,
+            anchorYear: 1850,
+            candidateId: "fused-operation-family",
+            source: "cofecha_segment_lag",
+        });
+        corroborating.evidence.algorithmSources.push("segmented_diagnosis");
+
+        const seed = selectCompletedPartialMissingSeed([aggregate], [corroborating]);
+
+        expect(seed?.event.shiftYears).toBe(-7);
+        expect(seed?.event.id).toBe(aggregate.id);
+        expect(seed?.event.evidence.notes).toContain(
+            "completed_mixed_seed=joint_distribution_dual_source_candidate",
+        );
+    });
+
     it("uses agreeing reference votes instead of a stale -2 path amplitude", () => {
         const stale = partialMoveEvent(-2);
         stale.evidence.candidateIds = [];
@@ -533,6 +637,34 @@ describe("selectCompletedPartialMissingSeed", () => {
 });
 
 describe("selectCompletedPartialFalseSeed", () => {
+    it("recovers a source-segment partial hidden by a remote weak false mode", () => {
+        const remoteFalse = falseRingEvent(1676, false);
+        remoteFalse.evidence.algorithmSources = ["decisive_joint_operation_fusion"];
+        remoteFalse.evidence.candidateIds = [];
+        remoteFalse.evidence.scoreMargin = 0.01;
+        remoteFalse.evidence.notes = ["joint_operation_selector_probability=0.56"];
+        const cumulative = candidatePartial({
+            shiftYears: -5,
+            anchorYear: 1850,
+            candidateId: "cofecha-cumulative",
+            source: "cofecha_segment_lag",
+        });
+        cumulative.evidence.notes.push(
+            "candidate_source_segment_start=1800",
+            "candidate_source_segment_end=1849",
+        );
+
+        const seed = selectCompletedPartialFalseSeed([remoteFalse], [cumulative]);
+
+        expect(seed?.event.id).toBe(cumulative.id);
+        expect(seed?.event.shiftYears).toBe(-5);
+        expect(seed?.anchorYears[0]).toBe(1800);
+        expect(seed?.anchorYears[(seed?.anchorYears.length ?? 0) - 1]).toBe(1850);
+        expect(seed?.event.evidence.notes).toContain(
+            "completed_mixed_seed=source_segment_partial_over_remote_false",
+        );
+    });
+
     it("joins a full-interval cumulative result to a same-amplitude hard candidate", () => {
         const displayed = partialMoveEvent(-19);
         displayed.evidence.candidateIds = [];

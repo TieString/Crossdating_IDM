@@ -98,7 +98,23 @@ type CompletedPartialUnitComposition = {
     orientationLowerQuartileMargin: number;
     masterOrientationMargin: number;
     comparedWithMissingStaircase: boolean;
+    sourceSegmentAnchored: boolean;
 };
+
+export type CompletedPartialUnitSupportEvidence = Pick<
+    CompletedPartialUnitComposition,
+    | "separationYears"
+    | "masterMargin"
+    | "referenceCount"
+    | "mixedReferenceSupportRatio"
+    | "referenceMedianMargin"
+    | "referenceLowerQuartileMargin"
+    | "orientationReferenceCount"
+    | "orientationReferenceSupportRatio"
+    | "orientationMedianMargin"
+    | "orientationLowerQuartileMargin"
+    | "masterOrientationMargin"
+> & Pick<CompletedPartialUnitComposition, "unitEventType" | "sourceSegmentAnchored">;
 
 export type CompletedPartialMissingComposition = CompletedPartialUnitComposition & {
     unitEventType: "missingRing";
@@ -110,6 +126,45 @@ export type CompletedPartialFalseComposition = CompletedPartialUnitComposition &
     unitEventType: "falseRing";
     orientation: "falseThenPartial" | "partialThenFalse";
     frontierEventType: "falseRing" | "partialMove";
+};
+
+export const supportsCompletedPartialUnitCompositionEvidence = (
+    evidence: CompletedPartialUnitSupportEvidence | null,
+): boolean => {
+    if (!evidence || evidence.separationYears < 2) return false;
+    const orientationSupported = evidence.orientationReferenceCount >= 8
+        && evidence.orientationReferenceSupportRatio >= 0.85
+        && evidence.orientationMedianMargin >= 0.04
+        && evidence.orientationLowerQuartileMargin >= 0.01;
+    const referenceFamilySupported = evidence.referenceCount >= 8
+        && evidence.mixedReferenceSupportRatio >= 0.75
+        && evidence.referenceMedianMargin >= 0.04
+        && evidence.referenceLowerQuartileMargin >= 0.01;
+    const masterFamilySupported = evidence.masterMargin >= 0.05
+        && evidence.masterOrientationMargin >= 0.05
+        && evidence.orientationReferenceSupportRatio >= 0.9
+        && evidence.orientationMedianMargin >= 0.1
+        && evidence.orientationLowerQuartileMargin >= 0.05;
+    const shortPlateauSupported = evidence.separationYears >= 5
+        && evidence.separationYears <= 13
+        && orientationSupported
+        && evidence.referenceCount >= 8
+        && evidence.mixedReferenceSupportRatio >= 0.65
+        && evidence.referenceMedianMargin >= 0.04
+        && evidence.referenceLowerQuartileMargin >= -0.01;
+    const sourceSegmentFalseSupported = evidence.unitEventType === "falseRing"
+        && evidence.sourceSegmentAnchored
+        && evidence.separationYears >= 5
+        && evidence.separationYears <= 13
+        && orientationSupported
+        && evidence.referenceCount >= 8
+        && evidence.mixedReferenceSupportRatio >= 0.65
+        && evidence.referenceMedianMargin >= 0.08
+        && evidence.referenceLowerQuartileMargin >= -0.025;
+    return (
+        orientationSupported
+        && (referenceFamilySupported || masterFamilySupported)
+    ) || shortPlateauSupported || sourceSegmentFalseSupported;
 };
 
 const MAX_TWO_STEP_SEPARATION_YEARS = 17;
@@ -990,10 +1045,21 @@ const compareCompletedPartialWithSingleUnit = (
             },
         )
     )).sort((left, right) => right.score - left.score);
-    const retainedMixed = orientations
-        .flatMap((orientation) => mixedCandidates.filter((candidate) => (
+    const retainedMixed = orientations.flatMap((orientation) => {
+        const candidates = mixedCandidates.filter((candidate) => (
             candidate.orientation === orientation
-        )).slice(0, 24));
+        ));
+        const bestByNewerBoundary = new Map<number, MixedPartialUnitCorrection>();
+        candidates.forEach((candidate) => {
+            if (!bestByNewerBoundary.has(candidate.newerBoundaryYear)) {
+                bestByNewerBoundary.set(candidate.newerBoundaryYear, candidate);
+            }
+        });
+        return Array.from(new Set([
+            ...candidates.slice(0, 24),
+            ...bestByNewerBoundary.values(),
+        ]));
+    });
     if (directCandidates.length === 0 || retainedMixed.length === 0) return null;
 
     const uniquePathMissingYears = Array.from(new Set(pathMissingYears))
@@ -1130,6 +1196,17 @@ const compareCompletedPartialWithSingleUnit = (
     const candidate = selected.candidate;
     const unitThenPartial = candidate.orientation === "missingThenPartial"
         || candidate.orientation === "falseThenPartial";
+    const sortedAdditionalAnchors = Array.from(new Set(additionalAnchorYears))
+        .filter(Number.isInteger)
+        .sort((left, right) => left - right);
+    const hasContiguousSourceSegment = sortedAdditionalAnchors.length >= 5
+        && sortedAdditionalAnchors.every((year, index) => (
+            index === 0 || year === sortedAdditionalAnchors[index - 1] + 1
+        ));
+    const sourceSegmentAnchored = hasContiguousSourceSegment
+        && candidate.olderBoundaryYear >= sortedAdditionalAnchors[0]
+        && candidate.newerBoundaryYear
+            <= sortedAdditionalAnchors[sortedAdditionalAnchors.length - 1];
     return {
         unitEventType,
         cumulativeShiftYears: cumulativeShiftYears!,
@@ -1157,6 +1234,7 @@ const compareCompletedPartialWithSingleUnit = (
         orientationLowerQuartileMargin: quantile(orientationMargins, 0.25),
         masterOrientationMargin: candidate.score - bestOtherOrientationMasterScore,
         comparedWithMissingStaircase: missingStaircaseCandidates.length > 0,
+        sourceSegmentAnchored,
     };
 };
 

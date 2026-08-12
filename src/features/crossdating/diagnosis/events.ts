@@ -177,7 +177,12 @@ const eventFromCluster = (
                 ? top.evidence.localEditAlignment.windowEndYear - top.evidence.localEditAlignment.windowStartYear + 1
                 : 0,
             candidateIds: candidates.map((candidate) => candidate.id),
-            notes: ["candidate_hard_gate_passed", "scores_are_relative_not_probabilities"],
+            notes: [
+                "candidate_hard_gate_passed",
+                "scores_are_relative_not_probabilities",
+                `candidate_source_segment_start=${top.segmentStartYear}`,
+                `candidate_source_segment_end=${top.segmentEndYear}`,
+            ],
         },
         alternativeTypes: [],
         ...(cluster.eventType === "partialMove" ? {

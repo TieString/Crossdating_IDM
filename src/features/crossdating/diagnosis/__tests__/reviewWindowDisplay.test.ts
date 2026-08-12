@@ -655,6 +655,7 @@ describe("lower review-window display gate", () => {
             "completed_mixed_frontier_year=1900",
             "completed_mixed_frontier_type=partialMove",
             "completed_mixed_frontier_is_newest_event",
+            "completed_mixed_separation=8",
             "completed_mixed_master_margin=0.106143",
             "completed_mixed_reference_support=18/54",
             "completed_mixed_reference_median=-0.028553",
@@ -685,6 +686,38 @@ describe("lower review-window display gate", () => {
         expect(selectReviewWindowDisplay(audit([]), [completed])).toMatchObject({
             status: "strict",
             event: completed,
+        });
+    });
+
+    it("uses the same short-plateau contract as completed mixed-event generation", () => {
+        const partial = reviewablePartial(-6, {
+            candidateIds: ["joint-distribution", "cofecha-segment"],
+            algorithmSources: [
+                "completed_partial_missing_composition",
+                "per_reference_completed_correction",
+            ],
+            notes: [
+                "counterfactual_correction_years=-6",
+                "completed_mixed_partial_shift=-6",
+                "completed_mixed_frontier_year=1900",
+                "completed_mixed_frontier_type=partialMove",
+                "completed_mixed_frontier_is_newest_event",
+                "completed_mixed_separation=5",
+                "completed_mixed_master_margin=-0.024000",
+                "completed_mixed_reference_support=19/28",
+                "completed_mixed_reference_median=0.072559",
+                "completed_mixed_reference_q25=-0.008036",
+                "completed_mixed_orientation_support=24/28",
+                "completed_mixed_orientation_median=0.053000",
+                "completed_mixed_orientation_q25=0.037000",
+                "completed_mixed_master_orientation_margin=-0.024000",
+                "completed_mixed_source_segment_anchored=false",
+            ],
+        });
+
+        expect(selectReviewWindowDisplay(audit([]), [partial])).toMatchObject({
+            status: "strict",
+            event: partial,
         });
     });
 

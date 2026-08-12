@@ -88,6 +88,7 @@ const completedComposition = (
     orientationLowerQuartileMargin: 0.09,
     masterOrientationMargin: -0.07,
     comparedWithMissingStaircase: false,
+    sourceSegmentAnchored: false,
     ...overrides,
 });
 

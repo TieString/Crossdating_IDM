@@ -209,6 +209,46 @@ describe("event hypothesis locator adjudication", () => {
         });
     });
 
+    it("lets a deep-reference transition replace an unstructured aggregate window", () => {
+        const checkpoint = event(1844, 1852, [
+            "joint_operation_top3_difference_gain=0.172874",
+        ], 1848, false);
+        const proposal = event(1817, 1829, [
+            "joint_operation_top3_difference_gain=0.172874",
+            "counterfactual_coarse_overlap_consensus=0.540806",
+        ], 1823, true);
+        checkpoint.shiftYears = -20;
+        proposal.shiftYears = -20;
+        proposal.evidence.locationEvidence = [{
+            source: "full_interval_counterfactual_locator",
+            startYear: 1817,
+            endYear: 1829,
+            topYear: 1823,
+            referenceCount: 16,
+            concentration: 0.492441,
+            remoteMargin: 0,
+            calibrated: false,
+        }];
+        const result = adjudicateLocatorProposal(checkpoint, proposal);
+
+        expect(result.evidence).toMatchObject({
+            structuredCheckpoint: false,
+            structuredProposal: true,
+            pairReferenceCount: 16,
+            coarseOverlapConsensus: 0.540806,
+            operationLocationGain: 0.172874,
+        });
+        expect(result).toMatchObject({
+            accepted: true,
+            reason: "accepted_detached_strong_mode",
+            detachedEvidenceStrong: true,
+        });
+        expect(result.event).toMatchObject({
+            startYear: 1817,
+            endYear: 1829,
+        });
+    });
+
     it("accepts a remote unit window when candidate, transition and endpoint posterior agree", () => {
         const checkpoint = event(1608, 1614, [], 1612, false);
         const proposal = event(1575, 1581, [
