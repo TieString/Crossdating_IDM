@@ -1074,6 +1074,110 @@ describe("selectExhaustiveCompletedPartialUnitComposition", () => {
         });
     });
 
+    it("uses a unique raw and COFECHA two-boundary consensus", () => {
+        const selected = selectExhaustiveCompletedPartialUnitComposition([
+            mixedCandidate("missingRing", {
+                orientation: "missingThenPartial",
+                frontierEventType: "partialMove",
+                olderBoundaryYear: 1689,
+                newerBoundaryYear: 1709,
+                frontierYear: 1709,
+                separationYears: 20,
+                referenceCount: 24,
+                mixedReferenceSupportRatio: 0.54,
+                referenceMedianMargin: 0.012,
+                referenceLowerQuartileMargin: 0,
+                orientationReferenceSupportRatio: 0.64,
+                orientationMedianMargin: 0.058,
+            }, {
+                orientation: "missingThenPartial",
+                frontierEventType: "partialMove",
+                olderBoundaryYear: 1686,
+                newerBoundaryYear: 1715,
+                frontierYear: 1715,
+                separationYears: 29,
+                referenceCount: 16,
+                mixedReferenceSupportRatio: 0.94,
+                referenceMedianMargin: 0.12,
+                referenceLowerQuartileMargin: 0.066,
+                orientationReferenceSupportRatio: 1,
+                orientationMedianMargin: 0.26,
+            }),
+            mixedCandidate("falseRing", {
+                orientation: "falseThenPartial",
+                frontierEventType: "partialMove",
+                olderBoundaryYear: 1672,
+                newerBoundaryYear: 1676,
+                frontierYear: 1676,
+                separationYears: 4,
+            }, {
+                orientation: "falseThenPartial",
+                frontierEventType: "partialMove",
+                olderBoundaryYear: 1680,
+                newerBoundaryYear: 1710,
+                frontierYear: 1710,
+                separationYears: 30,
+                referenceMedianMargin: 0.08,
+                referenceLowerQuartileMargin: 0.02,
+                mixedReferenceSupportRatio: 0.85,
+                orientationReferenceSupportRatio: 0.85,
+                orientationMedianMargin: 0.09,
+            }),
+        ], 1670, 1682);
+
+        expect(selected).toMatchObject({
+            unitEventType: "missingRing",
+            reason: "cross_view_boundary_consensus",
+            competition: {
+                frontierEventType: "partialMove",
+                partialShiftYears: -6,
+                olderBoundaryYear: 1686,
+                newerBoundaryYear: 1715,
+            },
+        });
+    });
+
+    it("does not use cross-view consensus when both decompositions are coherent", () => {
+        const coherent = (unitEventType: "missingRing" | "falseRing") => (
+            mixedCandidate(unitEventType, {
+                orientation: unitEventType === "missingRing"
+                    ? "missingThenPartial"
+                    : "falseThenPartial",
+                frontierEventType: "partialMove",
+                olderBoundaryYear: 1688,
+                newerBoundaryYear: 1708,
+                frontierYear: 1708,
+                separationYears: 20,
+                referenceCount: 20,
+                mixedReferenceSupportRatio: 0.7,
+                referenceMedianMargin: 0.02,
+                referenceLowerQuartileMargin: 0,
+                orientationReferenceSupportRatio: 0.75,
+                orientationMedianMargin: 0.06,
+            }, {
+                orientation: unitEventType === "missingRing"
+                    ? "missingThenPartial"
+                    : "falseThenPartial",
+                frontierEventType: "partialMove",
+                olderBoundaryYear: 1686,
+                newerBoundaryYear: 1712,
+                frontierYear: 1712,
+                separationYears: 26,
+                referenceCount: 20,
+                mixedReferenceSupportRatio: 0.9,
+                referenceMedianMargin: 0.1,
+                referenceLowerQuartileMargin: 0.04,
+                orientationReferenceSupportRatio: 0.9,
+                orientationMedianMargin: 0.12,
+            })
+        );
+
+        expect(selectExhaustiveCompletedPartialUnitComposition([
+            coherent("missingRing"),
+            coherent("falseRing"),
+        ], 1670, 1682)).toBeNull();
+    });
+
     it("keeps two weak completed families refused", () => {
         expect(selectExhaustiveCompletedPartialUnitComposition([
             mixedCandidate("missingRing"),

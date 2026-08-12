@@ -3024,6 +3024,7 @@ export type ExhaustiveCompletedPartialUnitSelection = {
     unitEventType: "missingRing" | "falseRing";
     competition: CompletedPartialUnitComposition;
     reason: "regional_unit_direction"
+        | "cross_view_boundary_consensus"
         | "cofecha_completed_family"
         | "raw_completed_family";
 };
@@ -3066,6 +3067,44 @@ export const selectExhaustiveCompletedPartialUnitComposition = (
         || new Set(candidates.map((candidate) => candidate.unitEventType)).size !== 2) {
         return null;
     }
+    const boundaryDistanceToRange = (year: number): number => (
+        year < startYear ? startYear - year : year > endYear ? year - endYear : 0
+    );
+    const crossViewBoundaryConsensus = candidates.filter((candidate) => {
+        const raw = candidate.rawCompetition;
+        const cofecha = candidate.cofechaCompetition;
+        return raw.orientation === cofecha.orientation
+            && raw.frontierEventType === cofecha.frontierEventType
+            && raw.separationYears >= 14 && raw.separationYears <= 40
+            && cofecha.separationYears >= 14 && cofecha.separationYears <= 40
+            && Math.abs(raw.olderBoundaryYear - cofecha.olderBoundaryYear) <= 7
+            && Math.abs(raw.newerBoundaryYear - cofecha.newerBoundaryYear) <= 7
+            && boundaryDistanceToRange(raw.olderBoundaryYear) <= 8
+            && boundaryDistanceToRange(cofecha.olderBoundaryYear) <= 8
+            && raw.referenceCount >= 8
+            && raw.mixedReferenceSupportRatio >= 0.5
+            && raw.referenceMedianMargin >= 0.005
+            && raw.referenceLowerQuartileMargin >= -0.005
+            && raw.orientationReferenceCount >= 8
+            && raw.orientationReferenceSupportRatio >= 0.6
+            && raw.orientationMedianMargin >= 0.04
+            && cofecha.referenceCount >= 8
+            && cofecha.mixedReferenceSupportRatio >= 0.8
+            && cofecha.referenceMedianMargin >= 0.06
+            && cofecha.referenceLowerQuartileMargin >= 0
+            && cofecha.orientationReferenceCount >= 8
+            && cofecha.orientationReferenceSupportRatio >= 0.8
+            && cofecha.orientationMedianMargin >= 0.08;
+    });
+    if (crossViewBoundaryConsensus.length === 1) {
+        const winner = crossViewBoundaryConsensus[0]!;
+        return {
+            unitEventType: winner.unitEventType,
+            competition: winner.cofechaCompetition,
+            reason: "cross_view_boundary_consensus",
+        };
+    }
+
     const localized = candidates.filter((candidate) => (
         exhaustiveCompositionIsLocalized(
             candidate.cofechaCompetition,
@@ -3882,6 +3921,238 @@ export const hardCandidateMaySeedExhaustiveComposition = (
         const distance = Math.abs(rankedEventYear(candidate) - eventYear);
         return distance >= 4 && distance <= 40;
     });
+};
+
+/**
+ * Resolves a long unit+partial composition only when raw and COFECHA views independently place
+ * both boundaries in the same mode. This checkpoint runs before generic lag-path projection so
+ * a remote path cannot overwrite a completed, operation-specific correction.
+ */
+const recoverCrossViewCompletedPartialUnitFrontier = (
+    boundedEvents: readonly DiagnosisEvent[],
+    displayedEvents: readonly DiagnosisEvent[],
+    candidateEvents: readonly DiagnosisEvent[],
+    diagnosis: SeriesCoreDiagnosis,
+    cofechaDiagnosis: SeriesCoreDiagnosis,
+    siteData: RwlSiteData,
+    maxPartialGapYears: number,
+    operations: readonly JointCounterfactualOperationScore[],
+): DiagnosisEvent | null => {
+    if (displayedEvents.some((event) => event.eventType === "wholeSeriesMove")) {
+        return null;
+    }
+    const operationHypotheses = candidateEvents.filter((event) => (
+        event.eventType === "partialMove"
+        && event.shiftSide === "older"
+        && Number.isInteger(event.shiftYears)
+        && event.shiftYears! <= -3
+        && Math.abs(event.shiftYears!) <= maxPartialGapYears
+        && event.evidence.candidateIds.length > 0
+        && event.evidence.notes.includes("candidate_hard_gate_passed")
+        && [
+            "candidate_ranking",
+            "global_sliding_match",
+            "propagation_pattern",
+            "segmented_diagnosis",
+        ].every((source) => event.evidence.algorithmSources.includes(source))
+        && (event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY) >= 0.02
+    )).sort((left, right) => (
+        right.evidence.scoreMargin - left.evidence.scoreMargin
+        || right.evidence.score - left.evidence.score
+    ));
+    const locationHypotheses = [
+        ...boundedEvents,
+        ...displayedEvents,
+    ].filter((event, index, events) => (
+        event.eventType === "partialMove"
+        && event.shiftSide === "older"
+        && Number.isInteger(event.shiftYears)
+        && event.shiftYears! <= -3
+        && Math.abs(event.shiftYears!) <= maxPartialGapYears
+        && event.endYear - event.startYear + 1 <= 13
+        && (
+            event.evidence.algorithmSources.includes("bounded_complete_lag_path")
+            || (
+                event.evidence.algorithmSources.includes(
+                    "full_interval_counterfactual_scan",
+                )
+                && event.evidence.algorithmSources.includes(
+                    "decisive_joint_operation_fusion",
+                )
+            )
+        )
+        && events.findIndex((candidate) => (
+            candidate.eventType === "partialMove"
+            && candidate.shiftYears === event.shiftYears
+            && candidate.startYear === event.startYear
+            && candidate.endYear === event.endYear
+        )) === index
+    )).sort((left, right) => (
+        Number(right.evidence.algorithmSources.includes("bounded_complete_lag_path"))
+            - Number(left.evidence.algorithmSources.includes("bounded_complete_lag_path"))
+        || right.evidence.scoreMargin - left.evidence.scoreMargin
+    ));
+    const aggregates = locationHypotheses.flatMap((location, index) => {
+        if (locationHypotheses.findIndex((candidate) => (
+            candidate.shiftYears === location.shiftYears
+        )) !== index) return [];
+        const operation = operationHypotheses.find((candidate) => (
+            candidate.shiftYears === location.shiftYears
+        ));
+        if (!operation) return [];
+        return [{
+            ...location,
+            evidence: {
+                ...location.evidence,
+                algorithmSources: Array.from(new Set([
+                    ...location.evidence.algorithmSources,
+                    ...operation.evidence.algorithmSources,
+                ])).sort(),
+                score: Math.max(location.evidence.score, operation.evidence.score),
+                scoreMargin: Math.max(
+                    location.evidence.scoreMargin,
+                    operation.evidence.scoreMargin,
+                ),
+                baselineCorrelation: operation.evidence.baselineCorrelation
+                    ?? location.evidence.baselineCorrelation,
+                correctedCorrelation: operation.evidence.correctedCorrelation
+                    ?? location.evidence.correctedCorrelation,
+                correlationGain: Math.max(
+                    location.evidence.correlationGain ?? Number.NEGATIVE_INFINITY,
+                    operation.evidence.correlationGain ?? Number.NEGATIVE_INFINITY,
+                ),
+                samplePairs: Math.max(
+                    location.evidence.samplePairs,
+                    operation.evidence.samplePairs,
+                ),
+                candidateIds: Array.from(new Set([
+                    ...location.evidence.candidateIds,
+                    ...operation.evidence.candidateIds,
+                ])),
+                notes: Array.from(new Set([
+                    ...location.evidence.notes,
+                    ...operation.evidence.notes,
+                    "cross_view_location_operation_hypothesis",
+                ])),
+            },
+        }];
+    });
+    for (const aggregate of aggregates) {
+        const regionalStartYear = Math.max(
+            diagnosis.targetRange.startYear,
+            aggregate.startYear - 6,
+        );
+        const regionalEndYear = Math.min(
+            diagnosis.targetRange.endYear,
+            aggregate.endYear + 6,
+        );
+        const regionalAnchorYear = rankedEventYear(aggregate);
+        const exhaustiveCandidates = (["missingRing", "falseRing"] as const)
+            .flatMap((unitEventType): ExhaustiveCompletedPartialUnitCandidate[] => {
+                const unitShiftYears = unitEventType === "missingRing" ? -1 : 1;
+                const partialShiftYears = aggregate.shiftYears! - unitShiftYears;
+                if (partialShiftYears > -2) return [];
+                const operation = operations.find((candidate) => (
+                    candidate.eventType === unitEventType
+                    && candidate.shiftYears === unitShiftYears
+                ));
+                if (!operation) return [];
+                const regionalEvidence = summarizeJointOperationRegion(
+                    operation,
+                    regionalStartYear,
+                    regionalEndYear,
+                    regionalAnchorYear,
+                );
+                const regionalAnchorYears = [
+                    regionalEvidence.bestYear,
+                    regionalEvidence.bestSideStepYear,
+                ].filter((year): year is number => year !== null);
+                const seed: DiagnosisEvent = {
+                    ...aggregate,
+                    evidence: {
+                        ...aggregate.evidence,
+                        notes: Array.from(new Set([
+                            ...aggregate.evidence.notes,
+                            "completed_mixed_seed=cross_view_boundary_consensus",
+                        ])),
+                    },
+                };
+                const rawCompetition = unitEventType === "missingRing"
+                    ? compareCompletedPartialWithSingleMissing(
+                        diagnosis,
+                        siteData,
+                        seed,
+                        [],
+                        false,
+                        regionalAnchorYears,
+                        40,
+                    )
+                    : compareCompletedPartialWithSingleFalse(
+                        diagnosis,
+                        siteData,
+                        seed,
+                        false,
+                        regionalAnchorYears,
+                        40,
+                    );
+                const cofechaCompetition = unitEventType === "missingRing"
+                    ? compareCompletedPartialWithSingleMissing(
+                        cofechaDiagnosis,
+                        siteData,
+                        seed,
+                        [],
+                        true,
+                        regionalAnchorYears,
+                        40,
+                    )
+                    : compareCompletedPartialWithSingleFalse(
+                        cofechaDiagnosis,
+                        siteData,
+                        seed,
+                        true,
+                        regionalAnchorYears,
+                        40,
+                    );
+                return rawCompetition && cofechaCompetition ? [{
+                    unitEventType,
+                    rawCompetition,
+                    cofechaCompetition,
+                    regionalEvidence,
+                }] : [];
+            });
+        const selected = selectExhaustiveCompletedPartialUnitComposition(
+            exhaustiveCandidates,
+            aggregate.startYear,
+            aggregate.endYear,
+        );
+        if (selected?.reason !== "cross_view_boundary_consensus"
+            || decisiveExactPartialRejectsWeakUnitComposition(
+                aggregate,
+                selected.competition,
+            )) continue;
+        const selectedSource: DiagnosisEvent = {
+            ...aggregate,
+            evidence: {
+                ...aggregate.evidence,
+                algorithmSources: Array.from(new Set([
+                    ...aggregate.evidence.algorithmSources,
+                    "cross_view_completed_composition_checkpoint",
+                    "exhaustive_completed_partial_unit_adjudication",
+                ])).sort(),
+                notes: Array.from(new Set([
+                    ...aggregate.evidence.notes,
+                    `completed_mixed_exhaustive_selected_type=${selected.unitEventType}`,
+                    `completed_mixed_exhaustive_reason=${selected.reason}`,
+                ])),
+            },
+        };
+        return makeCompletedPartialUnitFrontierEvent(
+            selectedSource,
+            selected.competition,
+            diagnosis,
+        );
+    }
+    return null;
 };
 
 const recoverBoundedCompletedPartialUnitFrontier = (
@@ -7385,6 +7656,19 @@ export const makeDiagnosisEvents = (
                 boundedOperationBaseline,
             )
             : [];
+        // The bounded path may legitimately use a non-zero terminal lag as a state baseline.
+        // Completed local compositions instead compare edits against the fixed newer side, whose
+        // residual baseline is zero after any whole-series correction has been exposed. Keeping
+        // these tables separate prevents a remote terminal state from changing the operation
+        // family considered by the composition adjudicator.
+        const localCompositionOperations = shouldFitBoundedPath
+            ? getJointCounterfactualOperationScores(
+                diagnosis,
+                15,
+                effectiveConfig.maxPartialGapYears,
+                0,
+            )
+            : [];
         const rankedBoundedOperations = boundedOperations
             .map((operation) => ({
                 operation,
@@ -7399,6 +7683,9 @@ export const makeDiagnosisEvents = (
             ));
         const boundedOperationSelection = selectDynamicJointOperation(boundedOperations);
         const boundedUnitSelection = selectDynamicUnitOperation(boundedOperations);
+        const localCompositionUnitSelection = selectDynamicUnitOperation(
+            localCompositionOperations,
+        );
         const trustedPartialOperation = boundedOperationSelection
             ?.operation.eventType === "partialMove"
             && boundedOperationSelection.score >= 0.04
@@ -7930,6 +8217,20 @@ export const makeDiagnosisEvents = (
         if (boundedCompressedMissingFrontier) {
             return finalize([boundedCompressedMissingFrontier], [], false);
         }
+        const crossViewCompletedPartialUnitFrontier =
+            recoverCrossViewCompletedPartialUnitFrontier(
+                boundedPathEvents,
+                displayed,
+                candidateEvents,
+                diagnosis,
+                cofechaDiagnosis,
+                siteData,
+                effectiveConfig.maxPartialGapYears,
+                localCompositionOperations,
+            );
+        if (crossViewCompletedPartialUnitFrontier) {
+            return finalize([crossViewCompletedPartialUnitFrontier], [], false);
+        }
         const nearCumulativePartialPairFrontier = recoverNearCumulativePartialPairFrontier(
             displayed,
             boundedPathEvents,
@@ -7957,8 +8258,8 @@ export const makeDiagnosisEvents = (
                 siteData,
                 effectiveConfig.maxPartialGapYears,
                 locatorPathCache,
-                boundedUnitSelection,
-                boundedOperations,
+                localCompositionUnitSelection,
+                localCompositionOperations,
             );
         if (boundedCompletedPartialUnitFrontier) {
             const reconciledUnit = reconcileCumulativeUnitOperationWithCompletedLocation(
