@@ -172,6 +172,60 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("does not let a supplemental cumulative path replace a selected mixed frontier", () => {
+        const cumulative = event("cumulative", "partialMove", 1823, 1835, 1829);
+        cumulative.shiftYears = -7;
+        cumulative.evidence.lagBefore = -7;
+        cumulative.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        cumulative.evidence.notes = ["bounded_path_complete_hypothesis=true"];
+        const partialFrontier = event("partial-frontier", "partialMove", 1830, 1836, 1833);
+        partialFrontier.shiftYears = -6;
+        partialFrontier.evidence.lagBefore = -6;
+        partialFrontier.evidence.algorithmSources = [
+            "completed_partial_missing_composition",
+            "per_reference_completed_correction",
+        ];
+        partialFrontier.evidence.notes = ["completed_mixed_frontier_is_newest_event"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("detected", cumulative),
+            checkpoint("fused", cumulative),
+            checkpoint("displayed", cumulative),
+            { stage: "final", authority: "supplemental", event: cumulative },
+            { stage: "final", authority: "selected", event: partialFrontier },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "final",
+            event: {
+                id: "partial-frontier",
+                eventType: "partialMove",
+                shiftYears: -6,
+                startYear: 1830,
+                endYear: 1836,
+            },
+        });
+    });
+
+    it("keeps supplemental operations in conflict with an ordinary selected final", () => {
+        const ordinaryPartial = event("ordinary-partial", "partialMove", 1622, 1634, 1628);
+        ordinaryPartial.shiftYears = -54;
+        ordinaryPartial.evidence.lagBefore = -54;
+        const competingMissing = event("competing-missing", "missingRing", 1627, 1633, 1631);
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: ordinaryPartial },
+            { stage: "final", authority: "supplemental", event: competingMissing },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "refused",
+            reason: "operation_conflict",
+            event: null,
+        });
+    });
+
     it("selects the unique hard-gated candidate supported by raw path and direct transition", () => {
         const correctCandidate = event(
             "path-candidate",

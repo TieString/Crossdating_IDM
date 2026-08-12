@@ -316,6 +316,8 @@ export type DiagnosisReviewSourceStage =
 /** Full upstream hypothesis retained for review adjudication without snapshot reconstruction. */
 export type DiagnosisReviewEventCheckpoint = {
     stage: DiagnosisReviewSourceStage;
+    /** Final checkpoints distinguish the production-selected event from fallback hypotheses. */
+    authority?: "selected" | "supplemental";
     event: DiagnosisEvent;
 };
 

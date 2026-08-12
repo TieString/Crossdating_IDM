@@ -7156,10 +7156,6 @@ export const makeDiagnosisEvents = (
                     { stage: "fused", events: detected },
                     { stage: "retained", events: retainedDetected },
                     { stage: "displayed", events: displayed },
-                    {
-                        stage: "final",
-                        events: [...supplementalFinalEvents, ...finalEvents],
-                    },
                 ];
                 stages.forEach(({ stage, events }) => events.forEach((event) => {
                     options.reviewEventCheckpoints?.push({
@@ -7172,6 +7168,25 @@ export const makeDiagnosisEvents = (
                         })),
                     });
                 }));
+                const pushFinalCheckpoint = (
+                    event: DiagnosisEvent,
+                    authority: NonNullable<DiagnosisReviewEventCheckpoint["authority"]>,
+                ): void => {
+                    options.reviewEventCheckpoints?.push({
+                        stage: "final",
+                        authority,
+                        event: withEvidenceLedger(stripDiagnosisEventAlternatives({
+                            ...event,
+                            seriesRange: event.seriesRange
+                                ? { ...event.seriesRange }
+                                : { ...diagnosis.targetRange },
+                        })),
+                    });
+                };
+                supplementalFinalEvents.forEach((event) => (
+                    pushFinalCheckpoint(event, "supplemental")
+                ));
+                finalEvents.forEach((event) => pushFinalCheckpoint(event, "selected"));
             }
             return finalEvents;
         };

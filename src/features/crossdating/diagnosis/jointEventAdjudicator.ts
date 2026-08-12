@@ -334,11 +334,13 @@ const deduplicateCheckpoints = (
     const selected = new Map<string, DiagnosisReviewEventCheckpoint>();
     checkpoints.forEach((checkpoint) => {
         const event = checkpoint.event;
-        const key = [checkpoint.stage, event.eventType, event.shiftYears ?? "unit",
+        const key = [checkpoint.stage, checkpoint.authority ?? "selected",
+            event.eventType, event.shiftYears ?? "unit",
             event.startYear, event.endYear, topYear(event) ?? "none"].join(":");
         if (!selected.has(key)) {
             selected.set(key, {
                 stage: checkpoint.stage,
+                ...(checkpoint.authority ? { authority: checkpoint.authority } : {}),
                 event: withEvidenceLedger(event),
             });
         }
@@ -469,6 +471,20 @@ const operationScore = (group: OperationGroup): number => {
 
 const hasFinalCheckpoint = (cluster: HypothesisCluster): boolean => (
     cluster.checkpoints.some(({ stage }) => stage === "final")
+);
+
+const hasSelectedCompletedComposition = (cluster: HypothesisCluster): boolean => (
+    cluster.checkpoints.some((checkpoint) => {
+        const { event } = checkpoint;
+        return checkpoint.stage === "final"
+            && checkpoint.authority !== "supplemental"
+            && event.eventType === "partialMove"
+            && event.evidence.notes.includes("completed_mixed_frontier_is_newest_event")
+            && event.evidence.algorithmSources.some((source) => (
+                source === "completed_partial_missing_composition"
+                || source === "completed_partial_false_composition"
+            ));
+    })
 );
 
 const checkpointsWithFinalClaim = (
@@ -747,8 +763,16 @@ const finalFrontierClusters = (
     clusters: readonly HypothesisCluster[],
     config: JointEventAdjudicationConfig,
 ): HypothesisCluster[] | null => {
-    const finalClusters = clusters.filter(hasFinalCheckpoint);
-    if (finalClusters.length === 0) return null;
+    const allFinalClusters = clusters.filter(hasFinalCheckpoint);
+    if (allFinalClusters.length === 0) return null;
+    const completedCompositionClusters = allFinalClusters.filter(
+        hasSelectedCompletedComposition,
+    );
+    // A fallback stays in competition for ordinary events. Only a completed, per-reference
+    // partial+unit correction has consumed the cumulative state strongly enough to supersede it.
+    const finalClusters = completedCompositionClusters.length > 0
+        ? completedCompositionClusters
+        : allFinalClusters;
     const boundedPathClusters = finalClusters.filter((cluster) => (
         cluster.checkpoints.some(({ event }) => evidenceClaimsFor(event).has(
             "bounded_lag_state_path",
