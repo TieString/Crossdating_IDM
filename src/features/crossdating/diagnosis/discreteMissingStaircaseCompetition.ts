@@ -913,12 +913,26 @@ const compareCompletedPartialWithSingleUnit = (
     ) && event.evidence.notes.some((note) => (
         note.startsWith("bounded_completed_mixed_seed=")
     ));
+    const hasExhaustiveMixedSeed = event.evidence.notes.includes(
+        "completed_mixed_seed=exhaustive_unit_family",
+    ) && (
+        event.evidence.algorithmSources.includes("bounded_complete_lag_path")
+        || (
+            event.evidence.algorithmSources.includes(
+                "full_interval_counterfactual_scan",
+            )
+            && event.evidence.algorithmSources.includes(
+                "decisive_joint_operation_fusion",
+            )
+        )
+    );
     if (
         event.eventType !== "partialMove"
         || event.shiftSide !== "older"
         || !Number.isInteger(cumulativeShiftYears)
         || cumulativeShiftYears! > -3
-        || (!hasCandidateBackedSeed && !hasBoundedMixedSeed)
+        || (!hasCandidateBackedSeed && !hasBoundedMixedSeed
+            && !hasExhaustiveMixedSeed)
     ) return null;
     const unitShiftYears = unitEventType === "missingRing" ? -1 : 1;
     const partialShiftYears = cumulativeShiftYears! - unitShiftYears;

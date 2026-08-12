@@ -345,6 +345,14 @@ const hasReviewablePartialMoveEvidence = (
         orientationLowerQuartileMargin: completedMixedOrientationQ25,
         masterOrientationMargin: completedMixedMasterOrientation,
     });
+    const exhaustiveRegionalPartialSupported = sources.has(
+        "exhaustive_completed_partial_unit_adjudication",
+    )
+        && event.evidence.notes.includes(
+            "completed_mixed_exhaustive_reason=regional_unit_direction",
+        )
+        && completedMixedSeparation >= 4
+        && completedMixedSeparation <= 13;
     if ((sources.has("completed_partial_missing_composition")
             || sources.has("completed_partial_false_composition"))
         && sources.has("per_reference_completed_correction")
@@ -356,8 +364,10 @@ const hasReviewablePartialMoveEvidence = (
             completedMixedFrontierYear,
             config.partialVoteWindowToleranceYears,
         )
-        && completedMixedSupported
-        && event.evidence.candidateIds.length >= 1) return true;
+        && (
+            (completedMixedSupported && event.evidence.candidateIds.length >= 1)
+            || exhaustiveRegionalPartialSupported
+        )) return true;
 
     const gridConsensusShift = numericNote(event, "candidate_grid_partial_shift");
     const gridCandidateYear = numericNote(

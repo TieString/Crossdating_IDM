@@ -208,6 +208,35 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("keeps a selected completed unit frontier over an older displayed unit window", () => {
+        const displayed = event("displayed-unit", "missingRing", 1821, 1829, 1824);
+        displayed.evidence.algorithmSources = ["reference_core_pair_voting"];
+        const completed = event("completed-unit", "missingRing", 1827, 1835, 1831);
+        completed.evidence.algorithmSources = [
+            "completed_partial_missing_composition",
+            "exhaustive_completed_partial_unit_adjudication",
+            "per_reference_completed_correction",
+        ];
+        completed.evidence.notes = ["completed_mixed_frontier_is_newest_event"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("detected", displayed),
+            checkpoint("displayed", displayed),
+            { stage: "final", authority: "selected", event: completed },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "final",
+            event: {
+                id: "completed-unit",
+                eventType: "missingRing",
+                startYear: 1827,
+                endYear: 1835,
+            },
+        });
+    });
+
     it("keeps supplemental operations in conflict with an ordinary selected final", () => {
         const ordinaryPartial = event("ordinary-partial", "partialMove", 1622, 1634, 1628);
         ordinaryPartial.shiftYears = -54;

@@ -271,6 +271,34 @@ const preferredAcceptedFinalLocation = (
             - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
     ))[0] ?? null;
 
+const isSelectedCompletedCompositionCheckpoint = (
+    checkpoint: DiagnosisReviewEventCheckpoint,
+): boolean => checkpoint.stage === "final"
+    && checkpoint.authority !== "supplemental"
+    && (
+        checkpoint.event.eventType === "partialMove"
+        || checkpoint.event.evidence.algorithmSources.includes(
+            "exhaustive_completed_partial_unit_adjudication",
+        )
+    )
+    && checkpoint.event.evidence.notes.includes(
+        "completed_mixed_frontier_is_newest_event",
+    )
+    && checkpoint.event.evidence.algorithmSources.some((source) => (
+        source === "completed_partial_missing_composition"
+        || source === "completed_partial_false_composition"
+    ));
+
+const preferredSelectedCompletedComposition = (
+    cluster: HypothesisCluster,
+): DiagnosisReviewEventCheckpoint | null => cluster.checkpoints
+    .filter(isSelectedCompletedCompositionCheckpoint)
+    .sort((left, right) => (
+        eventLocationQuality(right.event) - eventLocationQuality(left.event)
+        || (topYear(right.event) ?? Number.NEGATIVE_INFINITY)
+            - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
+    ))[0] ?? null;
+
 const preferredSelectedFinalLocation = (
     cluster: HypothesisCluster,
 ): DiagnosisReviewEventCheckpoint | null => {
@@ -301,7 +329,8 @@ const representative = (
         || (topYear(right.event) ?? Number.NEGATIVE_INFINITY)
             - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
     ))[0];
-    const selected = preferredAcceptedFinalLocation(cluster)
+    const selected = preferredSelectedCompletedComposition(cluster)
+        ?? preferredAcceptedFinalLocation(cluster)
         ?? preferredSelectedFinalLocation(cluster)
         ?? ranked;
     return preferredEndpointCandidate(cluster, selected)
@@ -497,17 +526,7 @@ const hasFinalCheckpoint = (cluster: HypothesisCluster): boolean => (
 );
 
 const hasSelectedCompletedComposition = (cluster: HypothesisCluster): boolean => (
-    cluster.checkpoints.some((checkpoint) => {
-        const { event } = checkpoint;
-        return checkpoint.stage === "final"
-            && checkpoint.authority !== "supplemental"
-            && event.eventType === "partialMove"
-            && event.evidence.notes.includes("completed_mixed_frontier_is_newest_event")
-            && event.evidence.algorithmSources.some((source) => (
-                source === "completed_partial_missing_composition"
-                || source === "completed_partial_false_composition"
-            ));
-    })
+    cluster.checkpoints.some(isSelectedCompletedCompositionCheckpoint)
 );
 
 const checkpointsWithFinalClaim = (

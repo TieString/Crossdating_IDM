@@ -759,6 +759,74 @@ describe("lower review-window display gate", () => {
         });
     });
 
+    it("shows an exhaustive partial only after regional unit-boundary validation", () => {
+        const partial = reviewablePartial(-6, {
+            candidateIds: [],
+            algorithmSources: [
+                "completed_partial_missing_composition",
+                "exhaustive_completed_partial_unit_adjudication",
+                "per_reference_completed_correction",
+            ],
+            notes: [
+                "counterfactual_correction_years=-6",
+                "completed_mixed_partial_shift=-6",
+                "completed_mixed_frontier_year=1900",
+                "completed_mixed_frontier_type=partialMove",
+                "completed_mixed_frontier_is_newest_event",
+                "completed_mixed_separation=6",
+                "completed_mixed_master_margin=-1.1",
+                "completed_mixed_reference_support=18/28",
+                "completed_mixed_reference_median=0.03",
+                "completed_mixed_reference_q25=-0.01",
+                "completed_mixed_orientation_support=20/28",
+                "completed_mixed_orientation_median=0.03",
+                "completed_mixed_orientation_q25=0.00",
+                "completed_mixed_master_orientation_margin=-1.1",
+                "completed_mixed_source_segment_anchored=false",
+                "completed_mixed_exhaustive_reason=regional_unit_direction",
+            ],
+        });
+
+        expect(selectReviewWindowDisplay(audit([]), [partial])).toMatchObject({
+            status: "strict",
+            event: partial,
+        });
+    });
+
+    it("keeps a two-year exhaustive partial decomposition hidden", () => {
+        const partial = reviewablePartial(-5, {
+            candidateIds: [],
+            algorithmSources: [
+                "completed_partial_missing_composition",
+                "exhaustive_completed_partial_unit_adjudication",
+                "per_reference_completed_correction",
+            ],
+            notes: [
+                "counterfactual_correction_years=-5",
+                "completed_mixed_partial_shift=-5",
+                "completed_mixed_frontier_year=1900",
+                "completed_mixed_frontier_type=partialMove",
+                "completed_mixed_frontier_is_newest_event",
+                "completed_mixed_separation=2",
+                "completed_mixed_master_margin=0",
+                "completed_mixed_reference_support=20/25",
+                "completed_mixed_reference_median=0.028611",
+                "completed_mixed_reference_q25=0.011442",
+                "completed_mixed_orientation_support=25/27",
+                "completed_mixed_orientation_median=0.092859",
+                "completed_mixed_orientation_q25=0.054859",
+                "completed_mixed_master_orientation_margin=0",
+                "completed_mixed_source_segment_anchored=false",
+                "completed_mixed_exhaustive_reason=cofecha_completed_family",
+            ],
+        });
+
+        expect(selectReviewWindowDisplay(audit([]), [partial])).toMatchObject({
+            status: "refused",
+            reason: "partial_move_evidence_insufficient",
+        });
+    });
+
     it("keeps a weak completed-partial family hidden", () => {
         const partial = reviewablePartial(-4, {
             candidateIds: ["partial-candidate"],

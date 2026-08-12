@@ -23,7 +23,9 @@ import {
     selectCompletedPartialFalseSeed,
     selectCompletedPartialMissingSeed,
     selectBoundedCompletedPartialUnitSeeds,
+    selectExhaustiveCompletedPartialUnitComposition,
     supportsCompletedPartialUnitComposition,
+    type ExhaustiveCompletedPartialUnitCandidate,
     shouldReplaceUnanchoredPartialWithReferencePulse,
     shouldPreferWholeSeriesAlias,
     shouldSuppressSelfWorseningCandidateFalseRing,
@@ -490,6 +492,213 @@ describe("supportsCompletedPartialUnitComposition", () => {
         supported.masterOrientationMargin = 0.26;
 
         expect(supportsCompletedPartialUnitComposition(supported)).toBe(true);
+    });
+});
+
+describe("selectExhaustiveCompletedPartialUnitComposition", () => {
+    const regionalEvidence = (overrides: Record<string, number | null> = {}) => ({
+        startYear: 1794,
+        endYear: 1818,
+        rowCount: 25,
+        bestYear: 1806,
+        bestRawGain: 0.01,
+        bestDifferenceGain: 0.01,
+        topThreeDifferenceGain: 0.01,
+        meanDifferenceGain: 0.005,
+        bestCombinedGain: 0.01,
+        topThreeCombinedGain: 0.01,
+        bestSideStepYear: 1806,
+        bestSideStepScore: 0.01,
+        topThreeSideStepScore: 0.01,
+        bestSideMinimumAdvantage: 0,
+        bestCorrectedSideSupport: 0.1,
+        differenceOutsideMargin: 0,
+        sideStepOutsideMargin: 0,
+        anchorYear: 1806,
+        anchorDifferenceGain: 0.01,
+        anchorCombinedGain: 0.01,
+        anchorSideStepScore: 0.01,
+        anchorSideMinimumAdvantage: 0,
+        anchorCorrectedSideSupport: 0.1,
+        anchorThreeDifferenceGain: 0.01,
+        anchorFiveDifferenceGain: 0.01,
+        anchorThreeCombinedGain: 0.01,
+        anchorFiveCombinedGain: 0.01,
+        anchorThreeSideStepScore: 0.01,
+        anchorFiveSideStepScore: 0.01,
+        ...overrides,
+    });
+    const mixedCandidate = (
+        unitEventType: "missingRing" | "falseRing",
+        rawOverrides: Record<string, number | string> = {},
+        cofechaOverrides: Record<string, number | string> = {},
+        regionalOverrides: Record<string, number | null> = {},
+    ): ExhaustiveCompletedPartialUnitCandidate => {
+        const orientation = unitEventType === "missingRing"
+            ? "partialThenMissing"
+            : "partialThenFalse";
+        const base = {
+            unitEventType,
+            cumulativeShiftYears: unitEventType === "missingRing" ? -7 : -5,
+            partialShiftYears: -6,
+            orientation,
+            olderBoundaryYear: 1800,
+            newerBoundaryYear: 1806,
+            frontierEventType: unitEventType,
+            frontierYear: 1806,
+            separationYears: 6,
+            masterMargin: 0,
+            referenceCount: 20,
+            mixedReferenceSupport: 14,
+            mixedReferenceSupportRatio: 0.7,
+            referenceMedianMargin: 0.01,
+            referenceLowerQuartileMargin: 0,
+            orientationReferenceCount: 20,
+            orientationReferenceSupport: 15,
+            orientationReferenceSupportRatio: 0.75,
+            orientationMedianMargin: 0.03,
+            orientationLowerQuartileMargin: 0.005,
+            masterOrientationMargin: 0,
+            comparedWithMissingStaircase: false,
+            sourceSegmentAnchored: false,
+        };
+        return {
+            unitEventType,
+            rawCompetition: { ...base, ...rawOverrides },
+            cofechaCompetition: { ...base, ...cofechaOverrides },
+            regionalEvidence: regionalEvidence(regionalOverrides),
+        } as ExhaustiveCompletedPartialUnitCandidate;
+    };
+
+    it("uses a dominant completed COFECHA family when the raw view is diffuse", () => {
+        const selected = selectExhaustiveCompletedPartialUnitComposition([
+            mixedCandidate("missingRing", {}, {
+                referenceMedianMargin: 0.055,
+                referenceLowerQuartileMargin: 0.02,
+                mixedReferenceSupportRatio: 0.8,
+                orientationReferenceSupportRatio: 0.85,
+                orientationMedianMargin: 0.06,
+                orientationLowerQuartileMargin: 0.01,
+            }),
+            mixedCandidate("falseRing", {}, {
+                referenceMedianMargin: 0.02,
+            }),
+        ], 1800, 1812);
+
+        expect(selected).toMatchObject({
+            unitEventType: "missingRing",
+            reason: "cofecha_completed_family",
+        });
+    });
+
+    it("uses sharp regional unit direction only with per-reference mixed support", () => {
+        const selected = selectExhaustiveCompletedPartialUnitComposition([
+            mixedCandidate("missingRing", {}, {}, {
+                bestDifferenceGain: 0.03,
+                bestSideStepScore: 0.08,
+                bestSideMinimumAdvantage: 0.05,
+            }),
+            mixedCandidate("falseRing", {
+                referenceMedianMargin: 0.02,
+                mixedReferenceSupportRatio: 0.7,
+                orientationReferenceSupportRatio: 0.75,
+                orientationMedianMargin: 0.03,
+            }, {}, {
+                bestDifferenceGain: 0.07,
+                bestSideStepScore: 0.15,
+                bestSideMinimumAdvantage: 0.1,
+            }),
+        ], 1800, 1812);
+
+        expect(selected).toMatchObject({
+            unitEventType: "falseRing",
+            reason: "regional_unit_direction",
+        });
+    });
+
+    it("uses a separated regional unit boundary when the newer frontier is partial", () => {
+        const selected = selectExhaustiveCompletedPartialUnitComposition([
+            mixedCandidate("missingRing", {
+                referenceMedianMargin: 0.03,
+                mixedReferenceSupportRatio: 0.68,
+                orientationReferenceSupportRatio: 0.75,
+                orientationMedianMargin: 0.03,
+            }, {
+                frontierEventType: "partialMove",
+                frontierYear: 1807,
+                olderBoundaryYear: 1801,
+                newerBoundaryYear: 1807,
+                separationYears: 6,
+            }, {
+                bestYear: 1802,
+                bestDifferenceGain: 0.06,
+                bestSideStepYear: 1801,
+                bestSideStepScore: 0.14,
+                bestSideMinimumAdvantage: 0.09,
+            }),
+            mixedCandidate("falseRing", {}, {}, {
+                bestDifferenceGain: 0.01,
+                bestSideStepScore: 0.03,
+            }),
+        ], 1800, 1812);
+
+        expect(selected).toMatchObject({
+            unitEventType: "missingRing",
+            reason: "regional_unit_direction",
+            competition: {
+                frontierEventType: "partialMove",
+                partialShiftYears: -6,
+            },
+        });
+    });
+
+    it("does not split a single partial on a two-year synthetic plateau", () => {
+        const selected = selectExhaustiveCompletedPartialUnitComposition([
+            mixedCandidate("missingRing", {}, {
+                frontierEventType: "partialMove",
+                frontierYear: 1807,
+                olderBoundaryYear: 1805,
+                newerBoundaryYear: 1807,
+                separationYears: 2,
+                referenceMedianMargin: 0.06,
+                referenceLowerQuartileMargin: 0.02,
+                mixedReferenceSupportRatio: 0.8,
+                orientationReferenceSupportRatio: 0.9,
+                orientationMedianMargin: 0.09,
+                orientationLowerQuartileMargin: 0.05,
+            }),
+            mixedCandidate("falseRing"),
+        ], 1800, 1812);
+
+        expect(selected).toBeNull();
+    });
+
+    it("does not let COFECHA alone split a three-year partial plateau", () => {
+        const selected = selectExhaustiveCompletedPartialUnitComposition([
+            mixedCandidate("missingRing", {}, {
+                frontierEventType: "missingRing",
+                frontierYear: 1807,
+                olderBoundaryYear: 1804,
+                newerBoundaryYear: 1807,
+                separationYears: 3,
+                referenceMedianMargin: 0.08,
+                referenceLowerQuartileMargin: 0.05,
+                mixedReferenceSupportRatio: 0.9,
+                orientationReferenceSupportRatio: 0.9,
+                orientationMedianMargin: 0.1,
+                orientationLowerQuartileMargin: 0.05,
+            }),
+            mixedCandidate("falseRing"),
+        ], 1800, 1812);
+
+        expect(selected).toBeNull();
+    });
+
+    it("keeps two weak completed families refused", () => {
+        expect(selectExhaustiveCompletedPartialUnitComposition([
+            mixedCandidate("missingRing"),
+            mixedCandidate("falseRing"),
+        ], 1800, 1812)).toBeNull();
     });
 });
 
