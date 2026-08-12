@@ -22,6 +22,13 @@ export const MISSING_PARTIAL_INTERPRETATION_CALIBRATION = {
     maximumMissingRegionWidthYears: 13,
 } as const;
 
+const sortedYearMedian = (years: readonly number[]): number => {
+    const middle = Math.floor(years.length / 2);
+    return years.length % 2 === 1
+        ? years[middle]!
+        : ((years[middle - 1] ?? 0) + (years[middle] ?? 0)) / 2;
+};
+
 type InterpretationCompetition = {
     cumulativeShiftYears: number;
     partialFirstFixedYear: number;
@@ -204,6 +211,93 @@ export const evaluateCompletedPartialMissingInterpretation = (
             orientationReferenceSupport: competition.orientationReferenceSupport,
             orientationReferenceCount: competition.orientationReferenceCount,
         },
+    };
+};
+
+/**
+ * A cumulative missing path can contain one or more isolated unit events plus one dense run of
+ * consecutive state changes. When both the fitted path and the completed family independently
+ * expose the same unique split, the dense run is review-equivalent to one physical gap. The
+ * isolated unit events remain deferred until the partial interpretation is applied and rerun.
+ */
+export const evaluateSeparatedDenseStaircaseClusterInterpretation = (
+    competition: CompletedPartialStaircaseCompetition | null,
+    head: SequentialMissingHead | null,
+    gate: {
+        partialReviewPassed: boolean;
+        hasIndependentWholeSeriesBaseline: boolean;
+    },
+): DiagnosisMissingPartialInterpretationEvidence | null => {
+    if (!competition
+        || !head
+        || !gate.partialReviewPassed
+        || gate.hasIndependentWholeSeriesBaseline
+        || competition.partialShiftYears >= -1
+        || head.pathStartLag >= -1
+        || Math.abs(head.pathStartLag) !== head.transitionCount
+        || head.unitEventYears.length !== head.transitionCount) return null;
+
+    const pathYears = [...head.unitEventYears].sort((left, right) => left - right);
+    const familyYears = [...competition.missingYears].sort((left, right) => left - right);
+    const splitDenseCluster = (years: readonly number[]) => {
+        const gaps = years.slice(1).map((year, index) => ({
+            index: index + 1,
+            gap: year - years[index]!,
+        })).filter((row) => row.gap >= 14);
+        if (gaps.length !== 1) return null;
+        const dense = years.slice(gaps[0]!.index);
+        const isolated = years.slice(0, gaps[0]!.index);
+        const denseWidth = (dense[dense.length - 1] ?? 0) - (dense[0] ?? 0) + 1;
+        return isolated.length >= 1
+            && dense.length >= 2
+            && denseWidth >= 5
+            && denseWidth <= MISSING_PARTIAL_INTERPRETATION_CALIBRATION
+                .maximumMissingRegionWidthYears
+            ? { dense, isolated, separationYears: gaps[0]!.gap }
+            : null;
+    };
+    const pathSplit = splitDenseCluster(pathYears);
+    const familySplit = splitDenseCluster(familyYears);
+    if (!pathSplit
+        || !familySplit) return null;
+    const partialCount = pathSplit.dense.length;
+    const candidateMagnitude = Math.abs(competition.partialShiftYears);
+    if (familySplit.dense.length !== partialCount
+        || pathSplit.isolated.length !== familySplit.isolated.length
+        || (candidateMagnitude !== partialCount
+            && candidateMagnitude !== head.transitionCount)
+        || pathSplit.separationYears > 60
+        || familySplit.separationYears > 60) return null;
+
+    const pathDenseCenter = sortedYearMedian(pathSplit.dense);
+    const familyDenseCenter = sortedYearMedian(familySplit.dense);
+    const pathIsolatedCenter = sortedYearMedian(pathSplit.isolated);
+    const familyIsolatedCenter = sortedYearMedian(familySplit.isolated);
+    if (Math.abs(pathDenseCenter - familyDenseCenter) > 4
+        || Math.abs(pathIsolatedCenter - familyIsolatedCenter) > 4
+        || Math.abs(competition.partialFirstFixedYear - pathDenseCenter) > 7
+        || competition.referenceCount
+            < MISSING_PARTIAL_INTERPRETATION_CALIBRATION.minimumReferenceCount) {
+        return null;
+    }
+
+    return {
+        interpretationBasis: "separatedDenseStaircaseClusterAlternative",
+        missingRingCount: partialCount,
+        cumulativeShiftYears: -partialCount,
+        missingYears: pathSplit.dense,
+        partialFirstFixedYear: competition.partialFirstFixedYear,
+        normalizedCounterfactualGainDifference: Math.max(
+            Math.abs(competition.masterMargin)
+                / MISSING_PARTIAL_INTERPRETATION_CALIBRATION.maximumMasterMargin,
+            Math.abs(competition.referenceMedianMargin)
+                / MISSING_PARTIAL_INTERPRETATION_CALIBRATION.maximumReferenceMedianMargin,
+        ),
+        masterMargin: competition.masterMargin,
+        referenceMedianMargin: competition.referenceMedianMargin,
+        referenceCount: competition.referenceCount,
+        missingReferenceSupport: competition.staircaseReferenceSupport,
+        partialReferenceSupport: competition.partialReferenceSupport,
     };
 };
 
@@ -434,6 +528,8 @@ export const makeMissingRingInterpretation = (
         ? "completed_partial_missing_interpretation"
         : evidence.interpretationBasis === "exactSequentialStaircaseAlternative"
             ? "exact_sequential_missing_interpretation"
+        : evidence.interpretationBasis === "separatedDenseStaircaseClusterAlternative"
+            ? "separated_dense_staircase_cluster_interpretation"
         : evidence.interpretationBasis === "localizedTwoStepStaircaseAlternative"
             ? "localized_two_step_missing_interpretation"
         : evidence.interpretationBasis === "structuredLocatorCumulativeLagAlternative"

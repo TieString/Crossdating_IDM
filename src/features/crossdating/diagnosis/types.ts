@@ -131,6 +131,7 @@ export type DiagnosisMissingPartialInterpretationEvidence = {
     interpretationBasis?: "counterfactualTie"
         | "completedPartialMissingComposition"
         | "exactSequentialStaircaseAlternative"
+        | "separatedDenseStaircaseClusterAlternative"
         | "localizedTwoStepStaircaseAlternative"
         | "structuredLocatorCumulativeLagAlternative";
     missingRingCount: number;

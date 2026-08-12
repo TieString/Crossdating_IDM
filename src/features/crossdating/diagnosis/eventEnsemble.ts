@@ -31,6 +31,7 @@ import {
     evaluateExactSequentialMissingInterpretation,
     evaluateLocalizedTwoStepMissingInterpretation,
     evaluateMissingPartialInterpretationTie,
+    evaluateSeparatedDenseStaircaseClusterInterpretation,
     makeMissingRingInterpretation,
     makePartialMoveInterpretation,
 } from "./missingPartialInterpretation";
@@ -5621,9 +5622,8 @@ const recoverSequentialMissingHeadEvent = (
                 && event.evidence.notes.includes("candidate_hard_gate_passed")
             )).length
             : 0;
-        const completedPartialCandidate = completedFamilyCompetition
+        const completedPartialReviewCandidate = completedFamilyCompetition
             && !whole
-            && !hasDistinctConfirmedMissingMode
             && !hasConsensusAnchoredMissingStaircase
             ? recoverCompletedCandidateBackedPartial(
                 completedFamilyCompetition,
@@ -5632,6 +5632,17 @@ const recoverSequentialMissingHeadEvent = (
                 completedFamilySupported ? "preferred" : "tied-alternative",
             )
             : null;
+        const completedPartialCandidate = !hasDistinctConfirmedMissingMode
+            ? completedPartialReviewCandidate
+            : null;
+        const denseClusterInterpretation = evaluateSeparatedDenseStaircaseClusterInterpretation(
+            completedFamilyCompetition,
+            head,
+            {
+                partialReviewPassed: completedPartialReviewCandidate !== null,
+                hasIndependentWholeSeriesBaseline: independentWholeBaseline,
+            },
+        );
         const completedPartial = completedFamilySupported
             ? completedPartialCandidate
             : null;
@@ -5787,9 +5798,18 @@ const recoverSequentialMissingHeadEvent = (
                 hasIndependentWholeSeriesBaseline: independentWholeBaseline,
             },
         );
-        const interpretationEvidence = completedTieEvidence ?? smallTieEvidence;
-        const partialInterpretation = completedTieEvidence
-            ? completedPartialCandidate
+        const interpretationEvidence = denseClusterInterpretation
+            ?? completedTieEvidence
+            ?? smallTieEvidence;
+        const partialInterpretation = denseClusterInterpretation
+            && completedPartialReviewCandidate
+            ? makePartialMoveInterpretation(
+                completedPartialReviewCandidate,
+                denseClusterInterpretation,
+                diagnosis.targetRange,
+            )
+            : completedTieEvidence
+                ? completedPartialCandidate
             : smallTieEvidence && compressedPartial
                 ? makePartialMoveInterpretation(
                     compressedPartial,
