@@ -255,6 +255,49 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("does not let a supplemental bounded path change the selected final operation", () => {
+        const selectedFalse = event("selected-false", "falseRing", 1156, 1164, 1160);
+        selectedFalse.evidence.algorithmSources = [
+            "candidate_ranking",
+            "full_interval_counterfactual_locator",
+            "local_edit_alignment",
+        ];
+        selectedFalse.evidence.notes = ["candidate_hard_gate_passed"];
+        selectedFalse.evidence.locationEvidence = [{
+            source: "full_interval_counterfactual_locator",
+            startYear: 1156,
+            endYear: 1164,
+            topYear: 1160,
+            referenceCount: 24,
+            concentration: 0.88,
+            remoteMargin: 0.8,
+            calibrated: true,
+        }];
+        const cumulative = event("cumulative-partial", "partialMove", 1153, 1165, 1159);
+        cumulative.shiftYears = -5;
+        cumulative.evidence.lagBefore = -5;
+        cumulative.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        cumulative.evidence.notes = ["bounded_path_complete_hypothesis=true"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", selectedFalse),
+            checkpoint("displayed", selectedFalse),
+            { stage: "final", authority: "selected", event: selectedFalse },
+            { stage: "final", authority: "supplemental", event: cumulative },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "final",
+            event: {
+                id: "selected-false",
+                eventType: "falseRing",
+                startYear: 1156,
+                endYear: 1164,
+            },
+        });
+    });
+
     it("keeps a selected location over a same-operation supplemental location", () => {
         const located = event("located", "partialMove", 1817, 1829, 1823);
         located.shiftYears = -20;

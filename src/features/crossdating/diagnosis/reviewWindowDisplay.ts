@@ -353,6 +353,32 @@ const hasReviewablePartialMoveEvidence = (
         )
         && completedMixedSeparation >= 4
         && completedMixedSeparation <= 13;
+    const exhaustiveLongCofechaPartialConsensus = completedMixedReference.ratio >= 0.85
+        && completedMixedMedian >= 0.12
+        && completedMixedQ25 >= 0.03
+        && completedMixedOrientation.ratio >= 0.85
+        && completedMixedOrientationMedian >= 0.08
+        && completedMixedOrientationQ25 >= 0.02;
+    const exhaustiveLongCofechaPartialHighGain = completedMixedReference.ratio >= 0.6
+        && completedMixedMedian >= 0.25
+        && completedMixedQ25 >= -0.001
+        && completedMixedOrientation.ratio >= 0.7
+        && completedMixedOrientationMedian >= 0.1
+        && completedMixedOrientationQ25 >= 0;
+    const exhaustiveLongCofechaPartialSupported = sources.has(
+        "exhaustive_completed_partial_unit_adjudication",
+    )
+        && event.evidence.notes.includes(
+            "completed_mixed_exhaustive_reason=cofecha_completed_family",
+        )
+        && completedMixedSeparation >= 14
+        && completedMixedSeparation <= 40
+        && completedMixedReference.count >= 8
+        && completedMixedOrientation.count >= 8
+        && (
+            exhaustiveLongCofechaPartialConsensus
+            || exhaustiveLongCofechaPartialHighGain
+        );
     if ((sources.has("completed_partial_missing_composition")
             || sources.has("completed_partial_false_composition"))
         && sources.has("per_reference_completed_correction")
@@ -367,6 +393,7 @@ const hasReviewablePartialMoveEvidence = (
         && (
             (completedMixedSupported && event.evidence.candidateIds.length >= 1)
             || exhaustiveRegionalPartialSupported
+            || exhaustiveLongCofechaPartialSupported
         )) return true;
 
     const gridConsensusShift = numericNote(event, "candidate_grid_partial_shift");

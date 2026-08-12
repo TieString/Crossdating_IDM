@@ -2781,10 +2781,17 @@ const exhaustiveCompositionIsLocalized = (
     competition: CompletedPartialUnitComposition,
     startYear: number,
     endYear: number,
-): boolean => competition.separationYears >= 2
-    && competition.separationYears <= 40
-    && competition.frontierYear >= startYear - 2
-    && competition.frontierYear <= endYear + 2;
+): boolean => {
+    const otherBoundaryYear = competition.frontierYear
+        === competition.olderBoundaryYear
+        ? competition.newerBoundaryYear
+        : competition.olderBoundaryYear;
+    return competition.separationYears >= 2
+        && competition.separationYears <= 40
+        && [competition.frontierYear, otherBoundaryYear].some((year) => (
+            year >= startYear - 2 && year <= endYear + 2
+        ));
+};
 
 const completedCompositionUnitBoundaryYear = (
     competition: CompletedPartialUnitComposition,
@@ -2873,18 +2880,50 @@ export const selectExhaustiveCompletedPartialUnitComposition = (
     const cofechaWinner = cofechaRanked[0]!;
     const cofechaRunnerUp = cofechaRanked[1]!;
     const cofecha = cofechaWinner.cofechaCompetition;
-    if (cofecha.frontierEventType === cofechaWinner.unitEventType
-        && cofecha.separationYears >= 4
+    const unitFrontierFamily = cofecha.frontierEventType
+        === cofechaWinner.unitEventType
+        && cofecha.separationYears >= 4;
+    const longSeparatedPartialConsensus = cofecha.frontierEventType === "partialMove"
+        && cofecha.separationYears >= 14
+        && cofecha.separationYears <= 40
+        && cofecha.referenceMedianMargin >= 0.12
+        && cofecha.referenceMedianMargin
+            - cofechaRunnerUp.cofechaCompetition.referenceMedianMargin >= 0.08
+        && cofecha.referenceLowerQuartileMargin >= 0.03
+        && cofecha.mixedReferenceSupportRatio >= 0.85
+        && cofecha.orientationReferenceSupportRatio >= 0.85
+        && cofecha.orientationMedianMargin >= 0.08
+        && cofecha.orientationLowerQuartileMargin >= 0.02;
+    const longSeparatedPartialHighGain = cofecha.frontierEventType === "partialMove"
+        && cofecha.separationYears >= 14
+        && cofecha.separationYears <= 40
+        && cofecha.referenceMedianMargin >= 0.25
+        && cofecha.referenceMedianMargin
+            - cofechaRunnerUp.cofechaCompetition.referenceMedianMargin >= 0.15
+        && cofecha.referenceLowerQuartileMargin >= -0.001
+        && cofecha.mixedReferenceSupportRatio >= 0.6
+        && cofecha.orientationReferenceSupportRatio >= 0.7
+        && cofecha.orientationMedianMargin >= 0.1
+        && cofecha.orientationMedianMargin
+            - cofechaRunnerUp.cofechaCompetition.orientationMedianMargin >= 0.05
+        && cofecha.orientationLowerQuartileMargin >= 0;
+    const longSeparatedPartialFamily = longSeparatedPartialConsensus
+        || longSeparatedPartialHighGain;
+    const familySpecificSupport = unitFrontierFamily
+        ? cofecha.referenceLowerQuartileMargin >= 0
+            && cofecha.mixedReferenceSupportRatio >= 0.75
+            && cofecha.orientationReferenceSupportRatio >= 0.75
+            && cofecha.orientationMedianMargin >= 0.03
+            && cofecha.orientationLowerQuartileMargin >= 0.003
+        : longSeparatedPartialFamily;
+    if ((unitFrontierFamily || longSeparatedPartialFamily)
+        && familySpecificSupport
         && cofecha.referenceCount >= 8
         && cofecha.referenceMedianMargin >= 0.025
         && cofecha.referenceMedianMargin
             - cofechaRunnerUp.cofechaCompetition.referenceMedianMargin >= 0.015
-        && cofecha.referenceLowerQuartileMargin >= 0
-        && cofecha.mixedReferenceSupportRatio >= 0.75
         && cofecha.orientationReferenceCount >= 8
-        && cofecha.orientationReferenceSupportRatio >= 0.75
-        && cofecha.orientationMedianMargin >= 0.03
-        && cofecha.orientationLowerQuartileMargin >= 0.003) {
+    ) {
         return {
             unitEventType: cofechaWinner.unitEventType,
             competition: cofecha,
@@ -3552,6 +3591,48 @@ const makeCompletedPartialUnitFrontierEvent = (
     return unit;
 };
 
+export const hardCandidateMaySeedExhaustiveComposition = (
+    event: DiagnosisEvent,
+    candidateEvents: readonly DiagnosisEvent[],
+): boolean => {
+    if (event.eventType !== "partialMove"
+        || event.evidence.candidateIds.length < 1
+        || !event.evidence.notes.includes("candidate_hard_gate_passed")
+        || ![
+            "candidate_ranking",
+            "global_sliding_match",
+            "propagation_pattern",
+            "segmented_diagnosis",
+        ].every((source) => event.evidence.algorithmSources.includes(source))) {
+        return false;
+    }
+    const cumulativeMagnitude = Math.abs(event.shiftYears ?? 0);
+    if (cumulativeMagnitude >= 14
+        && event.evidence.lagBefore !== null
+        && event.evidence.lagAfter !== null
+        && Math.abs(event.evidence.lagAfter - event.evidence.lagBefore) === 1) {
+        return true;
+    }
+    if (cumulativeMagnitude < 3 || cumulativeMagnitude > 13) return false;
+    const eventYear = rankedEventYear(event);
+    return candidateEvents.some((candidate) => {
+        if ((candidate.eventType !== "missingRing"
+                && candidate.eventType !== "falseRing")
+            || !candidate.evidence.notes.includes("candidate_hard_gate_passed")) {
+            return false;
+        }
+        if (candidate.evidence.candidateIds.length < 2
+            || candidate.evidence.correlationGain === null
+            || candidate.evidence.correlationGain < 0.005
+            || !candidate.evidence.algorithmSources.includes("cofecha_segment_lag")
+            || !candidate.evidence.algorithmSources.includes("local_edit_alignment")) {
+            return false;
+        }
+        const distance = Math.abs(rankedEventYear(candidate) - eventYear);
+        return distance >= 4 && distance <= 40;
+    });
+};
+
 const recoverBoundedCompletedPartialUnitFrontier = (
     boundedEvents: readonly DiagnosisEvent[],
     displayedEvents: readonly DiagnosisEvent[],
@@ -3622,9 +3703,13 @@ const recoverBoundedCompletedPartialUnitFrontier = (
             candidateEvents,
             [...supportingEvents, ...unitOperationEvent],
         );
+    const isExhaustiveHardCandidateAggregate = (event: DiagnosisEvent): boolean => (
+        hardCandidateMaySeedExhaustiveComposition(event, candidateEvents)
+    );
     const aggregateCandidates = [
         ...displayedEvents,
         ...boundedEvents,
+        ...candidateEvents,
     ].filter((event, index, events) => (
         event.eventType === "partialMove"
         && event.shiftSide === "older"
@@ -3632,7 +3717,10 @@ const recoverBoundedCompletedPartialUnitFrontier = (
         && event.shiftYears! <= -3
         && Math.abs(event.shiftYears!) <= maxPartialGapYears
         && event.endYear - event.startYear + 1 <= 13
-        && event.evidence.scoreMargin >= 0.02
+        && (
+            event.evidence.scoreMargin >= 0.02
+            || isExhaustiveHardCandidateAggregate(event)
+        )
         && (
             event.evidence.algorithmSources.includes("bounded_complete_lag_path")
             || (
@@ -3643,6 +3731,7 @@ const recoverBoundedCompletedPartialUnitFrontier = (
                     "decisive_joint_operation_fusion",
                 )
             )
+            || isExhaustiveHardCandidateAggregate(event)
         )
         && events.findIndex((candidate) => (
             candidate.eventType === "partialMove"
@@ -3653,6 +3742,8 @@ const recoverBoundedCompletedPartialUnitFrontier = (
     )).sort((left, right) => (
         Number(displayedEvents.includes(right))
             - Number(displayedEvents.includes(left))
+        || Number(boundedEvents.includes(right))
+            - Number(boundedEvents.includes(left))
         || right.evidence.scoreMargin - left.evidence.scoreMargin
         || right.evidence.score - left.evidence.score
     ));

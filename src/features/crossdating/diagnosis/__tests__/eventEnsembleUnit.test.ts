@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DiagnosisEvent, SeriesCoreDiagnosis } from "../types";
 import {
     hasIndependentPartialBoundaryAnchor,
+    hardCandidateMaySeedExhaustiveComposition,
     hasCandidateBackedSequentialFalseDirection,
     hasCompressedSequentialFalseDirection,
     hasCoherentSequentialFalseStaircase,
@@ -495,6 +496,80 @@ describe("supportsCompletedPartialUnitComposition", () => {
     });
 });
 
+describe("hardCandidateMaySeedExhaustiveComposition", () => {
+    const aggregate = (lagBefore: number, lagAfter: number): DiagnosisEvent => ({
+        ...falseRingEvent(1800, true),
+        id: "aggregate",
+        eventType: "partialMove",
+        shiftYears: lagBefore,
+        shiftSide: "older",
+        evidence: {
+            ...falseRingEvent(1800, true).evidence,
+            lagBefore,
+            lagAfter,
+            algorithmSources: [
+                "candidate_ranking",
+                "global_sliding_match",
+                "propagation_pattern",
+                "segmented_diagnosis",
+            ],
+            notes: ["candidate_hard_gate_passed"],
+        },
+    });
+
+    it("opens the complete family search for a one-lag residual", () => {
+        expect(hardCandidateMaySeedExhaustiveComposition(
+            aggregate(-19, -20),
+            [],
+        )).toBe(true);
+    });
+
+    it("keeps a standalone complete partial on the fast path", () => {
+        expect(hardCandidateMaySeedExhaustiveComposition(
+            aggregate(-20, 0),
+            [],
+        )).toBe(false);
+    });
+
+    it("opens the search when a separated hard unit candidate exists", () => {
+        const unit = falseRingEvent(1824, true);
+        unit.evidence = {
+            ...unit.evidence,
+            correlationGain: 0.008,
+            candidateIds: ["false-a", "false-b"],
+            algorithmSources: [
+                "candidate_ranking",
+                "cofecha_segment_lag",
+                "local_edit_alignment",
+            ],
+            notes: ["candidate_hard_gate_passed"],
+        };
+        expect(hardCandidateMaySeedExhaustiveComposition(
+            aggregate(-5, 0),
+            [unit],
+        )).toBe(true);
+    });
+
+    it("does not use a unit companion to decompose a deep complete partial", () => {
+        const unit = falseRingEvent(1824, true);
+        unit.evidence = {
+            ...unit.evidence,
+            correlationGain: 0.008,
+            candidateIds: ["false-a", "false-b"],
+            algorithmSources: [
+                "candidate_ranking",
+                "cofecha_segment_lag",
+                "local_edit_alignment",
+            ],
+            notes: ["candidate_hard_gate_passed"],
+        };
+        expect(hardCandidateMaySeedExhaustiveComposition(
+            aggregate(-20, 0),
+            [unit],
+        )).toBe(false);
+    });
+});
+
 describe("selectExhaustiveCompletedPartialUnitComposition", () => {
     const regionalEvidence = (overrides: Record<string, number | null> = {}) => ({
         startYear: 1794,
@@ -692,6 +767,88 @@ describe("selectExhaustiveCompletedPartialUnitComposition", () => {
         ], 1800, 1812);
 
         expect(selected).toBeNull();
+    });
+
+    it("accepts a long separated partial frontier with decisive COFECHA support", () => {
+        const selected = selectExhaustiveCompletedPartialUnitComposition([
+            mixedCandidate("missingRing", {}, {
+                frontierEventType: "partialMove",
+                frontierYear: 1831,
+                olderBoundaryYear: 1800,
+                newerBoundaryYear: 1831,
+                separationYears: 31,
+                referenceMedianMargin: 0.5,
+                referenceLowerQuartileMargin: 0.36,
+                mixedReferenceSupportRatio: 1,
+                orientationReferenceSupportRatio: 1,
+                orientationMedianMargin: 0.22,
+                orientationLowerQuartileMargin: 0.15,
+            }),
+            mixedCandidate("falseRing", {}, {
+                frontierEventType: "partialMove",
+                frontierYear: 1830,
+                olderBoundaryYear: 1800,
+                newerBoundaryYear: 1830,
+                separationYears: 30,
+                referenceMedianMargin: 0.2,
+                referenceLowerQuartileMargin: 0,
+                mixedReferenceSupportRatio: 0.62,
+                orientationReferenceSupportRatio: 0.6,
+                orientationMedianMargin: 0.02,
+                orientationLowerQuartileMargin: 0,
+            }),
+        ], 1798, 1806);
+
+        expect(selected).toMatchObject({
+            unitEventType: "missingRing",
+            reason: "cofecha_completed_family",
+            competition: {
+                frontierEventType: "partialMove",
+                partialShiftYears: -6,
+                separationYears: 31,
+            },
+        });
+    });
+
+    it("accepts a long partial frontier when fewer references support a decisive gain", () => {
+        const selected = selectExhaustiveCompletedPartialUnitComposition([
+            mixedCandidate("missingRing", {}, {
+                frontierEventType: "missingRing",
+                frontierYear: 1831,
+                olderBoundaryYear: 1800,
+                newerBoundaryYear: 1831,
+                separationYears: 31,
+                referenceMedianMargin: 0.138,
+                referenceLowerQuartileMargin: 0.072,
+                mixedReferenceSupportRatio: 0.84,
+                orientationReferenceSupportRatio: 0.62,
+                orientationMedianMargin: 0.033,
+                orientationLowerQuartileMargin: -0.027,
+            }),
+            mixedCandidate("falseRing", {}, {
+                frontierEventType: "partialMove",
+                frontierYear: 1834,
+                olderBoundaryYear: 1800,
+                newerBoundaryYear: 1834,
+                separationYears: 34,
+                referenceMedianMargin: 0.357,
+                referenceLowerQuartileMargin: 0,
+                mixedReferenceSupportRatio: 0.62,
+                orientationReferenceSupportRatio: 0.76,
+                orientationMedianMargin: 0.151,
+                orientationLowerQuartileMargin: 0.0002,
+            }),
+        ], 1798, 1806);
+
+        expect(selected).toMatchObject({
+            unitEventType: "falseRing",
+            reason: "cofecha_completed_family",
+            competition: {
+                frontierEventType: "partialMove",
+                partialShiftYears: -6,
+                separationYears: 34,
+            },
+        });
     });
 
     it("keeps two weak completed families refused", () => {

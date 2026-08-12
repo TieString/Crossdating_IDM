@@ -848,6 +848,15 @@ const finalFrontierClusters = (
                     - representative(left).event.endYear
             ))[0]!];
         }
+        const independentlyLocatedSelectedUnit = selectedFinalClusters.filter((cluster) => {
+            const event = representative(cluster).event;
+            return (event.eventType === "missingRing" || event.eventType === "falseRing")
+                && event.evidence.notes.includes("candidate_hard_gate_passed")
+                && hasIndependentLocationAuthority(cluster);
+        });
+        if (independentlyLocatedSelectedUnit.length > 0) {
+            return independentlyLocatedSelectedUnit;
+        }
         return [[...boundedPathClusters].sort((left, right) => (
             (topYear(representative(right).event) ?? Number.NEGATIVE_INFINITY)
                 - (topYear(representative(left).event) ?? Number.NEGATIVE_INFINITY)

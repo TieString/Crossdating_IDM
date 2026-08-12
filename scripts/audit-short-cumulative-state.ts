@@ -311,6 +311,11 @@ const regionalReferenceOperations = aggregate?.eventType === "partialMove"
     : [];
 
 const displayedAudit = diagnosis.eventDecisionAudits?.[0]?.displayedBeforeLocator[0];
+const hardCandidateAggregate = candidateEvents.filter((event) => (
+    event.eventType === "partialMove"
+    && event.shiftSide === "older"
+    && event.evidence.notes.includes("candidate_hard_gate_passed")
+)).sort((left, right) => right.evidence.score - left.evidence.score)[0] ?? null;
 const preLocatorAggregate = aggregate?.eventType === "partialMove"
     && displayedAudit?.eventType === "partialMove"
     ? {
@@ -334,7 +339,7 @@ const preLocatorAggregate = aggregate?.eventType === "partialMove"
             notes: displayedAudit.notes,
         },
     }
-    : null;
+    : hardCandidateAggregate;
 const preLocatorExhaustive = preLocatorAggregate
     ? (() => {
         const operations = getJointCounterfactualOperationScores(
@@ -440,6 +445,9 @@ process.stdout.write(`${JSON.stringify({
         startYear: event.startYear,
         endYear: event.endYear,
         topYear: event.rankedYears[0]?.year ?? null,
+        score: event.evidence.score,
+        scoreMargin: event.evidence.scoreMargin,
+        candidateCount: event.evidence.candidateIds.length,
         hardGate: event.evidence.notes.includes("candidate_hard_gate_passed"),
         sources: event.evidence.algorithmSources,
     })),
