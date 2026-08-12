@@ -310,35 +310,13 @@ const regionalReferenceOperations = aggregate?.eventType === "partialMove"
     })
     : [];
 
-const displayedAudit = diagnosis.eventDecisionAudits?.[0]?.displayedBeforeLocator[0];
 const hardCandidateAggregate = candidateEvents.filter((event) => (
     event.eventType === "partialMove"
     && event.shiftSide === "older"
     && event.evidence.notes.includes("candidate_hard_gate_passed")
 )).sort((left, right) => right.evidence.score - left.evidence.score)[0] ?? null;
 const preLocatorAggregate = aggregate?.eventType === "partialMove"
-    && displayedAudit?.eventType === "partialMove"
-    ? {
-        ...aggregate,
-        startYear: displayedAudit.startYear,
-        endYear: displayedAudit.endYear,
-        rankedYears: [{
-            year: displayedAudit.topYear ?? Math.round(
-                (displayedAudit.startYear + displayedAudit.endYear) / 2,
-            ),
-            rank: 1,
-            score: displayedAudit.score,
-            evidenceTags: [],
-        }],
-        shiftYears: displayedAudit.shiftYears ?? aggregate.shiftYears,
-        evidence: {
-            ...aggregate.evidence,
-            algorithmSources: displayedAudit.algorithmSources,
-            score: displayedAudit.score,
-            scoreMargin: displayedAudit.scoreMargin,
-            notes: displayedAudit.notes,
-        },
-    }
+    ? aggregate
     : hardCandidateAggregate;
 const preLocatorExhaustive = preLocatorAggregate
     ? (() => {

@@ -590,7 +590,17 @@ const runParent = async (): Promise<void> => {
     assertSafeRunDir();
     if (!existsSync(cofechaExe)) throw new Error(`COFECHA not found: ${cofechaExe}`);
     const { config, manifest, configBytes, manifestBytes } = readInputs();
-    const requestedFamilies = (valueFor("--families") ?? "A,B,C,D").split(",")
+    const mergeExisting = hasFlag("--merge-existing");
+    const existingPlan = mergeExisting
+        ? JSON.parse(readFileSync(planPath, "utf8")) as RunPlan
+        : null;
+    if (existingPlan
+        && (existingPlan.configSha256 !== sha256(configBytes)
+            || existingPlan.manifestSha256 !== sha256(manifestBytes))) {
+        throw new Error("existing run plan input hash mismatch");
+    }
+    const requestedFamilies = existingPlan?.families
+        ?? (valueFor("--families") ?? "A,B,C,D").split(",")
         .map((value) => value.trim().toUpperCase())
         .filter((value): value is CapabilityFamily => ["A", "B", "C", "D"].includes(value));
     const requestedFileIds = new Set((valueFor("--file-ids") ?? "").split(",")
@@ -605,16 +615,18 @@ const runParent = async (): Promise<void> => {
     const maximumTargets = Number(valueFor("--max-targets-per-file"));
     const caseLimit = Number(valueFor("--case-limit"));
     const maximumStepsValue = Number(valueFor("--max-steps"));
-    const maxSteps = Number.isInteger(maximumStepsValue) && maximumStepsValue > 0
+    const maxSteps = existingPlan?.maxSteps ?? (Number.isInteger(maximumStepsValue)
+        && maximumStepsValue > 0
         ? maximumStepsValue
-        : null;
+        : null);
     const requestedWorkers = Number(valueFor("--workers"));
-    const workerCount = Number.isInteger(requestedWorkers) && requestedWorkers > 0
+    const workerCount = existingPlan?.workerCount
+        ?? (Number.isInteger(requestedWorkers) && requestedWorkers > 0
         ? requestedWorkers
         : Math.max(1, Math.min(
             config.runtime.workers,
             Math.floor(availableParallelism() * 0.75),
-        ));
+        )));
     const targetsByFile = new Map<string, Set<string>>();
     if (Number.isInteger(maximumTargets) && maximumTargets > 0) {
         manifest.files.forEach((file) => {
@@ -625,19 +637,18 @@ const runParent = async (): Promise<void> => {
                 .map((target) => target.targetId)));
         });
     }
-    let selectedCases = buildCapabilityCases(config, manifest).filter((spec) => (
-        requestedFamilies.includes(spec.family)
-        && (requestedFileIds.size === 0 || requestedFileIds.has(spec.fileId.toLowerCase()))
-        && (scenarioIds.size === 0 || scenarioIds.has(spec.scenarioId))
-        && (requestedCaseIndices.size === 0 || requestedCaseIndices.has(spec.index))
-        && (!targetsByFile.has(spec.fileId)
-            || targetsByFile.get(spec.fileId)!.has(spec.targetId))
-    ));
+    const existingCaseIds = new Set(existingPlan?.caseIds ?? []);
+    let selectedCases = buildCapabilityCases(config, manifest).filter((spec) => existingPlan
+        ? existingCaseIds.has(spec.caseId)
+        : requestedFamilies.includes(spec.family)
+            && (requestedFileIds.size === 0 || requestedFileIds.has(spec.fileId.toLowerCase()))
+            && (scenarioIds.size === 0 || scenarioIds.has(spec.scenarioId))
+            && (requestedCaseIndices.size === 0 || requestedCaseIndices.has(spec.index))
+            && (!targetsByFile.has(spec.fileId)
+                || targetsByFile.get(spec.fileId)!.has(spec.targetId)));
     if (Number.isInteger(caseLimit) && caseLimit > 0) selectedCases = selectedCases.slice(0, caseLimit);
     if (selectedCases.length === 0) throw new Error("no cases selected");
-    rmSync(runDir, { recursive: true, force: true });
-    mkdirSync(runDir, { recursive: true });
-    const plan: RunPlan = {
+    const plan: RunPlan = existingPlan ?? {
         schemaVersion: 1,
         configPath,
         manifestPath,
@@ -649,21 +660,33 @@ const runParent = async (): Promise<void> => {
         maxSteps,
         keepAllCofecha: hasFlag("--keep-all-cofecha"),
     };
-    writeFileSync(planPath, `${JSON.stringify(plan, null, 2)}\n`, "utf8");
-    writeFileSync(
-        join(runDir, "resolved-cases.json"),
-        `${JSON.stringify(selectedCases, null, 2)}\n`,
-        "utf8",
-    );
-    console.log(`CAPABILITY_PLAN ${JSON.stringify({
-        runDir,
-        workers: workerCount,
-        families: requestedFamilies,
-        cases: selectedCases.length,
-        truths: selectedCases.reduce((sum, spec) => sum + spec.truths.length, 0),
-        maxSteps,
-    })}`);
-    const workerPromises = Array.from({ length: workerCount }, (_, index) => new Promise<void>((
+    if (!existingPlan) {
+        rmSync(runDir, { recursive: true, force: true });
+        mkdirSync(runDir, { recursive: true });
+        writeFileSync(planPath, `${JSON.stringify(plan, null, 2)}\n`, "utf8");
+        writeFileSync(
+            join(runDir, "resolved-cases.json"),
+            `${JSON.stringify(selectedCases, null, 2)}\n`,
+            "utf8",
+        );
+        console.log(`CAPABILITY_PLAN ${JSON.stringify({
+            runDir,
+            workers: workerCount,
+            families: requestedFamilies,
+            cases: selectedCases.length,
+            truths: selectedCases.reduce((sum, spec) => sum + spec.truths.length, 0),
+            maxSteps,
+        })}`);
+    } else {
+        console.log(`CAPABILITY_MERGE_EXISTING ${JSON.stringify({
+            runDir,
+            workers: workerCount,
+            cases: selectedCases.length,
+        })}`);
+    }
+    const workerPromises = existingPlan ? [] : Array.from(
+        { length: workerCount },
+        (_, index) => new Promise<void>((
         resolveWorker,
         rejectWorker,
     ) => {
@@ -689,7 +712,8 @@ const runParent = async (): Promise<void> => {
         child.on("exit", (code) => code === 0
             ? resolveWorker()
             : rejectWorker(new Error(`worker ${index} exited ${code}`)));
-    }));
+        }),
+    );
     await Promise.all(workerPromises);
     const readJsonLines = <T>(path: string): T[] => readFileSync(path, "utf8")
         .split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line) as T);
