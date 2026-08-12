@@ -140,6 +140,7 @@ const claimWeight: Record<DiagnosisEvidenceClaim, number> = {
     continuous_gap_consensus: 0.9,
     whole_global_lag: 0.6,
     whole_terminal_baseline: 0.9,
+    bounded_lag_state_path: 1.2,
 };
 
 const claimStrength = (events: readonly DiagnosisEvent[]): number => Math.max(
@@ -243,16 +244,43 @@ const preferredEndpointCandidate = (
     ))[0] ?? null;
 };
 
+const preferredAcceptedFinalLocation = (
+    cluster: HypothesisCluster,
+): DiagnosisReviewEventCheckpoint | null => cluster.checkpoints
+    .filter((checkpoint) => {
+        const event = checkpoint.event;
+        const location = matchingLocationEvidence(event).find((entry) => (
+            entry.source === "full_interval_counterfactual_locator"
+        ));
+        return checkpoint.stage === "final"
+            && event.eventType !== "wholeSeriesMove"
+            && event.evidence.algorithmSources.includes(
+                "full_interval_counterfactual_locator",
+            )
+            && event.evidence.notes.some((note) => (
+                note === "locator_adjudication=accepted_overlapping_mode"
+                || note === "locator_adjudication=accepted_overlapping_strong_mode"
+            ))
+            && location?.calibrated === true
+            && (location.remoteMargin ?? 0) >= 0.04;
+    })
+    .sort((left, right) => (
+        eventLocationQuality(right.event) - eventLocationQuality(left.event)
+        || (topYear(right.event) ?? Number.NEGATIVE_INFINITY)
+            - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
+    ))[0] ?? null;
+
 const representative = (
     cluster: HypothesisCluster,
 ): DiagnosisReviewEventCheckpoint => {
-    const selected = [...cluster.checkpoints].sort((left, right) => (
+    const ranked = [...cluster.checkpoints].sort((left, right) => (
         representativeQuality(cluster, right) - representativeQuality(cluster, left)
         || persistedStageCount(cluster, right) - persistedStageCount(cluster, left)
         || stagePriority[right.stage] - stagePriority[left.stage]
         || (topYear(right.event) ?? Number.NEGATIVE_INFINITY)
             - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
     ))[0];
+    const selected = preferredAcceptedFinalLocation(cluster) ?? ranked;
     return preferredEndpointCandidate(cluster, selected)
         ?? preferredSequentialSupport(cluster, selected)
         ?? selected;
@@ -721,6 +749,23 @@ const finalFrontierClusters = (
 ): HypothesisCluster[] | null => {
     const finalClusters = clusters.filter(hasFinalCheckpoint);
     if (finalClusters.length === 0) return null;
+    const boundedPathClusters = finalClusters.filter((cluster) => (
+        cluster.checkpoints.some(({ event }) => evidenceClaimsFor(event).has(
+            "bounded_lag_state_path",
+        ))
+    ));
+    if (boundedPathClusters.length > 0) {
+        const wholeBaseline = boundedPathClusters.find((cluster) => (
+            representative(cluster).event.eventType === "wholeSeriesMove"
+        ));
+        if (wholeBaseline) return [wholeBaseline];
+        return [[...boundedPathClusters].sort((left, right) => (
+            (topYear(representative(right).event) ?? Number.NEGATIVE_INFINITY)
+                - (topYear(representative(left).event) ?? Number.NEGATIVE_INFINITY)
+            || representative(right).event.endYear
+                - representative(left).event.endYear
+        ))[0]!];
+    }
     const protectedWholeClusters = clusters.filter((cluster) => {
         const event = representative(cluster).event;
         return event.eventType === "wholeSeriesMove"

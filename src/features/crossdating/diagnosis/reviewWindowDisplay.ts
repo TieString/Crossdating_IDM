@@ -94,6 +94,12 @@ const hasReviewablePartialMoveEvidence = (
     if (counterfactualShift !== null && counterfactualShift !== shiftYears) return false;
 
     const sources = new Set(event.evidence.algorithmSources);
+    const boundedPathGain = numericNote(event, "bounded_path_transition_gain");
+    if (sources.has("bounded_complete_lag_path")
+        && evidenceClaimsFor(event).has("bounded_lag_state_path")
+        && event.evidence.lagBefore - event.evidence.lagAfter === shiftYears
+        && (boundedPathGain ?? Number.NEGATIVE_INFINITY) >= 2
+        && event.evidence.samplePairs >= 30) return true;
     const referenceVote = hasOperationConsistentPartialVote(
         event,
         "partial_reference_vote",

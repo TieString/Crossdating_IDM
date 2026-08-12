@@ -36,11 +36,13 @@ import {
 import {
     createLagPathCache,
     diagnoseLagPath,
+    locateBoundedLagStateEvents,
     locateSequentialFalseHead,
     locateSequentialMissingHead,
     locateTwoStepMissingStaircase,
     selectSharedExplicitZeroMarker,
     type EventPathConfig,
+    type BoundedLagStateEventSet,
     type LagPathCache,
     type LagPathDiagnosis,
     type SequentialMissingHead,
@@ -114,12 +116,17 @@ import {
 } from "./endpointOperationContrast";
 import { refineEventWithCounterfactualLocator } from "./counterfactualEventLocator";
 import { adjudicateLocatorProposal } from "./eventAdjudicator";
-import { withEvidenceLedger } from "./evidenceLedger";
+import { evidenceClaimsFor, withEvidenceLedger } from "./evidenceLedger";
 import { refineEventWithBoundaryConsensus } from "./eventBoundaryConsensus";
 import {
     getJointCounterfactualOperationScores,
     type JointCounterfactualOperationScore,
 } from "./jointCounterfactualOperation";
+import {
+    scoreDynamicJointOperation,
+    selectDynamicJointOperation,
+    selectDynamicUnitOperation,
+} from "./jointOperationSelector";
 import {
     isExactPartialLagTransition,
     isAutomaticPartialShift,
@@ -6256,6 +6263,393 @@ export const makeDiagnosisEvents = (
             candidateEvents,
             options.preferRemotePairedMissingFrontier === true,
         );
+        const cofechaFlagged = isCofechaFlaggedSeries(
+            diagnosis.targetTree,
+            options.cofechaFlaggedSeriesIds,
+        );
+        const shouldFitBoundedPath = cofechaFlagged
+            || ownCandidates.length > 0
+            || detectedBeforeFusion.length > 0;
+        const wholeBaselineHypotheses = [
+            ...candidateEvents,
+            ...detectedBeforeFusion,
+            ...detected,
+            ...displayed,
+        ].filter((event) => event.eventType === "wholeSeriesMove");
+        const independentlySupportedWholeHypotheses = wholeBaselineHypotheses.filter(
+            (event) => {
+                const claims = evidenceClaimsFor(event);
+                return claims.has("whole_terminal_baseline")
+                    || claims.has("whole_global_lag")
+                    || (
+                        event.confidenceLevel === "high"
+                        && (event.evidence.correlationGain
+                            ?? Number.NEGATIVE_INFINITY) >= 0.1
+                        && event.evidence.notes.includes("candidate_hard_gate_passed")
+                        && event.evidence.notes.includes(
+                            "whole_state_newer_edge_support_fraction=1.000000",
+                        )
+                    );
+            },
+        );
+        const supportedWholeLags = [...new Set(
+            independentlySupportedWholeHypotheses.flatMap((event) => (
+                event.shiftYears === undefined ? [] : [event.shiftYears]
+            )),
+        )];
+        const boundedTerminalLags = supportedWholeLags.length > 0
+            ? supportedWholeLags
+            : [0];
+        const boundedOperationBaseline = boundedTerminalLags.length === 1
+            ? boundedTerminalLags[0]
+            : 0;
+        const boundedOperations = shouldFitBoundedPath
+            ? getJointCounterfactualOperationScores(
+                diagnosis,
+                15,
+                effectiveConfig.maxPartialGapYears,
+                boundedOperationBaseline,
+            )
+            : [];
+        const rankedBoundedOperations = boundedOperations
+            .map((operation) => ({
+                operation,
+                score: scoreDynamicJointOperation(operation, boundedOperations),
+            }))
+            .sort((left, right) => (
+                right.score - left.score
+                || right.operation.bestDifferenceGain
+                    - left.operation.bestDifferenceGain
+                || right.operation.remoteDifferenceMargin
+                    - left.operation.remoteDifferenceMargin
+            ));
+        const boundedOperationSelection = selectDynamicJointOperation(boundedOperations);
+        const boundedUnitSelection = selectDynamicUnitOperation(boundedOperations);
+        const trustedPartialOperation = boundedOperationSelection
+            ?.operation.eventType === "partialMove"
+            && boundedOperationSelection.score >= 0.04
+            && boundedOperationSelection.scoreMargin >= 0.025
+            && (boundedOperationSelection.shiftScoreMargin ?? 0) >= 0.01
+            ? boundedOperationSelection.operation
+            : null;
+        const requiredUnitOperation = boundedUnitSelection
+            && boundedUnitSelection.score >= 0.04
+            && boundedUnitSelection.scoreMargin >= 0.02
+            && (
+                trustedPartialOperation === null
+                || boundedUnitSelection.score >= boundedOperationSelection!.score * 0.5
+            )
+            ? boundedUnitSelection.operation
+            : null;
+        const boundedStateBaselines = [...new Set([
+            ...boundedTerminalLags,
+            0,
+        ])];
+        const boundedOperationStates = rankedBoundedOperations
+            .slice(0, 12)
+            .flatMap(({ operation }) => boundedStateBaselines.flatMap((terminalLag) => {
+                const state = terminalLag + operation.shiftYears;
+                return [state - 1, state, state + 1];
+            }));
+        const boundedUnitStates = requiredUnitOperation
+            ? boundedStateBaselines.flatMap((terminalLag) => (
+                [1, 2, 3].map((count) => (
+                    terminalLag + requiredUnitOperation.shiftYears * count
+                ))
+            ))
+            : [];
+        const boundedContractStates = trustedPartialOperation
+            ? boundedOperationStates
+            : requiredUnitOperation
+                ? boundedUnitStates
+                : boundedOperationStates;
+        const boundedHypothesisStates = [
+            ...candidateEvents,
+            ...detectedBeforeFusion,
+            ...detected,
+            ...displayed,
+        ].flatMap((event) => [
+            event.evidence.lagBefore,
+            event.evidence.lagAfter,
+        ]).filter((lag): lag is number => lag !== null && lag !== undefined);
+        const boundedRestrictedLags = [...new Set([
+            ...boundedStateBaselines,
+            ...boundedStateBaselines.flatMap((lag) => [lag - 1, lag + 1]),
+            ...boundedContractStates,
+            ...boundedHypothesisStates,
+        ].filter((lag) => (
+            lag >= effectiveConfig.lagMin && lag <= effectiveConfig.lagMax
+        )))];
+        const locateBoundedEvents = (
+            useCofechaStandardization: boolean,
+            allowedLags?: readonly number[],
+            terminalLags: readonly number[] = boundedTerminalLags,
+        ): BoundedLagStateEventSet | null => (
+            shouldFitBoundedPath
+                ? locateBoundedLagStateEvents(
+                diagnosis,
+                siteData,
+                {
+                    ...INTERNAL_EVENT_PATH_CONFIG,
+                    useCofechaStandardization,
+                    transitionPenaltyUnit: 3,
+                    transitionPenaltyBig: 3,
+                    transitionPenaltyPerYear: 0,
+                    minLag: effectiveConfig.lagMin,
+                    maxLag: effectiveConfig.lagMax,
+                    maxPartialGapYears: effectiveConfig.maxPartialGapYears,
+                    ...options.eventPathConfig,
+                },
+                {
+                    maxSegments: 3,
+                    minRunYears: 18,
+                    windowWidth: 13,
+                    terminalLags,
+                    allowedLags,
+                    minimumWholeLagGain: 8,
+                },
+                locatorPathCache,
+            )
+                : null
+        );
+        const boundedFrameIsSupported = (
+            result: BoundedLagStateEventSet | null,
+        ): result is BoundedLagStateEventSet => {
+            if (!result) return false;
+            const boundedWhole = result.events.find((event) => (
+                event.eventType === "wholeSeriesMove"
+            ));
+            return !boundedWhole
+                || independentlySupportedWholeHypotheses.some((whole) => (
+                    whole.shiftYears === boundedWhole.shiftYears
+                ));
+        };
+        const hasBoundedLocalEvent = (result: BoundedLagStateEventSet): boolean => (
+            result.events.some((event) => event.eventType !== "wholeSeriesMove")
+        );
+        const boundedResultSupport = (result: BoundedLagStateEventSet): {
+            strongestOperationRepresented: boolean;
+            operationScore: number;
+            localEventCount: number;
+            hasPartialTransition: boolean;
+            directCorrections: ReadonlySet<number>;
+            allTransitionsAreUnit: boolean;
+        } => {
+            const newestLag = result.path.runs[result.path.runs.length - 1]?.lag
+                ?? boundedOperationBaseline;
+            const representedCorrections = new Set([
+                ...result.path.runs.slice(0, -1).map((run) => run.lag - newestLag),
+                ...result.path.runs.slice(0, -1).map((run, index) => (
+                    run.lag - result.path.runs[index + 1].lag
+                )),
+            ]);
+            const represented = rankedBoundedOperations.filter(({ operation }) => (
+                representedCorrections.has(operation.shiftYears)
+            ));
+            const directCorrections = new Set(result.path.runs.slice(0, -1).map(
+                (run, index) => run.lag - result.path.runs[index + 1].lag,
+            ));
+            return {
+                strongestOperationRepresented: rankedBoundedOperations.length === 0
+                    || representedCorrections.has(
+                        rankedBoundedOperations[0].operation.shiftYears,
+                    ),
+                operationScore: represented.reduce(
+                    (sum, row) => sum + Math.max(0, row.score),
+                    0,
+                ),
+                localEventCount: result.events.filter((event) => (
+                    event.eventType !== "wholeSeriesMove"
+                )).length,
+                hasPartialTransition: result.events.some((event) => (
+                    event.eventType === "partialMove"
+                )),
+                directCorrections,
+                allTransitionsAreUnit: directCorrections.size > 0
+                    && [...directCorrections].every((shift) => Math.abs(shift) === 1),
+            };
+        };
+        const boundedResultIsOperationCompatible = (
+            result: BoundedLagStateEventSet,
+        ): boolean => {
+            const support = boundedResultSupport(result);
+            if (support.localEventCount === 0) return true;
+            const hasSupportedWhole = result.events.some((event) => (
+                event.eventType === "wholeSeriesMove"
+                && supportedWholeLags.includes(event.shiftYears ?? 0)
+            ));
+            if (hasSupportedWhole && result.path.wholeLagGain >= 8) return true;
+            const strongUnitPath = [...support.directCorrections].some(
+                (shift) => Math.abs(shift) === 1,
+            )
+                && (
+                    !support.hasPartialTransition
+                    || (
+                        trustedPartialOperation !== null
+                        && support.strongestOperationRepresented
+                    )
+                )
+                && result.path.transitionGain >= 8
+                && result.path.runnerUpMargin >= 2;
+            if (strongUnitPath) return true;
+            if (trustedPartialOperation) {
+                if (!support.strongestOperationRepresented) return false;
+            }
+            if (requiredUnitOperation
+                && !support.directCorrections.has(requiredUnitOperation.shiftYears)) {
+                const strongPathUnit = support.allTransitionsAreUnit
+                    && result.path.transitionGain >= 8
+                    && result.path.runnerUpMargin >= 2;
+                if (!strongPathUnit) return false;
+            }
+            if (!support.hasPartialTransition) return true;
+            return trustedPartialOperation !== null;
+        };
+        const preferBoundedResult = (
+            left: BoundedLagStateEventSet,
+            right: BoundedLagStateEventSet,
+        ): BoundedLagStateEventSet => {
+            const leftSupport = boundedResultSupport(left);
+            const rightSupport = boundedResultSupport(right);
+            const leftLocal = hasBoundedLocalEvent(left);
+            const rightLocal = hasBoundedLocalEvent(right);
+            if (leftLocal !== rightLocal) return leftLocal ? left : right;
+            if (trustedPartialOperation) {
+                const leftDirect = leftSupport.directCorrections.has(
+                    trustedPartialOperation.shiftYears,
+                );
+                const rightDirect = rightSupport.directCorrections.has(
+                    trustedPartialOperation.shiftYears,
+                );
+                if (leftDirect !== rightDirect) {
+                    const direct = leftDirect ? left : right;
+                    const decomposed = leftDirect ? right : left;
+                    if (direct.path.transitionGain > decomposed.path.transitionGain
+                        || direct.path.runnerUpMargin > decomposed.path.runnerUpMargin) {
+                        return direct;
+                    }
+                    return decomposed;
+                }
+            }
+            if (leftSupport.allTransitionsAreUnit !== rightSupport.allTransitionsAreUnit) {
+                return leftSupport.allTransitionsAreUnit ? left : right;
+            }
+            if (right.path.transitionGain > left.path.transitionGain
+                && right.path.runnerUpMargin > left.path.runnerUpMargin) {
+                return right;
+            }
+            // The left argument is the more stable COFECHA view at every call site.
+            return left;
+        };
+        const preferCofechaTerminalFrame = (
+            supportedTerminal: BoundedLagStateEventSet,
+            zeroTerminal: BoundedLagStateEventSet,
+        ): BoundedLagStateEventSet => {
+            const terminalHasWhole = supportedTerminal.events.some((event) => (
+                event.eventType === "wholeSeriesMove"
+            ));
+            const zeroHasWhole = zeroTerminal.events.some((event) => (
+                event.eventType === "wholeSeriesMove"
+            ));
+            if (terminalHasWhole && !zeroHasWhole) {
+                return zeroTerminal.path.score > supportedTerminal.path.score
+                    && zeroTerminal.path.runnerUpMargin
+                        > supportedTerminal.path.runnerUpMargin
+                    ? zeroTerminal
+                    : supportedTerminal;
+            }
+            return preferBoundedResult(supportedTerminal, zeroTerminal);
+        };
+        const initialCofechaBoundedResult = locateBoundedEvents(true);
+        const zeroTerminalCofechaResult = supportedWholeLags.length > 0
+            ? locateBoundedEvents(true, undefined, [0])
+            : null;
+        const supportedInitialCofecha = boundedFrameIsSupported(
+            initialCofechaBoundedResult,
+        ) && boundedResultIsOperationCompatible(initialCofechaBoundedResult)
+            ? initialCofechaBoundedResult
+            : null;
+        const supportedZeroTerminalCofecha = boundedFrameIsSupported(
+            zeroTerminalCofechaResult,
+        ) && boundedResultIsOperationCompatible(zeroTerminalCofechaResult)
+            ? zeroTerminalCofechaResult
+            : null;
+        const cofechaBoundedResult = supportedInitialCofecha
+            && supportedZeroTerminalCofecha
+            ? preferCofechaTerminalFrame(
+                    supportedInitialCofecha,
+                    supportedZeroTerminalCofecha,
+                )
+            : supportedInitialCofecha ?? supportedZeroTerminalCofecha;
+        const supportedCofechaResult = boundedFrameIsSupported(cofechaBoundedResult)
+            && boundedResultIsOperationCompatible(cofechaBoundedResult)
+            ? cofechaBoundedResult
+            : null;
+        const needsRawBoundedView = supportedCofechaResult === null
+            || trustedPartialOperation !== null;
+        const rawBoundedResult = needsRawBoundedView
+            ? locateBoundedEvents(false)
+            : null;
+        const supportedRawResult = boundedFrameIsSupported(rawBoundedResult)
+            && boundedResultIsOperationCompatible(rawBoundedResult)
+            ? rawBoundedResult
+            : null;
+        const unrestrictedBoundedResult = supportedCofechaResult && supportedRawResult
+            ? preferBoundedResult(supportedCofechaResult, supportedRawResult)
+            : supportedCofechaResult ?? supportedRawResult;
+        const unrestrictedSupport = unrestrictedBoundedResult
+            ? boundedResultSupport(unrestrictedBoundedResult)
+            : null;
+        const needsRestrictedBoundedView = unrestrictedBoundedResult === null
+            || (
+                requiredUnitOperation !== null
+                && !unrestrictedSupport?.directCorrections.has(
+                    requiredUnitOperation.shiftYears,
+                )
+                && !(
+                    unrestrictedSupport !== null
+                    && [...unrestrictedSupport.directCorrections].some(
+                        (shift) => Math.abs(shift) === 1,
+                    )
+                    && (
+                        !unrestrictedSupport.hasPartialTransition
+                        || (
+                            trustedPartialOperation !== null
+                            && unrestrictedSupport.strongestOperationRepresented
+                        )
+                    )
+                    && unrestrictedBoundedResult.path.transitionGain >= 8
+                    && unrestrictedBoundedResult.path.runnerUpMargin >= 2
+                )
+            );
+        const restrictedTerminalCofechaResult = needsRestrictedBoundedView
+            ? locateBoundedEvents(true, boundedRestrictedLags)
+            : null;
+        const restrictedZeroTerminalCofechaResult = needsRestrictedBoundedView
+            && supportedWholeLags.length > 0
+            ? locateBoundedEvents(true, boundedRestrictedLags, [0])
+            : null;
+        const supportedRestrictedTerminalCofecha = boundedFrameIsSupported(
+            restrictedTerminalCofechaResult,
+        ) && boundedResultIsOperationCompatible(restrictedTerminalCofechaResult)
+            ? restrictedTerminalCofechaResult
+            : null;
+        const supportedRestrictedZeroTerminalCofecha = boundedFrameIsSupported(
+            restrictedZeroTerminalCofechaResult,
+        ) && boundedResultIsOperationCompatible(restrictedZeroTerminalCofechaResult)
+            ? restrictedZeroTerminalCofechaResult
+            : null;
+        const supportedRestrictedCofecha = supportedRestrictedTerminalCofecha
+            && supportedRestrictedZeroTerminalCofecha
+            ? preferCofechaTerminalFrame(
+                    supportedRestrictedTerminalCofecha,
+                    supportedRestrictedZeroTerminalCofecha,
+                )
+            : supportedRestrictedTerminalCofecha
+                ?? supportedRestrictedZeroTerminalCofecha;
+        const selectedBoundedResult = supportedRestrictedCofecha
+            ?? unrestrictedBoundedResult;
+        const boundedPathEvents = selectedBoundedResult?.events ?? [];
         const isValidAutomaticEvent = (event: DiagnosisEvent): boolean => (
             event.eventType !== "partialMove"
             || (
@@ -6306,9 +6700,13 @@ export const makeDiagnosisEvents = (
             ).length;
             const finalEvents = validAutomaticEvents(sourceEvents)
                 .map(withEvidenceLedger);
-            const supplementalFinalEvents = validAutomaticEvents(
-                supplementalFinalHypotheses,
-            ).map(withEvidenceLedger);
+            const boundedFinalEvents = boundedPathEvents.flatMap((event) => (
+                validAutomaticEvents([event])
+            ));
+            const supplementalFinalEvents = [
+                ...boundedFinalEvents,
+                ...validAutomaticEvents(supplementalFinalHypotheses),
+            ].map(withEvidenceLedger);
             let finalReason: DiagnosisEventDecisionReason = "post_location_rejected";
             if (finalEvents.length > 0) {
                 finalReason = "emitted";
@@ -6388,7 +6786,7 @@ export const makeDiagnosisEvents = (
                     { stage: "displayed", events: displayed },
                     {
                         stage: "final",
-                        events: [...finalEvents, ...supplementalFinalEvents],
+                        events: [...supplementalFinalEvents, ...finalEvents],
                     },
                 ];
                 stages.forEach(({ stage, events }) => events.forEach((event) => {
@@ -6408,10 +6806,7 @@ export const makeDiagnosisEvents = (
         const hasLocalEvent = displayed.some(
             (event) => event.eventType !== "wholeSeriesMove",
         );
-        const mayRecoverSequentialMissing = isCofechaFlaggedSeries(
-            diagnosis.targetTree,
-            options.cofechaFlaggedSeriesIds,
-        );
+        const mayRecoverSequentialMissing = cofechaFlagged;
         if (options.enableCounterfactualEventLocator !== true
             || (!hasLocalEvent && !mayRecoverSequentialMissing)) {
             return finalize(displayed);

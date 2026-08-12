@@ -113,7 +113,7 @@ export const DEFAULT_EVENT_PATH_CONFIG: EventPathConfig = {
     pulseRequiresFlatOrPartialContext: true,
 };
 
-type LagEvidence = {
+export type LagStateEvidence = {
     years: number[];
     states: number[];
     emissions: number[][];
@@ -121,7 +121,11 @@ type LagEvidence = {
     differenceCounts: number[][];
     prefixScores: number[][];
     prefixCounts: number[][];
+    similarityPrefixScores: number[][];
+    similarityPrefixCounts: number[][];
 };
+
+type LagEvidence = LagStateEvidence;
 
 export type LagPathCache = {
     evidenceByDiagnosis: WeakMap<SeriesCoreDiagnosis, Map<string, LagEvidence>>;
@@ -394,6 +398,38 @@ const emissionFor = (
         : { score: -0.8, count: 0, differenceScore: 0, differenceCount: 0 };
 };
 
+const boundedSimilarityFor = (
+    target: NumericSeries,
+    targetDiff: NumericSeries,
+    master: NumericSeries,
+    masterDiff: NumericSeries,
+    year: number,
+    lag: number,
+): { score: number; count: number } => {
+    let score = 0;
+    let count = 0;
+    const rawTarget = target.get(year);
+    const rawMaster = master.get(year + lag);
+    if (rawTarget !== undefined && rawMaster !== undefined) {
+        score += 0.28 * Math.max(-4, Math.min(4, rawTarget * rawMaster));
+        count += 1;
+    } else {
+        score -= 0.28 * 0.8;
+    }
+    const differenceTarget = targetDiff.get(year);
+    const differenceMaster = masterDiff.get(year + lag);
+    if (differenceTarget !== undefined && differenceMaster !== undefined) {
+        score += 0.72 * Math.max(
+            -4,
+            Math.min(4, differenceTarget * differenceMaster),
+        );
+        count += 1;
+    } else {
+        score -= 0.72 * 0.8;
+    }
+    return { score, count };
+};
+
 const buildLagEvidence = (
     diagnosis: SeriesCoreDiagnosis,
     siteData: RwlSiteData,
@@ -429,6 +465,9 @@ const buildLagEvidence = (
     const emissionRows = years.map((year) => states.map((lag) => (
         emissionFor(target, targetDiff, master, masterDiff, year, lag)
     )));
+    const similarityRows = years.map((year) => states.map((lag) => (
+        boundedSimilarityFor(target, targetDiff, master, masterDiff, year, lag)
+    )));
     const emissions = emissionRows.map((row) => row.map((emission) => emission.score));
     const differenceEmissions = emissionRows.map((row) => (
         row.map((emission) => emission.differenceScore)
@@ -438,11 +477,20 @@ const buildLagEvidence = (
     ));
     const prefixScores = states.map(() => [0]);
     const prefixCounts = states.map(() => [0]);
+    const similarityPrefixScores = states.map(() => [0]);
+    const similarityPrefixCounts = states.map(() => [0]);
     emissions.forEach((_, yearIndex) => {
         states.forEach((_, stateIndex) => {
             const emission = emissionRows[yearIndex][stateIndex];
             prefixScores[stateIndex].push(prefixScores[stateIndex][yearIndex] + emission.score);
             prefixCounts[stateIndex].push(prefixCounts[stateIndex][yearIndex] + emission.count);
+            const similarity = similarityRows[yearIndex][stateIndex];
+            similarityPrefixScores[stateIndex].push(
+                similarityPrefixScores[stateIndex][yearIndex] + similarity.score,
+            );
+            similarityPrefixCounts[stateIndex].push(
+                similarityPrefixCounts[stateIndex][yearIndex] + similarity.count,
+            );
         });
     });
     return {
@@ -453,6 +501,8 @@ const buildLagEvidence = (
         differenceCounts,
         prefixScores,
         prefixCounts,
+        similarityPrefixScores,
+        similarityPrefixCounts,
     };
 };
 
@@ -624,6 +674,571 @@ const segmentScore = (
     return {
         score: evidence.prefixScores[stateIndex][endIndex + 1] - evidence.prefixScores[stateIndex][startIndex],
         count: evidence.prefixCounts[stateIndex][endIndex + 1] - evidence.prefixCounts[stateIndex][startIndex],
+    };
+};
+
+const boundedSegmentScore = (
+    evidence: LagEvidence,
+    state: number,
+    startIndex: number,
+    endIndex: number,
+): { score: number; count: number } => {
+    const stateIndex = evidence.states.indexOf(state);
+    if (stateIndex < 0 || endIndex < startIndex) {
+        return { score: Number.NEGATIVE_INFINITY, count: 0 };
+    }
+    return {
+        score: evidence.similarityPrefixScores[stateIndex][endIndex + 1]
+            - evidence.similarityPrefixScores[stateIndex][startIndex],
+        count: evidence.similarityPrefixCounts[stateIndex][endIndex + 1]
+            - evidence.similarityPrefixCounts[stateIndex][startIndex],
+    };
+};
+
+export type BoundedLagStateRun = {
+    lag: number;
+    startYear: number;
+    endYear: number;
+    startIndex: number;
+    endIndex: number;
+    score: number;
+    samplePairs: number;
+};
+
+export type BoundedLagStatePath = {
+    runs: BoundedLagStateRun[];
+    score: number;
+    bestConstantScore: number;
+    zeroLagScore: number;
+    transitionGain: number;
+    wholeLagGain: number;
+    runnerUpMargin: number;
+};
+
+export type BoundedLagStatePathConfig = {
+    maxSegments: number;
+    minRunYears: number;
+    windowWidth: 5 | 7 | 9 | 13;
+    minimumTransitionGain: number;
+    minimumWholeLagGain: number;
+    terminalLags?: readonly number[];
+    allowedLags?: readonly number[];
+};
+
+const boundedPathTransition = (
+    previous: Float64Array,
+    states: number[],
+    config: EventPathConfig,
+): { scores: Float64Array; from: Int32Array } => {
+    const scores = new Float64Array(states.length).fill(Number.NEGATIVE_INFINITY);
+    const from = new Int32Array(states.length).fill(-1);
+    const byState = new Map(states.map((state, index) => [state, index]));
+    let partialBest = Number.NEGATIVE_INFINITY;
+    let partialFrom = -1;
+    let partialCursor = 0;
+
+    states.forEach((newerLag, newerIndex) => {
+        while (
+            partialCursor < states.length
+            && states[partialCursor] <= newerLag - 2
+        ) {
+            const candidate = previous[partialCursor]
+                + states[partialCursor] * config.transitionPenaltyPerYear;
+            if (candidate > partialBest) {
+                partialBest = candidate;
+                partialFrom = partialCursor;
+            }
+            partialCursor += 1;
+        }
+        if (partialFrom >= 0) {
+            scores[newerIndex] = partialBest
+                - config.transitionPenaltyBig
+                - (newerLag - 2) * config.transitionPenaltyPerYear;
+            from[newerIndex] = partialFrom;
+        }
+
+        const unitOlderIndexes = [
+            byState.get(newerLag - 1),
+            byState.get(newerLag + 1),
+        ];
+        unitOlderIndexes.forEach((olderIndex) => {
+            if (olderIndex === undefined) return;
+            const candidate = previous[olderIndex] - config.transitionPenaltyUnit;
+            if (candidate > scores[newerIndex]) {
+                scores[newerIndex] = candidate;
+                from[newerIndex] = olderIndex;
+            }
+        });
+    });
+    return { scores, from };
+};
+
+/**
+ * Fits one immutable chronology hypothesis with at most two physical local transitions.
+ *
+ * Unlike the unrestricted Viterbi path, this model cannot explain noise by repeatedly changing
+ * lag. A non-zero newest run is retained as an independent whole-series baseline, while every
+ * older-to-newer transition must be a missing ring, false ring, or negative partial move.
+ */
+export const fitBoundedLagStatePath = (
+    diagnosis: SeriesCoreDiagnosis,
+    siteData: RwlSiteData,
+    overrides: Partial<EventPathConfig> = {},
+    pathOverrides: Partial<BoundedLagStatePathConfig> = {},
+    cache?: LagPathCache,
+): BoundedLagStatePath | null => {
+    const config = { ...DEFAULT_EVENT_PATH_CONFIG, ...overrides };
+    const pathConfig: BoundedLagStatePathConfig = {
+        maxSegments: 3,
+        minRunYears: config.minRunYears,
+        windowWidth: 13,
+        minimumTransitionGain: 2,
+        minimumWholeLagGain: 8,
+        ...pathOverrides,
+    };
+    const evidence = cachedLagEvidence(diagnosis, siteData, config, cache);
+    const yearCount = evidence.years.length;
+    const allowedLags = pathConfig.allowedLags === undefined
+        ? null
+        : new Set([
+            ...pathConfig.allowedLags,
+            ...(pathConfig.terminalLags ?? []),
+        ]);
+    const states = allowedLags === null
+        ? evidence.states
+        : evidence.states.filter((lag) => allowedLags.has(lag));
+    const evidenceStateIndexes = states.map((lag) => evidence.states.indexOf(lag));
+    const stateCount = states.length;
+    const maximumSegments = Math.max(
+        1,
+        Math.min(
+            Math.floor(pathConfig.maxSegments),
+            Math.floor(yearCount / Math.max(1, pathConfig.minRunYears)),
+        ),
+    );
+    if (yearCount === 0 || stateCount === 0 || maximumSegments < 1) return null;
+
+    const minimumRun = Math.max(1, Math.floor(pathConfig.minRunYears));
+    const layerSize = yearCount * stateCount;
+    const scoreLayers: Float64Array[] = [];
+    const priorEndLayers: Int32Array[] = [];
+    const priorStateLayers: Int32Array[] = [];
+    let previous = new Float64Array(layerSize).fill(Number.NEGATIVE_INFINITY);
+    for (let endIndex = minimumRun - 1; endIndex < yearCount; endIndex += 1) {
+        states.forEach((state, stateIndex) => {
+            previous[endIndex * stateCount + stateIndex] = boundedSegmentScore(
+                evidence,
+                state,
+                0,
+                endIndex,
+            ).score;
+        });
+    }
+    scoreLayers.push(previous);
+    priorEndLayers.push(new Int32Array(layerSize).fill(-1));
+    priorStateLayers.push(new Int32Array(layerSize).fill(-1));
+
+    for (let segmentCount = 2; segmentCount <= maximumSegments; segmentCount += 1) {
+        const current = new Float64Array(layerSize).fill(Number.NEGATIVE_INFINITY);
+        const priorEnds = new Int32Array(layerSize).fill(-1);
+        const priorStates = new Int32Array(layerSize).fill(-1);
+        const bestEntry = new Float64Array(stateCount).fill(Number.NEGATIVE_INFINITY);
+        const bestEntryEnd = new Int32Array(stateCount).fill(-1);
+        const bestEntryState = new Int32Array(stateCount).fill(-1);
+        const firstEnd = segmentCount * minimumRun - 1;
+        for (let endIndex = firstEnd; endIndex < yearCount; endIndex += 1) {
+            const enteringPriorEnd = endIndex - minimumRun;
+            const previousAtBoundary = new Float64Array(stateCount);
+            for (let stateIndex = 0; stateIndex < stateCount; stateIndex += 1) {
+                previousAtBoundary[stateIndex] = previous[
+                    enteringPriorEnd * stateCount + stateIndex
+                ];
+            }
+            const transition = boundedPathTransition(
+                previousAtBoundary,
+                states,
+                config,
+            );
+            for (let stateIndex = 0; stateIndex < stateCount; stateIndex += 1) {
+                const candidate = transition.scores[stateIndex]
+                    - evidence.similarityPrefixScores[
+                        evidenceStateIndexes[stateIndex]
+                    ][enteringPriorEnd + 1];
+                if (candidate > bestEntry[stateIndex]) {
+                    bestEntry[stateIndex] = candidate;
+                    bestEntryEnd[stateIndex] = enteringPriorEnd;
+                    bestEntryState[stateIndex] = transition.from[stateIndex];
+                }
+                if (!Number.isFinite(bestEntry[stateIndex])) continue;
+                const offset = endIndex * stateCount + stateIndex;
+                current[offset] = evidence.similarityPrefixScores[
+                    evidenceStateIndexes[stateIndex]
+                ][endIndex + 1]
+                    + bestEntry[stateIndex];
+                priorEnds[offset] = bestEntryEnd[stateIndex];
+                priorStates[offset] = bestEntryState[stateIndex];
+            }
+        }
+        previous = current;
+        scoreLayers.push(current);
+        priorEndLayers.push(priorEnds);
+        priorStateLayers.push(priorStates);
+    }
+
+    const terminalOffset = (yearCount - 1) * stateCount;
+    const allowedTerminalLags = pathConfig.terminalLags === undefined
+        ? null
+        : new Set(pathConfig.terminalLags);
+    const finals: Array<{ segmentCount: number; stateIndex: number; score: number }> = [];
+    scoreLayers.forEach((layer, layerIndex) => {
+        for (let stateIndex = 0; stateIndex < stateCount; stateIndex += 1) {
+            if (allowedTerminalLags
+                && !allowedTerminalLags.has(states[stateIndex])) continue;
+            const score = layer[terminalOffset + stateIndex];
+            if (Number.isFinite(score)) finals.push({
+                segmentCount: layerIndex + 1,
+                stateIndex,
+                score,
+            });
+        }
+    });
+    finals.sort((left, right) => right.score - left.score);
+    const best = finals[0];
+    if (!best) return null;
+
+    const runIndexes: Array<{
+        stateIndex: number;
+        startIndex: number;
+        endIndex: number;
+    }> = [];
+    let stateIndex = best.stateIndex;
+    let endIndex = yearCount - 1;
+    for (let layerIndex = best.segmentCount - 1; layerIndex >= 0; layerIndex -= 1) {
+        const offset = endIndex * stateCount + stateIndex;
+        const priorEnd = priorEndLayers[layerIndex][offset];
+        const startIndex = layerIndex === 0 ? 0 : priorEnd + 1;
+        if (startIndex < 0 || startIndex > endIndex) return null;
+        runIndexes.push({ stateIndex, startIndex, endIndex });
+        if (layerIndex > 0) {
+            const previousState = priorStateLayers[layerIndex][offset];
+            if (previousState < 0) return null;
+            stateIndex = previousState;
+            endIndex = priorEnd;
+        }
+    }
+    runIndexes.reverse();
+    const runs = runIndexes.map((run): BoundedLagStateRun => {
+        const interval = boundedSegmentScore(
+            evidence,
+            states[run.stateIndex],
+            run.startIndex,
+            run.endIndex,
+        );
+        return {
+            lag: states[run.stateIndex],
+            startYear: evidence.years[run.startIndex],
+            endYear: evidence.years[run.endIndex],
+            startIndex: run.startIndex,
+            endIndex: run.endIndex,
+            score: interval.score,
+            samplePairs: interval.count,
+        };
+    });
+    const constantScores = states.map((lag) => (
+        boundedSegmentScore(evidence, lag, 0, yearCount - 1).score
+    ));
+    const comparableConstantScores = constantScores.filter((_, stateIndex) => (
+        !allowedTerminalLags || allowedTerminalLags.has(states[stateIndex])
+    ));
+    const bestConstantScore = Math.max(...comparableConstantScores);
+    const zeroIndex = states.indexOf(0);
+    const zeroLagScore = zeroIndex >= 0
+        ? constantScores[zeroIndex]
+        : Number.NEGATIVE_INFINITY;
+    const newestLagIndex = states.indexOf(runs[runs.length - 1]?.lag ?? 0);
+    const newestLagScore = newestLagIndex >= 0
+        ? constantScores[newestLagIndex]
+        : Number.NEGATIVE_INFINITY;
+    return {
+        runs,
+        score: best.score,
+        bestConstantScore,
+        zeroLagScore,
+        transitionGain: best.score - bestConstantScore,
+        wholeLagGain: newestLagScore - zeroLagScore,
+        runnerUpMargin: best.score - (finals[1]?.score ?? best.score),
+    };
+};
+
+type BoundedTransitionRow = {
+    year: number;
+    score: number;
+    samplePairs: number;
+};
+
+const boundedTransitionType = (
+    olderLag: number,
+    newerLag: number,
+): DiagnosisEventType => {
+    const correction = olderLag - newerLag;
+    if (correction === -1) return "missingRing";
+    if (correction === 1) return "falseRing";
+    return "partialMove";
+};
+
+const boundedTransitionRows = (
+    evidence: LagEvidence,
+    older: BoundedLagStateRun,
+    newer: BoundedLagStateRun,
+    eventType: DiagnosisEventType,
+    radius: number,
+): BoundedTransitionRow[] => {
+    const nominalYear = eventType === "missingRing"
+        ? older.endYear
+        : newer.startYear;
+    const firstYear = evidence.years[0];
+    const lastYear = evidence.years[evidence.years.length - 1];
+    const contextStart = older.startIndex;
+    const contextEnd = newer.endIndex;
+    const startYear = Math.max(firstYear + 1, nominalYear - radius);
+    const endYear = Math.min(lastYear - 1, nominalYear + radius);
+    const rows: BoundedTransitionRow[] = [];
+    for (let year = startYear; year <= endYear; year += 1) {
+        const yearIndex = year - firstYear;
+        const olderEnd = eventType === "missingRing" ? yearIndex : yearIndex - 1;
+        const newerStart = eventType === "partialMove" ? yearIndex : yearIndex + 1;
+        if (olderEnd < contextStart || newerStart > contextEnd) continue;
+        const olderScore = boundedSegmentScore(
+            evidence,
+            older.lag,
+            contextStart,
+            olderEnd,
+        );
+        const newerScore = boundedSegmentScore(
+            evidence,
+            newer.lag,
+            newerStart,
+            contextEnd,
+        );
+        if (!Number.isFinite(olderScore.score) || !Number.isFinite(newerScore.score)) {
+            continue;
+        }
+        rows.push({
+            year,
+            score: olderScore.score + newerScore.score,
+            samplePairs: olderScore.count + newerScore.count,
+        });
+    }
+    return rows.sort((left, right) => right.score - left.score || right.year - left.year);
+};
+
+const boundedReviewWindow = (
+    centerYear: number,
+    width: number,
+    minimumYear: number,
+    maximumYear: number,
+): { startYear: number; endYear: number } => {
+    const actualWidth = Math.min(width, maximumYear - minimumYear + 1);
+    let startYear = centerYear - Math.floor((actualWidth - 1) / 2);
+    startYear = Math.max(
+        minimumYear,
+        Math.min(startYear, maximumYear - actualWidth + 1),
+    );
+    return { startYear, endYear: startYear + actualWidth - 1 };
+};
+
+const boundedLocationConcentration = (
+    rows: readonly BoundedTransitionRow[],
+    startYear: number,
+    endYear: number,
+): number => {
+    const best = rows[0]?.score;
+    if (!Number.isFinite(best)) return 0;
+    const masses = rows.map((row) => ({
+        year: row.year,
+        mass: Math.exp(Math.max(-30, Math.min(0, row.score - best))),
+    }));
+    const total = masses.reduce((sum, row) => sum + row.mass, 0);
+    if (total <= 0) return 0;
+    return masses.filter((row) => row.year >= startYear && row.year <= endYear)
+        .reduce((sum, row) => sum + row.mass, 0) / total;
+};
+
+const boundedRankedYears = (
+    rows: readonly BoundedTransitionRow[],
+    startYear: number,
+    endYear: number,
+): DiagnosisRankedYear[] => {
+    const scoreByYear = new Map(rows.map((row) => [row.year, row.score]));
+    return Array.from({ length: endYear - startYear + 1 }, (_, index) => {
+        const year = startYear + index;
+        return {
+            year,
+            score: scoreByYear.get(year) ?? Number.NEGATIVE_INFINITY,
+            evidenceTags: ["bounded_complete_lag_path"],
+        };
+    }).sort((left, right) => right.score - left.score || right.year - left.year)
+        .map((row, index) => ({ ...row, rank: index + 1 }));
+};
+
+export type BoundedLagStateEventSet = {
+    path: BoundedLagStatePath;
+    events: DiagnosisEvent[];
+};
+
+/** Projects the complete path into immutable event hypotheses without choosing a UI winner. */
+export const locateBoundedLagStateEvents = (
+    diagnosis: SeriesCoreDiagnosis,
+    siteData: RwlSiteData,
+    overrides: Partial<EventPathConfig> = {},
+    pathOverrides: Partial<BoundedLagStatePathConfig> = {},
+    cache?: LagPathCache,
+): BoundedLagStateEventSet | null => {
+    const config = { ...DEFAULT_EVENT_PATH_CONFIG, ...overrides };
+    const pathConfig: BoundedLagStatePathConfig = {
+        maxSegments: 3,
+        minRunYears: config.minRunYears,
+        windowWidth: 13,
+        minimumTransitionGain: 2,
+        minimumWholeLagGain: 8,
+        ...pathOverrides,
+    };
+    const referenceView = config.useCofechaStandardization ? "cofecha" : "raw";
+    const path = fitBoundedLagStatePath(
+        diagnosis,
+        siteData,
+        config,
+        pathConfig,
+        cache,
+    );
+    if (!path) return null;
+    const evidence = cachedLagEvidence(diagnosis, siteData, config, cache);
+    const events: DiagnosisEvent[] = [];
+    if (path.transitionGain >= pathConfig.minimumTransitionGain) {
+        for (let index = 0; index < path.runs.length - 1; index += 1) {
+            const older = path.runs[index];
+            const newer = path.runs[index + 1];
+            const correctionYears = older.lag - newer.lag;
+            if (correctionYears > 1 || correctionYears === 0) continue;
+            const eventType = boundedTransitionType(older.lag, newer.lag);
+            const rows = boundedTransitionRows(
+                evidence,
+                older,
+                newer,
+                eventType,
+                Math.max(config.maxBoundaryRefinementYears, 14),
+            );
+            const top = rows[0];
+            if (!top) continue;
+            const window = boundedReviewWindow(
+                top.year,
+                pathConfig.windowWidth,
+                diagnosis.targetRange.startYear,
+                diagnosis.targetRange.endYear,
+            );
+            const remote = rows.find((row) => (
+                Math.abs(row.year - top.year) > pathConfig.windowWidth
+            ));
+            const concentration = boundedLocationConcentration(
+                rows,
+                window.startYear,
+                window.endYear,
+            );
+            events.push({
+                id: `diagnosis-event-${diagnosis.targetTree}-bounded-${eventType}-${
+                    window.startYear
+                }-${window.endYear}`,
+                seriesId: diagnosis.targetTree,
+                eventType,
+                ...window,
+                rankedYears: boundedRankedYears(rows, window.startYear, window.endYear),
+                confidenceLevel: path.transitionGain >= 12
+                    ? "high"
+                    : path.transitionGain >= 5 ? "medium" : "low",
+                evidence: {
+                    algorithmSources: ["bounded_complete_lag_path"],
+                    score: path.transitionGain,
+                    scoreMargin: path.runnerUpMargin,
+                    baselineCorrelation: diagnosis.globalSlidingMatch.currentR,
+                    correctedCorrelation: diagnosis.globalSlidingMatch.bestGlobalR,
+                    correlationGain: path.transitionGain
+                        / Math.max(1, top.samplePairs),
+                    lagBefore: older.lag,
+                    lagAfter: newer.lag,
+                    samplePairs: top.samplePairs,
+                    candidateIds: [],
+                    locationEvidence: [{
+                        source: "bounded_complete_lag_path",
+                        ...window,
+                        topYear: top.year,
+                        referenceCount: diagnosis.master.sourceTrees.length,
+                        concentration,
+                        remoteMargin: remote ? top.score - remote.score : null,
+                        calibrated: false,
+                    }],
+                    notes: [
+                        `bounded_path_transition=${older.lag}->${newer.lag}`,
+                        `bounded_path_transition_gain=${path.transitionGain.toFixed(6)}`,
+                        `bounded_path_runner_up_margin=${path.runnerUpMargin.toFixed(6)}`,
+                        `bounded_path_location_concentration=${concentration.toFixed(6)}`,
+                        `bounded_path_reference_view=${referenceView}`,
+                        "bounded_path_complete_hypothesis=true",
+                        "score_is_relative_not_probability",
+                    ],
+                },
+                alternativeTypes: Math.abs(correctionYears) === 1
+                    ? ["partialMove"]
+                    : [],
+                ...(eventType === "partialMove" ? {
+                    shiftYears: correctionYears,
+                    shiftSide: "older" as const,
+                } : {}),
+            });
+        }
+    }
+
+    const newest = path.runs[path.runs.length - 1];
+    if (newest?.lag !== 0 && path.wholeLagGain >= pathConfig.minimumWholeLagGain) {
+        events.push({
+            id: `diagnosis-event-${diagnosis.targetTree}-bounded-whole-${newest.lag}`,
+            seriesId: diagnosis.targetTree,
+            eventType: "wholeSeriesMove",
+            startYear: diagnosis.targetRange.startYear,
+            endYear: diagnosis.targetRange.endYear,
+            rankedYears: [],
+            confidenceLevel: path.wholeLagGain >= 20
+                ? "high"
+                : path.wholeLagGain >= 12 ? "medium" : "low",
+            evidence: {
+                algorithmSources: ["bounded_complete_lag_path"],
+                score: path.wholeLagGain,
+                scoreMargin: path.runnerUpMargin,
+                baselineCorrelation: diagnosis.globalSlidingMatch.currentR,
+                correctedCorrelation: diagnosis.globalSlidingMatch.bestGlobalR,
+                correlationGain: path.wholeLagGain / Math.max(1, newest.samplePairs),
+                lagBefore: newest.lag,
+                lagAfter: newest.lag,
+                samplePairs: newest.samplePairs,
+                candidateIds: [],
+                notes: [
+                    `bounded_path_whole_lag=${newest.lag}`,
+                    `bounded_path_whole_gain=${path.wholeLagGain.toFixed(6)}`,
+                    `bounded_path_reference_view=${referenceView}`,
+                    "bounded_path_complete_hypothesis=true",
+                    "score_is_relative_not_probability",
+                ],
+            },
+            alternativeTypes: [],
+            shiftYears: newest.lag,
+        });
+    }
+    return {
+        path,
+        events: events.sort((left, right) => (
+            Number(right.eventType === "wholeSeriesMove")
+                - Number(left.eventType === "wholeSeriesMove")
+            || right.endYear - left.endYear
+        )),
     };
 };
 

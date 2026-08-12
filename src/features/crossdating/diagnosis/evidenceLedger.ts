@@ -38,6 +38,10 @@ const hasToken = (tokens: ReadonlySet<string>, token: string): boolean => (
 const operationClaims = (event: DiagnosisEvent): DiagnosisEvidenceClaim[] => {
     const tokens = evidenceTokens(event);
     const claims: DiagnosisEvidenceClaim[] = [];
+    if (hasToken(tokens, "bounded_complete_lag_path")
+        && hasToken(tokens, "bounded_path_complete_hypothesis")) {
+        claims.push("bounded_lag_state_path");
+    }
     if (event.eventType === "missingRing" && (
         hasToken(tokens, "explicit_partial_vs_missing_staircase")
         || hasToken(tokens, "sequential_missing_staircase_head")
@@ -86,7 +90,10 @@ const operationClaims = (event: DiagnosisEvent): DiagnosisEvidenceClaim[] => {
     }
     if (event.eventType === "wholeSeriesMove"
         && hasToken(tokens, "whole_state_global_lag_matches_shift")
-        && tokens.has("whole_state_global_lag_matches_shift=true")) {
+        && tokens.has("whole_state_global_lag_matches_shift=true")
+        && (numberFromNotes(event, [
+            "whole_state_newer_edge_support_fraction=",
+        ]) ?? 0) >= 0.5) {
         claims.push("whole_global_lag");
     }
     if (event.eventType === "wholeSeriesMove"

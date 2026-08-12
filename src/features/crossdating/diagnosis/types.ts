@@ -49,7 +49,8 @@ export type DiagnosisEvidenceClaim =
     | "joint_operation"
     | "continuous_gap_consensus"
     | "whole_global_lag"
-    | "whole_terminal_baseline";
+    | "whole_terminal_baseline"
+    | "bounded_lag_state_path";
 
 export type DiagnosisPresenceEvidenceEntry = {
     kind: "presence";

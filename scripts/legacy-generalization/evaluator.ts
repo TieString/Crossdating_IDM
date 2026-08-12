@@ -284,12 +284,16 @@ export const diagnoseTruthBlind = (input: {
                 const hasWholeBaseline = beforeFusion.some(
                     (event) => event.eventType === "wholeSeriesMove",
                 );
-                const localUnitEvents = beforeFusion.filter((event) => (
-                    event.eventType === "missingRing" || event.eventType === "falseRing"
-                ));
-                const productionBaselineLag = hasWholeBaseline
-                    && localUnitEvents.length === 1
-                    ? localUnitEvents[0].lagAfter ?? 0
+                const boundedTerminalLags = hasWholeBaseline
+                    ? [...new Set(beforeFusion.flatMap((event) => (
+                        event.eventType === "wholeSeriesMove"
+                        && typeof event.shiftYears === "number"
+                            ? [event.shiftYears]
+                            : []
+                    )))]
+                    : [0];
+                const productionBaselineLag = boundedTerminalLags.length === 1
+                    ? boundedTerminalLags[0]!
                     : 0;
                 const operations = getJointCounterfactualOperationScores(
                     core,
@@ -343,6 +347,9 @@ export const diagnoseTruthBlind = (input: {
                     })()
                     : null;
                 return {
+                    jointDecision: diagnosis.jointEventDecisions?.[0] ?? null,
+                    coreGlobalSlidingMatch: core.globalSlidingMatch,
+                    cofechaCoreGlobalSlidingMatch: cofechaCore?.globalSlidingMatch ?? null,
                     operations: operations.map((operation) => ({
                         eventType: operation.eventType,
                         shiftYears: operation.shiftYears,

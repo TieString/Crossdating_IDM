@@ -73,6 +73,105 @@ describe("joint event adjudicator", () => {
         expect(decision.event?.evidence.candidateIds).toEqual(["stable"]);
     });
 
+    it("keeps an accepted final locator window from being rewritten by an older checkpoint", () => {
+        const earlier = event("earlier", "missingRing", 1377, 1383, 1380);
+        const located = event("located", "missingRing", 1380, 1392, 1390);
+        located.evidence.algorithmSources = ["full_interval_counterfactual_locator"];
+        located.evidence.notes = ["locator_adjudication=accepted_overlapping_mode"];
+        located.evidence.locationEvidence = [{
+            source: "full_interval_counterfactual_locator",
+            startYear: 1380,
+            endYear: 1392,
+            topYear: 1390,
+            referenceCount: 9,
+            concentration: 0,
+            remoteMargin: 1.48,
+            calibrated: true,
+        }];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", earlier),
+            checkpoint("detected", earlier),
+            checkpoint("fused", earlier),
+            checkpoint("retained", earlier),
+            checkpoint("displayed", earlier),
+            checkpoint("final", located),
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "final",
+            event: {
+                id: "located",
+                startYear: 1380,
+                endYear: 1392,
+            },
+        });
+    });
+
+    it("keeps the persisted location when an accepted locator has no remote-mode margin", () => {
+        const persisted = event("persisted", "missingRing", 1568, 1580, 1574);
+        const weakLocator = event("weak-locator", "missingRing", 1579, 1591, 1591);
+        weakLocator.evidence.algorithmSources = ["full_interval_counterfactual_locator"];
+        weakLocator.evidence.notes = ["locator_adjudication=accepted_overlapping_mode"];
+        weakLocator.evidence.locationEvidence = [{
+            source: "full_interval_counterfactual_locator",
+            startYear: 1579,
+            endYear: 1591,
+            topYear: 1591,
+            referenceCount: 16,
+            concentration: 0,
+            remoteMargin: 0,
+            calibrated: true,
+        }];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("detected", persisted),
+            checkpoint("fused", persisted),
+            checkpoint("retained", persisted),
+            checkpoint("displayed", persisted),
+            checkpoint("final", weakLocator),
+        ]);
+
+        expect(decision.event).toMatchObject({
+            id: "persisted",
+            startYear: 1568,
+            endYear: 1580,
+        });
+    });
+
+    it("does not let an uncalibrated narrow locator replace a persisted partial window", () => {
+        const persisted = event("persisted", "partialMove", 1781, 1789, 1785);
+        const narrowLocator = event("narrow-locator", "partialMove", 1788, 1792, 1789);
+        narrowLocator.evidence.algorithmSources = ["full_interval_counterfactual_locator"];
+        narrowLocator.evidence.notes = ["locator_adjudication=accepted_overlapping_mode"];
+        narrowLocator.evidence.locationEvidence = [{
+            source: "full_interval_counterfactual_locator",
+            startYear: 1788,
+            endYear: 1792,
+            topYear: 1789,
+            referenceCount: 16,
+            concentration: 0.31,
+            remoteMargin: 0.44,
+            calibrated: false,
+        }];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("detected", persisted),
+            checkpoint("fused", persisted),
+            checkpoint("retained", persisted),
+            checkpoint("displayed", persisted),
+            checkpoint("final", persisted),
+            checkpoint("final", narrowLocator),
+        ]);
+
+        expect(decision.event).toMatchObject({
+            id: "persisted",
+            startYear: 1781,
+            endYear: 1789,
+        });
+    });
+
     it("selects the unique hard-gated candidate supported by raw path and direct transition", () => {
         const correctCandidate = event(
             "path-candidate",
