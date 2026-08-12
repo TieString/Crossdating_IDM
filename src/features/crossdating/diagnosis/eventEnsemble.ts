@@ -29,6 +29,7 @@ import {
     attachMissingPartialInterpretation,
     evaluateCompletedPartialMissingInterpretation,
     evaluateExactSequentialMissingInterpretation,
+    evaluateLocalizedTwoStepMissingInterpretation,
     evaluateMissingPartialInterpretationTie,
     makeMissingRingInterpretation,
     makePartialMoveInterpretation,
@@ -1480,7 +1481,19 @@ const addCompressedMissingStaircaseEvidence = (
                 && event.shiftSide === "older",
             hasIndependentWholeSeriesBaseline,
         });
-        const interpretationEvidence = tieEvidence ?? exactEvidence;
+        const localizedEvidence = evaluateLocalizedTwoStepMissingInterpretation(
+            event,
+            competition,
+            exactHead,
+            staircase,
+            {
+                missingReviewPassed: true,
+                partialReviewPassed: event.eventType === "partialMove"
+                    && event.shiftSide === "older",
+                hasIndependentWholeSeriesBaseline,
+            },
+        );
+        const interpretationEvidence = tieEvidence ?? exactEvidence ?? localizedEvidence;
         return interpretationEvidence
             ? attachMissingPartialInterpretation(
                 event,
@@ -3966,6 +3979,11 @@ const recoverCumulativePartialFrontier = (
     const aggregate = displayed.filter((event) => event.eventType === "partialMove")
         .sort((left, right) => (
             Math.abs(right.shiftYears ?? 0) - Math.abs(left.shiftYears ?? 0)
+            || Number(right.evidence.algorithmSources.includes(
+                "bounded_complete_lag_path",
+            )) - Number(left.evidence.algorithmSources.includes(
+                "bounded_complete_lag_path",
+            ))
         ))[0];
     if (!aggregate) return null;
     const operations = getJointCounterfactualOperationScores(
@@ -4065,6 +4083,7 @@ const recoverCumulativePartialFrontier = (
 
 const recoverNearCumulativePartialPairFrontier = (
     displayed: readonly DiagnosisEvent[],
+    boundedPathEvents: readonly DiagnosisEvent[],
     candidateEvents: readonly DiagnosisEvent[],
     diagnosis: SeriesCoreDiagnosis,
     cofechaDiagnosis: SeriesCoreDiagnosis,
@@ -4072,9 +4091,20 @@ const recoverNearCumulativePartialPairFrontier = (
     maxPartialGapYears: number,
 ): DiagnosisEvent | null => {
     if (displayed.some((event) => event.eventType === "wholeSeriesMove")) return null;
-    const aggregate = displayed.filter((event) => event.eventType === "partialMove")
+    const displayedPartials = displayed.filter((event) => event.eventType === "partialMove");
+    const displayedShifts = new Set(displayedPartials.map((event) => event.shiftYears));
+    const matchingBoundedPaths = boundedPathEvents.filter((event) => (
+        event.eventType === "partialMove"
+        && displayedShifts.has(event.shiftYears)
+    ));
+    const aggregate = [...matchingBoundedPaths, ...displayedPartials]
         .sort((left, right) => (
-            Math.abs(right.shiftYears ?? 0) - Math.abs(left.shiftYears ?? 0)
+            Number(right.evidence.algorithmSources.includes(
+                "bounded_complete_lag_path",
+            )) - Number(left.evidence.algorithmSources.includes(
+                "bounded_complete_lag_path",
+            ))
+            || Math.abs(right.shiftYears ?? 0) - Math.abs(left.shiftYears ?? 0)
         ))[0];
     if (!aggregate) return null;
     const competition: CompletedPartialPairCompetition | null = compareCompletedPartialPair(
@@ -7205,6 +7235,40 @@ export const makeDiagnosisEvents = (
             cofechaPreprocess,
         );
         if (!cofechaDiagnosis) return finalize(displayed);
+        const boundedCompressedMissingFrontier = boundedPathEvents
+            .filter((event) => (
+                event.eventType === "partialMove"
+                && event.shiftSide === "older"
+                && event.shiftYears === -2
+            ))
+            .map((event) => addCompressedMissingStaircaseEvidence(
+                event,
+                cofechaDiagnosis,
+                siteData,
+                { minLag: -2, maxPartialGapYears: 2 },
+                createLagPathCache(),
+            ))
+            .find((event) => (
+                event.interpretationAmbiguity?.kind === "missingRingsOrPartialMove"
+                || event.evidence.algorithmSources.includes(
+                    "compressed_missing_staircase_evidence",
+                )
+            ));
+        if (boundedCompressedMissingFrontier) {
+            return finalize([boundedCompressedMissingFrontier], [], false);
+        }
+        const nearCumulativePartialPairFrontier = recoverNearCumulativePartialPairFrontier(
+            displayed,
+            boundedPathEvents,
+            candidateEvents,
+            diagnosis,
+            cofechaDiagnosis,
+            siteData,
+            effectiveConfig.maxPartialGapYears,
+        );
+        if (nearCumulativePartialPairFrontier) {
+            return finalize([nearCumulativePartialPairFrontier], [], false);
+        }
         const cumulativeLagPathFrontier = recoverCumulativeLagPathFrontier(
             displayed,
             passRawPathEvents.events,
@@ -7247,19 +7311,6 @@ export const makeDiagnosisEvents = (
             : null;
         if (cumulativePartialFrontier) {
             return finalize([cumulativePartialFrontier]);
-        }
-        const nearCumulativePartialPairFrontier = cumulativeLagPathFrontier === null
-            ? recoverNearCumulativePartialPairFrontier(
-                displayed,
-                candidateEvents,
-                diagnosis,
-                cofechaDiagnosis,
-                siteData,
-                effectiveConfig.maxPartialGapYears,
-            )
-            : null;
-        if (nearCumulativePartialPairFrontier) {
-            return finalize([nearCumulativePartialPairFrontier]);
         }
         const sequentialMissing = mayRecoverSequentialMissing
             ? recoverSequentialMissingHeadEvent(

@@ -429,6 +429,7 @@ const hasReviewableMissingPartialInterpretation = (
         || ambiguity.alternative.eventType !== "missingRing"
         || ![
             "exactSequentialStaircaseAlternative",
+            "localizedTwoStepStaircaseAlternative",
             "structuredLocatorCumulativeLagAlternative",
         ].includes(ambiguity.evidence.interpretationBasis ?? "")
         || ambiguity.evidence.cumulativeShiftYears !== event.shiftYears

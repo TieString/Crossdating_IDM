@@ -226,6 +226,106 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("keeps a selected location over a same-operation supplemental location", () => {
+        const located = event("located", "partialMove", 1817, 1829, 1823);
+        located.shiftYears = -20;
+        located.evidence.lagBefore = -20;
+        located.evidence.algorithmSources = ["full_interval_counterfactual_locator"];
+        const fallback = event("fallback", "partialMove", 1810, 1822, 1816);
+        fallback.shiftYears = -20;
+        fallback.evidence.lagBefore = -20;
+        fallback.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        fallback.evidence.notes = ["bounded_path_complete_hypothesis=true"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: located },
+            { stage: "final", authority: "supplemental", event: fallback },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            event: {
+                id: "located",
+                startYear: 1817,
+                endYear: 1829,
+            },
+        });
+    });
+
+    it("keeps selected location authority when the supplemental window overlaps it", () => {
+        const located = event("located-overlap", "partialMove", 1817, 1829, 1823);
+        located.shiftYears = -20;
+        located.evidence.lagBefore = -20;
+        located.evidence.algorithmSources = ["full_interval_counterfactual_locator"];
+        const fallback = event("fallback-overlap", "partialMove", 1810, 1822, 1816);
+        fallback.shiftYears = -20;
+        fallback.evidence.lagBefore = -20;
+        fallback.evidence.score = 40;
+        fallback.evidence.scoreMargin = 7;
+        fallback.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        fallback.evidence.notes = ["bounded_path_complete_hypothesis=true"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: located },
+            { stage: "final", authority: "supplemental", event: fallback },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            event: {
+                id: "located-overlap",
+                startYear: 1817,
+                endYear: 1829,
+            },
+        });
+    });
+
+    it("uses a matching bounded operation to corroborate the selected frontier", () => {
+        const selected = event("selected-missing", "missingRing", 1973, 1985, 1979);
+        selected.evidence.algorithmSources = ["sequential_missing_staircase_head"];
+        const boundedMissing = event("bounded-missing", "missingRing", 1947, 1959, 1953);
+        boundedMissing.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        const boundedPartial = event("bounded-partial", "partialMove", 1861, 1873, 1867);
+        boundedPartial.shiftYears = -3;
+        boundedPartial.evidence.lagBefore = -3;
+        boundedPartial.evidence.algorithmSources = ["bounded_complete_lag_path"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: selected },
+            { stage: "final", authority: "supplemental", event: boundedMissing },
+            { stage: "final", authority: "supplemental", event: boundedPartial },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            event: {
+                id: "selected-missing",
+                startYear: 1973,
+                endYear: 1985,
+            },
+        });
+    });
+
+    it("keeps a newer bounded frontier over an older selected mode of the same operation", () => {
+        const selected = event("selected-old-mode", "missingRing", 1952, 1964, 1958);
+        const bounded = event("bounded-new-frontier", "missingRing", 1969, 1981, 1975);
+        bounded.evidence.algorithmSources = ["bounded_complete_lag_path"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: selected },
+            { stage: "final", authority: "supplemental", event: bounded },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            event: {
+                id: "bounded-new-frontier",
+                startYear: 1969,
+                endYear: 1981,
+            },
+        });
+    });
+
     it("selects the unique hard-gated candidate supported by raw path and direct transition", () => {
         const correctCandidate = event(
             "path-candidate",

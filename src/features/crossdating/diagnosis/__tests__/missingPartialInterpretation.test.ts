@@ -8,6 +8,7 @@ import {
     attachMissingPartialInterpretation,
     evaluateCompletedPartialMissingInterpretation,
     evaluateExactSequentialMissingInterpretation,
+    evaluateLocalizedTwoStepMissingInterpretation,
     evaluateMissingPartialInterpretationTie,
     makeMissingRingInterpretation,
     makePartialMoveInterpretation,
@@ -331,6 +332,106 @@ describe("missing/partial interpretation tie", () => {
             evidence!,
             partial.seriesRange!,
         ).rankedYears[0]?.year).toBe(1909);
+    });
+
+    it("keeps a locally decisive two-step staircase when the physical interpretation is tied", () => {
+        const partial = partialEvent();
+        partial.startYear = 1825;
+        partial.endYear = 1837;
+        partial.rankedYears = [{
+            year: 1832,
+            rank: 1,
+            score: 1,
+            evidenceTags: ["bounded_complete_lag_path"],
+        }];
+        const evidence = evaluateLocalizedTwoStepMissingInterpretation(
+            partial,
+            smallCompetition({
+                masterMargin: 0.04,
+                referenceMedianMargin: 0.009,
+                referenceCount: 28,
+                referenceSupport: 20,
+                referenceSupportRatio: 20 / 28,
+            }),
+            {
+                year: 1832,
+                score: 1,
+                directScore: 0.895,
+                gainOverDirect: 0.105,
+                transitionCount: 2,
+                headRunYears: 4,
+                headMeanAdvantage: 0.035,
+                fixedTailMeanAdvantage: 0.084,
+                pathStartLag: -2,
+                unitEventYears: [1825, 1832],
+            },
+            {
+                olderBoundaryYear: 1825,
+                newerBoundaryYear: 1832,
+                staircaseScore: 1,
+                directScore: 0.898,
+                staircaseGain: 0.102,
+                middleMeanAdvantage: 0.093,
+                middleSamplePairs: 30,
+                referenceSupport: 26,
+                referenceCount: 26,
+                referenceMedianAdvantage: 0.067,
+            },
+            gate,
+        );
+
+        expect(evidence).toMatchObject({
+            interpretationBasis: "localizedTwoStepStaircaseAlternative",
+            missingRingCount: 2,
+            cumulativeShiftYears: -2,
+            missingYears: [1825, 1832],
+            partialFirstFixedYear: 1832,
+            referenceCount: 26,
+            missingReferenceSupport: 26,
+        });
+        expect(makeMissingRingInterpretation(
+            partial,
+            evidence!,
+            partial.seriesRange!,
+        )).toMatchObject({
+            eventType: "missingRing",
+            startYear: 1826,
+            endYear: 1838,
+        });
+    });
+
+    it("rejects a localized two-step alternative without concentrated references", () => {
+        const evidence = evaluateLocalizedTwoStepMissingInterpretation(
+            partialEvent(),
+            smallCompetition(),
+            {
+                year: 1905,
+                score: 1,
+                directScore: 0.9,
+                gainOverDirect: 0.1,
+                transitionCount: 2,
+                headRunYears: 4,
+                headMeanAdvantage: 0.05,
+                fixedTailMeanAdvantage: 0.1,
+                pathStartLag: -2,
+                unitEventYears: [1900, 1905],
+            },
+            {
+                olderBoundaryYear: 1900,
+                newerBoundaryYear: 1905,
+                staircaseScore: 1,
+                directScore: 0.9,
+                staircaseGain: 0.1,
+                middleMeanAdvantage: 0.08,
+                middleSamplePairs: 30,
+                referenceSupport: 7,
+                referenceCount: 10,
+                referenceMedianAdvantage: 0.05,
+            },
+            gate,
+        );
+
+        expect(evidence).toBeNull();
     });
 
     it("keeps a tied cumulative -2 path behind a strong structured locator", () => {

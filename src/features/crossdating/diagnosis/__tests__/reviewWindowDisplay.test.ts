@@ -398,6 +398,44 @@ describe("lower review-window display gate", () => {
         });
     });
 
+    it("shows a partial carrying a concentrated local two-step interpretation", () => {
+        const partial = reviewablePartial(-2, {
+            algorithmSources: [
+                "bounded_complete_lag_path",
+                "compressed_missing_staircase_evidence",
+            ],
+            notes: [
+                "bounded_path_complete_hypothesis=true",
+                "counterfactual_correction_years=-2",
+            ],
+        });
+        partial.interpretationAmbiguity = {
+            kind: "missingRingsOrPartialMove",
+            alternative: {
+                ...strictEvent(),
+                id: "localized-two-step-missing-alternative",
+            },
+            evidence: {
+                interpretationBasis: "localizedTwoStepStaircaseAlternative",
+                missingRingCount: 2,
+                cumulativeShiftYears: -2,
+                missingYears: [1893, 1900],
+                partialFirstFixedYear: 1900,
+                normalizedCounterfactualGainDifference: 0.4,
+                masterMargin: 0.04,
+                referenceMedianMargin: 0.009,
+                referenceCount: 26,
+                missingReferenceSupport: 26,
+                partialReferenceSupport: 0,
+            },
+        };
+
+        expect(selectReviewWindowDisplay(audit([]), [partial])).toMatchObject({
+            status: "strict",
+            event: partial,
+        });
+    });
+
     it("shows a recovered sequential missing frontier before a competing whole baseline", () => {
         const unit = strictEvent();
         unit.evidence.algorithmSources = ["sequential_missing_staircase_head"];

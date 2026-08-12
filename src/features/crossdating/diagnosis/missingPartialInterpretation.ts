@@ -4,7 +4,7 @@ import type {
     CompletedPartialStaircaseCompetition,
     MissingStaircaseCompetition,
 } from "./discreteMissingStaircaseCompetition";
-import type { SequentialMissingHead } from "./eventPath";
+import type { SequentialMissingHead, TwoStepMissingStaircase } from "./eventPath";
 import type {
     DiagnosisEvent,
     DiagnosisMissingPartialInterpretationEvidence,
@@ -313,6 +313,76 @@ export const evaluateExactSequentialMissingInterpretation = (
     };
 };
 
+/**
+ * Keeps a two-step unit interpretation available when local lag shape is decisive but the
+ * whole-series direct-vs-staircase fit cannot identify whether the physical sample is broken.
+ */
+export const evaluateLocalizedTwoStepMissingInterpretation = (
+    partial: DiagnosisEvent,
+    competition: MissingStaircaseCompetition | null,
+    head: SequentialMissingHead | null,
+    staircase: TwoStepMissingStaircase | null,
+    gate: MissingPartialInterpretationGate,
+): DiagnosisMissingPartialInterpretationEvidence | null => {
+    if (!competition
+        || !head
+        || !staircase
+        || !gate.missingReviewPassed
+        || !gate.partialReviewPassed
+        || gate.hasIndependentWholeSeriesBaseline
+        || partial.eventType !== "partialMove"
+        || partial.shiftSide !== "older"
+        || partial.shiftYears !== -2) return null;
+    const supportRatio = staircase.referenceSupport
+        / Math.max(1, staircase.referenceCount);
+    const missingYears = [...head.unitEventYears].sort((left, right) => left - right);
+    const oldestYear = missingYears[0];
+    const newestYear = missingYears[missingYears.length - 1];
+    if (oldestYear === undefined
+        || newestYear === undefined
+        || head.pathStartLag !== -2
+        || head.transitionCount !== 2
+        || missingYears.length !== 2
+        || newestYear !== head.year
+        || newestYear - oldestYear + 1
+            > MISSING_PARTIAL_INTERPRETATION_CALIBRATION.maximumMissingRegionWidthYears
+        || staircase.newerBoundaryYear - staircase.olderBoundaryYear < 4
+        || staircase.newerBoundaryYear - staircase.olderBoundaryYear > 13
+        || Math.abs(head.year - staircase.newerBoundaryYear) > 2
+        || staircase.staircaseGain <= 0
+        || staircase.middleMeanAdvantage < 0.04
+        || staircase.referenceCount
+            < MISSING_PARTIAL_INTERPRETATION_CALIBRATION.minimumReferenceCount
+        || supportRatio < 0.9
+        || staircase.referenceMedianAdvantage < 0.03
+        || head.gainOverDirect <= 0
+        || head.headMeanAdvantage < 0.03
+        || head.year < partial.startYear - 2
+        || head.year > partial.endYear + 2) return null;
+    const topYear = partial.rankedYears.slice().sort(
+        (left, right) => left.rank - right.rank,
+    )[0]?.year ?? Math.round((partial.startYear + partial.endYear) / 2);
+    return {
+        interpretationBasis: "localizedTwoStepStaircaseAlternative",
+        missingRingCount: 2,
+        cumulativeShiftYears: -2,
+        missingYears,
+        partialFirstFixedYear: topYear,
+        normalizedCounterfactualGainDifference: Math.max(
+            Math.abs(competition.masterMargin)
+                / MISSING_PARTIAL_INTERPRETATION_CALIBRATION.maximumMasterMargin,
+            Math.abs(competition.referenceMedianMargin)
+                / MISSING_PARTIAL_INTERPRETATION_CALIBRATION.maximumReferenceMedianMargin,
+        ),
+        masterMargin: competition.masterMargin,
+        referenceMedianMargin: competition.referenceMedianMargin,
+        referenceCount: staircase.referenceCount,
+        missingReferenceSupport: staircase.referenceSupport,
+        partialReferenceSupport:
+            staircase.referenceCount - staircase.referenceSupport,
+    };
+};
+
 const supportedWindowWidth = (width: number): 5 | 7 | 9 | 13 => (
     width <= 5 ? 5 : width <= 7 ? 7 : width <= 9 ? 9 : 13
 );
@@ -364,6 +434,8 @@ export const makeMissingRingInterpretation = (
         ? "completed_partial_missing_interpretation"
         : evidence.interpretationBasis === "exactSequentialStaircaseAlternative"
             ? "exact_sequential_missing_interpretation"
+        : evidence.interpretationBasis === "localizedTwoStepStaircaseAlternative"
+            ? "localized_two_step_missing_interpretation"
         : evidence.interpretationBasis === "structuredLocatorCumulativeLagAlternative"
             ? "structured_locator_missing_interpretation"
         : "missing_partial_interpretation_tie";

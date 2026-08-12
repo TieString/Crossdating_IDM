@@ -128,15 +128,24 @@ export const compareCompletedPartialPair = (
     maxPartialGapYears: number,
 ): CompletedPartialPairCompetition | null => {
     const aggregateShiftYears = aggregate.shiftYears;
+    const hasJointAggregate = aggregate.evidence.algorithmSources.includes(
+        "decisive_joint_operation_fusion",
+    ) && aggregate.evidence.algorithmSources.includes(
+        "full_interval_counterfactual_scan",
+    ) && aggregate.evidence.scoreMargin >= 0.05;
+    const hasBoundedAggregate = aggregate.evidence.algorithmSources.includes(
+        "bounded_complete_lag_path",
+    ) && aggregate.evidence.notes.includes("bounded_path_complete_hypothesis=true")
+        && aggregate.evidence.score >= 2
+        && aggregate.evidence.scoreMargin >= 0.5
+        && aggregate.evidence.samplePairs >= 30;
     if (aggregate.eventType !== "partialMove"
         || aggregate.shiftSide !== "older"
         || aggregateShiftYears === undefined
         || aggregateShiftYears > -4
         || aggregate.evidence.lagBefore !== aggregateShiftYears
         || aggregate.evidence.lagAfter !== 0
-        || !aggregate.evidence.algorithmSources.includes("decisive_joint_operation_fusion")
-        || !aggregate.evidence.algorithmSources.includes("full_interval_counterfactual_scan")
-        || aggregate.evidence.scoreMargin < 0.05) return null;
+        || (!hasJointAggregate && !hasBoundedAggregate)) return null;
 
     const operations = getJointCounterfactualOperationScores(
         diagnosis,
@@ -170,7 +179,13 @@ export const compareCompletedPartialPair = (
         && event.evidence.notes.includes("candidate_hard_gate_passed")
     ));
     if (matchingCandidates.length === 0) return null;
-    const anchors = [aggregate, ...matchingCandidates];
+    const nearbyMatchingCandidates = matchingCandidates.filter((candidate) => (
+        Math.max(candidate.startYear, aggregate.startYear)
+            <= Math.min(candidate.endYear, aggregate.endYear) + 13
+    ));
+    const anchors = hasBoundedAggregate
+        ? [aggregate, ...nearbyMatchingCandidates]
+        : [aggregate, ...matchingCandidates];
     const searchStart = Math.max(
         diagnosis.targetRange.startYear + 12,
         Math.min(...anchors.map((event) => event.startYear)) - 4,

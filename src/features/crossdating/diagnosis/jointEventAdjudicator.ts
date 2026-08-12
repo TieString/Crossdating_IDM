@@ -253,6 +253,7 @@ const preferredAcceptedFinalLocation = (
             entry.source === "full_interval_counterfactual_locator"
         ));
         return checkpoint.stage === "final"
+            && checkpoint.authority !== "supplemental"
             && event.eventType !== "wholeSeriesMove"
             && event.evidence.algorithmSources.includes(
                 "full_interval_counterfactual_locator",
@@ -270,6 +271,26 @@ const preferredAcceptedFinalLocation = (
             - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
     ))[0] ?? null;
 
+const preferredSelectedFinalLocation = (
+    cluster: HypothesisCluster,
+): DiagnosisReviewEventCheckpoint | null => {
+    const hasSupplementalFinal = cluster.checkpoints.some((checkpoint) => (
+        checkpoint.stage === "final"
+        && checkpoint.authority === "supplemental"
+    ));
+    if (!hasSupplementalFinal) return null;
+    return cluster.checkpoints.filter((checkpoint) => (
+        checkpoint.stage === "final"
+        && checkpoint.authority !== "supplemental"
+    ))
+    .sort((left, right) => (
+        representativeQuality(cluster, right) - representativeQuality(cluster, left)
+        || eventLocationQuality(right.event) - eventLocationQuality(left.event)
+        || (topYear(right.event) ?? Number.NEGATIVE_INFINITY)
+            - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
+    ))[0] ?? null;
+};
+
 const representative = (
     cluster: HypothesisCluster,
 ): DiagnosisReviewEventCheckpoint => {
@@ -280,7 +301,9 @@ const representative = (
         || (topYear(right.event) ?? Number.NEGATIVE_INFINITY)
             - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
     ))[0];
-    const selected = preferredAcceptedFinalLocation(cluster) ?? ranked;
+    const selected = preferredAcceptedFinalLocation(cluster)
+        ?? preferredSelectedFinalLocation(cluster)
+        ?? ranked;
     return preferredEndpointCandidate(cluster, selected)
         ?? preferredSequentialSupport(cluster, selected)
         ?? selected;
@@ -768,6 +791,12 @@ const finalFrontierClusters = (
     const completedCompositionClusters = allFinalClusters.filter(
         hasSelectedCompletedComposition,
     );
+    const selectedFinalClusters = allFinalClusters.filter((cluster) => (
+        cluster.checkpoints.some((checkpoint) => (
+            checkpoint.stage === "final"
+            && checkpoint.authority !== "supplemental"
+        ))
+    ));
     // A fallback stays in competition for ordinary events. Only a completed, per-reference
     // partial+unit correction has consumed the cumulative state strongly enough to supersede it.
     const finalClusters = completedCompositionClusters.length > 0
@@ -783,6 +812,23 @@ const finalFrontierClusters = (
             representative(cluster).event.eventType === "wholeSeriesMove"
         ));
         if (wholeBaseline) return [wholeBaseline];
+        const corroboratedSelected = selectedFinalClusters.filter((selected) => (
+            boundedPathClusters.some((bounded) => sameOperation(
+                representative(selected).event,
+                representative(bounded).event,
+            ))
+        ));
+        if (corroboratedSelected.length > 0) {
+            return [[...new Set([
+                ...boundedPathClusters,
+                ...corroboratedSelected,
+            ])].sort((left, right) => (
+                (topYear(representative(right).event) ?? Number.NEGATIVE_INFINITY)
+                    - (topYear(representative(left).event) ?? Number.NEGATIVE_INFINITY)
+                || representative(right).event.endYear
+                    - representative(left).event.endYear
+            ))[0]!];
+        }
         return [[...boundedPathClusters].sort((left, right) => (
             (topYear(representative(right).event) ?? Number.NEGATIVE_INFINITY)
                 - (topYear(representative(left).event) ?? Number.NEGATIVE_INFINITY)
