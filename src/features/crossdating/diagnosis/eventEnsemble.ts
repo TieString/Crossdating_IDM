@@ -2246,6 +2246,187 @@ export const preserveNewestCandidateUnitCheckpoint = (
     return events.map((event) => event.id === incumbent.id ? retained : event);
 };
 
+/**
+ * A hard unit candidate can be the exposed frontier of a cumulative partial state. Require the
+ * unit transition, cumulative amplitude and calendar ordering to agree across independent
+ * candidate families before it is allowed to preempt a compressed partial path.
+ */
+export const selectCandidateBackedCumulativeUnitFrontier = (
+    candidateEvents: readonly DiagnosisEvent[],
+    completedLocation: DiagnosisEvent | null = null,
+): DiagnosisEvent | null => {
+    const sourceSegmentCenter = (event: DiagnosisEvent): number | null => {
+        const startYear = noteYear(event, "candidate_source_segment_start=");
+        const endYear = noteYear(event, "candidate_source_segment_end=");
+        return startYear !== null && endYear !== null
+            && startYear <= endYear && endYear - startYear <= 80
+            ? (startYear + endYear) / 2
+            : null;
+    };
+    const completedLocationYear = completedLocation?.eventType === "partialMove"
+        && completedLocation.evidence.algorithmSources.includes("bounded_complete_lag_path")
+        && completedLocation.evidence.algorithmSources.includes(
+            "per_reference_completed_correction",
+        )
+        && completedLocation.evidence.notes.includes("completed_mixed_frontier_type=partialMove")
+        && completedLocation.endYear - completedLocation.startYear + 1 <= 13
+        ? rankedEventYear(completedLocation)
+        : null;
+    const partials = candidateEvents.filter((event) => (
+        event.eventType === "partialMove"
+        && event.shiftSide === "older"
+        && (event.shiftYears ?? 0) <= -3
+        && event.evidence.candidateIds.length > 0
+        && event.evidence.notes.includes("candidate_hard_gate_passed")
+        && event.evidence.algorithmSources.includes("global_sliding_match")
+        && event.evidence.algorithmSources.includes("propagation_pattern")
+        && event.evidence.algorithmSources.includes("segmented_diagnosis")
+        && (event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY) >= 0.02
+    ));
+    const pairs = candidateEvents.flatMap((unit) => {
+        const correlationGain = unit.evidence.correlationGain
+            ?? Number.NEGATIVE_INFINITY;
+        const hasCofechaUnitSupport = unit.evidence.algorithmSources.includes(
+            "cofecha_segment_lag",
+        );
+        // Under a still-unfixed cumulative partial state, deleting the independently observed
+        // false ring can slightly reduce the aggregate correlation. Four agreeing candidate
+        // channels plus an exact lag step and ordered source segments are required instead.
+        const hasIndependentFalseConsensus = unit.eventType === "falseRing"
+            && unit.evidence.candidateIds.length >= 4
+            && unit.evidence.scoreMargin >= 0.05
+            && correlationGain >= -0.02;
+        if ((unit.eventType !== "missingRing" && unit.eventType !== "falseRing")
+            || unit.evidence.candidateIds.length < 2
+            || !unit.evidence.notes.includes("candidate_hard_gate_passed")
+            || (!hasCofechaUnitSupport && !hasIndependentFalseConsensus)
+            || !unit.evidence.algorithmSources.includes("local_edit_alignment")
+            || !unit.evidence.algorithmSources.includes("segmented_diagnosis")
+            || (hasCofechaUnitSupport && correlationGain < 0.005)
+            || unit.evidence.scoreMargin < 0.01
+            || unit.evidence.lagBefore === null
+            || unit.evidence.lagAfter === null) return [];
+        const expectedStep = unit.eventType === "missingRing" ? 1 : -1;
+        if (unit.evidence.lagAfter - unit.evidence.lagBefore !== expectedStep
+            || unit.evidence.lagAfter > -2) return [];
+        const unitYear = rankedEventYear(unit);
+        return partials.flatMap((partial) => {
+            if (partial.shiftYears !== unit.evidence.lagBefore) return [];
+            const partialYear = rankedEventYear(partial);
+            const separationYears = unitYear - partialYear;
+            const completedSeparationYears = completedLocationYear === null
+                ? null
+                : unitYear - completedLocationYear;
+            const unitSourceCenter = sourceSegmentCenter(unit);
+            const partialSourceCenter = sourceSegmentCenter(partial);
+            const sourceSegmentSeparationYears = unitSourceCenter === null
+                || partialSourceCenter === null
+                ? null
+                : unitSourceCenter - partialSourceCenter;
+            const candidateOrdered = separationYears >= 14 && separationYears <= 60;
+            const completedOrdered = completedSeparationYears !== null
+                && completedSeparationYears >= 14
+                && completedSeparationYears <= 60;
+            const sourceSegmentsOrdered = sourceSegmentSeparationYears !== null
+                && sourceSegmentSeparationYears >= 14
+                && sourceSegmentSeparationYears <= 60;
+            return candidateOrdered || completedOrdered || sourceSegmentsOrdered
+                ? [{
+                    unit,
+                    partial,
+                    separationYears,
+                    completedSeparationYears,
+                    sourceSegmentSeparationYears,
+                    independentFalseConsensus: hasIndependentFalseConsensus,
+                }]
+                : [];
+        });
+    }).sort((left, right) => (
+        right.unit.evidence.scoreMargin - left.unit.evidence.scoreMargin
+        || right.unit.evidence.candidateIds.length - left.unit.evidence.candidateIds.length
+        || right.unit.evidence.score - left.unit.evidence.score
+    ));
+    const selected = pairs[0];
+    if (!selected) return null;
+    return {
+        ...selected.unit,
+        evidence: {
+            ...selected.unit.evidence,
+            algorithmSources: Array.from(new Set([
+                ...selected.unit.evidence.algorithmSources,
+                "cumulative_unit_candidate_pair",
+            ])).sort(),
+            notes: Array.from(new Set([
+                ...selected.unit.evidence.notes,
+                `cumulative_unit_pair_partial_year=${rankedEventYear(selected.partial)}`,
+                `cumulative_unit_pair_unit_year=${rankedEventYear(selected.unit)}`,
+                `cumulative_unit_pair_shift=${selected.partial.shiftYears}`,
+                `cumulative_unit_pair_separation=${selected.separationYears}`,
+                ...(selected.completedSeparationYears === null ? [] : [
+                    `cumulative_unit_pair_completed_separation=${selected.completedSeparationYears}`,
+                ]),
+                ...(selected.sourceSegmentSeparationYears === null ? [] : [
+                    `cumulative_unit_pair_source_segment_separation=${selected.sourceSegmentSeparationYears}`,
+                ]),
+                ...(selected.independentFalseConsensus
+                    ? ["cumulative_unit_pair_independent_false_consensus=true"]
+                    : []),
+            ])),
+        },
+    };
+};
+
+/** Uses completed correction only as a locator; the independently backed unit keeps operation. */
+export const reconcileCumulativeUnitOperationWithCompletedLocation = (
+    unit: DiagnosisEvent | null,
+    completed: DiagnosisEvent | null,
+): DiagnosisEvent | null => {
+    if (!unit || !completed
+        || (unit.eventType !== "missingRing" && unit.eventType !== "falseRing")
+        || !unit.evidence.algorithmSources.includes("cumulative_unit_candidate_pair")
+        || completed.eventType !== "partialMove"
+        || !completed.evidence.algorithmSources.includes("bounded_complete_lag_path")
+        || !completed.evidence.algorithmSources.includes("per_reference_completed_correction")
+        || !completed.evidence.notes.includes("completed_mixed_frontier_type=partialMove")
+        || !completed.evidence.notes.includes("completed_mixed_frontier_is_newest_event")
+        || completed.endYear - completed.startYear + 1 > 13) return null;
+    const locationDistance = Math.abs(rankedEventYear(unit) - rankedEventYear(completed));
+    if (locationDistance > 8) {
+        return {
+            ...unit,
+            evidence: {
+                ...unit.evidence,
+                notes: Array.from(new Set([
+                    ...unit.evidence.notes,
+                    `completed_unit_remote_location_rejected=${rankedEventYear(completed)}`,
+                    `completed_unit_location_distance=${locationDistance}`,
+                ])),
+            },
+        };
+    }
+    return {
+        ...unit,
+        startYear: completed.startYear,
+        endYear: completed.endYear,
+        reviewCoreRange: completed.reviewCoreRange,
+        rankedYears: completed.rankedYears,
+        evidence: {
+            ...unit.evidence,
+            algorithmSources: Array.from(new Set([
+                ...unit.evidence.algorithmSources,
+                ...completed.evidence.algorithmSources,
+                "completed_unit_location_reconciliation",
+            ])).sort(),
+            notes: Array.from(new Set([
+                ...unit.evidence.notes,
+                `completed_unit_candidate_year=${rankedEventYear(unit)}`,
+                `completed_unit_location_year=${rankedEventYear(completed)}`,
+                `completed_unit_location_window=${completed.startYear}-${completed.endYear}`,
+            ])),
+        },
+    };
+};
+
 const hasDepthConsistentSequentialMissingCandidate = (
     candidateEvents: readonly DiagnosisEvent[],
     head: Pick<SequentialMissingHead, "transitionCount" | "headRunYears" | "year">,
@@ -7780,9 +7961,18 @@ export const makeDiagnosisEvents = (
                 boundedOperations,
             );
         if (boundedCompletedPartialUnitFrontier) {
+            const reconciledUnit = reconcileCumulativeUnitOperationWithCompletedLocation(
+                selectCandidateBackedCumulativeUnitFrontier(
+                    candidateEvents,
+                    boundedCompletedPartialUnitFrontier,
+                ),
+                boundedCompletedPartialUnitFrontier,
+            );
             // The completed correction has already adjudicated the bounded cumulative state.
             // Keeping that aggregate as a review hypothesis would let it overwrite the result.
-            return finalize([boundedCompletedPartialUnitFrontier], [], false);
+            return finalize([
+                reconciledUnit ?? boundedCompletedPartialUnitFrontier,
+            ], [], false);
         }
         const cumulativePathHasWholeBaseline = displayed.some(
             (event) => event.eventType === "wholeSeriesMove",

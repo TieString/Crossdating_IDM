@@ -19,6 +19,8 @@ import {
     projectSequentialUnitChainHead,
     recoverCandidateBackedPartialConsensus,
     selectCumulativeLagPathFrontier,
+    selectCandidateBackedCumulativeUnitFrontier,
+    reconcileCumulativeUnitOperationWithCompletedLocation,
     selectWholeBaselineLagPathFrontier,
     resolveSequentialMissingPresentation,
     selectCumulativePartialFrontier,
@@ -150,6 +152,225 @@ const candidateRecoveryDiagnosis = {
     targetTree: "TEST",
     targetRange: { startYear: 1800, endYear: 2020 },
 } as SeriesCoreDiagnosis;
+
+describe("selectCandidateBackedCumulativeUnitFrontier", () => {
+    const cumulativePartial = (shiftYears: number, year: number): DiagnosisEvent => {
+        const event = candidatePartial({
+            shiftYears,
+            anchorYear: year,
+            candidateId: `partial-${shiftYears}-${year}`,
+            source: "segmented_diagnosis",
+        });
+        event.evidence.algorithmSources.push("global_sliding_match", "propagation_pattern");
+        return event;
+    };
+    const unit = (
+        eventType: "missingRing" | "falseRing",
+        year: number,
+        lagBefore: number,
+    ): DiagnosisEvent => {
+        const event = falseRingEvent(year - 3, true);
+        event.eventType = eventType;
+        event.rankedYears = [{ year, rank: 1, score: 1, evidenceTags: [] }];
+        event.evidence.algorithmSources = [
+            "candidate_ranking",
+            "cofecha_segment_lag",
+            "local_edit_alignment",
+            "segmented_diagnosis",
+        ];
+        event.evidence.candidateIds = [`${eventType}-a`, `${eventType}-b`];
+        event.evidence.notes = ["candidate_hard_gate_passed"];
+        event.evidence.correlationGain = 0.01;
+        event.evidence.scoreMargin = 0.1;
+        event.evidence.lagBefore = lagBefore;
+        event.evidence.lagAfter = lagBefore + (eventType === "missingRing" ? 1 : -1);
+        return event;
+    };
+
+    it("selects a newer missing boundary from a cumulative -21 partial state", () => {
+        const selected = selectCandidateBackedCumulativeUnitFrontier([
+            cumulativePartial(-21, 1839),
+            unit("missingRing", 1871, -21),
+        ]);
+
+        expect(selected?.eventType).toBe("missingRing");
+        expect(selected?.rankedYears[0]?.year).toBe(1871);
+        expect(selected?.evidence.algorithmSources)
+            .toContain("cumulative_unit_candidate_pair");
+    });
+
+    it("selects a newer false boundary from a cumulative -19 partial state", () => {
+        const falseBoundary = unit("falseRing", 1834, -19);
+        falseBoundary.evidence.scoreMargin = 0.015;
+        const selected = selectCandidateBackedCumulativeUnitFrontier([
+            cumulativePartial(-19, 1800),
+            falseBoundary,
+        ]);
+
+        expect(selected?.eventType).toBe("falseRing");
+        expect(selected?.rankedYears[0]?.year).toBe(1834);
+    });
+
+    it("rejects a nearby, older, or amplitude-inconsistent unit candidate", () => {
+        const partial = cumulativePartial(-21, 1839);
+        expect(selectCandidateBackedCumulativeUnitFrontier([
+            partial,
+            unit("missingRing", 1846, -21),
+        ])).toBeNull();
+        expect(selectCandidateBackedCumulativeUnitFrontier([
+            partial,
+            unit("missingRing", 1800, -21),
+        ])).toBeNull();
+        expect(selectCandidateBackedCumulativeUnitFrontier([
+            partial,
+            unit("missingRing", 1871, -20),
+        ])).toBeNull();
+    });
+
+    it("uses a completed older partial location when the initial partial peak is inverted", () => {
+        const completed = partialMoveEvent(-7);
+        completed.startYear = 1804;
+        completed.endYear = 1816;
+        completed.rankedYears = [{ year: 1808, rank: 1, score: 2, evidenceTags: [] }];
+        completed.evidence.algorithmSources = [
+            "bounded_complete_lag_path",
+            "per_reference_completed_correction",
+        ];
+        completed.evidence.notes = ["completed_mixed_frontier_type=partialMove"];
+
+        const selected = selectCandidateBackedCumulativeUnitFrontier([
+            cumulativePartial(-7, 1846),
+            unit("missingRing", 1837, -7),
+        ], completed);
+
+        expect(selected?.eventType).toBe("missingRing");
+        expect(selected?.rankedYears[0]?.year).toBe(1837);
+        expect(selected?.evidence.notes)
+            .toContain("cumulative_unit_pair_completed_separation=29");
+    });
+
+    it("accepts an exact false step backed by four local channels and ordered source segments", () => {
+        const partial = cumulativePartial(-19, 1721);
+        partial.evidence.notes.push(
+            "candidate_source_segment_start=1651",
+            "candidate_source_segment_end=1700",
+        );
+        const falseBoundary = unit("falseRing", 1709, -19);
+        falseBoundary.evidence.algorithmSources = falseBoundary.evidence.algorithmSources
+            .filter((source) => source !== "cofecha_segment_lag");
+        falseBoundary.evidence.candidateIds = ["a", "b", "c", "d"];
+        falseBoundary.evidence.correlationGain = -0.015;
+        falseBoundary.evidence.scoreMargin = 0.08;
+        falseBoundary.evidence.notes.push(
+            "candidate_source_segment_start=1676",
+            "candidate_source_segment_end=1725",
+        );
+
+        const selected = selectCandidateBackedCumulativeUnitFrontier([
+            partial,
+            falseBoundary,
+        ]);
+
+        expect(selected?.eventType).toBe("falseRing");
+        expect(selected?.rankedYears[0]?.year).toBe(1709);
+        expect(selected?.evidence.notes)
+            .toContain("cumulative_unit_pair_source_segment_separation=25");
+        expect(selected?.evidence.notes)
+            .toContain("cumulative_unit_pair_independent_false_consensus=true");
+    });
+
+    it("rejects a local-only false step without four-channel or source-order support", () => {
+        const partial = cumulativePartial(-19, 1721);
+        partial.evidence.notes.push(
+            "candidate_source_segment_start=1651",
+            "candidate_source_segment_end=1700",
+        );
+        const falseBoundary = unit("falseRing", 1709, -19);
+        falseBoundary.evidence.algorithmSources = falseBoundary.evidence.algorithmSources
+            .filter((source) => source !== "cofecha_segment_lag");
+        falseBoundary.evidence.candidateIds = ["a", "b", "c"];
+        falseBoundary.evidence.correlationGain = -0.015;
+        falseBoundary.evidence.scoreMargin = 0.08;
+        falseBoundary.evidence.notes.push(
+            "candidate_source_segment_start=1676",
+            "candidate_source_segment_end=1725",
+        );
+        expect(selectCandidateBackedCumulativeUnitFrontier([
+            partial,
+            falseBoundary,
+        ])).toBeNull();
+
+        falseBoundary.evidence.candidateIds.push("d");
+        falseBoundary.evidence.notes = falseBoundary.evidence.notes.filter((note) => (
+            !note.startsWith("candidate_source_segment_")
+        ));
+        expect(selectCandidateBackedCumulativeUnitFrontier([
+            partial,
+            falseBoundary,
+        ])).toBeNull();
+    });
+
+    it("uses completed correction for location without changing unit operation", () => {
+        const selected = selectCandidateBackedCumulativeUnitFrontier([
+            cumulativePartial(-19, 1800),
+            unit("falseRing", 1834, -19),
+        ]);
+        const completed = partialMoveEvent(-19);
+        completed.startYear = 1839;
+        completed.endYear = 1845;
+        completed.rankedYears = [{ year: 1842, rank: 1, score: 2, evidenceTags: [] }];
+        completed.evidence.algorithmSources = [
+            "bounded_complete_lag_path",
+            "per_reference_completed_correction",
+        ];
+        completed.evidence.notes = [
+            "completed_mixed_frontier_type=partialMove",
+            "completed_mixed_frontier_is_newest_event",
+        ];
+
+        const reconciled = reconcileCumulativeUnitOperationWithCompletedLocation(
+            selected,
+            completed,
+        );
+
+        expect(reconciled?.eventType).toBe("falseRing");
+        expect(reconciled?.startYear).toBe(1839);
+        expect(reconciled?.endYear).toBe(1845);
+        expect(reconciled?.rankedYears[0]?.year).toBe(1842);
+        expect(reconciled?.evidence.algorithmSources)
+            .toContain("completed_unit_location_reconciliation");
+    });
+
+    it("keeps the unit window when completed correction is a remote location mode", () => {
+        const selected = selectCandidateBackedCumulativeUnitFrontier([
+            cumulativePartial(-21, 1839),
+            unit("missingRing", 1871, -21),
+        ]);
+        const completed = partialMoveEvent(-21);
+        completed.startYear = 1885;
+        completed.endYear = 1891;
+        completed.rankedYears = [{ year: 1888, rank: 1, score: 2, evidenceTags: [] }];
+        completed.evidence.algorithmSources = [
+            "bounded_complete_lag_path",
+            "per_reference_completed_correction",
+        ];
+        completed.evidence.notes = [
+            "completed_mixed_frontier_type=partialMove",
+            "completed_mixed_frontier_is_newest_event",
+        ];
+
+        const reconciled = reconcileCumulativeUnitOperationWithCompletedLocation(
+            selected,
+            completed,
+        );
+
+        expect(reconciled?.startYear).toBe(1868);
+        expect(reconciled?.endYear).toBe(1874);
+        expect(reconciled?.rankedYears[0]?.year).toBe(1871);
+        expect(reconciled?.evidence.notes)
+            .toContain("completed_unit_remote_location_rejected=1888");
+    });
+});
 
 describe("sequential missing hypothesis retention", () => {
     const lagPathUnit = (lagBefore: number, year: number): DiagnosisEvent => {
