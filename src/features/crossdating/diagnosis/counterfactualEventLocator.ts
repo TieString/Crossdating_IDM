@@ -14,7 +14,10 @@ import {
     selectFalseRingMergeOlderRecenter,
 } from "./falseRingPhysicalRecenter";
 import { scoreMissingRingCoarseCounterfactual } from "./missingRingCoarseCounterfactual";
-import { selectMissingRingDirectTransitionBridge } from "./missingRingDirectTransitionBridge";
+import {
+    selectMissingRingDiffuseOlderConsensusRecenter,
+    selectMissingRingDirectTransitionBridge,
+} from "./missingRingDirectTransitionBridge";
 import {
     selectMissingRingPhysicalRecenter,
     type MissingRingPhysicalRecenterRule,
@@ -1876,6 +1879,42 @@ export const refineEventWithCounterfactualLocator = (
         finalWindow = missingDirectTransitionBridge.window;
         finalCalibratedWidth = 13;
     }
+    const diffuseOlderConsensusRecenter = unitEventType === "missingRing"
+        && !missingPhysicalRecenter
+        && !localConsensusBoundaryShift
+        && !missingDirectTransitionBridge
+        ? selectMissingRingDiffuseOlderConsensusRecenter({
+                currentWindow: finalWindow,
+                minimumYear,
+                maximumYear,
+                scanTopYear: evidenceNoteYear(event, "scan_top_year="),
+                directTransitionYear: evidenceNoteYear(
+                    event,
+                    "direct_transition_year=",
+                ),
+                candidateTopYear: evidenceNoteYear(event, "candidate_top_year="),
+                candidateTopProbability: evidenceNoteNumber(
+                    event,
+                    "candidate_top_probability=",
+                ),
+                candidateTopMargin: evidenceNoteNumber(
+                    event,
+                    "candidate_top_margin=",
+                ),
+                locatorConcentration: learnedUnitWindow?.nineYearSafety
+                    ?? calibratedWindow!.concentration,
+                locatorRemoteMargin: learnedUnitWindow?.remoteMargin
+                    ?? calibratedWindow!.remoteMargin,
+                pairReferenceCount: Math.max(
+                    0,
+                    ...pairRows.map((row) => row.referenceCount),
+                ),
+            })
+        : null;
+    if (diffuseOlderConsensusRecenter) {
+        finalWindow = diffuseOlderConsensusRecenter.window;
+        finalCalibratedWidth = 13;
+    }
     const finalCalibrationRule = partialLocalConsensusRecenter
         ? "partial_local_consensus_recenter"
         : missingPhysicalRecenter
@@ -1888,6 +1927,8 @@ export const refineEventWithCounterfactualLocator = (
                     ? "unit_event_local_consensus_boundary_shift"
                     : missingDirectTransitionBridge
                         ? "unit_event_missing_direct_transition_bridge_13"
+                        : diffuseOlderConsensusRecenter
+                            ? "unit_event_missing_diffuse_older_consensus_13"
                         : preliminaryCalibrationRule;
     const finalYears = Array.from(
         {
@@ -2187,6 +2228,9 @@ export const refineEventWithCounterfactualLocator = (
                     ...(missingDirectTransitionBridge
                         ? ["missing_ring_direct_transition_bridge"]
                         : []),
+                    ...(diffuseOlderConsensusRecenter
+                        ? ["missing_ring_diffuse_older_consensus"]
+                        : []),
                     ...(partialLocalConsensusRecenter
                         ? ["partial_local_consensus_recenter"]
                         : []),
@@ -2285,6 +2329,25 @@ export const refineEventWithCounterfactualLocator = (
                         }`,
                         `missing_direct_transition_bridge_shift_years=${
                             missingDirectTransitionBridge.shiftYears
+                        }`,
+                    ] : []),
+                    ...(diffuseOlderConsensusRecenter ? [
+                        `missing_diffuse_older_scan_year=${
+                            diffuseOlderConsensusRecenter.scanTopYear
+                        }`,
+                        `missing_diffuse_older_transition_year=${
+                            diffuseOlderConsensusRecenter.directTransitionYear
+                        }`,
+                        `missing_diffuse_older_candidate_year=${
+                            diffuseOlderConsensusRecenter.candidateTopYear
+                        }`,
+                        `missing_diffuse_older_previous_window=${
+                            diffuseOlderConsensusRecenter.discardedWindow.startYear
+                        }-${
+                            diffuseOlderConsensusRecenter.discardedWindow.endYear
+                        }`,
+                        `missing_diffuse_older_shift_years=${
+                            diffuseOlderConsensusRecenter.shiftYears
                         }`,
                     ] : []),
                     ...(partialLocalConsensusRecenter ? [

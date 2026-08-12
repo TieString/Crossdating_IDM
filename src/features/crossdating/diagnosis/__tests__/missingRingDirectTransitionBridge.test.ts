@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { selectMissingRingDirectTransitionBridge } from "../missingRingDirectTransitionBridge";
+import {
+    selectMissingRingDiffuseOlderConsensusRecenter,
+    selectMissingRingDirectTransitionBridge,
+} from "../missingRingDirectTransitionBridge";
 
 describe("selectMissingRingDirectTransitionBridge", () => {
     it("keeps the existing primary and a newer direct transition in one 13-year window", () => {
@@ -55,5 +58,57 @@ describe("selectMissingRingDirectTransitionBridge", () => {
         });
 
         expect(result).toBeNull();
+    });
+});
+
+describe("selectMissingRingDiffuseOlderConsensusRecenter", () => {
+    const input = () => ({
+        currentWindow: { startYear: 1579, endYear: 1591 },
+        minimumYear: 1207,
+        maximumYear: 1960,
+        scanTopYear: 1574,
+        directTransitionYear: 1573,
+        candidateTopYear: 1579,
+        candidateTopProbability: 0.483653,
+        candidateTopMargin: 0.424708,
+        locatorConcentration: 0,
+        locatorRemoteMargin: 0,
+        pairReferenceCount: 16,
+    });
+
+    it("moves a diffuse 13-year mode to retain agreeing older boundaries", () => {
+        expect(selectMissingRingDiffuseOlderConsensusRecenter(input())).toEqual({
+            window: { startYear: 1573, endYear: 1585 },
+            discardedWindow: { startYear: 1579, endYear: 1591 },
+            scanTopYear: 1574,
+            directTransitionYear: 1573,
+            candidateTopYear: 1579,
+            shiftYears: -6,
+        });
+    });
+
+    it("also retains a candidate just outside the discarded window", () => {
+        const candidate = input();
+        candidate.currentWindow = { startYear: 1774, endYear: 1786 };
+        candidate.minimumYear = 1400;
+        candidate.maximumYear = 2000;
+        candidate.scanTopYear = 1767;
+        candidate.directTransitionYear = 1768;
+        candidate.candidateTopYear = 1772;
+
+        expect(selectMissingRingDiffuseOlderConsensusRecenter(candidate)?.window)
+            .toEqual({ startYear: 1767, endYear: 1779 });
+    });
+
+    it.each([
+        ["a concentrated locator", { locatorConcentration: 0.2 }],
+        ["a separated transition", { directTransitionYear: 1570 }],
+        ["a detached candidate", { candidateTopYear: 1581 }],
+        ["shallow reference support", { pairReferenceCount: 7 }],
+    ])("keeps the current window for %s", (_name, override) => {
+        expect(selectMissingRingDiffuseOlderConsensusRecenter({
+            ...input(),
+            ...override,
+        })).toBeNull();
     });
 });

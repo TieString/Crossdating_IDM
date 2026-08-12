@@ -11,6 +11,15 @@ export type MissingRingDirectTransitionBridge = {
     shiftYears: number;
 };
 
+export type MissingRingDiffuseOlderConsensusRecenter = {
+    window: MissingRingBridgeWindow;
+    discardedWindow: MissingRingBridgeWindow;
+    scanTopYear: number;
+    directTransitionYear: number;
+    candidateTopYear: number;
+    shiftYears: number;
+};
+
 const REVIEW_WINDOW_WIDTH = 13;
 const MINIMUM_ANCHOR_DISTANCE = 7;
 const MAXIMUM_ANCHOR_DISTANCE = REVIEW_WINDOW_WIDTH - 1;
@@ -98,6 +107,97 @@ export const selectMissingRingDirectTransitionBridge = (input: {
         discardedWindow: { ...currentWindow },
         currentPrimaryYear,
         directTransitionYear,
+        shiftYears: window.startYear - currentWindow.startYear,
+    };
+};
+
+/**
+ * Recovers an older mode only when two independent boundary channels agree and the learned
+ * 13-year locator has no concentrated mode of its own. The candidate anchor must fit in the
+ * translated window, so this cannot jump to a detached scan peak by itself.
+ */
+export const selectMissingRingDiffuseOlderConsensusRecenter = (input: {
+    currentWindow: MissingRingBridgeWindow;
+    minimumYear: number;
+    maximumYear: number;
+    scanTopYear: number | null;
+    directTransitionYear: number | null;
+    candidateTopYear: number | null;
+    candidateTopProbability: number | undefined;
+    candidateTopMargin: number | undefined;
+    locatorConcentration: number;
+    locatorRemoteMargin: number;
+    pairReferenceCount: number;
+}): MissingRingDiffuseOlderConsensusRecenter | null => {
+    const {
+        currentWindow,
+        scanTopYear,
+        directTransitionYear,
+        candidateTopYear,
+    } = input;
+    if (
+        widthOf(currentWindow) !== REVIEW_WINDOW_WIDTH
+        || scanTopYear === null
+        || directTransitionYear === null
+        || candidateTopYear === null
+        || scanTopYear >= currentWindow.startYear
+        || directTransitionYear >= currentWindow.startYear
+        || Math.abs(scanTopYear - directTransitionYear) > 1
+        || currentWindow.startYear - Math.max(
+            scanTopYear,
+            directTransitionYear,
+        ) > 7
+        || Math.abs(candidateTopYear - scanTopYear) > 5
+        || Math.abs(candidateTopYear - directTransitionYear) > 6
+        || (input.candidateTopProbability ?? Number.NEGATIVE_INFINITY) < 0.45
+        || (input.candidateTopMargin ?? Number.NEGATIVE_INFINITY) < 0.35
+        || input.locatorConcentration > 0.01
+        || input.locatorRemoteMargin > 0.01
+        || input.pairReferenceCount < 8
+    ) return null;
+
+    const minimumAnchor = Math.min(
+        scanTopYear,
+        directTransitionYear,
+        candidateTopYear,
+    );
+    const maximumAnchor = Math.max(
+        scanTopYear,
+        directTransitionYear,
+        candidateTopYear,
+    );
+    if (maximumAnchor - minimumAnchor >= REVIEW_WINDOW_WIDTH) return null;
+
+    const minimumStart = Math.max(
+        input.minimumYear,
+        maximumAnchor - REVIEW_WINDOW_WIDTH + 1,
+    );
+    const maximumStart = Math.min(
+        input.maximumYear - REVIEW_WINDOW_WIDTH + 1,
+        minimumAnchor,
+    );
+    if (minimumStart > maximumStart) return null;
+    const startYear = Math.max(
+        minimumStart,
+        Math.min(currentWindow.startYear, maximumStart),
+    );
+    const window = {
+        startYear,
+        endYear: startYear + REVIEW_WINDOW_WIDTH - 1,
+    };
+    if (
+        window.startYear === currentWindow.startYear
+        || !contains(window, scanTopYear)
+        || !contains(window, directTransitionYear)
+        || !contains(window, candidateTopYear)
+    ) return null;
+
+    return {
+        window,
+        discardedWindow: { ...currentWindow },
+        scanTopYear,
+        directTransitionYear,
+        candidateTopYear,
         shiftYears: window.startYear - currentWindow.startYear,
     };
 };
