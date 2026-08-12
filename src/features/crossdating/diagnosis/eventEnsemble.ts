@@ -2729,6 +2729,76 @@ export const supportsCompletedPartialUnitComposition = (
     competition: CompletedPartialUnitSupportEvidence | null,
 ): boolean => supportsCompletedPartialUnitCompositionEvidence(competition);
 
+/**
+ * A completed partial+unit hypothesis must add evidence, not merely split an already decisive
+ * exact partial amplitude by one year. This protects the jointly selected operation while still
+ * allowing a real mixed event when the per-reference correction has positive broad support.
+ */
+export const decisiveExactPartialRejectsWeakUnitComposition = (
+    event: DiagnosisEvent,
+    competition: CompletedPartialUnitComposition | null,
+): boolean => {
+    if (!competition || event.eventType !== "partialMove") return false;
+    const shiftYears = event.shiftYears;
+    const jointShift = latestCompletedMixedNoteNumber(event, "joint_operation_correction");
+    const gridShift = latestCompletedMixedNoteNumber(event, "candidate_grid_partial_shift");
+    const familyMargin = latestCompletedMixedNoteNumber(
+        event,
+        "candidate_grid_partial_family_margin",
+    ) ?? Number.NEGATIVE_INFINITY;
+    const shiftMargin = latestCompletedMixedNoteNumber(
+        event,
+        "candidate_grid_partial_shift_margin",
+    ) ?? Number.NEGATIVE_INFINITY;
+    const referenceCount = latestCompletedMixedNoteNumber(
+        event,
+        "candidate_grid_partial_reference_count",
+    ) ?? 0;
+    const peakKernel5 = latestCompletedMixedNoteNumber(
+        event,
+        "candidate_grid_partial_reference_peak_kernel5",
+    ) ?? 0;
+    const boundedPathGain = latestCompletedMixedNoteNumber(
+        event,
+        "bounded_path_transition_gain",
+    ) ?? Number.NEGATIVE_INFINITY;
+    const boundedRunnerMargin = latestCompletedMixedNoteNumber(
+        event,
+        "bounded_path_runner_up_margin",
+    ) ?? Number.NEGATIVE_INFINITY;
+    const decisiveCompletePath = event.evidence.algorithmSources.includes(
+        "bounded_complete_lag_path",
+    )
+        && event.evidence.notes.includes("bounded_path_complete_hypothesis=true")
+        && shiftYears !== undefined
+        && event.evidence.lagBefore === shiftYears
+        && event.evidence.lagAfter === 0
+        && boundedPathGain >= 20
+        && boundedRunnerMargin >= 1
+        && competition.frontierEventType === "partialMove"
+        && competition.separationYears <= 13
+        && !competition.sourceSegmentAnchored;
+    if (decisiveCompletePath) return true;
+
+    const exactPartialIsDecisive = shiftYears !== undefined
+        && shiftYears <= -2
+        && jointShift === shiftYears
+        && gridShift === shiftYears
+        && event.evidence.algorithmSources.includes(
+            "candidate_grid_reference_partial_consensus",
+        )
+        && event.evidence.algorithmSources.includes("per_reference_counterfactual_evidence")
+        && familyMargin >= 0.1
+        && shiftMargin >= 0.05
+        && referenceCount >= 6
+        && peakKernel5 >= 1 / 3;
+    if (!exactPartialIsDecisive) return false;
+
+    return competition.mixedReferenceSupportRatio < 0.5
+        || competition.referenceMedianMargin <= 0
+        || competition.referenceLowerQuartileMargin < -0.02;
+};
+
 const supportsCompletedPartialMissingComposition = (
     competition: CompletedPartialMissingComposition | null,
 ): competition is CompletedPartialMissingComposition => (
@@ -3809,11 +3879,13 @@ const recoverBoundedCompletedPartialUnitFrontier = (
             && competition.orientationMedianMargin >= 0.025
             && competition.orientationLowerQuartileMargin >= 0,
         );
-        return competition && (
-            supportsCompletedPartialUnitComposition(competition)
-            || masterDominantComposition
-            || referenceDominantComposition
-        )
+        return competition
+            && !decisiveExactPartialRejectsWeakUnitComposition(seed.event, competition)
+            && (
+                supportsCompletedPartialUnitComposition(competition)
+                || masterDominantComposition
+                || referenceDominantComposition
+            )
             ? [{ seed, competition }]
             : [];
     }).sort((left, right) => (
@@ -3939,7 +4011,11 @@ const recoverBoundedCompletedPartialUnitFrontier = (
             aggregate.startYear,
             aggregate.endYear,
         );
-        if (!exhaustiveSelection) continue;
+        if (!exhaustiveSelection
+            || decisiveExactPartialRejectsWeakUnitComposition(
+                aggregate,
+                exhaustiveSelection.competition,
+            )) continue;
         const selectedSource: DiagnosisEvent = {
             ...aggregate,
             evidence: {
@@ -7815,7 +7891,11 @@ export const makeDiagnosisEvents = (
                     true,
                     completedMixedSeed.anchorYears,
                 ) ?? baseComposition;
-            if (supportsCompletedPartialMissingComposition(composition)) {
+            if (supportsCompletedPartialMissingComposition(composition)
+                && !decisiveExactPartialRejectsWeakUnitComposition(
+                    completedMixedSeed.event,
+                    composition,
+                )) {
                 return finalize([makeCompletedPartialUnitFrontierEvent(
                     completedMixedSeed.event,
                     composition,
@@ -7935,7 +8015,11 @@ export const makeDiagnosisEvents = (
                     true,
                     completedFalseSeed.anchorYears,
                 ) ?? baseFalseComposition;
-            if (supportsCompletedPartialFalseComposition(falseComposition)) {
+            if (supportsCompletedPartialFalseComposition(falseComposition)
+                && !decisiveExactPartialRejectsWeakUnitComposition(
+                    completedFalseSeed.event,
+                    falseComposition,
+                )) {
                 return finalize([makeCompletedPartialUnitFrontierEvent(
                     completedFalseSeed.event,
                     falseComposition,

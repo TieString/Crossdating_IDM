@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DiagnosisEvent, SeriesCoreDiagnosis } from "../types";
 import {
     hasIndependentPartialBoundaryAnchor,
+    decisiveExactPartialRejectsWeakUnitComposition,
     hardCandidateMaySeedExhaustiveComposition,
     hasCandidateBackedSequentialFalseDirection,
     hasCompressedSequentialFalseDirection,
@@ -48,6 +49,7 @@ import {
     wholeSeriesEventIsLocalUnitAlias,
 } from "../eventEnsemble";
 import type { JointCounterfactualOperationScore } from "../jointCounterfactualOperation";
+import type { CompletedPartialMissingComposition } from "../discreteMissingStaircaseCompetition";
 
 const falseRingEvent = (
     startYear: number,
@@ -924,6 +926,115 @@ describe("selectBoundedCompletedPartialUnitSeeds", () => {
                 source: "cofecha_segment_lag",
             })],
         )).toEqual([]);
+    });
+});
+
+describe("decisiveExactPartialRejectsWeakUnitComposition", () => {
+    const decisivePartial = (): DiagnosisEvent => {
+        const event = partialMoveEvent(-20);
+        event.evidence.algorithmSources = [
+            "candidate_grid_reference_partial_consensus",
+            "per_reference_counterfactual_evidence",
+        ];
+        event.evidence.notes = [
+            "joint_operation_correction=-20",
+            "candidate_grid_partial_shift=-20",
+            "candidate_grid_partial_family_margin=0.399405",
+            "candidate_grid_partial_shift_margin=0.296268",
+            "candidate_grid_partial_reference_count=12",
+            "candidate_grid_partial_reference_peak_kernel5=0.650806",
+        ];
+        return event;
+    };
+    const composition = (
+        overrides: Partial<CompletedPartialMissingComposition> = {},
+    ): CompletedPartialMissingComposition => ({
+        unitEventType: "missingRing",
+        cumulativeShiftYears: -20,
+        partialShiftYears: -19,
+        orientation: "missingThenPartial",
+        olderBoundaryYear: 1604,
+        newerBoundaryYear: 1616,
+        frontierEventType: "partialMove",
+        frontierYear: 1616,
+        separationYears: 12,
+        masterMargin: 0.21,
+        referenceCount: 49,
+        mixedReferenceSupport: 15,
+        mixedReferenceSupportRatio: 15 / 49,
+        referenceMedianMargin: -0.018,
+        referenceLowerQuartileMargin: -0.052,
+        orientationReferenceCount: 49,
+        orientationReferenceSupport: 49,
+        orientationReferenceSupportRatio: 1,
+        orientationMedianMargin: 0.224,
+        orientationLowerQuartileMargin: 0.19,
+        masterOrientationMargin: 0.064,
+        comparedWithMissingStaircase: false,
+        sourceSegmentAnchored: false,
+        ...overrides,
+    });
+
+    it("keeps a decisive exact partial over a weak one-year decomposition", () => {
+        expect(decisiveExactPartialRejectsWeakUnitComposition(
+            decisivePartial(),
+            composition(),
+        )).toBe(true);
+    });
+
+    it("still allows a mixed event with broad positive per-reference support", () => {
+        expect(decisiveExactPartialRejectsWeakUnitComposition(
+            decisivePartial(),
+            composition({
+                mixedReferenceSupport: 39,
+                mixedReferenceSupportRatio: 39 / 49,
+                referenceMedianMargin: 0.08,
+                referenceLowerQuartileMargin: 0.01,
+            }),
+        )).toBe(false);
+    });
+
+    it("keeps a decisive complete path over an unanchored nearby amplitude split", () => {
+        const event = partialMoveEvent(-20);
+        event.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        event.evidence.notes = [
+            "bounded_path_complete_hypothesis=true",
+            "bounded_path_transition_gain=52.261950",
+            "bounded_path_runner_up_margin=2.050237",
+        ];
+
+        expect(decisiveExactPartialRejectsWeakUnitComposition(
+            event,
+            composition({
+                mixedReferenceSupport: 13,
+                mixedReferenceSupportRatio: 13 / 17,
+                referenceCount: 17,
+                referenceMedianMargin: 0.069,
+                referenceLowerQuartileMargin: 0.014,
+                separationYears: 7,
+            }),
+        )).toBe(true);
+    });
+
+    it("does not suppress a completed path whose newest frontier is the unit event", () => {
+        const event = partialMoveEvent(-21);
+        event.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        event.evidence.notes = [
+            "bounded_path_complete_hypothesis=true",
+            "bounded_path_transition_gain=47.408924",
+            "bounded_path_runner_up_margin=6.924264",
+        ];
+
+        expect(decisiveExactPartialRejectsWeakUnitComposition(
+            event,
+            composition({
+                cumulativeShiftYears: -21,
+                partialShiftYears: -20,
+                orientation: "partialThenMissing",
+                frontierEventType: "missingRing",
+                separationYears: 5,
+            }),
+        )).toBe(false);
     });
 });
 
