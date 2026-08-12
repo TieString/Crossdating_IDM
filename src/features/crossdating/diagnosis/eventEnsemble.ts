@@ -126,6 +126,7 @@ import {
     scoreDynamicJointOperation,
     selectDynamicJointOperation,
     selectDynamicUnitOperation,
+    type DynamicJointOperationSelection,
 } from "./jointOperationSelector";
 import {
     isExactPartialLagTransition,
@@ -2742,6 +2743,194 @@ type CompletedPartialUnitSeed = {
     anchorYears: number[];
 };
 
+type BoundedCompletedPartialUnitSeed = CompletedPartialUnitSeed & {
+    unitEventType: "missingRing" | "falseRing";
+};
+
+const completedMixedSourceSegmentAnchors = (event: DiagnosisEvent): number[] => {
+    const startYear = latestCompletedMixedNoteNumber(
+        event,
+        "candidate_source_segment_start",
+    );
+    const endYear = latestCompletedMixedNoteNumber(
+        event,
+        "candidate_source_segment_end",
+    );
+    if (startYear === null || endYear === null
+        || startYear > endYear || endYear - startYear > 80) return [];
+    const span = endYear - startYear;
+    if (span <= 8) {
+        return Array.from({ length: span + 1 }, (_, index) => startYear + index);
+    }
+    return Array.from(new Set([
+        startYear,
+        startYear + Math.round(span * 0.25),
+        startYear + Math.round(span * 0.5),
+        startYear + Math.round(span * 0.75),
+        endYear,
+    ])).sort((left, right) => left - right);
+};
+
+/**
+ * A bounded path can observe the cumulative lag while a hard partial candidate observes the
+ * intermediate state. Their exact one-year amplitude difference is only a seed; the completed
+ * per-reference correction still has to prove the mixed interpretation before it can be shown.
+ */
+export const selectBoundedCompletedPartialUnitSeeds = (
+    boundedEvents: readonly DiagnosisEvent[],
+    candidateEvents: readonly DiagnosisEvent[],
+    supportingEvents: readonly DiagnosisEvent[] = [],
+): BoundedCompletedPartialUnitSeed[] => {
+    if (boundedEvents.some((event) => event.eventType === "wholeSeriesMove")) return [];
+    const aggregates = boundedEvents.filter((event) => (
+        event.eventType === "partialMove"
+        && event.shiftSide === "older"
+        && Number.isInteger(event.shiftYears)
+        && event.shiftYears! <= -3
+    ));
+    const hardComponents = candidateEvents.filter((event) => (
+        event.eventType === "partialMove"
+        && event.shiftSide === "older"
+        && Number.isInteger(event.shiftYears)
+        && event.shiftYears! <= -2
+        && event.evidence.candidateIds.length > 0
+        && event.evidence.notes.includes("candidate_hard_gate_passed")
+    ));
+    return aggregates.flatMap((aggregate) => {
+        const groups = new Map<string, DiagnosisEvent[]>();
+        hardComponents.filter((component) => (
+            Math.abs(aggregate.shiftYears! - component.shiftYears!) === 1
+        )).forEach((component) => {
+            const unitEventType = aggregate.shiftYears! - component.shiftYears! === -1
+                ? "missingRing"
+                : "falseRing";
+            const key = `${unitEventType}:${component.shiftYears}`;
+            groups.set(key, [...(groups.get(key) ?? []), component]);
+        });
+        const exactSeeds = Array.from(groups.entries()).map(([key, components]) => {
+            const [unitEventType] = key.split(":") as ["missingRing" | "falseRing"];
+            const component = components.slice().sort((left, right) => (
+                right.evidence.score - left.evidence.score
+            ))[0];
+            const unitAnchors = supportingEvents.filter((event) => (
+                event.eventType === unitEventType
+            )).flatMap((event) => event.rankedYears.slice(0, 3).map((row) => row.year));
+            const anchorYears = Array.from(new Set([
+                ...components.flatMap((event) => {
+                    const anchor = candidateEventAnchorYear(event);
+                    return [
+                        ...(anchor === null ? [] : [anchor]),
+                        ...completedMixedSourceSegmentAnchors(event),
+                    ];
+                }),
+                ...unitAnchors,
+            ])).sort((left, right) => left - right);
+            return {
+                unitEventType,
+                anchorYears,
+                event: {
+                    ...aggregate,
+                    evidence: {
+                        ...aggregate.evidence,
+                        algorithmSources: Array.from(new Set([
+                            ...aggregate.evidence.algorithmSources,
+                            ...components.flatMap((event) => event.evidence.algorithmSources),
+                        ])).sort(),
+                        candidateIds: Array.from(new Set([
+                            ...aggregate.evidence.candidateIds,
+                            ...components.flatMap((event) => event.evidence.candidateIds),
+                        ])),
+                        notes: Array.from(new Set([
+                            ...aggregate.evidence.notes,
+                            "candidate_hard_gate_passed",
+                            "bounded_completed_mixed_seed=exact_component_amplitude",
+                            `bounded_completed_mixed_component_shift=${component.shiftYears}`,
+                            `bounded_completed_mixed_unit_type=${unitEventType}`,
+                            ...(anchorYears.length > 0
+                                ? [`bounded_completed_mixed_anchor_min=${anchorYears[0]}`]
+                                : []),
+                        ])),
+                    },
+                },
+            };
+        });
+        if (exactSeeds.length > 0) return exactSeeds;
+        const unitTransitionEvents = supportingEvents.filter((event) => {
+            if (event.eventType !== "missingRing" && event.eventType !== "falseRing") {
+                return false;
+            }
+            const unitShift = event.eventType === "missingRing" ? -1 : 1;
+            return event.evidence.lagBefore !== null
+                && event.evidence.lagAfter !== null
+                && event.evidence.lagBefore - event.evidence.lagAfter === unitShift;
+        });
+        const inferredSeeds = (["missingRing", "falseRing"] as const).flatMap(
+            (unitEventType) => {
+                const supports = unitTransitionEvents.filter((event) => {
+                    if (event.eventType !== unitEventType) return false;
+                    const correlationGain = event.evidence.correlationGain
+                        ?? Number.NEGATIVE_INFINITY;
+                    const connectsAggregateState = event.evidence.lagBefore
+                        === aggregate.shiftYears
+                        || event.evidence.lagAfter === aggregate.shiftYears;
+                    const candidateBackedTransition = connectsAggregateState
+                        && event.evidence.notes.includes("candidate_hard_gate_passed")
+                        && event.evidence.scoreMargin >= 0.02;
+                    const independentPathTransition = event.evidence.scoreMargin >= 0.02
+                        && correlationGain >= 0.03
+                        && (
+                            event.evidence.algorithmSources.includes("piecewise_lag_path")
+                            || event.evidence.algorithmSources.includes(
+                                "constrained_lag_path",
+                            )
+                            || event.evidence.algorithmSources.includes(
+                                "reference_core_voting",
+                            )
+                            || event.evidence.algorithmSources.includes(
+                                "joint_year_operation_evidence",
+                            )
+                        );
+                    return candidateBackedTransition || independentPathTransition;
+                });
+                if (supports.length === 0) return [];
+                const unitShift = unitEventType === "missingRing" ? -1 : 1;
+                const partialShiftYears = aggregate.shiftYears! - unitShift;
+                if (partialShiftYears > -2) return [];
+                const anchorYears = Array.from(new Set(supports.flatMap((event) => [
+                    ...event.rankedYears.slice(0, 5).map((row) => row.year),
+                    ...completedMixedSourceSegmentAnchors(event),
+                ]))).sort((left, right) => left - right);
+                return [{
+                    unitEventType,
+                    anchorYears,
+                    event: {
+                        ...aggregate,
+                        evidence: {
+                            ...aggregate.evidence,
+                            algorithmSources: Array.from(new Set([
+                                ...aggregate.evidence.algorithmSources,
+                                ...supports.flatMap(
+                                    (event) => event.evidence.algorithmSources,
+                                ),
+                            ])).sort(),
+                            notes: Array.from(new Set([
+                                ...aggregate.evidence.notes,
+                                "bounded_completed_mixed_seed=independent_unit_transition",
+                                `bounded_completed_mixed_component_shift=${partialShiftYears}`,
+                                `bounded_completed_mixed_unit_type=${unitEventType}`,
+                                ...(anchorYears.length > 0
+                                    ? [`bounded_completed_mixed_anchor_min=${anchorYears[0]}`]
+                                    : []),
+                            ])),
+                        },
+                    },
+                }];
+            },
+        );
+        return inferredSeeds;
+    });
+};
+
 /**
  * Chooses a cumulative negative-lag seed without trusting the already-localized window. A stale
  * path peak may have the right operation family but the wrong amplitude and year, while the two
@@ -3077,14 +3266,33 @@ const makeCompletedPartialUnitFrontierEvent = (
     const sourceTag = competition.unitEventType === "missingRing"
         ? "completed_partial_missing_composition"
         : "completed_partial_false_composition";
-    const width = competition.referenceMedianMargin >= 0.04
-        && competition.orientationMedianMargin >= 0.01
-        ? 7
-        : 9;
+    const isLongBoundedComposition = source.evidence.algorithmSources.includes(
+        "bounded_complete_lag_path",
+    ) && competition.separationYears >= 14;
+    const width = isLongBoundedComposition
+        ? 13
+        : competition.referenceMedianMargin >= 0.04
+            && competition.orientationMedianMargin >= 0.01
+            ? 7
+            : 9;
+    const boundedAnchorMinimum = latestCompletedMixedNoteNumber(
+        source,
+        "bounded_completed_mixed_anchor_min",
+    );
+    const centeredStartYear = competition.frontierYear - Math.floor(width / 2);
+    const proposedStartYear = isLongBoundedComposition
+        ? Math.max(
+            competition.frontierYear - width + 1,
+            Math.min(
+                competition.frontierYear - 4,
+                (boundedAnchorMinimum ?? competition.frontierYear) - 7,
+            ),
+        )
+        : centeredStartYear;
     const startYear = Math.max(
         diagnosis.targetRange.startYear,
         Math.min(
-            competition.frontierYear - Math.floor(width / 2),
+            proposedStartYear,
             diagnosis.targetRange.endYear - width + 1,
         ),
     );
@@ -3165,6 +3373,169 @@ const makeCompletedPartialUnitFrontierEvent = (
     delete unit.shiftYears;
     delete unit.shiftSide;
     return unit;
+};
+
+const recoverBoundedCompletedPartialUnitFrontier = (
+    boundedEvents: readonly DiagnosisEvent[],
+    candidateEvents: readonly DiagnosisEvent[],
+    supportingEvents: readonly DiagnosisEvent[],
+    diagnosis: SeriesCoreDiagnosis,
+    cofechaDiagnosis: SeriesCoreDiagnosis,
+    siteData: RwlSiteData,
+    maxPartialGapYears: number,
+    locatorPathCache: LagPathCache,
+    unitOperationSelection: DynamicJointOperationSelection | null,
+): DiagnosisEvent | null => {
+    const selectedUnitOperation = unitOperationSelection
+        && unitOperationSelection.score >= 0.04
+        && unitOperationSelection.scoreMargin >= 0.02
+        && unitOperationSelection.operation.bestDifferenceGain >= 0.03
+        ? unitOperationSelection
+        : null;
+    const unitOperationEvent: DiagnosisEvent[] = selectedUnitOperation
+        ? (() => {
+            const operation = selectedUnitOperation.operation;
+            const unitShift = operation.eventType === "missingRing" ? -1 : 1;
+            const startYear = Math.max(
+                diagnosis.targetRange.startYear,
+                operation.bestYear - 3,
+            );
+            const endYear = Math.min(diagnosis.targetRange.endYear, startYear + 6);
+            return [{
+                id: `${diagnosis.targetTree}-bounded-unit-operation-${operation.eventType}`,
+                seriesId: diagnosis.targetTree,
+                eventType: operation.eventType,
+                startYear,
+                endYear,
+                rankedYears: [{
+                    year: operation.bestYear,
+                    rank: 1,
+                    score: selectedUnitOperation.score,
+                    evidenceTags: ["joint_year_operation_evidence"],
+                }],
+                confidenceLevel: "medium",
+                evidence: {
+                    algorithmSources: ["joint_year_operation_evidence"],
+                    score: selectedUnitOperation.score,
+                    scoreMargin: selectedUnitOperation.scoreMargin,
+                    baselineCorrelation: null,
+                    correctedCorrelation: null,
+                    correlationGain: operation.bestDifferenceGain,
+                    lagBefore: unitShift,
+                    lagAfter: 0,
+                    samplePairs: 0,
+                    candidateIds: [],
+                    notes: ["bounded_unit_operation_selection"],
+                },
+                alternativeTypes: [],
+            }];
+        })()
+        : [];
+    const directSeeds = selectBoundedCompletedPartialUnitSeeds(
+        boundedEvents,
+        candidateEvents,
+        supportingEvents,
+    );
+    const seeds = directSeeds.length > 0
+        ? directSeeds
+        : selectBoundedCompletedPartialUnitSeeds(
+            boundedEvents,
+            candidateEvents,
+            [...supportingEvents, ...unitOperationEvent],
+        );
+    if (seeds.length === 0) return null;
+    const missingPath = seeds.some((seed) => seed.unitEventType === "missingRing")
+        ? locateSequentialMissingHead(
+            cofechaDiagnosis,
+            siteData,
+            { minLag: -maxPartialGapYears, maxPartialGapYears },
+            locatorPathCache,
+        )
+        : null;
+    const supported = seeds.flatMap((seed) => {
+        const competition = seed.unitEventType === "missingRing"
+            ? compareCompletedPartialWithSingleMissing(
+                cofechaDiagnosis,
+                siteData,
+                seed.event,
+                missingPath?.unitEventYears ?? [],
+                true,
+                seed.anchorYears,
+                40,
+            )
+            : compareCompletedPartialWithSingleFalse(
+                cofechaDiagnosis,
+                siteData,
+                seed.event,
+                true,
+                seed.anchorYears,
+                40,
+            );
+        const masterDominantComposition = Boolean(
+            competition
+            && seed.event.evidence.notes.includes(
+                "bounded_completed_mixed_seed=independent_unit_transition",
+            )
+            && competition.separationYears >= 14
+            && competition.separationYears <= 40
+            && competition.masterMargin >= 0.5
+            && competition.masterOrientationMargin >= 0.4
+            && competition.referenceCount >= 8
+            && competition.mixedReferenceSupportRatio >= 0.4
+            && competition.referenceMedianMargin >= -0.02
+            && competition.orientationReferenceCount >= 8
+            && competition.orientationReferenceSupportRatio >= 0.6
+            && competition.orientationMedianMargin >= 0.01,
+        );
+        const referenceDominantComposition = Boolean(
+            competition
+            && seed.event.evidence.notes.includes(
+                "bounded_completed_mixed_seed=independent_unit_transition",
+            )
+            && competition.separationYears >= 14
+            && competition.separationYears <= 40
+            && competition.masterMargin >= 0.5
+            && competition.masterOrientationMargin >= 0.1
+            && competition.referenceCount >= 8
+            && competition.mixedReferenceSupportRatio >= 0.7
+            && competition.referenceMedianMargin >= 0.08
+            && competition.referenceLowerQuartileMargin >= -0.005
+            && competition.orientationReferenceCount >= 8
+            && competition.orientationReferenceSupportRatio >= 0.75
+            && competition.orientationMedianMargin >= 0.025
+            && competition.orientationLowerQuartileMargin >= 0,
+        );
+        return competition && (
+            supportsCompletedPartialUnitComposition(competition)
+            || masterDominantComposition
+            || referenceDominantComposition
+        )
+            ? [{ seed, competition }]
+            : [];
+    }).sort((left, right) => (
+        right.competition.referenceMedianMargin
+            - left.competition.referenceMedianMargin
+        || right.competition.referenceLowerQuartileMargin
+            - left.competition.referenceLowerQuartileMargin
+        || right.competition.orientationMedianMargin
+            - left.competition.orientationMedianMargin
+        || right.competition.mixedReferenceSupportRatio
+            - left.competition.mixedReferenceSupportRatio
+    ));
+    const selected = supported[0];
+    if (!selected) return null;
+    const runnerUp = supported[1];
+    if (runnerUp
+        && runnerUp.seed.unitEventType !== selected.seed.unitEventType
+        && selected.competition.referenceMedianMargin
+            - runnerUp.competition.referenceMedianMargin < 0.01
+        && selected.competition.orientationMedianMargin
+            - runnerUp.competition.orientationMedianMargin < 0.01) return null;
+    return makeCompletedPartialUnitFrontierEvent(
+        selected.seed.event,
+        selected.competition,
+        diagnosis,
+    );
 };
 
 const recoverCompletedCandidateBackedPartial = (
@@ -6694,15 +7065,16 @@ export const makeDiagnosisEvents = (
         const finalize = (
             sourceEvents: DiagnosisEvent[],
             supplementalFinalHypotheses: DiagnosisEvent[] = [],
+            includeBoundedPathHypotheses = true,
         ): DiagnosisEvent[] => {
             const automaticSemanticsRejectedCount = sourceEvents.filter(
                 (event) => !isValidAutomaticEvent(event),
             ).length;
             const finalEvents = validAutomaticEvents(sourceEvents)
                 .map(withEvidenceLedger);
-            const boundedFinalEvents = boundedPathEvents.flatMap((event) => (
-                validAutomaticEvents([event])
-            ));
+            const boundedFinalEvents = includeBoundedPathHypotheses
+                ? boundedPathEvents.flatMap((event) => validAutomaticEvents([event]))
+                : [];
             const supplementalFinalEvents = [
                 ...boundedFinalEvents,
                 ...validAutomaticEvents(supplementalFinalHypotheses),
@@ -6822,6 +7194,23 @@ export const makeDiagnosisEvents = (
             displayed,
             passRawPathEvents.events,
         );
+        const boundedCompletedPartialUnitFrontier =
+            recoverBoundedCompletedPartialUnitFrontier(
+                boundedPathEvents,
+                candidateEvents,
+                detectedBeforeFusion,
+                diagnosis,
+                cofechaDiagnosis,
+                siteData,
+                effectiveConfig.maxPartialGapYears,
+                locatorPathCache,
+                boundedUnitSelection,
+            );
+        if (boundedCompletedPartialUnitFrontier) {
+            // The completed correction has already adjudicated the bounded cumulative state.
+            // Keeping that aggregate as a review hypothesis would let it overwrite the result.
+            return finalize([boundedCompletedPartialUnitFrontier], [], false);
+        }
         const cumulativePathHasWholeBaseline = displayed.some(
             (event) => event.eventType === "wholeSeriesMove",
         );
@@ -6829,7 +7218,9 @@ export const makeDiagnosisEvents = (
             cumulativeLagPathFrontier.eventType === "partialMove"
             || cumulativePathHasWholeBaseline
         )) {
-            return finalize([cumulativeLagPathFrontier]);
+            // The raw path has resolved one executable component of the cumulative state.
+            // Re-emitting the bounded aggregate would let review replace its operation window.
+            return finalize([cumulativeLagPathFrontier], [], false);
         }
         const cumulativePartialFrontier = cumulativeLagPathFrontier === null
             ? recoverCumulativePartialFrontier(
@@ -6964,7 +7355,7 @@ export const makeDiagnosisEvents = (
             );
         }
         if (cumulativeLagPathFrontier) {
-            return finalize([cumulativeLagPathFrontier]);
+            return finalize([cumulativeLagPathFrontier], [], false);
         }
         if (!hasLocalEvent) return finalize(displayed);
         const locatedInputEvents = prioritizeEndpointUnitAgainstWhole(

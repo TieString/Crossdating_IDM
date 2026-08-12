@@ -161,10 +161,21 @@ export const supportsCompletedPartialUnitCompositionEvidence = (
         && evidence.mixedReferenceSupportRatio >= 0.65
         && evidence.referenceMedianMargin >= 0.08
         && evidence.referenceLowerQuartileMargin >= -0.025;
+    const longPlateauSupported = evidence.separationYears >= 14
+        && evidence.separationYears <= 40
+        && evidence.referenceCount >= 8
+        && evidence.mixedReferenceSupportRatio >= 0.5
+        && evidence.referenceMedianMargin >= 0
+        && evidence.masterMargin >= 0.1
+        && evidence.orientationReferenceCount >= 8
+        && evidence.orientationReferenceSupportRatio >= 0.8
+        && evidence.orientationMedianMargin >= 0.1
+        && evidence.orientationLowerQuartileMargin >= 0.03
+        && evidence.masterOrientationMargin >= 0.1;
     return (
         orientationSupported
         && (referenceFamilySupported || masterFamilySupported)
-    ) || shortPlateauSupported || sourceSegmentFalseSupported;
+    ) || shortPlateauSupported || sourceSegmentFalseSupported || longPlateauSupported;
 };
 
 const MAX_TWO_STEP_SEPARATION_YEARS = 17;
@@ -892,15 +903,22 @@ const compareCompletedPartialWithSingleUnit = (
     useCofechaStandardization = true,
     additionalAnchorYears: readonly number[] = [],
     unitEventType: CompletedPartialUnitEventType,
+    maximumSeparationYears = 25,
 ): CompletedPartialUnitComposition | null => {
     const cumulativeShiftYears = event.shiftYears;
+    const hasCandidateBackedSeed = event.evidence.candidateIds.length > 0
+        && event.evidence.notes.includes("candidate_hard_gate_passed");
+    const hasBoundedMixedSeed = event.evidence.algorithmSources.includes(
+        "bounded_complete_lag_path",
+    ) && event.evidence.notes.some((note) => (
+        note.startsWith("bounded_completed_mixed_seed=")
+    ));
     if (
         event.eventType !== "partialMove"
         || event.shiftSide !== "older"
         || !Number.isInteger(cumulativeShiftYears)
         || cumulativeShiftYears! > -3
-        || event.evidence.candidateIds.length === 0
-        || !event.evidence.notes.includes("candidate_hard_gate_passed")
+        || (!hasCandidateBackedSeed && !hasBoundedMixedSeed)
     ) return null;
     const unitShiftYears = unitEventType === "missingRing" ? -1 : 1;
     const partialShiftYears = cumulativeShiftYears! - unitShiftYears;
@@ -949,14 +967,18 @@ const compareCompletedPartialWithSingleUnit = (
         if (olderBoundaryYear < minimumBoundaryYear
             || newerBoundaryYear > maximumBoundaryYear
             || newerBoundaryYear - olderBoundaryYear < 2
-            || newerBoundaryYear - olderBoundaryYear > 25) return;
+            || newerBoundaryYear - olderBoundaryYear > maximumSeparationYears) return;
         boundaryPairs.set(`${olderBoundaryYear}:${newerBoundaryYear}`, {
             olderBoundaryYear,
             newerBoundaryYear,
         });
     };
     anchorYears.forEach((anchorYear) => {
-        for (let separationYears = 2; separationYears <= 25; separationYears += 1) {
+        for (
+            let separationYears = 2;
+            separationYears <= maximumSeparationYears;
+            separationYears += 1
+        ) {
             addBoundaryPair(anchorYear, anchorYear + separationYears);
             addBoundaryPair(anchorYear - separationYears, anchorYear);
         }
@@ -1245,6 +1267,7 @@ export const compareCompletedPartialWithSingleMissing = (
     pathMissingYears: readonly number[] = [],
     useCofechaStandardization = true,
     additionalAnchorYears: readonly number[] = [],
+    maximumSeparationYears = 25,
 ): CompletedPartialMissingComposition | null => compareCompletedPartialWithSingleUnit(
     diagnosis,
     siteData,
@@ -1253,6 +1276,7 @@ export const compareCompletedPartialWithSingleMissing = (
     useCofechaStandardization,
     additionalAnchorYears,
     "missingRing",
+    maximumSeparationYears,
 ) as CompletedPartialMissingComposition | null;
 
 export const compareCompletedPartialWithSingleFalse = (
@@ -1261,6 +1285,7 @@ export const compareCompletedPartialWithSingleFalse = (
     event: DiagnosisEvent,
     useCofechaStandardization = true,
     additionalAnchorYears: readonly number[] = [],
+    maximumSeparationYears = 25,
 ): CompletedPartialFalseComposition | null => compareCompletedPartialWithSingleUnit(
     diagnosis,
     siteData,
@@ -1269,6 +1294,7 @@ export const compareCompletedPartialWithSingleFalse = (
     useCofechaStandardization,
     additionalAnchorYears,
     "falseRing",
+    maximumSeparationYears,
 ) as CompletedPartialFalseComposition | null;
 
 export const comparePartialMoveWithMissingStaircase = (

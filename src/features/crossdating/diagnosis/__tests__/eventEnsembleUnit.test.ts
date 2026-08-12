@@ -22,6 +22,7 @@ import {
     selectCumulativePartialFrontier,
     selectCompletedPartialFalseSeed,
     selectCompletedPartialMissingSeed,
+    selectBoundedCompletedPartialUnitSeeds,
     supportsCompletedPartialUnitComposition,
     shouldReplaceUnanchoredPartialWithReferencePulse,
     shouldPreferWholeSeriesAlias,
@@ -471,6 +472,92 @@ describe("supportsCompletedPartialUnitComposition", () => {
         supported.sourceSegmentAnchored = true;
 
         expect(supportsCompletedPartialUnitComposition(supported)).toBe(true);
+    });
+
+    it("accepts a long mixed plateau with strong master and orientation evidence", () => {
+        const supported = shortPlateau();
+        supported.separationYears = 25;
+        supported.masterMargin = 0.93;
+        supported.mixedReferenceSupport = 14;
+        supported.mixedReferenceSupportRatio = 14 / 27;
+        supported.referenceCount = 27;
+        supported.referenceMedianMargin = 0.012;
+        supported.referenceLowerQuartileMargin = -0.23;
+        supported.orientationReferenceSupport = 23;
+        supported.orientationReferenceSupportRatio = 23 / 28;
+        supported.orientationMedianMargin = 0.21;
+        supported.orientationLowerQuartileMargin = 0.059;
+        supported.masterOrientationMargin = 0.26;
+
+        expect(supportsCompletedPartialUnitComposition(supported)).toBe(true);
+    });
+});
+
+describe("selectBoundedCompletedPartialUnitSeeds", () => {
+    it("joins an exact -6 component to a bounded cumulative -7 transition", () => {
+        const cumulative = partialMoveEvent(-7);
+        cumulative.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        cumulative.evidence.candidateIds = [];
+        cumulative.evidence.notes = [];
+        const remote = partialMoveEvent(-73);
+        remote.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        const component = candidatePartial({
+            shiftYears: -6,
+            anchorYear: 1880,
+            candidateId: "partial-minus-six",
+            source: "cofecha_segment_lag",
+        });
+
+        const seeds = selectBoundedCompletedPartialUnitSeeds(
+            [cumulative, remote],
+            [component],
+        );
+
+        expect(seeds).toHaveLength(1);
+        expect(seeds[0].unitEventType).toBe("missingRing");
+        expect(seeds[0].event.shiftYears).toBe(-7);
+        expect(seeds[0].event.evidence.notes).toContain(
+            "bounded_completed_mixed_component_shift=-6",
+        );
+    });
+
+    it("uses a candidate-backed shifted unit transition as the intermediate state", () => {
+        const cumulative = partialMoveEvent(-21);
+        cumulative.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        cumulative.evidence.candidateIds = [];
+        cumulative.evidence.notes = [];
+        const missing = falseRingEvent(1877, true);
+        missing.eventType = "missingRing";
+        missing.rankedYears = [{ year: 1880, rank: 1, score: 1, evidenceTags: [] }];
+        missing.evidence.lagBefore = -21;
+        missing.evidence.lagAfter = -20;
+        missing.evidence.scoreMargin = 0.5;
+        missing.evidence.notes = ["candidate_hard_gate_passed"];
+
+        const seeds = selectBoundedCompletedPartialUnitSeeds(
+            [cumulative],
+            [],
+            [missing],
+        );
+
+        expect(seeds).toHaveLength(1);
+        expect(seeds[0].unitEventType).toBe("missingRing");
+        expect(seeds[0].event.evidence.notes).toContain(
+            "bounded_completed_mixed_component_shift=-20",
+        );
+        expect(seeds[0].anchorYears).toContain(1880);
+    });
+
+    it("does not decompose a path that still contains a whole-series baseline", () => {
+        expect(selectBoundedCompletedPartialUnitSeeds(
+            [wholeSeriesEvent(4), partialMoveEvent(-7)],
+            [candidatePartial({
+                shiftYears: -6,
+                anchorYear: 1880,
+                candidateId: "partial-minus-six",
+                source: "cofecha_segment_lag",
+            })],
+        )).toEqual([]);
     });
 });
 

@@ -597,6 +597,11 @@ const runParent = async (): Promise<void> => {
         .map((value) => value.trim().toLowerCase()).filter(Boolean));
     const scenarioIds = new Set((valueFor("--scenario-ids") ?? "").split(",")
         .map((value) => value.trim()).filter(Boolean));
+    const requestedCaseIndices = new Set((valueFor("--case-indices") ?? "").split(",")
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .map(Number)
+        .filter((value) => Number.isInteger(value) && value >= 0));
     const maximumTargets = Number(valueFor("--max-targets-per-file"));
     const caseLimit = Number(valueFor("--case-limit"));
     const maximumStepsValue = Number(valueFor("--max-steps"));
@@ -624,6 +629,7 @@ const runParent = async (): Promise<void> => {
         requestedFamilies.includes(spec.family)
         && (requestedFileIds.size === 0 || requestedFileIds.has(spec.fileId.toLowerCase()))
         && (scenarioIds.size === 0 || scenarioIds.has(spec.scenarioId))
+        && (requestedCaseIndices.size === 0 || requestedCaseIndices.has(spec.index))
         && (!targetsByFile.has(spec.fileId)
             || targetsByFile.get(spec.fileId)!.has(spec.targetId))
     ));
