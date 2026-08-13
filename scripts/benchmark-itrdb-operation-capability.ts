@@ -1,5 +1,5 @@
 /** Evaluates isolated and composed ITRDB events through the production review-event pipeline. */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
     existsSync,
@@ -115,6 +115,7 @@ type RunPlan = {
     workerCount: number;
     maxSteps: number | null;
     keepAllCofecha: boolean;
+    executionGitCommit?: string;
 };
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -146,6 +147,15 @@ const planPath = resolve(valueFor("--plan") ?? join(runDir, "run-plan.json"));
 
 const sha256 = (value: Buffer | string): string => createHash("sha256")
     .update(value).digest("hex");
+const currentGitCommit = (): string => {
+    const result = spawnSync("git", ["rev-parse", "HEAD"], {
+        cwd: repoRoot,
+        encoding: "utf8",
+        windowsHide: true,
+    });
+    if (result.status !== 0) throw new Error("unable to resolve execution git commit");
+    return result.stdout.trim();
+};
 const stableHash = (value: string): number => Number.parseInt(
     createHash("sha256").update(value).digest("hex").slice(0, 12),
     16,
@@ -659,6 +669,7 @@ const runParent = async (): Promise<void> => {
         workerCount,
         maxSteps,
         keepAllCofecha: hasFlag("--keep-all-cofecha"),
+        executionGitCommit: currentGitCommit(),
     };
     if (!existingPlan) {
         rmSync(runDir, { recursive: true, force: true });
@@ -732,7 +743,9 @@ const runParent = async (): Promise<void> => {
         protocolVersion: config.protocolVersion,
         createdAt: new Date().toISOString(),
         runDir,
-        gitCommit: manifest.gitCommit,
+        gitCommit: plan.executionGitCommit ?? manifest.gitCommit,
+        executionGitCommit: plan.executionGitCommit ?? null,
+        manifestGitCommit: manifest.gitCommit,
         configSha256: plan.configSha256,
         manifestSha256: plan.manifestSha256,
         sourceFilesUnchanged: sourceMismatches.length === 0,
