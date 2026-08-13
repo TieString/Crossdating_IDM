@@ -180,6 +180,7 @@ export type DiagnosisNearEventClusterReview = {
     evidenceYears: number[];
     operationTypes: DiagnosisEventType[];
     source: "sequentialUnitPath"
+        | "explicitUnitStaircase"
         | "completedMixedCorrection"
         | "cumulativeComponentPath"
         | "selectedFinalTransitionChain";

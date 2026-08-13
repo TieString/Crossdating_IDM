@@ -231,6 +231,45 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("uses an exact separated bounded chain instead of an unanchored aggregate rewrite", () => {
+        const aggregate = event("aggregate", "partialMove", 1718, 1724, 1721);
+        aggregate.shiftYears = -27;
+        aggregate.evidence.lagBefore = -27;
+        aggregate.evidence.algorithmSources = ["completed_partial_false_composition"];
+        aggregate.evidence.notes = [
+            "completed_mixed_frontier_is_newest_event",
+            "completed_mixed_source_segment_anchored=false",
+            "completed_mixed_cumulative_shift=-26",
+        ];
+        const older = event("older-component", "partialMove", 1675, 1687, 1681);
+        older.shiftYears = -20;
+        older.evidence.lagBefore = -26;
+        older.evidence.lagAfter = -6;
+        older.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        older.evidence.notes = ["bounded_path_complete_hypothesis=true"];
+        const newer = event("newer-component", "partialMove", 1695, 1707, 1701);
+        newer.shiftYears = -6;
+        newer.evidence.lagBefore = -6;
+        newer.evidence.lagAfter = 0;
+        newer.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        newer.evidence.notes = ["bounded_path_complete_hypothesis=true"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: aggregate },
+            { stage: "final", authority: "supplemental", event: older },
+            { stage: "final", authority: "supplemental", event: newer },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            event: {
+                id: "newer-component",
+                eventType: "partialMove",
+                shiftYears: -6,
+            },
+        });
+    });
+
     it("keeps a selected completed unit frontier over an older displayed unit window", () => {
         const displayed = event("displayed-unit", "missingRing", 1821, 1829, 1824);
         displayed.evidence.algorithmSources = ["reference_core_pair_voting"];

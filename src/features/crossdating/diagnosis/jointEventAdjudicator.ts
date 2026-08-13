@@ -530,6 +530,83 @@ const hasSelectedCompletedComposition = (cluster: HypothesisCluster): boolean =>
     cluster.checkpoints.some(isSelectedCompletedCompositionCheckpoint)
 );
 
+const eventShiftYears = (event: DiagnosisEvent): number | null => {
+    const lagBefore = event.evidence.lagBefore;
+    const lagAfter = event.evidence.lagAfter;
+    if (lagBefore === null || lagAfter === null) return null;
+    const shiftYears = lagBefore - lagAfter;
+    if (event.eventType === "missingRing") return shiftYears === -1 ? -1 : null;
+    if (event.eventType === "falseRing") return shiftYears === 1 ? 1 : null;
+    if (event.eventType !== "partialMove"
+        || event.shiftYears !== shiftYears
+        || shiftYears > -2) return null;
+    return shiftYears;
+};
+
+/**
+ * A selected mixed composition is not authoritative when the complete bounded path already
+ * resolves the same cumulative shift into separated, state-contiguous physical transitions.
+ */
+const exactBoundedComponentFrontier = (
+    allFinalClusters: readonly HypothesisCluster[],
+    completedCompositionClusters: readonly HypothesisCluster[],
+    minimumSeparationYears: number,
+): HypothesisCluster | null => {
+    const bounded = allFinalClusters.filter((cluster) => (
+        cluster.checkpoints.some((checkpoint) => (
+            checkpoint.stage === "final"
+            && checkpoint.authority === "supplemental"
+            && evidenceClaimsFor(checkpoint.event).has("bounded_lag_state_path")
+        ))
+    )).sort((left, right) => (
+        (topYear(representative(left).event) ?? Number.NEGATIVE_INFINITY)
+            - (topYear(representative(right).event) ?? Number.NEGATIVE_INFINITY)
+    ));
+    if (bounded.length < 2) return null;
+
+    for (const compositionCluster of completedCompositionClusters) {
+        const composition = representative(compositionCluster).event;
+        if (!composition.evidence.notes.includes(
+            "completed_mixed_source_segment_anchored=false",
+        )) continue;
+        const aggregateShiftYears = noteYear(
+            composition,
+            "completed_mixed_cumulative_shift=",
+        );
+        const baselineLag = composition.evidence.lagAfter;
+        if (aggregateShiftYears === null || baselineLag === null) continue;
+        for (let start = 0; start < bounded.length - 1; start += 1) {
+            let shiftSum = 0;
+            for (let end = start; end < bounded.length; end += 1) {
+                const current = representative(bounded[end]!).event;
+                const currentShift = eventShiftYears(current);
+                const previous = end > start
+                    ? representative(bounded[end - 1]!).event
+                    : null;
+                const currentTop = topYear(current);
+                const previousTop = previous ? topYear(previous) : null;
+                if (currentShift === null || currentTop === null || (
+                    previous && (
+                        previousTop === null
+                        || currentTop - previousTop < minimumSeparationYears
+                        || previous.evidence.lagAfter !== current.evidence.lagBefore
+                    )
+                )) break;
+                shiftSum += currentShift;
+                const transitionCount = end - start + 1;
+                const oldest = representative(bounded[start]!).event;
+                if (transitionCount >= 2
+                    && shiftSum === aggregateShiftYears
+                    && oldest.evidence.lagBefore === baselineLag + aggregateShiftYears
+                    && current.evidence.lagAfter === baselineLag) {
+                    return bounded[end]!;
+                }
+            }
+        }
+    }
+    return null;
+};
+
 const checkpointsWithFinalClaim = (
     cluster: HypothesisCluster,
     claims: ReadonlySet<DiagnosisEvidenceClaim>,
@@ -817,10 +894,21 @@ const finalFrontierClusters = (
             && checkpoint.authority !== "supplemental"
         ))
     ));
-    // A fallback stays in competition for ordinary events. Only a completed, per-reference
-    // partial+unit correction has consumed the cumulative state strongly enough to supersede it.
-    const finalClusters = completedCompositionClusters.length > 0
-        ? completedCompositionClusters
+    const boundedComponentFrontier = exactBoundedComponentFrontier(
+        allFinalClusters,
+        completedCompositionClusters,
+        config.remoteModeDistanceYears + 1,
+    );
+    if (boundedComponentFrontier) return [boundedComponentFrontier];
+    // An unanchored composition is an interpretation, not an override. Keep its independently
+    // validated aggregate or component hypotheses in the same final arbitration set.
+    const anchoredCompositionClusters = completedCompositionClusters.filter((cluster) => (
+        !representative(cluster).event.evidence.notes.includes(
+            "completed_mixed_source_segment_anchored=false",
+        )
+    ));
+    const finalClusters = anchoredCompositionClusters.length > 0
+        ? anchoredCompositionClusters
         : allFinalClusters;
     const boundedPathClusters = finalClusters.filter((cluster) => (
         cluster.checkpoints.some(({ event }) => evidenceClaimsFor(event).has(

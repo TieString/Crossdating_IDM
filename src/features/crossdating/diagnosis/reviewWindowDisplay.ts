@@ -1,6 +1,7 @@
 import { evidenceClaimsFor } from "./evidenceLedger";
 import { supportsCompletedPartialUnitCompositionEvidence } from "./discreteMissingStaircaseCompetition";
 import type {
+    DiagnosisEvidenceClaim,
     DiagnosisEvent,
     DiagnosisEventDecisionAudit,
     DiagnosisJointEventDecision,
@@ -61,6 +62,26 @@ const yearSupportsWindow = (
 ): boolean => year !== null
     && year >= event.startYear - toleranceYears
     && year <= event.endYear + toleranceYears;
+
+const hasUnflaggedReviewAuthority = (event: DiagnosisEvent): boolean => {
+    const claims = evidenceClaimsFor(event);
+    const decisiveClaims: DiagnosisEvidenceClaim[] = [
+        "bounded_lag_state_path",
+        "fixed_side_resolution",
+        "endpoint_unit_resolution",
+        "explicit_missing_staircase",
+        "whole_baseline_exhausted_by_missing_staircase",
+        "independent_reference_staircase",
+        "continuous_gap_consensus",
+        "whole_terminal_baseline",
+    ];
+    if (decisiveClaims.some((claim) => claims.has(claim))) {
+        return true;
+    }
+    const sources = new Set(event.evidence.algorithmSources);
+    return sources.has("long_pulse_consensus")
+        && sources.has("reference_core_pair_voting");
+};
 
 const hasOperationConsistentPartialVote = (
     event: DiagnosisEvent,
@@ -198,7 +219,7 @@ const hasReviewablePartialMoveEvidence = (
         && cumulativePathCompanionShift !== null
         && cumulativePathAggregateShift
             === shiftYears + cumulativePathCompanionShift
-        && numericNote(event, "cumulative_path_transition_count") === 2
+        && (numericNote(event, "cumulative_path_transition_count") ?? 0) >= 2
         && cumulativePathComponentScore >= 4.5
         && yearSupportsWindow(
             event,
@@ -536,6 +557,9 @@ const selectAdjudicatedReviewWindowDisplay = (
     if (event.eventType !== "wholeSeriesMove"
         && !config.allowedWindowWidths.includes(width)) {
         return refused(audit, "window_width_unsafe");
+    }
+    if (!audit.cofechaFlagged && !hasUnflaggedReviewAuthority(event)) {
+        return refused(audit, "cofecha_target_unflagged");
     }
     if (event.nearEventCluster) {
         return {

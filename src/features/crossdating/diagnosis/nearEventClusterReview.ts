@@ -10,6 +10,7 @@ const MAXIMUM_CLUSTER_SPAN_YEARS = 13;
 
 type ClusterEvidence = DiagnosisNearEventClusterReview & {
     event: DiagnosisEvent;
+    windowEvidenceYears?: number[];
 };
 
 const topYear = (event: DiagnosisEvent): number | null => (
@@ -70,9 +71,12 @@ const evidenceForEvent = (event: DiagnosisEvent): ClusterEvidence[] => {
         eventCount: number,
         operationTypes: readonly DiagnosisEventType[],
         source: DiagnosisNearEventClusterReview["source"],
+        windowEvidenceYears?: readonly number[],
     ): void => {
         const normalized = uniqueSortedYears(years);
         if (!isBoundedCluster(normalized)) return;
+        const normalizedWindowYears = uniqueSortedYears(windowEvidenceYears ?? years);
+        if (!isBoundedCluster(normalizedWindowYears)) return;
         results.push({
             kind: "nearEventCluster",
             event,
@@ -80,6 +84,9 @@ const evidenceForEvent = (event: DiagnosisEvent): ClusterEvidence[] => {
             evidenceYears: normalized,
             operationTypes: [...new Set(operationTypes)].sort(),
             source,
+            ...(windowEvidenceYears
+                ? { windowEvidenceYears: normalizedWindowYears }
+                : {}),
         });
     };
 
@@ -90,6 +97,23 @@ const evidenceForEvent = (event: DiagnosisEvent): ClusterEvidence[] => {
     const falseYears = noteYears(event, "sequential_false_delete_years");
     if (event.evidence.algorithmSources.includes("sequential_false_staircase_head")) {
         add(falseYears, falseYears.length, ["falseRing"], "sequentialUnitPath");
+    }
+    const explicitMissingYears = noteYears(event, "explicit_staircase_missing_years");
+    if (event.eventType === "missingRing"
+        && explicitMissingYears.length >= 2
+        && event.evidence.algorithmSources.includes(
+            "compressed_missing_staircase_projection",
+        )
+        && event.evidence.algorithmSources.includes(
+            "explicit_partial_vs_missing_staircase",
+        )) {
+        add(
+            explicitMissingYears,
+            explicitMissingYears.length,
+            ["missingRing"],
+            "explicitUnitStaircase",
+            [Math.min(...explicitMissingYears) - 1, ...explicitMissingYears],
+        );
     }
 
     const mixedOlder = noteNumber(event, "completed_mixed_older_boundary");
@@ -211,7 +235,10 @@ export const attachNearEventClusterReview = (
     const selected = candidates[0];
     if (!selected) return preferredEvent;
     const base = preferredEvent ?? selected.event;
-    const window = clusterWindow(selected.evidenceYears, base);
+    const window = clusterWindow(
+        selected.windowEvidenceYears ?? selected.evidenceYears,
+        base,
+    );
     if (!window) return preferredEvent;
     return {
         ...base,

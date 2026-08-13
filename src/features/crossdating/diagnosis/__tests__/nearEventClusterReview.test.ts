@@ -99,4 +99,27 @@ describe("near event cluster review", () => {
 
         expect(attachNearEventClusterReview([finalCheckpoint(event)], event)).toBe(event);
     });
+
+    it("projects a validated compressed staircase with older-boundary uncertainty", () => {
+        const event = makeEvent([
+            "explicit_staircase_missing_years=1695,1689",
+        ], [
+            "compressed_missing_staircase_projection",
+            "explicit_partial_vs_missing_staircase",
+        ]);
+        event.seriesRange = { startYear: 1600, endYear: 2000 };
+        const result = attachNearEventClusterReview([finalCheckpoint(event)], event);
+
+        expect(result).toMatchObject({
+            startYear: 1688,
+            endYear: 1696,
+            reviewOnly: true,
+            nearEventCluster: {
+                eventCount: 2,
+                evidenceYears: [1689, 1695],
+                operationTypes: ["missingRing"],
+                source: "explicitUnitStaircase",
+            },
+        });
+    });
 });

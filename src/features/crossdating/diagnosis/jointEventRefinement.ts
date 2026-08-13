@@ -38,6 +38,8 @@ export type JointEventRefinementConfig = {
     independentReferenceWeight: number;
     maximumReferences: number;
     independentReferenceCount: number;
+    candidateRadiusYears: number;
+    refinePartialLocations: boolean;
 };
 
 export type DiagnosisEventSetScore = {
@@ -56,6 +58,8 @@ const DEFAULT_CONFIG: JointEventRefinementConfig = {
     independentReferenceWeight: 0.2,
     maximumReferences: 10,
     independentReferenceCount: 7,
+    candidateRadiusYears: 1,
+    refinePartialLocations: false,
 };
 
 const firstDifferences = (series: NumericSeries): NumericSeries => {
@@ -164,9 +168,17 @@ const hasConsistentLagChain = (events: LocalEvent[]): boolean => events.every((e
 const candidateYears = (
     event: LocalEvent,
     diagnosis: SeriesCoreDiagnosis,
+    radiusYears: number,
 ): number[] => {
-    const start = Math.max(diagnosis.targetRange.startYear + 1, event.startYear - 1);
-    const end = Math.min(diagnosis.targetRange.endYear - 1, event.endYear + 1);
+    const radius = Math.max(0, Math.floor(radiusYears));
+    const start = Math.max(
+        diagnosis.targetRange.startYear + 1,
+        event.startYear - radius,
+    );
+    const end = Math.min(
+        diagnosis.targetRange.endYear - 1,
+        event.endYear + radius,
+    );
     return Array.from({ length: Math.max(0, end - start + 1) }, (_, index) => start + index);
 };
 
@@ -360,9 +372,9 @@ const boundedWindow = (
     diagnosis: SeriesCoreDiagnosis,
 ): { startYear: number; endYear: number } => {
     const width = event.endYear - event.startYear + 1;
-    const requestedStart = selectedYear < event.startYear
-        ? event.startYear - 1
-        : selectedYear > event.endYear ? event.startYear + 1 : event.startYear;
+    const previousTopYear = event.rankedYears[0]?.year
+        ?? Math.floor((event.startYear + event.endYear) / 2);
+    const requestedStart = event.startYear + selectedYear - previousTopYear;
     const startYear = Math.max(
         diagnosis.targetRange.startYear,
         Math.min(requestedStart, diagnosis.targetRange.endYear - width + 1),
@@ -413,7 +425,11 @@ export const refineEventYearsJointly = (
     if (localEvents.length < 2 || localEvents.length > 3 || !hasConsistentLagChain(localEvents)) {
         return events;
     }
-    const candidates = localEvents.map((event) => candidateYears(event, diagnosis));
+    const candidates = localEvents.map((event) => candidateYears(
+        event,
+        diagnosis,
+        config.candidateRadiusYears,
+    ));
     if (candidates.some((years) => years.length === 0)) return events;
     const assignments = scoreAssignments(
         diagnosis,
@@ -426,7 +442,9 @@ export const refineEventYearsJointly = (
     if (!best) return events;
 
     const refinedById = new Map(localEvents.map((event, eventIndex) => {
-        if (event.eventType === "partialMove") return [event.id, event] as const;
+        if (event.eventType === "partialMove" && !config.refinePartialLocations) {
+            return [event.id, event] as const;
+        }
         const selectedYear = best.years[eventIndex];
         const window = boundedWindow(event, selectedYear, diagnosis);
         const previousTopYear = event.rankedYears[0]?.year

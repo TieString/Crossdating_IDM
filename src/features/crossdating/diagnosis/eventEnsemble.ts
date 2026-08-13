@@ -2981,6 +2981,54 @@ export const decisiveExactPartialRejectsWeakUnitComposition = (
         || competition.referenceLowerQuartileMargin < -0.02;
 };
 
+const preservesDecisiveExactPartial = (event: DiagnosisEvent): boolean => {
+    if (event.eventType !== "partialMove"
+        || event.shiftYears === undefined
+        || event.shiftYears > -2
+        || event.evidence.lagBefore !== event.shiftYears
+        || event.evidence.lagAfter !== 0) return false;
+    const jointShift = latestCompletedMixedNoteNumber(event, "joint_operation_correction");
+    const gridShift = latestCompletedMixedNoteNumber(event, "candidate_grid_partial_shift");
+    const gridReferenceCount = latestCompletedMixedNoteNumber(
+        event,
+        "candidate_grid_partial_reference_count",
+    ) ?? 0;
+    const gridFamilyMargin = latestCompletedMixedNoteNumber(
+        event,
+        "candidate_grid_partial_family_margin",
+    ) ?? Number.NEGATIVE_INFINITY;
+    const gridShiftMargin = latestCompletedMixedNoteNumber(
+        event,
+        "candidate_grid_partial_shift_margin",
+    ) ?? Number.NEGATIVE_INFINITY;
+    const boundedPathGain = latestCompletedMixedNoteNumber(
+        event,
+        "bounded_path_transition_gain",
+    ) ?? Number.NEGATIVE_INFINITY;
+    const boundedRunnerMargin = latestCompletedMixedNoteNumber(
+        event,
+        "bounded_path_runner_up_margin",
+    ) ?? Number.NEGATIVE_INFINITY;
+    const boundedExact = event.evidence.algorithmSources.includes(
+        "bounded_complete_lag_path",
+    )
+        && event.evidence.notes.includes("bounded_path_complete_hypothesis=true")
+        && boundedPathGain >= 20
+        && boundedRunnerMargin >= 1;
+    const gridExact = jointShift === event.shiftYears
+        && gridShift === event.shiftYears
+        && gridReferenceCount >= 6
+        && gridFamilyMargin >= 0.1
+        && gridShiftMargin >= 0.05
+        && event.evidence.algorithmSources.includes(
+            "candidate_grid_reference_partial_consensus",
+        )
+        && event.evidence.algorithmSources.includes(
+            "per_reference_counterfactual_evidence",
+        );
+    return boundedExact || gridExact;
+};
+
 const supportsCompletedPartialMissingComposition = (
     competition: CompletedPartialMissingComposition | null,
 ): competition is CompletedPartialMissingComposition => (
@@ -3773,10 +3821,11 @@ const makeCompletedPartialUnitFrontierEvent = (
     const sourceTag = competition.unitEventType === "missingRing"
         ? "completed_partial_missing_composition"
         : "completed_partial_false_composition";
+    const isLongComposition = competition.separationYears >= 14;
     const isLongBoundedComposition = source.evidence.algorithmSources.includes(
         "bounded_complete_lag_path",
-    ) && competition.separationYears >= 14;
-    const width = isLongBoundedComposition
+    ) && isLongComposition;
+    const width = isLongComposition
         ? 13
         : competition.referenceMedianMargin >= 0.04
             && competition.orientationMedianMargin >= 0.01
@@ -4769,8 +4818,8 @@ const lagPathTransitionShift = (event: DiagnosisEvent): number | null => {
 };
 
 /**
- * Recovers the newest operation from an exact two-step raw lag chain. The aggregate operation
- * may score best because it fixes the longest old segment, but it is not the next serial edit.
+ * Recovers the newest operation from an exact raw lag chain. The aggregate operation may score
+ * best because it fixes the longest old segment, but it is not the next serial edit.
  */
 type ExactLagPathTransition = {
     event: DiagnosisEvent;
@@ -4792,20 +4841,65 @@ const exactLagPathTransitions = (
         : [];
 }).sort((left, right) => left.topYear - right.topYear);
 
-const exactTwoStepFrontier = (
+type ExactLagPathChain = {
+    event: DiagnosisEvent;
+    aggregateShiftYears: number;
+    transitionCount: number;
+};
+
+const withExactLagPathChain = (
+    chain: ExactLagPathChain,
+): ExactLagPathChain => ({
+    ...chain,
+    event: {
+        ...chain.event,
+        evidence: {
+            ...chain.event.evidence,
+            notes: Array.from(new Set([
+                ...chain.event.evidence.notes,
+                `exact_cumulative_path_transition_count=${chain.transitionCount}`,
+                `exact_cumulative_path_aggregate_shift=${chain.aggregateShiftYears}`,
+            ])),
+        },
+    },
+});
+
+const exactCumulativeLagPathChains = (
     transitions: readonly ExactLagPathTransition[],
-    aggregateShiftYears: number,
     baselineLag: number,
     minimumSeparationYears: number,
-): DiagnosisEvent | null => {
-    if (transitions.length !== 2) return null;
-    const [older, newer] = transitions;
-    if (newer.topYear - older.topYear < minimumSeparationYears
-        || older.event.evidence.lagBefore !== baselineLag + aggregateShiftYears
-        || older.event.evidence.lagAfter !== newer.event.evidence.lagBefore
-        || newer.event.evidence.lagAfter !== baselineLag
-        || older.shiftYears + newer.shiftYears !== aggregateShiftYears) return null;
-    return newer.event;
+    minimumTransitionCount: number,
+): ExactLagPathChain[] => {
+    const chains: ExactLagPathChain[] = [];
+    for (let start = 0; start < transitions.length; start += 1) {
+        let aggregateShiftYears = 0;
+        for (let end = start; end < transitions.length; end += 1) {
+            const current = transitions[end];
+            const previous = end > start ? transitions[end - 1] : null;
+            if (previous && (
+                current.topYear - previous.topYear < minimumSeparationYears
+                || previous.event.evidence.lagAfter !== current.event.evidence.lagBefore
+            )) break;
+            aggregateShiftYears += current.shiftYears;
+            const transitionCount = end - start + 1;
+            const oldestLag = transitions[start].event.evidence.lagBefore;
+            if (transitionCount < minimumTransitionCount
+                || oldestLag === null
+                || current.event.evidence.lagAfter !== baselineLag
+                || oldestLag - baselineLag !== aggregateShiftYears) continue;
+            chains.push(withExactLagPathChain({
+                event: current.event,
+                aggregateShiftYears,
+                transitionCount,
+            }));
+        }
+    }
+    return chains.sort((left, right) => (
+        right.transitionCount - left.transitionCount
+        || (right.event.rankedYears[0]?.year ?? Number.NEGATIVE_INFINITY)
+            - (left.event.rankedYears[0]?.year ?? Number.NEGATIVE_INFINITY)
+        || right.event.evidence.score - left.event.evidence.score
+    ));
 };
 
 export const selectCumulativeLagPathFrontier = (
@@ -4818,12 +4912,18 @@ export const selectCumulativeLagPathFrontier = (
     if (aggregate.eventType !== "partialMove"
         || aggregate.shiftYears === undefined
         || aggregate.shiftYears > -2) return null;
-    return exactTwoStepFrontier(
-        exactLagPathTransitions(pathEvents, minimumTransitionScore),
+    const aggregateShiftCandidates = new Set([
         aggregate.shiftYears,
+        noteYear(aggregate, "completed_mixed_cumulative_shift="),
+        noteYear(aggregate, "joint_operation_correction="),
+    ].filter((shift): shift is number => shift !== null));
+    const chain = exactCumulativeLagPathChains(
+        exactLagPathTransitions(pathEvents, minimumTransitionScore),
         baselineLag,
         minimumSeparationYears,
-    );
+        2,
+    ).find((candidate) => aggregateShiftCandidates.has(candidate.aggregateShiftYears));
+    return chain?.event ?? null;
 };
 
 export const selectWholeBaselineLagPathFrontier = (
@@ -4835,22 +4935,101 @@ export const selectWholeBaselineLagPathFrontier = (
     if (whole.eventType !== "wholeSeriesMove"
         || whole.shiftYears === undefined
         || whole.shiftYears === 0) return null;
-    const transitions = exactLagPathTransitions(pathEvents, minimumTransitionScore);
-    if (transitions.length !== 2) return null;
-    const oldestLag = transitions[0].event.evidence.lagBefore;
-    if (oldestLag === null) return null;
-    const aggregateShiftYears = oldestLag - whole.shiftYears;
-    if (!isAutomaticPartialShift(aggregateShiftYears, {
-        maxPartialGapYears: 100,
-        lagMin: -100,
-    })) return null;
-    const event = exactTwoStepFrontier(
-        transitions,
-        aggregateShiftYears,
+    const chain = exactCumulativeLagPathChains(
+        exactLagPathTransitions(pathEvents, minimumTransitionScore),
         whole.shiftYears,
         minimumSeparationYears,
+        1,
+    )[0];
+    return chain ? {
+        event: chain.event,
+        aggregateShiftYears: chain.aggregateShiftYears,
+    } : null;
+};
+
+export const refineBoundedPathLocationWithOperation = (
+    event: DiagnosisEvent,
+    operations: readonly JointCounterfactualOperationScore[],
+    targetRange: { startYear: number; endYear: number },
+): DiagnosisEvent => {
+    if (!event.evidence.algorithmSources.includes("bounded_complete_lag_path")) {
+        return event;
+    }
+    const shiftYears = lagPathTransitionShift(event);
+    const lagAfter = event.evidence.lagAfter;
+    const currentTopYear = event.rankedYears[0]?.year;
+    if (shiftYears === null || lagAfter === null || currentTopYear === undefined) return event;
+    const operation = operations.find((candidate) => (
+        candidate.eventType === event.eventType
+        && candidate.shiftYears === shiftYears
+        && candidate.baselineLag === lagAfter
+    ));
+    if (!operation) return event;
+    const width = event.endYear - event.startYear + 1;
+    const neighborRadius = Math.floor(width / 2);
+    const bestYear = operation.bestYear;
+    if (bestYear < event.startYear - neighborRadius
+        || bestYear > event.endYear + neighborRadius
+        || operation.remoteDifferenceMargin < 0.01
+        || Math.max(operation.bestRawGain, operation.bestDifferenceGain) < 0.02) {
+        return event;
+    }
+    const actualWidth = Math.min(
+        width,
+        targetRange.endYear - targetRange.startYear + 1,
     );
-    return event ? { event, aggregateShiftYears } : null;
+    const startYear = Math.max(
+        targetRange.startYear,
+        Math.min(
+            bestYear - Math.floor((actualWidth - 1) / 2),
+            targetRange.endYear - actualWidth + 1,
+        ),
+    );
+    const endYear = startYear + actualWidth - 1;
+    const scoreByYear = new Map(operation.rows.map((row) => [
+        row.year,
+        row.differenceGain * 0.75 + row.rawGain * 0.25,
+    ]));
+    const rankedYears = Array.from(
+        { length: endYear - startYear + 1 },
+        (_, index) => {
+            const year = startYear + index;
+            return {
+                year,
+                score: scoreByYear.get(year) ?? -Math.abs(year - bestYear),
+                rank: 0,
+                evidenceTags: [
+                    "bounded_complete_lag_path",
+                    "joint_year_operation_evidence",
+                ],
+            };
+        },
+    ).sort((left, right) => (
+        right.score - left.score || right.year - left.year
+    )).map((row, index) => ({ ...row, rank: index + 1 }));
+    return {
+        ...event,
+        id: `${event.id}-operation-location-${bestYear}`,
+        startYear,
+        endYear,
+        rankedYears,
+        evidence: {
+            ...event.evidence,
+            algorithmSources: Array.from(new Set([
+                ...event.evidence.algorithmSources,
+                "joint_year_operation_evidence",
+            ])).sort(),
+            notes: Array.from(new Set([
+                ...event.evidence.notes,
+                `bounded_operation_location_previous_top_year=${currentTopYear}`,
+                `bounded_operation_location_year=${bestYear}`,
+                `bounded_operation_location_shift=${shiftYears}`,
+                `bounded_operation_location_remote_margin=${
+                    operation.remoteDifferenceMargin.toFixed(6)
+                }`,
+            ])),
+        },
+    };
 };
 
 const partialTransitionShift = (event: DiagnosisEvent): number | null => {
@@ -5050,8 +5229,12 @@ const recoverNearCumulativePartialPairFrontier = (
                 "bounded_complete_lag_path",
             ))
             || Math.abs(right.shiftYears ?? 0) - Math.abs(left.shiftYears ?? 0)
-        ))[0];
+    ))[0];
     if (!aggregate) return null;
+    // A complete exact operation is the null hypothesis for this decomposition. The nearby-pair
+    // fitter may only replace it when an independent path already exposes both transitions;
+    // otherwise a single physical gap is routinely overfit as two smaller gaps.
+    if (preservesDecisiveExactPartial(aggregate)) return null;
     const competition: CompletedPartialPairCompetition | null = compareCompletedPartialPair(
         diagnosis,
         cofechaDiagnosis,
@@ -5170,7 +5353,10 @@ const recoverCumulativeLagPathFrontier = (
     const selected = selectedWithShift?.event ?? null;
     if (!selected) return null;
     const componentShift = lagPathTransitionShift(selected);
-    const aggregateShiftYears = selectedWithShift?.aggregateShiftYears;
+    const aggregateShiftYears = noteYear(
+        selected,
+        "exact_cumulative_path_aggregate_shift=",
+    ) ?? selectedWithShift?.aggregateShiftYears;
     if (componentShift === null || aggregateShiftYears === undefined) return null;
     const companionShift = aggregateShiftYears - componentShift;
     const componentYear = selected.rankedYears[0]?.year;
@@ -5207,7 +5393,11 @@ const recoverCumulativeLagPathFrontier = (
                 `cumulative_path_companion_shift=${companionShift}`,
                 `cumulative_path_component_year=${componentYear}`,
                 `cumulative_path_component_score=${selected.evidence.score.toFixed(6)}`,
-                "cumulative_path_transition_count=2",
+                `cumulative_path_transition_count=${
+                    selected.evidence.notes.find((note) => (
+                        note.startsWith("exact_cumulative_path_transition_count=")
+                    ))?.split("=")[1] ?? "2"
+                }`,
                 `counterfactual_correction_years=${componentShift}`,
             ])),
         },
@@ -7732,6 +7922,31 @@ export const makeDiagnosisEvents = (
                 const state = terminalLag + operation.shiftYears;
                 return [state - 1, state, state + 1];
             }));
+        const boundedComponentShifts = [...new Set([
+            -1,
+            1,
+            ...rankedBoundedOperations
+                .slice(0, 12)
+                .map(({ operation }) => operation.shiftYears)
+                .filter((shift) => shift !== 0),
+        ])];
+        const boundedCumulativeStates = boundedStateBaselines.flatMap((terminalLag) => {
+            const states = new Set<number>();
+            let frontier = new Set([terminalLag]);
+            for (let depth = 0; depth < 4; depth += 1) {
+                const next = new Set<number>();
+                frontier.forEach((lag) => boundedComponentShifts.forEach((shift) => {
+                    const state = lag + shift;
+                    if (state < effectiveConfig.lagMin || state > effectiveConfig.lagMax) {
+                        return;
+                    }
+                    states.add(state);
+                    next.add(state);
+                }));
+                frontier = next;
+            }
+            return [...states];
+        });
         const boundedUnitStates = requiredUnitOperation
             ? boundedStateBaselines.flatMap((terminalLag) => (
                 [1, 2, 3].map((count) => (
@@ -7740,10 +7955,10 @@ export const makeDiagnosisEvents = (
             ))
             : [];
         const boundedContractStates = trustedPartialOperation
-            ? boundedOperationStates
+            ? [...boundedOperationStates, ...boundedCumulativeStates]
             : requiredUnitOperation
-                ? boundedUnitStates
-                : boundedOperationStates;
+                ? [...boundedUnitStates, ...boundedCumulativeStates]
+                : [...boundedOperationStates, ...boundedCumulativeStates];
         const boundedHypothesisStates = [
             ...candidateEvents,
             ...detectedBeforeFusion,
@@ -7782,7 +7997,7 @@ export const makeDiagnosisEvents = (
                     ...options.eventPathConfig,
                 },
                 {
-                    maxSegments: 3,
+                    maxSegments: 5,
                     minRunYears: 18,
                     windowWidth: 13,
                     terminalLags,
@@ -8030,7 +8245,24 @@ export const makeDiagnosisEvents = (
                 ?? supportedRestrictedZeroTerminalCofecha;
         const selectedBoundedResult = supportedRestrictedCofecha
             ?? unrestrictedBoundedResult;
-        const boundedPathEvents = selectedBoundedResult?.events ?? [];
+        const jointlyLocatedBoundedEvents = selectedBoundedResult
+            ? refineEventYearsJointly(
+                selectedBoundedResult.events,
+                diagnosis,
+                siteData,
+                {
+                    candidateRadiusYears: 3,
+                    refinePartialLocations: true,
+                },
+            )
+            : [];
+        const boundedPathEvents = jointlyLocatedBoundedEvents.map((event) => (
+            refineBoundedPathLocationWithOperation(
+                event,
+                boundedOperations,
+                diagnosis.targetRange,
+            )
+        )) ?? [];
         const isValidAutomaticEvent = (event: DiagnosisEvent): boolean => (
             event.eventType !== "partialMove"
             || (
@@ -8249,7 +8481,11 @@ export const makeDiagnosisEvents = (
                 localCompositionOperations,
             );
         if (crossViewCompletedPartialUnitFrontier) {
-            return finalize([crossViewCompletedPartialUnitFrontier], [], false);
+            return finalize(
+                [crossViewCompletedPartialUnitFrontier],
+                displayed.filter(preservesDecisiveExactPartial),
+                false,
+            );
         }
         const nearCumulativePartialPairFrontier = recoverNearCumulativePartialPairFrontier(
             displayed,
@@ -8261,7 +8497,11 @@ export const makeDiagnosisEvents = (
             effectiveConfig.maxPartialGapYears,
         );
         if (nearCumulativePartialPairFrontier) {
-            return finalize([nearCumulativePartialPairFrontier], [], false);
+            return finalize(
+                [nearCumulativePartialPairFrontier],
+                displayed.filter(preservesDecisiveExactPartial),
+                false,
+            );
         }
         const cumulativeLagPathFrontier = recoverCumulativeLagPathFrontier(
             displayed,
@@ -8293,7 +8533,7 @@ export const makeDiagnosisEvents = (
             // Keeping that aggregate as a review hypothesis would let it overwrite the result.
             return finalize([
                 reconciledUnit ?? boundedCompletedPartialUnitFrontier,
-            ], [], false);
+            ], displayed.filter(preservesDecisiveExactPartial), false);
         }
         const cumulativePathHasWholeBaseline = displayed.some(
             (event) => event.eventType === "wholeSeriesMove",
@@ -8411,7 +8651,7 @@ export const makeDiagnosisEvents = (
                     completedMixedSeed.event,
                     composition,
                     diagnosis,
-                )]);
+                )], displayed.filter(preservesDecisiveExactPartial));
             }
         }
         // A terminal whole baseline and a newer unit frontier can coexist. The sequential
@@ -8535,7 +8775,7 @@ export const makeDiagnosisEvents = (
                     completedFalseSeed.event,
                     falseComposition,
                     diagnosis,
-                )]);
+                )], displayed.filter(preservesDecisiveExactPartial));
             }
         }
         return finalize(locatedEvents);

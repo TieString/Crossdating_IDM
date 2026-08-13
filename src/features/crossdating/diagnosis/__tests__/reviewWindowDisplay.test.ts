@@ -231,6 +231,34 @@ describe("lower review-window display gate", () => {
         expect(result.event).toBe(strict);
     });
 
+    it("does not let a final-stage label bypass the unflagged clean-series gate", () => {
+        const strict = strictEvent();
+        expect(selectReviewWindowDisplay(
+            audit([], { cofechaFlagged: false }),
+            [strict],
+            [],
+            {},
+            jointDecision(strict),
+        )).toMatchObject({
+            status: "refused",
+            reason: "cofecha_target_unflagged",
+            event: null,
+        });
+    });
+
+    it("keeps an unflagged event with a complete bounded path authority", () => {
+        const bounded = strictEvent();
+        bounded.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        bounded.evidence.notes = ["bounded_path_complete_hypothesis=true"];
+        expect(selectReviewWindowDisplay(
+            audit([], { cofechaFlagged: false }),
+            [bounded],
+            [],
+            {},
+            jointDecision(bounded),
+        )).toMatchObject({ status: "strict", reason: "strict_event" });
+    });
+
     it("keeps a strict partial move in the display layer", () => {
         const partial = reviewablePartial();
         const result = selectReviewWindowDisplay(audit([

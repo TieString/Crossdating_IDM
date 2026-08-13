@@ -15,7 +15,10 @@ import {
 import { diagnoseCrossdating } from "@/features/crossdating/diagnosis/engine";
 import { getConfig } from "@/features/crossdating/diagnosis/config";
 import { INTERNAL_EVENT_PATH_CONFIG } from "@/features/crossdating/diagnosis/eventEnsemble";
-import { diagnoseLagPath } from "@/features/crossdating/diagnosis/eventPath";
+import {
+    diagnoseLagPath,
+    locateBoundedLagStateEvents,
+} from "@/features/crossdating/diagnosis/eventPath";
 import { getJointCounterfactualOperationScores } from "@/features/crossdating/diagnosis/jointCounterfactualOperation";
 import { DEFAULT_MAX_PARTIAL_GAP_YEARS } from "@/features/crossdating/diagnosis/partialMoveSemantics";
 import {
@@ -29,7 +32,10 @@ import {
 } from "@/features/crossdating/diagnosis/jointOperationSelector";
 import { preprocessSeries } from "@/features/crossdating/diagnosis/series";
 import { diagnoseSeriesCore } from "@/features/crossdating/diagnosis/segments";
-import type { DiagnosisEvent } from "@/features/crossdating/diagnosis/types";
+import type {
+    DiagnosisEvent,
+    SeriesCoreDiagnosis,
+} from "@/features/crossdating/diagnosis/types";
 import {
     classifyCofechaPart6Series,
     cofechaStyleStandardize,
@@ -366,6 +372,45 @@ export const diagnoseTruthBlind = (input: {
                     lagAfter: event.evidence.lagAfter,
                     score: event.evidence.score,
                 }));
+                const boundedPathAudit = (
+                    pathDiagnosis: SeriesCoreDiagnosis | null,
+                    useCofechaStandardization: boolean,
+                ) => {
+                    if (!pathDiagnosis) return null;
+                    const result = locateBoundedLagStateEvents(
+                        pathDiagnosis,
+                        input.siteData,
+                        {
+                            ...pathConfig,
+                            useCofechaStandardization,
+                            transitionPenaltyUnit: 3,
+                            transitionPenaltyBig: 3,
+                            transitionPenaltyPerYear: 0,
+                        },
+                        {
+                            maxSegments: 5,
+                            minRunYears: 18,
+                            windowWidth: 13,
+                            terminalLags: boundedTerminalLags,
+                            minimumWholeLagGain: 8,
+                        },
+                    );
+                    return result ? {
+                        score: result.path.score,
+                        bestConstantScore: result.path.bestConstantScore,
+                        transitionGain: result.path.transitionGain,
+                        wholeLagGain: result.path.wholeLagGain,
+                        runnerUpMargin: result.path.runnerUpMargin,
+                        runs: result.path.runs.map((run) => ({
+                            lag: run.lag,
+                            startYear: run.startYear,
+                            endYear: run.endYear,
+                            score: run.score,
+                            samplePairs: run.samplePairs,
+                        })),
+                        events: pathAudit(result.events),
+                    } : null;
+                };
                 const dynamicSelection = selectDynamicJointOperation(operations);
                 const unitSelection = selectDynamicUnitOperation(operations);
                 const perReferenceSelection = dynamicSelection?.operation.eventType
@@ -433,6 +478,8 @@ export const diagnoseTruthBlind = (input: {
                             pathConfig,
                         ).events)
                         : [],
+                    boundedRawPath: boundedPathAudit(core, false),
+                    boundedCofechaPath: boundedPathAudit(cofechaCore, true),
                 };
             })()
             : null;
