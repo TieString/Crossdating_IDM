@@ -13,12 +13,23 @@ export type CapabilityConfig = {
     seed: string;
     itrdbRoot: string;
     fileIds: string[];
+    generalizationSelection?: {
+        fileSelectionSeed: string;
+        candidateFileCount: number;
+        priorManifestPaths: string[];
+        requireUniqueBasename: true;
+        usesSignalStrength: false;
+        usesDiagnosisOutput: false;
+    };
     selection: {
         minimumSeriesYears: number;
         minimumMasterCorrelation: number;
         maximumProblemSegments: number;
         minimumOlderContextYears: number;
         minimumNewerContextYears: number;
+        maximumTargetsPerFile?: number;
+        targetSelectionSeed?: string;
+        excludeFilesWithoutEligibleTargets?: boolean;
         usesSignalStrength: false;
         usesDiagnosisOutput: false;
     };
@@ -55,6 +66,7 @@ export type CapabilityFile = {
     seriesIntercorrelation: number;
     possibleProblemSegments: number;
     totalSeries: number;
+    eligibleTargetsBeforeLimit?: number;
     eligibleTargets: CapabilityTarget[];
 };
 
@@ -81,6 +93,7 @@ export type CapabilityManifest = {
         includedFiles: number;
         excludedFiles: number;
         totalSeries: number;
+        eligibleTargetsBeforeLimit?: number;
         eligibleTargets: number;
     };
 };

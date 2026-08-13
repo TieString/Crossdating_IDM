@@ -24,6 +24,7 @@ import type {
     CapabilityManifest,
     CapabilityTarget,
 } from "./itrdb-operation-capability/types";
+import { selectManifestTargets } from "./itrdb-operation-capability/manifestSelection";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2).filter((argument) => argument !== "--");
@@ -97,7 +98,7 @@ for (const [fileIndex, fileId] of config.fileIds.entries()) {
             timeoutSeconds: config.runtime.cofechaTimeoutSeconds,
         });
         const result = parseCofechaResult(context.outText);
-        const eligibleTargets: CapabilityTarget[] = Array.from(loaded.series.values())
+        const eligibleTargetsBeforeLimit: CapabilityTarget[] = Array.from(loaded.series.values())
             .flatMap((series) => {
                 const canonicalId = normalizeCofechaSeriesId(series.id);
                 const masterCorrelation = result.masterCorrelations.get(canonicalId);
@@ -120,9 +121,23 @@ for (const [fileIndex, fileId] of config.fileIds.entries()) {
                 }];
             })
             .sort((left, right) => left.targetId.localeCompare(right.targetId));
+        const eligibleTargets = selectManifestTargets(
+            config,
+            fileId,
+            eligibleTargetsBeforeLimit,
+        );
         const sourceHashAfter = sha256Bytes(readFileSync(inputPath));
         if (sourceHashAfter !== sourceHashBefore) {
             throw new Error("source hash changed while preparing manifest");
+        }
+        if (eligibleTargets.length === 0
+            && config.selection.excludeFilesWithoutEligibleTargets) {
+            excludedFiles.push({ fileId, relativePath, reason: "no_eligible_target" });
+            console.log(
+                `CAPABILITY_PREPARE_EXCLUDED file=${fileIndex + 1}/${config.fileIds.length}`
+                + ` id=${fileId} reason=no_eligible_target`,
+            );
+            continue;
         }
         files.push({
             fileId,
@@ -132,11 +147,13 @@ for (const [fileIndex, fileId] of config.fileIds.entries()) {
             seriesIntercorrelation: result.seriesIntercorrelation,
             possibleProblemSegments: result.possibleProblemsCount,
             totalSeries: loaded.series.size,
+            eligibleTargetsBeforeLimit: eligibleTargetsBeforeLimit.length,
             eligibleTargets,
         });
         console.log(
             `CAPABILITY_PREPARE file=${fileIndex + 1}/${config.fileIds.length}`
-            + ` id=${fileId} eligible=${eligibleTargets.length}`,
+            + ` id=${fileId} eligible=${eligibleTargets.length}`
+            + ` beforeLimit=${eligibleTargetsBeforeLimit.length}`,
         );
     } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
@@ -167,6 +184,10 @@ const manifest: CapabilityManifest = {
         includedFiles: files.length,
         excludedFiles: excludedFiles.length,
         totalSeries: files.reduce((sum, file) => sum + file.totalSeries, 0),
+        eligibleTargetsBeforeLimit: files.reduce(
+            (sum, file) => sum + (file.eligibleTargetsBeforeLimit ?? file.eligibleTargets.length),
+            0,
+        ),
         eligibleTargets: files.reduce((sum, file) => sum + file.eligibleTargets.length, 0),
     },
 };

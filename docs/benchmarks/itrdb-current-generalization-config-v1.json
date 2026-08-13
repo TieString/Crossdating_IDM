@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": "itrdb-operation-capability-v1",
+  "frozenDate": "2026-08-13",
+  "seed": "itrdb-current-generalization-events-2026-08-13-v1",
+  "itrdbRoot": "D:/软件测试/数据/ITRDB/itrdb_download/measurements",
+  "fileIds": [
+    "russ188", "finl018-noaa", "russ074t", "che546", "japa016x-noaa",
+    "nm563", "russ148n-noaa", "turk024-noaa", "russ109x-noaa", "russ118t",
+    "russ103x-noaa", "newz099", "spai060", "germ242", "russ029i-noaa",
+    "fran026p", "russ108x", "fran032n-noaa", "gree018", "tn022e",
+    "finl010l", "russ118t-noaa", "indi002x-noaa", "finl012n", "swit114x-noaa",
+    "russ049l-noaa", "fran025l-noaa", "germ240", "co566", "deu454",
+    "russ110e", "russ213", "russ148t-noaa", "swed010x-noaa", "arge095",
+    "russ126e-noaa", "swit161e-noaa", "swit163w-noaa", "russ079t-noaa", "co569",
+    "cana419", "lith042", "paki013", "russ072n", "brit022e-noaa",
+    "swit126n", "russ124i", "fran009-noaa", "brit049n-noaa", "nor041",
+    "fran036-noaa", "brit040-noaa", "spai058e-noaa", "norw004p", "germ148",
+    "lith028", "fran021e-noaa", "russ215", "finl069-noaa", "cana133",
+    "russ050l-noaa", "indi015", "cana628", "germ175-noaa", "russ142x-noaa",
+    "cana7ba", "swit289x", "russ097w-noaa", "finl015e", "finl018x-noaa",
+    "swed011", "newz112", "cze043", "germ184-noaa", "cana220",
+    "or110", "russ030l", "russ105i-noaa", "wa056", "newz059"
+  ],
+  "generalizationSelection": {
+    "fileSelectionSeed": "itrdb-current-generalization-2026-08-13-v1",
+    "candidateFileCount": 80,
+    "priorManifestPaths": [
+      "docs/benchmarks/itrdb-validation-v1-manifest.json",
+      "docs/benchmarks/legacy-cross-file-generalization-manifest-v1.json",
+      "docs/benchmarks/itrdb-operation-capability-manifest-v1.json"
+    ],
+    "requireUniqueBasename": true,
+    "usesSignalStrength": false,
+    "usesDiagnosisOutput": false
+  },
+  "selection": {
+    "minimumSeriesYears": 200,
+    "minimumMasterCorrelation": 0.8,
+    "maximumProblemSegments": 0,
+    "minimumOlderContextYears": 45,
+    "minimumNewerContextYears": 35,
+    "maximumTargetsPerFile": 1,
+    "targetSelectionSeed": "itrdb-current-generalization-target-2026-08-13-v1",
+    "excludeFilesWithoutEligibleTargets": true,
+    "usesSignalStrength": false,
+    "usesDiagnosisOutput": false
+  },
+  "injection": {
+    "falseRingMode": "moderate",
+    "partialShiftYears": [-6, -20],
+    "wholeShiftYears": [-4, 4],
+    "distantSpacingYears": 30,
+    "nearSpacingYears": 7,
+    "allowedWindowWidths": [5, 7, 9, 13]
+  },
+  "families": {
+    "A": "clean control and one missing, false, partial, or whole event per frozen unseen file",
+    "B": "all distant local pairs and whole plus one local event on the same frozen targets",
+    "C": "near local pairs at seven years, reported as a non-primary stress family",
+    "D": "whole plus partial plus missing or false on the same frozen targets"
+  },
+  "runtime": {
+    "workers": 12,
+    "cofechaTimeoutSeconds": 60
+  }
+}
