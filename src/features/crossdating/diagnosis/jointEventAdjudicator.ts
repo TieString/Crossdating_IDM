@@ -62,6 +62,14 @@ const noteYear = (event: DiagnosisEvent, prefix: string): number | null => {
     return Number.isInteger(year) ? year : null;
 };
 
+const noteNumber = (event: DiagnosisEvent, prefix: string): number | null => {
+    const note = [...event.evidence.notes]
+        .reverse()
+        .find((value) => value.startsWith(prefix));
+    const value = Number(note?.slice(prefix.length));
+    return Number.isFinite(value) ? value : null;
+};
+
 const sameOperation = (left: DiagnosisEvent, right: DiagnosisEvent): boolean => (
     left.eventType === right.eventType
     && (
@@ -103,15 +111,19 @@ const boundedQuality = (value: number | null, scale: number): number => (
         : Math.max(0, Math.min(1, value / scale))
 );
 
+const locationEntryQuality = (
+    entry: ReturnType<typeof locationEvidenceFor>[number],
+): number => (
+    0.35 * boundedQuality(entry.concentration, 0.7)
+    + 0.3 * boundedQuality(entry.remoteMargin, 0.1)
+    + 0.25 * boundedQuality(entry.referenceCount, 8)
+    + (entry.calibrated ? 0.1 : 0)
+);
+
 const eventLocationQuality = (event: DiagnosisEvent): number => {
     const entries = matchingLocationEvidence(event);
     if (entries.length === 0) return 0;
-    return Math.max(...entries.map((entry) => (
-        0.35 * boundedQuality(entry.concentration, 0.7)
-        + 0.3 * boundedQuality(entry.remoteMargin, 0.1)
-        + 0.25 * boundedQuality(entry.referenceCount, 8)
-        + (entry.calibrated ? 0.1 : 0)
-    )));
+    return Math.max(...entries.map(locationEntryQuality));
 };
 
 const eventHasIndependentLocationAuthority = (event: DiagnosisEvent): boolean => {
@@ -272,6 +284,47 @@ const preferredAcceptedFinalLocation = (
             - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
     ))[0] ?? null;
 
+const preferredStrongBoundedLocation = (
+    cluster: HypothesisCluster,
+): DiagnosisReviewEventCheckpoint | null => {
+    const selectedFinals = cluster.checkpoints.filter((checkpoint) => (
+        checkpoint.stage === "final" && checkpoint.authority !== "supplemental"
+    ));
+    const selectedQuality = Math.max(
+        0,
+        ...selectedFinals.map(({ event }) => eventLocationQuality(event)),
+    );
+    const boundedLocationQuality = (
+        checkpoint: DiagnosisReviewEventCheckpoint,
+    ): number => Math.max(0, ...locationEvidenceFor(checkpoint.event).filter((entry) => {
+        const eventTop = topYear(checkpoint.event);
+        return entry.source === "bounded_complete_lag_path"
+            && Math.max(entry.startYear, checkpoint.event.startYear)
+                <= Math.min(entry.endYear, checkpoint.event.endYear)
+            && eventTop !== null
+            && entry.topYear !== null
+            && Math.abs(entry.topYear - eventTop) <= 2
+            && entry.referenceCount >= 3
+            && (entry.concentration ?? 0) >= 0.2
+            && (entry.remoteMargin ?? 0) >= 0.04;
+    }).map(locationEntryQuality));
+    const strongest = cluster.checkpoints.filter((checkpoint) => {
+        const event = checkpoint.event;
+        return checkpoint.stage === "final"
+            && checkpoint.authority === "supplemental"
+            && evidenceClaimsFor(event).has("bounded_lag_state_path")
+            && boundedLocationQuality(checkpoint) > 0;
+    }).sort((left, right) => (
+        boundedLocationQuality(right) - boundedLocationQuality(left)
+        || (topYear(right.event) ?? Number.NEGATIVE_INFINITY)
+            - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
+    ))[0] ?? null;
+    if (!strongest) return null;
+    return boundedLocationQuality(strongest) >= selectedQuality + 0.15
+        ? strongest
+        : null;
+};
+
 const isSelectedCompletedCompositionCheckpoint = (
     checkpoint: DiagnosisReviewEventCheckpoint,
 ): boolean => checkpoint.stage === "final"
@@ -332,6 +385,7 @@ const representative = (
     ))[0];
     const selected = preferredSelectedCompletedComposition(cluster)
         ?? preferredAcceptedFinalLocation(cluster)
+        ?? preferredStrongBoundedLocation(cluster)
         ?? preferredSelectedFinalLocation(cluster)
         ?? ranked;
     return preferredEndpointCandidate(cluster, selected)
@@ -605,6 +659,81 @@ const exactBoundedComponentFrontier = (
         }
     }
     return null;
+};
+
+const exactTerminalBoundedPartialFrontier = (
+    allFinalClusters: readonly HypothesisCluster[],
+    completedCompositionClusters: readonly HypothesisCluster[],
+): HypothesisCluster | null => {
+    const hasUnanchoredComposition = completedCompositionClusters.some((cluster) => (
+        representative(cluster).event.evidence.notes.includes(
+            "completed_mixed_source_segment_anchored=false",
+        )
+    ));
+    if (!hasUnanchoredComposition) return null;
+    return allFinalClusters.filter((cluster) => cluster.checkpoints.some((checkpoint) => {
+        const event = checkpoint.event;
+        const shiftYears = eventShiftYears(event);
+        return checkpoint.stage === "final"
+            && checkpoint.authority === "supplemental"
+            && event.eventType === "partialMove"
+            && shiftYears !== null
+            && event.evidence.lagAfter === 0
+            && event.evidence.algorithmSources.includes("bounded_complete_lag_path")
+            && event.evidence.algorithmSources.includes("joint_year_operation_evidence")
+            && event.evidence.notes.includes("bounded_path_complete_hypothesis=true")
+            && (noteNumber(event, "bounded_path_transition_gain=") ?? 0) >= 20
+            && (noteNumber(event, "bounded_path_runner_up_margin=") ?? 0) >= 1
+            && (noteNumber(event, "bounded_operation_location_remote_margin=") ?? 0)
+                >= 0.01;
+    })).sort((left, right) => (
+        (topYear(representative(right).event) ?? Number.NEGATIVE_INFINITY)
+            - (topYear(representative(left).event) ?? Number.NEGATIVE_INFINITY)
+        || representative(right).event.endYear - representative(left).event.endYear
+    ))[0] ?? null;
+};
+
+const deduplicateObjects = <T>(values: readonly T[]): T[] => {
+    const selected = new Map<string, T>();
+    values.forEach((value) => selected.set(JSON.stringify(value), value));
+    return [...selected.values()];
+};
+
+const aggregateCompatibleClusterEvidence = (
+    event: DiagnosisEvent,
+    cluster: HypothesisCluster,
+): DiagnosisEvent => {
+    if (cluster.checkpoints.length <= 1) return event;
+    const supportEvents = cluster.checkpoints.map((checkpoint) => checkpoint.event);
+    return withEvidenceLedger({
+        ...event,
+        evidence: {
+            ...event.evidence,
+            algorithmSources: Array.from(new Set([
+                ...supportEvents.flatMap((candidate) => candidate.evidence.algorithmSources),
+                "joint_hypothesis_evidence_aggregation",
+            ])).sort(),
+            notes: Array.from(new Set([
+                ...supportEvents.flatMap((candidate) => candidate.evidence.notes),
+                `joint_compatible_evidence_count=${supportEvents.length}`,
+            ])),
+            candidateIds: Array.from(new Set(
+                supportEvents.flatMap((candidate) => candidate.evidence.candidateIds),
+            )),
+            samplePairs: Math.max(
+                ...supportEvents.map((candidate) => candidate.evidence.samplePairs),
+            ),
+            locationEvidence: deduplicateObjects(supportEvents.flatMap((candidate) => (
+                candidate.evidence.locationEvidence ?? []
+            ))),
+            ledger: {
+                version: 1,
+                entries: deduplicateObjects(supportEvents.flatMap((candidate) => (
+                    candidate.evidence.ledger?.entries ?? []
+                ))),
+            },
+        },
+    });
 };
 
 const checkpointsWithFinalClaim = (
@@ -900,6 +1029,11 @@ const finalFrontierClusters = (
         config.remoteModeDistanceYears + 1,
     );
     if (boundedComponentFrontier) return [boundedComponentFrontier];
+    const terminalBoundedPartial = exactTerminalBoundedPartialFrontier(
+        allFinalClusters,
+        completedCompositionClusters,
+    );
+    if (terminalBoundedPartial) return [terminalBoundedPartial];
     // An unanchored composition is an interpretation, not an override. Keep its independently
     // validated aggregate or component hypotheses in the same final arbitration set.
     const anchoredCompositionClusters = completedCompositionClusters.filter((cluster) => (
@@ -1153,7 +1287,10 @@ export const adjudicateJointEventHypotheses = (
     ));
     const winner = operationClusters[0];
     const winnerCheckpoint = representative(winner);
-    const winnerEvent = winnerCheckpoint.event;
+    const winnerEvent = aggregateCompatibleClusterEvidence(
+        winnerCheckpoint.event,
+        winner,
+    );
     const winnerScore = locationScore(winner);
     const remoteCompetitor = operationClusters.find((cluster) => {
         if (cluster === winner) return false;

@@ -140,6 +140,7 @@ const valueFor = (name: string): string | null => {
 };
 const hasFlag = (name: string): boolean => args.includes(name)
     || args.includes(`${name}=true`);
+const keepDiagnosisAudits = hasFlag("--keep-diagnosis-audits");
 const configPath = resolve(valueFor("--config")
     ?? "docs/benchmarks/itrdb-operation-capability-config-v1.json");
 const manifestPath = resolve(valueFor("--manifest")
@@ -277,13 +278,22 @@ const runCase = async (input: {
             targetId: input.spec.targetId,
             context,
             runId: `capability-before-${input.spec.index}-${step}`,
+            includeOperationGrid: keepDiagnosisAudits,
         });
         const after = diagnoseTruthBlind({
             siteData: reopened,
             targetId: input.spec.targetId,
             context,
             runId: `capability-after-${input.spec.index}-${step}`,
+            includeOperationGrid: keepDiagnosisAudits,
         });
+        if (keepDiagnosisAudits) {
+            writeFileSync(
+                join(context.stateDir, "diagnosis-audit.json"),
+                `${JSON.stringify({ before, after }, null, 2)}\n`,
+                "utf8",
+            );
+        }
         const primary = after.reviewEvent;
         const alternative = primary?.interpretationAmbiguity?.alternative ?? null;
         const isClusterCase = input.spec.evaluationMode === "nearEventCluster";
@@ -381,7 +391,7 @@ const runCase = async (input: {
             elapsedMs: Date.now() - stepStarted,
             error: before.error ?? after.error,
         });
-        const preserve = input.keepAllCofecha || ![
+        const preserve = input.keepAllCofecha || keepDiagnosisAudits || ![
             "accepted",
             "clean_pass",
             "cluster_covered",
@@ -811,6 +821,7 @@ const runParent = async (): Promise<void> => {
             "--plan", planPath,
             "--worker-index", String(index),
             "--cofecha-exe", cofechaExe,
+            ...(keepDiagnosisAudits ? ["--keep-diagnosis-audits"] : []),
         ], {
             cwd: repoRoot,
             windowsHide: true,

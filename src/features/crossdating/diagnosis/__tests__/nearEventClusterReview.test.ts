@@ -122,4 +122,27 @@ describe("near event cluster review", () => {
             },
         });
     });
+
+    it("does not attach a remote stale cluster to the selected event mode", () => {
+        const selected = makeEvent([]);
+        selected.id = "selected";
+        selected.eventType = "partialMove";
+        selected.shiftYears = -20;
+        selected.startYear = 1730;
+        selected.endYear = 1742;
+        selected.rankedYears[0]!.year = 1736;
+        const stale = makeEvent([
+            "completed_mixed_older_boundary=1685",
+            "completed_mixed_newer_boundary=1694",
+            "completed_mixed_source_segment_anchored=true",
+        ], ["completed_partial_missing_composition"]);
+        stale.id = "stale";
+        stale.startYear = 1684;
+        stale.endYear = 1696;
+
+        expect(attachNearEventClusterReview([
+            finalCheckpoint(selected),
+            finalCheckpoint(stale),
+        ], selected)).toBe(selected);
+    });
 });

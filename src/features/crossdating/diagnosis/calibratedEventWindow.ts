@@ -270,6 +270,7 @@ const physicalPartialConsensus = (
 ): {
     narrowRows: Array<{ year: number; value: number }>;
     fiveYearWindow: WindowEvidence;
+    fiveYearConcentration: number;
 } | null => {
     if (!PHYSICAL_PARTIAL_CONSENSUS_PROFILES.every(
         (profile) => input.ranks.has(profile),
@@ -289,7 +290,11 @@ const physicalPartialConsensus = (
         return profileWindow !== null
             && Math.abs(windowCenter(profileWindow) - center) <= 2;
     });
-    return agrees ? { narrowRows, fiveYearWindow } : null;
+    return agrees ? {
+        narrowRows,
+        fiveYearWindow,
+        fiveYearConcentration: windowConcentration(narrowRows, fiveYearWindow),
+    } : null;
 };
 
 type UnitBoundaryConsensus = {
@@ -845,6 +850,7 @@ export const selectCalibratedEventWindow = (
             consensus
             && operationEvidence
             && operationEvidence.remoteDifferenceMargin >= 0.04
+            && consensus.fiveYearConcentration >= 0.45
             && contains(
                 consensus.fiveYearWindow,
                 operationEvidence.bestYear,
@@ -858,6 +864,7 @@ export const selectCalibratedEventWindow = (
             consensus
             && operationEvidence
             && operationEvidence.remoteDifferenceMargin >= 0.025
+            && consensus.fiveYearConcentration >= 0.45
         ) {
             const sevenYearWindow = bestWindow(
                 consensus.narrowRows,

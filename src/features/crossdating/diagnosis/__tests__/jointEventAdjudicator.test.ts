@@ -270,6 +270,134 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("keeps a strongly located terminal bounded partial over an unanchored composition", () => {
+        const composition = event("unanchored-composition", "falseRing", 1893, 1905, 1899);
+        composition.evidence.algorithmSources = [
+            "completed_partial_false_composition",
+        ];
+        composition.evidence.notes = [
+            "completed_mixed_frontier_is_newest_event",
+            "completed_mixed_source_segment_anchored=false",
+        ];
+        const terminal = event("terminal-partial", "partialMove", 1884, 1896, 1890);
+        terminal.shiftYears = -6;
+        terminal.evidence.lagBefore = -6;
+        terminal.evidence.algorithmSources = [
+            "bounded_complete_lag_path",
+            "joint_year_operation_evidence",
+        ];
+        terminal.evidence.notes = [
+            "bounded_path_complete_hypothesis=true",
+            "bounded_path_transition_gain=88.2",
+            "bounded_path_runner_up_margin=3.6",
+            "bounded_operation_location_remote_margin=0.038",
+        ];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: composition },
+            { stage: "final", authority: "supplemental", event: terminal },
+        ]);
+
+        expect(decision.event).toMatchObject({
+            id: "terminal-partial",
+            eventType: "partialMove",
+            shiftYears: -6,
+            startYear: 1884,
+            endYear: 1896,
+        });
+    });
+
+    it("aggregates compatible bounded evidence without replacing the selected locator window", () => {
+        const located = event("located", "partialMove", 1743, 1749, 1747);
+        located.shiftYears = -6;
+        located.evidence.lagBefore = -6;
+        located.evidence.samplePairs = 29;
+        located.evidence.algorithmSources = ["full_interval_counterfactual_locator"];
+        located.evidence.notes = ["locator_adjudication=accepted_overlapping_mode"];
+        located.evidence.locationEvidence = [{
+            source: "full_interval_counterfactual_locator",
+            startYear: 1743,
+            endYear: 1749,
+            topYear: 1747,
+            referenceCount: 12,
+            concentration: 0.7,
+            remoteMargin: 0.3,
+            calibrated: true,
+        }];
+        const bounded = event("bounded", "partialMove", 1742, 1754, 1748);
+        bounded.shiftYears = -6;
+        bounded.evidence.lagBefore = -6;
+        bounded.evidence.samplePairs = 500;
+        bounded.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        bounded.evidence.notes = [
+            "bounded_path_complete_hypothesis=true",
+            "bounded_path_transition_gain=154",
+        ];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: located },
+            { stage: "final", authority: "supplemental", event: bounded },
+        ]);
+
+        expect(decision.event).toMatchObject({
+            id: "located",
+            startYear: 1743,
+            endYear: 1749,
+            evidence: { samplePairs: 500 },
+        });
+        expect(decision.event?.evidence.algorithmSources).toContain(
+            "bounded_complete_lag_path",
+        );
+        expect(decision.event?.evidence.notes).toContain(
+            "bounded_path_transition_gain=154",
+        );
+    });
+
+    it("uses strong bounded location evidence when the selected final window is unsupported", () => {
+        const unsupported = event("unsupported", "missingRing", 1744, 1756, 1756);
+        unsupported.evidence.algorithmSources = ["full_interval_counterfactual_locator"];
+        unsupported.evidence.locationEvidence = [{
+            source: "full_interval_counterfactual_locator",
+            startYear: 1744,
+            endYear: 1756,
+            topYear: 1756,
+            referenceCount: 15,
+            concentration: 0,
+            remoteMargin: -0.28,
+            calibrated: true,
+        }];
+        const bounded = event("bounded", "missingRing", 1754, 1766, 1760);
+        bounded.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        bounded.evidence.notes = ["bounded_path_complete_hypothesis=true"];
+        bounded.evidence.locationEvidence = [{
+            source: "bounded_complete_lag_path",
+            startYear: 1753,
+            endYear: 1765,
+            topYear: 1759,
+            referenceCount: 28,
+            concentration: 0.6,
+            remoteMargin: 0.84,
+            calibrated: false,
+        }];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: unsupported },
+            { stage: "final", authority: "supplemental", event: bounded },
+        ]);
+
+        expect(decision.event).toMatchObject({
+            id: "bounded",
+            startYear: 1754,
+            endYear: 1766,
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "bounded_complete_lag_path",
+                    "full_interval_counterfactual_locator",
+                ]),
+            },
+        });
+    });
+
     it("keeps a selected completed unit frontier over an older displayed unit window", () => {
         const displayed = event("displayed-unit", "missingRing", 1821, 1829, 1824);
         displayed.evidence.algorithmSources = ["reference_core_pair_voting"];

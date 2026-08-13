@@ -4968,6 +4968,11 @@ export const refineBoundedPathLocationWithOperation = (
     const width = event.endYear - event.startYear + 1;
     const neighborRadius = Math.floor(width / 2);
     const bestYear = operation.bestYear;
+    const maximumUnitRecenterYears = 3;
+    if ((event.eventType === "missingRing" || event.eventType === "falseRing")
+        && Math.abs(bestYear - currentTopYear) > maximumUnitRecenterYears) {
+        return event;
+    }
     if (bestYear < event.startYear - neighborRadius
         || bestYear > event.endYear + neighborRadius
         || operation.remoteDifferenceMargin < 0.01
@@ -8263,6 +8268,10 @@ export const makeDiagnosisEvents = (
                 diagnosis.targetRange,
             )
         )) ?? [];
+        const decisiveExactPartialHypotheses = [
+            ...boundedPathEvents,
+            ...displayed,
+        ].filter(preservesDecisiveExactPartial);
         const isValidAutomaticEvent = (event: DiagnosisEvent): boolean => (
             event.eventType !== "partialMove"
             || (
@@ -8483,7 +8492,7 @@ export const makeDiagnosisEvents = (
         if (crossViewCompletedPartialUnitFrontier) {
             return finalize(
                 [crossViewCompletedPartialUnitFrontier],
-                displayed.filter(preservesDecisiveExactPartial),
+                decisiveExactPartialHypotheses,
                 false,
             );
         }
@@ -8499,7 +8508,7 @@ export const makeDiagnosisEvents = (
         if (nearCumulativePartialPairFrontier) {
             return finalize(
                 [nearCumulativePartialPairFrontier],
-                displayed.filter(preservesDecisiveExactPartial),
+                decisiveExactPartialHypotheses,
                 false,
             );
         }
@@ -8533,7 +8542,7 @@ export const makeDiagnosisEvents = (
             // Keeping that aggregate as a review hypothesis would let it overwrite the result.
             return finalize([
                 reconciledUnit ?? boundedCompletedPartialUnitFrontier,
-            ], displayed.filter(preservesDecisiveExactPartial), false);
+            ], decisiveExactPartialHypotheses, false);
         }
         const cumulativePathHasWholeBaseline = displayed.some(
             (event) => event.eventType === "wholeSeriesMove",
@@ -8651,7 +8660,7 @@ export const makeDiagnosisEvents = (
                     completedMixedSeed.event,
                     composition,
                     diagnosis,
-                )], displayed.filter(preservesDecisiveExactPartial));
+                )], decisiveExactPartialHypotheses);
             }
         }
         // A terminal whole baseline and a newer unit frontier can coexist. The sequential
@@ -8775,7 +8784,7 @@ export const makeDiagnosisEvents = (
                     completedFalseSeed.event,
                     falseComposition,
                     diagnosis,
-                )], displayed.filter(preservesDecisiveExactPartial));
+                )], decisiveExactPartialHypotheses);
             }
         }
         return finalize(locatedEvents);

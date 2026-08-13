@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+    guardPartialWindowWithOperationAnchor,
     selectLocalConsensusBoundaryShift,
     selectPartialMoveLocalConsensusRecenter,
     selectCorroboratedFalseRingCurrentCandidateIndex,
@@ -54,6 +55,32 @@ const localPartialNotes = [
     "partial_exhaustive_vote_gain=0.240447",
     "partial_exhaustive_vote_margin=0.018906",
 ];
+
+describe("guardPartialWindowWithOperationAnchor", () => {
+    it("keeps the operation breakpoint inside either edge of a fixed-width window", () => {
+        expect(guardPartialWindowWithOperationAnchor({
+            window: { startYear: 1777, endYear: 1789 },
+            operationYear: 1775,
+            minimumYear: 1600,
+            maximumYear: 2000,
+        })).toEqual({ startYear: 1774, endYear: 1786 });
+        expect(guardPartialWindowWithOperationAnchor({
+            window: { startYear: 1265, endYear: 1277 },
+            operationYear: 1278,
+            minimumYear: 1100,
+            maximumYear: 1500,
+        })).toEqual({ startYear: 1267, endYear: 1279 });
+    });
+
+    it("does not move a window whose operation breakpoint is already internal", () => {
+        expect(guardPartialWindowWithOperationAnchor({
+            window: { startYear: 1800, endYear: 1812 },
+            operationYear: 1806,
+            minimumYear: 1600,
+            maximumYear: 2000,
+        })).toBeNull();
+    });
+});
 
 describe("counterfactual coarse-mode selection", () => {
     const candidates = [

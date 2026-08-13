@@ -832,6 +832,31 @@ export const selectPartialMoveLocalConsensusRecenter = (input: {
     );
 };
 
+export const guardPartialWindowWithOperationAnchor = (input: {
+    window: { startYear: number; endYear: number };
+    operationYear: number;
+    minimumYear: number;
+    maximumYear: number;
+}): { startYear: number; endYear: number } | null => {
+    const width = input.window.endYear - input.window.startYear + 1;
+    if (width < 3
+        || input.operationYear < input.minimumYear
+        || input.operationYear > input.maximumYear
+        || (
+            input.operationYear >= input.window.startYear + 1
+            && input.operationYear <= input.window.endYear - 1
+        )) return null;
+    const desiredStart = input.operationYear < input.window.startYear + 1
+        ? input.operationYear - 1
+        : input.operationYear - width + 2;
+    const startYear = Math.max(
+        input.minimumYear,
+        Math.min(desiredStart, input.maximumYear - width + 1),
+    );
+    if (startYear === input.window.startYear) return null;
+    return { startYear, endYear: startYear + width - 1 };
+};
+
 const valueForCumulative = (
     row: CumulativeLagChangePointScore,
     profile: ProfileName,
@@ -1915,7 +1940,23 @@ export const refineEventWithCounterfactualLocator = (
         finalWindow = diffuseOlderConsensusRecenter.window;
         finalCalibratedWidth = 13;
     }
-    const finalCalibrationRule = partialLocalConsensusRecenter
+    const partialOperationAnchorGuard = event.eventType === "partialMove"
+        && partialLocalConsensusRecenter === null
+        && selectedOperation
+        && selectedOperation.bestDifferenceGain >= 0.05
+        ? guardPartialWindowWithOperationAnchor({
+                window: finalWindow,
+                operationYear: selectedOperation.bestYear,
+                minimumYear,
+                maximumYear,
+            })
+        : null;
+    if (partialOperationAnchorGuard) {
+        finalWindow = partialOperationAnchorGuard;
+    }
+    const finalCalibrationRule = partialOperationAnchorGuard
+        ? `${preliminaryCalibrationRule}_partial_operation_anchor_guard`
+        : partialLocalConsensusRecenter
         ? "partial_local_consensus_recenter"
         : missingPhysicalRecenter
             ? `unit_event_missing_${missingPhysicalRecenter.rule}`
@@ -2364,6 +2405,11 @@ export const refineEventWithCounterfactualLocator = (
                             partialLocalConsensusRecenter.discardedWindow.startYear
                         }-${
                             partialLocalConsensusRecenter.discardedWindow.endYear
+                        }`,
+                    ] : []),
+                    ...(partialOperationAnchorGuard ? [
+                        `partial_operation_anchor_year=${
+                            selectedOperation!.bestYear
                         }`,
                     ] : []),
                     `counterfactual_mode_window=${

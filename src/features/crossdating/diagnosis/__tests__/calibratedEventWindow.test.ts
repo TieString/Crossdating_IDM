@@ -472,6 +472,28 @@ describe("selectCalibratedEventWindow", () => {
         );
     });
 
+    it("keeps diffuse physical agreement at thirteen years", () => {
+        const diffuseProfiles = Object.fromEntries(Object.keys(
+            physicalPartialProfiles(1920),
+        ).map((profile) => [profile, years.map(() => 0.5)]));
+        const result = selectCalibratedEventWindow({
+            eventType: "partialMove",
+            years,
+            ranks: ranks(diffuseProfiles),
+            coarseWindow,
+            internalCandidates: [],
+            currentPrimaryYear: 1920,
+            candidateBackedModePriorYear: 1920,
+            operationEvidence: {
+                bestYear: 1920,
+                remoteDifferenceMargin: 0.08,
+            },
+        });
+
+        expect(result?.width).toBe(13);
+        expect(result?.calibrationRule).not.toMatch(/partial_physical_consensus/);
+    });
+
     it("uses the unshifted evidence maximum for a partial-move plateau", () => {
         const result = selectCalibratedEventWindow({
             eventType: "partialMove",

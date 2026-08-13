@@ -215,6 +215,20 @@ const clusterWindow = (
     return { startYear, endYear: startYear + width - 1 };
 };
 
+const clusterMatchesPreferredMode = (
+    cluster: ClusterEvidence,
+    preferredEvent: DiagnosisEvent | null,
+): boolean => {
+    if (!preferredEvent || cluster.event.id === preferredEvent.id) return true;
+    const evidenceYears = cluster.windowEvidenceYears ?? cluster.evidenceYears;
+    const evidenceStart = evidenceYears[0];
+    const evidenceEnd = evidenceYears[evidenceYears.length - 1];
+    return Math.max(evidenceStart, preferredEvent.startYear)
+        <= Math.min(evidenceEnd, preferredEvent.endYear)
+        || Math.max(cluster.event.startYear, preferredEvent.startYear)
+            <= Math.min(cluster.event.endYear, preferredEvent.endYear);
+};
+
 export const attachNearEventClusterReview = (
     checkpoints: readonly DiagnosisReviewEventCheckpoint[],
     preferredEvent: DiagnosisEvent | null,
@@ -227,7 +241,10 @@ export const attachNearEventClusterReview = (
         ...(preferredEvent ? evidenceForEvent(preferredEvent) : []),
         ...finalEvents,
         ...(chain ? [chain] : []),
-    ].sort((left, right) => (
+    ].filter((candidate) => clusterMatchesPreferredMode(
+        candidate,
+        preferredEvent,
+    )).sort((left, right) => (
         right.eventCount - left.eventCount
         || right.evidenceYears.length - left.evidenceYears.length
         || (topYear(right.event) ?? -Infinity) - (topYear(left.event) ?? -Infinity)

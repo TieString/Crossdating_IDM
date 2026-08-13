@@ -2431,6 +2431,25 @@ describe("selectCumulativePartialFrontier", () => {
             { startYear: 1500, endYear: 1972 },
         )).toBe(bounded);
     });
+
+    it("does not let a unit-operation plateau move an exact bounded transition by more than three years", () => {
+        const bounded = pathEvent(-1, -1, 0, 1759, 12);
+        bounded.eventType = "missingRing";
+        bounded.startYear = 1753;
+        bounded.endYear = 1765;
+        bounded.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        const operationPeak = operation(-1, 1765);
+        operationPeak.eventType = "missingRing";
+        operationPeak.baselineLag = 0;
+        operationPeak.bestRawGain = 0.1;
+        operationPeak.remoteDifferenceMargin = 0.02;
+
+        expect(refineBoundedPathLocationWithOperation(
+            bounded,
+            [operationPeak],
+            { startYear: 1500, endYear: 1972 },
+        )).toBe(bounded);
+    });
 });
 
 describe("hasCompressedSequentialFalseDirection", () => {
