@@ -210,7 +210,11 @@ export type LegacyDiagnosisSnapshot = {
             selectedRow: PerReferenceCounterfactualRow | null;
         } | null;
     } | null;
-    referenceMode: "cofecha-pass-leave-one-out" | "cofecha-master-leave-one-out";
+    referenceMode:
+        | "cofecha-pass-leave-one-out"
+        | "cofecha-master-leave-one-out"
+        | "cofecha-master"
+        | "pairwise-bootstrap-target-excluded";
     referenceAnchorCount: number;
     durationMs: number;
     error: string | null;

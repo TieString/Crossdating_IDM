@@ -31,10 +31,16 @@ import { preprocessSeries } from "@/features/crossdating/diagnosis/series";
 import { diagnoseSeriesCore } from "@/features/crossdating/diagnosis/segments";
 import type { DiagnosisEvent } from "@/features/crossdating/diagnosis/types";
 import {
+    classifyCofechaPart6Series,
     cofechaStyleStandardize,
     createCofechaMasterReferenceConfig,
     createCofechaPassReferenceConfig,
+    type ReferenceSeriesConfig,
 } from "@/features/crossdating/reference";
+import {
+    createPairwiseBootstrapReferenceConfig,
+    createPairwiseBootstrapTargetReferenceConfig,
+} from "@/features/crossdating/pairwiseBootstrap";
 import {
     createEndAnchoredFalseRingCase,
     createEndAnchoredMissingRingCase,
@@ -230,6 +236,59 @@ const candidateAudit = (candidate: Record<string, unknown>) => ({
         ?.recallSourceTags ?? null,
 });
 
+/** Mirrors the Tauri automatic-reference path before each target diagnosis. */
+export const createProductionReferenceForEvaluation = (input: {
+    siteData: RwlSiteData;
+    targetId: string;
+    flaggedAIds: Iterable<string>;
+    cofechaRunId: string;
+    rwlHash: string;
+    masterDatingSeries: Map<number, number>;
+}): {
+    referenceConfig: ReferenceSeriesConfig;
+    referenceMode: LegacyDiagnosisSnapshot["referenceMode"];
+} => {
+    const flaggedAIds = [...input.flaggedAIds];
+    const classification = classifyCofechaPart6Series(
+        Array.from(input.siteData.keys()),
+        flaggedAIds,
+        input.cofechaRunId,
+    );
+    const pairwiseBootstrapReference = classification.anchorPassIds.length < 3
+        ? createPairwiseBootstrapReferenceConfig({
+            siteData: input.siteData,
+            flaggedAIds,
+            cofechaRunId: input.cofechaRunId,
+            rwlHash: input.rwlHash,
+        })
+        : null;
+    const automaticReference = pairwiseBootstrapReference
+        ?? createCofechaMasterReferenceConfig({
+            siteData: input.siteData,
+            flaggedAIds,
+            cofechaRunId: input.cofechaRunId,
+            rwlHash: input.rwlHash,
+            masterDatingSeries: input.masterDatingSeries,
+        });
+    const referenceConfig = createPairwiseBootstrapTargetReferenceConfig(
+        input.siteData,
+        automaticReference,
+        input.targetId,
+    ) ?? automaticReference;
+    const usesPairwiseBootstrap = referenceConfig.cofechaPassReference?.source
+        === "pairwise_bootstrap";
+    if (usesPairwiseBootstrap
+        && referenceConfig.cofechaPassReference?.includedSeriesIds.includes(input.targetId)) {
+        throw new Error(`target leaked into pairwise reference: ${input.targetId}`);
+    }
+    return {
+        referenceConfig,
+        referenceMode: usesPairwiseBootstrap
+            ? "pairwise-bootstrap-target-excluded"
+            : "cofecha-master",
+    };
+};
+
 export const diagnoseTruthBlind = (input: {
     siteData: RwlSiteData;
     targetId: string;
@@ -239,30 +298,14 @@ export const diagnoseTruthBlind = (input: {
 }): LegacyDiagnosisSnapshot => {
     const started = performance.now();
     try {
-        const targetExcludedFlags = new Set([...input.context.flaggedIds, input.targetId]);
-        let referenceConfig = createCofechaPassReferenceConfig({
+        const { referenceConfig, referenceMode } = createProductionReferenceForEvaluation({
             siteData: input.siteData,
-            flaggedAIds: targetExcludedFlags,
-            cofechaRunId: `${input.runId}-${input.targetId}`,
+            targetId: input.targetId,
+            flaggedAIds: input.context.flaggedIds,
+            cofechaRunId: input.runId,
             rwlHash: input.context.rwlHash,
+            masterDatingSeries: parseCofechaResult(input.context.outText).masterDatingSeries,
         });
-        let referenceMode: LegacyDiagnosisSnapshot["referenceMode"] =
-            "cofecha-pass-leave-one-out";
-        if (!referenceConfig.cofechaPassReference) {
-            referenceMode = "cofecha-master-leave-one-out";
-            referenceConfig = createCofechaMasterReferenceConfig({
-                siteData: input.siteData,
-                flaggedAIds: targetExcludedFlags,
-                cofechaRunId: `${input.runId}-${input.targetId}`,
-                rwlHash: input.context.rwlHash,
-                masterDatingSeries: parseCofechaResult(
-                    input.context.outText,
-                ).masterDatingSeries,
-            });
-        }
-        if (referenceConfig.cofechaPassReference?.includedSeriesIds.includes(input.targetId)) {
-            throw new Error(`target leaked into reference: ${input.targetId}`);
-        }
         const diagnosis = diagnoseCrossdating(input.siteData, {
             referenceConfig,
             targetTrees: [input.targetId],
@@ -417,7 +460,7 @@ export const diagnoseTruthBlind = (input: {
             audit: null,
             reviewDecision: null,
             operationGrid: null,
-            referenceMode: "cofecha-pass-leave-one-out",
+            referenceMode: "cofecha-master",
             referenceAnchorCount: 0,
             durationMs: Math.round(performance.now() - started),
             error: error instanceof Error ? error.stack ?? error.message : String(error),

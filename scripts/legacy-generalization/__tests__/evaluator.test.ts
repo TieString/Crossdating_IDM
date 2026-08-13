@@ -5,6 +5,7 @@ import {
     applyConfirmedEvent,
     buildScenarioSite,
     canonicalSnapshot,
+    createProductionReferenceForEvaluation,
     isResumableCompletedStage,
     matchTruthAfterDiagnosis,
     readRwlForEvaluation,
@@ -109,6 +110,56 @@ const snapshot = (candidateScore: number): LegacyDiagnosisSnapshot => ({
 });
 
 describe("Legacy generalization evaluator isolation", () => {
+    it("mirrors production COFECHA-master selection when pass anchors are usable", () => {
+        const site = new Map(Array.from({ length: 5 }, (_, index) => {
+            const item = series(`anchor${index + 1}`);
+            return [item.id, item.valuesByYear] as const;
+        }));
+        const result = createProductionReferenceForEvaluation({
+            siteData: site,
+            targetId: "anchor1",
+            flaggedAIds: [],
+            cofechaRunId: "master-run",
+            rwlHash: "master-hash",
+            masterDatingSeries: new Map(Array.from({ length: 225 }, (_, index) => (
+                [1800 + index, Math.sin(index / 7)]
+            ))),
+        });
+
+        expect(result.referenceMode).toBe("cofecha-master");
+        expect(result.referenceConfig.cofechaPassReference?.source)
+            .toBe("cofecha_master_series");
+        expect(result.referenceConfig.cofechaPassReference?.includedSeriesIds)
+            .toContain("anchor1");
+    });
+
+    it("uses target-excluded pairwise bootstrap for an all-flagged cold start", () => {
+        const base = series("base").valuesByYear;
+        const site = new Map(Array.from({ length: 6 }, (_, index) => [
+            `anchor${index + 1}`,
+            new Map(Array.from(base, ([year, value]) => [
+                year,
+                value + ((year + index * 3) % 7) - 3,
+            ])),
+        ]));
+        const result = createProductionReferenceForEvaluation({
+            siteData: site,
+            targetId: "anchor1",
+            flaggedAIds: site.keys(),
+            cofechaRunId: "cold-start",
+            rwlHash: "cold-hash",
+            masterDatingSeries: new Map(),
+        });
+
+        expect(result.referenceMode).toBe("pairwise-bootstrap-target-excluded");
+        expect(result.referenceConfig.cofechaPassReference?.source)
+            .toBe("pairwise_bootstrap");
+        expect(result.referenceConfig.cofechaPassReference?.includedSeriesIds)
+            .not.toContain("anchor1");
+        expect(result.referenceConfig.cofechaPassReference?.includedSeriesIds)
+            .toHaveLength(5);
+    });
+
     it("honors a frozen Tucson declaration when header text contains commas", async () => {
         const source = [
             "540    1 Lofoten, Loedingen WIDTH_EARLY PISY -",
