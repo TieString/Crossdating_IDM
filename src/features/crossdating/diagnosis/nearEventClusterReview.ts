@@ -94,10 +94,20 @@ const evidenceForEvent = (event: DiagnosisEvent): ClusterEvidence[] => {
 
     const mixedOlder = noteNumber(event, "completed_mixed_older_boundary");
     const mixedNewer = noteNumber(event, "completed_mixed_newer_boundary");
+    const mixedSourceAnchored = noteValue(
+        event,
+        "completed_mixed_source_segment_anchored",
+    ) === "true";
+    const exactBoundedAggregate = event.evidence.algorithmSources.includes(
+        "bounded_complete_lag_path",
+    ) && event.evidence.lagBefore !== null
+        && event.evidence.lagAfter !== null
+        && event.evidence.lagBefore - event.evidence.lagAfter
+            === operationShift(event);
     if (mixedOlder !== null && mixedNewer !== null && event.evidence.algorithmSources.some(
         (source) => source === "completed_partial_missing_composition"
             || source === "completed_partial_false_composition",
-    )) {
+    ) && (mixedSourceAnchored || !exactBoundedAggregate)) {
         const unitType = noteValue(event, "completed_mixed_unit_type") === "falseRing"
             ? "falseRing" as const
             : "missingRing" as const;

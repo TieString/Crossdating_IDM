@@ -68,6 +68,7 @@ describe("near event cluster review", () => {
             "completed_mixed_unit_type=falseRing",
             "completed_mixed_older_boundary=1900",
             "completed_mixed_newer_boundary=1907",
+            "completed_mixed_source_segment_anchored=true",
         ], ["completed_partial_false_composition"]);
         const result = attachNearEventClusterReview([finalCheckpoint(event)], event);
         expect(result).not.toBeNull();
@@ -81,5 +82,21 @@ describe("near event cluster review", () => {
             source: "completedMixedCorrection",
         });
         expect(result.endYear - result.startYear + 1).toBe(9);
+    });
+
+    it("does not split an exact bounded partial through an unanchored mixed alias", () => {
+        const event = makeEvent([
+            "completed_mixed_unit_type=falseRing",
+            "completed_mixed_older_boundary=1900",
+            "completed_mixed_newer_boundary=1907",
+            "completed_mixed_source_segment_anchored=false",
+        ], ["bounded_complete_lag_path", "completed_partial_false_composition"]);
+        event.eventType = "partialMove";
+        event.shiftYears = -6;
+        event.shiftSide = "older";
+        event.evidence.lagBefore = -6;
+        event.evidence.lagAfter = 0;
+
+        expect(attachNearEventClusterReview([finalCheckpoint(event)], event)).toBe(event);
     });
 });
