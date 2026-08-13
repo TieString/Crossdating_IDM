@@ -512,7 +512,7 @@ const readInputs = () => {
     const manifest = JSON.parse(manifestBytes.toString("utf8")) as CapabilityManifest;
     if (sha256(configBytes) !== manifest.configSha256) throw new Error("config hash mismatch");
     if (manifest.protocolVersion !== config.protocolVersion
-        || manifest.scenarioGeneratorVersion !== 1) {
+        || manifest.scenarioGeneratorVersion !== (config.scenarioGeneratorVersion ?? 1)) {
         throw new Error("capability protocol mismatch");
     }
     return { config, manifest, configBytes, manifestBytes };

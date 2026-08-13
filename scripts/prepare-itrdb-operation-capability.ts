@@ -98,6 +98,36 @@ for (const [fileIndex, fileId] of config.fileIds.entries()) {
             timeoutSeconds: config.runtime.cofechaTimeoutSeconds,
         });
         const result = parseCofechaResult(context.outText);
+        const sourceHashAfterCofecha = sha256Bytes(readFileSync(inputPath));
+        if (sourceHashAfterCofecha !== sourceHashBefore) {
+            throw new Error("source hash changed while preparing manifest");
+        }
+        if (config.selection.minimumFileIntercorrelation !== undefined
+            && result.seriesIntercorrelation < config.selection.minimumFileIntercorrelation) {
+            excludedFiles.push({
+                fileId,
+                relativePath,
+                reason: `file_intercorrelation_below_minimum:${result.seriesIntercorrelation}`,
+            });
+            console.log(
+                `CAPABILITY_PREPARE_EXCLUDED file=${fileIndex + 1}/${config.fileIds.length}`
+                + ` id=${fileId} reason=file_intercorrelation_below_minimum`,
+            );
+            continue;
+        }
+        if (config.selection.maximumFileProblemSegments !== undefined
+            && result.possibleProblemsCount > config.selection.maximumFileProblemSegments) {
+            excludedFiles.push({
+                fileId,
+                relativePath,
+                reason: `file_problem_segments_above_maximum:${result.possibleProblemsCount}`,
+            });
+            console.log(
+                `CAPABILITY_PREPARE_EXCLUDED file=${fileIndex + 1}/${config.fileIds.length}`
+                + ` id=${fileId} reason=file_problem_segments_above_maximum`,
+            );
+            continue;
+        }
         const eligibleTargetsBeforeLimit: CapabilityTarget[] = Array.from(loaded.series.values())
             .flatMap((series) => {
                 const canonicalId = normalizeCofechaSeriesId(series.id);
@@ -126,10 +156,6 @@ for (const [fileIndex, fileId] of config.fileIds.entries()) {
             fileId,
             eligibleTargetsBeforeLimit,
         );
-        const sourceHashAfter = sha256Bytes(readFileSync(inputPath));
-        if (sourceHashAfter !== sourceHashBefore) {
-            throw new Error("source hash changed while preparing manifest");
-        }
         if (eligibleTargets.length === 0
             && config.selection.excludeFilesWithoutEligibleTargets) {
             excludedFiles.push({ fileId, relativePath, reason: "no_eligible_target" });
@@ -170,7 +196,7 @@ const gitCommit = execFileSync("git", ["rev-parse", "HEAD"], {
 const manifest: CapabilityManifest = {
     schemaVersion: 1,
     protocolVersion: config.protocolVersion,
-    scenarioGeneratorVersion: 1,
+    scenarioGeneratorVersion: config.scenarioGeneratorVersion ?? 1,
     createdAt: new Date().toISOString(),
     gitCommit,
     configPath: relative(repoRoot, configPath).replaceAll("\\", "/"),

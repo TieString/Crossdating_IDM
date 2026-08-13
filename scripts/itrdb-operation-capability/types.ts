@@ -1,6 +1,7 @@
 import type { DiagnosisEventType } from "@/features/crossdating/diagnosis/types";
 
 export type CapabilityFamily = "A" | "B" | "C" | "D";
+export type CapabilityEvaluationMode = "sequentialExact" | "nearEventCluster";
 export type CapabilityOperation = Extract<
     DiagnosisEventType,
     "missingRing" | "falseRing" | "partialMove" | "wholeSeriesMove"
@@ -11,6 +12,7 @@ export type CapabilityConfig = {
     protocolVersion: "itrdb-operation-capability-v1";
     frozenDate: string;
     seed: string;
+    scenarioGeneratorVersion?: 1 | 2;
     itrdbRoot: string;
     fileIds: string[];
     generalizationSelection?: {
@@ -25,6 +27,8 @@ export type CapabilityConfig = {
         minimumSeriesYears: number;
         minimumMasterCorrelation: number;
         maximumProblemSegments: number;
+        minimumFileIntercorrelation?: number;
+        maximumFileProblemSegments?: number;
         minimumOlderContextYears: number;
         minimumNewerContextYears: number;
         maximumTargetsPerFile?: number;
@@ -39,6 +43,9 @@ export type CapabilityConfig = {
         wholeShiftYears: number[];
         distantSpacingYears: number;
         nearSpacingYears: number;
+        distantEventCounts?: number[];
+        nearClusterEventCounts?: number[];
+        nearClusterMaximumSpanYears?: number;
         allowedWindowWidths: number[];
     };
     families: Record<CapabilityFamily, string>;
@@ -79,7 +86,7 @@ export type CapabilityExcludedFile = {
 export type CapabilityManifest = {
     schemaVersion: 1;
     protocolVersion: CapabilityConfig["protocolVersion"];
-    scenarioGeneratorVersion: 1;
+    scenarioGeneratorVersion: 1 | 2;
     createdAt: string;
     gitCommit: string;
     configPath: string;
@@ -121,5 +128,11 @@ export type CapabilityCase = {
     spacingYears: number | null;
     partialShiftYears: number;
     wholeShiftYears: number;
+    evaluationMode: CapabilityEvaluationMode;
+    truthCluster: {
+        startYear: number;
+        endYear: number;
+        eventCount: number;
+    } | null;
     truths: CapabilityTruth[];
 };

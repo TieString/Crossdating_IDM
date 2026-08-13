@@ -96,4 +96,44 @@ describe("ITRDB operation capability scenario matrix", () => {
             expect(years[1] - years[0]).toBe(30);
         });
     });
+
+    it("adds deterministic distant multi-events and bounded near-event clusters in v2", () => {
+        const v2Config: CapabilityConfig = {
+            ...config,
+            scenarioGeneratorVersion: 2,
+            injection: {
+                ...config.injection,
+                distantEventCounts: [3, 4],
+                nearClusterEventCounts: [3, 4, 5],
+                nearClusterMaximumSpanYears: 12,
+            },
+        };
+        const v2Manifest: CapabilityManifest = {
+            ...manifest,
+            scenarioGeneratorVersion: 2,
+        };
+        const cases = buildCapabilityCases(v2Config, v2Manifest);
+        expect(cases).toHaveLength(59);
+        expect(cases.filter((item) => item.family === "A")).toHaveLength(5);
+        expect(cases.filter((item) => item.family === "B")).toHaveLength(24);
+        expect(cases.filter((item) => item.family === "C")).toHaveLength(26);
+        expect(cases.filter((item) => item.family === "D")).toHaveLength(4);
+
+        cases.filter((item) => item.family === "B" && item.truths.length >= 3)
+            .forEach((item) => {
+                expect(item.evaluationMode).toBe("sequentialExact");
+                const years = item.truths.map((truth) => truth.year!)
+                    .sort((left, right) => left - right);
+                years.slice(1).forEach((year, index) => {
+                    expect(year - years[index]).toBe(30);
+                });
+            });
+        cases.filter((item) => item.family === "C").forEach((item) => {
+            expect(item.evaluationMode).toBe("nearEventCluster");
+            expect(item.truthCluster).not.toBeNull();
+            expect(item.truthCluster!.eventCount).toBe(item.truths.length);
+            expect(item.truthCluster!.endYear - item.truthCluster!.startYear + 1)
+                .toBeLessThanOrEqual(13);
+        });
+    });
 });
