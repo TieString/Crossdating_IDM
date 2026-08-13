@@ -8,6 +8,7 @@ import {
     withEvidenceLedger,
 } from "./evidenceLedger";
 import { attachEndpointWholeMissingInterpretation } from "./endpointWholeMissingInterpretation";
+import { attachNearEventClusterReview } from "./nearEventClusterReview";
 import type {
     DiagnosisEvidenceClaim,
     DiagnosisEvent,
@@ -1023,6 +1024,25 @@ export const adjudicateJointEventHypotheses = (
         : null;
     if (operationMargin !== null
         && operationMargin < config.minimumOperationMargin) {
+        const clusterCheckpoint = representative(frontierClusters[0] ?? clusters[0]);
+        const clusterEvent = attachNearEventClusterReview(
+            submitted,
+            clusterCheckpoint.event,
+        );
+        if (clusterEvent?.nearEventCluster) {
+            return {
+                seriesId,
+                status: "selected",
+                reason: "near_event_cluster",
+                sourceStage: clusterCheckpoint.stage,
+                event: clusterEvent,
+                hypotheses,
+                operationMargin,
+                remoteModeMargin: null,
+                productionAgreement: productionAgreement(clusterEvent, productionEvent),
+                productionExactMatch: productionExactMatch(clusterEvent, productionEvent),
+            };
+        }
         return {
             seriesId,
             status: "refused",
@@ -1068,7 +1088,7 @@ export const adjudicateJointEventHypotheses = (
     const endpointMissing = baseSelectedEvent
         ? selectEndpointMissingInterpretation(clusters, baseSelectedEvent)
         : null;
-    const selectedEvent = baseSelectedEvent && endpointMissing
+    const endpointResolvedEvent = baseSelectedEvent && endpointMissing
         ? attachEndpointWholeMissingInterpretation(
             baseSelectedEvent,
             endpointMissing,
@@ -1085,10 +1105,13 @@ export const adjudicateJointEventHypotheses = (
             },
         )
         : baseSelectedEvent;
+    const selectedEvent = endpointResolvedEvent
+        ? attachNearEventClusterReview(submitted, endpointResolvedEvent)
+        : null;
     return {
         seriesId,
         status: selectedEvent ? "selected" : "refused",
-        reason,
+        reason: selectedEvent?.nearEventCluster ? "near_event_cluster" : reason,
         sourceStage: selectedEvent ? winnerCheckpoint.stage : null,
         event: selectedEvent,
         hypotheses,

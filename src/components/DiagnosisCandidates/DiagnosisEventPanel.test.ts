@@ -8,6 +8,51 @@ import {
 } from "./DiagnosisEventPanel";
 
 describe("DiagnosisEventPanel", () => {
+  it("renders a nearby-event cluster as review-only and disables direct apply", () => {
+    const event: DiagnosisEvent = {
+      id: "cluster",
+      seriesId: "ABC01A",
+      eventType: "missingRing",
+      startYear: 1900,
+      endYear: 1912,
+      rankedYears: [{ year: 1907, rank: 1, score: 1, evidenceTags: [] }],
+      confidenceLevel: "medium",
+      evidence: {
+        algorithmSources: ["near_event_cluster_review"],
+        score: 1,
+        scoreMargin: 0.1,
+        baselineCorrelation: 0.2,
+        correctedCorrelation: 0.5,
+        correlationGain: 0.3,
+        lagBefore: -1,
+        lagAfter: 0,
+        samplePairs: 80,
+        candidateIds: [],
+        notes: ["near_event_cluster_non_executable=true"],
+      },
+      alternativeTypes: [],
+      reviewOnly: true,
+      nearEventCluster: {
+        kind: "nearEventCluster",
+        eventCount: 4,
+        evidenceYears: [1900, 1904, 1908, 1912],
+        operationTypes: ["missingRing", "falseRing"],
+        source: "selectedFinalTransitionChain",
+      },
+    };
+
+    const html = renderToStaticMarkup(createElement(DiagnosisEventPanel, {
+      events: [event],
+      onApplyEvent: () => true,
+    }));
+
+    expect(html).toContain("可能多个近距离事件");
+    expect(html).toContain("约 4 个相互影响的事件");
+    expect(html).toContain("不能直接应用为单个操作");
+    expect(html).toContain("disabled=\"\"");
+    expect(html).not.toContain("优先年份");
+  });
+
   it("renders only the current event-level diagnosis surface", () => {
     const event: DiagnosisEvent = {
       id: "event-1",

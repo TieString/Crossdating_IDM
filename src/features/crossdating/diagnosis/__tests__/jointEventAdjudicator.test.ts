@@ -47,6 +47,29 @@ const checkpoint = (
 ): DiagnosisReviewEventCheckpoint => ({ stage, event: candidate });
 
 describe("joint event adjudicator", () => {
+    it("emits a non-executable cluster review when a final path resolves nearby events", () => {
+        const clustered = event("clustered", "missingRing", 1898, 1906, 1904);
+        clustered.seriesRange = { startYear: 1700, endYear: 2000 };
+        clustered.evidence.algorithmSources = ["sequential_missing_staircase_head"];
+        clustered.evidence.notes = [
+            "sequential_missing_unit_event_years=1901,1905,1909",
+        ];
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { ...checkpoint("final", clustered), authority: "selected" },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            reason: "near_event_cluster",
+            event: {
+                startYear: 1901,
+                endYear: 1909,
+                reviewOnly: true,
+                nearEventCluster: { eventCount: 3 },
+            },
+        });
+    });
+
     it("uses cross-stage survival instead of incomparable raw event scores", () => {
         const stable = event("stable", "missingRing", 1899, 1905, 1902, 0.4);
         const remoteRawPeak = event("raw-peak", "missingRing", 1940, 1952, 1946, 99);

@@ -83,6 +83,7 @@ describe("ITRDB operation capability scenario matrix", () => {
             .every((item) => item.spacingYears === 7)).toBe(true);
         expect(cases.filter((item) => item.family === "D")
             .every((item) => item.truths.length === 3)).toBe(true);
+        expect(cases.every((item) => item.evaluationMode === "sequentialExact")).toBe(true);
     });
 
     it("is deterministic and keeps distant local truths at the frozen separation", () => {

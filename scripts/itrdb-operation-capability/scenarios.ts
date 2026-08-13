@@ -246,8 +246,10 @@ export const buildCapabilityCases = (
                 family,
                 scenarioId: `${family}${pairIndex + 1}-${pair.slug}`,
                 spacingYears,
-                evaluationMode: family === "C" ? "nearEventCluster" : "sequentialExact",
-                truthCluster: family === "C" ? {
+                evaluationMode: family === "C" && scenarioGeneratorVersion >= 2
+                    ? "nearEventCluster"
+                    : "sequentialExact",
+                truthCluster: family === "C" && scenarioGeneratorVersion >= 2 ? {
                     startYear: pairYears.older,
                     endYear: pairYears.newer,
                     eventCount: 2,

@@ -44,6 +44,8 @@ type EventPreview = {
     scoreMargin: number;
     sources: string[];
     notes: string[];
+    reviewOnly: boolean;
+    nearEventCluster: DiagnosisEvent["nearEventCluster"] | null;
 };
 type StepRow = {
     caseIndex: number;
@@ -52,6 +54,7 @@ type StepRow = {
     scenarioId: string;
     fileId: string;
     targetId: string;
+    evaluationMode: CapabilityCase["evaluationMode"];
     step: number;
     remainingTruthsBefore: number;
     remainingTruthIds: string[];
@@ -65,6 +68,9 @@ type StepRow = {
     alternativeOperationCorrect: boolean;
     primaryWindowCovered: boolean;
     alternativeWindowCovered: boolean;
+    clusterReviewDetected: boolean;
+    clusterWindowCovered: boolean;
+    clusterNonExecutable: boolean;
     acceptedInterpretation: Interpretation | null;
     acceptedTruthId: string | null;
     acceptedTruthType: CapabilityOperation | null;
@@ -86,6 +92,7 @@ type CaseRow = {
     scenarioId: string;
     fileId: string;
     targetId: string;
+    evaluationMode: CapabilityCase["evaluationMode"];
     seriesYears: number;
     masterCorrelation: number;
     problemSegments: number;
@@ -98,6 +105,9 @@ type CaseRow = {
     alternativeRecoveries: number;
     complete: boolean;
     cleanFalsePositive: boolean | null;
+    clusterReviewDetected: boolean | null;
+    clusterWindowCovered: boolean | null;
+    clusterNonExecutable: boolean | null;
     stopReason: string;
     attemptedSteps: number;
     saveReopenStable: boolean;
@@ -176,6 +186,8 @@ const preview = (event: DiagnosisEvent | null): EventPreview | null => event ? (
     scoreMargin: event.evidence.scoreMargin,
     sources: event.evidence.algorithmSources,
     notes: event.evidence.notes,
+    reviewOnly: event.reviewOnly === true,
+    nearEventCluster: event.nearEventCluster ?? null,
 }) : null;
 const operationMatches = (event: DiagnosisEvent, truth: CapabilityTruth): boolean => (
     event.eventType === truth.eventType && effectiveShift(event) === truth.shiftYears
@@ -274,23 +286,48 @@ const runCase = async (input: {
         });
         const primary = after.reviewEvent;
         const alternative = primary?.interpretationAmbiguity?.alternative ?? null;
+        const isClusterCase = input.spec.evaluationMode === "nearEventCluster";
+        const clusterTruth = input.spec.truthCluster;
+        const clusterReviewDetected = Boolean(primary?.nearEventCluster);
+        const clusterWindowCovered = Boolean(
+            primary?.nearEventCluster
+            && clusterTruth
+            && primary.startYear <= clusterTruth.startYear
+            && primary.endYear >= clusterTruth.endYear,
+        );
+        const clusterNonExecutable = Boolean(
+            primary?.nearEventCluster && primary.reviewOnly === true,
+        );
         const primaryOperationTruth = matchingTruth(primary, remaining, false);
         const alternativeOperationTruth = matchingTruth(alternative, remaining, false);
         const primaryCoveredTruth = matchingTruth(primary, remaining, true);
         const alternativeCoveredTruth = matchingTruth(alternative, remaining, true);
-        const acceptedTruth = primaryCoveredTruth ?? alternativeCoveredTruth;
+        const acceptedTruth = isClusterCase
+            ? null
+            : primaryCoveredTruth ?? alternativeCoveredTruth;
         const acceptedInterpretation: Interpretation | null = primaryCoveredTruth
             ? "primary"
             : alternativeCoveredTruth
                 ? "alternative"
                 : null;
         const acceptedEvent = acceptedInterpretation === "primary" ? primary : alternative;
-        const width = acceptedEvent
-            ? acceptedEvent.endYear - acceptedEvent.startYear + 1
+        const widthEvent = isClusterCase ? primary : acceptedEvent;
+        const width = widthEvent
+            ? widthEvent.endYear - widthEvent.startYear + 1
             : null;
         const isClean = input.spec.truths.length === 0;
         if (isClean) {
             stopReason = primary ? "clean_false_positive" : "clean_pass";
+        } else if (isClusterCase) {
+            stopReason = !primary
+                ? "refused"
+                : !clusterReviewDetected
+                    ? "cluster_not_identified"
+                    : !clusterNonExecutable
+                        ? "cluster_executable_violation"
+                        : clusterWindowCovered
+                            ? "cluster_covered"
+                            : "cluster_window_miss";
         } else if (!primary) {
             stopReason = "refused";
         } else if (!acceptedTruth) {
@@ -309,6 +346,7 @@ const runCase = async (input: {
             scenarioId: input.spec.scenarioId,
             fileId: input.spec.fileId,
             targetId: input.spec.targetId,
+            evaluationMode: input.spec.evaluationMode,
             step,
             remainingTruthsBefore: remaining.length,
             remainingTruthIds: remaining.map((truth) => truth.truthId),
@@ -324,6 +362,9 @@ const runCase = async (input: {
             alternativeOperationCorrect: alternativeOperationTruth !== null,
             primaryWindowCovered: primaryCoveredTruth !== null,
             alternativeWindowCovered: alternativeCoveredTruth !== null,
+            clusterReviewDetected,
+            clusterWindowCovered,
+            clusterNonExecutable,
             acceptedInterpretation,
             acceptedTruthId: acceptedTruth?.truthId ?? null,
             acceptedTruthType: acceptedTruth?.eventType ?? null,
@@ -340,10 +381,13 @@ const runCase = async (input: {
             elapsedMs: Date.now() - stepStarted,
             error: before.error ?? after.error,
         });
-        const preserve = input.keepAllCofecha || stopReason !== "accepted"
-            && stopReason !== "clean_pass";
+        const preserve = input.keepAllCofecha || ![
+            "accepted",
+            "clean_pass",
+            "cluster_covered",
+        ].includes(stopReason);
         if (!preserve) rmSync(context.stateDir, { recursive: true, force: true });
-        if (isClean || !acceptedTruth) break;
+        if (isClean || isClusterCase || !acceptedTruth) break;
         const truthIndex = remaining.findIndex((truth) => truth.truthId === acceptedTruth.truthId);
         remaining.splice(truthIndex, 1);
         if (remaining.length === 0) {
@@ -360,6 +404,7 @@ const runCase = async (input: {
             scenarioId: input.spec.scenarioId,
             fileId: input.spec.fileId,
             targetId: input.spec.targetId,
+            evaluationMode: input.spec.evaluationMode,
             seriesYears: input.spec.seriesYears,
             masterCorrelation: input.spec.masterCorrelation,
             problemSegments: input.spec.problemSegments,
@@ -370,11 +415,22 @@ const runCase = async (input: {
             recoveredTruths: input.spec.truths.length - remaining.length,
             primaryRecoveries,
             alternativeRecoveries,
-            complete: input.spec.truths.length === 0
+            complete: input.spec.evaluationMode === "nearEventCluster"
+                ? stopReason === "cluster_covered"
+                : input.spec.truths.length === 0
                 ? stopReason === "clean_pass"
                 : remaining.length === 0,
             cleanFalsePositive: input.spec.truths.length === 0
                 ? stopReason === "clean_false_positive"
+                : null,
+            clusterReviewDetected: input.spec.evaluationMode === "nearEventCluster"
+                ? steps[0]?.clusterReviewDetected ?? false
+                : null,
+            clusterWindowCovered: input.spec.evaluationMode === "nearEventCluster"
+                ? steps[0]?.clusterWindowCovered ?? false
+                : null,
+            clusterNonExecutable: input.spec.evaluationMode === "nearEventCluster"
+                ? steps[0]?.clusterNonExecutable ?? false
                 : null,
             stopReason,
             attemptedSteps: steps.length,
@@ -397,7 +453,18 @@ const rate = (count: number, total: number): number | null => total > 0
 const summarize = (cases: CaseRow[], steps: StepRow[]) => {
     const eventCases = cases.filter((row) => row.truthCount > 0);
     const cleanCases = cases.filter((row) => row.truthCount === 0);
-    const attemptedEventSteps = steps.filter((row) => row.remainingTruthsBefore > 0);
+    const sequentialCases = eventCases.filter((row) => (
+        row.evaluationMode === "sequentialExact"
+    ));
+    const clusterCases = eventCases.filter((row) => (
+        row.evaluationMode === "nearEventCluster"
+    ));
+    const attemptedEventSteps = steps.filter((row) => (
+        row.remainingTruthsBefore > 0 && row.evaluationMode === "sequentialExact"
+    ));
+    const clusterSteps = steps.filter((row) => (
+        row.remainingTruthsBefore > 0 && row.evaluationMode === "nearEventCluster"
+    ));
     const localOperationSteps = attemptedEventSteps.filter((row) => (
         row.primaryOperationCorrect || row.alternativeOperationCorrect
     ) && row.acceptedTruthType !== "wholeSeriesMove");
@@ -406,8 +473,11 @@ const summarize = (cases: CaseRow[], steps: StepRow[]) => {
     ));
     const widths = acceptedLocalSteps.map((row) => row.windowWidth)
         .filter((value): value is number => value !== null);
-    const truthCount = eventCases.reduce((sum, row) => sum + row.truthCount, 0);
-    const recovered = eventCases.reduce((sum, row) => sum + row.recoveredTruths, 0);
+    const truthCount = sequentialCases.reduce((sum, row) => sum + row.truthCount, 0);
+    const recovered = sequentialCases.reduce((sum, row) => sum + row.recoveredTruths, 0);
+    const clusterWidths = clusterSteps.filter((row) => row.clusterReviewDetected)
+        .map((row) => row.windowWidth)
+        .filter((value): value is number => value !== null);
     return {
         cases: cases.length,
         eventCases: eventCases.length,
@@ -415,6 +485,25 @@ const summarize = (cases: CaseRow[], steps: StepRow[]) => {
         truthEvents: truthCount,
         recoveredTruthEvents: recovered,
         truthRecoveryRate: rate(recovered, truthCount),
+        clusterCases: clusterCases.length,
+        clusterTruthEvents: clusterCases.reduce((sum, row) => sum + row.truthCount, 0),
+        clusterResponseRate: rate(
+            clusterSteps.filter((row) => row.response).length,
+            clusterSteps.length,
+        ),
+        clusterReviewDetectionRate: rate(
+            clusterCases.filter((row) => row.clusterReviewDetected).length,
+            clusterCases.length,
+        ),
+        clusterWholeWindowCoverage: rate(
+            clusterCases.filter((row) => row.clusterWindowCovered).length,
+            clusterCases.length,
+        ),
+        clusterExecutableViolationCount: clusterCases.filter((row) => (
+            row.clusterReviewDetected && !row.clusterNonExecutable
+        )).length,
+        clusterMedianWindowWidth: percentile(clusterWidths, 0.5),
+        clusterP90WindowWidth: percentile(clusterWidths, 0.9),
         completeCases: eventCases.filter((row) => row.complete).length,
         completeCaseRate: rate(eventCases.filter((row) => row.complete).length, eventCases.length),
         responseRateAtAttemptedFrontier: rate(
@@ -553,6 +642,7 @@ const runWorker = async (): Promise<void> => {
                 scenarioId: spec.scenarioId,
                 fileId: spec.fileId,
                 targetId: spec.targetId,
+                evaluationMode: spec.evaluationMode,
                 seriesYears: spec.seriesYears,
                 masterCorrelation: spec.masterCorrelation,
                 problemSegments: spec.problemSegments,
@@ -565,6 +655,15 @@ const runWorker = async (): Promise<void> => {
                 alternativeRecoveries: 0,
                 complete: false,
                 cleanFalsePositive: spec.truths.length === 0 ? null : null,
+                clusterReviewDetected: spec.evaluationMode === "nearEventCluster"
+                    ? false
+                    : null,
+                clusterWindowCovered: spec.evaluationMode === "nearEventCluster"
+                    ? false
+                    : null,
+                clusterNonExecutable: spec.evaluationMode === "nearEventCluster"
+                    ? false
+                    : null,
                 stopReason: "error",
                 attemptedSteps: 0,
                 saveReopenStable: false,

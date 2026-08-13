@@ -174,6 +174,17 @@ export type DiagnosisEventInterpretationAmbiguity =
         evidence: DiagnosisWholeMissingInterpretationEvidence;
     };
 
+export type DiagnosisNearEventClusterReview = {
+    kind: "nearEventCluster";
+    eventCount: number;
+    evidenceYears: number[];
+    operationTypes: DiagnosisEventType[];
+    source: "sequentialUnitPath"
+        | "completedMixedCorrection"
+        | "cumulativeComponentPath"
+        | "selectedFinalTransitionChain";
+};
+
 /**
  * 人工复核事件。用户选定窗口内年份并确认后，事件会转换成受约束的 RWL 编辑；
  * whole-series 事件仍必须复用通过 before/after hard gate 的原始 candidate。
@@ -192,6 +203,8 @@ export type DiagnosisEvent = {
     locationAlternatives?: DiagnosisEventLocationAlternative[];
     operationAlternatives?: DiagnosisEvent[];
     interpretationAmbiguity?: DiagnosisEventInterpretationAmbiguity;
+    /** A non-executable review window containing several interacting local transitions. */
+    nearEventCluster?: DiagnosisNearEventClusterReview;
     shiftYears?: number;
     shiftSide?: DiagnosisEventShiftSide;
     seriesRange?: YearRange;
@@ -325,6 +338,7 @@ export type DiagnosisReviewEventCheckpoint = {
 
 export type DiagnosisReviewWindowDecisionReason =
     | "strict_event"
+    | "near_event_cluster"
     | "lower_display_gate_passed"
     | "cofecha_target_unflagged"
     | "insufficient_reference_support"
@@ -347,6 +361,7 @@ export type DiagnosisReviewWindowDecision = {
 
 export type DiagnosisJointAdjudicationReason =
     | "selected"
+    | "near_event_cluster"
     | "no_complete_hypothesis"
     | "operation_contract_conflict"
     | "operation_conflict"

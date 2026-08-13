@@ -537,6 +537,16 @@ const selectAdjudicatedReviewWindowDisplay = (
         && !config.allowedWindowWidths.includes(width)) {
         return refused(audit, "window_width_unsafe");
     }
+    if (event.nearEventCluster) {
+        return {
+            seriesId: audit.seriesId,
+            status: "review",
+            reason: "near_event_cluster",
+            strictReason: audit.finalReason,
+            sourceStage: decision.sourceStage,
+            event: { ...event, reviewOnly: true },
+        };
+    }
     const independentlyStrictWhole = event.eventType === "wholeSeriesMove"
         && evidenceClaimsFor(event).has("whole_terminal_baseline");
     if (decision.sourceStage === "final" || independentlyStrictWhole) {
