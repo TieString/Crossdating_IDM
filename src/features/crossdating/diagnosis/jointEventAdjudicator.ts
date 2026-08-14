@@ -284,6 +284,28 @@ const preferredAcceptedFinalLocation = (
             - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
     ))[0] ?? null;
 
+const hasAcceptedStrongSelectedLocator = (
+    cluster: HypothesisCluster,
+): boolean => cluster.checkpoints.some((checkpoint) => {
+    const event = checkpoint.event;
+    if (checkpoint.stage !== "final"
+        || checkpoint.authority === "supplemental"
+        || event.eventType === "wholeSeriesMove"
+        || !event.evidence.algorithmSources.includes(
+            "full_interval_counterfactual_locator",
+        )
+        || !event.evidence.notes.some((note) => (
+            note === "locator_adjudication=accepted_overlapping_mode"
+            || note === "locator_adjudication=accepted_overlapping_strong_mode"
+        ))) return false;
+    return matchingLocationEvidence(event).some((entry) => (
+        entry.source === "full_interval_counterfactual_locator"
+        && entry.referenceCount >= 3
+        && (entry.concentration ?? 0) >= 0.2
+        && (entry.remoteMargin ?? 0) >= 0.04
+    ));
+});
+
 const preferredStrongBoundedLocation = (
     cluster: HypothesisCluster,
 ): DiagnosisReviewEventCheckpoint | null => {
@@ -1111,6 +1133,20 @@ const finalFrontierClusters = (
                 || representative(right).event.endYear
                     - representative(left).event.endYear
             ))[0]!];
+        }
+        const acceptedSelectedLocator = operationProtectedSelectedLocal
+            .filter(hasAcceptedStrongSelectedLocator)
+            .sort((left, right) => (
+                locationScore(right) - locationScore(left)
+                || (topYear(representative(right).event) ?? Number.NEGATIVE_INFINITY)
+                    - (topYear(representative(left).event)
+                        ?? Number.NEGATIVE_INFINITY)
+            ));
+        if (acceptedSelectedLocator.length > 0) {
+            // The supplemental path remains corroborating evidence. Once the selected final has
+            // passed the locator contract with a concentrated, remote-separated mode, a distant
+            // bounded plateau cannot acquire authority merely by having a larger path score.
+            return [acceptedSelectedLocator[0]!];
         }
         const independentlyLocatedSelectedUnit = selectedFinalClusters.filter((cluster) => {
             const event = representative(cluster).event;

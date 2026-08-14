@@ -574,6 +574,59 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("keeps an accepted strong selected locator over a distant bounded plateau", () => {
+        const located = event("located-strong", "partialMove", 1783, 1795, 1792);
+        located.shiftYears = -6;
+        located.evidence.lagBefore = -6;
+        located.evidence.algorithmSources = [
+            "full_interval_counterfactual_locator",
+            "reference_core_voting",
+        ];
+        located.evidence.notes = [
+            "locator_adjudication=accepted_overlapping_strong_mode",
+        ];
+        located.evidence.locationEvidence = [{
+            source: "full_interval_counterfactual_locator",
+            startYear: 1783,
+            endYear: 1795,
+            topYear: 1792,
+            referenceCount: 16,
+            concentration: 0.57,
+            remoteMargin: 0.99,
+            calibrated: false,
+        }];
+        const bounded = event("bounded-remote", "partialMove", 1803, 1815, 1809);
+        bounded.shiftYears = -6;
+        bounded.evidence.lagBefore = -6;
+        bounded.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        bounded.evidence.notes = ["bounded_path_complete_hypothesis=true"];
+        bounded.evidence.locationEvidence = [{
+            source: "bounded_complete_lag_path",
+            startYear: 1803,
+            endYear: 1815,
+            topYear: 1809,
+            referenceCount: 34,
+            concentration: 0.45,
+            remoteMargin: 0.095,
+            calibrated: false,
+        }];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: located },
+            { stage: "final", authority: "supplemental", event: bounded },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            event: {
+                id: "located-strong",
+                startYear: 1783,
+                endYear: 1795,
+                shiftYears: -6,
+            },
+        });
+    });
+
     it("uses a matching bounded operation to corroborate the selected frontier", () => {
         const selected = event("selected-missing", "missingRing", 1973, 1985, 1979);
         selected.evidence.algorithmSources = ["sequential_missing_staircase_head"];

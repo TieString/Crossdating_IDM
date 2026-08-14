@@ -2505,6 +2505,84 @@ describe("selectCumulativePartialFrontier", () => {
         expect(selected?.event.rankedYears[0]?.year).toBe(1887);
     });
 
+    it("keeps structural partial transitions when the permissive path adds a reversible unit pulse", () => {
+        const localizedPartial = (
+            shiftYears: number,
+            lagBefore: number,
+            lagAfter: number,
+            year: number,
+            concentration: number,
+            remoteMargin: number,
+        ): DiagnosisEvent => {
+            const event = pathEvent(shiftYears, lagBefore, lagAfter, year);
+            event.evidence.algorithmSources = ["bounded_complete_lag_path"];
+            event.evidence.locationEvidence = [{
+                source: "bounded_complete_lag_path",
+                startYear: year - 6,
+                endYear: year + 6,
+                topYear: year,
+                referenceCount: 34,
+                concentration,
+                remoteMargin,
+                calibrated: false,
+            }];
+            return event;
+        };
+        const unit = (
+            eventType: "missingRing" | "falseRing",
+            lagBefore: number,
+            lagAfter: number,
+            year: number,
+        ): DiagnosisEvent => ({
+            ...localizedPartial(lagBefore - lagAfter, lagBefore, lagAfter, year, 0.7, 1),
+            eventType,
+            shiftYears: undefined,
+            shiftSide: undefined,
+        });
+        const older = localizedPartial(-22, -26, -4, 1769, 0.8, 2);
+        const newer = localizedPartial(-4, -4, 0, 1841, 0.5, 0.3);
+        const selected = selectStableBoundedLagPathFrontier(
+            boundedPath([older, newer]),
+            boundedPath([
+                unit("falseRing", -26, -27, 1690),
+                unit("missingRing", -27, -26, 1707),
+                localizedPartial(-22, -26, -4, 1769, 0.8, 2),
+                localizedPartial(-4, -4, 0, 1841, 0.5, 0.3),
+            ]),
+        );
+
+        expect(selected).toMatchObject({
+            structuralSubset: true,
+            aggregateShiftYears: -26,
+            transitionCount: 2,
+            event: { eventType: "partialMove", shiftYears: -22 },
+        });
+
+        const aggregate = candidate("aggregate", -26, -26, 0, 1775);
+        const cofechaComponent = candidate("cofecha-component", -6, -6, 0, 1825);
+        cofechaComponent.evidence.algorithmSources = ["cofecha_segment_lag"];
+        const recovered = recoverStableBoundedLagPathFrontier(
+            selected,
+            [aggregate],
+            [operation(-26, 1775), operation(-20, 1511)],
+            { startYear: 1495, endYear: 1964 },
+            [cofechaComponent],
+        );
+
+        expect(recovered).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -20,
+            startYear: 1764,
+            endYear: 1776,
+        });
+        expect(recovered?.evidence.notes).toContain(
+            "stable_bounded_path_component_calibrated_from_cofecha=-6",
+        );
+        expect(recovered?.evidence.notes).toContain(
+            "stable_bounded_path_component_calibrated_shift=-20",
+        );
+    });
+
     it("does not turn a stable path into an unsupported large partial operation", () => {
         const selected = selectStableBoundedLagPathFrontier(
             boundedPath([
@@ -2824,6 +2902,30 @@ describe("selectCumulativePartialFrontier", () => {
             shiftYears: -6,
         });
         expect(selected?.rankedYears[0]?.year).toBe(1818);
+    });
+
+    it("accepts a moderately scored component when a distant raw chain closes exactly", () => {
+        const aggregate = candidate("aggregate", -26, -26, 0, 1665);
+        const older = pathEvent(-6, -26, -20, 1652);
+        older.evidence.score = 4.046;
+        const newer = pathEvent(-20, -20, 0, 1683);
+        newer.evidence.score = 7.488;
+
+        expect(selectCumulativeLagPathFrontier(
+            aggregate,
+            [older, newer],
+            14,
+            4,
+        )).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -20,
+        });
+        expect(selectCumulativeLagPathFrontier(
+            aggregate,
+            [older, newer],
+            14,
+            4.1,
+        )).toBeNull();
     });
 
     it("selects the newest operation from an exact four-step raw lag chain", () => {

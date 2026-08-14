@@ -5017,12 +5017,14 @@ type ExactLagPathChain = {
 type StableBoundedLagPathFrontier = {
     event: DiagnosisEvent;
     newestEvent: DiagnosisEvent;
+    transitions: readonly ExactLagPathTransition[];
     aggregateShiftYears: number;
     suffixAggregateShiftYears: number[];
     transitionCount: number;
     allTransitionsPartial: boolean;
     baselineLag: number;
     maximumYearDrift: number;
+    structuralSubset: boolean;
 };
 
 const withExactLagPathChain = (
@@ -5091,6 +5093,43 @@ const transitionSequenceMatches = (
         && transition.shiftYears === other.shiftYears
         && Math.abs(transition.topYear - other.topYear) <= maximumYearDrift;
 });
+
+const stableTransitionSequence = (
+    regularized: readonly ExactLagPathTransition[],
+    permissive: readonly ExactLagPathTransition[],
+    maximumYearDrift: number,
+): { transitions: readonly ExactLagPathTransition[]; structuralSubset: boolean } | null => {
+    if (transitionSequenceMatches(regularized, permissive, maximumYearDrift)) {
+        return { transitions: regularized, structuralSubset: false };
+    }
+    if (regularized.length < 2
+        || permissive.length <= regularized.length
+        || !regularized.every(({ event }) => event.eventType === "partialMove")) return null;
+
+    let regularizedIndex = 0;
+    const unmatched: ExactLagPathTransition[] = [];
+    permissive.forEach((transition) => {
+        const expected = regularized[regularizedIndex];
+        if (expected
+            && transition.event.eventType === expected.event.eventType
+            && transition.shiftYears === expected.shiftYears
+            && Math.abs(transition.topYear - expected.topYear) <= maximumYearDrift) {
+            regularizedIndex += 1;
+        } else {
+            unmatched.push(transition);
+        }
+    });
+    const reversibleUnitExcursion = regularizedIndex === regularized.length
+        && unmatched.length >= 2
+        && unmatched.every(({ event, shiftYears }) => (
+            (event.eventType === "missingRing" || event.eventType === "falseRing")
+            && Math.abs(shiftYears) === 1
+        ))
+        && unmatched.reduce((sum, transition) => sum + transition.shiftYears, 0) === 0;
+    return reversibleUnitExcursion
+        ? { transitions: regularized, structuralSubset: true }
+        : null;
+};
 
 const exactCompleteTransitionChain = (
     path: BoundedLagStateEventSet,
@@ -5161,6 +5200,13 @@ const selectStableUnitTransition = (
     ))[0] ?? newest;
 };
 
+const selectStableStructuralPartialTransition = (
+    transitions: readonly ExactLagPathTransition[],
+): ExactLagPathTransition => [...transitions].sort((left, right) => (
+    stableTransitionLocationPriority(right) - stableTransitionLocationPriority(left)
+    || right.topYear - left.topYear
+))[0]!;
+
 /**
  * A distant multi-event decomposition is authoritative only when two independently regularized
  * complete paths agree on every operation and changepoint. This prevents a long corrected older
@@ -5185,21 +5231,24 @@ export const selectStableBoundedLagPathFrontier = (
         baselineLag,
         minimumSeparationYears,
     );
-    if (!penaltyOneTransitions
-        || !penaltyHalfTransitions
-        || !transitionSequenceMatches(
-            penaltyOneTransitions,
-            penaltyHalfTransitions,
-            maximumYearDrift,
-        )) return null;
-    const newest = penaltyOneTransitions[penaltyOneTransitions.length - 1];
-    const selectedTransition = selectStableUnitTransition(penaltyOneTransitions);
-    const aggregateShiftYears = penaltyOneTransitions.reduce(
+    if (!penaltyOneTransitions || !penaltyHalfTransitions) return null;
+    const stableSequence = stableTransitionSequence(
+        penaltyOneTransitions,
+        penaltyHalfTransitions,
+        maximumYearDrift,
+    );
+    if (!stableSequence) return null;
+    const stableTransitions = stableSequence.transitions;
+    const newest = stableTransitions[stableTransitions.length - 1];
+    const selectedTransition = stableSequence.structuralSubset
+        ? selectStableStructuralPartialTransition(stableTransitions)
+        : selectStableUnitTransition(stableTransitions);
+    const aggregateShiftYears = stableTransitions.reduce(
         (sum, transition) => sum + transition.shiftYears,
         0,
     );
     let suffixShift = 0;
-    const suffixAggregateShiftYears = [...penaltyOneTransitions]
+    const suffixAggregateShiftYears = [...stableTransitions]
         .reverse()
         .map((transition) => {
             suffixShift += transition.shiftYears;
@@ -5219,7 +5268,7 @@ export const selectStableBoundedLagPathFrontier = (
                     `stable_bounded_path_transition_count=${penaltyOneTransitions.length}`,
                     `stable_bounded_path_aggregate_shift=${aggregateShiftYears}`,
                     `stable_bounded_path_all_transitions_partial=${
-                        penaltyOneTransitions.every(({ event }) => (
+                        stableTransitions.every(({ event }) => (
                             event.eventType === "partialMove"
                         ))
                     }`,
@@ -5234,18 +5283,21 @@ export const selectStableBoundedLagPathFrontier = (
                     `stable_bounded_path_selected_location_priority=${
                         stableTransitionLocationPriority(selectedTransition).toFixed(6)
                     }`,
+                    `stable_bounded_path_structural_subset=${stableSequence.structuralSubset}`,
                 ])),
             },
         },
         newestEvent: newest.event,
+        transitions: stableTransitions,
         aggregateShiftYears,
         suffixAggregateShiftYears,
-        transitionCount: penaltyOneTransitions.length,
-        allTransitionsPartial: penaltyOneTransitions.every(({ event }) => (
+        transitionCount: stableTransitions.length,
+        allTransitionsPartial: stableTransitions.every(({ event }) => (
             event.eventType === "partialMove"
         )),
         baselineLag,
         maximumYearDrift,
+        structuralSubset: stableSequence.structuralSubset,
     };
 };
 
@@ -5254,6 +5306,7 @@ export const recoverStableBoundedLagPathFrontier = (
     displayed: readonly DiagnosisEvent[],
     operations: readonly JointCounterfactualOperationScore[] = [],
     targetRange?: { startYear: number; endYear: number },
+    candidateEvents: readonly DiagnosisEvent[] = [],
 ): DiagnosisEvent | null => {
     if (!frontier) return null;
     const frontierSelectedYear = frontier.event.rankedYears[0]?.year;
@@ -5279,12 +5332,63 @@ export const recoverStableBoundedLagPathFrontier = (
     const frontierEvent = latestHasIndependentLocation
         ? frontier.newestEvent
         : frontier.event;
-    const componentShift = lagPathTransitionShift(frontierEvent);
+    const pathComponentShift = lagPathTransitionShift(frontierEvent);
     const componentYear = frontierEvent.rankedYears[0]?.year;
-    if (componentShift === null || componentYear === undefined) return null;
-    const matchingDisplayedComponent = displayed.find((event) => (
+    if (pathComponentShift === null || componentYear === undefined) return null;
+    const selectedTransitionIndex = frontier.transitions.findIndex((transition) => (
+        transition.topYear === componentYear
+        && transition.shiftYears === pathComponentShift
+    ));
+    const structuralCalibration = frontier.structuralSubset
+        && frontier.allTransitionsPartial
+        && frontier.transitionCount === 2
+        && selectedTransitionIndex >= 0
+        ? candidateEvents.flatMap((candidate) => {
+                if (candidate.eventType !== "partialMove"
+                    || candidate.shiftYears === undefined
+                    || candidate.shiftYears === frontier.aggregateShiftYears
+                    || !candidate.evidence.algorithmSources.includes("cofecha_segment_lag")) {
+                    return [];
+                }
+                const candidateYear = candidate.rankedYears[0]?.year;
+                if (candidateYear === undefined) return [];
+                const matchedTransitionIndex = frontier.transitions
+                    .map((transition, index) => ({
+                        index,
+                        shiftDistance: Math.abs(
+                            transition.shiftYears - candidate.shiftYears!,
+                        ),
+                        yearDistance: Math.abs(transition.topYear - candidateYear),
+                    }))
+                    .filter((row) => row.shiftDistance <= 2 && row.yearDistance <= 35)
+                    .sort((left, right) => (
+                        left.shiftDistance - right.shiftDistance
+                        || left.yearDistance - right.yearDistance
+                    ))[0];
+                if (!matchedTransitionIndex) return [];
+                const calibratedShift = matchedTransitionIndex.index === selectedTransitionIndex
+                    ? candidate.shiftYears
+                    : frontier.aggregateShiftYears - candidate.shiftYears;
+                return isAutomaticPartialShift(calibratedShift, {
+                    maxPartialGapYears: 100,
+                    lagMin: -100,
+                }) ? [{
+                        candidate,
+                        calibratedShift,
+                        matchedTransitionIndex: matchedTransitionIndex.index,
+                        shiftDistance: matchedTransitionIndex.shiftDistance,
+                        yearDistance: matchedTransitionIndex.yearDistance,
+                    }] : [];
+            }).sort((left, right) => (
+                left.shiftDistance - right.shiftDistance
+                || left.yearDistance - right.yearDistance
+            ))[0] ?? null
+        : null;
+    const componentShift = structuralCalibration?.calibratedShift ?? pathComponentShift;
+    const componentHypotheses = [...displayed, ...candidateEvents];
+    const matchingDisplayedComponent = componentHypotheses.find((event) => (
         event.eventType === frontierEvent.eventType
-        && event.shiftYears === frontierEvent.shiftYears
+        && event.shiftYears === componentShift
     ));
     const matchingDisplayedAggregate = displayed.find((event) => (
         event.eventType === "partialMove"
@@ -5341,7 +5445,8 @@ export const recoverStableBoundedLagPathFrontier = (
         event.eventType === "partialMove"
         && event.shiftYears === frontier.aggregateShiftYears
     ));
-    const aggregateOperationDominates = frontier.allTransitionsPartial
+    const aggregateOperationDominates = structuralCalibration === null
+        && frontier.allTransitionsPartial
         && exactDisplayedAggregate !== undefined
         && aggregateOperationSupported
         && aggregateBoundaryDistance <= 2
@@ -5356,7 +5461,8 @@ export const recoverStableBoundedLagPathFrontier = (
         && !matchingDisplayedAggregate
         && !matchingDisplayedWholeComponent
         && !matchingDisplayedWholeAggregate
-        && !partialOperationSupported) return null;
+        && !partialOperationSupported
+        && structuralCalibration === null) return null;
     const selectedPathEvent = aggregateOperationDominates
         ? exactDisplayedAggregate
         : frontierEvent;
@@ -5422,7 +5528,8 @@ export const recoverStableBoundedLagPathFrontier = (
     }).sort((left, right) => (
         right.score - left.score || right.year - left.year
     )).map((row, index) => ({ ...row, rank: index + 1 }));
-    const authority = matchingDisplayedAggregate
+    const authority = structuralCalibration?.candidate
+        ?? matchingDisplayedAggregate
         ?? matchingDisplayedWholeComponent
         ?? displayed.find((event) => event.eventType === "wholeSeriesMove")
         ?? null;
@@ -5436,6 +5543,10 @@ export const recoverStableBoundedLagPathFrontier = (
             ? "medium"
             : selectedPathEvent.confidenceLevel,
         alternativeTypes: [],
+        ...(selectedPathEvent.eventType === "partialMove" ? {
+            shiftYears: selectedShift,
+            shiftSide: "older" as const,
+        } : {}),
         locationAlternatives: undefined,
         operationAlternatives: undefined,
         evidence: {
@@ -5459,6 +5570,13 @@ export const recoverStableBoundedLagPathFrontier = (
                 ...selectedPathEvent.evidence.notes,
                 ...frontierEvent.evidence.notes,
                 `stable_bounded_path_component_shift=${componentShift}`,
+                ...(structuralCalibration ? [
+                    `stable_bounded_path_raw_component_shift=${pathComponentShift}`,
+                    `stable_bounded_path_component_calibrated_from_cofecha=${
+                        structuralCalibration.candidate.shiftYears
+                    }`,
+                    `stable_bounded_path_component_calibrated_shift=${componentShift}`,
+                ] : []),
                 `stable_bounded_path_component_year=${componentYear}`,
                 ...(latestHasIndependentLocation ? [
                     `stable_bounded_path_preserved_candidate_backed_newest=${newestYear}`,
@@ -5940,7 +6058,7 @@ const recoverCumulativeLagPathFrontier = (
                 aggregate,
                 rawPathEvents,
                 14,
-                4.5,
+                4,
                 baselineLag,
             ),
             aggregateShiftYears: aggregate.shiftYears,
@@ -9269,6 +9387,7 @@ export const makeDiagnosisEvents = (
             displayed,
             boundedOperations,
             diagnosis.targetRange,
+            candidateEvents,
         );
         if (stableBoundedPathFrontier) {
             // The complete path has already resolved the serial frontier. Aggregate move
