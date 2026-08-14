@@ -1956,6 +1956,59 @@ const calibratedSequentialWindowWidth = (
 
 // A local advance must leave one year of context on both sides inside the 13-year review window.
 const MAX_LOCAL_CONFIRMED_PATH_ADVANCE_YEARS = 10;
+const CONFIRMED_FRONTIER_FOOTPRINT_RADIUS_YEARS = 4;
+const MIN_REMOTE_CONFIRMED_PATH_ADVANCE_YEARS = 14;
+const MAX_RESIDUAL_PATH_MODE_WIDTH_YEARS = 5;
+
+/**
+ * A confirmed zero can leave a nearby smoothing/path footprint after the edit. Skip that already
+ * explained frontier only when the remaining exact staircase contains a separate, internally
+ * concentrated older mode. This exposes the next event without using its calendar truth.
+ */
+export const selectResidualSequentialMissingPathYear = (
+    head: Pick<
+        SequentialMissingHead,
+        | "year"
+        | "pathStartLag"
+        | "transitionCount"
+        | "unitEventYears"
+        | "gainOverDirect"
+        | "fixedTailMeanAdvantage"
+    >,
+    confirmedTargetZeroYears: readonly number[],
+): number | null => {
+    const matchesConfirmedFrontier = confirmedTargetZeroYears.some((year) => (
+        Math.abs(year - head.year) <= CONFIRMED_FRONTIER_FOOTPRINT_RADIUS_YEARS
+    ));
+    if (!matchesConfirmedFrontier
+        || head.pathStartLag > -3
+        || Math.abs(head.pathStartLag) !== head.transitionCount
+        || head.unitEventYears.length !== head.transitionCount
+        || head.gainOverDirect < 8
+        || head.fixedTailMeanAdvantage < 0.28) return null;
+
+    const unconfirmedOlderYears = [...head.unitEventYears]
+        .filter((year) => (
+            year < head.year
+            && confirmedTargetZeroYears.every((confirmedYear) => (
+                Math.abs(confirmedYear - year)
+                    > CONFIRMED_FRONTIER_FOOTPRINT_RADIUS_YEARS
+            ))
+        ))
+        .sort((left, right) => right - left);
+    const newestResidualYear = unconfirmedOlderYears[0];
+    if (newestResidualYear === undefined
+        || head.year - newestResidualYear < MIN_REMOTE_CONFIRMED_PATH_ADVANCE_YEARS) return null;
+
+    const residualMode = unconfirmedOlderYears.filter((year) => (
+        newestResidualYear - year <= MAX_RESIDUAL_PATH_MODE_WIDTH_YEARS
+    )).sort((left, right) => left - right);
+    if (residualMode.length < 2) return null;
+    const middle = Math.floor(residualMode.length / 2);
+    return residualMode.length % 2 === 1
+        ? residualMode[middle]!
+        : Math.round((residualMode[middle - 1]! + residualMode[middle]!) / 2);
+};
 
 export type SequentialMissingPresentation = {
     marker: SharedExplicitZeroMarker | null;
@@ -1990,11 +2043,17 @@ export const resolveSequentialMissingPresentation = (
             year < head.year && !isConfirmedPathBoundary(year)
         )) ?? null
         : null;
-    const advancedSequentialPathYear = candidateAdvancedSequentialPathYear !== null
+    const localAdvancedSequentialPathYear = candidateAdvancedSequentialPathYear !== null
         && head.year - candidateAdvancedSequentialPathYear
             <= MAX_LOCAL_CONFIRMED_PATH_ADVANCE_YEARS
         ? candidateAdvancedSequentialPathYear
         : null;
+    const residualSequentialPathYear = selectResidualSequentialMissingPathYear(
+        head,
+        confirmedTargetZeroYears,
+    );
+    const advancedSequentialPathYear = localAdvancedSequentialPathYear
+        ?? residualSequentialPathYear;
     const rejectedRemoteSequentialPathYear = candidateAdvancedSequentialPathYear !== null
         && advancedSequentialPathYear === null
         ? candidateAdvancedSequentialPathYear
@@ -5798,6 +5857,87 @@ export const recoverStableBoundedLagPathFrontier = (
     };
 };
 
+/**
+ * A multi-transition path may compress several unresolved unit steps into one partial move. When
+ * that operation exists only in the path/operation scan, it must not replace an overlapping
+ * terminal -1 -> 0 event already localized by independent year-level evidence. The unit event is
+ * the executable bark-side frontier; the remaining cumulative state is reconsidered after it is
+ * applied.
+ */
+export const selectDirectTerminalUnitBeforeDerivedStablePartial = (
+    frontier: StableBoundedLagPathFrontier | null,
+    stableEvent: DiagnosisEvent | null,
+    displayed: readonly DiagnosisEvent[],
+    candidateEvents: readonly DiagnosisEvent[] = [],
+): DiagnosisEvent | null => {
+    if (!frontier
+        || stableEvent?.eventType !== "partialMove"
+        || stableEvent.shiftYears === undefined
+        || frontier.transitionCount < 2
+        || frontier.aggregateShiftYears === stableEvent.shiftYears) return null;
+
+    const stableYear = rankedEventYear(stableEvent);
+    const hasIndependentPartial = [...displayed, ...candidateEvents].some((event) => (
+        event.eventType === "partialMove"
+        && event.shiftYears === stableEvent.shiftYears
+        && Math.abs(rankedEventYear(event) - stableYear) <= 6
+        && (
+            event.evidence.candidateIds.length > 0
+            || event.evidence.algorithmSources.some((source) => (
+                source === "cofecha_segment_lag"
+                || source === "joint_event_counterfactual"
+                || source === "partial_local_consensus_recenter"
+            ))
+        )
+    ));
+    if (hasIndependentPartial) return null;
+
+    const directUnit = displayed.filter((event) => {
+        if (event.eventType !== "missingRing"
+            || event.evidence.lagBefore !== -1
+            || event.evidence.lagAfter !== 0) return false;
+        const sources = new Set(event.evidence.algorithmSources);
+        const hasIndependentYearEvidence = sources.has("joint_event_counterfactual")
+            && sources.has("piecewise_lag_path")
+            && sources.has("counterfactual_window_refinement")
+            && (
+                sources.has("local_counterfactual_raw_year")
+                || sources.has("paired_core_counterfactual_year")
+            );
+        const year = rankedEventYear(event);
+        return hasIndependentYearEvidence
+            && event.evidence.notes.includes("mixed_reference_counterfactual_selected")
+            && year >= stableEvent.startYear - 2
+            && year <= stableEvent.endYear + 2
+            && Math.abs(year - stableYear) <= 4;
+    }).sort((left, right) => (
+        rankedEventYear(right) - rankedEventYear(left)
+        || right.evidence.score - left.evidence.score
+    ))[0];
+    if (!directUnit) return null;
+
+    return {
+        ...directUnit,
+        id: `${directUnit.id}-terminal-unit-frontier-checkpoint`,
+        alternativeTypes: [],
+        locationAlternatives: undefined,
+        operationAlternatives: undefined,
+        evidence: {
+            ...directUnit.evidence,
+            algorithmSources: Array.from(new Set([
+                ...directUnit.evidence.algorithmSources,
+                "direct_terminal_unit_frontier_checkpoint",
+            ])).sort(),
+            notes: Array.from(new Set([
+                ...directUnit.evidence.notes,
+                `derived_stable_partial_deferred_shift=${stableEvent.shiftYears}`,
+                `derived_stable_partial_aggregate_shift=${frontier.aggregateShiftYears}`,
+                `derived_stable_partial_transition_count=${frontier.transitionCount}`,
+            ])),
+        },
+    };
+};
+
 export const selectCumulativeLagPathFrontier = (
     aggregate: DiagnosisEvent,
     pathEvents: readonly DiagnosisEvent[],
@@ -6661,7 +6801,8 @@ const recoverSequentialMissingHeadEvent = (
                 hasDetectedMissing,
                 hasMissingCandidate,
                 hasConfirmedTargetStaircase:
-                    presentation.confirmedTargetStaircaseYear !== null,
+                    presentation.confirmedTargetStaircaseYear !== null
+                    || presentation.advancedSequentialPathYear !== null,
                 sharedZeroSupport: marker?.support ?? 0,
                 hasCumulativeStaircase: hasCumulativeMissingStaircase,
                 hasMarkerAnchoredStaircase: hasMarkerAnchoredMissingStaircase,
@@ -9656,6 +9797,63 @@ export const makeDiagnosisEvents = (
             diagnosis.targetRange,
             candidateEvents,
         );
+        let cachedCofechaDiagnosis: ReturnType<typeof diagnoseSeriesCore> | undefined;
+        const getCofechaDiagnosis = (): ReturnType<typeof diagnoseSeriesCore> => {
+            if (cachedCofechaDiagnosis === undefined) {
+                cachedCofechaDiagnosis = diagnoseSeriesCore(
+                    siteData,
+                    diagnosis.targetTree,
+                    effectiveConfig,
+                    cofechaPreprocess,
+                );
+            }
+            return cachedCofechaDiagnosis;
+        };
+        const directTerminalUnitFrontier =
+            selectDirectTerminalUnitBeforeDerivedStablePartial(
+                stableMultiscaleBoundedFrontier,
+                stableBoundedPathFrontier,
+                displayed,
+                candidateEvents,
+            );
+        if (directTerminalUnitFrontier && stablePathHasFinalAuthority) {
+            return finalize([directTerminalUnitFrontier], [], false);
+        }
+        const stableFrontierYear = stableBoundedPathFrontier
+            ? rankedEventYear(stableBoundedPathFrontier)
+            : null;
+        const stableFrontierMatchesConfirmedZero = stableFrontierYear !== null
+            && Array.from(siteData.get(diagnosis.targetTree) ?? []).some(([year, value]) => (
+                value === 0
+                && Math.abs(year - stableFrontierYear)
+                    <= CONFIRMED_FRONTIER_FOOTPRINT_RADIUS_YEARS
+            ));
+        if (stableBoundedPathFrontier
+            && stablePathHasFinalAuthority
+            && stableFrontierMatchesConfirmedZero
+            && mayRecoverSequentialMissing
+            && options.enableCounterfactualEventLocator === true) {
+            const confirmedFrontierCofechaDiagnosis = getCofechaDiagnosis();
+            const residualSequentialMissing = confirmedFrontierCofechaDiagnosis
+                ? recoverSequentialMissingHeadEvent(
+                        displayed,
+                        [...detectedBeforeFusion, ...stableUnitPathLocationCheckpoints],
+                        diagnosis,
+                        confirmedFrontierCofechaDiagnosis,
+                        siteData,
+                        candidates,
+                        candidateEvents,
+                        effectiveConfig,
+                        options,
+                        locatorPathCache,
+                    )
+                : null;
+            if (residualSequentialMissing?.event.evidence.algorithmSources.includes(
+                "confirmed_target_zero_path_advance",
+            )) {
+                return finalize([residualSequentialMissing.event], [], false);
+            }
+        }
         if (stableBoundedPathFrontier && stablePathHasFinalAuthority) {
             // The complete path has already resolved the serial frontier. Aggregate move
             // hypotheses are intentionally excluded so later review cannot recombine it.
@@ -9687,12 +9885,7 @@ export const makeDiagnosisEvents = (
             || (!hasLocalEvent && !mayRecoverSequentialMissing)) {
             return finalize(displayed);
         }
-        const cofechaDiagnosis = diagnoseSeriesCore(
-            siteData,
-            diagnosis.targetTree,
-            effectiveConfig,
-            cofechaPreprocess,
-        );
+        const cofechaDiagnosis = getCofechaDiagnosis();
         if (!cofechaDiagnosis) return finalize(displayed);
         const boundedCompressedMissingFrontier = boundedPathEvents
             .filter((event) => (

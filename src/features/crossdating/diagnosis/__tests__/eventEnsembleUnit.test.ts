@@ -22,6 +22,7 @@ import {
     recoverCandidateBackedPartialConsensus,
     recoverAggregatePartialUnitFrontier,
     recoverStableBoundedLagPathFrontier,
+    selectDirectTerminalUnitBeforeDerivedStablePartial,
     selectAggregateAnchoredRegularizedPartialFrontier,
     selectCandidateAnchoredStableBoundedLagPathFrontier,
     selectStableUnitPathLocationCheckpoints,
@@ -32,6 +33,7 @@ import {
     refineBoundedPathLocationWithOperation,
     selectWholeBaselineLagPathFrontier,
     resolveSequentialMissingPresentation,
+    selectResidualSequentialMissingPathYear,
     selectCumulativePartialFrontier,
     selectCompletedPartialFalseSeed,
     selectCompletedPartialMissingSeed,
@@ -1953,6 +1955,33 @@ describe("supportsConfirmedSequentialMissingPathAdvance", () => {
     });
 });
 
+describe("selectResidualSequentialMissingPathYear", () => {
+    const head = {
+        year: 1974,
+        pathStartLag: -5,
+        transitionCount: 5,
+        unitEventYears: [1700, 1800, 1900, 1903, 1974],
+        gainOverDirect: 12,
+        fixedTailMeanAdvantage: 0.4,
+    };
+
+    it("skips a confirmed frontier footprint and centers the next path mode", () => {
+        expect(selectResidualSequentialMissingPathYear(head, [1977])).toBe(1902);
+    });
+
+    it("rejects an unconfirmed, weak or unclustered residual path", () => {
+        expect(selectResidualSequentialMissingPathYear(head, [])).toBeNull();
+        expect(selectResidualSequentialMissingPathYear({
+            ...head,
+            gainOverDirect: 7.99,
+        }, [1977])).toBeNull();
+        expect(selectResidualSequentialMissingPathYear({
+            ...head,
+            unitEventYears: [1700, 1800, 1850, 1903, 1974],
+        }, [1977])).toBeNull();
+    });
+});
+
 describe("supportsSequentialMissingDirectionOverride", () => {
     it("does not reverse explicit false-ring evidence from shared reference zeros alone", () => {
         expect(supportsSequentialMissingDirectionOverride({
@@ -2841,6 +2870,67 @@ describe("selectCumulativePartialFrontier", () => {
             [],
             [operation(-43, 1490)],
         )).toMatchObject({ eventType: "partialMove", shiftYears: -43 });
+    });
+
+    it("keeps a directly localized terminal unit ahead of a path-only partial component", () => {
+        const selected = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                pathEvent(-3, -5, -2, 1840),
+                pathEvent(-2, -2, 0, 1900),
+            ]),
+            boundedPath([
+                pathEvent(-3, -5, -2, 1841),
+                pathEvent(-2, -2, 0, 1901),
+            ]),
+        );
+        const stable = recoverStableBoundedLagPathFrontier(
+            selected,
+            [],
+            [operation(-2, 1901)],
+            { startYear: 1700, endYear: 2000 },
+        );
+        const directUnit: DiagnosisEvent = {
+            ...falseRingEvent(1897, false),
+            id: "direct-terminal-missing",
+            eventType: "missingRing",
+            startYear: 1897,
+            endYear: 1905,
+            rankedYears: [{ year: 1901, rank: 1, score: 2, evidenceTags: [] }],
+            evidence: {
+                ...falseRingEvent(1897, false).evidence,
+                lagBefore: -1,
+                lagAfter: 0,
+                algorithmSources: [
+                    "counterfactual_window_refinement",
+                    "joint_event_counterfactual",
+                    "local_counterfactual_raw_year",
+                    "piecewise_lag_path",
+                ],
+                notes: ["mixed_reference_counterfactual_selected"],
+            },
+        };
+
+        expect(selectDirectTerminalUnitBeforeDerivedStablePartial(
+            selected,
+            stable,
+            [directUnit],
+        )).toMatchObject({
+            eventType: "missingRing",
+            rankedYears: [{ year: 1901 }],
+        });
+
+        const independentPartial = candidatePartial({
+            shiftYears: -2,
+            anchorYear: 1901,
+            candidateId: "physical-partial",
+            source: "cofecha_segment_lag",
+        });
+        expect(selectDirectTerminalUnitBeforeDerivedStablePartial(
+            selected,
+            stable,
+            [directUnit],
+            [independentPartial],
+        )).toBeNull();
     });
 
     it("uses a displayed cumulative operation to authorize the newest path component", () => {

@@ -187,15 +187,66 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
         );
         const events = diagnoseWithFreshCofecha(corrupted);
         const [event] = events;
+        const context = JSON.stringify(summarize(events));
 
-        expect(events, JSON.stringify(summarize(events)))
-            .toHaveLength(1);
-        expect(event.eventType).toBe("missingRing");
-        expect(event.startYear).toBeLessThanOrEqual(1977);
-        expect(event.endYear).toBeGreaterThanOrEqual(1977);
-        expect(event.rankedYears[0]?.year).toBe(1977);
-        expect(event.evidence.algorithmSources)
+        expect(events, context).toHaveLength(1);
+        expect(event.eventType, context).toBe("missingRing");
+        expect(event.startYear, context).toBeLessThanOrEqual(1977);
+        expect(event.endYear, context).toBeGreaterThanOrEqual(1977);
+        expect(event.rankedYears[0]?.year, context).toBe(1977);
+        expect(event.evidence.algorithmSources, context)
             .toContain("sequential_missing_staircase_head");
+    }, 180_000);
+
+    bundledCofechaIt("keeps a sparse three-ring staircase at its bark-side frontier", () => {
+        const freshCleanOut = runBundledCofecha(cleanSite);
+        const freshCleanParts = splitReportByParts(freshCleanOut);
+        const appReferenceConfig = createCofechaMasterReferenceConfig({
+            siteData: cleanSite,
+            flaggedAIds: extractPart6FlaggedASeriesIds(
+                freshCleanParts.get("PART 6") ?? "",
+            ),
+            cofechaRunId: "co612-sparse-clean",
+            rwlHash: "co612-sparse-clean",
+            masterDatingSeries: parseCofechaResult(freshCleanOut).masterDatingSeries,
+        });
+        let corrupted = buildMultiMissingCorrupted(
+            target.valuesByYear,
+            [1873, 1902, 1977],
+        );
+        const steps: unknown[] = [];
+
+        [1977, 1902, 1873].forEach((truthYear) => {
+            const site = buildSite(corrupted);
+            const diagnosis = diagnoseCrossdating(site, {
+                referenceConfig: appReferenceConfig,
+                targetTrees: [TARGET_ID],
+                reviewWindowDisplayMode: "review",
+            });
+            const events = getDisplayedDiagnosisEvents(diagnosis).filter(
+                (event) => event.seriesId === TARGET_ID,
+            );
+            const [event] = events;
+            steps.push({
+                truthYear,
+                events: summarize(events),
+            });
+            const context = JSON.stringify(steps);
+
+            expect(events, context).toHaveLength(1);
+            expect(event.eventType, context).toBe("missingRing");
+            expect(event.startYear, context).toBeLessThanOrEqual(truthYear);
+            expect(event.endYear, context).toBeGreaterThanOrEqual(truthYear);
+            if (truthYear !== 1873) {
+                expect(event.rankedYears[0]?.year, context).toBe(truthYear);
+            }
+            corrupted = applyInsertRestore(corrupted, truthYear);
+        });
+
+        expect(
+            [1873, 1902, 1977].map((year) => corrupted.get(year)),
+            JSON.stringify(steps),
+        ).toEqual([0, 0, 0]);
     }, 180_000);
 
     bundledCofechaIt("keeps mon031 at 1977 when every natural zero is removed", () => {
