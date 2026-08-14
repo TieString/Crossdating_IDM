@@ -2412,6 +2412,47 @@ describe("selectCumulativePartialFrontier", () => {
         });
     });
 
+    it("preserves an exact aggregate partial when it decisively beats a detached component", () => {
+        const selected = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                pathEvent(-19, -100, -81, 1900),
+                pathEvent(-81, -81, 0, 1960),
+            ]),
+            boundedPath([
+                pathEvent(-19, -100, -81, 1901),
+                pathEvent(-81, -81, 0, 1961),
+            ]),
+        );
+        const aggregate = candidate("aggregate", -100, -100, 0, 1950);
+        const componentOperation = operation(-81, 1931);
+        componentOperation.sideStepBestYear = 1821;
+        componentOperation.bestDifferenceGain = 0.058;
+        componentOperation.bestCombinedGain = 0.022;
+        componentOperation.topThreeDifferenceGain = 0.057;
+        const aggregateOperation = operation(-100, 1950);
+        aggregateOperation.sideStepBestYear = 1949;
+        aggregateOperation.bestDifferenceGain = 0.639;
+        aggregateOperation.bestCombinedGain = 0.629;
+        aggregateOperation.topThreeDifferenceGain = 0.639;
+
+        const recovered = recoverStableBoundedLagPathFrontier(
+            selected,
+            [aggregate],
+            [componentOperation, aggregateOperation],
+            { startYear: 1800, endYear: 2024 },
+        );
+
+        expect(recovered).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -100,
+            evidence: { lagBefore: -100, lagAfter: 0 },
+        });
+        expect(recovered?.rankedYears[0]?.year).toBe(1950);
+        expect(recovered?.evidence.notes).toContain(
+            "stable_bounded_path_preserved_dominant_aggregate=-100",
+        );
+    });
+
     it("decomposes a non-authoritative whole alias into stable partial components", () => {
         const selected = selectStableBoundedLagPathFrontier(
             boundedPath([

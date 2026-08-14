@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { attachNearEventClusterReview } from "../nearEventClusterReview";
+import {
+    attachNearEventClusterReview,
+    createNearLagClusterReviewEvent,
+} from "../nearEventClusterReview";
 import type { DiagnosisEvent, DiagnosisReviewEventCheckpoint } from "../types";
 
 const makeEvent = (notes: string[], sources: string[] = [
@@ -36,6 +39,28 @@ const finalCheckpoint = (event: DiagnosisEvent): DiagnosisReviewEventCheckpoint 
 });
 
 describe("near event cluster review", () => {
+    it("creates one 13-year non-executable window from a stable local lag path", () => {
+        const base = makeEvent([]);
+        const result = createNearLagClusterReviewEvent({
+            representative: base,
+            eventCount: 3,
+            evidenceYears: [1901, 1906, 1912],
+            operationTypes: ["missingRing", "partialMove"],
+            maximumYearDrift: 2,
+        }, { startYear: 1700, endYear: 2000 });
+
+        expect(result).toMatchObject({
+            startYear: 1900,
+            endYear: 1912,
+            reviewOnly: true,
+            nearEventCluster: {
+                eventCount: 3,
+                evidenceYears: [1901, 1906, 1912],
+                source: "stableLocalLagPath",
+            },
+        });
+    });
+
     it("projects a structured three-step unit path into one non-executable narrow window", () => {
         const event = makeEvent([
             "sequential_missing_unit_event_years=1901,1905,1909",
@@ -81,7 +106,7 @@ describe("near event cluster review", () => {
             operationTypes: ["falseRing", "partialMove"],
             source: "completedMixedCorrection",
         });
-        expect(result.endYear - result.startYear + 1).toBe(9);
+        expect(result.endYear - result.startYear + 1).toBe(13);
     });
 
     it("does not split an exact bounded partial through an unanchored mixed alias", () => {
@@ -111,8 +136,8 @@ describe("near event cluster review", () => {
         const result = attachNearEventClusterReview([finalCheckpoint(event)], event);
 
         expect(result).toMatchObject({
-            startYear: 1688,
-            endYear: 1696,
+            startYear: 1687,
+            endYear: 1695,
             reviewOnly: true,
             nearEventCluster: {
                 eventCount: 2,

@@ -1253,10 +1253,18 @@ export const adjudicateJointEventHypotheses = (
     const submitted = checkpoints.filter(({ event }) => (
         event.seriesId === seriesId
     ));
-    const submittedClusters = clusterCheckpoints(submitted);
+    const directClusterEvent = submitted
+        .filter(({ stage, event }) => stage === "final" && event.nearEventCluster)
+        .sort((left, right) => (
+            (right.event.nearEventCluster?.eventCount ?? 0)
+                - (left.event.nearEventCluster?.eventCount ?? 0)
+            || right.event.evidence.score - left.event.evidence.score
+        ))[0]?.event ?? null;
+    const operationSubmitted = submitted.filter(({ event }) => !event.nearEventCluster);
+    const submittedClusters = clusterCheckpoints(operationSubmitted);
     const hypotheses = submittedClusters.map(summary);
-    const clusters = clusterCheckpoints(submitted.filter((checkpoint) => (
-        operationContractValid(checkpoint, submitted)
+    const clusters = clusterCheckpoints(operationSubmitted.filter((checkpoint) => (
+        operationContractValid(checkpoint, operationSubmitted)
     ))).sort((left, right) => (
         locationScore(right) - locationScore(left)
         || stagePriority[representative(right).stage]
@@ -1264,6 +1272,26 @@ export const adjudicateJointEventHypotheses = (
         || clusterId(left).localeCompare(clusterId(right))
     ));
     if (clusters.length === 0) {
+        if (directClusterEvent) {
+            return {
+                seriesId,
+                status: "selected",
+                reason: "near_event_cluster",
+                sourceStage: "final",
+                event: directClusterEvent,
+                hypotheses,
+                operationMargin: null,
+                remoteModeMargin: null,
+                productionAgreement: productionAgreement(
+                    directClusterEvent,
+                    productionEvent,
+                ),
+                productionExactMatch: productionExactMatch(
+                    directClusterEvent,
+                    productionEvent,
+                ),
+            };
+        }
         return {
             seriesId,
             status: "refused",
@@ -1380,8 +1408,11 @@ export const adjudicateJointEventHypotheses = (
             },
         )
         : baseSelectedEvent;
+    const selectedReviewCheckpoints = submitted.filter(({ event }) => (
+        event.nearEventCluster?.source !== "stableLocalLagPath"
+    ));
     const selectedEvent = endpointResolvedEvent
-        ? attachNearEventClusterReview(submitted, endpointResolvedEvent)
+        ? attachNearEventClusterReview(selectedReviewCheckpoints, endpointResolvedEvent)
         : null;
     return {
         seriesId,

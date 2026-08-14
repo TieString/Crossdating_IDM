@@ -96,6 +96,38 @@ describe("joint event adjudicator", () => {
         expect(decision.event?.evidence.candidateIds).toEqual(["stable"]);
     });
 
+    it("does not let a supplemental stable lag cluster replace a clear operation", () => {
+        const selected = event("selected", "missingRing", 1899, 1907, 1904, 8);
+        const cluster = {
+            ...event("stable-cluster", "missingRing", 1897, 1909, 1904, 12),
+            reviewOnly: true,
+            nearEventCluster: {
+                kind: "nearEventCluster" as const,
+                eventCount: 2,
+                evidenceYears: [1901, 1907],
+                operationTypes: ["missingRing" as const],
+                source: "stableLocalLagPath" as const,
+            },
+        };
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", selected),
+            checkpoint("detected", selected),
+            checkpoint("displayed", selected),
+            { ...checkpoint("final", cluster), authority: "supplemental" },
+            { ...checkpoint("final", selected), authority: "selected" },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            reason: "selected",
+            event: {
+                id: "selected",
+                eventType: "missingRing",
+            },
+        });
+        expect(decision.event).not.toHaveProperty("nearEventCluster");
+    });
+
     it("keeps an accepted final locator window from being rewritten by an older checkpoint", () => {
         const earlier = event("earlier", "missingRing", 1377, 1383, 1380);
         const located = event("located", "missingRing", 1380, 1392, 1390);

@@ -4,6 +4,7 @@ import type {
     DiagnosisNearEventClusterReview,
     DiagnosisReviewEventCheckpoint,
 } from "./types";
+import type { StableNearLagCluster } from "./nearLagCluster";
 
 const ALLOWED_WINDOW_WIDTHS = [5, 7, 9, 13] as const;
 const MAXIMUM_CLUSTER_SPAN_YEARS = 13;
@@ -64,6 +65,13 @@ const isExactLocalTransition = (event: DiagnosisEvent): boolean => {
 };
 
 const evidenceForEvent = (event: DiagnosisEvent): ClusterEvidence[] => {
+    if (event.nearEventCluster) {
+        return [{
+            ...event.nearEventCluster,
+            event,
+            windowEvidenceYears: [event.startYear, event.endYear],
+        }];
+    }
     if (event.eventType === "wholeSeriesMove" || event.evidence.samplePairs < 30) return [];
     const results: ClusterEvidence[] = [];
     const add = (
@@ -199,20 +207,85 @@ const finalTransitionChain = (
 const clusterWindow = (
     evidenceYears: readonly number[],
     event: DiagnosisEvent,
+    minimumWidth = 5,
 ): { startYear: number; endYear: number } | null => {
     const first = evidenceYears[0];
     const last = evidenceYears[evidenceYears.length - 1];
     const span = last - first + 1;
-    const width = ALLOWED_WINDOW_WIDTHS.find((candidate) => candidate >= span);
+    const width = ALLOWED_WINDOW_WIDTHS.find((candidate) => (
+        candidate >= span && candidate >= minimumWidth
+    ));
     if (!width) return null;
     const rangeStart = event.seriesRange?.startYear ?? first;
     const rangeEnd = event.seriesRange?.endYear ?? last;
     if (rangeEnd - rangeStart + 1 < width) return null;
-    const centered = Math.round((first + last - width + 1) / 2);
+    const centered = Math.floor((first + last - width + 1) / 2);
     const minimumStart = Math.max(rangeStart, last - width + 1);
     const maximumStart = Math.min(first, rangeEnd - width + 1);
     const startYear = Math.max(minimumStart, Math.min(centered, maximumStart));
     return { startYear, endYear: startYear + width - 1 };
+};
+
+export const createNearLagClusterReviewEvent = (
+    cluster: StableNearLagCluster,
+    seriesRange: { startYear: number; endYear: number },
+): DiagnosisEvent | null => {
+    const evidenceStart = cluster.evidenceYears[0];
+    const evidenceEnd = cluster.evidenceYears[cluster.evidenceYears.length - 1];
+    if (evidenceStart === undefined || evidenceEnd === undefined) return null;
+    const width = 13;
+    if (seriesRange.endYear - seriesRange.startYear + 1 < width) return null;
+    // Half-year ties lean older because prior window audits showed a systematic newer bias.
+    const centered = Math.floor((evidenceStart + evidenceEnd - width + 1) / 2);
+    const minimumStart = Math.max(seriesRange.startYear, evidenceEnd - width + 1);
+    const maximumStart = Math.min(evidenceStart, seriesRange.endYear - width + 1);
+    const startYear = Math.max(minimumStart, Math.min(centered, maximumStart));
+    const endYear = startYear + width - 1;
+    const centerYear = Math.round((evidenceStart + evidenceEnd) / 2);
+    const representative = cluster.representative;
+    return {
+        ...representative,
+        id: `${representative.id}-stable-near-cluster-${startYear}-${endYear}`,
+        startYear,
+        endYear,
+        reviewCoreRange: { startYear, endYear },
+        rankedYears: Array.from({ length: width }, (_, index) => {
+            const year = startYear + index;
+            return {
+                year,
+                score: -Math.abs(year - centerYear),
+                rank: 0,
+                evidenceTags: ["stable_near_lag_cluster_path"],
+            };
+        }).sort((left, right) => (
+            right.score - left.score || right.year - left.year
+        )).map((row, index) => ({ ...row, rank: index + 1 })),
+        reviewOnly: true,
+        nearEventCluster: {
+            kind: "nearEventCluster",
+            eventCount: cluster.eventCount,
+            evidenceYears: [...cluster.evidenceYears],
+            operationTypes: [...cluster.operationTypes],
+            source: "stableLocalLagPath",
+        },
+        seriesRange: { ...seriesRange },
+        evidence: {
+            ...representative.evidence,
+            algorithmSources: Array.from(new Set([
+                ...representative.evidence.algorithmSources,
+                "stable_near_lag_cluster_path",
+                "near_event_cluster_review",
+            ])).sort(),
+            notes: Array.from(new Set([
+                ...representative.evidence.notes,
+                `near_event_cluster_count=${cluster.eventCount}`,
+                `near_event_cluster_years=${cluster.evidenceYears.join(",")}`,
+                "near_event_cluster_source=stableLocalLagPath",
+                `near_event_cluster_maximum_year_drift=${cluster.maximumYearDrift}`,
+                "near_event_cluster_non_executable=true",
+            ])),
+        },
+    };
 };
 
 const clusterMatchesPreferredMode = (
@@ -234,7 +307,8 @@ export const attachNearEventClusterReview = (
     preferredEvent: DiagnosisEvent | null,
 ): DiagnosisEvent | null => {
     const finalEvents = checkpoints.filter((checkpoint) => (
-        checkpoint.stage === "final" && checkpoint.authority !== "supplemental"
+        checkpoint.stage === "final"
+        && (checkpoint.authority !== "supplemental" || checkpoint.event.nearEventCluster)
     )).flatMap(({ event }) => evidenceForEvent(event));
     const chain = finalTransitionChain(checkpoints);
     const candidates = [
@@ -255,6 +329,11 @@ export const attachNearEventClusterReview = (
     const window = clusterWindow(
         selected.windowEvidenceYears ?? selected.evidenceYears,
         base,
+        selected.source === "sequentialUnitPath"
+            ? Math.min(13, selected.evidenceYears.length >= 2 ? 9 : 5)
+            : selected.source === "explicitUnitStaircase"
+                ? 9
+                : 13,
     );
     if (!window) return preferredEvent;
     return {

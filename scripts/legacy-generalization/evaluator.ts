@@ -380,6 +380,7 @@ export const diagnoseTruthBlind = (input: {
                     terminalLags: readonly number[] = boundedTerminalLags,
                     allowedLags?: readonly number[],
                     maxSegments = 5,
+                    minRunYears = 18,
                 ) => {
                     if (!pathDiagnosis) return null;
                     const result = locateBoundedLagStateEvents(
@@ -394,7 +395,7 @@ export const diagnoseTruthBlind = (input: {
                         },
                         {
                             maxSegments,
-                            minRunYears: 18,
+                            minRunYears,
                             windowWidth: 13,
                             terminalLags,
                             allowedLags,
@@ -521,6 +522,33 @@ export const diagnoseTruthBlind = (input: {
                         0.5,
                         [0],
                         [-1, 0, 1],
+                    ),
+                    boundedRawNearSinglePenalty2: boundedPathAudit(
+                        core,
+                        false,
+                        2,
+                        boundedTerminalLags,
+                        undefined,
+                        2,
+                        2,
+                    ),
+                    boundedRawNearPathPenalty2: boundedPathAudit(
+                        core,
+                        false,
+                        2,
+                        boundedTerminalLags,
+                        undefined,
+                        6,
+                        2,
+                    ),
+                    boundedRawNearPathPenalty1: boundedPathAudit(
+                        core,
+                        false,
+                        1,
+                        boundedTerminalLags,
+                        undefined,
+                        6,
+                        2,
                     ),
                     boundedCofechaPath: boundedPathAudit(cofechaCore, true),
                 };

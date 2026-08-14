@@ -183,7 +183,8 @@ export type DiagnosisNearEventClusterReview = {
         | "explicitUnitStaircase"
         | "completedMixedCorrection"
         | "cumulativeComponentPath"
-        | "selectedFinalTransitionChain";
+        | "selectedFinalTransitionChain"
+        | "stableLocalLagPath";
 };
 
 /**
