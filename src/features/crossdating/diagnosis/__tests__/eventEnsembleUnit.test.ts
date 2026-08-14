@@ -18,6 +18,7 @@ import {
     pruneLocalEventsDisconnectedFromWholeBaseline,
     projectSequentialUnitChainHead,
     recoverCandidateBackedPartialConsensus,
+    recoverAggregatePartialUnitFrontier,
     recoverStableBoundedLagPathFrontier,
     selectCumulativeLagPathFrontier,
     selectStableBoundedLagPathFrontier,
@@ -2451,6 +2452,96 @@ describe("selectCumulativePartialFrontier", () => {
         expect(recovered?.evidence.notes).toContain(
             "stable_bounded_path_preserved_dominant_aggregate=-100",
         );
+    });
+
+    it("keeps a stable distant component when aggregate evidence is not absolute", () => {
+        const selected = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                pathEvent(-6, -26, -20, 1750),
+                pathEvent(-20, -20, 0, 1780),
+            ]),
+            boundedPath([
+                pathEvent(-6, -26, -20, 1751),
+                pathEvent(-20, -20, 0, 1781),
+            ]),
+        );
+        const aggregate = candidate("aggregate", -26, -26, 0, 1765);
+        const componentOperation = operation(-20, 1780);
+        const aggregateOperation = operation(-26, 1765);
+        aggregateOperation.bestDifferenceGain = 0.42;
+        aggregateOperation.bestCombinedGain = 0.4;
+        aggregateOperation.topThreeDifferenceGain = 0.41;
+
+        expect(recoverStableBoundedLagPathFrontier(
+            selected,
+            [aggregate],
+            [componentOperation, aggregateOperation],
+        )).toMatchObject({ eventType: "partialMove", shiftYears: -20 });
+    });
+
+    it("recovers a newer unit event that exactly bridges an aggregate partial state", () => {
+        const aggregate = candidate("aggregate", -19, -19, 0, 1768);
+        aggregate.evidence.algorithmSources = [
+            "decisive_joint_operation_fusion",
+            "joint_year_operation_evidence",
+        ];
+        aggregate.evidence.scoreMargin = 0.5;
+        const unit = falseRingEvent(1796, true);
+        unit.rankedYears = [{ year: 1799, score: 1, rank: 1, evidenceTags: [] }];
+        unit.evidence.lagBefore = -19;
+        unit.evidence.lagAfter = -20;
+        unit.evidence.notes = ["candidate_hard_gate_passed"];
+        const aggregateOperation = operation(-19, 1768);
+        aggregateOperation.bestDifferenceGain = 0.64;
+        aggregateOperation.bestCombinedGain = 0.59;
+        const unitOperation: JointCounterfactualOperationScore = {
+            ...operation(1, 1795),
+            eventType: "falseRing",
+            shiftYears: 1,
+            bestDifferenceGain: 0.16,
+            bestCombinedGain: 0.14,
+            topThreeDifferenceGain: 0.15,
+        };
+
+        const recovered = recoverAggregatePartialUnitFrontier(
+            [aggregate],
+            [unit],
+            {
+                operation: unitOperation,
+                score: 0.13,
+                scoreMargin: 0.1,
+                shiftScoreMargin: null,
+                probabilityLike: 0.9,
+            },
+            [aggregateOperation, unitOperation],
+            { startYear: 1500, endYear: 1950 },
+        );
+
+        expect(recovered).toMatchObject({
+            eventType: "falseRing",
+            startYear: 1791,
+            endYear: 1799,
+            evidence: { lagBefore: -19, lagAfter: -20 },
+        });
+        expect(recovered?.rankedYears[0]?.year).toBe(1795);
+        expect(recovered?.evidence.notes).toContain(
+            "aggregate_partial_residual_shift=-20",
+        );
+
+        unit.evidence.lagAfter = -18;
+        expect(recoverAggregatePartialUnitFrontier(
+            [aggregate],
+            [unit],
+            {
+                operation: unitOperation,
+                score: 0.13,
+                scoreMargin: 0.1,
+                shiftScoreMargin: null,
+                probabilityLike: 0.9,
+            },
+            [aggregateOperation, unitOperation],
+            { startYear: 1500, endYear: 1950 },
+        )).toBeNull();
     });
 
     it("decomposes a non-authoritative whole alias into stable partial components", () => {

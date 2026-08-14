@@ -4550,6 +4550,150 @@ const recoverBoundedCompletedPartialUnitFrontier = (
     return null;
 };
 
+/**
+ * A distant unit edit can be hidden inside the net lag of one aggregate partial correction.
+ * Recover the newer unit only when its hard-gated candidate connects the aggregate and residual
+ * lag states exactly, and an independent year-by-operation scan places it in the same mode.
+ */
+export const recoverAggregatePartialUnitFrontier = (
+    displayedEvents: readonly DiagnosisEvent[],
+    candidateEvents: readonly DiagnosisEvent[],
+    unitSelection: DynamicJointOperationSelection | null,
+    operations: readonly JointCounterfactualOperationScore[],
+    targetRange: { startYear: number; endYear: number },
+    minimumSeparationYears = 14,
+): DiagnosisEvent | null => {
+    if (displayedEvents.some((event) => event.eventType === "wholeSeriesMove")
+        || !unitSelection
+        || unitSelection.score < 0.06
+        || unitSelection.scoreMargin < 0.04
+        || unitSelection.operation.bestDifferenceGain < 0.08
+        || unitSelection.operation.bestCombinedGain < 0.05) return null;
+    const unitOperation = unitSelection.operation;
+    if (unitOperation.eventType !== "missingRing"
+        && unitOperation.eventType !== "falseRing") return null;
+    const unitShiftYears = unitOperation.eventType === "missingRing" ? -1 : 1;
+    const aggregates = displayedEvents.filter((event) => (
+        event.eventType === "partialMove"
+        && event.shiftSide === "older"
+        && event.shiftYears !== undefined
+        && event.shiftYears <= -3
+        && event.evidence.lagBefore === event.shiftYears
+        && event.evidence.lagAfter === 0
+        && event.evidence.scoreMargin >= 0.04
+        && event.evidence.algorithmSources.includes("decisive_joint_operation_fusion")
+    )).sort((left, right) => (
+        right.evidence.scoreMargin - left.evidence.scoreMargin
+        || right.evidence.score - left.evidence.score
+    ));
+    for (const aggregate of aggregates) {
+        const residualPartialShift = aggregate.shiftYears! - unitShiftYears;
+        if (!isAutomaticPartialShift(residualPartialShift, {
+            maxPartialGapYears: 100,
+            lagMin: -100,
+        })) continue;
+        const aggregateOperation = operations.filter((operation) => (
+            operation.eventType === "partialMove"
+            && operation.shiftYears === aggregate.shiftYears
+            && operation.baselineLag === 0
+        )).sort((left, right) => (
+            scoreDynamicJointOperation(right, operations)
+                - scoreDynamicJointOperation(left, operations)
+            || right.bestDifferenceGain - left.bestDifferenceGain
+        ))[0];
+        if (!aggregateOperation
+            || scoreDynamicJointOperation(aggregateOperation, operations) < 0.08
+            || aggregateOperation.bestDifferenceGain < 0.08
+            || unitOperation.bestYear - aggregateOperation.bestYear
+                < minimumSeparationYears) continue;
+        const connectingCandidate = candidateEvents.filter((event) => {
+            if (event.eventType !== unitOperation.eventType
+                || !event.evidence.notes.includes("candidate_hard_gate_passed")
+                || event.evidence.lagBefore === null
+                || event.evidence.lagAfter === null
+                || event.evidence.lagBefore - event.evidence.lagAfter !== unitShiftYears) {
+                return false;
+            }
+            const states = new Set([event.evidence.lagBefore, event.evidence.lagAfter]);
+            return states.has(aggregate.shiftYears!)
+                && states.has(residualPartialShift)
+                && Math.abs(rankedEventYear(event) - unitOperation.bestYear) <= 8;
+        }).sort((left, right) => (
+            Math.abs(rankedEventYear(left) - unitOperation.bestYear)
+                - Math.abs(rankedEventYear(right) - unitOperation.bestYear)
+            || right.evidence.score - left.evidence.score
+        ))[0];
+        if (!connectingCandidate) continue;
+
+        const width = Math.min(
+            9,
+            targetRange.endYear - targetRange.startYear + 1,
+        );
+        const startYear = Math.max(
+            targetRange.startYear,
+            Math.min(
+                unitOperation.bestYear - Math.floor(width / 2),
+                targetRange.endYear - width + 1,
+            ),
+        );
+        const endYear = startYear + width - 1;
+        const rankedYears = Array.from({ length: width }, (_, index) => {
+            const year = startYear + index;
+            return {
+                year,
+                score: year === unitOperation.bestYear
+                    ? unitSelection.score + 1
+                    : -Math.abs(year - unitOperation.bestYear),
+                evidenceTags: ["aggregate_partial_unit_decomposition"],
+            };
+        }).sort((left, right) => (
+            right.score - left.score || left.year - right.year
+        )).map((row, index) => ({ ...row, rank: index + 1 }));
+        return {
+            ...connectingCandidate,
+            id: `${aggregate.id}-aggregate-unit-${unitOperation.eventType}-${unitOperation.bestYear}`,
+            startYear,
+            endYear,
+            reviewCoreRange: { startYear, endYear },
+            rankedYears,
+            confidenceLevel: "medium",
+            alternativeTypes: [],
+            locationAlternatives: undefined,
+            operationAlternatives: undefined,
+            shiftYears: undefined,
+            shiftSide: undefined,
+            evidence: {
+                ...connectingCandidate.evidence,
+                algorithmSources: Array.from(new Set([
+                    ...connectingCandidate.evidence.algorithmSources,
+                    "aggregate_partial_unit_decomposition",
+                    "joint_year_operation_evidence",
+                ])).sort(),
+                score: unitSelection.score,
+                scoreMargin: unitSelection.scoreMargin,
+                correlationGain: Math.max(
+                    connectingCandidate.evidence.correlationGain ?? 0,
+                    unitOperation.bestDifferenceGain,
+                ),
+                candidateIds: Array.from(new Set([
+                    ...aggregate.evidence.candidateIds,
+                    ...connectingCandidate.evidence.candidateIds,
+                ])).sort(),
+                notes: Array.from(new Set([
+                    ...connectingCandidate.evidence.notes,
+                    `aggregate_partial_net_shift=${aggregate.shiftYears}`,
+                    `aggregate_partial_residual_shift=${residualPartialShift}`,
+                    `aggregate_partial_unit_shift=${unitShiftYears}`,
+                    `aggregate_partial_boundary_year=${aggregateOperation.bestYear}`,
+                    `aggregate_partial_unit_year=${unitOperation.bestYear}`,
+                    "aggregate_partial_unit_state_bridge=exact",
+                ])),
+            },
+        };
+    }
+    return null;
+};
+
 const recoverCompletedCandidateBackedPartial = (
     competition: CompletedPartialStaircaseCompetition,
     candidateEvents: readonly DiagnosisEvent[],
@@ -5131,6 +5275,8 @@ export const recoverStableBoundedLagPathFrontier = (
         && exactDisplayedAggregate !== undefined
         && aggregateOperationSupported
         && aggregateBoundaryDistance <= 2
+        && matchingAggregateOperation.bestDifferenceGain >= 0.5
+        && matchingAggregateOperation.bestCombinedGain >= 0.5
         && aggregateOperationScore >= componentOperationScore + 0.08
         && matchingAggregateOperation.bestDifferenceGain
             >= (matchingOperation?.bestDifferenceGain ?? 0) + 0.05
@@ -9055,6 +9201,16 @@ export const makeDiagnosisEvents = (
             // The complete path has already resolved the serial frontier. Aggregate move
             // hypotheses are intentionally excluded so later review cannot recombine it.
             return finalize([stableBoundedPathFrontier], [], false);
+        }
+        const aggregatePartialUnitFrontier = recoverAggregatePartialUnitFrontier(
+            displayed,
+            candidateEvents,
+            localCompositionUnitSelection,
+            localCompositionOperations,
+            diagnosis.targetRange,
+        );
+        if (aggregatePartialUnitFrontier) {
+            return finalize([aggregatePartialUnitFrontier], [], false);
         }
         if (options.enableCounterfactualEventLocator !== true
             || (!hasLocalEvent && !mayRecoverSequentialMissing)) {
