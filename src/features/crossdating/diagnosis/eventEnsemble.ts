@@ -27,11 +27,11 @@ import {
 } from "./discreteMissingStaircaseCompetition";
 import {
     attachMissingPartialInterpretation,
+    attachUniversalPartialMissingWorkflow,
     evaluateCompletedPartialMissingInterpretation,
     evaluateExactSequentialMissingInterpretation,
     evaluateLocalizedTwoStepMissingInterpretation,
     evaluateMissingPartialInterpretationTie,
-    evaluateSeparatedDenseStaircaseClusterInterpretation,
     makeMissingRingInterpretation,
     makePartialMoveInterpretation,
 } from "./missingPartialInterpretation";
@@ -152,6 +152,7 @@ import type {
     DiagnosisEventPassAudit,
     DiagnosisEvent,
     DiagnosisEventType,
+    DiagnosisLocalLagTransitionEvidence,
     DiagnosisReviewEventCheckpoint,
     EffectiveDiagnosisConfig,
     NumericSeries,
@@ -6870,14 +6871,6 @@ const recoverSequentialMissingHeadEvent = (
         const completedPartialCandidate = !hasDistinctConfirmedMissingMode
             ? completedPartialReviewCandidate
             : null;
-        const denseClusterInterpretation = evaluateSeparatedDenseStaircaseClusterInterpretation(
-            completedFamilyCompetition,
-            head,
-            {
-                partialReviewPassed: completedPartialReviewCandidate !== null,
-                hasIndependentWholeSeriesBaseline: independentWholeBaseline,
-            },
-        );
         const completedPartial = completedFamilySupported
             ? completedPartialCandidate
             : null;
@@ -7033,18 +7026,10 @@ const recoverSequentialMissingHeadEvent = (
                 hasIndependentWholeSeriesBaseline: independentWholeBaseline,
             },
         );
-        const interpretationEvidence = denseClusterInterpretation
-            ?? completedTieEvidence
+        const interpretationEvidence = completedTieEvidence
             ?? smallTieEvidence;
-        const partialInterpretation = denseClusterInterpretation
-            && completedPartialReviewCandidate
-            ? makePartialMoveInterpretation(
-                completedPartialReviewCandidate,
-                denseClusterInterpretation,
-                diagnosis.targetRange,
-            )
-            : completedTieEvidence
-                ? completedPartialCandidate
+        const partialInterpretation = completedTieEvidence
+            ? completedPartialCandidate
             : smallTieEvidence && compressedPartial
                 ? makePartialMoveInterpretation(
                     compressedPartial,
@@ -9424,6 +9409,15 @@ export const makeDiagnosisEvents = (
             rawNearPenaltyOnePath,
             boundedHypotheses,
         );
+        const localLagTransitionEvidence: DiagnosisLocalLagTransitionEvidence | null =
+            stableNearLagCluster ? {
+                eventCount: stableNearLagCluster.eventCount,
+                evidenceYears: [...stableNearLagCluster.evidenceYears],
+                operationTypes: [...stableNearLagCluster.operationTypes],
+                aggregateShiftYears: stableNearLagCluster.aggregateShiftYears,
+                locallyComplete: stableNearLagCluster.locallyComplete,
+                maximumYearDrift: stableNearLagCluster.maximumYearDrift,
+            } : null;
         const unflaggedUnitPulseProbeEligible = diagnosis.master.sourceTrees.length >= 8
             && diagnosis.targetRange.endYear - diagnosis.targetRange.startYear + 1 >= 120
             && (
@@ -9657,6 +9651,14 @@ export const makeDiagnosisEvents = (
                 (event) => !isValidAutomaticEvent(event),
             ).length;
             const finalEvents = validAutomaticEvents(sourceEvents)
+                .map((event) => event.eventType === "partialMove"
+                    ? attachUniversalPartialMissingWorkflow(
+                            event,
+                            getCofechaDiagnosis(),
+                            siteData,
+                            localLagTransitionEvidence,
+                        )
+                    : event)
                 .map(withEvidenceLedger);
             const boundedFinalEvents = includeBoundedPathHypotheses
                 ? boundedPathEvents.flatMap((event) => validAutomaticEvents([event]))
@@ -9720,14 +9722,7 @@ export const makeDiagnosisEvents = (
                     retainedAfterEndpointGuard: retainedDetected.map(auditEvent),
                     displayedBeforeLocator: displayed.map(auditEvent),
                     finalEvents: finalEvents.map(auditEvent),
-                    localLagTransitionEvidence: stableNearLagCluster ? {
-                        eventCount: stableNearLagCluster.eventCount,
-                        evidenceYears: [...stableNearLagCluster.evidenceYears],
-                        operationTypes: [...stableNearLagCluster.operationTypes],
-                        aggregateShiftYears: stableNearLagCluster.aggregateShiftYears,
-                        locallyComplete: stableNearLagCluster.locallyComplete,
-                        maximumYearDrift: stableNearLagCluster.maximumYearDrift,
-                    } : null,
+                    localLagTransitionEvidence,
                     locatorDecisions: locatorDecisionAudits.map((decision) => ({
                         ...decision,
                         preLocatorEvent: { ...decision.preLocatorEvent },

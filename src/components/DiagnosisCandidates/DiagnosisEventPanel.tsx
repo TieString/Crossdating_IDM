@@ -46,18 +46,6 @@ const interpretationButtonStyle: CSSProperties = {
   color: "#315d36",
 };
 
-const yearButtonStyle: CSSProperties = {
-  appearance: "none",
-  padding: "1px 4px",
-  borderRadius: 3,
-  border: "1px solid #d4e4d2",
-  background: "#fff",
-  color: "#315d36",
-  cursor: "pointer",
-  font: "inherit",
-  lineHeight: 1.4,
-};
-
 const eventTypeLabels: Record<DiagnosisEventType, string> = {
   missingRing: "可能缺轮",
   falseRing: "可能伪轮",
@@ -159,21 +147,11 @@ export const selectDiagnosisEventInterpretation = (
 );
 
 export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Props) {
-  const [selectedYears, setSelectedYears] = useState<Record<string, number>>({});
   const [selectedInterpretations, setSelectedInterpretations] = useState<
     Record<string, InterpretationSelection>
   >({});
 
   useEffect(() => {
-    const currentIds = new Set(events.flatMap((event) => [
-      event.id,
-      ...(event.interpretationAmbiguity
-        ? [event.interpretationAmbiguity.alternative.id]
-        : []),
-    ]));
-    setSelectedYears((previous) => Object.fromEntries(
-      Object.entries(previous).filter(([eventId]) => currentIds.has(eventId)),
-    ));
     const currentPrimaryIds = new Set(events.map((event) => event.id));
     setSelectedInterpretations((previous) => Object.fromEntries(
       Object.entries(previous).filter(([eventId]) => currentPrimaryIds.has(eventId)),
@@ -217,7 +195,6 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
         );
         const interpretation = event.interpretationAmbiguity;
         const width = selectedEvent.endYear - selectedEvent.startYear + 1;
-        const savedYear = selectedYears[selectedEvent.id];
         const rankedYears = [...selectedEvent.rankedYears]
           .filter((row, index, rows) => (
             row.year >= selectedEvent.startYear
@@ -226,26 +203,23 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
           ))
           .sort((a, b) => a.rank - b.rank);
         const preferredYear = rankedYears[0]?.year;
-        const rankedYearSet = new Set(rankedYears.map((row) => row.year));
-        const selectableYears = selectedEvent.eventType === "partialMove"
-          ? [
-            ...rankedYears.map((row) => ({ year: row.year, rank: row.rank })),
-            ...Array.from({ length: Math.max(0, width) }, (_, index) => selectedEvent.startYear + index)
-              .filter((year) => !rankedYearSet.has(year))
-              .map((year) => ({ year, rank: null })),
-          ]
-          : rankedYears.map((row) => ({ year: row.year, rank: row.rank }));
-        const selectedYear = savedYear !== undefined
-          && selectableYears.some((row) => row.year === savedYear)
-          ? savedYear
-          : preferredYear
-            ?? Math.round((selectedEvent.startYear + selectedEvent.endYear) / 2);
+        const selectedYear = preferredYear
+          ?? Math.round((selectedEvent.startYear + selectedEvent.endYear) / 2);
+        const isWholeSeriesMove = selectedEvent.eventType === "wholeSeriesMove";
         const shiftText = selectedEvent.eventType === "partialMove" && selectedEvent.shiftYears
           ? ` · 较老侧向老年份移动 ${Math.abs(selectedEvent.shiftYears)} 年`
           : "";
+        const wholeShiftText = isWholeSeriesMove && selectedEvent.shiftYears
+          ? `整条序列向${selectedEvent.shiftYears < 0 ? "老" : "新"}年份移动 ${Math.abs(selectedEvent.shiftYears)} 年`
+          : "整条序列位移";
         const yearEvidence = yearEvidenceLabel(selectedEvent);
         const retainedAcrossEvidenceRefresh = selectedEvent.evidence.algorithmSources
           .includes("evidence_refresh_adjudicator");
+        const missingPartialEvidence = interpretation?.kind === "missingRingsOrPartialMove"
+          ? interpretation.evidence
+          : null;
+        const hasCalibratedMissingCount = missingPartialEvidence?.countEvidence
+          === "multiReferenceStaircase";
 
         return (
           <article
@@ -267,7 +241,9 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
                   {eventTypeLabels[selectedEvent.eventType]}
                 </strong>
                 <span>
-                  {selectedEvent.startYear}-{selectedEvent.endYear}（{width} 年）
+                  {isWholeSeriesMove
+                    ? wholeShiftText
+                    : `${selectedEvent.startYear}-${selectedEvent.endYear}（${width} 年）`}
                 </span>
                 <span
                   title="表示事件级证据强度，不代表首选年份正确概率"
@@ -275,12 +251,14 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
                 >
                   事件置信 {confidenceLabels[selectedEvent.confidenceLevel]}
                 </span>
-                <span
-                  title="表示不同定位证据是否聚集，不是该年份的正确概率"
-                  style={{ fontSize: 10, fontWeight: 700 }}
-                >
-                  年份证据 {yearEvidence}
-                </span>
+                {!isWholeSeriesMove ? (
+                  <span
+                    title="表示不同定位证据是否聚集，不是该年份的正确概率"
+                    style={{ fontSize: 10, fontWeight: 700 }}
+                  >
+                    年份证据 {yearEvidence}
+                  </span>
+                ) : null}
                 {retainedAcrossEvidenceRefresh ? (
                   <span
                     title="working 数据没有变化；保存后新 COFECHA 与保存前内部假设冲突，当前保留两边都支持的原复核事件。"
@@ -291,41 +269,9 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
                 ) : null}
               </div>
 
-              {selectableYears.length > 0 ? (
-                <div
-                  title={selectableYears
-                    .map((row) => row.rank === null ? `${row.year}` : `#${row.rank} ${row.year}`)
-                    .join(" · ")}
-                  style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4, marginTop: 4 }}
-                >
-                  <span>{selectedEvent.eventType === "partialMove" ? "断点选项" : "优先年份"}</span>
-                  {selectableYears.map((row) => {
-                    const selected = row.year === selectedYear;
-                    return (
-                      <button
-                        type="button"
-                        key={row.year}
-                        aria-pressed={selected}
-                        title={selectedEvent.eventType === "partialMove"
-                          ? `选择断点 ${row.year}；${row.year} 年起保持不动`
-                          : `选择 ${row.year} 年作为应用边界`}
-                        onClick={() => {
-                          setSelectedYears((previous) => ({
-                            ...previous,
-                            [selectedEvent.id]: row.year,
-                          }));
-                        }}
-                        style={{
-                          ...yearButtonStyle,
-                          borderColor: selected ? "#397342" : "#d4e4d2",
-                          background: selected ? "#dcefdc" : "#fff",
-                          fontWeight: row.rank === 1 || selected ? 700 : 500,
-                        }}
-                      >
-                        {row.rank === null ? row.year : `#${row.rank} ${row.year}`}
-                      </button>
-                    );
-                  })}
+              {!isWholeSeriesMove ? (
+                <div style={{ marginTop: 4 }}>
+                  Top1 {selectedYear}
                 </div>
               ) : null}
 
@@ -390,8 +336,12 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
                         ? "树皮端整体移动与一个缺轮的证据接近；也可能是缺轮，需结合样本确认。"
                         : "当前按树皮端缺轮窗口复核；内部证据也允许整条序列移动 1 年的解释。"
                       : selectedEvent.eventType === "missingRing"
-                        ? `该区域预计包含 ${interpretation.evidence.missingRingCount} 个缺轮事件；当前先复核最靠树皮的一处。`
-                        : `连续缺段 ${Math.abs(interpretation.evidence.cumulativeShiftYears)} 年与 ${interpretation.evidence.missingRingCount} 个缺轮的证据接近。`}
+                        ? hasCalibratedMissingCount
+                          ? `附近可能还有 ${Math.max(0, interpretation.evidence.missingRingCount - 1)} 个同方向缺轮事件；当前只复核最靠树皮侧的一处。`
+                          : "当前只复核最靠树皮侧的一个缺轮；应用后重新诊断其余累计 lag。"
+                        : hasCalibratedMissingCount
+                          ? `多参考芯支持该区域累计约 ${interpretation.evidence.missingRingCount} 次同方向单位转移；实体样芯决定按连续缺段还是逐轮缺轮复核。`
+                          : `累计 lag 差约 ${Math.abs(interpretation.evidence.cumulativeShiftYears)} 年；具体缺轮数量尚未独立确认。`}
                   </span>
                   <button
                     type="button"
@@ -401,8 +351,8 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
                         ? "切换到算法已独立验证的树皮端缺轮窗口，仅改变复核解释"
                         : "返回算法保留的整条序列移动解释"
                       : selectedEvent.eventType === "missingRing"
-                        ? "仅在样本存在断裂、腐朽等连续缺段证据时采用算法已验证的局部移动解释"
-                        : "未发现连续缺段证据时，返回算法已验证的逐轮缺轮解释"}
+                        ? "实体样芯存在断裂、腐朽或连续缺段证据时返回局部移动解释"
+                        : "实体样芯完整、未见断裂时，切换到单个前沿缺轮复核"}
                     onClick={() => {
                       const nextSelection: InterpretationSelection = interpretationSelection
                         === "primary" ? "alternative" : "primary";
@@ -422,8 +372,8 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
                         ? "按可能缺轮复核"
                         : "返回整体移动解释"
                       : selectedEvent.eventType === "missingRing"
-                        ? "按连续缺段处理"
-                        : `按 ${interpretation.evidence.missingRingCount} 个缺轮逐轮复核`}
+                        ? "存在断裂，返回局部移动解释"
+                        : "未见断裂，按缺轮逐轮复核"}
                   </button>
                 </div>
               ) : null}
@@ -437,7 +387,7 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
               <button
                 type="button"
                 disabled={!onFocusEvent}
-                title={`定位到已选年份 ${selectedYear}`}
+                title={isWholeSeriesMove ? "定位整条序列" : `定位到 Top1 年份 ${selectedYear}`}
                 onClick={() => onFocusEvent?.(selectedEvent, selectedYear)}
                 style={onFocusEvent ? buttonStyle : disabledButtonStyle}
               >

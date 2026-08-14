@@ -15,6 +15,7 @@ import type {
 
 export type UnitBreakpointScore = {
     year: number;
+    referenceCount: number;
     raw31: number;
     difference31: number;
     whitened31: number;
@@ -228,6 +229,7 @@ const pairwiseLocalAggregates = (
     references: LocalReference[],
     year: number,
 ): Pick<UnitBreakpointScore,
+    | "referenceCount"
     | "pairMean31"
     | "pairMedian31"
     | "pairTrimmed31"
@@ -250,6 +252,7 @@ const pairwiseLocalAggregates = (
         .filter((row) => row.pairedCore)
         .map((row) => row.correlation);
     return {
+        referenceCount: rows.length,
         pairMean31: mean(values),
         pairMedian31: median(values),
         pairTrimmed31: mean(trimmed),

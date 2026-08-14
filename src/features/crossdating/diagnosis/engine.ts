@@ -63,6 +63,7 @@ import {
     adjudicateJointEventHypotheses,
     compareJointDecisionToProduction,
 } from "./jointEventAdjudicator";
+import { attachUniversalPartialMissingWorkflow } from "./missingPartialInterpretation";
 
 export {
     getDiagnosisCandidateLabel,
@@ -313,7 +314,7 @@ export function diagnoseCrossdating(
             reviewEventCheckpoints,
         ))
         : null;
-    const reviewWindowDisplay = options.reviewWindowDisplayMode === "review"
+    const rawReviewWindowDisplay = options.reviewWindowDisplayMode === "review"
         && selectedJointEventDecisions
         && eventDecisionAudits
         ? buildReviewWindowDisplays(
@@ -321,6 +322,34 @@ export function diagnoseCrossdating(
             selectedJointEventDecisions,
         )
         : null;
+    const diagnosisByTree = new Map(seriesDiagnoses.map((diagnosis) => [
+        diagnosis.targetTree,
+        diagnosis,
+    ]));
+    const auditByTree = new Map(eventDecisionAudits?.map((audit) => [
+        audit.seriesId,
+        audit,
+    ]) ?? []);
+    const attachFinalInterpretation = (event: DiagnosisEvent): DiagnosisEvent => (
+        event.eventType === "partialMove"
+            ? attachUniversalPartialMissingWorkflow(
+                    event,
+                    diagnosisByTree.get(event.seriesId) ?? null,
+                    siteData,
+                    auditByTree.get(event.seriesId)?.localLagTransitionEvidence ?? null,
+                )
+            : event
+    );
+    const reviewWindowDecisions = rawReviewWindowDisplay?.decisions.map((decision) => ({
+            ...decision,
+            event: decision.event ? attachFinalInterpretation(decision.event) : null,
+        })) ?? null;
+    const reviewWindowDisplay = reviewWindowDecisions ? {
+        decisions: reviewWindowDecisions,
+        events: reviewWindowDecisions.flatMap((decision) => (
+            decision.event ? [decision.event] : []
+        )),
+    } : null;
     const jointEventDecisions = selectedJointEventDecisions?.map((decision) => (
         compareJointDecisionToProduction(
             decision,

@@ -131,9 +131,9 @@ export type DiagnosisMissingPartialInterpretationEvidence = {
     interpretationBasis?: "counterfactualTie"
         | "completedPartialMissingComposition"
         | "exactSequentialStaircaseAlternative"
-        | "separatedDenseStaircaseClusterAlternative"
         | "localizedTwoStepStaircaseAlternative"
-        | "structuredLocatorCumulativeLagAlternative";
+        | "structuredLocatorCumulativeLagAlternative"
+        | "virtualSequentialFrontier";
     missingRingCount: number;
     cumulativeShiftYears: number;
     /** Exact unit years are present only when the staircase locator resolved them. */
@@ -145,6 +145,10 @@ export type DiagnosisMissingPartialInterpretationEvidence = {
     referenceCount: number;
     missingReferenceSupport: number;
     partialReferenceSupport: number;
+    /** Exact counts require independently localized unit years; otherwise N is cumulative lag. */
+    countEvidence?: "multiReferenceStaircase" | "cumulativeLagOnly";
+    frontierYear?: number;
+    frontierLocalization?: "multiReferenceCounterfactual" | "partialBoundaryFallback";
     completedComposition?: {
         separationYears: number;
         mixedReferenceSupport: number;

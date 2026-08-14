@@ -40,7 +40,7 @@ describe("DiagnosisEventPanel", () => {
     }));
 
     expect(html).toContain("可能缺轮");
-    expect(html).toContain("#1 1907");
+    expect(html).toContain("Top1 1907");
     expect(html).not.toContain("可能多个近距离事件");
     expect(html).not.toContain("不能直接应用为单个操作");
     expect(html).not.toContain("disabled=\"\"");
@@ -76,7 +76,7 @@ describe("DiagnosisEventPanel", () => {
     expect(html).toContain("JS 事件级诊断");
     expect(html).toContain("可能缺轮");
     expect(html).toContain("1880-1886");
-    expect(html).toContain("#1 1883");
+    expect(html).toContain("Top1 1883");
     expect(html).toContain("事件置信 高");
     expect(html).toContain("年份证据 不足");
     expect(html).toContain("不代表首选年份正确概率");
@@ -86,7 +86,7 @@ describe("DiagnosisEventPanel", () => {
     expect(html).not.toContain("忽略");
   });
 
-  it("offers every year in the partial-move main window as a breakpoint", () => {
+  it("shows only one Top1 breakpoint for a partial move", () => {
     const event: DiagnosisEvent = {
       id: "event-apply",
       seriesId: "ABC01A",
@@ -125,12 +125,10 @@ describe("DiagnosisEventPanel", () => {
       onApplyEvent: () => true,
     }));
 
-    expect(html).toContain("断点选项");
-    expect(html).toContain("#1 1881");
-    expect(html).toContain("#2 1880");
-    expect(html).toContain("选择断点 1882");
-    expect(html).toContain("aria-pressed=\"true\"");
-    expect(html).toContain("aria-pressed=\"false\"");
+    expect(html).toContain("Top1 1881");
+    expect(html).not.toContain("#2 1880");
+    expect(html).not.toContain("选择断点 1882");
+    expect(html).not.toContain("aria-pressed");
     expect(html).toContain("较老侧向老年份移动 2 年");
     expect(html).toContain("年份证据 较一致");
     expect(html).toContain("应用");
@@ -312,6 +310,7 @@ describe("DiagnosisEventPanel", () => {
           referenceCount: 10,
           missingReferenceSupport: 5,
           partialReferenceSupport: 5,
+          countEvidence: "multiReferenceStaircase",
         },
       },
     };
@@ -322,8 +321,8 @@ describe("DiagnosisEventPanel", () => {
     }));
 
     expect(html).toContain("可能缺轮");
-    expect(html).toContain("预计包含 2 个缺轮事件");
-    expect(html).toContain("按连续缺段处理");
+    expect(html).toContain("附近可能还有 1 个同方向缺轮事件");
+    expect(html).toContain("存在断裂，返回局部移动解释");
     expect(html).toContain("缺轮/连续缺段参考芯支持 5/5");
     expect(html).not.toContain("可能局部移动");
     expect(html).not.toContain("1901-1907（7 年）");
@@ -381,6 +380,7 @@ describe("DiagnosisEventPanel", () => {
           referenceCount: 10,
           missingReferenceSupport: 5,
           partialReferenceSupport: 5,
+          countEvidence: "multiReferenceStaircase",
         },
       },
     };
@@ -390,7 +390,8 @@ describe("DiagnosisEventPanel", () => {
     }));
 
     expect(html).toContain("可能局部移动");
-    expect(html).toContain("按 2 个缺轮逐轮复核");
+    expect(html).toContain("未见断裂，按缺轮逐轮复核");
+    expect(html).toContain("累计约 2 次同方向单位转移");
     expect(html).not.toContain("可能缺轮");
     expect(html).not.toContain("1900-1906（7 年）");
   });
@@ -447,6 +448,9 @@ describe("DiagnosisEventPanel", () => {
     expect(html).toContain("也可能是缺轮");
     expect(html).toContain("按可能缺轮复核");
     expect(html).not.toContain("按连续缺段处理");
+    expect(html).toContain("整条序列向老年份移动 1 年");
+    expect(html).not.toContain("1768-2002");
+    expect(html).not.toContain("Top1");
     expect(selectDiagnosisEventInterpretation(whole, "alternative")).toBe(missing);
   });
 });

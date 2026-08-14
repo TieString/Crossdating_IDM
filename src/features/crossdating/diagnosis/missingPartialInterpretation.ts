@@ -5,9 +5,17 @@ import type {
     MissingStaircaseCompetition,
 } from "./discreteMissingStaircaseCompetition";
 import type { SequentialMissingHead, TwoStepMissingStaircase } from "./eventPath";
+import {
+    scoreUnitBoundaries,
+    selectStableUnitLocalConsensus,
+    type UnitBreakpointScore,
+} from "./unitBreakpointRefinement";
+import type { RwlSiteData } from "@/features/rwl/types";
 import type {
     DiagnosisEvent,
+    DiagnosisLocalLagTransitionEvidence,
     DiagnosisMissingPartialInterpretationEvidence,
+    SeriesCoreDiagnosis,
     YearRange,
 } from "./types";
 
@@ -21,13 +29,6 @@ export const MISSING_PARTIAL_INTERPRETATION_CALIBRATION = {
     maximumBoundaryDistanceYears: 6,
     maximumMissingRegionWidthYears: 13,
 } as const;
-
-const sortedYearMedian = (years: readonly number[]): number => {
-    const middle = Math.floor(years.length / 2);
-    return years.length % 2 === 1
-        ? years[middle]!
-        : ((years[middle - 1] ?? 0) + (years[middle] ?? 0)) / 2;
-};
 
 type InterpretationCompetition = {
     cumulativeShiftYears: number;
@@ -211,93 +212,6 @@ export const evaluateCompletedPartialMissingInterpretation = (
             orientationReferenceSupport: competition.orientationReferenceSupport,
             orientationReferenceCount: competition.orientationReferenceCount,
         },
-    };
-};
-
-/**
- * A cumulative missing path can contain one or more isolated unit events plus one dense run of
- * consecutive state changes. When both the fitted path and the completed family independently
- * expose the same unique split, the dense run is review-equivalent to one physical gap. The
- * isolated unit events remain deferred until the partial interpretation is applied and rerun.
- */
-export const evaluateSeparatedDenseStaircaseClusterInterpretation = (
-    competition: CompletedPartialStaircaseCompetition | null,
-    head: SequentialMissingHead | null,
-    gate: {
-        partialReviewPassed: boolean;
-        hasIndependentWholeSeriesBaseline: boolean;
-    },
-): DiagnosisMissingPartialInterpretationEvidence | null => {
-    if (!competition
-        || !head
-        || !gate.partialReviewPassed
-        || gate.hasIndependentWholeSeriesBaseline
-        || competition.partialShiftYears >= -1
-        || head.pathStartLag >= -1
-        || Math.abs(head.pathStartLag) !== head.transitionCount
-        || head.unitEventYears.length !== head.transitionCount) return null;
-
-    const pathYears = [...head.unitEventYears].sort((left, right) => left - right);
-    const familyYears = [...competition.missingYears].sort((left, right) => left - right);
-    const splitDenseCluster = (years: readonly number[]) => {
-        const gaps = years.slice(1).map((year, index) => ({
-            index: index + 1,
-            gap: year - years[index]!,
-        })).filter((row) => row.gap >= 14);
-        if (gaps.length !== 1) return null;
-        const dense = years.slice(gaps[0]!.index);
-        const isolated = years.slice(0, gaps[0]!.index);
-        const denseWidth = (dense[dense.length - 1] ?? 0) - (dense[0] ?? 0) + 1;
-        return isolated.length >= 1
-            && dense.length >= 2
-            && denseWidth >= 5
-            && denseWidth <= MISSING_PARTIAL_INTERPRETATION_CALIBRATION
-                .maximumMissingRegionWidthYears
-            ? { dense, isolated, separationYears: gaps[0]!.gap }
-            : null;
-    };
-    const pathSplit = splitDenseCluster(pathYears);
-    const familySplit = splitDenseCluster(familyYears);
-    if (!pathSplit
-        || !familySplit) return null;
-    const partialCount = pathSplit.dense.length;
-    const candidateMagnitude = Math.abs(competition.partialShiftYears);
-    if (familySplit.dense.length !== partialCount
-        || pathSplit.isolated.length !== familySplit.isolated.length
-        || (candidateMagnitude !== partialCount
-            && candidateMagnitude !== head.transitionCount)
-        || pathSplit.separationYears > 60
-        || familySplit.separationYears > 60) return null;
-
-    const pathDenseCenter = sortedYearMedian(pathSplit.dense);
-    const familyDenseCenter = sortedYearMedian(familySplit.dense);
-    const pathIsolatedCenter = sortedYearMedian(pathSplit.isolated);
-    const familyIsolatedCenter = sortedYearMedian(familySplit.isolated);
-    if (Math.abs(pathDenseCenter - familyDenseCenter) > 4
-        || Math.abs(pathIsolatedCenter - familyIsolatedCenter) > 4
-        || Math.abs(competition.partialFirstFixedYear - pathDenseCenter) > 7
-        || competition.referenceCount
-            < MISSING_PARTIAL_INTERPRETATION_CALIBRATION.minimumReferenceCount) {
-        return null;
-    }
-
-    return {
-        interpretationBasis: "separatedDenseStaircaseClusterAlternative",
-        missingRingCount: partialCount,
-        cumulativeShiftYears: -partialCount,
-        missingYears: pathSplit.dense,
-        partialFirstFixedYear: competition.partialFirstFixedYear,
-        normalizedCounterfactualGainDifference: Math.max(
-            Math.abs(competition.masterMargin)
-                / MISSING_PARTIAL_INTERPRETATION_CALIBRATION.maximumMasterMargin,
-            Math.abs(competition.referenceMedianMargin)
-                / MISSING_PARTIAL_INTERPRETATION_CALIBRATION.maximumReferenceMedianMargin,
-        ),
-        masterMargin: competition.masterMargin,
-        referenceMedianMargin: competition.referenceMedianMargin,
-        referenceCount: competition.referenceCount,
-        missingReferenceSupport: competition.staircaseReferenceSupport,
-        partialReferenceSupport: competition.partialReferenceSupport,
     };
 };
 
@@ -514,6 +428,15 @@ const interpretationNotes = (
     `missing_partial_tie_reference_support=${
         evidence.missingReferenceSupport
     }:${evidence.partialReferenceSupport}/${evidence.referenceCount}`,
+    `missing_partial_count_evidence=${
+        evidence.countEvidence ?? "cumulativeLagOnly"
+    }`,
+    ...(evidence.frontierYear === undefined
+        ? []
+        : [`missing_partial_frontier_year=${evidence.frontierYear}`]),
+    ...(evidence.frontierLocalization === undefined
+        ? []
+        : [`missing_partial_frontier_localization=${evidence.frontierLocalization}`]),
 ];
 
 export const makeMissingRingInterpretation = (
@@ -521,19 +444,20 @@ export const makeMissingRingInterpretation = (
     evidence: DiagnosisMissingPartialInterpretationEvidence,
     range: YearRange,
 ): DiagnosisEvent => {
-    const selectedYear = evidence.missingYears[evidence.missingYears.length - 1]
-        ?? evidence.partialFirstFixedYear;
+    const selectedYear = evidence.frontierYear
+        ?? evidence.missingYears[evidence.missingYears.length - 1]
+        ?? evidence.partialFirstFixedYear - 1;
     const interpretationSource = evidence.interpretationBasis
         === "completedPartialMissingComposition"
         ? "completed_partial_missing_interpretation"
         : evidence.interpretationBasis === "exactSequentialStaircaseAlternative"
             ? "exact_sequential_missing_interpretation"
-        : evidence.interpretationBasis === "separatedDenseStaircaseClusterAlternative"
-            ? "separated_dense_staircase_cluster_interpretation"
         : evidence.interpretationBasis === "localizedTwoStepStaircaseAlternative"
             ? "localized_two_step_missing_interpretation"
         : evidence.interpretationBasis === "structuredLocatorCumulativeLagAlternative"
             ? "structured_locator_missing_interpretation"
+        : evidence.interpretationBasis === "virtualSequentialFrontier"
+            ? "virtual_sequential_missing_frontier"
         : "missing_partial_interpretation_tie";
     const window = boundedWindow(
         selectedYear,
@@ -649,15 +573,135 @@ export const attachMissingPartialInterpretation = (
     primary: DiagnosisEvent,
     alternative: DiagnosisEvent,
     evidence: DiagnosisMissingPartialInterpretationEvidence,
-): DiagnosisEvent => ({
-    ...primary,
-    interpretationAmbiguity: {
-        kind: "missingRingsOrPartialMove",
-        alternative: {
-            ...alternative,
-            interpretationAmbiguity: undefined,
-            stale: primary.stale || alternative.stale ? true : undefined,
+): DiagnosisEvent => {
+    const countEvidence = evidence.countEvidence ?? (
+        evidence.missingYears.length === evidence.missingRingCount
+        && evidence.referenceCount
+            >= MISSING_PARTIAL_INTERPRETATION_CALIBRATION.minimumReferenceCount
+            ? "multiReferenceStaircase"
+            : "cumulativeLagOnly"
+    );
+    return {
+        ...primary,
+        interpretationAmbiguity: {
+            kind: "missingRingsOrPartialMove",
+            alternative: {
+                ...alternative,
+                interpretationAmbiguity: undefined,
+                stale: primary.stale || alternative.stale ? true : undefined,
+            },
+            evidence: { ...evidence, countEvidence },
         },
+    };
+};
+
+const rankedTopYear = (event: DiagnosisEvent): number => (
+    [...event.rankedYears].sort((left, right) => (
+        left.rank - right.rank || right.score - left.score || right.year - left.year
+    ))[0]?.year ?? Math.round((event.startYear + event.endYear) / 2)
+);
+
+const unitFrontierScore = (row: UnitBreakpointScore): number => (
+    row.multiScale * 0.35
+    + row.combo21 * 0.2
+    + row.combo31 * 0.15
+    + row.pairMedian31 * 0.3
+);
+
+/**
+ * Every automatic physical-gap suggestion keeps a one-step missing-ring workflow available.
+ * The alternative locates only the current bark-side unit event. The cumulative shift is never
+ * expanded into several zero insertions, and event-count wording stays uncalibrated unless an
+ * existing multi-reference staircase already resolved every unit year.
+ */
+export const attachUniversalPartialMissingWorkflow = (
+    partial: DiagnosisEvent,
+    diagnosis: SeriesCoreDiagnosis | null,
+    siteData: RwlSiteData,
+    localLagEvidence: DiagnosisLocalLagTransitionEvidence | null = null,
+): DiagnosisEvent => {
+    if (partial.eventType !== "partialMove"
+        || partial.shiftSide !== "older"
+        || (partial.shiftYears ?? 0) >= -1) return partial;
+    if (partial.interpretationAmbiguity?.kind === "missingRingsOrPartialMove") {
+        const ambiguity = partial.interpretationAmbiguity;
+        return attachMissingPartialInterpretation(
+            partial,
+            ambiguity.alternative,
+            ambiguity.evidence,
+        );
+    }
+
+    const firstFixedYear = rankedTopYear(partial);
+    const fallbackYear = Math.max(
+        partial.startYear,
+        Math.min(partial.endYear, firstFixedYear - 1),
+    );
+    const probe: DiagnosisEvent = {
+        ...partial,
+        id: `${partial.id}-virtual-missing-probe`,
+        eventType: "missingRing",
+        rankedYears: [{
+            year: fallbackYear,
+            rank: 1,
+            score: partial.evidence.score,
+            evidenceTags: ["virtual_sequential_missing_frontier"],
+        }],
+        shiftYears: undefined,
+        shiftSide: undefined,
+        interpretationAmbiguity: undefined,
+    };
+    const scores = diagnosis ? scoreUnitBoundaries(probe, diagnosis, siteData) : [];
+    const consensus = selectStableUnitLocalConsensus(
+        scores,
+        fallbackYear,
+        Math.max(2, partial.endYear - partial.startYear + 1),
+    );
+    const bestScore = [...scores].sort((left, right) => (
+        unitFrontierScore(right) - unitFrontierScore(left)
+        || Math.abs(left.year - fallbackYear) - Math.abs(right.year - fallbackYear)
+        || right.year - left.year
+    ))[0] ?? null;
+    const selectedYear = consensus?.year ?? bestScore?.year ?? fallbackYear;
+    const selectedScore = scores.find((row) => row.year === selectedYear) ?? bestScore;
+    const multiReferenceLocalized = consensus !== null
+        && (selectedScore?.referenceCount ?? 0)
+            >= MISSING_PARTIAL_INTERPRETATION_CALIBRATION.minimumReferenceCount;
+    const shiftYears = partial.shiftYears!;
+    const evidence: DiagnosisMissingPartialInterpretationEvidence = {
+        interpretationBasis: "virtualSequentialFrontier",
+        missingRingCount: Math.abs(shiftYears),
+        cumulativeShiftYears: shiftYears,
+        missingYears: [],
+        partialFirstFixedYear: firstFixedYear,
+        normalizedCounterfactualGainDifference: 0,
+        masterMargin: 0,
+        referenceMedianMargin: 0,
+        referenceCount: selectedScore?.referenceCount ?? 0,
+        missingReferenceSupport: 0,
+        partialReferenceSupport: 0,
+        countEvidence: "cumulativeLagOnly",
+        frontierYear: selectedYear,
+        frontierLocalization: multiReferenceLocalized
+            ? "multiReferenceCounterfactual"
+            : "partialBoundaryFallback",
+    };
+    const alternative = makeMissingRingInterpretation(
+        partial,
         evidence,
-    },
-});
+        partial.seriesRange ?? diagnosis?.targetRange ?? {
+            startYear: partial.startYear,
+            endYear: partial.endYear,
+        },
+    );
+    alternative.evidence.notes = Array.from(new Set([
+        ...alternative.evidence.notes,
+        "missing_workflow_applies_one_frontier_event_only",
+        ...(localLagEvidence ? [
+            `internal_lag_transition_count=${localLagEvidence.eventCount}`,
+            `internal_lag_transition_years=${localLagEvidence.evidenceYears.join(",")}`,
+            `internal_lag_transition_shift=${localLagEvidence.aggregateShiftYears}`,
+        ] : []),
+    ]));
+    return attachMissingPartialInterpretation(partial, alternative, evidence);
+};

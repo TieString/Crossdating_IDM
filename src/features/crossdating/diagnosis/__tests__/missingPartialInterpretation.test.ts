@@ -10,7 +10,7 @@ import {
     evaluateExactSequentialMissingInterpretation,
     evaluateLocalizedTwoStepMissingInterpretation,
     evaluateMissingPartialInterpretationTie,
-    evaluateSeparatedDenseStaircaseClusterInterpretation,
+    attachUniversalPartialMissingWorkflow,
     makeMissingRingInterpretation,
     makePartialMoveInterpretation,
 } from "../missingPartialInterpretation";
@@ -127,90 +127,6 @@ const partialEvent = (): DiagnosisEvent => ({
 });
 
 describe("missing/partial interpretation tie", () => {
-    it("recognizes one isolated unit step followed by a unique dense partial cluster", () => {
-        const evidence = evaluateSeparatedDenseStaircaseClusterInterpretation(
-            completedCompetition({
-                partialShiftYears: -7,
-                partialFirstFixedYear: 1821,
-                missingYears: [1787, 1816, 1818, 1820, 1821, 1823, 1824],
-                referenceCount: 54,
-                staircaseReferenceSupport: 54,
-                partialReferenceSupport: 0,
-            }),
-            {
-                year: 1826,
-                score: 10,
-                directScore: 0,
-                gainOverDirect: 10,
-                transitionCount: 7,
-                headRunYears: 1,
-                headMeanAdvantage: 0.1,
-                fixedTailMeanAdvantage: 0.3,
-                pathStartLag: -7,
-                unitEventYears: [1789, 1818, 1820, 1822, 1823, 1825, 1826],
-            },
-            { partialReviewPassed: true, hasIndependentWholeSeriesBaseline: false },
-        );
-
-        expect(evidence).toMatchObject({
-            interpretationBasis: "separatedDenseStaircaseClusterAlternative",
-            missingRingCount: 6,
-            cumulativeShiftYears: -6,
-            partialFirstFixedYear: 1821,
-            missingYears: [1818, 1820, 1822, 1823, 1825, 1826],
-        });
-    });
-
-    it("rejects a candidate amplitude unrelated to both the dense and cumulative depths", () => {
-        expect(evaluateSeparatedDenseStaircaseClusterInterpretation(
-            completedCompetition({
-                partialShiftYears: -4,
-                partialFirstFixedYear: 1821,
-                missingYears: [1787, 1816, 1818, 1820, 1821, 1823, 1824],
-            }),
-            {
-                year: 1826,
-                score: 10,
-                directScore: 0,
-                gainOverDirect: 10,
-                transitionCount: 7,
-                headRunYears: 1,
-                headMeanAdvantage: 0.1,
-                fixedTailMeanAdvantage: 0.3,
-                pathStartLag: -7,
-                unitEventYears: [1789, 1818, 1820, 1822, 1823, 1825, 1826],
-            },
-            { partialReviewPassed: true, hasIndependentWholeSeriesBaseline: false },
-        )).toBeNull();
-    });
-
-    it.each([
-        ["no separated mode", [1800, 1802, 1804, 1806, 1808, 1810, 1812]],
-        ["two separated modes", [1760, 1780, 1818, 1820, 1822, 1824, 1826]],
-        ["dense mode too wide", [1789, 1810, 1814, 1818, 1822, 1826, 1830]],
-    ])("rejects dense-cluster interpretation for %s", (_name, unitEventYears) => {
-        expect(evaluateSeparatedDenseStaircaseClusterInterpretation(
-            completedCompetition({
-                partialShiftYears: -6,
-                partialFirstFixedYear: 1821,
-                missingYears: unitEventYears,
-            }),
-            {
-                year: unitEventYears[unitEventYears.length - 1]!,
-                score: 10,
-                directScore: 0,
-                gainOverDirect: 10,
-                transitionCount: unitEventYears.length,
-                headRunYears: 1,
-                headMeanAdvantage: 0.1,
-                fixedTailMeanAdvantage: 0.3,
-                pathStartLag: -unitEventYears.length,
-                unitEventYears,
-            },
-            { partialReviewPassed: true, hasIndependentWholeSeriesBaseline: false },
-        )).toBeNull();
-    });
-
     it("accepts a balanced, local, independently reviewed -2 family tie", () => {
         const evidence = evaluateMissingPartialInterpretationTie(
             smallCompetition(),
@@ -346,10 +262,10 @@ describe("missing/partial interpretation tie", () => {
         );
         expect(missing).toMatchObject({
             eventType: "missingRing",
-            startYear: 1901,
-            endYear: 1909,
+            startYear: 1900,
+            endYear: 1908,
         });
-        expect(missing.rankedYears[0]?.year).toBe(1905);
+        expect(missing.rankedYears[0]?.year).toBe(1904);
         expect(missing.evidence.algorithmSources).toContain(
             "completed_partial_missing_interpretation",
         );
@@ -607,5 +523,35 @@ describe("missing/partial interpretation tie", () => {
             head,
             gate,
         )).toBeNull();
+    });
+
+    it("always exposes one bark-side missing frontier for an automatic partial move", () => {
+        const result = attachUniversalPartialMissingWorkflow(
+            partialEvent(),
+            null,
+            new Map(),
+        );
+
+        expect(result.interpretationAmbiguity).toMatchObject({
+            kind: "missingRingsOrPartialMove",
+            evidence: {
+                interpretationBasis: "virtualSequentialFrontier",
+                cumulativeShiftYears: -2,
+                missingRingCount: 2,
+                countEvidence: "cumulativeLagOnly",
+                frontierYear: 1904,
+                frontierLocalization: "partialBoundaryFallback",
+            },
+            alternative: {
+                eventType: "missingRing",
+            },
+        });
+        expect(result.interpretationAmbiguity?.alternative.rankedYears[0]).toMatchObject({
+            year: 1904,
+            rank: 1,
+        });
+        expect(result.interpretationAmbiguity?.alternative.evidence.notes).toContain(
+            "missing_workflow_applies_one_frontier_event_only",
+        );
     });
 });
