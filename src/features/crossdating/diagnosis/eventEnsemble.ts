@@ -4769,9 +4769,6 @@ export const isAuthoritativeWholeSeriesCheckpoint = (
     if (event.eventType !== "wholeSeriesMove"
         || !event.shiftYears
         || !event.evidence.notes.includes("candidate_hard_gate_passed")
-        || !event.evidence.notes.includes(
-            "whole_state_global_lag_matches_shift=true",
-        )
         || event.evidence.score <= 0) return false;
     const terminalSegments = latestEventNoteNumber(
         event,
@@ -4789,10 +4786,27 @@ export const isAuthoritativeWholeSeriesCheckpoint = (
         event,
         "whole_state_support_fraction=",
     ) ?? 0;
+    const newestLag = latestEventNoteNumber(
+        event,
+        "whole_state_newest_lag=",
+    );
+    const newerEdgeSupport = latestEventNoteNumber(
+        event,
+        "whole_state_newer_edge_support_fraction=",
+    ) ?? 0;
+    const globallyConsistent = event.evidence.notes.includes(
+        "whole_state_global_lag_matches_shift=true",
+    ) && terminalResidualLag === 0
+        && stateSupport >= 0.5;
+    // In a whole + local composition the local edit changes the older/global mode, while the
+    // untouched newer edge still identifies the whole-series baseline exactly.
+    const newerEdgeConsistent = newestLag === event.shiftYears
+        && newerEdgeSupport >= 0.9
+        && stateSupport >= 0.3
+        && (event.evidence.correlationGain ?? 0) >= 0.1;
     return terminalSegments >= 2
         && terminalConsistency >= 0.9
-        && terminalResidualLag === 0
-        && stateSupport >= 0.5;
+        && (globallyConsistent || newerEdgeConsistent);
 };
 
 type CumulativePartialComponent = {
@@ -4835,7 +4849,10 @@ const exactLagPathTransitions = (
     const topYear = event.rankedYears[0]?.year;
     return shiftYears !== null
         && topYear !== undefined
-        && event.evidence.algorithmSources.includes("piecewise_lag_path")
+        && event.evidence.algorithmSources.some((source) => (
+            source === "piecewise_lag_path"
+            || source === "bounded_complete_lag_path"
+        ))
         && event.evidence.score >= minimumTransitionScore
         ? [{ event, shiftYears, topYear }]
         : [];
@@ -4845,6 +4862,16 @@ type ExactLagPathChain = {
     event: DiagnosisEvent;
     aggregateShiftYears: number;
     transitionCount: number;
+};
+
+type StableBoundedLagPathFrontier = {
+    event: DiagnosisEvent;
+    aggregateShiftYears: number;
+    suffixAggregateShiftYears: number[];
+    transitionCount: number;
+    allTransitionsPartial: boolean;
+    baselineLag: number;
+    maximumYearDrift: number;
 };
 
 const withExactLagPathChain = (
@@ -4900,6 +4927,279 @@ const exactCumulativeLagPathChains = (
             - (left.event.rankedYears[0]?.year ?? Number.NEGATIVE_INFINITY)
         || right.event.evidence.score - left.event.evidence.score
     ));
+};
+
+const transitionSequenceMatches = (
+    left: readonly ExactLagPathTransition[],
+    right: readonly ExactLagPathTransition[],
+    maximumYearDrift: number,
+): boolean => left.length === right.length && left.every((transition, index) => {
+    const other = right[index];
+    return other !== undefined
+        && transition.event.eventType === other.event.eventType
+        && transition.shiftYears === other.shiftYears
+        && Math.abs(transition.topYear - other.topYear) <= maximumYearDrift;
+});
+
+const exactCompleteTransitionChain = (
+    path: BoundedLagStateEventSet,
+    baselineLag: number,
+    minimumSeparationYears: number,
+): ExactLagPathTransition[] | null => {
+    const transitions = exactLagPathTransitions(
+        path.events,
+        Number.NEGATIVE_INFINITY,
+    );
+    if (transitions.length < 2) return null;
+    for (let index = 1; index < transitions.length; index += 1) {
+        const older = transitions[index - 1];
+        const newer = transitions[index];
+        if (newer.topYear - older.topYear < minimumSeparationYears
+            || older.event.evidence.lagAfter !== newer.event.evidence.lagBefore) {
+            return null;
+        }
+    }
+    const oldestLag = transitions[0].event.evidence.lagBefore;
+    const newestLag = transitions[transitions.length - 1].event.evidence.lagAfter;
+    const aggregateShiftYears = transitions.reduce(
+        (sum, transition) => sum + transition.shiftYears,
+        0,
+    );
+    return oldestLag !== null
+        && newestLag === baselineLag
+        && oldestLag - baselineLag === aggregateShiftYears
+        ? transitions
+        : null;
+};
+
+/**
+ * A distant multi-event decomposition is authoritative only when two independently regularized
+ * complete paths agree on every operation and changepoint. This prevents a long corrected older
+ * segment from collapsing several real edits into one aggregate partial move.
+ */
+export const selectStableBoundedLagPathFrontier = (
+    penaltyOnePath: BoundedLagStateEventSet | null,
+    penaltyHalfPath: BoundedLagStateEventSet | null,
+    baselineLag = 0,
+    minimumSeparationYears = 14,
+    maximumYearDrift = 2,
+    penaltyLabel = "1,0.5",
+): StableBoundedLagPathFrontier | null => {
+    if (!penaltyOnePath || !penaltyHalfPath) return null;
+    const penaltyOneTransitions = exactCompleteTransitionChain(
+        penaltyOnePath,
+        baselineLag,
+        minimumSeparationYears,
+    );
+    const penaltyHalfTransitions = exactCompleteTransitionChain(
+        penaltyHalfPath,
+        baselineLag,
+        minimumSeparationYears,
+    );
+    if (!penaltyOneTransitions
+        || !penaltyHalfTransitions
+        || !transitionSequenceMatches(
+            penaltyOneTransitions,
+            penaltyHalfTransitions,
+            maximumYearDrift,
+        )) return null;
+    const newest = penaltyOneTransitions[penaltyOneTransitions.length - 1];
+    const aggregateShiftYears = penaltyOneTransitions.reduce(
+        (sum, transition) => sum + transition.shiftYears,
+        0,
+    );
+    let suffixShift = 0;
+    const suffixAggregateShiftYears = [...penaltyOneTransitions]
+        .reverse()
+        .map((transition) => {
+            suffixShift += transition.shiftYears;
+            return suffixShift;
+        });
+    return {
+        event: {
+            ...newest.event,
+            evidence: {
+                ...newest.event.evidence,
+                algorithmSources: Array.from(new Set([
+                    ...newest.event.evidence.algorithmSources,
+                    "stable_multiscale_bounded_path_frontier",
+                ])).sort(),
+                notes: Array.from(new Set([
+                    ...newest.event.evidence.notes,
+                    `stable_bounded_path_transition_count=${penaltyOneTransitions.length}`,
+                    `stable_bounded_path_aggregate_shift=${aggregateShiftYears}`,
+                    `stable_bounded_path_all_transitions_partial=${
+                        penaltyOneTransitions.every(({ event }) => (
+                            event.eventType === "partialMove"
+                        ))
+                    }`,
+                    `stable_bounded_path_suffix_shifts=${
+                        suffixAggregateShiftYears.join(",")
+                    }`,
+                    `stable_bounded_path_baseline_lag=${baselineLag}`,
+                    `stable_bounded_path_penalties=${penaltyLabel}`,
+                    `stable_bounded_path_maximum_year_drift=${maximumYearDrift}`,
+                ])),
+            },
+        },
+        aggregateShiftYears,
+        suffixAggregateShiftYears,
+        transitionCount: penaltyOneTransitions.length,
+        allTransitionsPartial: penaltyOneTransitions.every(({ event }) => (
+            event.eventType === "partialMove"
+        )),
+        baselineLag,
+        maximumYearDrift,
+    };
+};
+
+export const recoverStableBoundedLagPathFrontier = (
+    frontier: StableBoundedLagPathFrontier | null,
+    displayed: readonly DiagnosisEvent[],
+    operations: readonly JointCounterfactualOperationScore[] = [],
+    targetRange?: { startYear: number; endYear: number },
+): DiagnosisEvent | null => {
+    if (!frontier) return null;
+    const componentShift = lagPathTransitionShift(frontier.event);
+    const componentYear = frontier.event.rankedYears[0]?.year;
+    if (componentShift === null || componentYear === undefined) return null;
+    const matchingDisplayedComponent = displayed.find((event) => (
+        event.eventType === frontier.event.eventType
+        && event.shiftYears === frontier.event.shiftYears
+    ));
+    const matchingDisplayedAggregate = displayed.find((event) => (
+        event.eventType === "partialMove"
+        && event.shiftYears !== undefined
+        && frontier.suffixAggregateShiftYears.includes(event.shiftYears)
+    ));
+    const matchingDisplayedWholeComponent = displayed.find((event) => (
+        event.eventType === "wholeSeriesMove"
+        && event.shiftYears === componentShift
+        && frontier.transitionCount >= 2
+    ));
+    const matchingDisplayedWholeAggregate = displayed.find((event) => (
+        event.eventType === "wholeSeriesMove"
+        && event.shiftYears !== undefined
+        && frontier.allTransitionsPartial
+        && frontier.transitionCount >= 2
+        && Math.abs(event.shiftYears - frontier.aggregateShiftYears) <= 1
+    ));
+    const matchingOperation = operations.find((operation) => (
+        operation.eventType === frontier.event.eventType
+        && operation.shiftYears === componentShift
+    ));
+    const partialOperationSupported = matchingOperation !== undefined
+        && scoreDynamicJointOperation(matchingOperation, operations) >= 0.02
+        && matchingOperation.bestDifferenceGain >= 0.02
+        && matchingOperation.bestCombinedGain >= 0.015
+        && matchingOperation.topThreeDifferenceGain >= 0.02;
+    if (frontier.event.eventType === "partialMove"
+        && !matchingDisplayedComponent
+        && !matchingDisplayedAggregate
+        && !matchingDisplayedWholeComponent
+        && !matchingDisplayedWholeAggregate
+        && !partialOperationSupported) return null;
+    const operationYear = partialOperationSupported
+        ? matchingOperation?.bestYear ?? null
+        : null;
+    const operationPathDistance = operationYear === null
+        ? null
+        : Math.abs(operationYear - componentYear);
+    const calibratedCenter = frontier.event.eventType === "partialMove"
+        ? operationPathDistance !== null
+            && operationPathDistance >= 2
+            && operationPathDistance <= 12
+            ? Math.round((operationYear! + componentYear) / 2)
+            : componentYear + (componentShift <= -10 ? 1 : 0)
+        : componentYear;
+    const width = 13;
+    let calibratedStart = calibratedCenter - Math.floor(width / 2);
+    let calibratedEnd = calibratedStart + width - 1;
+    if (targetRange) {
+        if (calibratedStart < targetRange.startYear) {
+            calibratedStart = targetRange.startYear;
+            calibratedEnd = calibratedStart + width - 1;
+        }
+        if (calibratedEnd > targetRange.endYear) {
+            calibratedEnd = targetRange.endYear;
+            calibratedStart = calibratedEnd - width + 1;
+        }
+    }
+    const preferredTop = operationYear !== null
+        && operationYear >= calibratedStart
+        && operationYear <= calibratedEnd
+        ? operationYear
+        : componentYear;
+    const existingYears = new Map(frontier.event.rankedYears.map((row) => [row.year, row]));
+    const maximumScore = Math.max(0, ...frontier.event.rankedYears.map((row) => row.score));
+    const calibratedRankedYears = Array.from(
+        { length: calibratedEnd - calibratedStart + 1 },
+        (_, offset) => calibratedStart + offset,
+    ).map((year) => {
+        const existing = existingYears.get(year);
+        return {
+            year,
+            score: year === preferredTop
+                ? maximumScore + Math.max(1e-9, Math.abs(maximumScore) * 1e-12)
+                : existing?.score ?? 0,
+            rank: 0,
+            evidenceTags: Array.from(new Set([
+                ...(existing?.evidenceTags ?? []),
+                "stable_multiscale_bounded_path_frontier",
+                ...(year === operationYear ? ["joint_operation_location"] : []),
+            ])),
+        };
+    }).sort((left, right) => (
+        right.score - left.score || right.year - left.year
+    )).map((row, index) => ({ ...row, rank: index + 1 }));
+    const authority = matchingDisplayedAggregate
+        ?? matchingDisplayedWholeComponent
+        ?? displayed.find((event) => event.eventType === "wholeSeriesMove")
+        ?? null;
+    return {
+        ...frontier.event,
+        id: `${frontier.event.id}-stable-multiscale-frontier`,
+        startYear: calibratedStart,
+        endYear: calibratedEnd,
+        rankedYears: calibratedRankedYears,
+        confidenceLevel: frontier.event.confidenceLevel === "low"
+            ? "medium"
+            : frontier.event.confidenceLevel,
+        alternativeTypes: [],
+        locationAlternatives: undefined,
+        operationAlternatives: undefined,
+        evidence: {
+            ...frontier.event.evidence,
+            correlationGain: Math.max(
+                frontier.event.evidence.correlationGain ?? 0,
+                authority?.evidence.correlationGain ?? 0,
+            ),
+            lagBefore: componentShift,
+            lagAfter: 0,
+            candidateIds: Array.from(new Set([
+                ...frontier.event.evidence.candidateIds,
+                ...(authority?.evidence.candidateIds ?? []),
+            ])),
+            notes: Array.from(new Set([
+                ...frontier.event.evidence.notes,
+                `stable_bounded_path_component_shift=${componentShift}`,
+                `stable_bounded_path_component_year=${componentYear}`,
+                ...(matchingDisplayedWholeAggregate ? [
+                    `stable_bounded_path_replaced_whole_alias=${
+                        matchingDisplayedWholeAggregate.shiftYears
+                    }`,
+                ] : []),
+                `stable_bounded_path_calibrated_center=${calibratedCenter}`,
+                `stable_bounded_path_preferred_year=${preferredTop}`,
+                ...(operationYear === null ? [] : [
+                    `stable_bounded_path_operation_year=${operationYear}`,
+                ]),
+                ...(frontier.event.eventType === "partialMove"
+                    ? [`counterfactual_correction_years=${componentShift}`]
+                    : []),
+            ])),
+        },
+    };
 };
 
 export const selectCumulativeLagPathFrontier = (
@@ -7985,16 +8285,20 @@ export const makeDiagnosisEvents = (
             useCofechaStandardization: boolean,
             allowedLags?: readonly number[],
             terminalLags: readonly number[] = boundedTerminalLags,
+            transitionPenalty = 3,
+            minimumTransitionGain = 2,
+            forceFit = false,
+            maxSegments = 5,
         ): BoundedLagStateEventSet | null => (
-            shouldFitBoundedPath
+            shouldFitBoundedPath || forceFit
                 ? locateBoundedLagStateEvents(
                 diagnosis,
                 siteData,
                 {
                     ...INTERNAL_EVENT_PATH_CONFIG,
                     useCofechaStandardization,
-                    transitionPenaltyUnit: 3,
-                    transitionPenaltyBig: 3,
+                    transitionPenaltyUnit: transitionPenalty,
+                    transitionPenaltyBig: transitionPenalty,
                     transitionPenaltyPerYear: 0,
                     minLag: effectiveConfig.lagMin,
                     maxLag: effectiveConfig.lagMax,
@@ -8002,11 +8306,12 @@ export const makeDiagnosisEvents = (
                     ...options.eventPathConfig,
                 },
                 {
-                    maxSegments: 5,
+                    maxSegments,
                     minRunYears: 18,
                     windowWidth: 13,
                     terminalLags,
                     allowedLags,
+                    minimumTransitionGain,
                     minimumWholeLagGain: 8,
                 },
                 locatorPathCache,
@@ -8257,7 +8562,7 @@ export const makeDiagnosisEvents = (
                 siteData,
                 {
                     candidateRadiusYears: 3,
-                    refinePartialLocations: true,
+                    refinePartialLocations: false,
                 },
             )
             : [];
@@ -8268,6 +8573,165 @@ export const makeDiagnosisEvents = (
                 diagnosis.targetRange,
             )
         )) ?? [];
+        const boundedHypotheses = [
+            ...candidateEvents,
+            ...detectedBeforeFusion,
+            ...detected,
+            ...displayed,
+        ];
+        const needsStableMultiscaleBoundedPath = shouldFitBoundedPath && (
+            boundedHypotheses.some((event) => (
+                event.eventType === "wholeSeriesMove"
+                || (event.eventType === "partialMove"
+                    && Math.abs(event.shiftYears ?? 0) >= 2)
+            ))
+            || (initialCofechaBoundedResult?.events.filter((event) => (
+                event.eventType !== "wholeSeriesMove"
+            )).length ?? 0) >= 2
+            || (rawBoundedResult?.events.filter((event) => (
+                event.eventType !== "wholeSeriesMove"
+            )).length ?? 0) >= 2
+        );
+        const terminalBaselineLag = boundedTerminalLags.length === 1
+            ? boundedTerminalLags[0]
+            : 0;
+        const hasAuthoritativeWholeBaseline = wholeBaselineHypotheses.some(
+            isAuthoritativeWholeSeriesCheckpoint,
+        );
+        const rawTerminalAliasProbe = needsStableMultiscaleBoundedPath
+            && terminalBaselineLag !== 0
+            ? rawBoundedResult ?? locateBoundedEvents(false)
+            : null;
+        const terminalLocalTransitionHasIndependentOperationSupport =
+            rawTerminalAliasProbe?.events.some((event) => {
+                const transitionShift = lagPathTransitionShift(event);
+                if (transitionShift === null || event.evidence.lagAfter !== terminalBaselineLag) {
+                    return false;
+                }
+                return (
+                    requiredUnitOperation !== null
+                    && event.eventType === requiredUnitOperation.eventType
+                    && transitionShift === requiredUnitOperation.shiftYears
+                ) || (
+                    trustedPartialOperation !== null
+                    && event.eventType === "partialMove"
+                    && transitionShift === trustedPartialOperation.shiftYears
+                );
+            }) === true;
+        const terminalBaselineIsUnsupportedAlias = terminalBaselineLag !== 0
+            && !hasAuthoritativeWholeBaseline
+            && rawTerminalAliasProbe !== null
+            && !(
+                rawTerminalAliasProbe.path.runs[
+                    rawTerminalAliasProbe.path.runs.length - 1
+                ]?.lag === terminalBaselineLag
+                && terminalLocalTransitionHasIndependentOperationSupport
+            )
+            && rawTerminalAliasProbe.path.wholeLagGain < 0;
+        const stableTerminalLags = terminalBaselineIsUnsupportedAlias
+            ? [0]
+            : boundedTerminalLags;
+        const unflaggedUnitPulseProbeEligible = diagnosis.master.sourceTrees.length >= 8
+            && diagnosis.targetRange.endYear - diagnosis.targetRange.startYear + 1 >= 120
+            && (
+                displayed.length === 0
+                || boundedHypotheses.filter((event) => (
+                    event.eventType !== "wholeSeriesMove"
+                )).length >= 2
+            );
+        const unflaggedUnitPenaltyOnePath = unflaggedUnitPulseProbeEligible
+            ? locateBoundedEvents(false, [-1, 0, 1], [0], 1, 2, true, 6)
+            : null;
+        const unflaggedUnitPenaltyHalfPath = unflaggedUnitPulseProbeEligible
+            ? locateBoundedEvents(false, [-1, 0, 1], [0], 0.5, 2, true, 6)
+            : null;
+        const unflaggedUnitPulseCandidate = selectStableBoundedLagPathFrontier(
+            unflaggedUnitPenaltyOnePath,
+            unflaggedUnitPenaltyHalfPath,
+        );
+        const unflaggedUnitPulseFrontier = unflaggedUnitPulseCandidate?.transitionCount === 2
+            && unflaggedUnitPulseCandidate.aggregateShiftYears === 0
+            && (unflaggedUnitPulseCandidate.event.eventType === "missingRing"
+                || unflaggedUnitPulseCandidate.event.eventType === "falseRing")
+            && (unflaggedUnitPenaltyOnePath?.path.transitionGain ?? 0) >= 3
+            && (unflaggedUnitPenaltyOnePath?.path.runnerUpMargin ?? 0) >= 0.5
+            ? {
+                    ...unflaggedUnitPulseCandidate,
+                    event: {
+                        ...unflaggedUnitPulseCandidate.event,
+                        evidence: {
+                            ...unflaggedUnitPulseCandidate.event.evidence,
+                            notes: [
+                                ...unflaggedUnitPulseCandidate.event.evidence.notes,
+                                "stable_bounded_path_unflagged_unit_probe=true",
+                            ],
+                        },
+                    },
+                }
+            : null;
+        const rawPenaltyOneStablePath = needsStableMultiscaleBoundedPath
+            ? locateBoundedEvents(false, undefined, stableTerminalLags, 1, 2, false, 6)
+            : null;
+        const rawPenaltyHalfStablePath = needsStableMultiscaleBoundedPath
+            ? locateBoundedEvents(false, undefined, stableTerminalLags, 0.5, 0.5, false, 6)
+            : null;
+        const strongMultiscaleBoundedFrontier = selectStableBoundedLagPathFrontier(
+            rawPenaltyOneStablePath,
+            rawPenaltyHalfStablePath,
+            terminalBaselineIsUnsupportedAlias ? 0 : terminalBaselineLag,
+        );
+        const zeroTerminalPenaltyOneStablePath = needsStableMultiscaleBoundedPath
+            && terminalBaselineLag !== 0
+            && !hasAuthoritativeWholeBaseline
+            ? locateBoundedEvents(false, undefined, [0], 1, 2, false, 6)
+            : null;
+        const zeroTerminalPenaltyHalfStablePath = zeroTerminalPenaltyOneStablePath
+            ? locateBoundedEvents(false, undefined, [0], 0.5, 0.5, false, 6)
+            : null;
+        const zeroTerminalWholeAliasFrontier = selectStableBoundedLagPathFrontier(
+            zeroTerminalPenaltyOneStablePath,
+            zeroTerminalPenaltyHalfStablePath,
+            0,
+        );
+        const decomposedWholeAliasFrontier = zeroTerminalWholeAliasFrontier
+            ?.allTransitionsPartial
+            && zeroTerminalWholeAliasFrontier.transitionCount >= 2
+            && wholeBaselineHypotheses.some((event) => (
+                event.shiftYears !== undefined
+                && Math.abs(
+                    event.shiftYears
+                    - zeroTerminalWholeAliasFrontier.aggregateShiftYears
+                ) <= 1
+            ))
+            ? zeroTerminalWholeAliasFrontier
+            : null;
+        const rawPenaltyQuarterStablePath = needsStableMultiscaleBoundedPath
+            && strongMultiscaleBoundedFrontier === null
+            ? locateBoundedEvents(false, undefined, stableTerminalLags, 0.25, 0.5, false, 6)
+            : null;
+        const weakUnitPulseFrontier = selectStableBoundedLagPathFrontier(
+            rawPenaltyHalfStablePath,
+            rawPenaltyQuarterStablePath,
+            terminalBaselineIsUnsupportedAlias ? 0 : terminalBaselineLag,
+            14,
+            2,
+            "0.5,0.25",
+        );
+        const stableMultiscaleBoundedFrontier = decomposedWholeAliasFrontier
+            ?? strongMultiscaleBoundedFrontier
+            ?? (weakUnitPulseFrontier
+                && (
+                    weakUnitPulseFrontier.transitionCount > 2
+                    || (
+                        weakUnitPulseFrontier.transitionCount === 2
+                        && weakUnitPulseFrontier.aggregateShiftYears === 0
+                        && (weakUnitPulseFrontier.event.eventType === "missingRing"
+                            || weakUnitPulseFrontier.event.eventType === "falseRing")
+                    )
+                )
+                ? weakUnitPulseFrontier
+                : null)
+            ?? unflaggedUnitPulseFrontier;
         const decisiveExactPartialHypotheses = [
             ...boundedPathEvents,
             ...displayed,
@@ -8445,6 +8909,17 @@ export const makeDiagnosisEvents = (
             (event) => event.eventType !== "wholeSeriesMove",
         );
         const mayRecoverSequentialMissing = cofechaFlagged;
+        const stableBoundedPathFrontier = recoverStableBoundedLagPathFrontier(
+            stableMultiscaleBoundedFrontier,
+            displayed,
+            boundedOperations,
+            diagnosis.targetRange,
+        );
+        if (stableBoundedPathFrontier) {
+            // The complete path has already resolved the serial frontier. Aggregate move
+            // hypotheses are intentionally excluded so later review cannot recombine it.
+            return finalize([stableBoundedPathFrontier], [], false);
+        }
         if (options.enableCounterfactualEventLocator !== true
             || (!hasLocalEvent && !mayRecoverSequentialMissing)) {
             return finalize(displayed);

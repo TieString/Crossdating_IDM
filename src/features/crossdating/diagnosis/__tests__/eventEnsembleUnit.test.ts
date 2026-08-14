@@ -18,7 +18,9 @@ import {
     pruneLocalEventsDisconnectedFromWholeBaseline,
     projectSequentialUnitChainHead,
     recoverCandidateBackedPartialConsensus,
+    recoverStableBoundedLagPathFrontier,
     selectCumulativeLagPathFrontier,
+    selectStableBoundedLagPathFrontier,
     selectCandidateBackedCumulativeUnitFrontier,
     reconcileCumulativeUnitOperationWithCompletedLocation,
     refineBoundedPathLocationWithOperation,
@@ -51,6 +53,7 @@ import {
     unitEventExplainsWholeSeriesCandidate,
     wholeSeriesEventIsLocalUnitAlias,
 } from "../eventEnsemble";
+import type { BoundedLagStateEventSet } from "../eventPath";
 import type { JointCounterfactualOperationScore } from "../jointCounterfactualOperation";
 import type { CompletedPartialMissingComposition } from "../discreteMissingStaircaseCompetition";
 
@@ -2129,6 +2132,24 @@ describe("isAuthoritativeWholeSeriesCheckpoint", () => {
         expect(isAuthoritativeWholeSeriesCheckpoint(whole())).toBe(true);
     });
 
+    it("uses the fixed newer edge as the whole baseline when one local unit event shifts the global mode", () => {
+        const mixed = whole();
+        mixed.confidenceLevel = "low";
+        mixed.evidence.correlationGain = 0.18;
+        mixed.evidence.notes = [
+            "candidate_hard_gate_passed",
+            "cofecha_terminal_segments=3",
+            "cofecha_terminal_consistency=1.000000",
+            "cofecha_terminal_residual_lag=-1",
+            "whole_state_support_fraction=0.333333",
+            "whole_state_newer_edge_support_fraction=1.000000",
+            "whole_state_newest_lag=4",
+            "whole_state_global_lag_matches_shift=false",
+        ];
+
+        expect(isAuthoritativeWholeSeriesCheckpoint(mixed)).toBe(true);
+    });
+
     it("does not protect a weak cumulative-lag alias", () => {
         const alias = whole();
         alias.evidence.score = -24;
@@ -2139,6 +2160,23 @@ describe("isAuthoritativeWholeSeriesCheckpoint", () => {
                     ? "whole_state_global_lag_matches_shift=false"
                     : note
         ));
+        expect(isAuthoritativeWholeSeriesCheckpoint(alias)).toBe(false);
+    });
+
+    it("does not treat a local terminal alias as an independently supported whole baseline", () => {
+        const alias = whole();
+        alias.evidence.correlationGain = 0.2;
+        alias.evidence.notes = [
+            "candidate_hard_gate_passed",
+            "cofecha_terminal_segments=3",
+            "cofecha_terminal_consistency=1.000000",
+            "cofecha_terminal_residual_lag=-1",
+            "whole_state_support_fraction=0.333333",
+            "whole_state_newer_edge_support_fraction=1.000000",
+            "whole_state_newest_lag=0",
+            "whole_state_global_lag_matches_shift=false",
+        ];
+
         expect(isAuthoritativeWholeSeriesCheckpoint(alias)).toBe(false);
     });
 });
@@ -2203,6 +2241,280 @@ describe("selectCumulativePartialFrontier", () => {
             },
         };
     };
+    const boundedPath = (
+        events: DiagnosisEvent[],
+    ): BoundedLagStateEventSet => ({
+        path: {
+            runs: [],
+            score: 20,
+            bestConstantScore: 0,
+            zeroLagScore: 0,
+            transitionGain: 20,
+            wholeLagGain: 0,
+            runnerUpMargin: 1,
+        },
+        events,
+    });
+
+    it("selects a distant multiscale path frontier only when both penalties agree", () => {
+        const penaltyOne = boundedPath([
+            pathEvent(-20, -26, -6, 1750),
+            pathEvent(-6, -6, 0, 1780),
+        ]);
+        const penaltyHalf = boundedPath([
+            pathEvent(-20, -26, -6, 1751),
+            pathEvent(-6, -6, 0, 1781),
+        ]);
+
+        const selected = selectStableBoundedLagPathFrontier(
+            penaltyOne,
+            penaltyHalf,
+        );
+
+        expect(selected).toMatchObject({
+            aggregateShiftYears: -26,
+            suffixAggregateShiftYears: [-6, -26],
+            transitionCount: 2,
+            allTransitionsPartial: true,
+            baselineLag: 0,
+            event: {
+                eventType: "partialMove",
+                shiftYears: -6,
+            },
+        });
+        expect(selected?.event.rankedYears[0]?.year).toBe(1780);
+    });
+
+    it("rejects close, discontinuous, or penalty-unstable decompositions", () => {
+        const separated = boundedPath([
+            pathEvent(-20, -26, -6, 1750),
+            pathEvent(-6, -6, 0, 1780),
+        ]);
+        expect(selectStableBoundedLagPathFrontier(separated, boundedPath([
+            pathEvent(-20, -26, -6, 1750),
+            pathEvent(-6, -6, 0, 1758),
+        ]))).toBeNull();
+        expect(selectStableBoundedLagPathFrontier(separated, boundedPath([
+            pathEvent(-20, -26, -6, 1750),
+            pathEvent(-6, -7, -1, 1780),
+        ]))).toBeNull();
+        expect(selectStableBoundedLagPathFrontier(separated, boundedPath([
+            pathEvent(-19, -25, -6, 1750),
+            pathEvent(-6, -6, 0, 1780),
+        ]))).toBeNull();
+    });
+
+    it("keeps a supported non-zero whole baseline outside the local path", () => {
+        const penaltyOne = boundedPath([
+            pathEvent(-20, -30, -10, 1750),
+            pathEvent(-6, -10, -4, 1780),
+        ]);
+        const penaltyHalf = boundedPath([
+            pathEvent(-20, -30, -10, 1751),
+            pathEvent(-6, -10, -4, 1781),
+        ]);
+
+        const selected = selectStableBoundedLagPathFrontier(
+            penaltyOne,
+            penaltyHalf,
+            -4,
+        );
+
+        expect(selected).toMatchObject({
+            aggregateShiftYears: -26,
+            baselineLag: -4,
+            event: { shiftYears: -6 },
+        });
+    });
+
+    it("accepts a stable distant unit pulse that returns to its baseline", () => {
+        const unitPathEvent = (
+            eventType: "missingRing" | "falseRing",
+            lagBefore: number,
+            lagAfter: number,
+            year: number,
+        ): DiagnosisEvent => ({
+            ...pathEvent(lagBefore - lagAfter, lagBefore, lagAfter, year),
+            eventType,
+            shiftYears: undefined,
+            shiftSide: undefined,
+        });
+        const penaltyHalf = boundedPath([
+            unitPathEvent("missingRing", 0, 1, 1750),
+            unitPathEvent("falseRing", 1, 0, 1780),
+        ]);
+        const penaltyQuarter = boundedPath([
+            unitPathEvent("missingRing", 0, 1, 1751),
+            unitPathEvent("falseRing", 1, 0, 1781),
+        ]);
+
+        const selected = selectStableBoundedLagPathFrontier(
+            penaltyHalf,
+            penaltyQuarter,
+            0,
+            14,
+            2,
+            "0.5,0.25",
+        );
+
+        expect(selected).toMatchObject({
+            aggregateShiftYears: 0,
+            transitionCount: 2,
+            event: { eventType: "falseRing" },
+        });
+        expect(selected?.event.evidence.notes).toContain(
+            "stable_bounded_path_penalties=0.5,0.25",
+        );
+    });
+
+    it("does not turn a stable path into an unsupported large partial operation", () => {
+        const selected = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                pathEvent(-10, -53, -43, 1450),
+                pathEvent(-43, -43, 0, 1490),
+            ]),
+            boundedPath([
+                pathEvent(-10, -53, -43, 1451),
+                pathEvent(-43, -43, 0, 1491),
+            ]),
+        );
+
+        expect(recoverStableBoundedLagPathFrontier(selected, [], [])).toBeNull();
+        expect(recoverStableBoundedLagPathFrontier(
+            selected,
+            [],
+            [operation(-43, 1490)],
+        )).toMatchObject({ eventType: "partialMove", shiftYears: -43 });
+    });
+
+    it("uses a displayed cumulative operation to authorize the newest path component", () => {
+        const selected = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                pathEvent(-6, -26, -20, 1749),
+                pathEvent(-20, -20, 0, 1779),
+            ]),
+            boundedPath([
+                pathEvent(-6, -26, -20, 1750),
+                pathEvent(-20, -20, 0, 1780),
+            ]),
+        );
+        const aggregate = candidate("aggregate", -26, -26, 0, 1756);
+
+        expect(recoverStableBoundedLagPathFrontier(
+            selected,
+            [aggregate],
+            [],
+        )).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -20,
+            startYear: 1774,
+            endYear: 1786,
+        });
+    });
+
+    it("decomposes a non-authoritative whole alias into stable partial components", () => {
+        const selected = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                pathEvent(-20, -26, -6, 1346),
+                pathEvent(-6, -6, 0, 1376),
+            ]),
+            boundedPath([
+                pathEvent(-20, -26, -6, 1347),
+                pathEvent(-6, -6, 0, 1377),
+            ]),
+        );
+        const wholeAlias = candidate("whole-alias", -26, -26, -26, 1500);
+        wholeAlias.eventType = "wholeSeriesMove";
+        wholeAlias.rankedYears = [];
+
+        expect(recoverStableBoundedLagPathFrontier(
+            selected,
+            [wholeAlias],
+            [],
+        )).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -6,
+        });
+    });
+
+    it("does not decompose a whole baseline through a mixed unit and partial path", () => {
+        const unit = pathEvent(1, -3, -4, 1361);
+        unit.eventType = "falseRing";
+        unit.shiftYears = undefined;
+        unit.shiftSide = undefined;
+        const selected = selectStableBoundedLagPathFrontier(
+            boundedPath([unit, pathEvent(-4, -4, 0, 1499)]),
+            boundedPath([{ ...unit, rankedYears: [{
+                ...unit.rankedYears[0]!,
+                year: 1362,
+            }] }, pathEvent(-4, -4, 0, 1500)]),
+        );
+        const whole = candidate("whole", -3, -3, -3, 1500);
+        whole.eventType = "wholeSeriesMove";
+        whole.rankedYears = [];
+
+        expect(selected?.allTransitionsPartial).toBe(false);
+        expect(recoverStableBoundedLagPathFrontier(selected, [whole], [])).toBeNull();
+    });
+
+    it("matches a displayed operation against a stable newest path suffix", () => {
+        const selected = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                pathEvent(-78, -99, -21, 1786),
+                {
+                    ...pathEvent(-1, -21, -20, 1873),
+                    eventType: "missingRing",
+                    shiftYears: undefined,
+                    shiftSide: undefined,
+                },
+                pathEvent(-20, -20, 0, 1901),
+            ]),
+            boundedPath([
+                pathEvent(-78, -99, -21, 1787),
+                {
+                    ...pathEvent(-1, -21, -20, 1874),
+                    eventType: "missingRing",
+                    shiftYears: undefined,
+                    shiftSide: undefined,
+                },
+                pathEvent(-20, -20, 0, 1902),
+            ]),
+        );
+        const aggregate = candidate("aggregate", -21, -21, 0, 1898);
+
+        expect(selected?.suffixAggregateShiftYears).toEqual([-20, -21, -99]);
+        expect(recoverStableBoundedLagPathFrontier(
+            selected,
+            [aggregate],
+            [],
+        )).toMatchObject({ eventType: "partialMove", shiftYears: -20 });
+    });
+
+    it("centers a stable partial window over agreeing path and operation locations", () => {
+        const selected = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                pathEvent(-20, -26, -6, 1800),
+                pathEvent(-6, -6, 0, 1840),
+            ]),
+            boundedPath([
+                pathEvent(-20, -26, -6, 1801),
+                pathEvent(-6, -6, 0, 1841),
+            ]),
+        );
+
+        const recovered = recoverStableBoundedLagPathFrontier(
+            selected,
+            [],
+            [operation(-6, 1832)],
+            { startYear: 1700, endYear: 2000 },
+        );
+
+        expect(recovered).toMatchObject({
+            startYear: 1830,
+            endYear: 1842,
+        });
+        expect(recovered?.rankedYears[0]).toMatchObject({ year: 1832, rank: 1 });
+    });
 
     it("returns the newer component of two independently separated partial steps", () => {
         const aggregate = candidate("aggregate", -26, -26, 0, 1772);

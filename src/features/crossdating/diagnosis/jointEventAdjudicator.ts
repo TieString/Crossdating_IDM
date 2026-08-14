@@ -1050,15 +1050,56 @@ const finalFrontierClusters = (
         ))
     ));
     if (boundedPathClusters.length > 0) {
-        const wholeBaseline = boundedPathClusters.find((cluster) => (
+        const selectedWhole = selectedFinalClusters.find((cluster) => (
             representative(cluster).event.eventType === "wholeSeriesMove"
         ));
-        if (wholeBaseline) return [wholeBaseline];
-        const corroboratedSelected = selectedFinalClusters.filter((selected) => (
-            boundedPathClusters.some((bounded) => sameOperation(
+        if (selectedWhole) {
+            const wholeShift = representative(selectedWhole).event.shiftYears;
+            const localOnWholeBaseline = boundedPathClusters.filter((cluster) => {
+                const event = representative(cluster).event;
+                return event.eventType !== "wholeSeriesMove"
+                    && event.evidence.lagAfter === wholeShift;
+            }).sort((left, right) => (
+                (topYear(representative(right).event) ?? Number.NEGATIVE_INFINITY)
+                    - (topYear(representative(left).event) ?? Number.NEGATIVE_INFINITY)
+            ));
+            // A local transition may precede the whole correction only when its untouched
+            // newer state is exactly the selected whole baseline.
+            return localOnWholeBaseline.length > 0
+                ? [localOnWholeBaseline[0]!]
+                : [selectedWhole];
+        }
+        const boundedWhole = boundedPathClusters.find((cluster) => (
+            representative(cluster).event.eventType === "wholeSeriesMove"
+        ));
+        if (boundedWhole) return [boundedWhole];
+        const selectedLocal = selectedFinalClusters.filter((cluster) => (
+            representative(cluster).event.eventType !== "wholeSeriesMove"
+        ));
+        const operationProtectedSelectedLocal = selectedLocal.filter((cluster) => (
+            !representative(cluster).event.evidence.notes.includes(
+                "completed_mixed_source_segment_anchored=false",
+            )
+        ));
+        const boundedMatchingSelectedOperation = boundedPathClusters.filter((bounded) => (
+            operationProtectedSelectedLocal.some((selected) => sameOperation(
                 representative(selected).event,
                 representative(bounded).event,
             ))
+        ));
+        if (operationProtectedSelectedLocal.length > 0
+            && boundedMatchingSelectedOperation.length === 0) {
+            // Supplemental paths can sharpen a selected operation, but an ordinary bounded
+            // checkpoint cannot rewrite the operation already emitted by the production pass.
+            return operationProtectedSelectedLocal;
+        }
+        const corroboratedSelected = selectedFinalClusters.filter((selected) => (
+            boundedMatchingSelectedOperation.some((bounded) => {
+                const selectedEvent = representative(selected).event;
+                const boundedEvent = representative(bounded).event;
+                return sameOperation(selectedEvent, boundedEvent)
+                    && sameLocationMode(selectedEvent, boundedEvent);
+            })
         ));
         if (corroboratedSelected.length > 0) {
             return [[...new Set([
@@ -1080,7 +1121,16 @@ const finalFrontierClusters = (
         if (independentlyLocatedSelectedUnit.length > 0) {
             return independentlyLocatedSelectedUnit;
         }
-        return [[...boundedPathClusters].sort((left, right) => (
+        const strongRemoteBounded = boundedMatchingSelectedOperation.filter(
+            hasIndependentLocationAuthority,
+        );
+        if (operationProtectedSelectedLocal.length > 0
+            && strongRemoteBounded.length === 0) {
+            return operationProtectedSelectedLocal;
+        }
+        return [[...(strongRemoteBounded.length > 0
+            ? strongRemoteBounded
+            : boundedPathClusters)].sort((left, right) => (
             (topYear(representative(right).event) ?? Number.NEGATIVE_INFINITY)
                 - (topYear(representative(left).event) ?? Number.NEGATIVE_INFINITY)
             || representative(right).event.endYear

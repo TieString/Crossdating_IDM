@@ -95,6 +95,23 @@ describe("event hypothesis locator adjudication", () => {
         expect(result.event.rankedYears[0]?.year).toBe(1902);
     });
 
+    it("does not widen an unstructured checkpoint when the locator has zero separating evidence", () => {
+        const checkpoint = event(1807, 1813, [], 1810);
+        const proposal = event(1800, 1812, [
+            "counterfactual_window_concentration=0",
+            "counterfactual_window_remote_margin=0",
+            "counterfactual_pair_reference_count=16",
+        ], 1810, true);
+        const result = adjudicateLocatorProposal(checkpoint, proposal);
+
+        expect(result).toMatchObject({
+            accepted: false,
+            reason: "fallback_overlapping_precision_regression",
+            precisionRegression: true,
+        });
+        expect(result.event).toMatchObject({ startYear: 1807, endYear: 1813 });
+    });
+
     it("allows a precision-changing overlapping proposal when calibrated channels dominate", () => {
         const checkpoint = event(1899, 1905, [], 1902, true);
         const proposal = event(1897, 1909, [

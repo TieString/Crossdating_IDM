@@ -408,10 +408,15 @@ export const adjudicateLocatorProposal = (
     const protectedPrecisionRegression = evidence.structuredCheckpoint
         && evidence.precisionRegression
         && !detachedEvidenceStrong;
+    const unsupportedPrecisionRegression = evidence.precisionRegression
+        && evidence.proposedWidth > evidence.checkpointWidth
+        && evidence.concentration <= 0
+        && evidence.remoteMargin <= 0
+        && !detachedEvidenceStrong;
     const reason: DiagnosisLocatorDecisionReason = !operationContractValid
         ? "fallback_operation_contract"
         : sharedYears > 0
-            ? protectedPrecisionRegression
+            ? protectedPrecisionRegression || unsupportedPrecisionRegression
                 ? "fallback_overlapping_precision_regression"
                 : evidence.precisionRegression && detachedEvidenceStrong
                     ? "accepted_overlapping_strong_mode"

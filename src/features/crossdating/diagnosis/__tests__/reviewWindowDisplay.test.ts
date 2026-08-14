@@ -426,6 +426,25 @@ describe("lower review-window display gate", () => {
         });
     });
 
+    it("keeps a bounded partial transition measured relative to a whole baseline", () => {
+        const partial = reviewablePartial(-20, {
+            lagBefore: -24,
+            lagAfter: -4,
+            samplePairs: 120,
+            algorithmSources: ["bounded_complete_lag_path"],
+            notes: [
+                "bounded_path_complete_hypothesis=true",
+                "bounded_path_transition_gain=36",
+            ],
+        });
+
+        expect(selectReviewWindowDisplay(audit([]), [partial])).toMatchObject({
+            status: "strict",
+            reason: "strict_event",
+            event: partial,
+        });
+    });
+
     it("shows a partial carrying a concentrated local two-step interpretation", () => {
         const partial = reviewablePartial(-2, {
             algorithmSources: [

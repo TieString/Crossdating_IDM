@@ -572,6 +572,16 @@ describe("joint event adjudicator", () => {
         const selected = event("selected-old-mode", "missingRing", 1952, 1964, 1958);
         const bounded = event("bounded-new-frontier", "missingRing", 1969, 1981, 1975);
         bounded.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        bounded.evidence.locationEvidence = [{
+            source: "bounded_complete_lag_path",
+            startYear: 1969,
+            endYear: 1981,
+            topYear: 1975,
+            referenceCount: 12,
+            concentration: 0.8,
+            remoteMargin: 0.2,
+            calibrated: false,
+        }];
 
         const decision = adjudicateJointEventHypotheses("TARGET", [
             { stage: "final", authority: "selected", event: selected },
@@ -585,6 +595,61 @@ describe("joint event adjudicator", () => {
                 startYear: 1969,
                 endYear: 1981,
             },
+        });
+    });
+
+    it("does not let a supplemental bounded path rewrite a selected operation", () => {
+        const selected = event("selected-partial", "partialMove", 1773, 1785, 1779);
+        selected.shiftYears = -20;
+        selected.evidence.lagBefore = -20;
+        const bounded = event("bounded-aggregate", "partialMove", 1936, 1948, 1942);
+        bounded.shiftYears = -24;
+        bounded.evidence.lagBefore = -24;
+        bounded.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        bounded.evidence.notes = ["bounded_path_complete_hypothesis=true"];
+        bounded.evidence.locationEvidence = [{
+            source: "bounded_complete_lag_path",
+            startYear: 1936,
+            endYear: 1948,
+            topYear: 1942,
+            referenceCount: 13,
+            concentration: 0.99,
+            remoteMargin: 7,
+            calibrated: false,
+        }];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: selected },
+            { stage: "final", authority: "supplemental", event: bounded },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            event: { id: "selected-partial", shiftYears: -20 },
+        });
+    });
+
+    it("accepts a bounded local transition that lands on the selected whole baseline", () => {
+        const whole = event("whole", "wholeSeriesMove", 1100, 1500, 1500);
+        whole.shiftYears = -4;
+        whole.rankedYears = [];
+        whole.evidence.lagBefore = -4;
+        whole.evidence.lagAfter = -4;
+        const local = event("local", "partialMove", 1325, 1337, 1331);
+        local.shiftYears = -20;
+        local.evidence.lagBefore = -24;
+        local.evidence.lagAfter = -4;
+        local.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        local.evidence.notes = ["bounded_path_complete_hypothesis=true"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: whole },
+            { stage: "final", authority: "supplemental", event: local },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            event: { id: "local", shiftYears: -20 },
         });
     });
 

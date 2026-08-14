@@ -371,10 +371,15 @@ export const diagnoseTruthBlind = (input: {
                     lagBefore: event.evidence.lagBefore,
                     lagAfter: event.evidence.lagAfter,
                     score: event.evidence.score,
+                    locationEvidence: event.evidence.locationEvidence ?? [],
                 }));
                 const boundedPathAudit = (
                     pathDiagnosis: SeriesCoreDiagnosis | null,
                     useCofechaStandardization: boolean,
+                    transitionPenalty = 3,
+                    terminalLags: readonly number[] = boundedTerminalLags,
+                    allowedLags?: readonly number[],
+                    maxSegments = 5,
                 ) => {
                     if (!pathDiagnosis) return null;
                     const result = locateBoundedLagStateEvents(
@@ -383,15 +388,16 @@ export const diagnoseTruthBlind = (input: {
                         {
                             ...pathConfig,
                             useCofechaStandardization,
-                            transitionPenaltyUnit: 3,
-                            transitionPenaltyBig: 3,
+                            transitionPenaltyUnit: transitionPenalty,
+                            transitionPenaltyBig: transitionPenalty,
                             transitionPenaltyPerYear: 0,
                         },
                         {
-                            maxSegments: 5,
+                            maxSegments,
                             minRunYears: 18,
                             windowWidth: 13,
-                            terminalLags: boundedTerminalLags,
+                            terminalLags,
+                            allowedLags,
                             minimumWholeLagGain: 8,
                         },
                     );
@@ -479,6 +485,43 @@ export const diagnoseTruthBlind = (input: {
                         ).events)
                         : [],
                     boundedRawPath: boundedPathAudit(core, false),
+                    boundedRawPathPenalty2: boundedPathAudit(core, false, 2),
+                    boundedRawPathPenalty1: boundedPathAudit(core, false, 1),
+                    boundedRawPathPenalty05: boundedPathAudit(core, false, 0.5),
+                    boundedRawPathPenalty025: boundedPathAudit(core, false, 0.25),
+                    boundedRawPathPenalty1Max6: boundedPathAudit(
+                        core,
+                        false,
+                        1,
+                        boundedTerminalLags,
+                        undefined,
+                        6,
+                    ),
+                    boundedRawPathPenalty05Max6: boundedPathAudit(
+                        core,
+                        false,
+                        0.5,
+                        boundedTerminalLags,
+                        undefined,
+                        6,
+                    ),
+                    boundedRawPathZeroTerminal: boundedPathAudit(core, false, 3, [0]),
+                    boundedRawPathPenalty1ZeroTerminal: boundedPathAudit(core, false, 1, [0]),
+                    boundedRawPathPenalty05ZeroTerminal: boundedPathAudit(core, false, 0.5, [0]),
+                    boundedRawUnitPulsePenalty1: boundedPathAudit(
+                        core,
+                        false,
+                        1,
+                        [0],
+                        [-1, 0, 1],
+                    ),
+                    boundedRawUnitPulsePenalty05: boundedPathAudit(
+                        core,
+                        false,
+                        0.5,
+                        [0],
+                        [-1, 0, 1],
+                    ),
                     boundedCofechaPath: boundedPathAudit(cofechaCore, true),
                 };
             })()

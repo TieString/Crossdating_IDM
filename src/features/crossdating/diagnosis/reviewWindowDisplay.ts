@@ -102,11 +102,14 @@ const hasReviewablePartialMoveEvidence = (
 ): boolean => {
     if (event.eventType !== "partialMove") return false;
     const shiftYears = event.shiftYears;
+    const lagBefore = event.evidence.lagBefore;
+    const lagAfter = event.evidence.lagAfter;
     if (shiftYears === undefined
         || shiftYears > -2
         || event.shiftSide !== "older"
-        || event.evidence.lagBefore !== shiftYears
-        || event.evidence.lagAfter !== 0) return false;
+        || lagBefore === null
+        || lagAfter === null
+        || lagBefore - lagAfter !== shiftYears) return false;
 
     const counterfactualShift = latestNumericNote(
         event,
@@ -118,7 +121,7 @@ const hasReviewablePartialMoveEvidence = (
     const boundedPathGain = numericNote(event, "bounded_path_transition_gain");
     if (sources.has("bounded_complete_lag_path")
         && evidenceClaimsFor(event).has("bounded_lag_state_path")
-        && event.evidence.lagBefore - event.evidence.lagAfter === shiftYears
+        && lagBefore - lagAfter === shiftYears
         && (boundedPathGain ?? Number.NEGATIVE_INFINITY) >= 2
         && event.evidence.samplePairs >= 30) return true;
     const referenceVote = hasOperationConsistentPartialVote(
