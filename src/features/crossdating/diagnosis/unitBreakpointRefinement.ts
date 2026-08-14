@@ -16,6 +16,10 @@ import type {
 export type UnitBreakpointScore = {
     year: number;
     referenceCount: number;
+    directRaw31: number;
+    rawGain31: number;
+    referencePeakVotes: number;
+    referencePeakVoteRatio: number;
     raw31: number;
     difference31: number;
     whitened31: number;
@@ -76,7 +80,18 @@ const UNIT_SCORE_KEYS: UnitScoreKey[] = [
     "pairedCore31",
 ];
 
-type LocalReference = { data: NumericSeries; weight: number; pairedCore: boolean };
+type LocalReference = {
+    data: NumericSeries;
+    weight: number;
+    voteWeight: number;
+    pairedCore: boolean;
+};
+
+type UnitBoundaryScoreOptions = {
+    includeReferencePeakVotes?: boolean;
+};
+
+const REFERENCE_PEAK_SUPPORT_RADIUS_YEARS = 2;
 
 const firstDifferences = (series: NumericSeries): NumericSeries => {
     const entries = Array.from(series.entries()).sort((a, b) => a[0] - b[0]);
@@ -201,7 +216,7 @@ const localReferences = (
 ): LocalReference[] => {
     const target = preprocessSeries(diagnosis.rawTarget);
     const targetStem = diagnosis.targetTree.slice(0, -1).toLowerCase();
-    return diagnosis.master.sourceTrees
+    const selected = diagnosis.master.sourceTrees
         .map((tree) => {
             const data = preprocessSeries(toNumericSeries(siteData.get(tree)));
             const correlation = correlationForSegment(
@@ -216,12 +231,22 @@ const localReferences = (
                 data,
                 correlation,
                 weight: Math.max(0, correlation) + 0.1,
-                pairedCore: tree.slice(0, -1).toLowerCase() === targetStem,
+                stem: tree.slice(0, -1).toLowerCase(),
             };
         })
         .filter((reference) => reference.correlation > -0.25)
         .sort((a, b) => b.correlation - a.correlation)
         .slice(0, 16);
+    const stemCounts = selected.reduce((counts, reference) => {
+        counts.set(reference.stem, (counts.get(reference.stem) ?? 0) + 1);
+        return counts;
+    }, new Map<string, number>());
+    return selected.map((reference) => ({
+        data: reference.data,
+        weight: reference.weight,
+        voteWeight: 1 / (stemCounts.get(reference.stem) ?? 1),
+        pairedCore: reference.stem === targetStem,
+    }));
 };
 
 const pairwiseLocalAggregates = (
@@ -268,12 +293,19 @@ export const scoreUnitBoundaries = (
     event: DiagnosisEvent,
     diagnosis: SeriesCoreDiagnosis,
     siteData: RwlSiteData,
+    options: UnitBoundaryScoreOptions = {},
 ): UnitBreakpointScore[] => {
     if (event.eventType !== "missingRing" && event.eventType !== "falseRing") return [];
     const master = diagnosis.master.data;
     const masterDifference = firstDifferences(master);
     const masterWhitened = ar1WhitenSeries(master);
     const references = localReferences(diagnosis, siteData);
+    const directRaw = options.includeReferencePeakVotes
+        ? preprocessSeries(diagnosis.rawTarget)
+        : null;
+    const correctedRawByYear = options.includeReferencePeakVotes
+        ? new Map<number, NumericSeries>()
+        : null;
     const scores: UnitBreakpointScore[] = [];
     const scanStartYear = Math.max(
         diagnosis.targetRange.startYear + 30,
@@ -292,9 +324,13 @@ export const scoreUnitBoundaries = (
             ? simulateMissingCorrection(diagnosis.rawTarget, year)
             : simulateFalseCorrection(diagnosis.rawTarget, year);
         const raw = preprocessSeries(corrected);
+        correctedRawByYear?.set(year, raw);
         const difference = firstDifferences(corrected);
         const whitened = ar1WhitenSeries(corrected);
         const raw31 = localCorrelation(raw, master, year, 31);
+        const directRaw31 = directRaw
+            ? localCorrelation(directRaw, master, year, 31)
+            : raw31;
         const difference31 = localCorrelation(difference, masterDifference, year, 31);
         const whitened31 = localCorrelation(whitened, masterWhitened, year, 31);
         const raw11 = shortCorrelation(raw, master, year, 11);
@@ -398,6 +434,10 @@ export const scoreUnitBoundaries = (
             + whitenedHuber31 * 0.3;
         scores.push({
             year,
+            directRaw31,
+            rawGain31: raw31 - directRaw31,
+            referencePeakVotes: 0,
+            referencePeakVoteRatio: 0,
             raw31,
             difference31,
             whitened31,
@@ -430,6 +470,54 @@ export const scoreUnitBoundaries = (
             ...pairwiseLocalAggregates(raw, references, year),
         });
     }
+    if (!correctedRawByYear || !directRaw) return scores;
+
+    const totalVoteWeight = references.reduce((sum, reference) => (
+        sum + reference.voteWeight
+    ), 0);
+    const referencePeaks = references.flatMap((reference) => {
+        const peak = scores.map((row) => {
+            const corrected = correctedRawByYear.get(row.year);
+            if (!corrected) return null;
+            const correctedCorrelation = localCorrelation(
+                corrected,
+                reference.data,
+                row.year,
+                31,
+            );
+            const directCorrelation = localCorrelation(
+                directRaw,
+                reference.data,
+                row.year,
+                31,
+            );
+            return {
+                year: row.year,
+                correctedCorrelation,
+                gain: correctedCorrelation - directCorrelation,
+            };
+        }).filter((row): row is {
+            year: number;
+            correctedCorrelation: number;
+            gain: number;
+        } => row !== null)
+            .sort((left, right) => (
+                right.correctedCorrelation - left.correctedCorrelation
+                || right.gain - left.gain
+                || right.year - left.year
+            ))[0];
+        return peak && peak.gain >= 0.01 ? [{ ...peak, weight: reference.voteWeight }] : [];
+    });
+    scores.forEach((row) => {
+        row.referencePeakVotes = referencePeaks.reduce((sum, peak) => (
+            Math.abs(peak.year - row.year) <= REFERENCE_PEAK_SUPPORT_RADIUS_YEARS
+                ? sum + peak.weight
+                : sum
+        ), 0);
+        row.referencePeakVoteRatio = totalVoteWeight > 0
+            ? row.referencePeakVotes / totalVoteWeight
+            : 0;
+    });
     return scores;
 };
 

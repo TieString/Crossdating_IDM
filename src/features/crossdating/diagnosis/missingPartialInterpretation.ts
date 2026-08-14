@@ -1,4 +1,5 @@
 /** Conservative tie policy for discrete missing rings versus one continuous partial gap. */
+import { insertMissingYearAtSide } from "@/features/rwl/edit";
 import type {
     CompletedPartialMissingComposition,
     CompletedPartialStaircaseCompetition,
@@ -11,6 +12,7 @@ import {
     type UnitBreakpointScore,
 } from "./unitBreakpointRefinement";
 import type { RwlSiteData } from "@/features/rwl/types";
+import { getRangeForSeries, toNumericSeries } from "./series";
 import type {
     DiagnosisEvent,
     DiagnosisLocalLagTransitionEvidence,
@@ -437,6 +439,20 @@ const interpretationNotes = (
     ...(evidence.frontierLocalization === undefined
         ? []
         : [`missing_partial_frontier_localization=${evidence.frontierLocalization}`]),
+    ...(evidence.virtualCountEvaluation === undefined ? [] : [
+        `missing_partial_virtual_count_status=${evidence.virtualCountEvaluation.status}`,
+        `missing_partial_virtual_count_steps=${evidence.virtualCountEvaluation.validatedSteps}`,
+        `missing_partial_virtual_count_years=${evidence.virtualCountEvaluation.years.join(",")}`,
+        `missing_partial_virtual_count_min_reference_count=${
+            evidence.virtualCountEvaluation.minimumReferenceCount
+        }`,
+        `missing_partial_virtual_count_min_reference_vote_ratio=${
+            evidence.virtualCountEvaluation.minimumReferenceVoteRatio.toFixed(6)
+        }`,
+        `missing_partial_virtual_count_min_raw_gain=${
+            evidence.virtualCountEvaluation.minimumRawGain.toFixed(6)
+        }`,
+    ]),
 ];
 
 export const makeMissingRingInterpretation = (
@@ -608,6 +624,182 @@ const unitFrontierScore = (row: UnitBreakpointScore): number => (
     + row.pairMedian31 * 0.3
 );
 
+// A 13-year review window cannot hold more than this many separately testable unit events
+// without collapsing into adjacent/physically indistinguishable rings. Larger shifts keep
+// their cumulative-lag wording and avoid an unbounded diagnostic loop.
+const MAX_EXPLICIT_VIRTUAL_MISSING_COUNT = 8;
+const MINIMUM_VIRTUAL_RAW_GAIN = 0.01;
+const MINIMUM_REFERENCE_PEAK_VOTES = 3;
+const MINIMUM_REFERENCE_PEAK_VOTE_RATIO = 0.55;
+const MINIMUM_REMOTE_VOTE_MARGIN = 0.1;
+const REMOTE_VOTE_EXCLUSION_YEARS = 4;
+
+type VirtualSequentialCountEvaluation = NonNullable<
+    DiagnosisMissingPartialInterpretationEvidence["virtualCountEvaluation"]
+> & {
+    frontierYear: number | null;
+    frontierScores: UnitBreakpointScore[];
+};
+
+const publicVirtualCountEvaluation = (
+    evaluation: VirtualSequentialCountEvaluation,
+): NonNullable<DiagnosisMissingPartialInterpretationEvidence["virtualCountEvaluation"]> => ({
+    status: evaluation.status,
+    validatedSteps: evaluation.validatedSteps,
+    years: [...evaluation.years],
+    minimumReferenceCount: evaluation.minimumReferenceCount,
+    minimumReferenceVoteRatio: evaluation.minimumReferenceVoteRatio,
+    minimumRawGain: evaluation.minimumRawGain,
+});
+
+const evaluateVirtualSequentialMissingCount = (
+    partial: DiagnosisEvent,
+    diagnosis: SeriesCoreDiagnosis | null,
+    siteData: RwlSiteData,
+): VirtualSequentialCountEvaluation => {
+    const expectedCount = Math.abs(partial.shiftYears ?? 0);
+    if (!diagnosis
+        || expectedCount < 2
+        || expectedCount > MAX_EXPLICIT_VIRTUAL_MISSING_COUNT) {
+        return {
+            status: "skipped",
+            validatedSteps: 0,
+            years: [],
+            minimumReferenceCount: 0,
+            minimumReferenceVoteRatio: 0,
+            minimumRawGain: 0,
+            frontierYear: null,
+            frontierScores: [],
+        };
+    }
+
+    let workingSite = siteData;
+    let workingDiagnosis = diagnosis;
+    let previousYear: number | null = null;
+    let minimumReferenceCount = Infinity;
+    let minimumReferenceVoteRatio = Infinity;
+    let minimumRawGain = Infinity;
+    const years: number[] = [];
+    let frontierScores: UnitBreakpointScore[] = [];
+    for (let step = 0; step < expectedCount; step += 1) {
+        const fallbackYear: number = previousYear === null
+            ? Math.max(
+                    partial.startYear,
+                    Math.min(partial.endYear, rankedTopYear(partial) - 1),
+                )
+            : Math.max(partial.startYear, previousYear - 1);
+        const probe: DiagnosisEvent = {
+            ...partial,
+            id: `${partial.id}-virtual-missing-count-${step + 1}`,
+            eventType: "missingRing",
+            rankedYears: [{
+                year: fallbackYear,
+                rank: 1,
+                score: partial.evidence.score,
+                evidenceTags: ["virtual_sequential_missing_count"],
+            }],
+            shiftYears: undefined,
+            shiftSide: undefined,
+            interpretationAmbiguity: undefined,
+        };
+        const scores = scoreUnitBoundaries(probe, workingDiagnosis, workingSite, {
+            includeReferencePeakVotes: true,
+        });
+        if (step === 0) frontierScores = scores;
+        const consensus = selectStableUnitLocalConsensus(
+            scores,
+            fallbackYear,
+            Math.max(2, partial.endYear - partial.startYear + 1),
+        );
+        const selected: UnitBreakpointScore | null = consensus
+            ? scores.filter((row) => Math.abs(row.year - consensus.year) <= 1)
+                .sort((left: UnitBreakpointScore, right: UnitBreakpointScore): number => (
+                    right.referencePeakVoteRatio - left.referencePeakVoteRatio
+                    || right.rawGain31 - left.rawGain31
+                    || unitFrontierScore(right) - unitFrontierScore(left)
+                    || Math.abs(left.year - fallbackYear)
+                        - Math.abs(right.year - fallbackYear)
+                    || right.year - left.year
+                ))[0] ?? null
+            : null;
+        const remoteVoteRatio = selected ? Math.max(
+            0,
+            ...scores.filter((row) => (
+                Math.abs(row.year - selected.year) > REMOTE_VOTE_EXCLUSION_YEARS
+            ))
+                .map((row) => row.referencePeakVoteRatio),
+        ) : 0;
+        const sequential = selected !== null
+            && (previousYear === null || selected.year < previousYear);
+        const independentlySupported = selected !== null
+            && selected.referenceCount
+                >= MISSING_PARTIAL_INTERPRETATION_CALIBRATION.minimumReferenceCount
+            && selected.referencePeakVotes >= MINIMUM_REFERENCE_PEAK_VOTES
+            && selected.referencePeakVoteRatio >= MINIMUM_REFERENCE_PEAK_VOTE_RATIO
+            && selected.referencePeakVoteRatio - remoteVoteRatio
+                >= MINIMUM_REMOTE_VOTE_MARGIN
+            && selected.rawGain31 >= MINIMUM_VIRTUAL_RAW_GAIN;
+        if (!selected || !sequential || !independentlySupported) break;
+
+        years.push(selected.year);
+        minimumReferenceCount = Math.min(minimumReferenceCount, selected.referenceCount);
+        minimumReferenceVoteRatio = Math.min(
+            minimumReferenceVoteRatio,
+            selected.referencePeakVoteRatio,
+        );
+        minimumRawGain = Math.min(minimumRawGain, selected.rawGain31);
+        previousYear = selected.year;
+
+        const target = workingSite.get(partial.seriesId);
+        if (!target?.has(selected.year)) break;
+        const correctedTarget = insertMissingYearAtSide(target, selected.year, "right");
+        const rawTarget = toNumericSeries(correctedTarget);
+        const targetRange = getRangeForSeries(rawTarget);
+        if (!targetRange) break;
+        workingSite = new Map(workingSite);
+        workingSite.set(partial.seriesId, correctedTarget);
+        workingDiagnosis = {
+            ...workingDiagnosis,
+            rawTarget,
+            targetRange,
+        };
+    }
+    const completed = years.length === expectedCount;
+    return {
+        status: completed ? "confirmed" : "inconclusive",
+        validatedSteps: years.length,
+        years,
+        minimumReferenceCount: Number.isFinite(minimumReferenceCount)
+            ? minimumReferenceCount
+            : 0,
+        minimumReferenceVoteRatio: Number.isFinite(minimumReferenceVoteRatio)
+            ? minimumReferenceVoteRatio
+            : 0,
+        minimumRawGain: Number.isFinite(minimumRawGain) ? minimumRawGain : 0,
+        frontierYear: years[0] ?? null,
+        frontierScores,
+    };
+};
+
+const appendMissingWorkflowNotes = (
+    event: DiagnosisEvent,
+    localLagEvidence: DiagnosisLocalLagTransitionEvidence | null,
+): DiagnosisEvent => ({
+    ...event,
+    evidence: {
+        ...event.evidence,
+        notes: Array.from(new Set([
+            ...event.evidence.notes,
+            "missing_workflow_applies_one_frontier_event_only",
+            ...(localLagEvidence ? [
+                `internal_lag_transition_count=${localLagEvidence.eventCount}`,
+                `internal_lag_transition_years=${localLagEvidence.evidenceYears.join(",")}`,
+                `internal_lag_transition_shift=${localLagEvidence.aggregateShiftYears}`,
+            ] : []),
+        ])),
+    },
+});
+
 /**
  * Every automatic physical-gap suggestion keeps a one-step missing-ring workflow available.
  * The alternative locates only the current bark-side unit event. The cumulative shift is never
@@ -625,10 +817,48 @@ export const attachUniversalPartialMissingWorkflow = (
         || (partial.shiftYears ?? 0) >= -1) return partial;
     if (partial.interpretationAmbiguity?.kind === "missingRingsOrPartialMove") {
         const ambiguity = partial.interpretationAmbiguity;
+        if (ambiguity.evidence.countEvidence === "multiReferenceStaircase"
+            || ambiguity.evidence.virtualCountEvaluation) {
+            return attachMissingPartialInterpretation(
+                partial,
+                appendMissingWorkflowNotes(ambiguity.alternative, localLagEvidence),
+                ambiguity.evidence,
+            );
+        }
+        const virtual = evaluateVirtualSequentialMissingCount(
+            partial,
+            diagnosis,
+            siteData,
+        );
+        const confirmed = virtual.status === "confirmed";
+        const evidence: DiagnosisMissingPartialInterpretationEvidence = {
+            ...ambiguity.evidence,
+            ...(confirmed ? {
+                missingYears: [...virtual.years].sort((left, right) => left - right),
+                countEvidence: "multiReferenceStaircase" as const,
+                frontierYear: virtual.frontierYear ?? ambiguity.evidence.frontierYear,
+                frontierLocalization: "multiReferenceCounterfactual" as const,
+                referenceCount: virtual.minimumReferenceCount,
+                missingReferenceSupport: Math.round(
+                    virtual.minimumReferenceCount * virtual.minimumReferenceVoteRatio,
+                ),
+            } : { countEvidence: "cumulativeLagOnly" as const }),
+            virtualCountEvaluation: publicVirtualCountEvaluation(virtual),
+        };
+        const alternative = confirmed
+            ? makeMissingRingInterpretation(
+                    partial,
+                    evidence,
+                    partial.seriesRange ?? diagnosis?.targetRange ?? {
+                        startYear: partial.startYear,
+                        endYear: partial.endYear,
+                    },
+                )
+            : ambiguity.alternative;
         return attachMissingPartialInterpretation(
             partial,
-            ambiguity.alternative,
-            ambiguity.evidence,
+            appendMissingWorkflowNotes(alternative, localLagEvidence),
+            evidence,
         );
     }
 
@@ -651,7 +881,10 @@ export const attachUniversalPartialMissingWorkflow = (
         shiftSide: undefined,
         interpretationAmbiguity: undefined,
     };
-    const scores = diagnosis ? scoreUnitBoundaries(probe, diagnosis, siteData) : [];
+    const virtual = evaluateVirtualSequentialMissingCount(partial, diagnosis, siteData);
+    const scores = virtual.frontierScores.length > 0
+        ? virtual.frontierScores
+        : diagnosis ? scoreUnitBoundaries(probe, diagnosis, siteData) : [];
     const consensus = selectStableUnitLocalConsensus(
         scores,
         fallbackYear,
@@ -662,7 +895,10 @@ export const attachUniversalPartialMissingWorkflow = (
         || Math.abs(left.year - fallbackYear) - Math.abs(right.year - fallbackYear)
         || right.year - left.year
     ))[0] ?? null;
-    const selectedYear = consensus?.year ?? bestScore?.year ?? fallbackYear;
+    const selectedYear = virtual.frontierYear
+        ?? consensus?.year
+        ?? bestScore?.year
+        ?? fallbackYear;
     const selectedScore = scores.find((row) => row.year === selectedYear) ?? bestScore;
     const multiReferenceLocalized = consensus !== null
         && (selectedScore?.referenceCount ?? 0)
@@ -672,19 +908,30 @@ export const attachUniversalPartialMissingWorkflow = (
         interpretationBasis: "virtualSequentialFrontier",
         missingRingCount: Math.abs(shiftYears),
         cumulativeShiftYears: shiftYears,
-        missingYears: [],
+        missingYears: virtual.status === "confirmed"
+            ? [...virtual.years].sort((left, right) => left - right)
+            : [],
         partialFirstFixedYear: firstFixedYear,
         normalizedCounterfactualGainDifference: 0,
         masterMargin: 0,
         referenceMedianMargin: 0,
-        referenceCount: selectedScore?.referenceCount ?? 0,
-        missingReferenceSupport: 0,
+        referenceCount: virtual.status === "confirmed"
+            ? virtual.minimumReferenceCount
+            : selectedScore?.referenceCount ?? 0,
+        missingReferenceSupport: virtual.status === "confirmed"
+            ? Math.round(
+                    virtual.minimumReferenceCount * virtual.minimumReferenceVoteRatio,
+                )
+            : 0,
         partialReferenceSupport: 0,
-        countEvidence: "cumulativeLagOnly",
+        countEvidence: virtual.status === "confirmed"
+            ? "multiReferenceStaircase"
+            : "cumulativeLagOnly",
         frontierYear: selectedYear,
         frontierLocalization: multiReferenceLocalized
             ? "multiReferenceCounterfactual"
             : "partialBoundaryFallback",
+        virtualCountEvaluation: publicVirtualCountEvaluation(virtual),
     };
     const alternative = makeMissingRingInterpretation(
         partial,
@@ -694,14 +941,9 @@ export const attachUniversalPartialMissingWorkflow = (
             endYear: partial.endYear,
         },
     );
-    alternative.evidence.notes = Array.from(new Set([
-        ...alternative.evidence.notes,
-        "missing_workflow_applies_one_frontier_event_only",
-        ...(localLagEvidence ? [
-            `internal_lag_transition_count=${localLagEvidence.eventCount}`,
-            `internal_lag_transition_years=${localLagEvidence.evidenceYears.join(",")}`,
-            `internal_lag_transition_shift=${localLagEvidence.aggregateShiftYears}`,
-        ] : []),
-    ]));
-    return attachMissingPartialInterpretation(partial, alternative, evidence);
+    return attachMissingPartialInterpretation(
+        partial,
+        appendMissingWorkflowNotes(alternative, localLagEvidence),
+        evidence,
+    );
 };

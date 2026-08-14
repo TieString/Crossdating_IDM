@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { getConfig } from "../config";
 import type {
     CompletedPartialMissingComposition,
     CompletedPartialStaircaseCompetition,
@@ -15,6 +16,8 @@ import {
     makePartialMoveInterpretation,
 } from "../missingPartialInterpretation";
 import { planDiagnosisEventEdit } from "../eventApply";
+import { diagnoseSeriesCore } from "../segments";
+import type { RwlSiteData } from "@/features/rwl/types";
 import type { DiagnosisEvent } from "../types";
 
 const gate = {
@@ -125,6 +128,44 @@ const partialEvent = (): DiagnosisEvent => ({
     shiftSide: "older",
     seriesRange: { startYear: 1800, endYear: 2000 },
 });
+
+const missingPartialAmbiguity = (event: DiagnosisEvent) => {
+    const ambiguity = event.interpretationAmbiguity;
+    if (!ambiguity || ambiguity.kind !== "missingRingsOrPartialMove") {
+        throw new Error("expected missing/partial interpretation ambiguity");
+    }
+    return ambiguity;
+};
+
+const buildDeterministicMissingSite = (
+    missingYears: number[],
+    referenceCount = 12,
+): { site: RwlSiteData; targetId: string } => {
+    const targetId = "TARGETA";
+    const correct = new Map<number, number>();
+    let state = 0x12345678;
+    for (let year = 1700; year <= 2000; year += 1) {
+        state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+        correct.set(year, 250 + state % 1000);
+    }
+    const site: RwlSiteData = new Map();
+    for (let index = 0; index < referenceCount; index += 1) {
+        site.set(`REF${String(index).padStart(2, "0")}A`, new Map(
+            Array.from(correct, ([year, width]) => [
+                year,
+                Math.max(1, width + ((year * (index + 3) + index * 17) % 17) - 8),
+            ]),
+        ));
+    }
+    const corrupted = new Map<number, number>();
+    for (let year = 1700 + missingYears.length; year <= 2000; year += 1) {
+        const cumulativeLag = -missingYears.filter((eventYear) => year <= eventYear).length;
+        const value = correct.get(year + cumulativeLag);
+        if (value !== undefined) corrupted.set(year, value);
+    }
+    site.set(targetId, corrupted);
+    return { site, targetId };
+};
 
 describe("missing/partial interpretation tie", () => {
     it("accepts a balanced, local, independently reviewed -2 family tie", () => {
@@ -541,6 +582,11 @@ describe("missing/partial interpretation tie", () => {
                 countEvidence: "cumulativeLagOnly",
                 frontierYear: 1904,
                 frontierLocalization: "partialBoundaryFallback",
+                virtualCountEvaluation: {
+                    status: "skipped",
+                    validatedSteps: 0,
+                    years: [],
+                },
             },
             alternative: {
                 eventType: "missingRing",
@@ -553,5 +599,125 @@ describe("missing/partial interpretation tie", () => {
         expect(result.interpretationAmbiguity?.alternative.evidence.notes).toContain(
             "missing_workflow_applies_one_frontier_event_only",
         );
+        expect(result.interpretationAmbiguity?.alternative.evidence.notes).toContain(
+            "missing_partial_virtual_count_status=skipped",
+        );
+    });
+
+    it("keeps an already calibrated staircase without replacing it with virtual guesses", () => {
+        const partial = partialEvent();
+        const evidence = evaluateMissingPartialInterpretationTie(
+            smallCompetition(),
+            gate,
+        )!;
+        const alternative = makeMissingRingInterpretation(
+            partial,
+            evidence,
+            partial.seriesRange!,
+        );
+        const attached = attachMissingPartialInterpretation(
+            partial,
+            alternative,
+            evidence,
+        );
+        const result = attachUniversalPartialMissingWorkflow(
+            attached,
+            null,
+            new Map(),
+        );
+
+        const ambiguity = missingPartialAmbiguity(result);
+        expect(ambiguity.evidence).toMatchObject({
+            countEvidence: "multiReferenceStaircase",
+            missingYears: [1901, 1904],
+        });
+        expect(
+            ambiguity.evidence.virtualCountEvaluation,
+        ).toBeUndefined();
+    });
+
+    it("confirms a nearby two-ring count only after both virtual corrections win independent reference votes", () => {
+        const { site, targetId } = buildDeterministicMissingSite([1934, 1940]);
+        const diagnosis = diagnoseSeriesCore(
+            site,
+            targetId,
+            getConfig({ referenceConfig: null }),
+        );
+        expect(diagnosis).not.toBeNull();
+        const partial = partialEvent();
+        partial.seriesId = targetId;
+        partial.startYear = 1930;
+        partial.endYear = 1942;
+        partial.rankedYears = [{
+            year: 1941,
+            rank: 1,
+            score: 1,
+            evidenceTags: ["bounded_complete_lag_path"],
+        }];
+        partial.seriesRange = diagnosis!.targetRange;
+
+        const result = attachUniversalPartialMissingWorkflow(
+            partial,
+            diagnosis,
+            site,
+        );
+        const ambiguity = missingPartialAmbiguity(result);
+
+        expect(ambiguity.evidence.virtualCountEvaluation).toMatchObject({
+            status: "confirmed",
+            validatedSteps: 2,
+            minimumReferenceCount: 12,
+        });
+        const virtualYears = ambiguity.evidence.virtualCountEvaluation?.years ?? [];
+        expect(virtualYears[0]).toBe(1940);
+        expect(Math.abs((virtualYears[1] ?? 0) - 1934)).toBeLessThanOrEqual(1);
+        expect(ambiguity.evidence).toMatchObject({
+            countEvidence: "multiReferenceStaircase",
+            frontierYear: 1940,
+        });
+        expect(ambiguity.evidence.missingYears).toEqual(
+            [...virtualYears].sort((left, right) => left - right),
+        );
+        expect(ambiguity.alternative.eventType).toBe("missingRing");
+        expect(ambiguity.alternative.rankedYears[0]).toMatchObject({
+            year: 1940,
+            rank: 1,
+        });
+    });
+
+    it("keeps cumulative-lag wording when virtual steps lack enough independent references", () => {
+        const { site, targetId } = buildDeterministicMissingSite([1934, 1940], 4);
+        const diagnosis = diagnoseSeriesCore(
+            site,
+            targetId,
+            getConfig({ referenceConfig: null }),
+        );
+        expect(diagnosis).not.toBeNull();
+        const partial = partialEvent();
+        partial.seriesId = targetId;
+        partial.startYear = 1930;
+        partial.endYear = 1942;
+        partial.rankedYears = [{
+            year: 1941,
+            rank: 1,
+            score: 1,
+            evidenceTags: ["bounded_complete_lag_path"],
+        }];
+        partial.seriesRange = diagnosis!.targetRange;
+
+        const result = attachUniversalPartialMissingWorkflow(
+            partial,
+            diagnosis,
+            site,
+        );
+
+        expect(result.interpretationAmbiguity?.evidence).toMatchObject({
+            countEvidence: "cumulativeLagOnly",
+            missingYears: [],
+            virtualCountEvaluation: {
+                status: "inconclusive",
+                validatedSteps: 0,
+            },
+        });
     });
 });

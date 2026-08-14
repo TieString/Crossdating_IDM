@@ -149,6 +149,14 @@ export type DiagnosisMissingPartialInterpretationEvidence = {
     countEvidence?: "multiReferenceStaircase" | "cumulativeLagOnly";
     frontierYear?: number;
     frontierLocalization?: "multiReferenceCounterfactual" | "partialBoundaryFallback";
+    virtualCountEvaluation?: {
+        status: "confirmed" | "inconclusive" | "skipped";
+        validatedSteps: number;
+        years: number[];
+        minimumReferenceCount: number;
+        minimumReferenceVoteRatio: number;
+        minimumRawGain: number;
+    };
     completedComposition?: {
         separationYears: number;
         mixedReferenceSupport: number;
