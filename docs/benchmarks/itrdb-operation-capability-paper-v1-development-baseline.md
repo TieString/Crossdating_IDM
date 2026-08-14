@@ -44,3 +44,15 @@ Across all families, terminal case outcomes included 55 out-of-order frontiers, 
 
 The first development change should therefore make a stable complete same-operation path expose
 its newest transition unconditionally. This is a shared frontier rule, not a file or year exception.
+
+## Frontier correction replay
+
+After removing the older-location override, all 39 B cases that had stopped on an out-of-order
+frontier were replayed from their clean source. The replay recovered 37 complete chains; the other
+two stopped on a window miss rather than an older event. Out-of-order and wrong-operation counts
+were both zero, prompted strict coverage was 59/60 (98.33%), and serial recovery was 118/124
+(95.16%).
+
+The frozen co612 first-sweep gate remained 24 correct windows against a minimum of 22, with zero
+operation mismatches and clean review at 2/55. Five directly related test files passed 244 tests,
+and the production build completed successfully.

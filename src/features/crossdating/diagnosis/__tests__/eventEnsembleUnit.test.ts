@@ -2591,7 +2591,7 @@ describe("selectCumulativePartialFrontier", () => {
         );
     });
 
-    it("selects the best localized repeated unit transition instead of the newest one", () => {
+    it("keeps the newest repeated unit transition even when an older location is sharper", () => {
         const localizedFalse = (
             year: number,
             lagBefore: number,
@@ -2629,9 +2629,9 @@ describe("selectCumulativePartialFrontier", () => {
             penaltyHalf,
         );
 
-        expect(selected?.event.rankedYears[0]?.year).toBe(1766);
+        expect(selected?.event.rankedYears[0]?.year).toBe(1823);
         expect(selected?.event.evidence.notes).toContain(
-            "stable_bounded_path_selected_year=1766",
+            "stable_bounded_path_selected_year=1823",
         );
     });
 
@@ -2686,7 +2686,7 @@ describe("selectCumulativePartialFrontier", () => {
 
         expect(recovered?.rankedYears[0]?.year).toBe(1823);
         expect(recovered?.evidence.notes).toContain(
-            "stable_bounded_path_preserved_candidate_backed_newest=1823",
+            "stable_bounded_path_selected_year=1823",
         );
         expect(recovered?.evidence.notes).toContain(
             "stable_bounded_path_component_lag_after=0",

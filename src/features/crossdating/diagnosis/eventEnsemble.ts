@@ -5293,32 +5293,16 @@ const stableTransitionLocationPriority = (
         * Math.max(0, location?.remoteMargin ?? 0);
 };
 
-const stableTransitionLocationConcentration = (
-    transition: ExactLagPathTransition,
-): number => transition.event.evidence.locationEvidence
-    ?.find((row) => row.source === "bounded_complete_lag_path")
-    ?.concentration
-    ?? transition.event.evidence.locationEvidence?.[0]?.concentration
-    ?? 0;
-
 const selectStableUnitTransition = (
     transitions: readonly ExactLagPathTransition[],
 ): ExactLagPathTransition => {
     const newest = transitions[transitions.length - 1]!;
     if (newest.event.eventType !== "missingRing"
         && newest.event.eventType !== "falseRing") return newest;
-    // A sharply localized newest transition is already an adequate changepoint estimate.
-    // Older transitions can have a larger remote-margin product simply because they sit in a
-    // quieter interval; that is not sufficient evidence to skip the current frontier event.
-    if (stableTransitionLocationConcentration(newest) >= 0.85) return newest;
-    const sameOperation = transitions.filter((transition) => (
-        transition.event.eventType === newest.event.eventType
-        && transition.shiftYears === newest.shiftYears
-    ));
-    return [...sameOperation].sort((left, right) => (
-        stableTransitionLocationPriority(right) - stableTransitionLocationPriority(left)
-        || right.topYear - left.topYear
-    ))[0] ?? newest;
+    // The complete path is ordered pith-to-bark and already agrees across two penalties. Location
+    // sharpness may rank years inside one transition, but it must not replace the executable
+    // bark-side frontier with an older member of the same event chain.
+    return newest;
 };
 
 const selectStableStructuralPartialTransition = (
