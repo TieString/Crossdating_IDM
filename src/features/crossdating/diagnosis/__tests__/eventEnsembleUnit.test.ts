@@ -9,6 +9,7 @@ import {
     hasCoherentSequentialFalseStaircase,
     hasMultipleCoherentLocalTransitions,
     isAuthoritativeWholeSeriesCheckpoint,
+    isTerminalWholeBaselineEvent,
     partialMoveExplainsWholeSeriesCandidate,
     partialMoveSupportsSequentialMissingDepth,
     prioritizeEndpointUnitAgainstWhole,
@@ -2002,7 +2003,7 @@ describe("supportsSequentialMissingDirectionOverride", () => {
         expect(supportsSequentialMissingDirectionOverride({
             hasOppositeUnitOnly: true,
             hasAuthoritativeOppositeUnit: true,
-            hasDetectedMissing: false,
+            hasDetectedMissing: true,
             hasMissingCandidate: false,
             hasConfirmedTargetStaircase: true,
             sharedZeroSupport: 23,
@@ -3398,6 +3399,42 @@ describe("partialMoveSupportsSequentialMissingDepth", () => {
 });
 
 describe("terminal whole baseline ordering", () => {
+    it("retains a negative-score COFECHA baseline with coherent terminal support", () => {
+        const whole = terminalWholeSeriesEvent(-4);
+        whole.evidence.score = -13.65;
+        whole.evidence.notes.push(
+            "whole_baseline_source=cofecha_terminal_lag",
+            "candidate_hard_gate_passed",
+            "cofecha_terminal_segments=2",
+            "cofecha_terminal_consistency=1.000000",
+            "cofecha_terminal_matching_pattern_support=14.394954",
+            "cofecha_terminal_opposing_pattern_support=0.000000",
+            "whole_state_support_fraction=0.315789",
+            "whole_state_newest_lag=-4",
+            "whole_state_newer_edge_support_fraction=1.000000",
+        );
+
+        expect(isTerminalWholeBaselineEvent(whole)).toBe(true);
+    });
+
+    it("does not grant terminal authority to a negative-score whole alias", () => {
+        const whole = terminalWholeSeriesEvent(-6);
+        whole.evidence.score = -38.28;
+        whole.evidence.notes.push(
+            "whole_state_global_lag_matches_shift=false",
+            "whole_state_newer_edge_support_fraction=0.000000",
+        );
+
+        expect(isTerminalWholeBaselineEvent(whole)).toBe(false);
+        expect(pruneWholeSeriesPartialAliases([
+            whole,
+            partialMoveEvent(-6),
+        ])).toMatchObject([{
+            eventType: "partialMove",
+            shiftYears: -6,
+        }]);
+    });
+
     it("does not collapse an independently verified whole baseline into a unit chain", () => {
         const whole = terminalWholeSeriesEvent(-1);
         const missing = falseRingEvent(1995, true);

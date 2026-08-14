@@ -904,6 +904,63 @@ export const wholeSeriesEventIsLocalUnitAlias = (
     ));
 };
 
+const terminalWholeNoteNumber = (
+    event: DiagnosisEvent,
+    prefix: string,
+): number | null => {
+    const note = [...event.evidence.notes]
+        .reverse()
+        .find((value) => value.startsWith(prefix));
+    const value = Number(note?.slice(prefix.length));
+    return Number.isFinite(value) ? value : null;
+};
+
+const hasCoherentNegativeCofechaWholeBaseline = (
+    event: DiagnosisEvent,
+): boolean => {
+    const shiftYears = wholeSeriesMoveShiftYears(event);
+    if (shiftYears === null
+        || !event.evidence.notes.includes("candidate_hard_gate_passed")
+        || !event.evidence.notes.includes(
+            "whole_baseline_source=cofecha_terminal_lag",
+        )) return false;
+    const terminalSegments = terminalWholeNoteNumber(
+        event,
+        "cofecha_terminal_segments=",
+    ) ?? 0;
+    const terminalConsistency = terminalWholeNoteNumber(
+        event,
+        "cofecha_terminal_consistency=",
+    ) ?? 0;
+    const matchingSupport = terminalWholeNoteNumber(
+        event,
+        "cofecha_terminal_matching_pattern_support=",
+    ) ?? 0;
+    const opposingSupport = terminalWholeNoteNumber(
+        event,
+        "cofecha_terminal_opposing_pattern_support=",
+    ) ?? 0;
+    const stateSupport = terminalWholeNoteNumber(
+        event,
+        "whole_state_support_fraction=",
+    ) ?? 0;
+    const newestLag = terminalWholeNoteNumber(
+        event,
+        "whole_state_newest_lag=",
+    );
+    const newerEdgeSupport = terminalWholeNoteNumber(
+        event,
+        "whole_state_newer_edge_support_fraction=",
+    ) ?? 0;
+    return terminalSegments >= 2
+        && terminalConsistency >= 0.9
+        && matchingSupport >= 1
+        && matchingSupport >= opposingSupport + 1
+        && stateSupport >= 0.3
+        && newestLag === shiftYears
+        && newerEdgeSupport >= 0.9;
+};
+
 export const isTerminalWholeBaselineEvent = (
     event: DiagnosisEvent,
 ): boolean => event.eventType === "wholeSeriesMove"
@@ -911,7 +968,11 @@ export const isTerminalWholeBaselineEvent = (
         "whole_baseline_source=cofecha_terminal_lag",
         "whole_baseline_source=path_fixed_side_lag",
         "whole_baseline_source=recent_tail_lag",
-    ].includes(note));
+    ].includes(note))
+    && (
+        event.evidence.score > 0
+        || hasCoherentNegativeCofechaWholeBaseline(event)
+    );
 
 const PARTIAL_BOUNDARY_ANCHOR_SOURCES = new Set([
     "candidate_backed_partial_consensus",
@@ -6165,7 +6226,7 @@ export const supportsSequentialMissingDirectionOverride = ({
     // missing frontier, but cannot by themselves reverse a current, independently hard-gated
     // false-ring operation. A competing missing operation needs its own current candidate.
     if (hasAuthoritativeOppositeUnit) {
-        return hasDetectedMissing || hasMissingCandidate;
+        return hasMissingCandidate;
     }
     return hasDetectedMissing
     || hasMissingCandidate
@@ -6439,6 +6500,12 @@ const recoverSequentialMissingHeadEvent = (
                 ...detected,
                 ...candidateEvents,
             ]);
+        const hasDetectedMissing = detected.some(
+            (event) => event.eventType === "missingRing",
+        );
+        const hasMissingCandidate = candidateEvents.some(
+            (event) => event.eventType === "missingRing",
+        );
         const hasOppositeUnitOnly = (
             hasCoherentSequentialFalseStaircase(detected)
             || hasAuthoritativeOppositeUnit
@@ -6448,7 +6515,9 @@ const recoverSequentialMissingHeadEvent = (
                 diagnosis.targetTree,
             )
         )
-            && !detected.some((event) => event.eventType === "missingRing");
+            && !(hasAuthoritativeOppositeUnit
+                ? hasMissingCandidate
+                : hasDetectedMissing);
         const hasCumulativeMissingStaircase =
             supportsCumulativeSequentialMissingStaircase(head);
         const hasMarkerAnchoredMissingStaircase =
@@ -6465,12 +6534,8 @@ const recoverSequentialMissingHeadEvent = (
             supportsSequentialMissingDirectionOverride({
                 hasOppositeUnitOnly,
                 hasAuthoritativeOppositeUnit,
-                hasDetectedMissing: detected.some(
-                    (event) => event.eventType === "missingRing",
-                ),
-                hasMissingCandidate: candidateEvents.some(
-                    (event) => event.eventType === "missingRing",
-                ),
+                hasDetectedMissing,
+                hasMissingCandidate,
                 hasConfirmedTargetStaircase:
                     presentation.confirmedTargetStaircaseYear !== null,
                 sharedZeroSupport: marker?.support ?? 0,
