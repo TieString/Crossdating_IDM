@@ -34,4 +34,13 @@ describe("stable partial location consensus", () => {
             1922,
         ).centerYear).toBe(1928);
     });
+
+    it("keeps a clipped per-reference boundary vote out of the consensus", () => {
+        expect(selectStablePartialLocationConsensus(
+            1864,
+            1860,
+            1869,
+            1864,
+        ).centerYear).toBe(1864);
+    });
 });

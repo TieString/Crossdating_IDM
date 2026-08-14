@@ -5016,6 +5016,7 @@ type ExactLagPathChain = {
 
 type StableBoundedLagPathFrontier = {
     event: DiagnosisEvent;
+    newestEvent: DiagnosisEvent;
     aggregateShiftYears: number;
     suffixAggregateShiftYears: number[];
     transitionCount: number;
@@ -5122,6 +5123,44 @@ const exactCompleteTransitionChain = (
         : null;
 };
 
+const stableTransitionLocationPriority = (
+    transition: ExactLagPathTransition,
+): number => {
+    const location = transition.event.evidence.locationEvidence
+        ?.find((row) => row.source === "bounded_complete_lag_path")
+        ?? transition.event.evidence.locationEvidence?.[0];
+    return Math.max(0, location?.concentration ?? 0)
+        * Math.max(0, location?.remoteMargin ?? 0);
+};
+
+const stableTransitionLocationConcentration = (
+    transition: ExactLagPathTransition,
+): number => transition.event.evidence.locationEvidence
+    ?.find((row) => row.source === "bounded_complete_lag_path")
+    ?.concentration
+    ?? transition.event.evidence.locationEvidence?.[0]?.concentration
+    ?? 0;
+
+const selectStableUnitTransition = (
+    transitions: readonly ExactLagPathTransition[],
+): ExactLagPathTransition => {
+    const newest = transitions[transitions.length - 1]!;
+    if (newest.event.eventType !== "missingRing"
+        && newest.event.eventType !== "falseRing") return newest;
+    // A sharply localized newest transition is already an adequate changepoint estimate.
+    // Older transitions can have a larger remote-margin product simply because they sit in a
+    // quieter interval; that is not sufficient evidence to skip the current frontier event.
+    if (stableTransitionLocationConcentration(newest) >= 0.85) return newest;
+    const sameOperation = transitions.filter((transition) => (
+        transition.event.eventType === newest.event.eventType
+        && transition.shiftYears === newest.shiftYears
+    ));
+    return [...sameOperation].sort((left, right) => (
+        stableTransitionLocationPriority(right) - stableTransitionLocationPriority(left)
+        || right.topYear - left.topYear
+    ))[0] ?? newest;
+};
+
 /**
  * A distant multi-event decomposition is authoritative only when two independently regularized
  * complete paths agree on every operation and changepoint. This prevents a long corrected older
@@ -5154,6 +5193,7 @@ export const selectStableBoundedLagPathFrontier = (
             maximumYearDrift,
         )) return null;
     const newest = penaltyOneTransitions[penaltyOneTransitions.length - 1];
+    const selectedTransition = selectStableUnitTransition(penaltyOneTransitions);
     const aggregateShiftYears = penaltyOneTransitions.reduce(
         (sum, transition) => sum + transition.shiftYears,
         0,
@@ -5167,15 +5207,15 @@ export const selectStableBoundedLagPathFrontier = (
         });
     return {
         event: {
-            ...newest.event,
+            ...selectedTransition.event,
             evidence: {
-                ...newest.event.evidence,
+                ...selectedTransition.event.evidence,
                 algorithmSources: Array.from(new Set([
-                    ...newest.event.evidence.algorithmSources,
+                    ...selectedTransition.event.evidence.algorithmSources,
                     "stable_multiscale_bounded_path_frontier",
                 ])).sort(),
                 notes: Array.from(new Set([
-                    ...newest.event.evidence.notes,
+                    ...selectedTransition.event.evidence.notes,
                     `stable_bounded_path_transition_count=${penaltyOneTransitions.length}`,
                     `stable_bounded_path_aggregate_shift=${aggregateShiftYears}`,
                     `stable_bounded_path_all_transitions_partial=${
@@ -5189,9 +5229,15 @@ export const selectStableBoundedLagPathFrontier = (
                     `stable_bounded_path_baseline_lag=${baselineLag}`,
                     `stable_bounded_path_penalties=${penaltyLabel}`,
                     `stable_bounded_path_maximum_year_drift=${maximumYearDrift}`,
+                    `stable_bounded_path_newest_year=${newest.topYear}`,
+                    `stable_bounded_path_selected_year=${selectedTransition.topYear}`,
+                    `stable_bounded_path_selected_location_priority=${
+                        stableTransitionLocationPriority(selectedTransition).toFixed(6)
+                    }`,
                 ])),
             },
         },
+        newestEvent: newest.event,
         aggregateShiftYears,
         suffixAggregateShiftYears,
         transitionCount: penaltyOneTransitions.length,
@@ -5210,12 +5256,35 @@ export const recoverStableBoundedLagPathFrontier = (
     targetRange?: { startYear: number; endYear: number },
 ): DiagnosisEvent | null => {
     if (!frontier) return null;
-    const componentShift = lagPathTransitionShift(frontier.event);
-    const componentYear = frontier.event.rankedYears[0]?.year;
+    const frontierSelectedYear = frontier.event.rankedYears[0]?.year;
+    const newestYear = frontier.newestEvent.rankedYears[0]?.year;
+    const latestHasIndependentLocation = frontierSelectedYear !== newestYear
+        && newestYear !== undefined
+        && displayed.some((event) => (
+            event.eventType === frontier.newestEvent.eventType
+            && (event.eventType !== "partialMove"
+                || event.shiftYears === frontier.newestEvent.shiftYears)
+            && event.startYear <= frontier.newestEvent.endYear
+            && event.endYear >= frontier.newestEvent.startYear
+            && (
+                event.evidence.candidateIds.length > 0
+                || event.evidence.algorithmSources.some((source) => (
+                    source === "candidate_ranking"
+                    || source === "cofecha_segment_lag"
+                    || source === "local_edit_alignment"
+                    || source === "counterfactual_window_refinement"
+                ))
+            )
+        ));
+    const frontierEvent = latestHasIndependentLocation
+        ? frontier.newestEvent
+        : frontier.event;
+    const componentShift = lagPathTransitionShift(frontierEvent);
+    const componentYear = frontierEvent.rankedYears[0]?.year;
     if (componentShift === null || componentYear === undefined) return null;
     const matchingDisplayedComponent = displayed.find((event) => (
-        event.eventType === frontier.event.eventType
-        && event.shiftYears === frontier.event.shiftYears
+        event.eventType === frontierEvent.eventType
+        && event.shiftYears === frontierEvent.shiftYears
     ));
     const matchingDisplayedAggregate = displayed.find((event) => (
         event.eventType === "partialMove"
@@ -5235,7 +5304,7 @@ export const recoverStableBoundedLagPathFrontier = (
         && Math.abs(event.shiftYears - frontier.aggregateShiftYears) <= 1
     ));
     const matchingOperation = operations.find((operation) => (
-        operation.eventType === frontier.event.eventType
+        operation.eventType === frontierEvent.eventType
         && operation.shiftYears === componentShift
     ));
     const matchingAggregateOperation = operations.find((operation) => (
@@ -5282,7 +5351,7 @@ export const recoverStableBoundedLagPathFrontier = (
         && matchingAggregateOperation.bestDifferenceGain
             >= (matchingOperation?.bestDifferenceGain ?? 0) + 0.05
         && componentBoundaryDistance > 12;
-    if (frontier.event.eventType === "partialMove"
+    if (frontierEvent.eventType === "partialMove"
         && !matchingDisplayedComponent
         && !matchingDisplayedAggregate
         && !matchingDisplayedWholeComponent
@@ -5290,7 +5359,7 @@ export const recoverStableBoundedLagPathFrontier = (
         && !partialOperationSupported) return null;
     const selectedPathEvent = aggregateOperationDominates
         ? exactDisplayedAggregate
-        : frontier.event;
+        : frontierEvent;
     const selectedShift = aggregateOperationDominates
         ? frontier.aggregateShiftYears
         : componentShift;
@@ -5373,7 +5442,7 @@ export const recoverStableBoundedLagPathFrontier = (
             ...selectedPathEvent.evidence,
             algorithmSources: Array.from(new Set([
                 ...selectedPathEvent.evidence.algorithmSources,
-                ...frontier.event.evidence.algorithmSources,
+                ...frontierEvent.evidence.algorithmSources,
             ])).sort(),
             correlationGain: Math.max(
                 selectedPathEvent.evidence.correlationGain ?? 0,
@@ -5383,14 +5452,17 @@ export const recoverStableBoundedLagPathFrontier = (
             lagAfter: 0,
             candidateIds: Array.from(new Set([
                 ...selectedPathEvent.evidence.candidateIds,
-                ...frontier.event.evidence.candidateIds,
+                ...frontierEvent.evidence.candidateIds,
                 ...(authority?.evidence.candidateIds ?? []),
             ])),
             notes: Array.from(new Set([
                 ...selectedPathEvent.evidence.notes,
-                ...frontier.event.evidence.notes,
+                ...frontierEvent.evidence.notes,
                 `stable_bounded_path_component_shift=${componentShift}`,
                 `stable_bounded_path_component_year=${componentYear}`,
+                ...(latestHasIndependentLocation ? [
+                    `stable_bounded_path_preserved_candidate_backed_newest=${newestYear}`,
+                ] : []),
                 ...(aggregateOperationDominates ? [
                     `stable_bounded_path_preserved_dominant_aggregate=${
                         frontier.aggregateShiftYears

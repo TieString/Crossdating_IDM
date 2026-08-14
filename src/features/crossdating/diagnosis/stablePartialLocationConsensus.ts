@@ -152,11 +152,17 @@ export const refineStablePartialMoveLocation = (
         || referenceVoteYear === null
     ) return event;
 
+    // A maximum at the edge of this deliberately bounded search is a clipped mode, not a
+    // localized reference vote. Keep the path vote neutral until a wider locator verifies it.
+    const boundedReferenceVoteYear = Math.abs(referenceVoteYear - pathYear) >= 15
+        ? pathYear
+        : referenceVoteYear;
+
     const consensus = selectStablePartialLocationConsensus(
         pathYear,
         localCorrelationYear,
         localStepYear,
-        referenceVoteYear,
+        boundedReferenceVoteYear,
     );
     const { startYear, endYear } = boundedWindow(consensus.centerYear, diagnosis);
     return {
@@ -207,6 +213,9 @@ export const refineStablePartialMoveLocation = (
                 }`,
                 `stable_partial_location_step_year=${consensus.localStepYear}`,
                 `stable_partial_location_reference_year=${consensus.referenceVoteYear}`,
+                ...(boundedReferenceVoteYear === referenceVoteYear
+                    ? []
+                    : [`stable_partial_location_clipped_reference_year=${referenceVoteYear}`]),
                 `stable_partial_location_center=${consensus.centerYear}`,
             ])),
         },

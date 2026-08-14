@@ -2368,6 +2368,143 @@ describe("selectCumulativePartialFrontier", () => {
         );
     });
 
+    it("selects the best localized repeated unit transition instead of the newest one", () => {
+        const localizedFalse = (
+            year: number,
+            lagBefore: number,
+            lagAfter: number,
+            concentration: number,
+            remoteMargin: number,
+        ): DiagnosisEvent => {
+            const event = pathEvent(1, lagBefore, lagAfter, year);
+            event.eventType = "falseRing";
+            event.shiftYears = undefined;
+            event.shiftSide = undefined;
+            event.evidence.locationEvidence = [{
+                source: "bounded_complete_lag_path",
+                startYear: year - 6,
+                endYear: year + 6,
+                topYear: year,
+                referenceCount: 12,
+                concentration,
+                remoteMargin,
+                calibrated: false,
+            }];
+            return event;
+        };
+        const penaltyOne = boundedPath([
+            localizedFalse(1766, 2, 1, 0.8, 2),
+            localizedFalse(1823, 1, 0, 0.5, 0.4),
+        ]);
+        const penaltyHalf = boundedPath([
+            localizedFalse(1767, 2, 1, 0.8, 2),
+            localizedFalse(1824, 1, 0, 0.5, 0.4),
+        ]);
+
+        const selected = selectStableBoundedLagPathFrontier(
+            penaltyOne,
+            penaltyHalf,
+        );
+
+        expect(selected?.event.rankedYears[0]?.year).toBe(1766);
+        expect(selected?.event.evidence.notes).toContain(
+            "stable_bounded_path_selected_year=1766",
+        );
+    });
+
+    it("preserves a newest unit transition backed by an independent candidate window", () => {
+        const localizedFalse = (
+            year: number,
+            lagBefore: number,
+            lagAfter: number,
+            priority: number,
+        ): DiagnosisEvent => {
+            const event = pathEvent(1, lagBefore, lagAfter, year);
+            event.eventType = "falseRing";
+            event.shiftYears = undefined;
+            event.shiftSide = undefined;
+            event.evidence.locationEvidence = [{
+                source: "bounded_complete_lag_path",
+                startYear: year - 6,
+                endYear: year + 6,
+                topYear: year,
+                referenceCount: 12,
+                concentration: priority,
+                remoteMargin: priority,
+                calibrated: false,
+            }];
+            return event;
+        };
+        const selected = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                localizedFalse(1766, 2, 1, 0.9),
+                localizedFalse(1823, 1, 0, 0.3),
+            ]),
+            boundedPath([
+                localizedFalse(1767, 2, 1, 0.9),
+                localizedFalse(1824, 1, 0, 0.3),
+            ]),
+        );
+        const candidateBackedNewest = falseRingEvent(1819, true);
+        candidateBackedNewest.endYear = 1827;
+        candidateBackedNewest.rankedYears = [{
+            year: 1823,
+            rank: 1,
+            score: 1,
+            evidenceTags: ["candidate_ranking"],
+        }];
+        candidateBackedNewest.evidence.algorithmSources = ["candidate_ranking"];
+
+        const recovered = recoverStableBoundedLagPathFrontier(
+            selected,
+            [candidateBackedNewest],
+            [],
+        );
+
+        expect(recovered?.rankedYears[0]?.year).toBe(1823);
+        expect(recovered?.evidence.notes).toContain(
+            "stable_bounded_path_preserved_candidate_backed_newest=1823",
+        );
+    });
+
+    it("preserves a sharply localized newest unit transition", () => {
+        const localizedFalse = (
+            year: number,
+            lagBefore: number,
+            lagAfter: number,
+            concentration: number,
+            remoteMargin: number,
+        ): DiagnosisEvent => {
+            const event = pathEvent(1, lagBefore, lagAfter, year);
+            event.eventType = "falseRing";
+            event.shiftYears = undefined;
+            event.shiftSide = undefined;
+            event.evidence.locationEvidence = [{
+                source: "bounded_complete_lag_path",
+                startYear: year - 6,
+                endYear: year + 6,
+                topYear: year,
+                referenceCount: 12,
+                concentration,
+                remoteMargin,
+                calibrated: false,
+            }];
+            return event;
+        };
+        const selected = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                localizedFalse(1868, 2, 1, 0.99, 14),
+                localizedFalse(1887, 1, 0, 0.93, 1),
+            ]),
+            boundedPath([
+                localizedFalse(1869, 2, 1, 0.99, 14),
+                localizedFalse(1888, 1, 0, 0.93, 1),
+            ]),
+        );
+
+        expect(selected?.event.rankedYears[0]?.year).toBe(1887);
+    });
+
     it("does not turn a stable path into an unsupported large partial operation", () => {
         const selected = selectStableBoundedLagPathFrontier(
             boundedPath([
