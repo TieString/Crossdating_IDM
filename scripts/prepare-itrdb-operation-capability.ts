@@ -196,7 +196,7 @@ const gitCommit = execFileSync("git", ["rev-parse", "HEAD"], {
 const manifest: CapabilityManifest = {
     schemaVersion: 1,
     protocolVersion: config.protocolVersion,
-    scenarioGeneratorVersion: config.scenarioGeneratorVersion ?? 1,
+    scenarioGeneratorVersion: config.scenarioGeneratorVersion,
     createdAt: new Date().toISOString(),
     gitCommit,
     configPath: relative(repoRoot, configPath).replaceAll("\\", "/"),

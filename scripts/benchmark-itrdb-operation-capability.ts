@@ -45,7 +45,6 @@ type EventPreview = {
     sources: string[];
     notes: string[];
     reviewOnly: boolean;
-    nearEventCluster: DiagnosisEvent["nearEventCluster"] | null;
 };
 type StepRow = {
     caseIndex: number;
@@ -55,6 +54,7 @@ type StepRow = {
     fileId: string;
     targetId: string;
     evaluationMode: CapabilityCase["evaluationMode"];
+    acceptanceTier: CapabilityCase["acceptanceTier"];
     step: number;
     remainingTruthsBefore: number;
     remainingTruthIds: string[];
@@ -68,9 +68,11 @@ type StepRow = {
     alternativeOperationCorrect: boolean;
     primaryWindowCovered: boolean;
     alternativeWindowCovered: boolean;
-    clusterReviewDetected: boolean;
-    clusterWindowCovered: boolean;
-    clusterNonExecutable: boolean;
+    workflowEquivalentOperationCorrect: boolean;
+    workflowEquivalentWindowCovered: boolean;
+    outOfOrderEvent: boolean;
+    partialMoveMisclassification: boolean;
+    wholeSeriesMoveMisclassification: boolean;
     acceptedInterpretation: Interpretation | null;
     acceptedTruthId: string | null;
     acceptedTruthType: CapabilityOperation | null;
@@ -93,6 +95,7 @@ type CaseRow = {
     fileId: string;
     targetId: string;
     evaluationMode: CapabilityCase["evaluationMode"];
+    acceptanceTier: CapabilityCase["acceptanceTier"];
     seriesYears: number;
     masterCorrelation: number;
     problemSegments: number;
@@ -105,9 +108,6 @@ type CaseRow = {
     alternativeRecoveries: number;
     complete: boolean;
     cleanFalsePositive: boolean | null;
-    clusterReviewDetected: boolean | null;
-    clusterWindowCovered: boolean | null;
-    clusterNonExecutable: boolean | null;
     stopReason: string;
     attemptedSteps: number;
     saveReopenStable: boolean;
@@ -188,7 +188,6 @@ const preview = (event: DiagnosisEvent | null): EventPreview | null => event ? (
     sources: event.evidence.algorithmSources,
     notes: event.evidence.notes,
     reviewOnly: event.reviewOnly === true,
-    nearEventCluster: event.nearEventCluster ?? null,
 }) : null;
 const operationMatches = (event: DiagnosisEvent, truth: CapabilityTruth): boolean => (
     event.eventType === truth.eventType && effectiveShift(event) === truth.shiftYears
@@ -213,6 +212,15 @@ const matchingTruth = (
         || (right.year ?? -Infinity) - (left.year ?? -Infinity)
         || left.truthId.localeCompare(right.truthId)
     ))[0];
+};
+
+const currentFrontierTruths = (
+    truths: readonly CapabilityTruth[],
+): CapabilityTruth[] => {
+    const whole = truths.filter((truth) => truth.eventType === "wholeSeriesMove");
+    const local = truths.filter((truth) => truth.year !== null)
+        .sort((left, right) => right.year! - left.year!)[0];
+    return [...whole, ...(local ? [local] : [])];
 };
 
 const buildScenarioSite = async (
@@ -296,54 +304,41 @@ const runCase = async (input: {
         }
         const primary = after.reviewEvent;
         const alternative = primary?.interpretationAmbiguity?.alternative ?? null;
-        const isClusterCase = input.spec.evaluationMode === "nearEventCluster";
-        const clusterTruth = input.spec.truthCluster;
-        const clusterReviewDetected = Boolean(primary?.nearEventCluster);
-        const clusterWindowCovered = Boolean(
-            primary?.nearEventCluster
-            && clusterTruth
-            && primary.startYear <= clusterTruth.startYear
-            && primary.endYear >= clusterTruth.endYear,
-        );
-        const clusterNonExecutable = Boolean(
-            primary?.nearEventCluster && primary.reviewOnly === true,
-        );
-        const primaryOperationTruth = matchingTruth(primary, remaining, false);
-        const alternativeOperationTruth = matchingTruth(alternative, remaining, false);
-        const primaryCoveredTruth = matchingTruth(primary, remaining, true);
-        const alternativeCoveredTruth = matchingTruth(alternative, remaining, true);
-        const acceptedTruth = isClusterCase
-            ? null
-            : primaryCoveredTruth ?? alternativeCoveredTruth;
+        const frontierTruths = currentFrontierTruths(remaining);
+        const primaryOperationTruth = matchingTruth(primary, frontierTruths, false);
+        const alternativeOperationTruth = matchingTruth(alternative, frontierTruths, false);
+        const primaryCoveredTruth = matchingTruth(primary, frontierTruths, true);
+        const alternativeCoveredTruth = matchingTruth(alternative, frontierTruths, true);
+        const acceptedTruth = primaryCoveredTruth ?? alternativeCoveredTruth;
         const acceptedInterpretation: Interpretation | null = primaryCoveredTruth
             ? "primary"
             : alternativeCoveredTruth
                 ? "alternative"
                 : null;
         const acceptedEvent = acceptedInterpretation === "primary" ? primary : alternative;
-        const widthEvent = isClusterCase ? primary : acceptedEvent;
-        const width = widthEvent
-            ? widthEvent.endYear - widthEvent.startYear + 1
+        const width = acceptedEvent && acceptedEvent.eventType !== "wholeSeriesMove"
+            ? acceptedEvent.endYear - acceptedEvent.startYear + 1
             : null;
         const isClean = input.spec.truths.length === 0;
+        const matchesAnyRemaining = matchingTruth(primary, remaining, true) !== null
+            || matchingTruth(alternative, remaining, true) !== null;
+        const workflowEquivalentOperationCorrect = primaryOperationTruth !== null
+            || alternativeOperationTruth !== null;
+        const workflowEquivalentWindowCovered = acceptedTruth !== null;
+        const partialMoveMisclassification = primary?.eventType === "partialMove"
+            && primaryOperationTruth === null;
+        const wholeSeriesMoveMisclassification = primary?.eventType === "wholeSeriesMove"
+            && primaryOperationTruth === null;
         if (isClean) {
             stopReason = primary ? "clean_false_positive" : "clean_pass";
-        } else if (isClusterCase) {
-            stopReason = !primary
-                ? "refused"
-                : !clusterReviewDetected
-                    ? "cluster_not_identified"
-                    : !clusterNonExecutable
-                        ? "cluster_executable_violation"
-                        : clusterWindowCovered
-                            ? "cluster_covered"
-                            : "cluster_window_miss";
         } else if (!primary) {
             stopReason = "refused";
         } else if (!acceptedTruth) {
-            stopReason = primaryOperationTruth || alternativeOperationTruth
-                ? "window_miss"
-                : "wrong_operation";
+            stopReason = matchesAnyRemaining
+                ? "out_of_order_frontier"
+                : primaryOperationTruth || alternativeOperationTruth
+                    ? "window_miss"
+                    : "wrong_operation";
         } else {
             stopReason = "accepted";
             if (acceptedInterpretation === "primary") primaryRecoveries += 1;
@@ -357,6 +352,7 @@ const runCase = async (input: {
             fileId: input.spec.fileId,
             targetId: input.spec.targetId,
             evaluationMode: input.spec.evaluationMode,
+            acceptanceTier: input.spec.acceptanceTier,
             step,
             remainingTruthsBefore: remaining.length,
             remainingTruthIds: remaining.map((truth) => truth.truthId),
@@ -372,9 +368,11 @@ const runCase = async (input: {
             alternativeOperationCorrect: alternativeOperationTruth !== null,
             primaryWindowCovered: primaryCoveredTruth !== null,
             alternativeWindowCovered: alternativeCoveredTruth !== null,
-            clusterReviewDetected,
-            clusterWindowCovered,
-            clusterNonExecutable,
+            workflowEquivalentOperationCorrect,
+            workflowEquivalentWindowCovered,
+            outOfOrderEvent: stopReason === "out_of_order_frontier",
+            partialMoveMisclassification,
+            wholeSeriesMoveMisclassification,
             acceptedInterpretation,
             acceptedTruthId: acceptedTruth?.truthId ?? null,
             acceptedTruthType: acceptedTruth?.eventType ?? null,
@@ -394,10 +392,9 @@ const runCase = async (input: {
         const preserve = input.keepAllCofecha || keepDiagnosisAudits || ![
             "accepted",
             "clean_pass",
-            "cluster_covered",
         ].includes(stopReason);
         if (!preserve) rmSync(context.stateDir, { recursive: true, force: true });
-        if (isClean || isClusterCase || !acceptedTruth) break;
+        if (isClean || !acceptedTruth) break;
         const truthIndex = remaining.findIndex((truth) => truth.truthId === acceptedTruth.truthId);
         remaining.splice(truthIndex, 1);
         if (remaining.length === 0) {
@@ -415,6 +412,7 @@ const runCase = async (input: {
             fileId: input.spec.fileId,
             targetId: input.spec.targetId,
             evaluationMode: input.spec.evaluationMode,
+            acceptanceTier: input.spec.acceptanceTier,
             seriesYears: input.spec.seriesYears,
             masterCorrelation: input.spec.masterCorrelation,
             problemSegments: input.spec.problemSegments,
@@ -425,22 +423,11 @@ const runCase = async (input: {
             recoveredTruths: input.spec.truths.length - remaining.length,
             primaryRecoveries,
             alternativeRecoveries,
-            complete: input.spec.evaluationMode === "nearEventCluster"
-                ? stopReason === "cluster_covered"
-                : input.spec.truths.length === 0
+            complete: input.spec.truths.length === 0
                 ? stopReason === "clean_pass"
                 : remaining.length === 0,
             cleanFalsePositive: input.spec.truths.length === 0
                 ? stopReason === "clean_false_positive"
-                : null,
-            clusterReviewDetected: input.spec.evaluationMode === "nearEventCluster"
-                ? steps[0]?.clusterReviewDetected ?? false
-                : null,
-            clusterWindowCovered: input.spec.evaluationMode === "nearEventCluster"
-                ? steps[0]?.clusterWindowCovered ?? false
-                : null,
-            clusterNonExecutable: input.spec.evaluationMode === "nearEventCluster"
-                ? steps[0]?.clusterNonExecutable ?? false
                 : null,
             stopReason,
             attemptedSteps: steps.length,
@@ -463,90 +450,66 @@ const rate = (count: number, total: number): number | null => total > 0
 const summarize = (cases: CaseRow[], steps: StepRow[]) => {
     const eventCases = cases.filter((row) => row.truthCount > 0);
     const cleanCases = cases.filter((row) => row.truthCount === 0);
-    const sequentialCases = eventCases.filter((row) => (
-        row.evaluationMode === "sequentialExact"
-    ));
-    const clusterCases = eventCases.filter((row) => (
-        row.evaluationMode === "nearEventCluster"
-    ));
     const attemptedEventSteps = steps.filter((row) => (
-        row.remainingTruthsBefore > 0 && row.evaluationMode === "sequentialExact"
+        row.remainingTruthsBefore > 0
     ));
-    const clusterSteps = steps.filter((row) => (
-        row.remainingTruthsBefore > 0 && row.evaluationMode === "nearEventCluster"
-    ));
+    const respondedSteps = attemptedEventSteps.filter((row) => row.response);
     const localOperationSteps = attemptedEventSteps.filter((row) => (
-        row.primaryOperationCorrect || row.alternativeOperationCorrect
-    ) && row.acceptedTruthType !== "wholeSeriesMove");
+        row.workflowEquivalentOperationCorrect
+        && (
+            row.primaryOperationCorrect
+                ? row.primary?.eventType
+                : row.alternative?.eventType
+        ) !== "wholeSeriesMove"
+    ));
     const acceptedLocalSteps = attemptedEventSteps.filter((row) => (
         row.acceptedTruthType !== null && row.acceptedTruthType !== "wholeSeriesMove"
     ));
     const widths = acceptedLocalSteps.map((row) => row.windowWidth)
         .filter((value): value is number => value !== null);
-    const truthCount = sequentialCases.reduce((sum, row) => sum + row.truthCount, 0);
-    const recovered = sequentialCases.reduce((sum, row) => sum + row.recoveredTruths, 0);
-    const clusterWidths = clusterSteps.filter((row) => row.clusterReviewDetected)
-        .map((row) => row.windowWidth)
-        .filter((value): value is number => value !== null);
+    const truthCount = eventCases.reduce((sum, row) => sum + row.truthCount, 0);
+    const recovered = eventCases.reduce((sum, row) => sum + row.recoveredTruths, 0);
     return {
         cases: cases.length,
         eventCases: eventCases.length,
         cleanCases: cleanCases.length,
         truthEvents: truthCount,
         recoveredTruthEvents: recovered,
-        truthRecoveryRate: rate(recovered, truthCount),
-        clusterCases: clusterCases.length,
-        clusterTruthEvents: clusterCases.reduce((sum, row) => sum + row.truthCount, 0),
-        clusterResponseRate: rate(
-            clusterSteps.filter((row) => row.response).length,
-            clusterSteps.length,
-        ),
-        clusterReviewDetectionRate: rate(
-            clusterCases.filter((row) => row.clusterReviewDetected).length,
-            clusterCases.length,
-        ),
-        clusterWholeWindowCoverage: rate(
-            clusterCases.filter((row) => row.clusterWindowCovered).length,
-            clusterCases.length,
-        ),
-        clusterExecutableViolationCount: clusterCases.filter((row) => (
-            row.clusterReviewDetected && !row.clusterNonExecutable
-        )).length,
-        clusterMedianWindowWidth: percentile(clusterWidths, 0.5),
-        clusterP90WindowWidth: percentile(clusterWidths, 0.9),
+        serialRecoveryRate: rate(recovered, truthCount),
         completeCases: eventCases.filter((row) => row.complete).length,
         completeCaseRate: rate(eventCases.filter((row) => row.complete).length, eventCases.length),
-        responseRateAtAttemptedFrontier: rate(
-            attemptedEventSteps.filter((row) => row.response).length,
+        responseRate: rate(respondedSteps.length, attemptedEventSteps.length),
+        refusalRate: rate(
+            attemptedEventSteps.filter((row) => row.stopReason === "refused").length,
             attemptedEventSteps.length,
         ),
-        primaryOperationAccuracy: rate(
+        strictOperationAccuracy: rate(
             attemptedEventSteps.filter((row) => row.primaryOperationCorrect).length,
             attemptedEventSteps.length,
         ),
-        reviewChoiceOperationAccuracy: rate(
-            attemptedEventSteps.filter((row) => (
-                row.primaryOperationCorrect || row.alternativeOperationCorrect
-            )).length,
+        strictOperationAccuracyAnswered: rate(
+            respondedSteps.filter((row) => row.primaryOperationCorrect).length,
+            respondedSteps.length,
+        ),
+        workflowEquivalentAccuracy: rate(
+            attemptedEventSteps.filter((row) => row.workflowEquivalentOperationCorrect).length,
             attemptedEventSteps.length,
         ),
-        primaryWindowCoverage: rate(
+        workflowEquivalentAccuracyAnswered: rate(
+            respondedSteps.filter((row) => row.workflowEquivalentOperationCorrect).length,
+            respondedSteps.length,
+        ),
+        mainWindowCoverage: rate(
             attemptedEventSteps.filter((row) => row.primaryWindowCovered).length,
             attemptedEventSteps.length,
         ),
-        reviewChoiceWindowCoverage: rate(
-            attemptedEventSteps.filter((row) => (
-                row.primaryWindowCovered || row.alternativeWindowCovered
-            )).length,
+        workflowEquivalentWindowCoverage: rate(
+            attemptedEventSteps.filter((row) => row.workflowEquivalentWindowCovered).length,
             attemptedEventSteps.length,
         ),
         conditionalLocalWindowCoverage: rate(acceptedLocalSteps.length, localOperationSteps.length),
         top1: rate(acceptedLocalSteps.filter((row) => row.top1Exact).length, acceptedLocalSteps.length),
         alternativeRecoveries: eventCases.reduce((sum, row) => sum + row.alternativeRecoveries, 0),
-        refusalRate: rate(
-            attemptedEventSteps.filter((row) => row.stopReason === "refused").length,
-            attemptedEventSteps.length,
-        ),
         wrongOperationRate: rate(
             attemptedEventSteps.filter((row) => row.stopReason === "wrong_operation").length,
             attemptedEventSteps.length,
@@ -554,6 +517,18 @@ const summarize = (cases: CaseRow[], steps: StepRow[]) => {
         windowMissRate: rate(
             attemptedEventSteps.filter((row) => row.stopReason === "window_miss").length,
             attemptedEventSteps.length,
+        ),
+        outOfOrderFrontierRate: rate(
+            attemptedEventSteps.filter((row) => row.outOfOrderEvent).length,
+            attemptedEventSteps.length,
+        ),
+        partialMoveMisclassificationRate: rate(
+            respondedSteps.filter((row) => row.partialMoveMisclassification).length,
+            respondedSteps.length,
+        ),
+        wholeSeriesMoveMisclassificationRate: rate(
+            respondedSteps.filter((row) => row.wholeSeriesMoveMisclassification).length,
+            respondedSteps.length,
         ),
         cleanFalsePositiveRate: rate(
             cleanCases.filter((row) => row.cleanFalsePositive).length,
@@ -611,7 +586,7 @@ const readInputs = () => {
     const manifest = JSON.parse(manifestBytes.toString("utf8")) as CapabilityManifest;
     if (sha256(configBytes) !== manifest.configSha256) throw new Error("config hash mismatch");
     if (manifest.protocolVersion !== config.protocolVersion
-        || manifest.scenarioGeneratorVersion !== (config.scenarioGeneratorVersion ?? 1)) {
+        || manifest.scenarioGeneratorVersion !== config.scenarioGeneratorVersion) {
         throw new Error("capability protocol mismatch");
     }
     return { config, manifest, configBytes, manifestBytes };
@@ -653,6 +628,7 @@ const runWorker = async (): Promise<void> => {
                 fileId: spec.fileId,
                 targetId: spec.targetId,
                 evaluationMode: spec.evaluationMode,
+                acceptanceTier: spec.acceptanceTier,
                 seriesYears: spec.seriesYears,
                 masterCorrelation: spec.masterCorrelation,
                 problemSegments: spec.problemSegments,
@@ -665,15 +641,6 @@ const runWorker = async (): Promise<void> => {
                 alternativeRecoveries: 0,
                 complete: false,
                 cleanFalsePositive: spec.truths.length === 0 ? null : null,
-                clusterReviewDetected: spec.evaluationMode === "nearEventCluster"
-                    ? false
-                    : null,
-                clusterWindowCovered: spec.evaluationMode === "nearEventCluster"
-                    ? false
-                    : null,
-                clusterNonExecutable: spec.evaluationMode === "nearEventCluster"
-                    ? false
-                    : null,
                 stopReason: "error",
                 attemptedSteps: 0,
                 saveReopenStable: false,
@@ -719,9 +686,16 @@ const runParent = async (): Promise<void> => {
         throw new Error("existing run plan input hash mismatch");
     }
     const requestedFamilies = existingPlan?.families
-        ?? (valueFor("--families") ?? "A,B,C,D").split(",")
-        .map((value) => value.trim().toUpperCase())
-        .filter((value): value is CapabilityFamily => ["A", "B", "C", "D"].includes(value));
+        ?? (valueFor("--families") ?? "Clean,A,B,C,D").split(",")
+        .map((value): CapabilityFamily | null => {
+            const normalized = value.trim().toLowerCase();
+            if (normalized === "clean") return "Clean";
+            const upper = normalized.toUpperCase();
+            return upper === "A" || upper === "B" || upper === "C" || upper === "D"
+                ? upper
+                : null;
+        })
+        .filter((value): value is CapabilityFamily => value !== null);
     const requestedFileIds = new Set((valueFor("--file-ids") ?? "").split(",")
         .map((value) => value.trim().toLowerCase()).filter(Boolean));
     const scenarioIds = new Set((valueFor("--scenario-ids") ?? "").split(",")
@@ -865,6 +839,7 @@ const runParent = async (): Promise<void> => {
         errors: cases.filter((row) => row.error !== null).length,
         overall: summarize(cases, steps),
         byFamily: grouped(cases, steps, (row) => row.family),
+        byAcceptanceTier: grouped(cases, steps, (row) => row.acceptanceTier),
         byScenario: grouped(cases, steps, (row) => row.scenarioId),
         byFile: grouped(cases, steps, (row) => row.fileId),
         stopReasons: Object.fromEntries(Array.from(new Set(cases.map((row) => row.stopReason)))

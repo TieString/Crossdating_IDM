@@ -453,6 +453,7 @@ export const diagnoseTruthBlind = (input: {
                 const reviewLocationProfiles = reviewEvent && reviewTopYear !== null
                     ? (() => {
                         const correctionYears = effectiveShift(reviewEvent);
+                        if (correctionYears === null) return null;
                         if (reviewEvent.eventType === "partialMove") {
                             const partialRows = scoreNegativePartialMoveBoundaries(
                                 core,

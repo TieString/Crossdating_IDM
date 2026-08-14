@@ -40,6 +40,7 @@
     "benchmark:itrdb:complex": "node scripts/run-itrdb-complex-events.mjs",
     "benchmark:itrdb:capability:prepare": "node scripts/run-prepare-itrdb-operation-capability.mjs",
     "benchmark:itrdb:capability": "node scripts/run-itrdb-operation-capability.mjs",
+    "typecheck:itrdb:capability": "tsc -p tsconfig.itrdb-operation-capability.json",
     "analyze:itrdb:current-generalization": "node scripts/analyze-itrdb-current-generalization.mjs --ab-dir D:/软件测试/itrdb-current-generalization/results/ab-production-reference-aligned-e903486e-v1 --cd-dir D:/软件测试/itrdb-current-generalization/results/cd-production-reference-aligned-e903486e-v1 --execution-git-commit e903486ef0d7ff9c7e11ef6e31dfa5903abd9e46",
     "validate:itrdb:generalization-pool": "node scripts/validate-itrdb-generalization-pool.mjs",
     "prepare:legacy-generalization": "node scripts/run-prepare-legacy-generalization-manifest.mjs",

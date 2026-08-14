@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "protocolVersion": "itrdb-operation-capability-v1",
-  "scenarioGeneratorVersion": 1,
+  "scenarioGeneratorVersion": 3,
   "createdAt": "2026-08-11T22:02:58.986Z",
   "gitCommit": "5e8728d319816fb0dcfba848de16b639e6c112dd",
   "configPath": "docs/benchmarks/itrdb-operation-capability-config-v1.json",
-  "configSha256": "3617f95e66f366449b1aef131f56c0a2b2976cf4b418af9d1c4ff876c008ee7d",
+  "configSha256": "094a0a5498fed8c731602e939cff3377e0d69402df50f5de97cd3d39ed5f9a9c",
   "itrdbRoot": "D:/软件测试/数据/ITRDB/itrdb_download/measurements",
   "cofechaSha256": "3b898012c417ed06b3a1d88c0a4f86a677e276eadfe30a04fd5798542c63372b",
   "files": [

@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import type {
     CapabilityCase,
     CapabilityConfig,
-    CapabilityFamily,
     CapabilityManifest,
     CapabilityOperation,
     CapabilityTarget,
@@ -101,47 +100,28 @@ const centeredEventYears = (
     ));
 };
 
-type LocalPair = {
-    slug: string;
-    older: Exclude<CapabilityOperation, "wholeSeriesMove">;
-    newer: Exclude<CapabilityOperation, "wholeSeriesMove">;
-};
-
-const localPairs: LocalPair[] = [
-    { slug: "missing-missing", older: "missingRing", newer: "missingRing" },
-    { slug: "false-false", older: "falseRing", newer: "falseRing" },
-    { slug: "partial-partial", older: "partialMove", newer: "partialMove" },
-    { slug: "missing-false", older: "missingRing", newer: "falseRing" },
-    { slug: "false-missing", older: "falseRing", newer: "missingRing" },
-    { slug: "missing-partial", older: "missingRing", newer: "partialMove" },
-    { slug: "partial-missing", older: "partialMove", newer: "missingRing" },
-    { slug: "false-partial", older: "falseRing", newer: "partialMove" },
-    { slug: "partial-false", older: "partialMove", newer: "falseRing" },
-];
-
 type LocalPattern = {
     slug: string;
-    operations: Array<Exclude<CapabilityOperation, "wholeSeriesMove">>;
+    operations: CapabilityOperation[];
 };
 
-const multiEventPatterns: LocalPattern[] = [
-    { slug: "missing-missing-missing", operations: ["missingRing", "missingRing", "missingRing"] },
-    { slug: "false-false-false", operations: ["falseRing", "falseRing", "falseRing"] },
-    { slug: "partial-partial-partial", operations: ["partialMove", "partialMove", "partialMove"] },
+const distantMixedPatterns: LocalPattern[] = [
+    { slug: "missing-false", operations: ["missingRing", "falseRing"] },
+    { slug: "missing-partial", operations: ["missingRing", "partialMove"] },
+    { slug: "missing-whole", operations: ["wholeSeriesMove", "missingRing"] },
+    { slug: "false-partial", operations: ["falseRing", "partialMove"] },
+    { slug: "false-whole", operations: ["wholeSeriesMove", "falseRing"] },
+    { slug: "partial-whole", operations: ["wholeSeriesMove", "partialMove"] },
     { slug: "missing-false-partial", operations: ["missingRing", "falseRing", "partialMove"] },
-    { slug: "partial-missing-false", operations: ["partialMove", "missingRing", "falseRing"] },
-    { slug: "false-partial-missing", operations: ["falseRing", "partialMove", "missingRing"] },
-    { slug: "missing-missing-false-partial", operations: ["missingRing", "missingRing", "falseRing", "partialMove"] },
-    { slug: "false-false-missing-partial", operations: ["falseRing", "falseRing", "missingRing", "partialMove"] },
-    { slug: "partial-partial-missing-false", operations: ["partialMove", "partialMove", "missingRing", "falseRing"] },
-    { slug: "missing-partial-false-missing", operations: ["missingRing", "partialMove", "falseRing", "missingRing"] },
-    { slug: "false-missing-partial-false", operations: ["falseRing", "missingRing", "partialMove", "falseRing"] },
-    { slug: "partial-false-missing-partial", operations: ["partialMove", "falseRing", "missingRing", "partialMove"] },
-    { slug: "missing-missing-missing-missing-missing", operations: ["missingRing", "missingRing", "missingRing", "missingRing", "missingRing"] },
-    { slug: "false-false-false-false-false", operations: ["falseRing", "falseRing", "falseRing", "falseRing", "falseRing"] },
-    { slug: "partial-partial-partial-partial-partial", operations: ["partialMove", "partialMove", "partialMove", "partialMove", "partialMove"] },
-    { slug: "missing-false-partial-missing-false", operations: ["missingRing", "falseRing", "partialMove", "missingRing", "falseRing"] },
-    { slug: "partial-false-missing-partial-false", operations: ["partialMove", "falseRing", "missingRing", "partialMove", "falseRing"] },
+    { slug: "whole-missing-false", operations: ["wholeSeriesMove", "missingRing", "falseRing"] },
+    { slug: "whole-missing-partial", operations: ["wholeSeriesMove", "missingRing", "partialMove"] },
+    { slug: "whole-false-partial", operations: ["wholeSeriesMove", "falseRing", "partialMove"] },
+    { slug: "whole-missing-partial-false", operations: [
+        "wholeSeriesMove",
+        "missingRing",
+        "partialMove",
+        "falseRing",
+    ] },
 ];
 
 const buildPatternTruths = (
@@ -149,16 +129,61 @@ const buildPatternTruths = (
     years: readonly number[],
     partialShiftYears: number,
     secondPartialShiftYears: number,
+    wholeShiftYears: number,
 ): CapabilityTruth[] => {
     let partialIndex = 0;
+    let localIndex = 0;
     return pattern.operations.map((eventType, index) => {
+        if (eventType === "wholeSeriesMove") {
+            return wholeTruth(`event-${index + 1}`, wholeShiftYears);
+        }
         const shift = partialIndex % 2 === 0
             ? partialShiftYears
             : secondPartialShiftYears;
         if (eventType === "partialMove") partialIndex += 1;
-        return localTruth(`event-${index + 1}`, eventType, years[index], shift);
+        const truth = localTruth(
+            `event-${index + 1}`,
+            eventType,
+            years[localIndex],
+            shift,
+        );
+        localIndex += 1;
+        return truth;
     });
 };
+
+const normalizedCounts = (values: readonly number[] | undefined): number[] => (
+    Array.from(new Set(values ?? [2, 3, 4]))
+        .filter((value) => Number.isInteger(value) && value >= 2)
+        .sort((left, right) => left - right)
+);
+
+const nearSpacingFor = (config: CapabilityConfig, key: string): number => {
+    const configured = Array.isArray(config.injection.nearSpacingYears)
+        ? config.injection.nearSpacingYears
+        : [config.injection.nearSpacingYears];
+    const valid = configured.filter((value) => (
+        Number.isInteger(value) && value >= 2 && value <= 13
+    ));
+    if (valid.length === 0) throw new Error("near spacing must be within 2-13 years");
+    return balanced(valid, key);
+};
+
+const yearsForPattern = (
+    config: CapabilityConfig,
+    target: CapabilityTarget,
+    localCount: number,
+    spacingYears: number,
+    key: string,
+): number[] => localCount === 1
+    ? [anchorYears(config, target, 0, key).single]
+    : centeredEventYears(
+            config,
+            target,
+            localCount,
+            spacingYears * (localCount - 1),
+            key,
+        );
 
 const addCase = (
     cases: CapabilityCase[],
@@ -172,7 +197,9 @@ export const buildCapabilityCases = (
     manifest: CapabilityManifest,
 ): CapabilityCase[] => {
     const cases: CapabilityCase[] = [];
-    const scenarioGeneratorVersion = config.scenarioGeneratorVersion ?? 1;
+    if (config.scenarioGeneratorVersion !== 3) {
+        throw new Error("the unified frontier benchmark requires scenario generator v3");
+    }
     manifest.files.forEach((file) => file.eligibleTargets.forEach((target) => {
         const baseKey = `${config.seed}:${file.fileId}:${target.targetId}`;
         const partialShiftYears = balanced(
@@ -202,12 +229,12 @@ export const buildCapabilityCases = (
         };
         addCase(cases, {
             ...common,
-            caseId: `${file.fileId}:${target.targetId}:A0-clean`,
-            family: "A",
-            scenarioId: "A0-clean",
+            caseId: `${file.fileId}:${target.targetId}:Clean0-control`,
+            family: "Clean",
+            scenarioId: "Clean0-control",
             spacingYears: null,
-            evaluationMode: "sequentialExact",
-            truthCluster: null,
+            evaluationMode: "sequentialFrontier",
+            acceptanceTier: "blocking",
             truths: [],
         });
         ([
@@ -220,8 +247,8 @@ export const buildCapabilityCases = (
             family: "A",
             scenarioId,
             spacingYears: null,
-            evaluationMode: "sequentialExact",
-            truthCluster: null,
+            evaluationMode: "sequentialFrontier",
+            acceptanceTier: "blocking",
             truths: [localTruth("event-1", eventType, single, partialShiftYears)],
         }));
         addCase(cases, {
@@ -230,131 +257,136 @@ export const buildCapabilityCases = (
             family: "A",
             scenarioId: "A4-single-whole",
             spacingYears: null,
-            evaluationMode: "sequentialExact",
-            truthCluster: null,
+            evaluationMode: "sequentialFrontier",
+            acceptanceTier: "blocking",
             truths: [wholeTruth("event-1", wholeShiftYears)],
         });
 
-        const addPairFamily = (family: Extract<CapabilityFamily, "B" | "C">): void => {
-            const spacingYears = family === "B"
-                ? config.injection.distantSpacingYears
-                : config.injection.nearSpacingYears;
-            const pairYears = anchorYears(config, target, spacingYears, `${baseKey}:${family}`);
-            localPairs.forEach((pair, pairIndex) => addCase(cases, {
-                ...common,
-                caseId: `${file.fileId}:${target.targetId}:${family}${pairIndex + 1}-${pair.slug}`,
-                family,
-                scenarioId: `${family}${pairIndex + 1}-${pair.slug}`,
-                spacingYears,
-                evaluationMode: family === "C" && scenarioGeneratorVersion >= 2
-                    ? "nearEventCluster"
-                    : "sequentialExact",
-                truthCluster: family === "C" && scenarioGeneratorVersion >= 2 ? {
-                    startYear: pairYears.older,
-                    endYear: pairYears.newer,
-                    eventCount: 2,
-                } : null,
-                truths: [
-                    localTruth("older", pair.older, pairYears.older, partialShiftYears),
-                    localTruth("newer", pair.newer, pairYears.newer, secondPartialShiftYears),
-                ],
-            }));
-            if (family === "B") {
-                ([
-                    ["B10-whole-missing", "missingRing"],
-                    ["B11-whole-false", "falseRing"],
-                    ["B12-whole-partial", "partialMove"],
-                ] as const).forEach(([scenarioId, eventType]) => addCase(cases, {
+        normalizedCounts(config.injection.distantEventCounts).forEach((count) => {
+            ([
+                ["missing", "missingRing"],
+                ["false", "falseRing"],
+                ["partial", "partialMove"],
+            ] as const).forEach(([slug, eventType]) => {
+                const scenarioId = `B-${slug}-n${count}`;
+                const years = yearsForPattern(
+                    config,
+                    target,
+                    count,
+                    config.injection.distantSpacingYears,
+                    `${baseKey}:${scenarioId}`,
+                );
+                addCase(cases, {
                     ...common,
                     caseId: `${file.fileId}:${target.targetId}:${scenarioId}`,
-                    family,
+                    family: "B",
                     scenarioId,
-                    spacingYears,
-                    evaluationMode: "sequentialExact",
-                    truthCluster: null,
-                    truths: [
-                        wholeTruth("whole", wholeShiftYears),
-                        localTruth("local", eventType, pairYears.single, partialShiftYears),
-                    ],
-                }));
-            }
-            if (scenarioGeneratorVersion >= 2) {
-                const requestedCounts = family === "B"
-                    ? config.injection.distantEventCounts ?? [3, 4]
-                    : config.injection.nearClusterEventCounts ?? [3, 4, 5];
-                const patterns = multiEventPatterns.filter((pattern) => (
-                    requestedCounts.includes(pattern.operations.length)
-                ));
-                const firstScenarioNumber = family === "B" ? 13 : 10;
-                patterns.forEach((pattern, patternIndex) => {
-                    const count = pattern.operations.length;
-                    const totalSpanYears = family === "B"
-                        ? spacingYears * (count - 1)
-                        : Math.min(
-                            config.injection.nearClusterMaximumSpanYears ?? 12,
-                            spacingYears * (count - 1),
-                        );
-                    const years = centeredEventYears(
-                        config,
-                        target,
-                        count,
-                        totalSpanYears,
-                        `${baseKey}:${family}:multi:${pattern.slug}`,
-                    );
-                    const scenarioId = `${family}${firstScenarioNumber + patternIndex}`
-                        + `-${pattern.slug}`;
-                    addCase(cases, {
-                        ...common,
-                        caseId: `${file.fileId}:${target.targetId}:${scenarioId}`,
-                        family,
-                        scenarioId,
-                        spacingYears: family === "B" ? spacingYears : null,
-                        evaluationMode: family === "C"
-                            ? "nearEventCluster"
-                            : "sequentialExact",
-                        truthCluster: family === "C" ? {
-                            startYear: years[0],
-                            endYear: years[years.length - 1],
-                            eventCount: years.length,
-                        } : null,
-                        truths: buildPatternTruths(
-                            pattern,
-                            years,
-                            partialShiftYears,
-                            secondPartialShiftYears,
-                        ),
-                    });
+                    spacingYears: config.injection.distantSpacingYears,
+                    evaluationMode: "sequentialFrontier",
+                    acceptanceTier: "blocking",
+                    truths: years.map((year, index) => localTruth(
+                        `event-${index + 1}`,
+                        eventType,
+                        year,
+                        index % 2 === 0 ? partialShiftYears : secondPartialShiftYears,
+                    )),
                 });
-            }
-        };
-        addPairFamily("B");
-        addPairFamily("C");
+            });
+        });
 
-        const tripleYears = anchorYears(
-            config,
-            target,
-            config.injection.distantSpacingYears,
-            `${baseKey}:D`,
-        );
-        ([
-            ["D1-whole-missing-partial", "missingRing", "partialMove"],
-            ["D2-whole-partial-missing", "partialMove", "missingRing"],
-            ["D3-whole-false-partial", "falseRing", "partialMove"],
-            ["D4-whole-partial-false", "partialMove", "falseRing"],
-        ] as const).forEach(([scenarioId, olderType, newerType]) => addCase(cases, {
-            ...common,
-            caseId: `${file.fileId}:${target.targetId}:${scenarioId}`,
-            family: "D",
-            scenarioId,
-            spacingYears: config.injection.distantSpacingYears,
-            evaluationMode: "sequentialExact",
-            truthCluster: null,
-            truths: [
-                wholeTruth("whole", wholeShiftYears),
-                localTruth("older", olderType, tripleYears.older, partialShiftYears),
-                localTruth("newer", newerType, tripleYears.newer, secondPartialShiftYears),
-            ],
-        }));
+        const nearSpacingYears = nearSpacingFor(config, `${baseKey}:C-spacing`);
+        normalizedCounts(config.injection.nearUnitEventCounts).forEach((count) => {
+            ([
+                ["missing", "missingRing"],
+                ["false", "falseRing"],
+            ] as const).forEach(([slug, eventType]) => {
+                const scenarioId = `C-${slug}-n${count}`;
+                const years = yearsForPattern(
+                    config,
+                    target,
+                    count,
+                    nearSpacingYears,
+                    `${baseKey}:${scenarioId}`,
+                );
+                addCase(cases, {
+                    ...common,
+                    caseId: `${file.fileId}:${target.targetId}:${scenarioId}`,
+                    family: "C",
+                    scenarioId,
+                    spacingYears: nearSpacingYears,
+                    evaluationMode: "sequentialFrontier",
+                    acceptanceTier: "blocking",
+                    truths: years.map((year, index) => localTruth(
+                        `event-${index + 1}`,
+                        eventType,
+                        year,
+                        partialShiftYears,
+                    )),
+                });
+            });
+        });
+        if (config.injection.includeAdjacentOptionalSuccess === true) {
+            ([
+                ["missing", "missingRing"],
+                ["false", "falseRing"],
+            ] as const).forEach(([slug, eventType]) => {
+                const scenarioId = `C-optional-adjacent-${slug}`;
+                const years = yearsForPattern(
+                    config,
+                    target,
+                    2,
+                    1,
+                    `${baseKey}:${scenarioId}`,
+                );
+                addCase(cases, {
+                    ...common,
+                    caseId: `${file.fileId}:${target.targetId}:${scenarioId}`,
+                    family: "C",
+                    scenarioId,
+                    spacingYears: 1,
+                    evaluationMode: "sequentialFrontier",
+                    acceptanceTier: "optionalSuccess",
+                    truths: years.map((year, index) => localTruth(
+                        `event-${index + 1}`,
+                        eventType,
+                        year,
+                        partialShiftYears,
+                    )),
+                });
+            });
+        }
+
+        distantMixedPatterns.forEach((pattern, patternIndex) => {
+            const localCount = pattern.operations.filter((operation) => (
+                operation !== "wholeSeriesMove"
+            )).length;
+            const years = yearsForPattern(
+                config,
+                target,
+                localCount,
+                config.injection.distantSpacingYears,
+                `${baseKey}:D:${pattern.slug}`,
+            );
+            const scenarioId = `D${patternIndex + 1}-${pattern.slug}`;
+            addCase(cases, {
+                ...common,
+                caseId: `${file.fileId}:${target.targetId}:${scenarioId}`,
+                family: "D",
+                scenarioId,
+                spacingYears: localCount >= 2
+                    ? config.injection.distantSpacingYears
+                    : null,
+                evaluationMode: "sequentialFrontier",
+                acceptanceTier: "blocking",
+                truths: buildPatternTruths(
+                    pattern,
+                    years,
+                    partialShiftYears,
+                    secondPartialShiftYears,
+                    wholeShiftYears,
+                ),
+            });
+        });
     }));
     return cases;
 };

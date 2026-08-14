@@ -1,7 +1,8 @@
 import type { DiagnosisEventType } from "@/features/crossdating/diagnosis/types";
 
-export type CapabilityFamily = "A" | "B" | "C" | "D";
-export type CapabilityEvaluationMode = "sequentialExact" | "nearEventCluster";
+export type CapabilityFamily = "Clean" | "A" | "B" | "C" | "D";
+export type CapabilityEvaluationMode = "sequentialFrontier";
+export type CapabilityAcceptanceTier = "blocking" | "optionalSuccess";
 export type CapabilityOperation = Extract<
     DiagnosisEventType,
     "missingRing" | "falseRing" | "partialMove" | "wholeSeriesMove"
@@ -12,7 +13,7 @@ export type CapabilityConfig = {
     protocolVersion: "itrdb-operation-capability-v1";
     frozenDate: string;
     seed: string;
-    scenarioGeneratorVersion?: 1 | 2;
+    scenarioGeneratorVersion: 3;
     itrdbRoot: string;
     fileIds: string[];
     generalizationSelection?: {
@@ -42,10 +43,10 @@ export type CapabilityConfig = {
         partialShiftYears: number[];
         wholeShiftYears: number[];
         distantSpacingYears: number;
-        nearSpacingYears: number;
+        nearSpacingYears: number | number[];
         distantEventCounts?: number[];
-        nearClusterEventCounts?: number[];
-        nearClusterMaximumSpanYears?: number;
+        nearUnitEventCounts?: number[];
+        includeAdjacentOptionalSuccess?: boolean;
         allowedWindowWidths: number[];
     };
     families: Record<CapabilityFamily, string>;
@@ -86,7 +87,7 @@ export type CapabilityExcludedFile = {
 export type CapabilityManifest = {
     schemaVersion: 1;
     protocolVersion: CapabilityConfig["protocolVersion"];
-    scenarioGeneratorVersion: 1 | 2;
+    scenarioGeneratorVersion: 3;
     createdAt: string;
     gitCommit: string;
     configPath: string;
@@ -129,10 +130,6 @@ export type CapabilityCase = {
     partialShiftYears: number;
     wholeShiftYears: number;
     evaluationMode: CapabilityEvaluationMode;
-    truthCluster: {
-        startYear: number;
-        endYear: number;
-        eventCount: number;
-    } | null;
+    acceptanceTier: CapabilityAcceptanceTier;
     truths: CapabilityTruth[];
 };

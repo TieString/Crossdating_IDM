@@ -1,7 +1,8 @@
 {
   "schemaVersion": 1,
   "protocolVersion": "itrdb-operation-capability-v1",
-  "frozenDate": "2026-08-12",
+  "scenarioGeneratorVersion": 3,
+  "frozenDate": "2026-08-15",
   "seed": "itrdb-operation-capability-2026-08-12-v1",
   "itrdbRoot": "D:/软件测试/数据/ITRDB/itrdb_download/measurements",
   "fileIds": [
@@ -25,14 +26,18 @@
     "partialShiftYears": [-6, -20],
     "wholeShiftYears": [-4, 4],
     "distantSpacingYears": 30,
-    "nearSpacingYears": 7,
+    "distantEventCounts": [2, 3, 4],
+    "nearSpacingYears": [2, 5, 9, 13],
+    "nearUnitEventCounts": [2, 3, 4],
+    "includeAdjacentOptionalSuccess": true,
     "allowedWindowWidths": [5, 7, 9, 13]
   },
   "families": {
-    "A": "clean control and one missing, false, partial, or whole event per eligible series",
-    "B": "all distant local pairs in both calendar orders where relevant, plus whole with each local type",
-    "C": "all local pairs at seven years; missing plus false deliberately excludes the 1-4 year unidentifiable band",
-    "D": "whole plus partial plus missing or false, with both local calendar orders"
+    "Clean": "clean control used only for review false-positive measurement",
+    "A": "one missing, false, partial, or whole event per eligible series",
+    "B": "distant same-type chains of missing, false, or partial events; local spacing is at least 14 years",
+    "C": "same-direction unit missing or false chains at 2-13 years; adjacent pairs are optional-success only",
+    "D": "all two-type combinations, representative three-type combinations, and one four-type combination"
   },
   "runtime": {
     "workers": 12,
