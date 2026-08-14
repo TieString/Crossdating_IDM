@@ -6,6 +6,8 @@ export type StableNearLagCluster = {
     eventCount: number;
     evidenceYears: number[];
     operationTypes: DiagnosisEventType[];
+    aggregateShiftYears: number;
+    locallyComplete: boolean;
     maximumYearDrift: number;
 };
 
@@ -123,6 +125,24 @@ const groupsMatch = (
             && Math.abs(transition.year - other.year) <= maximumYearDrift;
     });
 
+const groupIsLocallyComplete = (
+    group: TransitionGroup,
+    transitions: readonly LocalTransition[],
+    maximumSpanYears: number,
+): boolean => !transitions.some((candidate) => {
+    if (group.transitions.includes(candidate)) return false;
+    const combined = [...group.transitions, candidate]
+        .sort((left, right) => left.year - right.year);
+    if (combined[combined.length - 1].year - combined[0].year + 1
+        > maximumSpanYears) return false;
+    return combined.every((transition, index) => {
+        const next = combined[index + 1];
+        return next === undefined
+            || transition.event.evidence.lagAfter
+                === next.event.evidence.lagBefore;
+    });
+});
+
 /**
  * Selects a short multi-transition mode only when two regularizations reproduce the same path.
  * A cluster must overlap an independently produced event mode; agreement between two
@@ -193,6 +213,19 @@ export const selectStableNearLagCluster = (
         operationTypes: [...new Set(selected.stronger.transitions.map(
             ({ eventType }) => eventType,
         ))].sort(),
+        aggregateShiftYears: selected.stronger.transitions.reduce(
+            (sum, transition) => sum + transition.shiftYears,
+            0,
+        ),
+        locallyComplete: groupIsLocallyComplete(
+            selected.stronger,
+            strongerTransitions,
+            maximumSpanYears,
+        ) && groupIsLocallyComplete(
+            selected.weaker,
+            weakerTransitions,
+            maximumSpanYears,
+        ),
         maximumYearDrift,
     };
 };

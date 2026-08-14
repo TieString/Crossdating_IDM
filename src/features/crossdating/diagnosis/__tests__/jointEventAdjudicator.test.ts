@@ -47,27 +47,26 @@ const checkpoint = (
 ): DiagnosisReviewEventCheckpoint => ({ stage, event: candidate });
 
 describe("joint event adjudicator", () => {
-    it("emits a non-executable cluster review when a final path resolves nearby events", () => {
-        const clustered = event("clustered", "missingRing", 1898, 1906, 1904);
-        clustered.seriesRange = { startYear: 1700, endYear: 2000 };
-        clustered.evidence.algorithmSources = ["sequential_missing_staircase_head"];
-        clustered.evidence.notes = [
-            "sequential_missing_unit_event_years=1901,1905,1909",
-        ];
+    it("keeps a multi-transition path projected as one ordinary frontier event", () => {
+        const frontier = event("frontier", "missingRing", 1898, 1906, 1904);
+        frontier.seriesRange = { startYear: 1700, endYear: 2000 };
+        frontier.evidence.algorithmSources = ["sequential_missing_staircase_head"];
+        frontier.evidence.notes = ["sequential_missing_unit_event_years=1901,1905,1909"];
         const decision = adjudicateJointEventHypotheses("TARGET", [
-            { ...checkpoint("final", clustered), authority: "selected" },
+            { ...checkpoint("final", frontier), authority: "selected" },
         ]);
 
         expect(decision).toMatchObject({
             status: "selected",
-            reason: "near_event_cluster",
+            reason: "selected",
             event: {
-                startYear: 1901,
-                endYear: 1909,
-                reviewOnly: true,
-                nearEventCluster: { eventCount: 3 },
+                id: "frontier",
+                startYear: 1898,
+                endYear: 1906,
+                eventType: "missingRing",
             },
         });
+        expect(decision.event).not.toHaveProperty("nearEventCluster");
     });
 
     it("uses cross-stage survival instead of incomparable raw event scores", () => {
@@ -94,38 +93,6 @@ describe("joint event adjudicator", () => {
             },
         });
         expect(decision.event?.evidence.candidateIds).toEqual(["stable"]);
-    });
-
-    it("does not let a supplemental stable lag cluster replace a clear operation", () => {
-        const selected = event("selected", "missingRing", 1899, 1907, 1904, 8);
-        const cluster = {
-            ...event("stable-cluster", "missingRing", 1897, 1909, 1904, 12),
-            reviewOnly: true,
-            nearEventCluster: {
-                kind: "nearEventCluster" as const,
-                eventCount: 2,
-                evidenceYears: [1901, 1907],
-                operationTypes: ["missingRing" as const],
-                source: "stableLocalLagPath" as const,
-            },
-        };
-        const decision = adjudicateJointEventHypotheses("TARGET", [
-            checkpoint("candidate", selected),
-            checkpoint("detected", selected),
-            checkpoint("displayed", selected),
-            { ...checkpoint("final", cluster), authority: "supplemental" },
-            { ...checkpoint("final", selected), authority: "selected" },
-        ]);
-
-        expect(decision).toMatchObject({
-            status: "selected",
-            reason: "selected",
-            event: {
-                id: "selected",
-                eventType: "missingRing",
-            },
-        });
-        expect(decision.event).not.toHaveProperty("nearEventCluster");
     });
 
     it("keeps an accepted final locator window from being rewritten by an older checkpoint", () => {

@@ -174,17 +174,14 @@ export type DiagnosisEventInterpretationAmbiguity =
         evidence: DiagnosisWholeMissingInterpretationEvidence;
     };
 
-export type DiagnosisNearEventClusterReview = {
-    kind: "nearEventCluster";
+/** Internal path evidence only. It must never become a user-facing event or review window. */
+export type DiagnosisLocalLagTransitionEvidence = {
     eventCount: number;
     evidenceYears: number[];
     operationTypes: DiagnosisEventType[];
-    source: "sequentialUnitPath"
-        | "explicitUnitStaircase"
-        | "completedMixedCorrection"
-        | "cumulativeComponentPath"
-        | "selectedFinalTransitionChain"
-        | "stableLocalLagPath";
+    aggregateShiftYears: number;
+    locallyComplete: boolean;
+    maximumYearDrift: number;
 };
 
 /**
@@ -205,8 +202,6 @@ export type DiagnosisEvent = {
     locationAlternatives?: DiagnosisEventLocationAlternative[];
     operationAlternatives?: DiagnosisEvent[];
     interpretationAmbiguity?: DiagnosisEventInterpretationAmbiguity;
-    /** A non-executable review window containing several interacting local transitions. */
-    nearEventCluster?: DiagnosisNearEventClusterReview;
     shiftYears?: number;
     shiftSide?: DiagnosisEventShiftSide;
     seriesRange?: YearRange;
@@ -315,6 +310,7 @@ export type DiagnosisEventDecisionAudit = {
     retainedAfterEndpointGuard: DiagnosisEventAuditSnapshot[];
     displayedBeforeLocator: DiagnosisEventAuditSnapshot[];
     finalEvents: DiagnosisEventAuditSnapshot[];
+    localLagTransitionEvidence?: DiagnosisLocalLagTransitionEvidence | null;
     locatorDecisions?: DiagnosisLocatorDecisionAudit[];
     automaticSemanticsRejectedCount: number;
     finalReason: DiagnosisEventDecisionReason;
@@ -340,7 +336,6 @@ export type DiagnosisReviewEventCheckpoint = {
 
 export type DiagnosisReviewWindowDecisionReason =
     | "strict_event"
-    | "near_event_cluster"
     | "lower_display_gate_passed"
     | "cofecha_target_unflagged"
     | "insufficient_reference_support"
@@ -363,7 +358,6 @@ export type DiagnosisReviewWindowDecision = {
 
 export type DiagnosisJointAdjudicationReason =
     | "selected"
-    | "near_event_cluster"
     | "no_complete_hypothesis"
     | "operation_contract_conflict"
     | "operation_conflict"

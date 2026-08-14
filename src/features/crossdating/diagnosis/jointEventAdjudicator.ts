@@ -8,7 +8,6 @@ import {
     withEvidenceLedger,
 } from "./evidenceLedger";
 import { attachEndpointWholeMissingInterpretation } from "./endpointWholeMissingInterpretation";
-import { attachNearEventClusterReview } from "./nearEventClusterReview";
 import type {
     DiagnosisEvidenceClaim,
     DiagnosisEvent,
@@ -1289,18 +1288,10 @@ export const adjudicateJointEventHypotheses = (
     const submitted = checkpoints.filter(({ event }) => (
         event.seriesId === seriesId
     ));
-    const directClusterEvent = submitted
-        .filter(({ stage, event }) => stage === "final" && event.nearEventCluster)
-        .sort((left, right) => (
-            (right.event.nearEventCluster?.eventCount ?? 0)
-                - (left.event.nearEventCluster?.eventCount ?? 0)
-            || right.event.evidence.score - left.event.evidence.score
-        ))[0]?.event ?? null;
-    const operationSubmitted = submitted.filter(({ event }) => !event.nearEventCluster);
-    const submittedClusters = clusterCheckpoints(operationSubmitted);
+    const submittedClusters = clusterCheckpoints(submitted);
     const hypotheses = submittedClusters.map(summary);
-    const clusters = clusterCheckpoints(operationSubmitted.filter((checkpoint) => (
-        operationContractValid(checkpoint, operationSubmitted)
+    const clusters = clusterCheckpoints(submitted.filter((checkpoint) => (
+        operationContractValid(checkpoint, submitted)
     ))).sort((left, right) => (
         locationScore(right) - locationScore(left)
         || stagePriority[representative(right).stage]
@@ -1308,26 +1299,6 @@ export const adjudicateJointEventHypotheses = (
         || clusterId(left).localeCompare(clusterId(right))
     ));
     if (clusters.length === 0) {
-        if (directClusterEvent) {
-            return {
-                seriesId,
-                status: "selected",
-                reason: "near_event_cluster",
-                sourceStage: "final",
-                event: directClusterEvent,
-                hypotheses,
-                operationMargin: null,
-                remoteModeMargin: null,
-                productionAgreement: productionAgreement(
-                    directClusterEvent,
-                    productionEvent,
-                ),
-                productionExactMatch: productionExactMatch(
-                    directClusterEvent,
-                    productionEvent,
-                ),
-            };
-        }
         return {
             seriesId,
             status: "refused",
@@ -1360,25 +1331,6 @@ export const adjudicateJointEventHypotheses = (
         : null;
     if (operationMargin !== null
         && operationMargin < config.minimumOperationMargin) {
-        const clusterCheckpoint = representative(frontierClusters[0] ?? clusters[0]);
-        const clusterEvent = attachNearEventClusterReview(
-            submitted,
-            clusterCheckpoint.event,
-        );
-        if (clusterEvent?.nearEventCluster) {
-            return {
-                seriesId,
-                status: "selected",
-                reason: "near_event_cluster",
-                sourceStage: clusterCheckpoint.stage,
-                event: clusterEvent,
-                hypotheses,
-                operationMargin,
-                remoteModeMargin: null,
-                productionAgreement: productionAgreement(clusterEvent, productionEvent),
-                productionExactMatch: productionExactMatch(clusterEvent, productionEvent),
-            };
-        }
         return {
             seriesId,
             status: "refused",
@@ -1444,16 +1396,11 @@ export const adjudicateJointEventHypotheses = (
             },
         )
         : baseSelectedEvent;
-    const selectedReviewCheckpoints = submitted.filter(({ event }) => (
-        event.nearEventCluster?.source !== "stableLocalLagPath"
-    ));
-    const selectedEvent = endpointResolvedEvent
-        ? attachNearEventClusterReview(selectedReviewCheckpoints, endpointResolvedEvent)
-        : null;
+    const selectedEvent = endpointResolvedEvent;
     return {
         seriesId,
         status: selectedEvent ? "selected" : "refused",
-        reason: selectedEvent?.nearEventCluster ? "near_event_cluster" : reason,
+        reason,
         sourceStage: selectedEvent ? winnerCheckpoint.stage : null,
         event: selectedEvent,
         hypotheses,

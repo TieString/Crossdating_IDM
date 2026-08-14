@@ -564,16 +564,6 @@ const selectAdjudicatedReviewWindowDisplay = (
     if (!audit.cofechaFlagged && !hasUnflaggedReviewAuthority(event)) {
         return refused(audit, "cofecha_target_unflagged");
     }
-    if (event.nearEventCluster) {
-        return {
-            seriesId: audit.seriesId,
-            status: "review",
-            reason: "near_event_cluster",
-            strictReason: audit.finalReason,
-            sourceStage: decision.sourceStage,
-            event: { ...event, reviewOnly: true },
-        };
-    }
     const independentlyStrictWhole = event.eventType === "wholeSeriesMove"
         && evidenceClaimsFor(event).has("whole_terminal_baseline");
     if (decision.sourceStage === "final" || independentlyStrictWhole) {

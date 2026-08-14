@@ -125,7 +125,6 @@ import {
     hasNearLagClusterCandidate,
     selectStableNearLagCluster,
 } from "./nearLagCluster";
-import { createNearLagClusterReviewEvent } from "./nearEventClusterReview";
 import { refineEventWithBoundaryConsensus } from "./eventBoundaryConsensus";
 import {
     getJointCounterfactualOperationScores,
@@ -9425,12 +9424,6 @@ export const makeDiagnosisEvents = (
             rawNearPenaltyOnePath,
             boundedHypotheses,
         );
-        const stableNearClusterReviewEvent = stableNearLagCluster
-            ? createNearLagClusterReviewEvent(
-                stableNearLagCluster,
-                diagnosis.targetRange,
-            )
-            : null;
         const unflaggedUnitPulseProbeEligible = diagnosis.master.sourceTrees.length >= 8
             && diagnosis.targetRange.endYear - diagnosis.targetRange.startYear + 1 >= 120
             && (
@@ -9670,9 +9663,6 @@ export const makeDiagnosisEvents = (
                 : [];
             const supplementalFinalEvents = [
                 ...boundedFinalEvents,
-                ...(stableNearClusterReviewEvent
-                    ? [withEvidenceLedger(stableNearClusterReviewEvent)]
-                    : []),
                 ...validAutomaticEvents(supplementalFinalHypotheses),
             ].map(withEvidenceLedger);
             let finalReason: DiagnosisEventDecisionReason = "post_location_rejected";
@@ -9730,6 +9720,14 @@ export const makeDiagnosisEvents = (
                     retainedAfterEndpointGuard: retainedDetected.map(auditEvent),
                     displayedBeforeLocator: displayed.map(auditEvent),
                     finalEvents: finalEvents.map(auditEvent),
+                    localLagTransitionEvidence: stableNearLagCluster ? {
+                        eventCount: stableNearLagCluster.eventCount,
+                        evidenceYears: [...stableNearLagCluster.evidenceYears],
+                        operationTypes: [...stableNearLagCluster.operationTypes],
+                        aggregateShiftYears: stableNearLagCluster.aggregateShiftYears,
+                        locallyComplete: stableNearLagCluster.locallyComplete,
+                        maximumYearDrift: stableNearLagCluster.maximumYearDrift,
+                    } : null,
                     locatorDecisions: locatorDecisionAudits.map((decision) => ({
                         ...decision,
                         preLocatorEvent: { ...decision.preLocatorEvent },

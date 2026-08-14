@@ -215,8 +215,7 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
           event,
           interpretationSelection,
         );
-        const cluster = selectedEvent.nearEventCluster;
-        const interpretation = cluster ? undefined : event.interpretationAmbiguity;
+        const interpretation = event.interpretationAmbiguity;
         const width = selectedEvent.endYear - selectedEvent.startYear + 1;
         const savedYear = selectedYears[selectedEvent.id];
         const rankedYears = [...selectedEvent.rankedYears]
@@ -228,7 +227,7 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
           .sort((a, b) => a.rank - b.rank);
         const preferredYear = rankedYears[0]?.year;
         const rankedYearSet = new Set(rankedYears.map((row) => row.year));
-        const selectableYears = cluster ? [] : selectedEvent.eventType === "partialMove"
+        const selectableYears = selectedEvent.eventType === "partialMove"
           ? [
             ...rankedYears.map((row) => ({ year: row.year, rank: row.rank })),
             ...Array.from({ length: Math.max(0, width) }, (_, index) => selectedEvent.startYear + index)
@@ -265,7 +264,7 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
             <div style={{ minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 5 }}>
                 <strong style={{ color: "#234d28" }}>
-                  {cluster ? "可能多个近距离事件" : eventTypeLabels[selectedEvent.eventType]}
+                  {eventTypeLabels[selectedEvent.eventType]}
                 </strong>
                 <span>
                   {selectedEvent.startYear}-{selectedEvent.endYear}（{width} 年）
@@ -330,19 +329,6 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
                 </div>
               ) : null}
 
-              {cluster ? (
-                <div
-                  style={{
-                    marginTop: 5,
-                    paddingTop: 5,
-                    borderTop: "1px solid #e0ebe0",
-                    color: "#45694a",
-                  }}
-                >
-                  该窗口内检测到约 {cluster.eventCount} 个相互影响的事件，
-                  请结合图表和样本逐项判断；此窗口不能直接应用为单个操作。
-                </div>
-              ) : null}
               <div style={{ marginTop: 4 }}>
                 lag {selectedEvent.evidence.lagBefore ?? "-"} → {selectedEvent.evidence.lagAfter ?? "-"}
                 {shiftText}
@@ -460,12 +446,10 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
               {onApplyEvent ? (
                 <button
                   type="button"
-                  disabled={Boolean(cluster) || Boolean(selectedEvent.stale ?? event.stale)}
-                  title={cluster
-                    ? "近距离多事件窗口仅用于复核，不能作为单个操作直接应用"
-                    : applyPreview(selectedEvent, selectedYear)}
+                  disabled={Boolean(selectedEvent.stale ?? event.stale)}
+                  title={applyPreview(selectedEvent, selectedYear)}
                   onClick={() => onApplyEvent(selectedEvent, selectedYear)}
-                  style={(cluster || selectedEvent.stale || event.stale)
+                  style={(selectedEvent.stale || event.stale)
                     ? disabledButtonStyle
                     : applyButtonStyle}
                 >

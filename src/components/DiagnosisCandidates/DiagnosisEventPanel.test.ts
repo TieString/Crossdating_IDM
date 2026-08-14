@@ -8,9 +8,9 @@ import {
 } from "./DiagnosisEventPanel";
 
 describe("DiagnosisEventPanel", () => {
-  it("renders a nearby-event cluster as review-only and disables direct apply", () => {
+  it("does not project multi-transition evidence as a special cluster UI", () => {
     const event: DiagnosisEvent = {
-      id: "cluster",
+      id: "frontier",
       seriesId: "ABC01A",
       eventType: "missingRing",
       startYear: 1900,
@@ -18,7 +18,7 @@ describe("DiagnosisEventPanel", () => {
       rankedYears: [{ year: 1907, rank: 1, score: 1, evidenceTags: [] }],
       confidenceLevel: "medium",
       evidence: {
-        algorithmSources: ["near_event_cluster_review"],
+        algorithmSources: ["sequential_missing_staircase_head"],
         score: 1,
         scoreMargin: 0.1,
         baselineCorrelation: 0.2,
@@ -28,29 +28,22 @@ describe("DiagnosisEventPanel", () => {
         lagAfter: 0,
         samplePairs: 80,
         candidateIds: [],
-        notes: ["near_event_cluster_non_executable=true"],
+        notes: ["sequential_missing_unit_event_years=1900,1904,1908,1912"],
       },
       alternativeTypes: [],
-      reviewOnly: true,
-      nearEventCluster: {
-        kind: "nearEventCluster",
-        eventCount: 4,
-        evidenceYears: [1900, 1904, 1908, 1912],
-        operationTypes: ["missingRing", "falseRing"],
-        source: "selectedFinalTransitionChain",
-      },
     };
 
     const html = renderToStaticMarkup(createElement(DiagnosisEventPanel, {
       events: [event],
+      onFocusEvent: () => undefined,
       onApplyEvent: () => true,
     }));
 
-    expect(html).toContain("可能多个近距离事件");
-    expect(html).toContain("约 4 个相互影响的事件");
-    expect(html).toContain("不能直接应用为单个操作");
-    expect(html).toContain("disabled=\"\"");
-    expect(html).not.toContain("优先年份");
+    expect(html).toContain("可能缺轮");
+    expect(html).toContain("#1 1907");
+    expect(html).not.toContain("可能多个近距离事件");
+    expect(html).not.toContain("不能直接应用为单个操作");
+    expect(html).not.toContain("disabled=\"\"");
   });
 
   it("renders only the current event-level diagnosis surface", () => {

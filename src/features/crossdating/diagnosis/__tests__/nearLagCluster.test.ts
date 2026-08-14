@@ -69,6 +69,28 @@ describe("stable near lag cluster", () => {
             eventCount: 3,
             evidenceYears: [1902, 1906, 1912],
             operationTypes: ["missingRing", "partialMove"],
+            aggregateShiftYears: -8,
+            locallyComplete: true,
+        });
+    });
+
+    it("marks a matched subgroup incomplete when another chained transition is nearby", () => {
+        const preferred = event(1904, -2, -1);
+        const selected = selectStableNearLagCluster(
+            path([event(1901, -2, -1), event(1907, -1, 0)]),
+            path([
+                event(1898, -3, -2),
+                event(1901, -2, -1),
+                event(1907, -1, 0),
+            ]),
+            [preferred],
+        );
+
+        expect(selected).toMatchObject({
+            eventCount: 2,
+            evidenceYears: [1901, 1907],
+            aggregateShiftYears: -2,
+            locallyComplete: false,
         });
     });
 
