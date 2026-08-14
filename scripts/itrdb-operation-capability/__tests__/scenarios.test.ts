@@ -179,3 +179,92 @@ describe("ITRDB operation capability scenario matrix v3", () => {
         );
     });
 });
+
+describe("ITRDB operation capability balanced paper matrix v4", () => {
+    const paperConfig: CapabilityConfig = {
+        ...config,
+        scenarioGeneratorVersion: 4,
+        design: {
+            scenarioSampling: "balancedOnePerFamily",
+            splitId: "fixture-split",
+            datasetRole: "finalHoldout",
+            casesPerTargetPerFamily: 1,
+        },
+        statistics: {
+            clusterUnit: "file",
+            bootstrapReplicates: 1000,
+            confidenceLevel: 0.95,
+            targetCoverage: 0.9,
+            seed: "fixture-bootstrap",
+        },
+    };
+    const targets = Array.from({ length: 24 }, (_, index) => ({
+        ...manifest.files[0].eligibleTargets[0],
+        targetId: `T${String(index + 1).padStart(2, "0")}`,
+    }));
+    const paperManifest: CapabilityManifest = {
+        ...manifest,
+        scenarioGeneratorVersion: 4,
+        files: [{
+            ...manifest.files[0],
+            eligibleTargets: targets,
+        }],
+        counts: {
+            ...manifest.counts,
+            eligibleTargets: targets.length,
+        },
+    };
+
+    it("freezes exactly one case per target and major family", () => {
+        const cases = buildCapabilityCases(paperConfig, paperManifest);
+
+        expect(cases).toHaveLength(targets.length * 5);
+        (["Clean", "A", "B", "C", "D"] as const).forEach((family) => {
+            const selected = cases.filter((item) => item.family === family);
+            expect(selected).toHaveLength(targets.length);
+            expect(new Set(selected.map((item) => item.targetId)).size).toBe(targets.length);
+        });
+    });
+
+    it("balances operation subtypes without using target signal strength", () => {
+        const cases = buildCapabilityCases(paperConfig, paperManifest);
+        const aTypes = cases.filter((item) => item.family === "A")
+            .map((item) => item.truths[0].eventType);
+        expect(new Set(aTypes)).toEqual(new Set([
+            "missingRing",
+            "falseRing",
+            "partialMove",
+            "wholeSeriesMove",
+        ]));
+        const bCases = cases.filter((item) => item.family === "B");
+        expect(new Set(bCases.map((item) => item.scenarioId)).size).toBe(9);
+        expect(bCases.every((item) => item.truths.length >= 2)).toBe(true);
+        expect(bCases.every((item) => (
+            new Set(item.truths.map((truth) => truth.eventType)).size === 1
+        ))).toBe(true);
+        const cCases = cases.filter((item) => item.family === "C");
+        expect(new Set(cCases.map((item) => item.scenarioId)).size).toBe(24);
+        expect(cCases.every((item) => item.spacingYears !== null
+            && item.spacingYears >= 2
+            && item.spacingYears <= 13)).toBe(true);
+        const dCases = cases.filter((item) => item.family === "D");
+        expect(new Set(dCases.map((item) => item.scenarioId)).size).toBe(11);
+        expect(paperConfig.selection.usesSignalStrength).toBe(false);
+        expect(paperConfig.selection.usesDiagnosisOutput).toBe(false);
+    });
+
+    it("is deterministic and keeps all local windows in the requested context", () => {
+        const first = buildCapabilityCases(paperConfig, paperManifest);
+        const second = buildCapabilityCases(paperConfig, paperManifest);
+        expect(first).toEqual(second);
+        first.forEach((item) => item.truths.forEach((truth) => {
+            if (truth.year === null) return;
+            expect(truth.year - item.targetStartYear).toBeGreaterThanOrEqual(
+                paperConfig.selection.minimumOlderContextYears,
+            );
+            expect(item.targetEndYear - truth.year).toBeGreaterThanOrEqual(
+                paperConfig.selection.minimumNewerContextYears,
+            );
+        }));
+    });
+});

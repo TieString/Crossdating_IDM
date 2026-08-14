@@ -13,7 +13,7 @@ export type CapabilityConfig = {
     protocolVersion: "itrdb-operation-capability-v1";
     frozenDate: string;
     seed: string;
-    scenarioGeneratorVersion: 3;
+    scenarioGeneratorVersion: 3 | 4;
     itrdbRoot: string;
     fileIds: string[];
     generalizationSelection?: {
@@ -50,6 +50,19 @@ export type CapabilityConfig = {
         allowedWindowWidths: number[];
     };
     families: Record<CapabilityFamily, string>;
+    design?: {
+        scenarioSampling: "exhaustivePerTarget" | "balancedOnePerFamily";
+        splitId: string;
+        datasetRole: "development" | "finalHoldout";
+        casesPerTargetPerFamily: number;
+    };
+    statistics?: {
+        clusterUnit: "file";
+        bootstrapReplicates: number;
+        confidenceLevel: number;
+        targetCoverage: number;
+        seed: string;
+    };
     runtime: {
         workers: number;
         cofechaTimeoutSeconds: number;
@@ -87,7 +100,7 @@ export type CapabilityExcludedFile = {
 export type CapabilityManifest = {
     schemaVersion: 1;
     protocolVersion: CapabilityConfig["protocolVersion"];
-    scenarioGeneratorVersion: 3;
+    scenarioGeneratorVersion: 3 | 4;
     createdAt: string;
     gitCommit: string;
     configPath: string;

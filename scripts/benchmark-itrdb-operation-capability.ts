@@ -23,6 +23,7 @@ import {
     snapshotsSemanticallyEqual,
 } from "./legacy-generalization/evaluator";
 import { buildCapabilityCases } from "./itrdb-operation-capability/scenarios";
+import { summarizeClusteredMetric } from "./itrdb-operation-capability/clusteredStatistics";
 import type {
     CapabilityCase,
     CapabilityConfig,
@@ -70,6 +71,9 @@ type StepRow = {
     alternativeWindowCovered: boolean;
     workflowEquivalentOperationCorrect: boolean;
     workflowEquivalentWindowCovered: boolean;
+    localWindowEvaluated: boolean;
+    primaryLocalWindowCovered: boolean;
+    workflowEquivalentLocalWindowCovered: boolean;
     outOfOrderEvent: boolean;
     partialMoveMisclassification: boolean;
     wholeSeriesMoveMisclassification: boolean;
@@ -103,7 +107,12 @@ type CaseRow = {
     partialShiftYears: number;
     wholeShiftYears: number;
     truthCount: number;
+    localTruthCount: number;
+    wholeTruthCount: number;
     recoveredTruths: number;
+    recoveredLocalTruths: number;
+    strictRecoveredLocalTruths: number;
+    top1RecoveredLocalTruths: number;
     primaryRecoveries: number;
     alternativeRecoveries: number;
     complete: boolean;
@@ -227,6 +236,7 @@ const buildScenarioSite = async (
     inputPath: string,
     targetId: string,
     remainingTruths: readonly CapabilityTruth[],
+    falseRingMode: CapabilityConfig["injection"]["falseRingMode"],
 ) => {
     const loaded = await loadRwl(inputPath, "tucson-auto");
     const source = loaded.series.get(targetId);
@@ -237,7 +247,7 @@ const buildScenarioSite = async (
             eventType: truth.eventType as "missingRing" | "falseRing" | "partialMove",
             year: truth.year!,
             shiftYears: truth.shiftYears,
-            falseMode: truth.eventType === "falseRing" ? "moderate" as const : undefined,
+            falseMode: truth.eventType === "falseRing" ? falseRingMode : undefined,
         }));
     const target = remainingTruths.length === 0
         ? new Map(source.valuesByYear)
@@ -271,7 +281,12 @@ const runCase = async (input: {
         : Math.max(1, Math.min(input.maxSteps, Math.max(1, input.spec.truths.length)));
     for (let step = 1; step <= maximumSteps; step += 1) {
         const stepStarted = Date.now();
-        const { loaded, site } = await buildScenarioSite(inputPath, input.spec.targetId, remaining);
+        const { loaded, site } = await buildScenarioSite(
+            inputPath,
+            input.spec.targetId,
+            remaining,
+            input.config.injection.falseRingMode,
+        );
         const reopened = await reopenFormattedSite(site, loaded.readResult);
         const context = runCofecha({
             siteData: reopened,
@@ -325,6 +340,17 @@ const runCase = async (input: {
         const workflowEquivalentOperationCorrect = primaryOperationTruth !== null
             || alternativeOperationTruth !== null;
         const workflowEquivalentWindowCovered = acceptedTruth !== null;
+        const localFrontierTruthPresent = frontierTruths.some((truth) => (
+            truth.eventType !== "wholeSeriesMove"
+        ));
+        // A correctly accepted whole-series baseline is resolved before the local
+        // frontier. The local event is evaluated on the next diagnostic pass.
+        const localWindowEvaluated = localFrontierTruthPresent
+            && acceptedTruth?.eventType !== "wholeSeriesMove";
+        const primaryLocalWindowCovered = primaryCoveredTruth !== null
+            && primaryCoveredTruth.eventType !== "wholeSeriesMove";
+        const workflowEquivalentLocalWindowCovered = acceptedTruth !== null
+            && acceptedTruth.eventType !== "wholeSeriesMove";
         const partialMoveMisclassification = primary?.eventType === "partialMove"
             && primaryOperationTruth === null;
         const wholeSeriesMoveMisclassification = primary?.eventType === "wholeSeriesMove"
@@ -370,6 +396,9 @@ const runCase = async (input: {
             alternativeWindowCovered: alternativeCoveredTruth !== null,
             workflowEquivalentOperationCorrect,
             workflowEquivalentWindowCovered,
+            localWindowEvaluated,
+            primaryLocalWindowCovered,
+            workflowEquivalentLocalWindowCovered,
             outOfOrderEvent: stopReason === "out_of_order_frontier",
             partialMoveMisclassification,
             wholeSeriesMoveMisclassification,
@@ -420,7 +449,29 @@ const runCase = async (input: {
             partialShiftYears: input.spec.partialShiftYears,
             wholeShiftYears: input.spec.wholeShiftYears,
             truthCount: input.spec.truths.length,
+            localTruthCount: input.spec.truths.filter((truth) => (
+                truth.eventType !== "wholeSeriesMove"
+            )).length,
+            wholeTruthCount: input.spec.truths.filter((truth) => (
+                truth.eventType === "wholeSeriesMove"
+            )).length,
             recoveredTruths: input.spec.truths.length - remaining.length,
+            recoveredLocalTruths: steps.filter((stepRow) => (
+                stepRow.acceptedTruthType !== null
+                && stepRow.acceptedTruthType !== "wholeSeriesMove"
+            )).length,
+            strictRecoveredLocalTruths: steps.filter((stepRow) => (
+                stepRow.acceptedTruthType !== null
+                && stepRow.acceptedTruthType !== "wholeSeriesMove"
+                && stepRow.acceptedInterpretation === "primary"
+                && stepRow.primaryOperationCorrect
+                && stepRow.primaryWindowCovered
+            )).length,
+            top1RecoveredLocalTruths: steps.filter((stepRow) => (
+                stepRow.acceptedTruthType !== null
+                && stepRow.acceptedTruthType !== "wholeSeriesMove"
+                && stepRow.top1Exact
+            )).length,
             primaryRecoveries,
             alternativeRecoveries,
             complete: input.spec.truths.length === 0
@@ -465,17 +516,35 @@ const summarize = (cases: CaseRow[], steps: StepRow[]) => {
     const acceptedLocalSteps = attemptedEventSteps.filter((row) => (
         row.acceptedTruthType !== null && row.acceptedTruthType !== "wholeSeriesMove"
     ));
+    const promptedLocalSteps = attemptedEventSteps.filter((row) => row.localWindowEvaluated);
     const widths = acceptedLocalSteps.map((row) => row.windowWidth)
         .filter((value): value is number => value !== null);
     const truthCount = eventCases.reduce((sum, row) => sum + row.truthCount, 0);
+    const localTruthCount = eventCases.reduce((sum, row) => sum + row.localTruthCount, 0);
     const recovered = eventCases.reduce((sum, row) => sum + row.recoveredTruths, 0);
+    const recoveredLocal = eventCases.reduce(
+        (sum, row) => sum + row.recoveredLocalTruths,
+        0,
+    );
+    const strictRecoveredLocal = eventCases.reduce(
+        (sum, row) => sum + row.strictRecoveredLocalTruths,
+        0,
+    );
+    const top1RecoveredLocal = eventCases.reduce(
+        (sum, row) => sum + row.top1RecoveredLocalTruths,
+        0,
+    );
     return {
         cases: cases.length,
         eventCases: eventCases.length,
         cleanCases: cleanCases.length,
         truthEvents: truthCount,
+        localTruthEvents: localTruthCount,
         recoveredTruthEvents: recovered,
         serialRecoveryRate: rate(recovered, truthCount),
+        serialStrictMainWindowCoverage: rate(strictRecoveredLocal, localTruthCount),
+        serialWorkflowEquivalentWindowCoverage: rate(recoveredLocal, localTruthCount),
+        serialTop1: rate(top1RecoveredLocal, localTruthCount),
         completeCases: eventCases.filter((row) => row.complete).length,
         completeCaseRate: rate(eventCases.filter((row) => row.complete).length, eventCases.length),
         responseRate: rate(respondedSteps.length, attemptedEventSteps.length),
@@ -506,6 +575,16 @@ const summarize = (cases: CaseRow[], steps: StepRow[]) => {
         workflowEquivalentWindowCoverage: rate(
             attemptedEventSteps.filter((row) => row.workflowEquivalentWindowCovered).length,
             attemptedEventSteps.length,
+        ),
+        promptedStrictLocalWindowCoverage: rate(
+            promptedLocalSteps.filter((row) => row.primaryLocalWindowCovered).length,
+            promptedLocalSteps.length,
+        ),
+        promptedWorkflowEquivalentLocalWindowCoverage: rate(
+            promptedLocalSteps.filter((row) => (
+                row.workflowEquivalentLocalWindowCovered
+            )).length,
+            promptedLocalSteps.length,
         ),
         conditionalLocalWindowCoverage: rate(acceptedLocalSteps.length, localOperationSteps.length),
         top1: rate(acceptedLocalSteps.filter((row) => row.top1Exact).length, acceptedLocalSteps.length),
@@ -561,6 +640,156 @@ const grouped = <T extends string>(
         ))),
     ),
 ]));
+
+type ClusterMetricCount = { numerator: number; denominator: number };
+type ClusterMetricName =
+    | "responseRate"
+    | "refusalRate"
+    | "strictOperationAccuracy"
+    | "workflowEquivalentAccuracy"
+    | "serialRecoveryRate"
+    | "serialStrictMainWindowCoverage"
+    | "serialWorkflowEquivalentWindowCoverage"
+    | "serialTop1"
+    | "promptedStrictLocalWindowCoverage"
+    | "promptedWorkflowEquivalentLocalWindowCoverage"
+    | "saveReopenStableRate"
+    | "cleanFalsePositiveRate";
+
+const clusterMetricCounts = (
+    cases: CaseRow[],
+    steps: StepRow[],
+): Record<ClusterMetricName, ClusterMetricCount> => {
+    const eventCases = cases.filter((row) => row.truthCount > 0);
+    const cleanCases = cases.filter((row) => row.truthCount === 0);
+    const attempted = steps.filter((row) => row.remainingTruthsBefore > 0);
+    const truthCount = eventCases.reduce((sum, row) => sum + row.truthCount, 0);
+    const localTruthCount = eventCases.reduce((sum, row) => sum + row.localTruthCount, 0);
+    const promptedLocal = attempted.filter((row) => row.localWindowEvaluated);
+    return {
+        responseRate: {
+            numerator: attempted.filter((row) => row.response).length,
+            denominator: attempted.length,
+        },
+        refusalRate: {
+            numerator: attempted.filter((row) => row.stopReason === "refused").length,
+            denominator: attempted.length,
+        },
+        strictOperationAccuracy: {
+            numerator: attempted.filter((row) => row.primaryOperationCorrect).length,
+            denominator: truthCount,
+        },
+        workflowEquivalentAccuracy: {
+            numerator: attempted.filter((row) => row.workflowEquivalentOperationCorrect).length,
+            denominator: truthCount,
+        },
+        serialRecoveryRate: {
+            numerator: eventCases.reduce((sum, row) => sum + row.recoveredTruths, 0),
+            denominator: truthCount,
+        },
+        serialStrictMainWindowCoverage: {
+            numerator: eventCases.reduce(
+                (sum, row) => sum + row.strictRecoveredLocalTruths,
+                0,
+            ),
+            denominator: localTruthCount,
+        },
+        serialWorkflowEquivalentWindowCoverage: {
+            numerator: eventCases.reduce(
+                (sum, row) => sum + row.recoveredLocalTruths,
+                0,
+            ),
+            denominator: localTruthCount,
+        },
+        serialTop1: {
+            numerator: eventCases.reduce(
+                (sum, row) => sum + row.top1RecoveredLocalTruths,
+                0,
+            ),
+            denominator: localTruthCount,
+        },
+        promptedStrictLocalWindowCoverage: {
+            numerator: promptedLocal.filter((row) => row.primaryLocalWindowCovered).length,
+            denominator: promptedLocal.length,
+        },
+        promptedWorkflowEquivalentLocalWindowCoverage: {
+            numerator: promptedLocal.filter((row) => (
+                row.workflowEquivalentLocalWindowCovered
+            )).length,
+            denominator: promptedLocal.length,
+        },
+        saveReopenStableRate: {
+            numerator: cases.filter((row) => row.saveReopenStable).length,
+            denominator: cases.length,
+        },
+        cleanFalsePositiveRate: {
+            numerator: cleanCases.filter((row) => row.cleanFalsePositive).length,
+            denominator: cleanCases.length,
+        },
+    };
+};
+
+const clusteredInference = (
+    cases: CaseRow[],
+    steps: StepRow[],
+    statistics: NonNullable<CapabilityConfig["statistics"]>,
+    family: CapabilityFamily,
+) => {
+    const familyCases = cases.filter((row) => row.family === family);
+    const familyCaseIds = new Set(familyCases.map((row) => row.caseId));
+    const familySteps = steps.filter((row) => familyCaseIds.has(row.caseId));
+    const fileIds = Array.from(new Set(familyCases.map((row) => row.fileId))).sort();
+    const byFile = new Map(fileIds.map((fileId) => {
+        const selectedCases = familyCases.filter((row) => row.fileId === fileId);
+        const selectedIds = new Set(selectedCases.map((row) => row.caseId));
+        return [fileId, clusterMetricCounts(
+            selectedCases,
+            familySteps.filter((row) => selectedIds.has(row.caseId)),
+        )];
+    }));
+    const allCounts = clusterMetricCounts(familyCases, familySteps);
+    const metricNames = Object.keys(allCounts) as ClusterMetricName[];
+    const targetMetrics = new Set<ClusterMetricName>([
+        "promptedStrictLocalWindowCoverage",
+        "promptedWorkflowEquivalentLocalWindowCoverage",
+    ]);
+    const metrics = Object.fromEntries(metricNames.map((metricName) => {
+        const inference = summarizeClusteredMetric(fileIds.map((fileId) => ({
+            clusterId: fileId,
+            ...byFile.get(fileId)![metricName],
+        })), {
+            replicates: statistics.bootstrapReplicates,
+            confidenceLevel: statistics.confidenceLevel,
+            seed: `${statistics.seed}:${family}:${metricName}`,
+        });
+        const target = family !== "Clean" && targetMetrics.has(metricName)
+            ? statistics.targetCoverage
+            : null;
+        return [metricName, {
+            ...inference,
+            target,
+            observedTargetPassed: target === null || (
+                inference.micro.estimate !== null && inference.micro.estimate >= target
+                && inference.macro.estimate !== null && inference.macro.estimate >= target
+            ),
+            oneSidedLowerTargetPassed: target === null || (
+                inference.micro.oneSidedLower !== null
+                && inference.micro.oneSidedLower >= target
+                && inference.macro.oneSidedLower !== null
+                && inference.macro.oneSidedLower >= target
+            ),
+        }];
+    }));
+    return {
+        family,
+        clusterUnit: statistics.clusterUnit,
+        clusters: fileIds.length,
+        bootstrapReplicates: statistics.bootstrapReplicates,
+        confidenceLevel: statistics.confidenceLevel,
+        metrics,
+    };
+};
+
 const csvCell = (value: unknown): string => {
     const text = Array.isArray(value) || value !== null && typeof value === "object"
         ? JSON.stringify(value)
@@ -636,7 +865,16 @@ const runWorker = async (): Promise<void> => {
                 partialShiftYears: spec.partialShiftYears,
                 wholeShiftYears: spec.wholeShiftYears,
                 truthCount: spec.truths.length,
+                localTruthCount: spec.truths.filter((truth) => (
+                    truth.eventType !== "wholeSeriesMove"
+                )).length,
+                wholeTruthCount: spec.truths.filter((truth) => (
+                    truth.eventType === "wholeSeriesMove"
+                )).length,
                 recoveredTruths: 0,
+                recoveredLocalTruths: 0,
+                strictRecoveredLocalTruths: 0,
+                top1RecoveredLocalTruths: 0,
                 primaryRecoveries: 0,
                 alternativeRecoveries: 0,
                 complete: false,
@@ -834,6 +1072,8 @@ const runParent = async (): Promise<void> => {
         manifestSha256: plan.manifestSha256,
         sourceFilesUnchanged: sourceMismatches.length === 0,
         sourceMismatches,
+        design: config.design ?? null,
+        statistics: config.statistics ?? null,
         selectedFamilies: requestedFamilies,
         selectedCases: cases.length,
         errors: cases.filter((row) => row.error !== null).length,
@@ -842,6 +1082,12 @@ const runParent = async (): Promise<void> => {
         byAcceptanceTier: grouped(cases, steps, (row) => row.acceptanceTier),
         byScenario: grouped(cases, steps, (row) => row.scenarioId),
         byFile: grouped(cases, steps, (row) => row.fileId),
+        clusteredInferenceByFamily: config.statistics
+            ? Object.fromEntries(requestedFamilies.map((family) => [
+                    family,
+                    clusteredInference(cases, steps, config.statistics!, family),
+                ]))
+            : null,
         stopReasons: Object.fromEntries(Array.from(new Set(cases.map((row) => row.stopReason)))
             .sort().map((reason) => [reason, cases.filter((row) => row.stopReason === reason).length])),
     };
