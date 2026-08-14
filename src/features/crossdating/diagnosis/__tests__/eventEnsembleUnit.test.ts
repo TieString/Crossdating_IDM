@@ -21,6 +21,8 @@ import {
     recoverCandidateBackedPartialConsensus,
     recoverAggregatePartialUnitFrontier,
     recoverStableBoundedLagPathFrontier,
+    selectAggregateAnchoredRegularizedPartialFrontier,
+    selectCandidateAnchoredStableBoundedLagPathFrontier,
     selectCumulativeLagPathFrontier,
     selectStableBoundedLagPathFrontier,
     selectCandidateBackedCumulativeUnitFrontier,
@@ -2285,6 +2287,140 @@ describe("selectCumulativePartialFrontier", () => {
             },
         });
         expect(selected?.event.rankedYears[0]?.year).toBe(1780);
+    });
+
+    it("admits an extended path when its newest transition has an independent candidate anchor", () => {
+        const parsimonious = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                {
+                    ...pathEvent(-1, -6, -5, 1864),
+                    eventType: "missingRing",
+                    shiftYears: undefined,
+                    shiftSide: undefined,
+                },
+                pathEvent(-5, -5, 0, 1912),
+            ]),
+            boundedPath([
+                {
+                    ...pathEvent(-1, -6, -5, 1865),
+                    eventType: "missingRing",
+                    shiftYears: undefined,
+                    shiftSide: undefined,
+                },
+                pathEvent(-5, -5, 0, 1913),
+            ]),
+        );
+        const extended = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                pathEvent(-6, -5, 1, 1897),
+                {
+                    ...pathEvent(1, 1, 0, 1921),
+                    eventType: "falseRing",
+                    shiftYears: undefined,
+                    shiftSide: undefined,
+                },
+            ]),
+            boundedPath([
+                pathEvent(-6, -5, 1, 1898),
+                {
+                    ...pathEvent(1, 1, 0, 1922),
+                    eventType: "falseRing",
+                    shiftYears: undefined,
+                    shiftSide: undefined,
+                },
+            ]),
+        );
+        const falseCandidate = {
+            ...falseRingEvent(1919, true),
+            endYear: 1925,
+        };
+
+        expect(selectCandidateAnchoredStableBoundedLagPathFrontier(
+            parsimonious,
+            extended,
+            [falseCandidate],
+        )).toBe(extended);
+    });
+
+    it("keeps the parsimonious path when an extra segment has no closer candidate anchor", () => {
+        const parsimonious = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                {
+                    ...pathEvent(-1, -6, -5, 1864),
+                    eventType: "missingRing",
+                    shiftYears: undefined,
+                    shiftSide: undefined,
+                },
+                pathEvent(-5, -5, 0, 1912),
+            ]),
+            boundedPath([
+                {
+                    ...pathEvent(-1, -6, -5, 1865),
+                    eventType: "missingRing",
+                    shiftYears: undefined,
+                    shiftSide: undefined,
+                },
+                pathEvent(-5, -5, 0, 1913),
+            ]),
+        );
+        const extended = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                pathEvent(-6, -5, 1, 1897),
+                {
+                    ...pathEvent(1, 1, 0, 1921),
+                    eventType: "falseRing",
+                    shiftYears: undefined,
+                    shiftSide: undefined,
+                },
+            ]),
+            boundedPath([
+                pathEvent(-6, -5, 1, 1898),
+                {
+                    ...pathEvent(1, 1, 0, 1922),
+                    eventType: "falseRing",
+                    shiftYears: undefined,
+                    shiftSide: undefined,
+                },
+            ]),
+        );
+
+        expect(selectCandidateAnchoredStableBoundedLagPathFrontier(
+            parsimonious,
+            extended,
+            [],
+        )).toBe(parsimonious);
+    });
+
+    it("recovers two regularized partial components only with an exact aggregate anchor", () => {
+        const regularized = boundedPath([
+            pathEvent(-6, -26, -20, 1793),
+            pathEvent(-20, -20, 0, 1826),
+        ]);
+        const aggregate = {
+            ...partialMoveEvent(-26),
+            startYear: 1761,
+            endYear: 1769,
+        };
+
+        expect(selectAggregateAnchoredRegularizedPartialFrontier(
+            regularized,
+            [aggregate],
+        )).toMatchObject({
+            aggregateShiftYears: -26,
+            transitionCount: 2,
+            event: { eventType: "partialMove", shiftYears: -20 },
+        });
+        expect(selectAggregateAnchoredRegularizedPartialFrontier(
+            regularized,
+            [{ ...aggregate, shiftYears: -25 }],
+        )).toBeNull();
+        expect(selectAggregateAnchoredRegularizedPartialFrontier(
+            regularized,
+            [{
+                ...aggregate,
+                evidence: { ...aggregate.evidence, candidateIds: [] },
+            }],
+        )).toBeNull();
     });
 
     it("rejects close, discontinuous, or penalty-unstable decompositions", () => {

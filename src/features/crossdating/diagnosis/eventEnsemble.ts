@@ -5362,6 +5362,82 @@ export const selectStableBoundedLagPathFrontier = (
     };
 };
 
+const stableFrontierCandidateAnchorDistance = (
+    frontier: StableBoundedLagPathFrontier,
+    candidates: readonly DiagnosisEvent[],
+): number | null => {
+    const newest = frontier.newestEvent;
+    const newestYear = newest.rankedYears[0]?.year;
+    const distances = candidates.flatMap((candidate) => {
+        if (candidate.evidence.candidateIds.length === 0
+            || candidate.eventType !== newest.eventType
+            || (candidate.eventType === "partialMove"
+                && candidate.shiftYears !== newest.shiftYears)) return [];
+        if (candidate.startYear <= newest.endYear && candidate.endYear >= newest.startYear) {
+            return [0];
+        }
+        const candidateYear = candidate.rankedYears[0]?.year;
+        return newestYear !== undefined && candidateYear !== undefined
+            ? [Math.abs(candidateYear - newestYear)]
+            : [];
+    });
+    const distance = distances.length > 0 ? Math.min(...distances) : null;
+    return distance !== null && distance <= 8 ? distance : null;
+};
+
+/**
+ * A sixth path segment is extra model complexity. It may recover a real newest transition, but it
+ * may also fit an unsupported old-side lag and change an otherwise stable frontier. Only let the
+ * extended path win when its newest transition has a closer independent candidate anchor.
+ */
+export const selectCandidateAnchoredStableBoundedLagPathFrontier = (
+    parsimonious: StableBoundedLagPathFrontier | null,
+    extended: StableBoundedLagPathFrontier | null,
+    candidates: readonly DiagnosisEvent[],
+): StableBoundedLagPathFrontier | null => {
+    if (!parsimonious) return extended;
+    if (!extended) return parsimonious;
+    const parsimoniousDistance = stableFrontierCandidateAnchorDistance(
+        parsimonious,
+        candidates,
+    );
+    const extendedDistance = stableFrontierCandidateAnchorDistance(extended, candidates);
+    if (extendedDistance === null
+        || (parsimoniousDistance !== null && parsimoniousDistance <= extendedDistance)) {
+        return parsimonious;
+    }
+    return extended;
+};
+
+/**
+ * A permissive penalty can split one real partial transition into a short reversible excursion.
+ * When the regularized path contains exactly two distant partial transitions whose sum is also
+ * independently proposed as an aggregate move, recover the newest component instead of letting
+ * the aggregate proposal erase both locations.
+ */
+export const selectAggregateAnchoredRegularizedPartialFrontier = (
+    regularizedPath: BoundedLagStateEventSet | null,
+    candidates: readonly DiagnosisEvent[],
+    baselineLag = 0,
+): StableBoundedLagPathFrontier | null => {
+    if (!regularizedPath || regularizedPath.path.transitionGain < 12) return null;
+    const frontier = selectStableBoundedLagPathFrontier(
+        regularizedPath,
+        regularizedPath,
+        baselineLag,
+    );
+    if (!frontier
+        || frontier.transitionCount !== 2
+        || !frontier.allTransitionsPartial
+        || frontier.transitions.some(({ shiftYears }) => shiftYears > -2)) return null;
+    const aggregateAnchor = candidates.some((candidate) => (
+        candidate.eventType === "partialMove"
+        && candidate.shiftYears === frontier.aggregateShiftYears
+        && candidate.evidence.candidateIds.length > 0
+    ));
+    return aggregateAnchor ? frontier : null;
+};
+
 export const recoverStableBoundedLagPathFrontier = (
     frontier: StableBoundedLagPathFrontier | null,
     displayed: readonly DiagnosisEvent[],
@@ -9208,17 +9284,70 @@ export const makeDiagnosisEvents = (
                     },
                 }
             : null;
+        // Keep a parsimonious path and admit a sixth segment only when it recovers a candidate-
+        // anchored newest transition. This avoids both old-side overfit and lost frontier events.
+        const parsimoniousStablePathMaxSegments = 5;
         const rawPenaltyOneStablePath = needsStableMultiscaleBoundedPath
-            ? locateBoundedEvents(false, undefined, stableTerminalLags, 1, 2, false, 6)
+            ? locateBoundedEvents(
+                    false,
+                    undefined,
+                    stableTerminalLags,
+                    1,
+                    2,
+                    false,
+                    parsimoniousStablePathMaxSegments,
+                )
             : null;
         const rawPenaltyHalfStablePath = needsStableMultiscaleBoundedPath
+            ? locateBoundedEvents(
+                    false,
+                    undefined,
+                    stableTerminalLags,
+                    0.5,
+                    0.5,
+                    false,
+                    parsimoniousStablePathMaxSegments,
+                )
+            : null;
+        const parsimoniousStrongMultiscaleBoundedFrontier =
+            selectStableBoundedLagPathFrontier(
+                rawPenaltyOneStablePath,
+                rawPenaltyHalfStablePath,
+                terminalBaselineIsUnsupportedAlias ? 0 : terminalBaselineLag,
+            );
+        const parsimoniousFrontierHasCandidateAnchor =
+            parsimoniousStrongMultiscaleBoundedFrontier !== null
+            && stableFrontierCandidateAnchorDistance(
+                parsimoniousStrongMultiscaleBoundedFrontier,
+                candidateEvents,
+            ) !== null;
+        const rawPenaltyOneExtendedStablePath = needsStableMultiscaleBoundedPath
+            && !parsimoniousFrontierHasCandidateAnchor
+            ? locateBoundedEvents(false, undefined, stableTerminalLags, 1, 2, false, 6)
+            : null;
+        const rawPenaltyHalfExtendedStablePath = rawPenaltyOneExtendedStablePath
             ? locateBoundedEvents(false, undefined, stableTerminalLags, 0.5, 0.5, false, 6)
             : null;
-        const strongMultiscaleBoundedFrontier = selectStableBoundedLagPathFrontier(
-            rawPenaltyOneStablePath,
-            rawPenaltyHalfStablePath,
+        const extendedStrongMultiscaleBoundedFrontier = selectStableBoundedLagPathFrontier(
+            rawPenaltyOneExtendedStablePath,
+            rawPenaltyHalfExtendedStablePath,
             terminalBaselineIsUnsupportedAlias ? 0 : terminalBaselineLag,
         );
+        const strongMultiscaleBoundedFrontier =
+            selectCandidateAnchoredStableBoundedLagPathFrontier(
+                parsimoniousStrongMultiscaleBoundedFrontier,
+                extendedStrongMultiscaleBoundedFrontier,
+                candidateEvents,
+            );
+        const strongFrontierUsesExtendedPath = strongMultiscaleBoundedFrontier !== null
+            && strongMultiscaleBoundedFrontier === extendedStrongMultiscaleBoundedFrontier;
+        const selectedPenaltyHalfStablePath = strongFrontierUsesExtendedPath
+            ? rawPenaltyHalfExtendedStablePath
+            : rawPenaltyHalfStablePath;
+        const selectedStablePathMaxSegments = strongFrontierUsesExtendedPath
+            ? 6
+            : parsimoniousStablePathMaxSegments;
+        const stableStrongFrontier = strongMultiscaleBoundedFrontier;
         const zeroTerminalPenaltyOneStablePath = needsStableMultiscaleBoundedPath
             && terminalBaselineLag !== 0
             && !hasAuthoritativeWholeBaseline
@@ -9245,19 +9374,35 @@ export const makeDiagnosisEvents = (
             ? zeroTerminalWholeAliasFrontier
             : null;
         const rawPenaltyQuarterStablePath = needsStableMultiscaleBoundedPath
-            && strongMultiscaleBoundedFrontier === null
-            ? locateBoundedEvents(false, undefined, stableTerminalLags, 0.25, 0.5, false, 6)
+            && stableStrongFrontier === null
+            ? locateBoundedEvents(
+                    false,
+                    undefined,
+                    stableTerminalLags,
+                    0.25,
+                    0.5,
+                    false,
+                    selectedStablePathMaxSegments,
+                )
             : null;
         const weakUnitPulseFrontier = selectStableBoundedLagPathFrontier(
-            rawPenaltyHalfStablePath,
+            selectedPenaltyHalfStablePath,
             rawPenaltyQuarterStablePath,
             terminalBaselineIsUnsupportedAlias ? 0 : terminalBaselineLag,
             14,
             2,
             "0.5,0.25",
         );
+        const aggregateAnchoredRegularizedPartialFrontier = stableStrongFrontier === null
+            ? selectAggregateAnchoredRegularizedPartialFrontier(
+                    rawPenaltyOneStablePath,
+                    candidateEvents,
+                    terminalBaselineIsUnsupportedAlias ? 0 : terminalBaselineLag,
+                )
+            : null;
         const stableMultiscaleBoundedFrontier = decomposedWholeAliasFrontier
-            ?? strongMultiscaleBoundedFrontier
+            ?? stableStrongFrontier
+            ?? aggregateAnchoredRegularizedPartialFrontier
             ?? (weakUnitPulseFrontier
                 && (
                     weakUnitPulseFrontier.transitionCount > 2
