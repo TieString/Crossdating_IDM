@@ -5548,7 +5548,11 @@ export const recoverStableBoundedLagPathFrontier = (
             && operationPathDistance <= 12
             ? Math.round((operationYear! + selectedYear) / 2)
             : selectedYear + (selectedShift <= -10 ? 1 : 0)
-        : selectedYear;
+        : operationPathDistance !== null
+            && operationPathDistance >= 2
+            && operationPathDistance <= 10
+            ? Math.round((operationYear! + selectedYear) / 2)
+            : selectedYear;
     const width = 13;
     let calibratedStart = calibratedCenter - Math.floor(width / 2);
     let calibratedEnd = calibratedStart + width - 1;

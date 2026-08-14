@@ -2468,6 +2468,46 @@ describe("selectCumulativePartialFrontier", () => {
         );
     });
 
+    it("centers a stable unit window between path and supported operation evidence", () => {
+        const unitEvent = (year: number): DiagnosisEvent => ({
+            ...pathEvent(1, 1, 0, year),
+            eventType: "falseRing",
+            shiftYears: undefined,
+            shiftSide: undefined,
+        });
+        const selected = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                pathEvent(-6, -5, 1, 1880),
+                unitEvent(1916),
+            ]),
+            boundedPath([
+                pathEvent(-6, -5, 1, 1881),
+                unitEvent(1917),
+            ]),
+        );
+        const falseOperation: JointCounterfactualOperationScore = {
+            ...operation(1, 1925),
+            eventType: "falseRing",
+        };
+
+        const recovered = recoverStableBoundedLagPathFrontier(
+            selected,
+            [],
+            [falseOperation],
+            { startYear: 1800, endYear: 2000 },
+        );
+
+        expect(recovered).toMatchObject({
+            eventType: "falseRing",
+            startYear: 1915,
+            endYear: 1927,
+        });
+        expect(recovered?.rankedYears[0]?.year).toBe(1925);
+        expect(recovered?.evidence.notes).toContain(
+            "stable_bounded_path_calibrated_center=1921",
+        );
+    });
+
     it("preserves a sharply localized newest unit transition", () => {
         const localizedFalse = (
             year: number,
