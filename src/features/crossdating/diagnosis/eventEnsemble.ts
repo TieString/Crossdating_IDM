@@ -70,6 +70,7 @@ import {
 import { locateDenseLagProfileEvents } from "./denseLagProfile";
 import { locateSegmentedLagEvents } from "./segmentedEventPath";
 import { refinePartialMoveWithRepeatedBlock } from "./partialBreakpointRefinement";
+import { refineStablePartialMoveLocation } from "./stablePartialLocationConsensus";
 import { refineUnitEventWithIndependentBreakpoints } from "./pairedCoreBreakpoint";
 import { diagnoseSeriesCore } from "./segments";
 import {
@@ -9200,7 +9201,14 @@ export const makeDiagnosisEvents = (
         if (stableBoundedPathFrontier) {
             // The complete path has already resolved the serial frontier. Aggregate move
             // hypotheses are intentionally excluded so later review cannot recombine it.
-            return finalize([stableBoundedPathFrontier], [], false);
+            return finalize([
+                refineStablePartialMoveLocation(
+                    stableBoundedPathFrontier,
+                    diagnosis,
+                    siteData,
+                    stableMultiscaleBoundedFrontier?.baselineLag ?? 0,
+                ),
+            ], [], false);
         }
         const aggregatePartialUnitFrontier = recoverAggregatePartialUnitFrontier(
             displayed,

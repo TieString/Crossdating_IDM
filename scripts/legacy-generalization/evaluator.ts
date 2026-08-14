@@ -25,6 +25,9 @@ import {
     scorePerReferenceCounterfactualEvidence,
     summarizePerReferenceCounterfactualRows,
 } from "@/features/crossdating/diagnosis/perReferenceCounterfactualEvidence";
+import { scoreBoundaryLocalCounterfactual } from "@/features/crossdating/diagnosis/boundaryLocalCounterfactual";
+import { scoreNegativePartialMoveBoundaries } from "@/features/crossdating/diagnosis/partialBreakpointRefinement";
+import { scoreUnitBoundaries } from "@/features/crossdating/diagnosis/unitBreakpointRefinement";
 import {
     scoreDynamicJointOperation,
     selectDynamicJointOperation,
@@ -420,6 +423,116 @@ export const diagnoseTruthBlind = (input: {
                 };
                 const dynamicSelection = selectDynamicJointOperation(operations);
                 const unitSelection = selectDynamicUnitOperation(operations);
+                const reviewEvent = diagnosis.reviewEvents?.[0] ?? null;
+                const reviewTopYear = reviewEvent?.rankedYears[0]?.year ?? null;
+                const reviewBaselineLag = Number(
+                    reviewEvent?.evidence.notes
+                        .find((note) => note.startsWith(
+                            "stable_bounded_path_baseline_lag=",
+                        ))
+                        ?.split("=")[1]
+                        ?? reviewEvent?.evidence.lagAfter
+                        ?? 0,
+                );
+                const profilePeaks = <Row extends { year: number }>(
+                    rows: readonly Row[],
+                    keys: readonly (keyof Omit<Row, "year">)[],
+                    radius: number | null,
+                ) => Object.fromEntries(keys.map((key) => {
+                    const eligible = reviewTopYear === null || radius === null
+                        ? rows
+                        : rows.filter((row) => Math.abs(row.year - reviewTopYear) <= radius);
+                    const best = [...eligible].sort((left, right) => (
+                        Number(right[key]) - Number(left[key]) || right.year - left.year
+                    ))[0];
+                    return [String(key), best ? {
+                        year: best.year,
+                        score: Number(best[key]),
+                    } : null];
+                }));
+                const reviewLocationProfiles = reviewEvent && reviewTopYear !== null
+                    ? (() => {
+                        const correctionYears = effectiveShift(reviewEvent);
+                        if (reviewEvent.eventType === "partialMove") {
+                            const partialRows = scoreNegativePartialMoveBoundaries(
+                                core,
+                                correctionYears,
+                            );
+                            const localRows = scoreBoundaryLocalCounterfactual(
+                                core,
+                                correctionYears,
+                            );
+                            const referenceRows = scorePerReferenceCounterfactualEvidence(
+                                core,
+                                input.siteData,
+                                correctionYears,
+                                { baselineLagCenter: reviewBaselineLag },
+                            );
+                            return {
+                                eventType: reviewEvent.eventType,
+                                shiftYears: correctionYears,
+                                baselineLag: reviewBaselineLag,
+                                reviewTopYear,
+                                partialLocal: profilePeaks(partialRows, [
+                                    "difference31",
+                                    "combo31",
+                                    "combo41",
+                                    "combo61",
+                                    "multiScale",
+                                ], 15),
+                                boundaryLocal: profilePeaks(localRows, [
+                                    "stepMinimum3",
+                                    "stepMean3",
+                                    "stepMinimum5",
+                                    "stepMean5",
+                                    "stepMinimum9",
+                                    "stepMean9",
+                                ], 15),
+                                referenceLocal: profilePeaks(referenceRows, [
+                                    "differenceGainWeighted",
+                                    "peakKernel9",
+                                    "fixedLagStepWeighted",
+                                    "fixedLagStepMedian",
+                                    "fixedLagStepPeakKernel9",
+                                ], 15),
+                            };
+                        }
+                        if (reviewEvent.eventType === "missingRing"
+                            || reviewEvent.eventType === "falseRing") {
+                            const expanded = {
+                                ...reviewEvent,
+                                startYear: Math.max(
+                                    core.targetRange.startYear,
+                                    reviewEvent.startYear - 15,
+                                ),
+                                endYear: Math.min(
+                                    core.targetRange.endYear,
+                                    reviewEvent.endYear + 15,
+                                ),
+                            };
+                            const unitRows = scoreUnitBoundaries(expanded, core, input.siteData);
+                            return {
+                                eventType: reviewEvent.eventType,
+                                shiftYears: correctionYears,
+                                baselineLag: reviewBaselineLag,
+                                reviewTopYear,
+                                unitLocal: profilePeaks(unitRows, [
+                                    "combo11",
+                                    "combo21",
+                                    "combo31",
+                                    "multiScale",
+                                    "huberCombo5",
+                                    "huberCombo7",
+                                    "huberMultiScale",
+                                    "pairMedian31",
+                                    "pairWeighted31",
+                                    "pairedCore31",
+                                ], 15),
+                            };
+                        }
+                        return null;
+                    })()
+                    : null;
                 const perReferenceSelection = dynamicSelection?.operation.eventType
                     === "partialMove"
                     ? (() => {
@@ -472,6 +585,7 @@ export const diagnoseTruthBlind = (input: {
                         score: unitSelection.score,
                         scoreMargin: unitSelection.scoreMargin,
                     } : null,
+                    reviewLocationProfiles,
                     perReferenceSelection,
                     rawPathEvents: pathAudit(diagnoseLagPath(core, input.siteData, {
                         ...pathConfig,
