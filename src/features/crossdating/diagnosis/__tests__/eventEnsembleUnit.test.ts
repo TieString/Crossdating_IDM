@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DiagnosisEvent, SeriesCoreDiagnosis } from "../types";
 import {
+    allowStableBoundedPathFinalAuthority,
     hasIndependentPartialBoundaryAnchor,
     decisiveExactPartialRejectsWeakUnitComposition,
     hardCandidateMaySeedExhaustiveComposition,
@@ -23,6 +24,7 @@ import {
     recoverStableBoundedLagPathFrontier,
     selectAggregateAnchoredRegularizedPartialFrontier,
     selectCandidateAnchoredStableBoundedLagPathFrontier,
+    selectStableUnitPathLocationCheckpoints,
     selectCumulativeLagPathFrontier,
     selectStableBoundedLagPathFrontier,
     selectCandidateBackedCumulativeUnitFrontier,
@@ -2186,6 +2188,11 @@ describe("isAuthoritativeWholeSeriesCheckpoint", () => {
 });
 
 describe("selectCumulativePartialFrontier", () => {
+    it("keeps stable paths evidential during an all-flagged pairwise cold start", () => {
+        expect(allowStableBoundedPathFinalAuthority(false)).toBe(true);
+        expect(allowStableBoundedPathFinalAuthority(true)).toBe(false);
+    });
+
     const candidate = (
         id: string,
         shiftYears: number,
@@ -2423,6 +2430,56 @@ describe("selectCumulativePartialFrontier", () => {
         )).toBeNull();
     });
 
+    it("keeps only multiscale-stable unit path locations as sequential checkpoints", () => {
+        const located = (
+            event: DiagnosisEvent,
+            concentration: number,
+            remoteMargin: number,
+        ): DiagnosisEvent => ({
+            ...event,
+            evidence: {
+                ...event.evidence,
+                locationEvidence: [{
+                    source: "bounded_complete_lag_path",
+                    startYear: event.startYear,
+                    endYear: event.endYear,
+                    topYear: event.rankedYears[0]?.year ?? event.startYear,
+                    referenceCount: 20,
+                    concentration,
+                    remoteMargin,
+                    calibrated: false,
+                }],
+            },
+        });
+        const missing = located({
+            ...pathEvent(-1, -1, 0, 1489),
+            eventType: "missingRing",
+            shiftYears: undefined,
+            shiftSide: undefined,
+        }, 0.77, 2.3);
+        const unstableFalse = located({
+            ...pathEvent(1, 1, 0, 1445),
+            eventType: "falseRing",
+            shiftYears: undefined,
+            shiftSide: undefined,
+        }, 0.28, 0.2);
+        const intermediateMissing = located({
+            ...pathEvent(-1, -2, -1, 1460),
+            eventType: "missingRing",
+            shiftYears: undefined,
+            shiftSide: undefined,
+        }, 0.81, 3.1);
+
+        expect(selectStableUnitPathLocationCheckpoints(
+            boundedPath([missing, unstableFalse, intermediateMissing]),
+            boundedPath([
+                { ...missing, rankedYears: [{ ...missing.rankedYears[0], year: 1490 }] },
+                unstableFalse,
+                intermediateMissing,
+            ]),
+        )).toEqual([missing]);
+    });
+
     it("rejects close, discontinuous, or penalty-unstable decompositions", () => {
         const separated = boundedPath([
             pathEvent(-20, -26, -6, 1750),
@@ -2602,6 +2659,9 @@ describe("selectCumulativePartialFrontier", () => {
         expect(recovered?.evidence.notes).toContain(
             "stable_bounded_path_preserved_candidate_backed_newest=1823",
         );
+        expect(recovered?.evidence.notes).toContain(
+            "stable_bounded_path_component_lag_after=0",
+        );
     });
 
     it("centers a stable unit window between path and supported operation evidence", () => {
@@ -2641,6 +2701,9 @@ describe("selectCumulativePartialFrontier", () => {
         expect(recovered?.rankedYears[0]?.year).toBe(1925);
         expect(recovered?.evidence.notes).toContain(
             "stable_bounded_path_calibrated_center=1921",
+        );
+        expect(recovered?.evidence.notes).toContain(
+            "stable_bounded_path_component_lag_before=1",
         );
     });
 

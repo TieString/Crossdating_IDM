@@ -88,6 +88,7 @@ import {
     addUnitEventEvidenceEdgeGuard,
     addUnitEventRankEdgeGuard,
     refineUnitEventWithLocalEditScores,
+    refineStableUnitEventWithLocalConsensus,
     rerankMissingRingWithNeighborAgreement,
     restoreUnitEventLocalYearRanking,
 } from "./unitBreakpointRefinement";
@@ -5438,6 +5439,43 @@ export const selectAggregateAnchoredRegularizedPartialFrontier = (
     return aggregateAnchor ? frontier : null;
 };
 
+export const selectStableUnitPathLocationCheckpoints = (
+    regularizedPath: BoundedLagStateEventSet | null,
+    permissivePath: BoundedLagStateEventSet | null,
+    maximumYearDrift = 2,
+): DiagnosisEvent[] => {
+    if (!regularizedPath || !permissivePath) return [];
+    const eligible = (event: DiagnosisEvent): boolean => {
+        if (event.eventType !== "missingRing" && event.eventType !== "falseRing") return false;
+        // Unit-boundary scores assume the proposed edit returns the target to the
+        // zero-lag baseline. Intermediate cumulative transitions need a scorer
+        // conditioned on their non-zero baseline and cannot anchor later layers.
+        if (event.evidence.lagAfter !== 0) return false;
+        const location = event.evidence.locationEvidence?.find(
+            (row) => row.source === "bounded_complete_lag_path",
+        );
+        return (location?.concentration ?? 0) >= 0.5
+            && (location?.remoteMargin ?? 0) >= 1;
+    };
+    return regularizedPath.events.filter((event) => {
+        if (!eligible(event)) return false;
+        const year = event.rankedYears[0]?.year;
+        return year !== undefined && permissivePath.events.some((other) => (
+            eligible(other)
+            && other.eventType === event.eventType
+            && other.evidence.lagBefore === event.evidence.lagBefore
+            && other.evidence.lagAfter === event.evidence.lagAfter
+            && other.rankedYears[0]?.year !== undefined
+            && Math.abs(other.rankedYears[0].year - year) <= maximumYearDrift
+        ));
+    });
+};
+
+/** Pairwise cold starts keep bounded paths as evidence until an absolute anchor is restored. */
+export const allowStableBoundedPathFinalAuthority = (
+    preferRemotePairedMissingFrontier = false,
+): boolean => !preferRemotePairedMissingFrontier;
+
 export const recoverStableBoundedLagPathFrontier = (
     frontier: StableBoundedLagPathFrontier | null,
     displayed: readonly DiagnosisEvent[],
@@ -5711,6 +5749,12 @@ export const recoverStableBoundedLagPathFrontier = (
                 ...selectedPathEvent.evidence.notes,
                 ...frontierEvent.evidence.notes,
                 `stable_bounded_path_component_shift=${componentShift}`,
+                `stable_bounded_path_component_lag_before=${
+                    frontierEvent.evidence.lagBefore
+                }`,
+                `stable_bounded_path_component_lag_after=${
+                    frontierEvent.evidence.lagAfter
+                }`,
                 ...(structuralCalibration ? [
                     `stable_bounded_path_raw_component_shift=${pathComponentShift}`,
                     `stable_bounded_path_component_calibrated_from_cofecha=${
@@ -9400,6 +9444,15 @@ export const makeDiagnosisEvents = (
                     terminalBaselineIsUnsupportedAlias ? 0 : terminalBaselineLag,
                 )
             : null;
+        const stablePathHasFinalAuthority = allowStableBoundedPathFinalAuthority(
+            options.preferRemotePairedMissingFrontier === true,
+        );
+        const stableUnitPathLocationCheckpoints = stablePathHasFinalAuthority
+            ? selectStableUnitPathLocationCheckpoints(
+                    rawPenaltyOneStablePath,
+                    rawPenaltyHalfStablePath,
+                )
+            : [];
         const stableMultiscaleBoundedFrontier = decomposedWholeAliasFrontier
             ?? stableStrongFrontier
             ?? aggregateAnchoredRegularizedPartialFrontier
@@ -9603,17 +9656,22 @@ export const makeDiagnosisEvents = (
             diagnosis.targetRange,
             candidateEvents,
         );
-        if (stableBoundedPathFrontier) {
+        if (stableBoundedPathFrontier && stablePathHasFinalAuthority) {
             // The complete path has already resolved the serial frontier. Aggregate move
             // hypotheses are intentionally excluded so later review cannot recombine it.
-            return finalize([
-                refineStablePartialMoveLocation(
-                    stableBoundedPathFrontier,
-                    diagnosis,
-                    siteData,
-                    stableMultiscaleBoundedFrontier?.baselineLag ?? 0,
-                ),
-            ], [], false);
+            const locatedStableFrontier = stableBoundedPathFrontier.eventType === "partialMove"
+                ? refineStablePartialMoveLocation(
+                        stableBoundedPathFrontier,
+                        diagnosis,
+                        siteData,
+                        stableMultiscaleBoundedFrontier?.baselineLag ?? 0,
+                    )
+                : refineStableUnitEventWithLocalConsensus(
+                        stableBoundedPathFrontier,
+                        diagnosis,
+                        siteData,
+                    );
+            return finalize([locatedStableFrontier], [], false);
         }
         const aggregatePartialUnitFrontier = recoverAggregatePartialUnitFrontier(
             displayed,
@@ -9749,7 +9807,7 @@ export const makeDiagnosisEvents = (
         const sequentialMissing = mayRecoverSequentialMissing
             ? recoverSequentialMissingHeadEvent(
                 displayed,
-                detectedBeforeFusion,
+                [...detectedBeforeFusion, ...stableUnitPathLocationCheckpoints],
                 diagnosis,
                 cofechaDiagnosis,
                 siteData,

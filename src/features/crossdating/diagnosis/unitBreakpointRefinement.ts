@@ -54,6 +54,10 @@ export type UnitBreakpointScore = {
 
 type UnitScoreKey = keyof Omit<UnitBreakpointScore, "year">;
 type UnitNeighborScore = Pick<UnitBreakpointScore, "year" | "combo11">;
+type StableUnitLocalScore = Pick<
+    UnitBreakpointScore,
+    "year" | "combo21" | "combo31" | "multiScale" | "pairMedian31"
+>;
 
 const UNIT_SCORE_KEYS: UnitScoreKey[] = [
     "raw31",
@@ -429,6 +433,120 @@ export const scoreUnitBoundaries = (
 const top = (scores: UnitBreakpointScore[], key: UnitScoreKey): UnitBreakpointScore | null => (
     [...scores].sort((a, b) => b[key] - a[key] || b.year - a.year)[0] ?? null
 );
+
+const STABLE_UNIT_LOCAL_CONSENSUS_KEYS = [
+    "combo21",
+    "combo31",
+    "multiScale",
+    "pairMedian31",
+] as const;
+
+export type StableUnitLocalConsensus = {
+    year: number;
+    votes: number;
+    peakYears: number[];
+};
+
+const stablePathComponentLagAfter = (event: DiagnosisEvent): number | null => {
+    const note = event.evidence.notes.find((row) => (
+        row.startsWith("stable_bounded_path_component_lag_after=")
+    ));
+    if (!note) return event.evidence.lagAfter;
+    const parsed = Number(note.slice(note.indexOf("=") + 1));
+    return Number.isFinite(parsed) ? parsed : event.evidence.lagAfter;
+};
+
+/** Selects a local center only when at least three independent score families agree within a year. */
+export const selectStableUnitLocalConsensus = (
+    scores: readonly StableUnitLocalScore[],
+    currentTopYear: number,
+    radiusYears = 15,
+): StableUnitLocalConsensus | null => {
+    const local = scores.filter((row) => Math.abs(row.year - currentTopYear) <= radiusYears);
+    const peakYears = STABLE_UNIT_LOCAL_CONSENSUS_KEYS.flatMap((key) => {
+        const peak = [...local].sort((left, right) => (
+            right[key] - left[key] || right.year - left.year
+        ))[0];
+        return peak ? [peak.year] : [];
+    });
+    if (peakYears.length < 3) return null;
+    const votes = new Map<number, number>();
+    peakYears.forEach((year) => {
+        for (let candidate = year - 1; candidate <= year + 1; candidate += 1) {
+            votes.set(candidate, (votes.get(candidate) ?? 0) + 1);
+        }
+    });
+    const selected = [...votes.entries()].sort((left, right) => (
+        right[1] - left[1]
+        || Math.abs(left[0] - currentTopYear) - Math.abs(right[0] - currentTopYear)
+        || right[0] - left[0]
+    ))[0];
+    return selected && selected[1] >= 3
+        ? { year: selected[0], votes: selected[1], peakYears }
+        : null;
+};
+
+export const refineStableUnitEventWithLocalConsensus = (
+    event: DiagnosisEvent,
+    diagnosis: SeriesCoreDiagnosis,
+    siteData: RwlSiteData,
+): DiagnosisEvent => {
+    if ((event.eventType !== "missingRing" && event.eventType !== "falseRing")
+        || !event.evidence.algorithmSources.includes(
+            "stable_multiscale_bounded_path_frontier",
+        )
+        // scoreUnitBoundaries evaluates the corrected series at lag zero. Intermediate
+        // transitions such as -7 -> -6 require a baseline-aware scorer and must stay untouched.
+        // Stable-path projection normalizes public lagAfter to zero, so read the immutable
+        // component metadata captured before projection when it is available.
+        || stablePathComponentLagAfter(event) !== 0) return event;
+    const currentTopYear = event.rankedYears[0]?.year;
+    if (currentTopYear === undefined) return event;
+    const expanded = {
+        ...event,
+        startYear: Math.max(diagnosis.targetRange.startYear, event.startYear - 15),
+        endYear: Math.min(diagnosis.targetRange.endYear, event.endYear + 15),
+    };
+    const consensus = selectStableUnitLocalConsensus(
+        scoreUnitBoundaries(expanded, diagnosis, siteData),
+        currentTopYear,
+    );
+    if (!consensus || consensus.year === currentTopYear) return event;
+    const width = event.endYear - event.startYear + 1;
+    const startYear = Math.max(
+        diagnosis.targetRange.startYear,
+        Math.min(
+            consensus.year - Math.floor((width - 1) / 2),
+            diagnosis.targetRange.endYear - width + 1,
+        ),
+    );
+    const window = { startYear, endYear: startYear + width - 1 };
+    return {
+        ...event,
+        id: `${event.id}-stable-unit-local-consensus-${consensus.year}`,
+        ...window,
+        rankedYears: rerank(
+            event,
+            window,
+            consensus.year,
+            "stable_unit_local_consensus",
+        ),
+        evidence: {
+            ...event.evidence,
+            algorithmSources: Array.from(new Set([
+                ...event.evidence.algorithmSources,
+                "stable_unit_local_consensus",
+            ])).sort(),
+            notes: [
+                ...event.evidence.notes,
+                `stable_unit_local_previous_year=${currentTopYear}`,
+                `stable_unit_local_consensus_year=${consensus.year}`,
+                `stable_unit_local_consensus_votes=${consensus.votes}`,
+                `stable_unit_local_peak_years=${consensus.peakYears.join(",")}`,
+            ],
+        },
+    };
+};
 
 const peakMargin = (
     scores: UnitBreakpointScore[],

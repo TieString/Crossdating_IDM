@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
     addUnitEventEvidenceEdgeGuard,
     addUnitEventRankEdgeGuard,
+    refineStableUnitEventWithLocalConsensus,
     selectMissingRingNeighborYear,
+    selectStableUnitLocalConsensus,
 } from "../unitBreakpointRefinement";
 import type { DiagnosisEvent, SeriesCoreDiagnosis } from "../types";
 
@@ -136,5 +138,61 @@ describe("missing-ring neighbour ranking", () => {
             { year: 1901, combo11: -0.1 },
             { year: 1902, combo11: 10 },
         ], 1900, 1899, 1899)).toBeNull();
+    });
+});
+
+describe("stable unit local consensus", () => {
+    it("does not apply zero-baseline scores to an intermediate lag transition", () => {
+        const event = eventFor(1848, 1860, 1854);
+        event.evidence.algorithmSources.push("stable_multiscale_bounded_path_frontier");
+        event.evidence.lagBefore = -2;
+        event.evidence.lagAfter = 0;
+        event.evidence.notes.push("stable_bounded_path_component_lag_after=-1");
+
+        expect(refineStableUnitEventWithLocalConsensus(
+            event,
+            diagnosis,
+            new Map(),
+        )).toBe(event);
+    });
+
+    it("selects the nearest center supported by three local score families", () => {
+        const rows = Array.from({ length: 31 }, (_, index) => {
+            const year = 1839 + index;
+            return {
+                year,
+                combo21: year === 1843 ? 4 : 0,
+                combo31: year === 1843 ? 4 : 0,
+                multiScale: year === 1843 ? 4 : 0,
+                pairMedian31: year === 1844 ? 4 : 0,
+            };
+        });
+
+        expect(selectStableUnitLocalConsensus(rows, 1854)).toEqual({
+            year: 1844,
+            votes: 4,
+            peakYears: [1843, 1843, 1843, 1844],
+        });
+    });
+
+    it("rejects a two-channel location mode", () => {
+        const rows = [
+            {
+                year: 1843,
+                combo21: 4,
+                combo31: 4,
+                multiScale: 0,
+                pairMedian31: 0,
+            },
+            {
+                year: 1854,
+                combo21: 0,
+                combo31: 0,
+                multiScale: 4,
+                pairMedian31: 4,
+            },
+        ];
+
+        expect(selectStableUnitLocalConsensus(rows, 1854)).toBeNull();
     });
 });
