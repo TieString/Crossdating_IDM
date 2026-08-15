@@ -513,6 +513,120 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("keeps a candidate-anchored positive staircase over a distant bounded mode", () => {
+        const selected = event("sequential-false", "falseRing", 1847, 1859, 1853);
+        selected.evidence.algorithmSources = [
+            "candidate_anchored_positive_staircase",
+            "positive_unit_staircase_direction",
+            "sequential_false_staircase_head",
+        ];
+        selected.evidence.notes = [
+            "sequential_false_path_start_lag=4",
+            "sequential_false_transition_count=4",
+            "sequential_false_candidate_depth=4",
+            "sequential_false_gain_over_direct=2.4",
+            "sequential_false_direction_master_margin=0.13",
+        ];
+        const remote = event("remote-bounded", "falseRing", 1889, 1901, 1895);
+        remote.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        remote.evidence.notes = ["bounded_path_complete_hypothesis=true"];
+        remote.evidence.locationEvidence = [{
+            source: "bounded_complete_lag_path",
+            startYear: 1889,
+            endYear: 1901,
+            topYear: 1895,
+            referenceCount: 28,
+            concentration: 0.99,
+            remoteMargin: 4.5,
+            calibrated: false,
+        }];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: selected },
+            { stage: "final", authority: "supplemental", event: remote },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "final",
+            event: {
+                id: "sequential-false",
+                eventType: "falseRing",
+                startYear: 1847,
+                endYear: 1859,
+            },
+        });
+    });
+
+    it("keeps the selected positive staircase inside an overlapping bounded cluster", () => {
+        const selected = event("sequential-false-overlap", "falseRing", 1845, 1857, 1851);
+        selected.evidence.algorithmSources = [
+            "candidate_anchored_positive_staircase",
+            "positive_unit_staircase_direction",
+            "sequential_false_staircase_head",
+        ];
+        selected.evidence.notes = [
+            "sequential_false_path_start_lag=3",
+            "sequential_false_transition_count=3",
+            "sequential_false_candidate_depth=3",
+            "sequential_false_gain_over_direct=3.4",
+            "sequential_false_direction_master_margin=0.04",
+        ];
+        const overlapping = event("bounded-overlap", "falseRing", 1833, 1845, 1839);
+        overlapping.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        overlapping.evidence.notes = ["bounded_path_complete_hypothesis=true"];
+        overlapping.evidence.locationEvidence = [{
+            source: "bounded_complete_lag_path",
+            startYear: 1833,
+            endYear: 1845,
+            topYear: 1839,
+            referenceCount: 28,
+            concentration: 0.99,
+            remoteMargin: 5,
+            calibrated: false,
+        }];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: selected },
+            { stage: "final", authority: "supplemental", event: overlapping },
+        ]);
+
+        expect(decision.event).toMatchObject({
+            id: "sequential-false-overlap",
+            startYear: 1845,
+            endYear: 1857,
+        });
+    });
+
+    it("keeps a stable terminal unit staircase over an older contaminated mode", () => {
+        const selected = event("terminal-false", "falseRing", 1873, 1881, 1877);
+        selected.evidence.algorithmSources = [
+            "candidate_anchored_positive_staircase",
+            "stable_terminal_unit_staircase_frontier",
+        ];
+        selected.evidence.notes = [
+            "terminal_unit_staircase_depth=3",
+            "terminal_unit_staircase_aggregate_shift=3",
+            "terminal_unit_staircase_maximum_year_drift=1",
+            "terminal_unit_staircase_stronger_gain=12",
+            "terminal_unit_staircase_weaker_gain=10",
+        ];
+        const older = event("older-missing", "missingRing", 1858, 1870, 1864);
+        older.evidence.algorithmSources = ["bounded_complete_lag_path"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: selected },
+            { stage: "final", authority: "supplemental", event: older },
+        ]);
+
+        expect(decision.event).toMatchObject({
+            id: "terminal-false",
+            eventType: "falseRing",
+            startYear: 1873,
+            endYear: 1881,
+        });
+    });
+
     it("keeps selected location authority when the supplemental window overlaps it", () => {
         const located = event("located-overlap", "partialMove", 1817, 1829, 1823);
         located.shiftYears = -20;

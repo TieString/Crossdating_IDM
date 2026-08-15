@@ -305,9 +305,62 @@ const hasAcceptedStrongSelectedLocator = (
     ));
 });
 
+const isValidatedSelectedSequentialFalseCheckpoint = (
+    checkpoint: DiagnosisReviewEventCheckpoint,
+): boolean => {
+    const event = checkpoint.event;
+    const pathStartLag = noteNumber(event, "sequential_false_path_start_lag=");
+    const transitionCount = noteNumber(event, "sequential_false_transition_count=");
+    const candidateDepth = noteNumber(event, "sequential_false_candidate_depth=");
+    return checkpoint.stage === "final"
+        && checkpoint.authority !== "supplemental"
+        && event.eventType === "falseRing"
+        && event.evidence.algorithmSources.includes(
+            "candidate_anchored_positive_staircase",
+        )
+        && event.evidence.algorithmSources.includes(
+            "positive_unit_staircase_direction",
+        )
+        && pathStartLag !== null
+        && pathStartLag >= 2
+        && transitionCount === pathStartLag
+        && candidateDepth === pathStartLag
+        && (noteNumber(event, "sequential_false_gain_over_direct=") ?? 0) > 0
+        && (noteNumber(event, "sequential_false_direction_master_margin=") ?? 0) > 0;
+};
+
+const isValidatedSelectedTerminalUnitStaircaseCheckpoint = (
+    checkpoint: DiagnosisReviewEventCheckpoint,
+): boolean => {
+    const event = checkpoint.event;
+    const depth = noteNumber(event, "terminal_unit_staircase_depth=");
+    const aggregateShift = noteNumber(event, "terminal_unit_staircase_aggregate_shift=");
+    return checkpoint.stage === "final"
+        && checkpoint.authority !== "supplemental"
+        && event.eventType === "falseRing"
+        && event.evidence.algorithmSources.includes(
+            "stable_terminal_unit_staircase_frontier",
+        )
+        && event.evidence.algorithmSources.includes(
+            "candidate_anchored_positive_staircase",
+        )
+        && depth !== null
+        && depth >= 2
+        && aggregateShift === depth
+        && (noteNumber(event, "terminal_unit_staircase_stronger_gain=") ?? 0) > 0
+        && (noteNumber(event, "terminal_unit_staircase_weaker_gain=") ?? 0) > 0
+        && (noteNumber(event, "terminal_unit_staircase_maximum_year_drift=") ?? Infinity) <= 2;
+};
+
+const isValidatedSelectedSequentialFalse = (
+    checkpoint: DiagnosisReviewEventCheckpoint,
+): boolean => isValidatedSelectedSequentialFalseCheckpoint(checkpoint)
+    || isValidatedSelectedTerminalUnitStaircaseCheckpoint(checkpoint);
+
 const preferredStrongBoundedLocation = (
     cluster: HypothesisCluster,
 ): DiagnosisReviewEventCheckpoint | null => {
+    if (cluster.checkpoints.some(isValidatedSelectedSequentialFalse)) return null;
     const selectedFinals = cluster.checkpoints.filter((checkpoint) => (
         checkpoint.stage === "final" && checkpoint.authority !== "supplemental"
     ));
@@ -1044,6 +1097,15 @@ const finalFrontierClusters = (
             && checkpoint.authority !== "supplemental"
         ))
     ));
+    const validatedSelectedSequentialFalse = selectedFinalClusters.filter((cluster) => (
+        cluster.checkpoints.some(isValidatedSelectedSequentialFalse)
+    ));
+    if (validatedSelectedSequentialFalse.length > 0) {
+        return validatedSelectedSequentialFalse.sort((left, right) => (
+            (topYear(representative(right).event) ?? Number.NEGATIVE_INFINITY)
+                - (topYear(representative(left).event) ?? Number.NEGATIVE_INFINITY)
+        ));
+    }
     const boundedComponentFrontier = exactBoundedComponentFrontier(
         allFinalClusters,
         completedCompositionClusters,
@@ -1113,6 +1175,17 @@ const finalFrontierClusters = (
             // Supplemental paths can sharpen a selected operation, but an ordinary bounded
             // checkpoint cannot rewrite the operation already emitted by the production pass.
             return operationProtectedSelectedLocal;
+        }
+        const validatedSequentialFalse = operationProtectedSelectedLocal.filter((cluster) => (
+            cluster.checkpoints.some(isValidatedSelectedSequentialFalse)
+        ));
+        if (validatedSequentialFalse.length > 0) {
+            // A remote bounded mode remains evidence, but cannot relocate a final frontier whose
+            // candidate depth, monotone unit path, and local operation direction all agree.
+            return validatedSequentialFalse.sort((left, right) => (
+                (topYear(representative(right).event) ?? Number.NEGATIVE_INFINITY)
+                    - (topYear(representative(left).event) ?? Number.NEGATIVE_INFINITY)
+            ));
         }
         const corroboratedSelected = selectedFinalClusters.filter((selected) => (
             boundedMatchingSelectedOperation.some((bounded) => {

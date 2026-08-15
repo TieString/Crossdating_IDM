@@ -11,6 +11,16 @@ export type StableNearLagCluster = {
     maximumYearDrift: number;
 };
 
+export type StableTerminalUnitStaircaseFrontier = {
+    representative: DiagnosisEvent;
+    eventCount: number;
+    aggregateShiftYears: number;
+    boundaryYear: number;
+    maximumYearDrift: number;
+    strongerTransitionGain: number;
+    weakerTransitionGain: number;
+};
+
 type LocalTransition = {
     event: DiagnosisEvent;
     eventType: DiagnosisEventType;
@@ -53,6 +63,88 @@ const localTransitions = (path: BoundedLagStateEventSet): LocalTransition[] => (
             : [{ event, eventType: event.eventType, shiftYears, year }];
     }).sort((left, right) => left.year - right.year)
 );
+
+type TerminalUnitStaircase = {
+    representative: DiagnosisEvent;
+    boundaryYear: number;
+};
+
+const terminalUnitStaircase = (
+    path: BoundedLagStateEventSet,
+    aggregateShiftYears: number,
+    terminalLag: number,
+    minimumFixedTailYears: number,
+): TerminalUnitStaircase | null => {
+    if (!Number.isInteger(aggregateShiftYears) || aggregateShiftYears === 0) return null;
+    const direction = Math.sign(aggregateShiftYears);
+    const eventCount = Math.abs(aggregateShiftYears);
+    const runs = path.path.runs;
+    const terminalRun = runs[runs.length - 1];
+    if (
+        !terminalRun
+        || terminalRun.lag !== terminalLag
+        || terminalRun.endYear - terminalRun.startYear + 1 < minimumFixedTailYears
+        || runs.length < eventCount + 1
+    ) return null;
+    for (let offset = 0; offset <= eventCount; offset += 1) {
+        const run = runs[runs.length - 1 - offset];
+        if (!run || run.lag !== terminalLag + direction * offset) return null;
+    }
+    const precedingRun = runs[runs.length - eventCount - 2];
+    if (precedingRun?.lag === terminalLag + direction * (eventCount + 1)) return null;
+    const transitionLag = terminalLag + direction;
+    const expectedType: DiagnosisEventType = direction > 0 ? "falseRing" : "missingRing";
+    const representative = path.events.find((event) => (
+        event.eventType === expectedType
+        && event.evidence.lagBefore === transitionLag
+        && event.evidence.lagAfter === terminalLag
+    ));
+    return representative
+        ? { representative, boundaryYear: terminalRun.startYear }
+        : null;
+};
+
+/**
+ * Finds the newest unit event in a cumulative staircase without requiring the older, already
+ * contaminated part of the path to be globally coherent. Both regularizations must reproduce
+ * the complete terminal suffix, while the caller supplies an independently estimated depth.
+ */
+export const selectStableTerminalUnitStaircaseFrontier = (
+    strongerPenaltyPath: BoundedLagStateEventSet | null,
+    weakerPenaltyPath: BoundedLagStateEventSet | null,
+    aggregateShiftYears: number,
+    terminalLag = 0,
+    maximumYearDrift = 2,
+    minimumFixedTailYears = 8,
+): StableTerminalUnitStaircaseFrontier | null => {
+    if (!strongerPenaltyPath || !weakerPenaltyPath) return null;
+    const stronger = terminalUnitStaircase(
+        strongerPenaltyPath,
+        aggregateShiftYears,
+        terminalLag,
+        minimumFixedTailYears,
+    );
+    const weaker = terminalUnitStaircase(
+        weakerPenaltyPath,
+        aggregateShiftYears,
+        terminalLag,
+        minimumFixedTailYears,
+    );
+    if (
+        !stronger
+        || !weaker
+        || Math.abs(stronger.boundaryYear - weaker.boundaryYear) > maximumYearDrift
+    ) return null;
+    return {
+        representative: stronger.representative,
+        eventCount: Math.abs(aggregateShiftYears),
+        aggregateShiftYears,
+        boundaryYear: Math.round((stronger.boundaryYear + weaker.boundaryYear) / 2),
+        maximumYearDrift,
+        strongerTransitionGain: strongerPenaltyPath.path.transitionGain,
+        weakerTransitionGain: weakerPenaltyPath.path.transitionGain,
+    };
+};
 
 const overlapsEvent = (
     transitions: readonly LocalTransition[],

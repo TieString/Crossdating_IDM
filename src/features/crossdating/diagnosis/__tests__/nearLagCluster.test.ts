@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { selectStableNearLagCluster } from "../nearLagCluster";
+import {
+    selectStableNearLagCluster,
+    selectStableTerminalUnitStaircaseFrontier,
+} from "../nearLagCluster";
 import type { BoundedLagStateEventSet } from "../eventPath";
 import type { DiagnosisEvent } from "../types";
 
@@ -47,6 +50,28 @@ const path = (events: DiagnosisEvent[]): BoundedLagStateEventSet => ({
     events,
     path: {
         runs: [],
+        score: 20,
+        bestConstantScore: 0,
+        zeroLagScore: 0,
+        transitionGain: 20,
+        wholeLagGain: 0,
+        runnerUpMargin: 1,
+    },
+});
+
+const pathWithRuns = (
+    runs: Array<{ lag: number; startYear: number; endYear: number }>,
+    events: DiagnosisEvent[],
+): BoundedLagStateEventSet => ({
+    events,
+    path: {
+        runs: runs.map((run, index) => ({
+            ...run,
+            startIndex: index * 10,
+            endIndex: index * 10 + run.endYear - run.startYear,
+            score: 1,
+            samplePairs: run.endYear - run.startYear + 1,
+        })),
         score: 20,
         bestConstantScore: 0,
         zeroLagScore: 0,
@@ -132,6 +157,57 @@ describe("stable near lag cluster", () => {
             path([event(1900, -2, -1), event(1907, -1, 0)]),
             path([event(1901, -2, -1), event(1908, -1, 0)]),
             [],
+        )).toBeNull();
+    });
+});
+
+describe("stable terminal unit staircase frontier", () => {
+    const positiveThree = (boundaryYear: number) => pathWithRuns([
+        { lag: -70, startYear: 1500, endYear: 1520 },
+        { lag: 3, startYear: 1521, endYear: boundaryYear - 18 },
+        { lag: 2, startYear: boundaryYear - 17, endYear: boundaryYear - 10 },
+        { lag: 1, startYear: boundaryYear - 9, endYear: boundaryYear - 1 },
+        { lag: 0, startYear: boundaryYear, endYear: 2000 },
+    ], [
+        event(boundaryYear - 17, 3, 2),
+        event(boundaryYear - 9, 2, 1),
+        event(boundaryYear, 1, 0),
+        event(1521, -70, 3),
+    ]);
+
+    it("projects the newest event from a stable +3 to 0 terminal suffix", () => {
+        expect(selectStableTerminalUnitStaircaseFrontier(
+            positiveThree(1877),
+            positiveThree(1878),
+            3,
+        )).toMatchObject({
+            eventCount: 3,
+            aggregateShiftYears: 3,
+            boundaryYear: 1878,
+            representative: { eventType: "falseRing" },
+        });
+    });
+
+    it("rejects a candidate depth that does not equal the complete suffix", () => {
+        expect(selectStableTerminalUnitStaircaseFrontier(
+            positiveThree(1877),
+            positiveThree(1877),
+            2,
+        )).toBeNull();
+    });
+
+    it("rejects a whole-series terminal baseline instead of inventing a local event", () => {
+        const whole = pathWithRuns([
+            { lag: 3, startYear: 1500, endYear: 2000 },
+        ], []);
+        expect(selectStableTerminalUnitStaircaseFrontier(whole, whole, 3)).toBeNull();
+    });
+
+    it("rejects terminal boundaries that do not reproduce across regularizations", () => {
+        expect(selectStableTerminalUnitStaircaseFrontier(
+            positiveThree(1877),
+            positiveThree(1882),
+            3,
         )).toBeNull();
     });
 });

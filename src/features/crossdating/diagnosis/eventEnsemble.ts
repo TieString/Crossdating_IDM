@@ -124,6 +124,8 @@ import { evidenceClaimsFor, withEvidenceLedger } from "./evidenceLedger";
 import {
     hasNearLagClusterCandidate,
     selectStableNearLagCluster,
+    selectStableTerminalUnitStaircaseFrontier,
+    type StableTerminalUnitStaircaseFrontier,
 } from "./nearLagCluster";
 import { refineEventWithBoundaryConsensus } from "./eventBoundaryConsensus";
 import {
@@ -2785,8 +2787,6 @@ type SequentialMissingRecovery = {
     preserveWholeBaseline: boolean;
 };
 
-const MIN_SEQUENTIAL_FALSE_HEAD_RUN_YEARS = 4;
-
 const recoverSequentialFalseHeadEvent = (
     detected: readonly DiagnosisEvent[],
     diagnosis: SeriesCoreDiagnosis,
@@ -2804,17 +2804,27 @@ const recoverSequentialFalseHeadEvent = (
             options.cofechaFlaggedSeriesIds,
         )
     ) return null;
-    const hasCumulativePositiveCandidate = candidates.some((candidate) => (
-        candidate.targetTree === diagnosis.targetTree
-        && candidate.operationType === "SHIFT_RANGE"
-        && (candidate.deltaYears ?? candidate.suggestedLag) === 2
-    ));
-    if (!hasCumulativePositiveCandidate) return null;
+    const cumulativePositiveCandidates = candidates.flatMap((candidate) => {
+        const shift = candidate.deltaYears ?? candidate.suggestedLag;
+        return candidate.targetTree === diagnosis.targetTree
+            && candidate.operationType === "SHIFT_RANGE"
+            && Number.isInteger(shift)
+            && shift >= 2
+            && shift <= effectiveConfig.lagMax
+            ? [{ candidate, shift }]
+            : [];
+    });
+    const cumulativePositiveCandidateDepths = Array.from(new Set(
+        cumulativePositiveCandidates.map(({ shift }) => shift),
+    )).sort((left, right) => left - right);
+    if (cumulativePositiveCandidateDepths.length === 0) return null;
     const head = locateSequentialFalseHead(
         cofechaDiagnosis,
         siteData,
         {
-            maxLag: 2,
+            maxLag: cumulativePositiveCandidateDepths[
+                cumulativePositiveCandidateDepths.length - 1
+            ],
             maxPartialGapYears: effectiveConfig.maxPartialGapYears,
         },
         pathCache,
@@ -2822,44 +2832,46 @@ const recoverSequentialFalseHeadEvent = (
     );
     if (
         !head
-        || head.pathStartLag !== 2
-        || head.transitionCount !== 2
-        || head.headRunYears < MIN_SEQUENTIAL_FALSE_HEAD_RUN_YEARS
+        || head.pathStartLag < 2
+        || head.transitionCount !== head.pathStartLag
+        || !cumulativePositiveCandidateDepths.includes(head.pathStartLag)
         || head.gainOverDirect <= 0
         || head.headMeanAdvantage <= 0
         || head.fixedTailMeanAdvantage <= 0
     ) return null;
-    const oppositeHead = locateSequentialMissingHead(
-        cofechaDiagnosis,
-        siteData,
-        { minLag: -2, maxPartialGapYears: 2 },
-        pathCache,
-        0,
-    );
-    if (!oppositeHead) return null;
+    const matchingCandidate = cumulativePositiveCandidates
+        .filter(({ shift }) => shift === head.pathStartLag)
+        .sort((left, right) => right.candidate.score - left.candidate.score)[0]?.candidate;
+    const candidateFrontierYear = matchingCandidate
+        ? matchingCandidate.anchorYear - 1
+        : null;
+    const presentationYear = candidateFrontierYear !== null
+        && candidateFrontierYear >= diagnosis.targetRange.startYear
+        && candidateFrontierYear <= diagnosis.targetRange.endYear
+        && Math.abs(candidateFrontierYear - head.year) <= 8
+        ? candidateFrontierYear
+        : head.year;
+    // Compare opposite edits at the same identified frontier. Requiring a separately fitted
+    // negative path either rejects a valid positive staircase or compares two unrelated modes.
     const direction = compareTwoStepUnitDirections(
         cofechaDiagnosis,
         siteData,
-        head.year,
-        oppositeHead.year,
+        presentationYear,
+        presentationYear,
         true,
     );
     if (
         !direction
         || direction.masterMargin <= 0
-        || direction.referenceCount < 8
-        || direction.referenceSupportRatio < 0.8
-        || direction.referenceMedianMargin < 0.02
-        || direction.referenceLowerQuartileMargin < 0.005
     ) return null;
-    const window = boundedSequentialWindow(head.year, 7, diagnosis.targetRange);
+    const window = boundedSequentialWindow(presentationYear, 7, diagnosis.targetRange);
     const rankedYears = Array.from(
         { length: window.endYear - window.startYear + 1 },
         (_, index) => {
             const year = window.startYear + index;
             return {
                 year,
-                score: head.gainOverDirect - Math.abs(year - head.year) * 0.01,
+                score: head.gainOverDirect - Math.abs(year - presentationYear) * 0.01,
                 evidenceTags: [
                     "sequential_false_staircase_head",
                     "positive_unit_staircase_direction",
@@ -2881,6 +2893,7 @@ const recoverSequentialFalseHeadEvent = (
         confidenceLevel: "medium",
         evidence: {
             algorithmSources: [
+                "candidate_anchored_positive_staircase",
                 "per_reference_two_step_direction_competition",
                 "positive_unit_staircase_direction",
                 "sequential_false_staircase_head",
@@ -2906,8 +2919,13 @@ const recoverSequentialFalseHeadEvent = (
             )).map((candidate) => candidate.id),
             notes: [
                 `sequential_false_head_year=${head.year}`,
+                `sequential_false_presented_year=${presentationYear}`,
+                ...(candidateFrontierYear === null ? [] : [
+                    `sequential_false_candidate_frontier_year=${candidateFrontierYear}`,
+                ]),
                 `sequential_false_path_start_lag=${head.pathStartLag}`,
                 `sequential_false_transition_count=${head.transitionCount}`,
+                `sequential_false_candidate_depth=${head.pathStartLag}`,
                 `sequential_false_head_run_years=${head.headRunYears}`,
                 `sequential_false_gain_over_direct=${head.gainOverDirect.toFixed(6)}`,
                 `sequential_false_head_mean_advantage=${finiteNote(
@@ -5403,6 +5421,96 @@ export const selectStableBoundedLagPathFrontier = (
         baselineLag,
         maximumYearDrift,
         structuralSubset: stableSequence.structuralSubset,
+    };
+};
+
+const projectStableTerminalSequentialFalse = (
+    frontier: StableTerminalUnitStaircaseFrontier,
+    diagnosis: SeriesCoreDiagnosis,
+    candidates: readonly DiagnosisCandidateOperation[],
+): DiagnosisEvent => {
+    const presentationYear = frontier.boundaryYear;
+    const window = boundedSequentialWindow(presentationYear, 9, diagnosis.targetRange);
+    const baseScore = Math.min(
+        frontier.strongerTransitionGain,
+        frontier.weakerTransitionGain,
+    );
+    const rankedYears = Array.from(
+        { length: window.endYear - window.startYear + 1 },
+        (_, index) => {
+            const year = window.startYear + index;
+            return {
+                year,
+                score: baseScore - Math.abs(year - presentationYear) * 0.01,
+                evidenceTags: [
+                    "stable_terminal_unit_staircase_frontier",
+                    "positive_unit_staircase_direction",
+                ],
+            };
+        },
+    ).sort((left, right) => (
+        right.score - left.score || right.year - left.year
+    )).map((row, index) => ({ ...row, rank: index + 1 }));
+    const matchingCandidateIds = candidates.filter((candidate) => {
+        const shift = candidate.deltaYears ?? candidate.suggestedLag;
+        return candidate.targetTree === diagnosis.targetTree
+            && candidate.operationType === "SHIFT_RANGE"
+            && shift === frontier.aggregateShiftYears;
+    }).map((candidate) => candidate.id);
+    return {
+        ...frontier.representative,
+        id: `diagnosis-event-${diagnosis.targetTree}-terminal-sequential-false-${
+            window.startYear
+        }-${window.endYear}`,
+        seriesId: diagnosis.targetTree,
+        eventType: "falseRing",
+        ...window,
+        reviewCoreRange: undefined,
+        rankedYears,
+        confidenceLevel: "medium",
+        evidence: {
+            ...frontier.representative.evidence,
+            algorithmSources: Array.from(new Set([
+                ...frontier.representative.evidence.algorithmSources,
+                "candidate_anchored_positive_staircase",
+                "positive_unit_staircase_direction",
+                "stable_terminal_unit_staircase_frontier",
+            ])).sort(),
+            score: baseScore,
+            scoreMargin: Math.min(
+                frontier.representative.evidence.scoreMargin,
+                baseScore,
+            ),
+            lagBefore: 1,
+            lagAfter: 0,
+            candidateIds: Array.from(new Set([
+                ...frontier.representative.evidence.candidateIds,
+                ...matchingCandidateIds,
+            ])),
+            notes: Array.from(new Set([
+                ...frontier.representative.evidence.notes,
+                `terminal_unit_staircase_depth=${frontier.eventCount}`,
+                `terminal_unit_staircase_aggregate_shift=${
+                    frontier.aggregateShiftYears
+                }`,
+                `terminal_unit_staircase_boundary_year=${presentationYear}`,
+                `terminal_unit_staircase_maximum_year_drift=${
+                    frontier.maximumYearDrift
+                }`,
+                `terminal_unit_staircase_stronger_gain=${
+                    frontier.strongerTransitionGain.toFixed(6)
+                }`,
+                `terminal_unit_staircase_weaker_gain=${
+                    frontier.weakerTransitionGain.toFixed(6)
+                }`,
+                "terminal_unit_staircase_fixed_tail_lag=0",
+                "terminal_unit_staircase_outputs_newest_event_only",
+            ])),
+        },
+        alternativeTypes: [],
+        locationAlternatives: undefined,
+        operationAlternatives: undefined,
+        seriesRange: { ...diagnosis.targetRange },
     };
 };
 
@@ -9355,12 +9463,26 @@ export const makeDiagnosisEvents = (
         ].filter((lag) => (
             lag >= effectiveConfig.lagMin && lag <= effectiveConfig.lagMax
         )))];
+        const positiveCumulativeCandidateDepths = Array.from(new Set(
+            ownCandidates.flatMap((candidate) => {
+                const shift = candidate.deltaYears ?? candidate.suggestedLag;
+                return candidate.operationType === "SHIFT_RANGE"
+                    && Number.isInteger(shift)
+                    && shift >= 2
+                    && shift <= effectiveConfig.lagMax
+                    ? [shift]
+                    : [];
+            }),
+        )).sort((left, right) => right - left);
         const nearClusterProbeEligible = shouldFitBoundedPath
             && diagnosis.master.sourceTrees.length >= 8
             && diagnosis.targetRange.endYear - diagnosis.targetRange.startYear + 1 >= 80
-            && boundedHypotheses.some((event) => (
-                event.eventType !== "wholeSeriesMove"
-            ));
+            && (
+                positiveCumulativeCandidateDepths.length > 0
+                || boundedHypotheses.some((event) => (
+                    event.eventType !== "wholeSeriesMove"
+                ))
+            );
         const rawNearPenaltyTwoPath = nearClusterProbeEligible
             ? locateBoundedEvents(
                 false,
@@ -9373,9 +9495,9 @@ export const makeDiagnosisEvents = (
                 2,
             )
             : null;
-        const rawNearPenaltyOnePath = hasNearLagClusterCandidate(
-            rawNearPenaltyTwoPath,
-            boundedHypotheses,
+        const rawNearPenaltyOnePath = rawNearPenaltyTwoPath && (
+            positiveCumulativeCandidateDepths.length > 0
+            || hasNearLagClusterCandidate(rawNearPenaltyTwoPath, boundedHypotheses)
         )
             ? locateBoundedEvents(
                 false,
@@ -9393,6 +9515,20 @@ export const makeDiagnosisEvents = (
             rawNearPenaltyOnePath,
             boundedHypotheses,
         );
+        const stableTerminalSequentialFalse = positiveCumulativeCandidateDepths
+            .map((depth) => selectStableTerminalUnitStaircaseFrontier(
+                rawNearPenaltyTwoPath,
+                rawNearPenaltyOnePath,
+                depth,
+            ))
+            .filter((frontier): frontier is StableTerminalUnitStaircaseFrontier => (
+                frontier !== null && frontier.aggregateShiftYears > 1
+            ))
+            .map((frontier) => projectStableTerminalSequentialFalse(
+                frontier,
+                diagnosis,
+                ownCandidates,
+            ))[0] ?? null;
         const localLagTransitionEvidence: DiagnosisLocalLagTransitionEvidence | null =
             stableNearLagCluster ? {
                 eventCount: stableNearLagCluster.eventCount,
@@ -9707,6 +9843,16 @@ export const makeDiagnosisEvents = (
                     displayedBeforeLocator: displayed.map(auditEvent),
                     finalEvents: finalEvents.map(auditEvent),
                     localLagTransitionEvidence,
+                    terminalUnitStaircaseEvidence: {
+                        candidateDepths: [...positiveCumulativeCandidateDepths],
+                        strongerTerminalLags: rawNearPenaltyTwoPath?.path.runs
+                            .slice(-6).map((run) => run.lag) ?? [],
+                        weakerTerminalLags: rawNearPenaltyOnePath?.path.runs
+                            .slice(-6).map((run) => run.lag) ?? [],
+                        selectedBoundaryYear: stableTerminalSequentialFalse
+                            ? rankedEventYear(stableTerminalSequentialFalse)
+                            : null,
+                    },
                     locatorDecisions: locatorDecisionAudits.map((decision) => ({
                         ...decision,
                         preLocatorEvent: { ...decision.preLocatorEvent },
@@ -9786,6 +9932,42 @@ export const makeDiagnosisEvents = (
             }
             return cachedCofechaDiagnosis;
         };
+        let cachedSequentialFalse: DiagnosisEvent | null | undefined;
+        const getSequentialFalse = (): DiagnosisEvent | null => {
+            if (cachedSequentialFalse === undefined) {
+                const currentCofechaDiagnosis = getCofechaDiagnosis();
+                cachedSequentialFalse = currentCofechaDiagnosis
+                    ? recoverSequentialFalseHeadEvent(
+                            displayed,
+                            diagnosis,
+                            currentCofechaDiagnosis,
+                            siteData,
+                            ownCandidates,
+                            effectiveConfig,
+                            options,
+                            locatorPathCache,
+                        )
+                    : null;
+            }
+            return cachedSequentialFalse;
+        };
+        if (stableTerminalSequentialFalse) {
+            // The two regularizations and the independently estimated cumulative depth agree on
+            // the complete +N...+1 -> 0 suffix. Older path contamination cannot reverse this
+            // newest operation or turn the staircase into one positive automatic range move.
+            return finalize([stableTerminalSequentialFalse], [], false);
+        }
+        const candidateAnchoredSequentialFalse = positiveCumulativeCandidateDepths.length > 0
+            ? getSequentialFalse()
+            : null;
+        if (candidateAnchoredSequentialFalse?.evidence.algorithmSources.includes(
+            "candidate_anchored_positive_staircase",
+        )) {
+            // Resolve a candidate-depth positive staircase before an unrelated negative bounded
+            // path can return early. The helper has already required exact depth, monotone unit
+            // transitions, fixed-tail support, and same-region operation direction.
+            return finalize([candidateAnchoredSequentialFalse], [], false);
+        }
         const directTerminalUnitFrontier =
             selectDirectTerminalUnitBeforeDerivedStablePartial(
                 stableMultiscaleBoundedFrontier,
@@ -9990,16 +10172,7 @@ export const makeDiagnosisEvents = (
             : null;
         // A directly validated positive unit staircase is the operation-direction authority.
         // Evaluate it before a deep aggregate missing path can claim the same serial frontier.
-        const sequentialFalse = recoverSequentialFalseHeadEvent(
-            displayed,
-            diagnosis,
-            cofechaDiagnosis,
-            siteData,
-            ownCandidates,
-            effectiveConfig,
-            options,
-            locatorPathCache,
-        );
+        const sequentialFalse = getSequentialFalse();
         if (sequentialFalse) {
             return finalize([sequentialFalse]);
         }

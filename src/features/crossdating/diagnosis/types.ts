@@ -323,6 +323,12 @@ export type DiagnosisEventDecisionAudit = {
     displayedBeforeLocator: DiagnosisEventAuditSnapshot[];
     finalEvents: DiagnosisEventAuditSnapshot[];
     localLagTransitionEvidence?: DiagnosisLocalLagTransitionEvidence | null;
+    terminalUnitStaircaseEvidence?: {
+        candidateDepths: number[];
+        strongerTerminalLags: number[];
+        weakerTerminalLags: number[];
+        selectedBoundaryYear: number | null;
+    };
     locatorDecisions?: DiagnosisLocatorDecisionAudit[];
     automaticSemanticsRejectedCount: number;
     finalReason: DiagnosisEventDecisionReason;
