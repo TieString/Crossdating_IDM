@@ -18,6 +18,7 @@ import {
 } from "./partialMoveSemantics";
 import {
     measureWholeSeriesStateConsistency,
+    supportsDominantWholeSeriesBaseline,
     supportsNonTerminalWholeSeriesCandidate,
     wholeSeriesStateConsistencyNotes,
 } from "./wholeSeriesStateConsistency";
@@ -311,7 +312,21 @@ export const selectWholeSeriesCandidate = (
         || isValidatedPathFixedSideWholeCandidate(candidate)
         || isValidatedRecentTailWholeCandidate(candidate)
     ));
-    const eligible = validatedBaselines.length > 0
+    const dominantWholeBaselines = diagnosis
+        ? whole.filter((candidate) => {
+            const evaluation = candidate.evidence.evaluationDelta;
+            const shiftYears = candidate.deltaYears ?? candidate.suggestedLag;
+            return candidate.candidateStrength === "strong"
+                && (evaluation?.hardGatePassed === true
+                    || evaluation?.jointCompositionGatePassed === true)
+                && supportsDominantWholeSeriesBaseline(
+                    measureWholeSeriesStateConsistency(diagnosis, shiftYears),
+                );
+        })
+        : [];
+    const eligible = dominantWholeBaselines.length > 0
+        ? dominantWholeBaselines
+        : validatedBaselines.length > 0
         ? validatedBaselines
         : whole.filter((candidate) => !candidate.evidence.recallSourceTags?.includes(
             "cofecha_terminal_whole_baseline",

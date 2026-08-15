@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { SegmentDiagnosis } from "../types";
+import { selectWholeSeriesCandidate } from "../events";
+import type {
+    DiagnosisCandidateOperation,
+    SegmentDiagnosis,
+    SeriesCoreDiagnosis,
+} from "../types";
 import {
     measureWholeSeriesStateConsistency,
     supportsDominantWholeSeriesBaseline,
@@ -10,6 +15,7 @@ const segment = (
     startYear: number,
     bestLag: number,
     confidence = 1,
+    wholeSeriesLagProbe?: SegmentDiagnosis["wholeSeriesLagProbe"],
 ): SegmentDiagnosis => ({
     targetTree: "T",
     seriesId: "T",
@@ -35,6 +41,7 @@ const segment = (
     fisherZImprovement: 0.6,
     classification: "A_like",
     confidence,
+    wholeSeriesLagProbe,
 });
 
 const diagnosis = (lags: number[], globalLag: number) => ({
@@ -154,6 +161,106 @@ describe("whole-series state consistency", () => {
         expect(evidence.newerEdgeSupportFraction).toBe(0);
         expect(evidence.globalLagMatchesShift).toBe(false);
         expect(supportsNonTerminalWholeSeriesCandidate(evidence)).toBe(false);
+    });
+
+    it("uses direct global-lag probes without widening local best-lag states", () => {
+        const globalLag = 11;
+        const evidence = measureWholeSeriesStateConsistency({
+            segments: [0, 1, 2, 3].map((_, index) => segment(
+                1800 + index * 25,
+                10,
+                1,
+                {
+                    lag: globalLag,
+                    correlation: 0.72,
+                    samplePairs: 50,
+                    rImprovement: 0.5,
+                    competitiveWithLocalBest: true,
+                    supportsLag: true,
+                },
+            )),
+            globalSlidingMatch: diagnosis([], globalLag).globalSlidingMatch,
+        }, globalLag);
+
+        expect(evidence.shiftSupportCount).toBe(4);
+        expect(evidence.oldestLag).toBe(globalLag);
+        expect(evidence.newestLag).toBe(globalLag);
+        expect(supportsDominantWholeSeriesBaseline(evidence)).toBe(true);
+    });
+
+    it("does not turn an older-side global probe into a whole baseline", () => {
+        const globalLag = 20;
+        const probe = (supportsLag: boolean): SegmentDiagnosis["wholeSeriesLagProbe"] => ({
+            lag: globalLag,
+            correlation: supportsLag ? 0.72 : 0.15,
+            samplePairs: 50,
+            rImprovement: supportsLag ? 0.5 : -0.05,
+            competitiveWithLocalBest: supportsLag,
+            supportsLag,
+        });
+        const evidence = measureWholeSeriesStateConsistency({
+            segments: [
+                segment(1800, 10, 1, probe(true)),
+                segment(1825, 10, 1, probe(true)),
+                segment(1850, 0, 1, probe(false)),
+                segment(1875, 0, 1, probe(false)),
+            ],
+            globalSlidingMatch: diagnosis([], globalLag).globalSlidingMatch,
+        }, globalLag);
+
+        expect(evidence.olderEdgeSupportFraction).toBe(1);
+        expect(evidence.newerEdgeSupportFraction).toBe(0);
+        expect(evidence.newestLag).toBe(0);
+        expect(supportsNonTerminalWholeSeriesCandidate(evidence)).toBe(false);
+        expect(supportsDominantWholeSeriesBaseline(evidence)).toBe(false);
+    });
+
+    it("lets dominant whole-state evidence outrank a conflicting terminal label", () => {
+        const globalLag = 50;
+        const probe: SegmentDiagnosis["wholeSeriesLagProbe"] = {
+            lag: globalLag,
+            correlation: 0.72,
+            samplePairs: 50,
+            rImprovement: 0.5,
+            competitiveWithLocalBest: true,
+            supportsLag: true,
+        };
+        const core = {
+            ...diagnosis([], globalLag),
+            targetTree: "T",
+            rawTarget: new Map(),
+            targetRange: { startYear: 1800, endYear: 2000 },
+            master: { data: new Map(), sampleDepth: new Map(), sourceTrees: [] },
+            segments: Array.from({ length: 8 }, (_, index) => (
+                segment(1800 + index * 20, 10, 1, probe)
+            )),
+            propagationPatterns: [],
+            unresolvedA: 0,
+            unresolvedB: 0,
+        } as SeriesCoreDiagnosis;
+        const candidate = (
+            shiftYears: number,
+            score: number,
+            terminal: boolean,
+        ): DiagnosisCandidateOperation => ({
+            operationType: "SHIFT_RANGE",
+            mode: "wholeSeriesMove",
+            deltaYears: shiftYears,
+            suggestedLag: shiftYears,
+            score,
+            candidateStrength: "strong",
+            evidence: {
+                recallSourceTags: terminal
+                    ? ["cofecha_terminal_whole_baseline"]
+                    : [],
+                evaluationDelta: { hardGatePassed: true },
+            },
+        } as DiagnosisCandidateOperation);
+
+        expect(selectWholeSeriesCandidate([
+            candidate(globalLag, 24, false),
+            candidate(7, -20, true),
+        ], core)?.deltaYears).toBe(globalLag);
     });
 
     it("accepts a dominant whole baseline with uniform support", () => {

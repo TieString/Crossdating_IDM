@@ -36,34 +36,45 @@ export const measureWholeSeriesStateConsistency = (
         Math.max(1, segment.samplePairs)
         * Math.max(0.1, segment.confidence)
     );
+    const supportsShift = (segment: (typeof segments)[number]): boolean => (
+        segment.bestLag === shiftYears
+        || (
+            diagnosis.globalSlidingMatch.bestGlobalLag === shiftYears
+            && segment.wholeSeriesLagProbe?.lag === shiftYears
+            && segment.wholeSeriesLagProbe.supportsLag
+        )
+    );
+    const effectiveLag = (segment: (typeof segments)[number]): number => (
+        supportsShift(segment) ? shiftYears : segment.bestLag
+    );
     const totalWeight = segments.reduce((sum, segment) => sum + weightFor(segment), 0);
     const shiftWeight = segments.reduce((sum, segment) => (
-        sum + (segment.bestLag === shiftYears ? weightFor(segment) : 0)
+        sum + (supportsShift(segment) ? weightFor(segment) : 0)
     ), 0);
     const edgeCount = Math.min(2, segments.length);
     const edgeSupportFraction = (
         edge: typeof segments,
     ): number => edge.length > 0
-        ? edge.filter((segment) => segment.bestLag === shiftYears).length / edge.length
+        ? edge.filter(supportsShift).length / edge.length
         : 0;
+    const shiftSupportCount = segments.filter(supportsShift).length;
 
     return {
         segmentCount: segments.length,
-        shiftSupportCount: segments.filter((segment) => (
-            segment.bestLag === shiftYears
-        )).length,
-        zeroSupportCount: segments.filter((segment) => segment.bestLag === 0).length,
+        shiftSupportCount,
+        zeroSupportCount: segments.filter((segment) => effectiveLag(segment) === 0).length,
         supportFraction: segments.length > 0
-            ? segments.filter((segment) => segment.bestLag === shiftYears).length
-                / segments.length
+            ? shiftSupportCount / segments.length
             : 0,
         weightedSupportFraction: totalWeight > 0 ? shiftWeight / totalWeight : 0,
         olderEdgeSupportFraction: edgeSupportFraction(segments.slice(0, edgeCount)),
         newerEdgeSupportFraction: edgeSupportFraction(
             edgeCount > 0 ? segments.slice(-edgeCount) : [],
         ),
-        oldestLag: segments[0]?.bestLag ?? null,
-        newestLag: segments[segments.length - 1]?.bestLag ?? null,
+        oldestLag: segments[0] ? effectiveLag(segments[0]) : null,
+        newestLag: segments.length > 0
+            ? effectiveLag(segments[segments.length - 1])
+            : null,
         globalLag: diagnosis.globalSlidingMatch.bestGlobalLag,
         globalLagMatchesShift:
             diagnosis.globalSlidingMatch.bestGlobalLag === shiftYears,

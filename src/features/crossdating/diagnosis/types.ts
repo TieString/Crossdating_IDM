@@ -537,6 +537,19 @@ export type SegmentDiagnosis = {
     fisherZImprovement: number;
     classification: SegmentDiagnosisFlag;
     confidence: number;
+    /**
+     * Direct validation of the single lag selected by the whole-series search.
+     * It is deliberately separate from bestLag so a wide global lag range does
+     * not expand the local event-state search.
+     */
+    wholeSeriesLagProbe?: {
+        lag: number;
+        correlation: number | null;
+        samplePairs: number;
+        rImprovement: number;
+        competitiveWithLocalBest: boolean;
+        supportsLag: boolean;
+    };
 };
 
 export type PropagationPatternType =

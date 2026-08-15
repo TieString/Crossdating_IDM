@@ -7,6 +7,8 @@ import { classifySegment } from "./classification";
 import { runGlobalSlidingMatch } from "./sliding";
 import {
     buildScoringMaster,
+    adaptiveImprovementThreshold,
+    adaptiveLowCorrelationThreshold,
     correlationForSegment,
     createSegmentsForSeries,
     fisherZ,
@@ -36,6 +38,7 @@ const scanSegment = (
     master: NumericSeries,
     segment: YearRange,
     config: EffectiveDiagnosisConfig,
+    wholeSeriesLag: number,
 ): SegmentDiagnosis => {
     const current = correlationForSegment(
         target,
@@ -77,6 +80,35 @@ const scanSegment = (
     const fisherZBest = fisherZ(bestR);
     const fisherZImprovement = fisherZBest - fisherZ0;
 
+    const wholeSeriesMatch = correlationForSegment(
+        target,
+        master,
+        segment.startYear,
+        segment.endYear,
+        wholeSeriesLag,
+        config.minPairsForCorrelation,
+    );
+    const wholeSeriesR = wholeSeriesMatch.correlation;
+    const wholeSeriesRImprovement = wholeSeriesR === null
+        ? 0
+        : wholeSeriesR - (r0 ?? -1);
+    const wholeSeriesEffectiveN = Math.max(effectiveN, wholeSeriesMatch.samplePairs);
+    const competitiveWithLocalBest = wholeSeriesR !== null
+        && (bestR === null || wholeSeriesR >= bestR - 0.02);
+    const independentlyImproves = wholeSeriesR !== null
+        && (r0 === null
+            ? wholeSeriesR >= adaptiveLowCorrelationThreshold(wholeSeriesEffectiveN)
+            : wholeSeriesRImprovement >= adaptiveImprovementThreshold(wholeSeriesEffectiveN));
+    const wholeSeriesLagProbe = {
+        lag: wholeSeriesLag,
+        correlation: wholeSeriesR,
+        samplePairs: wholeSeriesMatch.samplePairs,
+        rImprovement: wholeSeriesRImprovement,
+        competitiveWithLocalBest,
+        supportsLag: bestLag === wholeSeriesLag
+            || (wholeSeriesLag !== 0 && competitiveWithLocalBest && independentlyImproves),
+    };
+
     const { classification, confidence, reason } = classifySegment(
         { effectiveN, r0, bestLag, bestR, rImprovement, t0, bestT, tImprovement },
         CrossdateConfig.adaptiveClassification,
@@ -107,6 +139,7 @@ const scanSegment = (
         fisherZImprovement,
         classification,
         confidence,
+        wholeSeriesLagProbe,
     };
 };
 
@@ -251,14 +284,21 @@ export const diagnoseSeriesCore = (
     if (master.data.size === 0) return null;
 
     const target = preprocess(rawTarget);
-    const segments = createSegmentsForSeries(target, config.segmentLength, config.overlap)
-        .map((segment) => scanSegment(targetTree, target, master.data, segment, config));
     const globalSlidingMatch = runGlobalSlidingMatch(target, master.data, {
         seriesId: targetTree,
         lagMin: config.globalLagMin,
         lagMax: config.globalLagMax,
         minOverlap: config.minGlobalOverlap,
     });
+    const segments = createSegmentsForSeries(target, config.segmentLength, config.overlap)
+        .map((segment) => scanSegment(
+            targetTree,
+            target,
+            master.data,
+            segment,
+            config,
+            globalSlidingMatch.bestGlobalLag,
+        ));
     const propagationPatterns = detectPropagationPatterns(targetTree, segments, targetRange);
     const { unresolvedA, unresolvedB } = summarizeSegments(segments);
 
