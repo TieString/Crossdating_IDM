@@ -10,7 +10,9 @@ export type CapabilityOperation = Extract<
 
 export type CapabilityConfig = {
     schemaVersion: 1;
-    protocolVersion: "itrdb-operation-capability-v1";
+    protocolVersion:
+        | "itrdb-operation-capability-v1"
+        | "itrdb-operation-capability-v2";
     frozenDate: string;
     seed: string;
     scenarioGeneratorVersion: 3 | 4;
