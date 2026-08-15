@@ -641,6 +641,29 @@ type VirtualSequentialCountEvaluation = NonNullable<
     frontierScores: UnitBreakpointScore[];
 };
 
+const virtualFrontierCandidateAnchor = (
+    partial: DiagnosisEvent,
+    candidateEvents: readonly DiagnosisEvent[],
+): number | null => {
+    const matchingCandidates = candidateEvents.filter((candidate) => (
+        candidate.eventType === "partialMove"
+        && candidate.shiftSide === "older"
+        && candidate.shiftYears === partial.shiftYears
+        && candidate.evidence.notes.includes("candidate_hard_gate_passed")
+    ));
+    const strongest = matchingCandidates.slice().sort((left, right) => (
+        (right.evidence.correlationGain ?? Number.NEGATIVE_INFINITY)
+            - (left.evidence.correlationGain ?? Number.NEGATIVE_INFINITY)
+        || right.evidence.score - left.evidence.score
+        || rankedTopYear(right) - rankedTopYear(left)
+    ))[0];
+    return strongest ? rankedTopYear(strongest) : null;
+};
+
+const virtualFrontierSearchRadius = (expectedCount: number): number => (
+    Math.min(30, Math.max(13, expectedCount * 6))
+);
+
 const publicVirtualCountEvaluation = (
     evaluation: VirtualSequentialCountEvaluation,
 ): NonNullable<DiagnosisMissingPartialInterpretationEvidence["virtualCountEvaluation"]> => ({
@@ -656,6 +679,7 @@ const evaluateVirtualSequentialMissingCount = (
     partial: DiagnosisEvent,
     diagnosis: SeriesCoreDiagnosis | null,
     siteData: RwlSiteData,
+    candidateEvents: readonly DiagnosisEvent[] = [],
 ): VirtualSequentialCountEvaluation => {
     const expectedCount = Math.abs(partial.shiftYears ?? 0);
     if (!diagnosis
@@ -681,17 +705,39 @@ const evaluateVirtualSequentialMissingCount = (
     let minimumRawGain = Infinity;
     const years: number[] = [];
     let frontierScores: UnitBreakpointScore[] = [];
+    const candidateSearchAnchor = virtualFrontierCandidateAnchor(
+        partial,
+        candidateEvents,
+    );
+    const initialSearchAnchor = candidateSearchAnchor ?? Math.max(
+        partial.startYear,
+        Math.min(partial.endYear, rankedTopYear(partial) - 1),
+    );
+    const searchRadiusYears = candidateSearchAnchor === null
+        ? Math.max(2, partial.endYear - partial.startYear + 1)
+        : virtualFrontierSearchRadius(expectedCount);
     for (let step = 0; step < expectedCount; step += 1) {
         const fallbackYear: number = previousYear === null
-            ? Math.max(
-                    partial.startYear,
-                    Math.min(partial.endYear, rankedTopYear(partial) - 1),
-                )
+            ? initialSearchAnchor
             : Math.max(partial.startYear, previousYear - 1);
+        const scanStartYear = candidateSearchAnchor === null
+            ? partial.startYear
+            : Math.max(
+                    workingDiagnosis.targetRange.startYear + 30,
+                    fallbackYear - searchRadiusYears,
+                );
+        const scanEndYear = candidateSearchAnchor === null
+            ? partial.endYear
+            : Math.min(
+                    workingDiagnosis.targetRange.endYear - 30,
+                    fallbackYear + searchRadiusYears,
+                );
         const probe: DiagnosisEvent = {
             ...partial,
             id: `${partial.id}-virtual-missing-count-${step + 1}`,
             eventType: "missingRing",
+            startYear: Math.min(scanStartYear, scanEndYear),
+            endYear: Math.max(scanStartYear, scanEndYear),
             rankedYears: [{
                 year: fallbackYear,
                 rank: 1,
@@ -709,7 +755,7 @@ const evaluateVirtualSequentialMissingCount = (
         const consensus = selectStableUnitLocalConsensus(
             scores,
             fallbackYear,
-            Math.max(2, partial.endYear - partial.startYear + 1),
+            searchRadiusYears,
         );
         const selected: UnitBreakpointScore | null = consensus
             ? scores.filter((row) => Math.abs(row.year - consensus.year) <= 1)
@@ -811,6 +857,7 @@ export const attachUniversalPartialMissingWorkflow = (
     diagnosis: SeriesCoreDiagnosis | null,
     siteData: RwlSiteData,
     localLagEvidence: DiagnosisLocalLagTransitionEvidence | null = null,
+    candidateEvents: readonly DiagnosisEvent[] = [],
 ): DiagnosisEvent => {
     if (partial.eventType !== "partialMove"
         || partial.shiftSide !== "older"
@@ -829,6 +876,7 @@ export const attachUniversalPartialMissingWorkflow = (
             partial,
             diagnosis,
             siteData,
+            candidateEvents,
         );
         const confirmed = virtual.status === "confirmed";
         const evidence: DiagnosisMissingPartialInterpretationEvidence = {
@@ -881,7 +929,12 @@ export const attachUniversalPartialMissingWorkflow = (
         shiftSide: undefined,
         interpretationAmbiguity: undefined,
     };
-    const virtual = evaluateVirtualSequentialMissingCount(partial, diagnosis, siteData);
+    const virtual = evaluateVirtualSequentialMissingCount(
+        partial,
+        diagnosis,
+        siteData,
+        candidateEvents,
+    );
     const scores = virtual.frontierScores.length > 0
         ? virtual.frontierScores
         : diagnosis ? scoreUnitBoundaries(probe, diagnosis, siteData) : [];
@@ -895,12 +948,13 @@ export const attachUniversalPartialMissingWorkflow = (
         || Math.abs(left.year - fallbackYear) - Math.abs(right.year - fallbackYear)
         || right.year - left.year
     ))[0] ?? null;
-    const selectedYear = virtual.frontierYear
-        ?? consensus?.year
-        ?? bestScore?.year
-        ?? fallbackYear;
+    // Consensus and best-score rows are exploratory until one virtual correction passes all
+    // reference, remote-mode, and raw-gain gates. A zero-step probe must not move the user's
+    // missing-ring interpretation away from the already validated partial boundary.
+    const selectedYear = virtual.frontierYear ?? fallbackYear;
     const selectedScore = scores.find((row) => row.year === selectedYear) ?? bestScore;
-    const multiReferenceLocalized = consensus !== null
+    const multiReferenceLocalized = virtual.frontierYear !== null
+        && consensus !== null
         && (selectedScore?.referenceCount ?? 0)
             >= MISSING_PARTIAL_INTERPRETATION_CALIBRATION.minimumReferenceCount;
     const shiftYears = partial.shiftYears!;

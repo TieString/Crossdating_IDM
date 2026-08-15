@@ -330,6 +330,13 @@ export function diagnoseCrossdating(
         audit.seriesId,
         audit,
     ]) ?? []);
+    const candidateEventsByTree = new Map<string, DiagnosisEvent[]>();
+    reviewEventCheckpoints?.forEach((checkpoint) => {
+        if (checkpoint.stage !== "candidate") return;
+        const rows = candidateEventsByTree.get(checkpoint.event.seriesId) ?? [];
+        rows.push(checkpoint.event);
+        candidateEventsByTree.set(checkpoint.event.seriesId, rows);
+    });
     const attachFinalInterpretation = (event: DiagnosisEvent): DiagnosisEvent => (
         event.eventType === "partialMove"
             ? attachUniversalPartialMissingWorkflow(
@@ -337,6 +344,7 @@ export function diagnoseCrossdating(
                     diagnosisByTree.get(event.seriesId) ?? null,
                     siteData,
                     auditByTree.get(event.seriesId)?.localLagTransitionEvidence ?? null,
+                    candidateEventsByTree.get(event.seriesId) ?? [],
                 )
             : event
     );

@@ -714,10 +714,14 @@ describe("missing/partial interpretation tie", () => {
         expect(result.interpretationAmbiguity?.evidence).toMatchObject({
             countEvidence: "cumulativeLagOnly",
             missingYears: [],
+            frontierYear: 1940,
+            frontierLocalization: "partialBoundaryFallback",
             virtualCountEvaluation: {
                 status: "inconclusive",
                 validatedSteps: 0,
             },
         });
+        expect(result.interpretationAmbiguity?.alternative.rankedYears[0]?.year)
+            .toBe(1940);
     });
 });

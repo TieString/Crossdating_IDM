@@ -103,7 +103,11 @@ import {
     type EventOperationRecoveryConfig,
 } from "./eventOperationRecovery";
 import { wholeSeriesMoveShiftYears } from "./wholeSeriesMoveSemantics";
-import { measureWholeSeriesStateConsistency } from "./wholeSeriesStateConsistency";
+import {
+    measureWholeSeriesStateConsistency,
+    supportsDominantWholeSeriesBaseline,
+    wholeSeriesStateConsistencyNotes,
+} from "./wholeSeriesStateConsistency";
 import {
     addDiagnosisReviewWindowPadding,
     restoreUnlocalizedFalseRingReviewWindow,
@@ -1637,14 +1641,31 @@ export const projectSequentialUnitChainHead = (
             partial,
             "partial_reference_vote_year=",
         );
-        const missingYear = referenceVoteYear
+        const explicitStaircaseYears = partial.evidence.algorithmSources.includes(
+            "explicit_partial_vs_missing_staircase",
+        )
+            ? partial.evidence.notes
+                .filter((note) => note.startsWith("explicit_staircase_missing_years="))
+                .flatMap((note) => note
+                    .slice("explicit_staircase_missing_years=".length)
+                    .split(",")
+                    .map(Number)
+                    .filter(Number.isInteger))
+            : [];
+        const explicitStaircaseYear = explicitStaircaseYears.length > 0
+            ? Math.max(...explicitStaircaseYears)
+            : null;
+        const missingYear = explicitStaircaseYear
+            ?? referenceVoteYear
             ?? ((partialTop?.year
                 ?? Math.round((partial.startYear + partial.endYear) / 2)) - 1);
         const width = partial.endYear - partial.startYear + 1;
         const seriesStart = partial.seriesRange?.startYear ?? partial.startYear - 1;
         const seriesEnd = partial.seriesRange?.endYear ?? partial.endYear;
         if (missingYear < seriesStart || missingYear > seriesEnd) return events;
-        let startYear = partial.startYear;
+        let startYear = explicitStaircaseYear === null
+            ? partial.startYear
+            : missingYear - Math.floor(width / 2);
         if (missingYear < startYear) startYear = missingYear;
         if (missingYear > startYear + width - 1) startYear = missingYear - width + 1;
         startYear = Math.max(
@@ -1687,7 +1708,11 @@ export const projectSequentialUnitChainHead = (
                     "compressed_missing_staircase_projected_shift=-1",
                     `compressed_missing_staircase_selected_year=${missingYear}`,
                     `compressed_missing_staircase_selected_year_source=${
-                        referenceVoteYear === null ? "shifted_partial_top" : "partial_reference_vote"
+                        explicitStaircaseYear !== null
+                            ? "explicit_staircase_newest_year"
+                            : referenceVoteYear === null
+                                ? "shifted_partial_top"
+                                : "partial_reference_vote"
                     }`,
                     `compressed_missing_staircase_deferred_events=${events.length - 1}`,
                 ],
@@ -5424,13 +5449,46 @@ export const selectStableBoundedLagPathFrontier = (
     };
 };
 
-const projectStableTerminalSequentialFalse = (
+export const calibratedTerminalUnitStaircaseWindowWidth = (
+    frontier: StableTerminalUnitStaircaseFrontier,
+): 9 | 13 => {
+    const pathLocation = frontier.representative.evidence.locationEvidence?.find((entry) => (
+        entry.source === "bounded_complete_lag_path"
+    ));
+    const runnerUpMarginNote = frontier.representative.evidence.notes.find((note) => (
+        note.startsWith("bounded_path_runner_up_margin=")
+    ));
+    const runnerUpMargin = Number(runnerUpMarginNote?.split("=")[1]);
+    const diffuseTwoStep = frontier.eventCount === 2
+        && typeof pathLocation?.concentration === "number"
+        && pathLocation.concentration < 0.7;
+    const deepWeaklySeparatedMode = frontier.eventCount >= 4
+        && typeof pathLocation?.concentration === "number"
+        && pathLocation.concentration > 0.95
+        && Number.isFinite(runnerUpMargin)
+        && runnerUpMargin < 1.2;
+    return diffuseTwoStep || deepWeaklySeparatedMode ? 13 : 9;
+};
+
+const projectStableTerminalSequentialUnit = (
     frontier: StableTerminalUnitStaircaseFrontier,
     diagnosis: SeriesCoreDiagnosis,
     candidates: readonly DiagnosisCandidateOperation[],
 ): DiagnosisEvent => {
     const presentationYear = frontier.boundaryYear;
-    const window = boundedSequentialWindow(presentationYear, 9, diagnosis.targetRange);
+    const eventType = frontier.aggregateShiftYears > 0 ? "falseRing" : "missingRing";
+    const directionSource = frontier.aggregateShiftYears > 0
+        ? "positive_unit_staircase_direction"
+        : "negative_unit_staircase_direction";
+    const candidateSource = frontier.aggregateShiftYears > 0
+        ? "candidate_anchored_positive_staircase"
+        : "candidate_anchored_negative_staircase";
+    const windowWidth = calibratedTerminalUnitStaircaseWindowWidth(frontier);
+    const window = boundedSequentialWindow(
+        presentationYear,
+        windowWidth,
+        diagnosis.targetRange,
+    );
     const baseScore = Math.min(
         frontier.strongerTransitionGain,
         frontier.weakerTransitionGain,
@@ -5444,7 +5502,7 @@ const projectStableTerminalSequentialFalse = (
                 score: baseScore - Math.abs(year - presentationYear) * 0.01,
                 evidenceTags: [
                     "stable_terminal_unit_staircase_frontier",
-                    "positive_unit_staircase_direction",
+                    directionSource,
                 ],
             };
         },
@@ -5459,11 +5517,11 @@ const projectStableTerminalSequentialFalse = (
     }).map((candidate) => candidate.id);
     return {
         ...frontier.representative,
-        id: `diagnosis-event-${diagnosis.targetTree}-terminal-sequential-false-${
+        id: `diagnosis-event-${diagnosis.targetTree}-terminal-sequential-${eventType}-${
             window.startYear
         }-${window.endYear}`,
         seriesId: diagnosis.targetTree,
-        eventType: "falseRing",
+        eventType,
         ...window,
         reviewCoreRange: undefined,
         rankedYears,
@@ -5472,8 +5530,8 @@ const projectStableTerminalSequentialFalse = (
             ...frontier.representative.evidence,
             algorithmSources: Array.from(new Set([
                 ...frontier.representative.evidence.algorithmSources,
-                "candidate_anchored_positive_staircase",
-                "positive_unit_staircase_direction",
+                candidateSource,
+                directionSource,
                 "stable_terminal_unit_staircase_frontier",
             ])).sort(),
             score: baseScore,
@@ -5481,7 +5539,7 @@ const projectStableTerminalSequentialFalse = (
                 frontier.representative.evidence.scoreMargin,
                 baseScore,
             ),
-            lagBefore: 1,
+            lagBefore: Math.sign(frontier.aggregateShiftYears),
             lagAfter: 0,
             candidateIds: Array.from(new Set([
                 ...frontier.representative.evidence.candidateIds,
@@ -5494,6 +5552,9 @@ const projectStableTerminalSequentialFalse = (
                     frontier.aggregateShiftYears
                 }`,
                 `terminal_unit_staircase_boundary_year=${presentationYear}`,
+                `terminal_unit_staircase_max_adjacent_gap_years=${
+                    frontier.maximumAdjacentTransitionGapYears
+                }`,
                 `terminal_unit_staircase_maximum_year_drift=${
                     frontier.maximumYearDrift
                 }`,
@@ -5502,6 +5563,14 @@ const projectStableTerminalSequentialFalse = (
                 }`,
                 `terminal_unit_staircase_weaker_gain=${
                     frontier.weakerTransitionGain.toFixed(6)
+                }`,
+                `terminal_unit_staircase_window_width=${windowWidth}`,
+                `terminal_unit_staircase_window_rule=${
+                    windowWidth === 13
+                        ? frontier.eventCount === 2
+                            ? "two_step_low_location_concentration"
+                            : "deep_staircase_weak_mode_separation"
+                        : "stable_default_9"
                 }`,
                 "terminal_unit_staircase_fixed_tail_lag=0",
                 "terminal_unit_staircase_outputs_newest_event_only",
@@ -5750,6 +5819,20 @@ export const recoverStableBoundedLagPathFrontier = (
         && operation.topThreeDifferenceGain >= 0.02;
     const partialOperationSupported = operationSupported(matchingOperation);
     const aggregateOperationSupported = operationSupported(matchingAggregateOperation);
+    const selectedUnitOpposesAggregate = frontier.aggregateShiftYears !== 0
+        && (frontierEvent.eventType === "missingRing"
+            || frontierEvent.eventType === "falseRing")
+        && Math.sign(componentShift) !== Math.sign(frontier.aggregateShiftYears);
+    const independentlySupportedSelectedUnit = partialOperationSupported
+        || componentHypotheses.some((event) => (
+            event.eventType === frontierEvent.eventType
+            && lagPathTransitionShift(event) === componentShift
+            && Math.abs(rankedEventYear(event) - componentYear) <= 6
+            && hasIndependentUnitSpecificAnchor(event)
+        ));
+    // A complete path may use a short opposite-sign excursion to fit residual noise. Such a
+    // component needs independent operation evidence before it can become the product answer.
+    if (selectedUnitOpposesAggregate && !independentlySupportedSelectedUnit) return null;
     const componentOperationScore = matchingOperation
         ? scoreDynamicJointOperation(matchingOperation, operations)
         : Number.NEGATIVE_INFINITY;
@@ -9463,22 +9546,23 @@ export const makeDiagnosisEvents = (
         ].filter((lag) => (
             lag >= effectiveConfig.lagMin && lag <= effectiveConfig.lagMax
         )))];
-        const positiveCumulativeCandidateDepths = Array.from(new Set(
+        const cumulativeUnitCandidateDepths = Array.from(new Set(
             ownCandidates.flatMap((candidate) => {
                 const shift = candidate.deltaYears ?? candidate.suggestedLag;
                 return candidate.operationType === "SHIFT_RANGE"
                     && Number.isInteger(shift)
-                    && shift >= 2
+                    && Math.abs(shift) >= 2
+                    && shift >= effectiveConfig.lagMin
                     && shift <= effectiveConfig.lagMax
                     ? [shift]
                     : [];
             }),
-        )).sort((left, right) => right - left);
+        )).sort((left, right) => Math.abs(right) - Math.abs(left) || right - left);
         const nearClusterProbeEligible = shouldFitBoundedPath
             && diagnosis.master.sourceTrees.length >= 8
             && diagnosis.targetRange.endYear - diagnosis.targetRange.startYear + 1 >= 80
             && (
-                positiveCumulativeCandidateDepths.length > 0
+                cumulativeUnitCandidateDepths.length > 0
                 || boundedHypotheses.some((event) => (
                     event.eventType !== "wholeSeriesMove"
                 ))
@@ -9496,7 +9580,7 @@ export const makeDiagnosisEvents = (
             )
             : null;
         const rawNearPenaltyOnePath = rawNearPenaltyTwoPath && (
-            positiveCumulativeCandidateDepths.length > 0
+            cumulativeUnitCandidateDepths.length > 0
             || hasNearLagClusterCandidate(rawNearPenaltyTwoPath, boundedHypotheses)
         )
             ? locateBoundedEvents(
@@ -9515,16 +9599,16 @@ export const makeDiagnosisEvents = (
             rawNearPenaltyOnePath,
             boundedHypotheses,
         );
-        const stableTerminalSequentialFalse = positiveCumulativeCandidateDepths
+        const stableTerminalSequentialUnit = cumulativeUnitCandidateDepths
             .map((depth) => selectStableTerminalUnitStaircaseFrontier(
                 rawNearPenaltyTwoPath,
                 rawNearPenaltyOnePath,
                 depth,
             ))
             .filter((frontier): frontier is StableTerminalUnitStaircaseFrontier => (
-                frontier !== null && frontier.aggregateShiftYears > 1
+                frontier !== null && Math.abs(frontier.aggregateShiftYears) > 1
             ))
-            .map((frontier) => projectStableTerminalSequentialFalse(
+            .map((frontier) => projectStableTerminalSequentialUnit(
                 frontier,
                 diagnosis,
                 ownCandidates,
@@ -9754,7 +9838,30 @@ export const makeDiagnosisEvents = (
                     ...event,
                     seriesRange: { ...diagnosis.targetRange },
                 }))
-                .map(refineEventWithBoundaryConsensus);
+                .map(refineEventWithBoundaryConsensus)
+                .map((event) => {
+                    const shiftYears = wholeSeriesMoveShiftYears(event);
+                    if (shiftYears === null) return event;
+                    const stateConsistency = measureWholeSeriesStateConsistency(
+                        diagnosis,
+                        shiftYears,
+                    );
+                    if (!supportsDominantWholeSeriesBaseline(stateConsistency)) return event;
+                    return {
+                        ...event,
+                        evidence: {
+                            ...event.evidence,
+                            algorithmSources: Array.from(new Set([
+                                ...event.evidence.algorithmSources,
+                                "dominant_whole_state_consensus",
+                            ])),
+                            notes: Array.from(new Set([
+                                ...event.evidence.notes,
+                                ...wholeSeriesStateConsistencyNotes(stateConsistency),
+                            ])),
+                        },
+                    };
+                });
             const projected = projectSequentialUnitChainHead(valid);
             return prioritizeEndpointUnitAgainstWhole(
                 projected,
@@ -9772,11 +9879,12 @@ export const makeDiagnosisEvents = (
             ).length;
             const finalEvents = validAutomaticEvents(sourceEvents)
                 .map((event) => event.eventType === "partialMove"
-                    ? attachUniversalPartialMissingWorkflow(
+                        ? attachUniversalPartialMissingWorkflow(
                             event,
                             getCofechaDiagnosis(),
                             siteData,
                             localLagTransitionEvidence,
+                            candidateEvents,
                         )
                     : event)
                 .map(withEvidenceLedger);
@@ -9844,13 +9952,13 @@ export const makeDiagnosisEvents = (
                     finalEvents: finalEvents.map(auditEvent),
                     localLagTransitionEvidence,
                     terminalUnitStaircaseEvidence: {
-                        candidateDepths: [...positiveCumulativeCandidateDepths],
+                        candidateDepths: [...cumulativeUnitCandidateDepths],
                         strongerTerminalLags: rawNearPenaltyTwoPath?.path.runs
                             .slice(-6).map((run) => run.lag) ?? [],
                         weakerTerminalLags: rawNearPenaltyOnePath?.path.runs
                             .slice(-6).map((run) => run.lag) ?? [],
-                        selectedBoundaryYear: stableTerminalSequentialFalse
-                            ? rankedEventYear(stableTerminalSequentialFalse)
+                        selectedBoundaryYear: stableTerminalSequentialUnit
+                            ? rankedEventYear(stableTerminalSequentialUnit)
                             : null,
                     },
                     locatorDecisions: locatorDecisionAudits.map((decision) => ({
@@ -9951,13 +10059,15 @@ export const makeDiagnosisEvents = (
             }
             return cachedSequentialFalse;
         };
-        if (stableTerminalSequentialFalse) {
+        if (stableTerminalSequentialUnit) {
             // The two regularizations and the independently estimated cumulative depth agree on
-            // the complete +N...+1 -> 0 suffix. Older path contamination cannot reverse this
-            // newest operation or turn the staircase into one positive automatic range move.
-            return finalize([stableTerminalSequentialFalse], [], false);
+            // the complete signed unit suffix. Older path contamination cannot reverse this
+            // newest operation or compress the staircase into one automatic range move.
+            return finalize([stableTerminalSequentialUnit], [], false);
         }
-        const candidateAnchoredSequentialFalse = positiveCumulativeCandidateDepths.length > 0
+        const candidateAnchoredSequentialFalse = cumulativeUnitCandidateDepths.some(
+            (depth) => depth > 1,
+        )
             ? getSequentialFalse()
             : null;
         if (candidateAnchoredSequentialFalse?.evidence.algorithmSources.includes(
@@ -10012,6 +10122,52 @@ export const makeDiagnosisEvents = (
             )) {
                 return finalize([residualSequentialMissing.event], [], false);
             }
+        }
+        const dominantWholeSeriesBaseline = displayed
+            .filter((event) => event.eventType === "wholeSeriesMove")
+            .map((event) => {
+                const shiftYears = wholeSeriesMoveShiftYears(event);
+                if (shiftYears === null) return null;
+                const stateConsistency = measureWholeSeriesStateConsistency(
+                    diagnosis,
+                    shiftYears,
+                );
+                return supportsDominantWholeSeriesBaseline(stateConsistency)
+                    ? {
+                        event: {
+                            ...event,
+                            evidence: {
+                                ...event.evidence,
+                                algorithmSources: Array.from(new Set([
+                                    ...event.evidence.algorithmSources,
+                                    "dominant_whole_state_consensus",
+                                ])),
+                                notes: Array.from(new Set([
+                                    ...event.evidence.notes,
+                                    ...wholeSeriesStateConsistencyNotes(stateConsistency),
+                                    "whole_baseline_preempts_weak_local_path",
+                                ])),
+                            },
+                        },
+                        stateConsistency,
+                    }
+                    : null;
+            })
+            .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+            .sort((left, right) => (
+                right.stateConsistency.weightedSupportFraction
+                    - left.stateConsistency.weightedSupportFraction
+                || right.stateConsistency.supportFraction
+                    - left.stateConsistency.supportFraction
+                || right.event.evidence.score - left.event.evidence.score
+            ))[0]?.event ?? null;
+        if (dominantWholeSeriesBaseline && (
+            stableBoundedPathFrontier
+            || boundedPathEvents.length > 0
+        )) {
+            // A broad global baseline is a valid first correction even when unresolved local
+            // transitions remain. Re-diagnosis after that edit preserves the serial workflow.
+            return finalize([dominantWholeSeriesBaseline], [], false);
         }
         if (stableBoundedPathFrontier && stablePathHasFinalAuthority) {
             // The complete path has already resolved the serial frontier. Aggregate move
@@ -10137,6 +10293,12 @@ export const makeDiagnosisEvents = (
         const cumulativePathHasWholeBaseline = displayed.some(
             (event) => event.eventType === "wholeSeriesMove",
         );
+        if (cumulativeLagPathFrontier && dominantWholeSeriesBaseline) {
+            // The full chronology agrees on a global baseline. Correct that baseline first and
+            // re-diagnose; the bounded path is retained as evidence but must not rewrite it as a
+            // local transition ending at the same non-zero state.
+            return finalize([dominantWholeSeriesBaseline], [], false);
+        }
         if (cumulativeLagPathFrontier && (
             cumulativeLagPathFrontier.eventType === "partialMove"
             || cumulativePathHasWholeBaseline

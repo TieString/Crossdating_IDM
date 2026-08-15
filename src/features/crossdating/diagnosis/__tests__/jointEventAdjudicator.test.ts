@@ -627,6 +627,492 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("keeps a stable negative terminal unit staircase over an aggregate partial mode", () => {
+        const selected = event("terminal-missing", "missingRing", 1873, 1881, 1877);
+        selected.evidence.algorithmSources = [
+            "candidate_anchored_negative_staircase",
+            "stable_terminal_unit_staircase_frontier",
+        ];
+        selected.evidence.notes = [
+            "terminal_unit_staircase_depth=3",
+            "terminal_unit_staircase_aggregate_shift=-3",
+            "terminal_unit_staircase_maximum_year_drift=1",
+            "terminal_unit_staircase_stronger_gain=12",
+            "terminal_unit_staircase_weaker_gain=10",
+        ];
+        const aggregate = event("aggregate-partial", "partialMove", 1858, 1870, 1864);
+        aggregate.shiftYears = -3;
+        aggregate.shiftSide = "older";
+        aggregate.evidence.algorithmSources = ["bounded_complete_lag_path"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: selected },
+            { stage: "final", authority: "supplemental", event: aggregate },
+        ]);
+
+        expect(decision.event).toMatchObject({
+            id: "terminal-missing",
+            eventType: "missingRing",
+            startYear: 1873,
+            endYear: 1881,
+        });
+    });
+
+    it("keeps the validated final terminal frontier over an older displayed location", () => {
+        const displayed = event("displayed-terminal-false", "falseRing", 1854, 1860, 1857);
+        displayed.evidence.algorithmSources = ["candidate_anchored_positive_staircase"];
+        const final = event("final-terminal-false", "falseRing", 1860, 1868, 1864);
+        final.evidence.algorithmSources = [
+            "candidate_anchored_positive_staircase",
+            "stable_terminal_unit_staircase_frontier",
+        ];
+        final.evidence.notes = [
+            "terminal_unit_staircase_depth=2",
+            "terminal_unit_staircase_aggregate_shift=2",
+            "terminal_unit_staircase_maximum_year_drift=1",
+            "terminal_unit_staircase_stronger_gain=5",
+            "terminal_unit_staircase_weaker_gain=3",
+        ];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "displayed", authority: "selected", event: displayed },
+            { stage: "final", authority: "selected", event: final },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "final",
+            event: {
+                id: "final-terminal-false",
+                eventType: "falseRing",
+                startYear: 1860,
+                endYear: 1868,
+                rankedYears: [{ year: 1864 }],
+            },
+        });
+    });
+
+    it("uses an overlapping independently localized window for a terminal unit operation", () => {
+        const final = event("terminal-false", "falseRing", 1851, 1863, 1857);
+        final.evidence.algorithmSources = [
+            "candidate_anchored_positive_staircase",
+            "stable_terminal_unit_staircase_frontier",
+        ];
+        final.evidence.notes = [
+            "terminal_unit_staircase_depth=2",
+            "terminal_unit_staircase_aggregate_shift=2",
+            "terminal_unit_staircase_maximum_year_drift=1",
+            "terminal_unit_staircase_stronger_gain=5",
+            "terminal_unit_staircase_weaker_gain=3",
+        ];
+        const located = event("located-false", "falseRing", 1844, 1856, 1853);
+        located.evidence.algorithmSources = ["full_interval_counterfactual_locator"];
+        located.evidence.locationEvidence = [{
+            source: "full_interval_counterfactual_locator",
+            startYear: 1844,
+            endYear: 1856,
+            topYear: 1853,
+            referenceCount: 16,
+            concentration: 0.4,
+            remoteMargin: 0,
+            calibrated: true,
+        }];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: final },
+            { stage: "final", authority: "selected", event: located },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "final",
+            event: {
+                eventType: "falseRing",
+                startYear: 1844,
+                endYear: 1856,
+                rankedYears: [{ year: 1853 }],
+                evidence: {
+                    algorithmSources: expect.arrayContaining([
+                        "stable_terminal_unit_staircase_frontier",
+                        "terminal_unit_independent_location_projection",
+                    ]),
+                },
+            },
+        });
+    });
+
+    it("uses a hard-gated exact unit frontier to locate a terminal staircase", () => {
+        const terminal = event("terminal-false", "falseRing", 1851, 1863, 1857);
+        terminal.evidence.algorithmSources = [
+            "candidate_anchored_positive_staircase",
+            "stable_terminal_unit_staircase_frontier",
+        ];
+        terminal.evidence.notes = [
+            "terminal_unit_staircase_depth=2",
+            "terminal_unit_staircase_aggregate_shift=2",
+            "terminal_unit_staircase_maximum_year_drift=1",
+            "terminal_unit_staircase_stronger_gain=5",
+            "terminal_unit_staircase_weaker_gain=3",
+        ];
+        const candidate = event("exact-frontier", "falseRing", 1847, 1853, 1850);
+        candidate.evidence.algorithmSources = ["candidate_ranking"];
+        candidate.evidence.notes = ["candidate_hard_gate_passed"];
+        candidate.evidence.lagBefore = 2;
+        candidate.evidence.lagAfter = 1;
+        candidate.evidence.scoreMargin = 0.41;
+        candidate.evidence.correlationGain = 0.04;
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", candidate),
+            { ...checkpoint("final", terminal), authority: "selected" },
+        ]);
+
+        expect(decision.event).toMatchObject({
+            eventType: "falseRing",
+            startYear: 1847,
+            endYear: 1853,
+            rankedYears: [{ year: 1850 }],
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "stable_terminal_unit_staircase_frontier",
+                    "terminal_unit_exact_unit_frontier_location",
+                ]),
+            },
+        });
+    });
+
+    it("does not let an unseparated unit candidate relocate a terminal staircase", () => {
+        const terminal = event("terminal-false", "falseRing", 1766, 1774, 1770);
+        terminal.evidence.algorithmSources = [
+            "candidate_anchored_positive_staircase",
+            "stable_terminal_unit_staircase_frontier",
+        ];
+        terminal.evidence.notes = [
+            "terminal_unit_staircase_depth=3",
+            "terminal_unit_staircase_aggregate_shift=3",
+            "terminal_unit_staircase_maximum_year_drift=1",
+            "terminal_unit_staircase_stronger_gain=5",
+            "terminal_unit_staircase_weaker_gain=3",
+        ];
+        const candidate = event("flat-frontier", "falseRing", 1773, 1779, 1776);
+        candidate.evidence.algorithmSources = ["candidate_ranking"];
+        candidate.evidence.notes = ["candidate_hard_gate_passed"];
+        candidate.evidence.lagBefore = 3;
+        candidate.evidence.lagAfter = 2;
+        candidate.evidence.scoreMargin = 0;
+        candidate.evidence.correlationGain = 0.05;
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", candidate),
+            { ...checkpoint("final", terminal), authority: "selected" },
+        ]);
+
+        expect(decision.event).toMatchObject({
+            id: "terminal-false",
+            startYear: 1766,
+            endYear: 1774,
+            rankedYears: [{ year: 1770 }],
+        });
+    });
+
+    it("uses a decisive equivalent partial hypothesis to locate a missing staircase", () => {
+        const terminal = event("terminal-missing", "missingRing", 1814, 1822, 1818);
+        terminal.evidence.algorithmSources = [
+            "candidate_anchored_negative_staircase",
+            "stable_terminal_unit_staircase_frontier",
+        ];
+        terminal.evidence.notes = [
+            "terminal_unit_staircase_depth=2",
+            "terminal_unit_staircase_aggregate_shift=-2",
+            "terminal_unit_staircase_maximum_year_drift=1",
+            "terminal_unit_staircase_stronger_gain=12",
+            "terminal_unit_staircase_weaker_gain=10",
+        ];
+        const partial = event("equivalent-partial", "partialMove", 1811, 1819, 1812);
+        partial.shiftYears = -2;
+        partial.shiftSide = "older";
+        partial.confidenceLevel = "high";
+        partial.evidence.lagBefore = -2;
+        partial.evidence.lagAfter = 0;
+        partial.evidence.correlationGain = 0.42;
+        partial.evidence.scoreMargin = 0.46;
+        partial.evidence.algorithmSources = [
+            "decisive_joint_operation_fusion",
+            "full_interval_counterfactual_scan",
+            "joint_year_operation_evidence",
+        ];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("displayed", partial),
+            { ...checkpoint("final", terminal), authority: "selected" },
+        ]);
+
+        expect(decision.event).toMatchObject({
+            eventType: "missingRing",
+            startYear: 1811,
+            endYear: 1819,
+            rankedYears: [{ year: 1812 }],
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "stable_terminal_unit_staircase_frontier",
+                    "terminal_unit_workflow_equivalent_partial_location",
+                ]),
+            },
+        });
+        expect(decision.event).not.toHaveProperty("shiftYears");
+    });
+
+    it("does not use a weak partial hypothesis as terminal unit location", () => {
+        const terminal = event("terminal-missing", "missingRing", 1814, 1822, 1818);
+        terminal.evidence.algorithmSources = [
+            "candidate_anchored_negative_staircase",
+            "stable_terminal_unit_staircase_frontier",
+        ];
+        terminal.evidence.notes = [
+            "terminal_unit_staircase_depth=2",
+            "terminal_unit_staircase_aggregate_shift=-2",
+            "terminal_unit_staircase_maximum_year_drift=1",
+            "terminal_unit_staircase_stronger_gain=12",
+            "terminal_unit_staircase_weaker_gain=10",
+        ];
+        const partial = event("weak-partial", "partialMove", 1811, 1819, 1812);
+        partial.shiftYears = -2;
+        partial.shiftSide = "older";
+        partial.confidenceLevel = "high";
+        partial.evidence.lagBefore = -2;
+        partial.evidence.lagAfter = 0;
+        partial.evidence.correlationGain = 0.19;
+        partial.evidence.scoreMargin = 0.19;
+        partial.evidence.algorithmSources = [
+            "decisive_joint_operation_fusion",
+            "full_interval_counterfactual_scan",
+            "joint_year_operation_evidence",
+        ];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("displayed", partial),
+            { ...checkpoint("final", terminal), authority: "selected" },
+        ]);
+
+        expect(decision.event).toMatchObject({
+            id: "terminal-missing",
+            startYear: 1814,
+            endYear: 1822,
+            rankedYears: [{ year: 1818 }],
+        });
+    });
+
+    it("does not join strong terminal and partial evidence from distinct location modes", () => {
+        const terminal = event("terminal-missing", "missingRing", 1883, 1895, 1889);
+        terminal.evidence.algorithmSources = [
+            "candidate_anchored_negative_staircase",
+            "stable_terminal_unit_staircase_frontier",
+        ];
+        terminal.evidence.notes = [
+            "terminal_unit_staircase_depth=2",
+            "terminal_unit_staircase_aggregate_shift=-2",
+            "terminal_unit_staircase_maximum_year_drift=2",
+            "terminal_unit_staircase_stronger_gain=12",
+            "terminal_unit_staircase_weaker_gain=10",
+        ];
+        const partial = event("remote-partial", "partialMove", 1875, 1883, 1879);
+        partial.shiftYears = -2;
+        partial.shiftSide = "older";
+        partial.confidenceLevel = "high";
+        partial.evidence.lagBefore = -2;
+        partial.evidence.lagAfter = 0;
+        partial.evidence.correlationGain = 0.58;
+        partial.evidence.scoreMargin = 0.57;
+        partial.evidence.algorithmSources = [
+            "decisive_joint_operation_fusion",
+            "full_interval_counterfactual_scan",
+            "joint_year_operation_evidence",
+        ];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("displayed", partial),
+            { ...checkpoint("final", terminal), authority: "selected" },
+        ]);
+
+        expect(decision.event).toMatchObject({
+            id: "terminal-missing",
+            startYear: 1883,
+            endYear: 1895,
+            rankedYears: [{ year: 1889 }],
+        });
+    });
+
+    it("uses a high-confidence bark-side COFECHA partial candidate inside the final mode", () => {
+        const final = event("older-final-partial", "partialMove", 1836, 1848, 1842);
+        final.shiftYears = -4;
+        final.shiftSide = "older";
+        final.evidence.lagBefore = -4;
+        final.evidence.lagAfter = 0;
+        final.interpretationAmbiguity = {
+            kind: "missingRingsOrPartialMove",
+            alternative: event("stale-missing-window", "missingRing", 1835, 1847, 1841),
+            evidence: {
+                missingRingCount: 4,
+                cumulativeShiftYears: -4,
+                missingYears: [],
+                partialFirstFixedYear: 1842,
+                normalizedCounterfactualGainDifference: 0,
+                masterMargin: 0,
+                referenceMedianMargin: 0,
+                referenceCount: 10,
+                missingReferenceSupport: 0,
+                partialReferenceSupport: 0,
+            },
+        };
+        const candidate = event("bark-side-cofecha-partial", "partialMove", 1846, 1854, 1850);
+        candidate.shiftYears = -4;
+        candidate.shiftSide = "older";
+        candidate.confidenceLevel = "high";
+        candidate.evidence.lagBefore = -4;
+        candidate.evidence.lagAfter = 0;
+        candidate.evidence.correlationGain = 0.31;
+        candidate.evidence.algorithmSources = [
+            "candidate_ranking",
+            "cofecha_segment_lag",
+            "segmented_diagnosis",
+        ];
+        candidate.evidence.notes = ["candidate_hard_gate_passed"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: final },
+            { stage: "candidate", authority: "selected", event: candidate },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "final",
+            event: {
+                eventType: "partialMove",
+                shiftYears: -4,
+                startYear: 1846,
+                endYear: 1854,
+                rankedYears: [{ year: 1850 }],
+                interpretationAmbiguity: undefined,
+                evidence: {
+                    lagBefore: -4,
+                    lagAfter: 0,
+                    algorithmSources: expect.arrayContaining([
+                        "cofecha_bark_side_partial_location",
+                    ]),
+                },
+            },
+        });
+    });
+
+    it("does not let a low-confidence bark-side partial candidate rewrite the final mode", () => {
+        const final = event("kept-final-partial", "partialMove", 1836, 1848, 1842);
+        final.shiftYears = -4;
+        final.shiftSide = "older";
+        final.evidence.lagBefore = -4;
+        final.evidence.lagAfter = 0;
+        const candidate = event("weak-bark-side-partial", "partialMove", 1846, 1854, 1850);
+        candidate.shiftYears = -4;
+        candidate.shiftSide = "older";
+        candidate.confidenceLevel = "low";
+        candidate.evidence.lagBefore = -4;
+        candidate.evidence.lagAfter = 0;
+        candidate.evidence.correlationGain = 0.31;
+        candidate.evidence.algorithmSources = [
+            "candidate_ranking",
+            "cofecha_segment_lag",
+        ];
+        candidate.evidence.notes = ["candidate_hard_gate_passed"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: final },
+            { stage: "candidate", authority: "selected", event: candidate },
+        ]);
+
+        expect(decision.event).toMatchObject({
+            id: "kept-final-partial",
+            startYear: 1836,
+            endYear: 1848,
+        });
+    });
+
+    it("does not replace an independently localized physical partial move", () => {
+        const final = event("localized-final-partial", "partialMove", 1910, 1922, 1916);
+        final.shiftYears = -6;
+        final.shiftSide = "older";
+        final.evidence.lagBefore = -6;
+        final.evidence.lagAfter = 0;
+        final.evidence.algorithmSources = [
+            "negative_partial_multiview_consensus",
+            "full_interval_counterfactual_locator",
+        ];
+        const candidate = event("newer-cofecha-partial", "partialMove", 1921, 1929, 1925);
+        candidate.shiftYears = -6;
+        candidate.shiftSide = "older";
+        candidate.confidenceLevel = "high";
+        candidate.evidence.lagBefore = -6;
+        candidate.evidence.lagAfter = 0;
+        candidate.evidence.correlationGain = 0.31;
+        candidate.evidence.algorithmSources = [
+            "candidate_ranking",
+            "cofecha_segment_lag",
+        ];
+        candidate.evidence.notes = ["candidate_hard_gate_passed"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: final },
+            { stage: "candidate", authority: "selected", event: candidate },
+        ]);
+
+        expect(decision.event).toMatchObject({
+            id: "localized-final-partial",
+            startYear: 1910,
+            endYear: 1922,
+            rankedYears: [{ year: 1916 }],
+        });
+    });
+
+    it("does not replace a calibrated stable partial location", () => {
+        const final = event("stable-final-partial", "partialMove", 1864, 1876, 1870);
+        final.shiftYears = -6;
+        final.shiftSide = "older";
+        final.evidence.lagBefore = -6;
+        final.evidence.lagAfter = 0;
+        final.evidence.locationEvidence = [{
+            source: "stable_partial_location_consensus",
+            startYear: 1864,
+            endYear: 1876,
+            topYear: 1870,
+            referenceCount: 12,
+            concentration: 0.9,
+            remoteMargin: null,
+            calibrated: true,
+        }];
+        const candidate = event("newer-cofecha-partial", "partialMove", 1871, 1879, 1875);
+        candidate.shiftYears = -6;
+        candidate.shiftSide = "older";
+        candidate.confidenceLevel = "high";
+        candidate.evidence.lagBefore = -6;
+        candidate.evidence.lagAfter = 0;
+        candidate.evidence.correlationGain = 0.31;
+        candidate.evidence.algorithmSources = [
+            "candidate_ranking",
+            "cofecha_segment_lag",
+        ];
+        candidate.evidence.notes = ["candidate_hard_gate_passed"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: final },
+            { stage: "candidate", authority: "selected", event: candidate },
+        ]);
+
+        expect(decision.event).toMatchObject({
+            id: "stable-final-partial",
+            startYear: 1864,
+            endYear: 1876,
+            rankedYears: [{ year: 1870 }],
+        });
+    });
+
     it("keeps selected location authority when the supplemental window overlaps it", () => {
         const located = event("located-overlap", "partialMove", 1817, 1829, 1823);
         located.shiftYears = -20;
@@ -816,6 +1302,32 @@ describe("joint event adjudicator", () => {
         expect(decision).toMatchObject({
             status: "selected",
             event: { id: "local", shiftYears: -20 },
+        });
+    });
+
+    it("applies a dominant whole baseline before an unsupported bounded transition", () => {
+        const whole = event("whole", "wholeSeriesMove", 1100, 1500, 1500);
+        whole.shiftYears = 4;
+        whole.rankedYears = [];
+        whole.evidence.lagBefore = 4;
+        whole.evidence.lagAfter = 0;
+        whole.evidence.algorithmSources = ["dominant_whole_state_consensus"];
+        const local = event("local", "partialMove", 1120, 1132, 1126);
+        local.shiftYears = -73;
+        local.evidence.lagBefore = -69;
+        local.evidence.lagAfter = 4;
+        local.evidence.correlationGain = 0.011;
+        local.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        local.evidence.notes = ["bounded_path_complete_hypothesis=true"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: whole },
+            { stage: "final", authority: "supplemental", event: local },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            event: { id: "whole", eventType: "wholeSeriesMove", shiftYears: 4 },
         });
     });
 

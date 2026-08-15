@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { SegmentDiagnosis } from "../types";
 import {
     measureWholeSeriesStateConsistency,
+    supportsDominantWholeSeriesBaseline,
     supportsNonTerminalWholeSeriesCandidate,
 } from "../wholeSeriesStateConsistency";
 
@@ -153,5 +154,45 @@ describe("whole-series state consistency", () => {
         expect(evidence.newerEdgeSupportFraction).toBe(0);
         expect(evidence.globalLagMatchesShift).toBe(false);
         expect(supportsNonTerminalWholeSeriesCandidate(evidence)).toBe(false);
+    });
+
+    it("accepts a dominant whole baseline with uniform support", () => {
+        const evidence = measureWholeSeriesStateConsistency(
+            diagnosis([-4, -4, -4, -4, -4, -4], -4),
+            -4,
+        );
+
+        expect(supportsDominantWholeSeriesBaseline(evidence)).toBe(true);
+    });
+
+    it("accepts one noisy chronology edge when the remaining evidence is broad", () => {
+        const evidence = measureWholeSeriesStateConsistency(
+            diagnosis([0, -4, -4, -4, -4, -4, -4, -4, -4], -4),
+            -4,
+        );
+
+        expect(evidence.olderEdgeSupportFraction).toBe(0.5);
+        expect(evidence.newerEdgeSupportFraction).toBe(1);
+        expect(supportsDominantWholeSeriesBaseline(evidence)).toBe(true);
+    });
+
+    it("rejects a weak whole hypothesis from a bounded local state", () => {
+        const evidence = measureWholeSeriesStateConsistency(
+            diagnosis([0, 0, -4, -4, -4, -4, -4, -4], -4),
+            -4,
+        );
+
+        expect(evidence.supportFraction).toBe(0.75);
+        expect(supportsDominantWholeSeriesBaseline(evidence)).toBe(false);
+    });
+
+    it("rejects broad segment support when the global lag disagrees", () => {
+        const evidence = measureWholeSeriesStateConsistency(
+            diagnosis([-4, -4, -4, -4, -4, -4, -4, 0], 0),
+            -4,
+        );
+
+        expect(evidence.supportFraction).toBe(0.875);
+        expect(supportsDominantWholeSeriesBaseline(evidence)).toBe(false);
     });
 });

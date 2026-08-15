@@ -175,6 +175,19 @@ describe("stable terminal unit staircase frontier", () => {
         event(1521, -70, 3),
     ]);
 
+    const negativeThree = (boundaryYear: number) => pathWithRuns([
+        { lag: -70, startYear: 1500, endYear: 1520 },
+        { lag: -3, startYear: 1521, endYear: boundaryYear - 18 },
+        { lag: -2, startYear: boundaryYear - 17, endYear: boundaryYear - 10 },
+        { lag: -1, startYear: boundaryYear - 9, endYear: boundaryYear - 1 },
+        { lag: 0, startYear: boundaryYear, endYear: 2000 },
+    ], [
+        event(boundaryYear - 17, -3, -2),
+        event(boundaryYear - 9, -2, -1),
+        event(boundaryYear, -1, 0),
+        event(1521, -70, -3),
+    ]);
+
     it("projects the newest event from a stable +3 to 0 terminal suffix", () => {
         expect(selectStableTerminalUnitStaircaseFrontier(
             positiveThree(1877),
@@ -186,6 +199,27 @@ describe("stable terminal unit staircase frontier", () => {
             boundaryYear: 1878,
             representative: { eventType: "falseRing" },
         });
+    });
+
+    it("projects the newest event from a stable -3 to 0 terminal suffix", () => {
+        expect(selectStableTerminalUnitStaircaseFrontier(
+            negativeThree(1877),
+            negativeThree(1878),
+            -3,
+        )).toMatchObject({
+            eventCount: 3,
+            aggregateShiftYears: -3,
+            boundaryYear: 1878,
+            representative: { eventType: "missingRing" },
+        });
+    });
+
+    it("does not reinterpret a direct negative partial transition as unit events", () => {
+        const partial = pathWithRuns([
+            { lag: -3, startYear: 1500, endYear: 1876 },
+            { lag: 0, startYear: 1877, endYear: 2000 },
+        ], [event(1877, -3, 0)]);
+        expect(selectStableTerminalUnitStaircaseFrontier(partial, partial, -3)).toBeNull();
     });
 
     it("rejects a candidate depth that does not equal the complete suffix", () => {
@@ -209,5 +243,28 @@ describe("stable terminal unit staircase frontier", () => {
             positiveThree(1882),
             3,
         )).toBeNull();
+    });
+
+    it("records distant spacing without changing the terminal event semantics", () => {
+        const distant = (boundaryYear: number) => pathWithRuns([
+            { lag: -3, startYear: 1700, endYear: boundaryYear - 61 },
+            { lag: -2, startYear: boundaryYear - 60, endYear: boundaryYear - 31 },
+            { lag: -1, startYear: boundaryYear - 30, endYear: boundaryYear - 1 },
+            { lag: 0, startYear: boundaryYear, endYear: 2000 },
+        ], [
+            event(boundaryYear - 60, -3, -2),
+            event(boundaryYear - 30, -2, -1),
+            event(boundaryYear, -1, 0),
+        ]);
+
+        expect(selectStableTerminalUnitStaircaseFrontier(
+            distant(1900),
+            distant(1901),
+            -3,
+        )).toMatchObject({
+            eventCount: 3,
+            boundaryYear: 1901,
+            maximumAdjacentTransitionGapYears: 30,
+        });
     });
 });

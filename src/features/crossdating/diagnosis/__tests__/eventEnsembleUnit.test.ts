@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DiagnosisEvent, SeriesCoreDiagnosis } from "../types";
 import {
     allowStableBoundedPathFinalAuthority,
+    calibratedTerminalUnitStaircaseWindowWidth,
     hasIndependentPartialBoundaryAnchor,
     decisiveExactPartialRejectsWeakUnitComposition,
     hardCandidateMaySeedExhaustiveComposition,
@@ -164,6 +165,48 @@ const candidateRecoveryDiagnosis = {
     targetTree: "TEST",
     targetRange: { startYear: 1800, endYear: 2020 },
 } as SeriesCoreDiagnosis;
+
+describe("calibratedTerminalUnitStaircaseWindowWidth", () => {
+    const frontier = (
+        eventCount: number,
+        concentration: number,
+        runnerUpMargin = 2,
+    ) => {
+        const representative = falseRingEvent(1880, true);
+        representative.evidence.notes = [
+            `bounded_path_runner_up_margin=${runnerUpMargin}`,
+        ];
+        representative.evidence.locationEvidence = [{
+            source: "bounded_complete_lag_path",
+            startYear: 1880,
+            endYear: 1888,
+            topYear: 1884,
+            referenceCount: 20,
+            concentration,
+            remoteMargin: 1,
+            calibrated: false,
+        }];
+        return {
+            representative,
+            eventCount,
+            aggregateShiftYears: eventCount,
+            boundaryYear: 1884,
+            maximumAdjacentTransitionGapYears: 8,
+            maximumYearDrift: 2,
+            strongerTransitionGain: 20,
+            weakerTransitionGain: 18,
+        };
+    };
+
+    it("uses 13 years only for a diffuse two-step terminal staircase", () => {
+        expect(calibratedTerminalUnitStaircaseWindowWidth(frontier(2, 0.69))).toBe(13);
+        expect(calibratedTerminalUnitStaircaseWindowWidth(frontier(2, 0.7))).toBe(9);
+        expect(calibratedTerminalUnitStaircaseWindowWidth(frontier(3, 0.4))).toBe(9);
+        expect(calibratedTerminalUnitStaircaseWindowWidth(frontier(4, 0.96, 1.1))).toBe(13);
+        expect(calibratedTerminalUnitStaircaseWindowWidth(frontier(4, 0.94, 1.1))).toBe(9);
+        expect(calibratedTerminalUnitStaircaseWindowWidth(frontier(4, 0.96, 1.2))).toBe(9);
+    });
+});
 
 describe("selectCandidateBackedCumulativeUnitFrontier", () => {
     const cumulativePartial = (shiftYears: number, year: number): DiagnosisEvent => {
@@ -2736,6 +2779,29 @@ describe("selectCumulativePartialFrontier", () => {
         );
     });
 
+    it("rejects an opposite-sign unit component without independent operation evidence", () => {
+        const unitEvent = (year: number): DiagnosisEvent => ({
+            ...pathEvent(1, 1, 0, year),
+            eventType: "falseRing",
+            shiftYears: undefined,
+            shiftSide: undefined,
+        });
+        const selected = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                pathEvent(-3, -2, 1, 1840),
+                unitEvent(1877),
+            ]),
+            boundedPath([
+                pathEvent(-3, -2, 1, 1841),
+                unitEvent(1878),
+            ]),
+        );
+
+        expect(selected?.aggregateShiftYears).toBe(-2);
+        expect(recoverStableBoundedLagPathFrontier(selected, [], []))
+            .toBeNull();
+    });
+
     it("preserves a sharply localized newest unit transition", () => {
         const localizedFalse = (
             year: number,
@@ -4023,6 +4089,23 @@ describe("projectSequentialUnitChainHead", () => {
         expect(projected.evidence.lagBefore).toBe(-1);
         expect(projected.evidence.lagAfter).toBe(0);
         expect(projected.shiftYears).toBeUndefined();
+    });
+
+    it("keeps an explicit staircase frontier ahead of the shifted aggregate top", () => {
+        const partial = partialEvent(true);
+        partial.seriesRange = { startYear: 1700, endYear: 1900 };
+        partial.evidence.algorithmSources.push("explicit_partial_vs_missing_staircase");
+        partial.evidence.notes.push("explicit_staircase_missing_years=1774,1782");
+
+        const [projected] = projectSequentialUnitChainHead([partial]);
+
+        expect(projected.rankedYears[0]?.year).toBe(1782);
+        expect(1782 - projected.startYear).toBe(projected.endYear - 1782);
+        expect(projected.endYear - projected.startYear)
+            .toBe(partial.endYear - partial.startYear);
+        expect(projected.evidence.notes).toContain(
+            "compressed_missing_staircase_selected_year_source=explicit_staircase_newest_year",
+        );
     });
 
     it("keeps a genuine -2 partial move without staircase evidence", () => {

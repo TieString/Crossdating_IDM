@@ -83,6 +83,26 @@ const windowsOverlap = (left: DiagnosisEvent, right: DiagnosisEvent): boolean =>
         <= Math.min(left.endYear, right.endYear)
 );
 
+const windowsTouchOrOverlap = (left: DiagnosisEvent, right: DiagnosisEvent): boolean => (
+    Math.max(left.startYear, right.startYear)
+        <= Math.min(left.endYear, right.endYear) + 1
+);
+
+const MAXIMUM_TERMINAL_LOCATION_SUPPORT_TOP_DRIFT = 8;
+
+const sameTerminalLocationMode = (
+    left: DiagnosisEvent,
+    right: DiagnosisEvent,
+): boolean => {
+    const leftTop = topYear(left);
+    const rightTop = topYear(right);
+    return windowsTouchOrOverlap(left, right)
+        && leftTop !== null
+        && rightTop !== null
+        && Math.abs(leftTop - rightTop)
+            <= MAXIMUM_TERMINAL_LOCATION_SUPPORT_TOP_DRIFT;
+};
+
 const sameLocationMode = (left: DiagnosisEvent, right: DiagnosisEvent): boolean => {
     if (left.eventType === "wholeSeriesMove"
         || right.eventType === "wholeSeriesMove") {
@@ -129,7 +149,22 @@ const eventHasIndependentLocationAuthority = (event: DiagnosisEvent): boolean =>
     const claims = evidenceClaimsFor(event);
     if (claims.has("independent_reference_staircase")
         || claims.has("fixed_side_resolution")
-        || claims.has("endpoint_unit_resolution")) {
+        || claims.has("endpoint_unit_resolution")
+        || (
+            event.evidence.algorithmSources.includes(
+                "stable_unit_local_consensus",
+            )
+            && (noteNumber(event, "stable_unit_local_consensus_votes=") ?? 0) >= 3
+        )
+        || event.evidence.algorithmSources.includes(
+            "sequential_missing_checkpoint_location",
+        )
+        || (
+            claims.has("continuous_gap_consensus")
+            && event.evidence.algorithmSources.includes(
+                "negative_partial_multiview_consensus",
+            )
+        )) {
         return true;
     }
     return matchingLocationEvidence(event).some((entry) => (
@@ -337,22 +372,24 @@ const isValidatedSelectedTerminalUnitStaircaseCheckpoint = (
     const aggregateShift = noteNumber(event, "terminal_unit_staircase_aggregate_shift=");
     return checkpoint.stage === "final"
         && checkpoint.authority !== "supplemental"
-        && event.eventType === "falseRing"
+        && (event.eventType === "falseRing" || event.eventType === "missingRing")
         && event.evidence.algorithmSources.includes(
             "stable_terminal_unit_staircase_frontier",
         )
         && event.evidence.algorithmSources.includes(
-            "candidate_anchored_positive_staircase",
+            event.eventType === "falseRing"
+                ? "candidate_anchored_positive_staircase"
+                : "candidate_anchored_negative_staircase",
         )
         && depth !== null
         && depth >= 2
-        && aggregateShift === depth
+        && aggregateShift === (event.eventType === "falseRing" ? depth : -depth)
         && (noteNumber(event, "terminal_unit_staircase_stronger_gain=") ?? 0) > 0
         && (noteNumber(event, "terminal_unit_staircase_weaker_gain=") ?? 0) > 0
         && (noteNumber(event, "terminal_unit_staircase_maximum_year_drift=") ?? Infinity) <= 2;
 };
 
-const isValidatedSelectedSequentialFalse = (
+const isValidatedSelectedSequentialUnit = (
     checkpoint: DiagnosisReviewEventCheckpoint,
 ): boolean => isValidatedSelectedSequentialFalseCheckpoint(checkpoint)
     || isValidatedSelectedTerminalUnitStaircaseCheckpoint(checkpoint);
@@ -360,7 +397,7 @@ const isValidatedSelectedSequentialFalse = (
 const preferredStrongBoundedLocation = (
     cluster: HypothesisCluster,
 ): DiagnosisReviewEventCheckpoint | null => {
-    if (cluster.checkpoints.some(isValidatedSelectedSequentialFalse)) return null;
+    if (cluster.checkpoints.some(isValidatedSelectedSequentialUnit)) return null;
     const selectedFinals = cluster.checkpoints.filter((checkpoint) => (
         checkpoint.stage === "final" && checkpoint.authority !== "supplemental"
     ));
@@ -427,6 +464,288 @@ const preferredSelectedCompletedComposition = (
             - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
     ))[0] ?? null;
 
+const preferredValidatedFinalSequentialUnit = (
+    cluster: HypothesisCluster,
+): DiagnosisReviewEventCheckpoint | null => {
+    const selected = cluster.checkpoints.filter(isValidatedSelectedSequentialUnit)
+        .sort((left, right) => (
+        representativeQuality(cluster, right) - representativeQuality(cluster, left)
+        || eventLocationQuality(right.event) - eventLocationQuality(left.event)
+        || (topYear(right.event) ?? Number.NEGATIVE_INFINITY)
+            - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
+        ))[0] ?? null;
+    if (!selected || !isValidatedSelectedTerminalUnitStaircaseCheckpoint(selected)) {
+        return selected;
+    }
+    const location = cluster.checkpoints.filter((checkpoint) => (
+        checkpoint !== selected
+        && !isValidatedSelectedSequentialUnit(checkpoint)
+        && sameOperation(checkpoint.event, selected.event)
+        && windowsOverlap(checkpoint.event, selected.event)
+        && eventHasIndependentLocationAuthority(checkpoint.event)
+    )).sort((left, right) => (
+        eventLocationQuality(right.event) - eventLocationQuality(left.event)
+        || representativeQuality(cluster, right) - representativeQuality(cluster, left)
+        || stagePriority[right.stage] - stagePriority[left.stage]
+    ))[0] ?? null;
+    if (!location) return selected;
+    return {
+        ...selected,
+        event: withEvidenceLedger({
+            ...selected.event,
+            id: `${selected.event.id}-independent-location-${
+                topYear(location.event) ?? "window"
+            }`,
+            startYear: location.event.startYear,
+            endYear: location.event.endYear,
+            rankedYears: location.event.rankedYears.map((row) => ({ ...row })),
+            reviewCoreRange: location.event.reviewCoreRange,
+            evidence: {
+                ...selected.event.evidence,
+                algorithmSources: Array.from(new Set([
+                    ...selected.event.evidence.algorithmSources,
+                    ...location.event.evidence.algorithmSources,
+                    "terminal_unit_independent_location_projection",
+                ])).sort(),
+                candidateIds: Array.from(new Set([
+                    ...selected.event.evidence.candidateIds,
+                    ...location.event.evidence.candidateIds,
+                ])),
+                locationEvidence: [
+                    ...(selected.event.evidence.locationEvidence ?? []),
+                    ...(location.event.evidence.locationEvidence ?? []),
+                ],
+                notes: Array.from(new Set([
+                    ...selected.event.evidence.notes,
+                    ...location.event.evidence.notes,
+                    `terminal_unit_location_previous_top_year=${
+                        topYear(selected.event) ?? "none"
+                    }`,
+                    `terminal_unit_location_projected_top_year=${
+                        topYear(location.event) ?? "none"
+                    }`,
+                ])),
+            },
+        }),
+    };
+};
+
+type TerminalLocationSupport = {
+    checkpoint: DiagnosisReviewEventCheckpoint;
+    kind: "exact_unit_frontier" | "workflow_equivalent_partial";
+};
+
+const exactTerminalUnitCandidate = (
+    checkpoint: DiagnosisReviewEventCheckpoint,
+    terminal: DiagnosisEvent,
+    aggregateShiftYears: number,
+): boolean => {
+    const event = checkpoint.event;
+    const direction = Math.sign(aggregateShiftYears);
+    return checkpoint.stage === "candidate"
+        && checkpoint.authority !== "supplemental"
+        && sameOperation(event, terminal)
+        && sameTerminalLocationMode(event, terminal)
+        && event.evidence.notes.includes("candidate_hard_gate_passed")
+        && event.evidence.algorithmSources.includes("candidate_ranking")
+        && event.evidence.lagBefore === aggregateShiftYears
+        && event.evidence.lagAfter === aggregateShiftYears - direction
+        && (event.evidence.correlationGain ?? 0) > 0
+        && event.evidence.scoreMargin >= 0.25;
+};
+
+const workflowEquivalentTerminalPartial = (
+    checkpoint: DiagnosisReviewEventCheckpoint,
+    terminal: DiagnosisEvent,
+    aggregateShiftYears: number,
+): boolean => {
+    const event = checkpoint.event;
+    return terminal.eventType === "missingRing"
+        && aggregateShiftYears < -1
+        && stagePriority[checkpoint.stage] >= stagePriority.displayed
+        && checkpoint.authority !== "supplemental"
+        && event.eventType === "partialMove"
+        && event.shiftSide === "older"
+        && event.shiftYears === aggregateShiftYears
+        && event.evidence.lagBefore === aggregateShiftYears
+        && event.evidence.lagAfter === 0
+        && event.confidenceLevel === "high"
+        && sameTerminalLocationMode(event, terminal)
+        && event.evidence.algorithmSources.includes(
+            "decisive_joint_operation_fusion",
+        )
+        && event.evidence.algorithmSources.includes(
+            "full_interval_counterfactual_scan",
+        )
+        && event.evidence.algorithmSources.includes(
+            "joint_year_operation_evidence",
+        )
+        && (event.evidence.correlationGain ?? 0) >= 0.2
+        && event.evidence.scoreMargin >= 0.2;
+};
+
+/**
+ * The terminal path owns the unit operation and cumulative direction, but its final run boundary
+ * is only a coarse locator. A hard-gated candidate for that exact terminal transition, or an
+ * independently scored equivalent partial-gap hypothesis, may contribute location only.
+ */
+const projectTerminalUnitCompatibleLocation = (
+    terminal: DiagnosisEvent,
+    checkpoints: readonly DiagnosisReviewEventCheckpoint[],
+): DiagnosisEvent => {
+    if (!terminal.evidence.algorithmSources.includes(
+        "stable_terminal_unit_staircase_frontier",
+    ) || terminal.evidence.algorithmSources.includes(
+        "terminal_unit_independent_location_projection",
+    )) return terminal;
+    const aggregateShiftYears = noteNumber(
+        terminal,
+        "terminal_unit_staircase_aggregate_shift=",
+    );
+    if (aggregateShiftYears === null || Math.abs(aggregateShiftYears) < 2) return terminal;
+
+    const exact = checkpoints.filter((checkpoint) => exactTerminalUnitCandidate(
+        checkpoint,
+        terminal,
+        aggregateShiftYears,
+    )).sort((left, right) => (
+        right.event.evidence.scoreMargin - left.event.evidence.scoreMargin
+        || (right.event.evidence.correlationGain ?? 0)
+            - (left.event.evidence.correlationGain ?? 0)
+        || (topYear(right.event) ?? Number.NEGATIVE_INFINITY)
+            - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
+    ))[0];
+    const partial = checkpoints.filter((checkpoint) => workflowEquivalentTerminalPartial(
+        checkpoint,
+        terminal,
+        aggregateShiftYears,
+    )).sort((left, right) => (
+        right.event.evidence.scoreMargin - left.event.evidence.scoreMargin
+        || (right.event.evidence.correlationGain ?? 0)
+            - (left.event.evidence.correlationGain ?? 0)
+        || stagePriority[right.stage] - stagePriority[left.stage]
+    ))[0];
+    const support: TerminalLocationSupport | null = exact
+        ? { checkpoint: exact, kind: "exact_unit_frontier" }
+        : partial
+            ? { checkpoint: partial, kind: "workflow_equivalent_partial" }
+            : null;
+    if (!support) return terminal;
+
+    const location = support.checkpoint.event;
+    return withEvidenceLedger({
+        ...terminal,
+        id: `${terminal.id}-${support.kind}-location-${
+            topYear(location) ?? "window"
+        }`,
+        startYear: location.startYear,
+        endYear: location.endYear,
+        rankedYears: location.rankedYears.map((row) => ({ ...row })),
+        reviewCoreRange: location.reviewCoreRange,
+        evidence: {
+            ...terminal.evidence,
+            algorithmSources: Array.from(new Set([
+                ...terminal.evidence.algorithmSources,
+                ...location.evidence.algorithmSources,
+                "terminal_unit_compatible_location_projection",
+                `terminal_unit_${support.kind}_location`,
+            ])).sort(),
+            candidateIds: Array.from(new Set([
+                ...terminal.evidence.candidateIds,
+                ...location.evidence.candidateIds,
+            ])),
+            locationEvidence: [
+                ...(terminal.evidence.locationEvidence ?? []),
+                ...(location.evidence.locationEvidence ?? []),
+            ],
+            notes: Array.from(new Set([
+                ...terminal.evidence.notes,
+                ...location.evidence.notes,
+                `terminal_unit_location_support=${support.kind}`,
+                `terminal_unit_location_support_stage=${support.checkpoint.stage}`,
+                `terminal_unit_location_previous_top_year=${topYear(terminal) ?? "none"}`,
+                `terminal_unit_location_projected_top_year=${topYear(location) ?? "none"}`,
+            ])),
+        },
+    });
+};
+
+const preferredHighConfidenceBarkSidePartialCandidate = (
+    cluster: HypothesisCluster,
+): DiagnosisReviewEventCheckpoint | null => {
+    const selectedFinals = cluster.checkpoints.filter((checkpoint) => {
+        const event = checkpoint.event;
+        return checkpoint.stage === "final"
+            && checkpoint.authority !== "supplemental"
+            && event.eventType === "partialMove"
+            && event.shiftSide === "older"
+            && (event.shiftYears ?? 0) < -1
+            && event.evidence.lagBefore === event.shiftYears
+            && event.evidence.lagAfter === 0
+            && !eventHasIndependentLocationAuthority(event);
+    });
+    if (selectedFinals.length === 0) return null;
+    const candidate = cluster.checkpoints.filter((checkpoint) => {
+        const event = checkpoint.event;
+        const eventTop = topYear(event);
+        return checkpoint.stage === "candidate"
+            && checkpoint.authority !== "supplemental"
+            && event.eventType === "partialMove"
+            && event.shiftSide === "older"
+            && event.confidenceLevel === "high"
+            && (event.evidence.correlationGain ?? 0) >= 0.2
+            && event.evidence.notes.includes("candidate_hard_gate_passed")
+            && event.evidence.algorithmSources.includes("candidate_ranking")
+            && event.evidence.algorithmSources.includes("cofecha_segment_lag")
+            && eventTop !== null
+            && selectedFinals.some((selected) => {
+                const selectedTop = topYear(selected.event);
+                return sameOperation(event, selected.event)
+                    && selectedTop !== null
+                    && eventTop > selectedTop
+                    && eventTop - selectedTop <= 13
+                    && event.endYear > selected.event.endYear;
+            });
+    }).sort((left, right) => (
+        (right.event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY)
+            - (left.event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY)
+        || (topYear(right.event) ?? Number.NEGATIVE_INFINITY)
+            - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
+    ))[0] ?? null;
+    if (!candidate) return null;
+    const selectedFinal = selectedFinals.slice().sort((left, right) => (
+        representativeQuality(cluster, right) - representativeQuality(cluster, left)
+        || eventLocationQuality(right.event) - eventLocationQuality(left.event)
+    ))[0]!;
+    const candidateTop = topYear(candidate.event)!;
+    const selectedTop = topYear(selectedFinal.event);
+    return {
+        ...selectedFinal,
+        event: withEvidenceLedger({
+            ...selectedFinal.event,
+            id: `${selectedFinal.event.id}-cofecha-bark-frontier-${candidateTop}`,
+            startYear: candidate.event.startYear,
+            endYear: candidate.event.endYear,
+            rankedYears: candidate.event.rankedYears.map((row) => ({ ...row })),
+            interpretationAmbiguity: undefined,
+            evidence: {
+                ...selectedFinal.event.evidence,
+                algorithmSources: Array.from(new Set([
+                    ...selectedFinal.event.evidence.algorithmSources,
+                    ...candidate.event.evidence.algorithmSources,
+                    "cofecha_bark_side_partial_location",
+                ])).sort(),
+                notes: Array.from(new Set([
+                    ...selectedFinal.event.evidence.notes,
+                    ...candidate.event.evidence.notes,
+                    `cofecha_bark_side_previous_top_year=${selectedTop ?? "none"}`,
+                    `cofecha_bark_side_selected_top_year=${candidateTop}`,
+                ])),
+            },
+        }),
+    };
+};
+
 const preferredSelectedFinalLocation = (
     cluster: HypothesisCluster,
 ): DiagnosisReviewEventCheckpoint | null => {
@@ -457,7 +776,9 @@ const representative = (
         || (topYear(right.event) ?? Number.NEGATIVE_INFINITY)
             - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
     ))[0];
-    const selected = preferredSelectedCompletedComposition(cluster)
+    const selected = preferredValidatedFinalSequentialUnit(cluster)
+        ?? preferredSelectedCompletedComposition(cluster)
+        ?? preferredHighConfidenceBarkSidePartialCandidate(cluster)
         ?? preferredAcceptedFinalLocation(cluster)
         ?? preferredStrongBoundedLocation(cluster)
         ?? preferredSelectedFinalLocation(cluster)
@@ -784,27 +1105,40 @@ const aggregateCompatibleClusterEvidence = (
         evidence: {
             ...event.evidence,
             algorithmSources: Array.from(new Set([
+                ...event.evidence.algorithmSources,
                 ...supportEvents.flatMap((candidate) => candidate.evidence.algorithmSources),
                 "joint_hypothesis_evidence_aggregation",
             ])).sort(),
             notes: Array.from(new Set([
+                ...event.evidence.notes,
                 ...supportEvents.flatMap((candidate) => candidate.evidence.notes),
                 `joint_compatible_evidence_count=${supportEvents.length}`,
             ])),
             candidateIds: Array.from(new Set(
-                supportEvents.flatMap((candidate) => candidate.evidence.candidateIds),
+                [
+                    ...event.evidence.candidateIds,
+                    ...supportEvents.flatMap((candidate) => (
+                        candidate.evidence.candidateIds
+                    )),
+                ],
             )),
             samplePairs: Math.max(
                 ...supportEvents.map((candidate) => candidate.evidence.samplePairs),
             ),
-            locationEvidence: deduplicateObjects(supportEvents.flatMap((candidate) => (
-                candidate.evidence.locationEvidence ?? []
-            ))),
+            locationEvidence: deduplicateObjects([
+                ...(event.evidence.locationEvidence ?? []),
+                ...supportEvents.flatMap((candidate) => (
+                    candidate.evidence.locationEvidence ?? []
+                )),
+            ]),
             ledger: {
                 version: 1,
-                entries: deduplicateObjects(supportEvents.flatMap((candidate) => (
-                    candidate.evidence.ledger?.entries ?? []
-                ))),
+                entries: deduplicateObjects([
+                    ...(event.evidence.ledger?.entries ?? []),
+                    ...supportEvents.flatMap((candidate) => (
+                        candidate.evidence.ledger?.entries ?? []
+                    )),
+                ]),
             },
         },
     });
@@ -1098,7 +1432,7 @@ const finalFrontierClusters = (
         ))
     ));
     const validatedSelectedSequentialFalse = selectedFinalClusters.filter((cluster) => (
-        cluster.checkpoints.some(isValidatedSelectedSequentialFalse)
+        cluster.checkpoints.some(isValidatedSelectedSequentialUnit)
     ));
     if (validatedSelectedSequentialFalse.length > 0) {
         return validatedSelectedSequentialFalse.sort((left, right) => (
@@ -1137,7 +1471,15 @@ const finalFrontierClusters = (
             representative(cluster).event.eventType === "wholeSeriesMove"
         ));
         if (selectedWhole) {
-            const wholeShift = representative(selectedWhole).event.shiftYears;
+            const selectedWholeEvent = representative(selectedWhole).event;
+            if (selectedWholeEvent.evidence.algorithmSources.includes(
+                "dominant_whole_state_consensus",
+            )) {
+                // Correct a broadly verified global state first. The bounded transition remains
+                // evidence for the next diagnosis but cannot rewrite this operation.
+                return [selectedWhole];
+            }
+            const wholeShift = selectedWholeEvent.shiftYears;
             const localOnWholeBaseline = boundedPathClusters.filter((cluster) => {
                 const event = representative(cluster).event;
                 return event.eventType !== "wholeSeriesMove"
@@ -1177,7 +1519,7 @@ const finalFrontierClusters = (
             return operationProtectedSelectedLocal;
         }
         const validatedSequentialFalse = operationProtectedSelectedLocal.filter((cluster) => (
-            cluster.checkpoints.some(isValidatedSelectedSequentialFalse)
+            cluster.checkpoints.some(isValidatedSelectedSequentialUnit)
         ));
         if (validatedSequentialFalse.length > 0) {
             // A remote bounded mode remains evidence, but cannot relocate a final frontier whose
@@ -1448,7 +1790,9 @@ export const adjudicateJointEventHypotheses = (
         && remoteModeMargin < config.minimumRemoteModeMargin
         ? "remote_mode_conflict"
         : "selected";
-    const baseSelectedEvent = reason === "selected" ? winnerEvent : null;
+    const baseSelectedEvent = reason === "selected"
+        ? projectTerminalUnitCompatibleLocation(winnerEvent, submitted)
+        : null;
     const endpointMissing = baseSelectedEvent
         ? selectEndpointMissingInterpretation(clusters, baseSelectedEvent)
         : null;

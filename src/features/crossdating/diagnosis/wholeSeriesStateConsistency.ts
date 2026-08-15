@@ -108,3 +108,20 @@ export const supportsNonTerminalWholeSeriesCandidate = (
         && evidence.weightedSupportFraction > 0.55;
     return stableNewerState || broadGlobalConsensus || robustSegmentMajority;
 };
+
+/**
+ * A broad whole-series baseline may be executed before unresolved local events. Unlike the
+ * permissive non-terminal candidate gate above, this requires agreement from the global match,
+ * nearly all weighted segments, and at least one chronology edge. This prevents a bounded lag
+ * transition that merely ends at the whole baseline from replacing the baseline operation.
+ */
+export const supportsDominantWholeSeriesBaseline = (
+    evidence: WholeSeriesStateConsistency,
+): boolean => evidence.segmentCount >= 3
+    && evidence.globalLagMatchesShift
+    && evidence.supportFraction >= 0.84
+    && evidence.weightedSupportFraction >= 0.88
+    && Math.max(
+        evidence.olderEdgeSupportFraction,
+        evidence.newerEdgeSupportFraction,
+    ) >= 0.9;

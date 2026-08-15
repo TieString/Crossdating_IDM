@@ -16,6 +16,7 @@ export type StableTerminalUnitStaircaseFrontier = {
     eventCount: number;
     aggregateShiftYears: number;
     boundaryYear: number;
+    maximumAdjacentTransitionGapYears: number;
     maximumYearDrift: number;
     strongerTransitionGain: number;
     weakerTransitionGain: number;
@@ -67,6 +68,8 @@ const localTransitions = (path: BoundedLagStateEventSet): LocalTransition[] => (
 type TerminalUnitStaircase = {
     representative: DiagnosisEvent;
     boundaryYear: number;
+    transitionYears: number[];
+    maximumAdjacentTransitionGapYears: number;
 };
 
 const terminalUnitStaircase = (
@@ -99,8 +102,21 @@ const terminalUnitStaircase = (
         && event.evidence.lagBefore === transitionLag
         && event.evidence.lagAfter === terminalLag
     ));
+    const transitionYears = runs.slice(runs.length - eventCount)
+        .map((run) => run.startYear);
+    const maximumAdjacentTransitionGapYears = Math.max(
+        0,
+        ...transitionYears.slice(1).map((year, index) => (
+            year - transitionYears[index]
+        )),
+    );
     return representative
-        ? { representative, boundaryYear: terminalRun.startYear }
+        ? {
+            representative,
+            boundaryYear: terminalRun.startYear,
+            transitionYears,
+            maximumAdjacentTransitionGapYears,
+        }
         : null;
 };
 
@@ -134,12 +150,19 @@ export const selectStableTerminalUnitStaircaseFrontier = (
         !stronger
         || !weaker
         || Math.abs(stronger.boundaryYear - weaker.boundaryYear) > maximumYearDrift
+        || stronger.transitionYears.some((year, index) => (
+            Math.abs(year - weaker.transitionYears[index]) > maximumYearDrift
+        ))
     ) return null;
     return {
         representative: stronger.representative,
         eventCount: Math.abs(aggregateShiftYears),
         aggregateShiftYears,
         boundaryYear: Math.round((stronger.boundaryYear + weaker.boundaryYear) / 2),
+        maximumAdjacentTransitionGapYears: Math.max(
+            stronger.maximumAdjacentTransitionGapYears,
+            weaker.maximumAdjacentTransitionGapYears,
+        ),
         maximumYearDrift,
         strongerTransitionGain: strongerPenaltyPath.path.transitionGain,
         weakerTransitionGain: weakerPenaltyPath.path.transitionGain,
