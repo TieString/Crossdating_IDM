@@ -14,6 +14,7 @@ import {
     isTerminalWholeBaselineEvent,
     partialMoveExplainsWholeSeriesCandidate,
     partialMoveSupportsSequentialMissingDepth,
+    pathFixedWholeBaselinePreemptsLocalPath,
     prioritizeEndpointUnitAgainstWhole,
     rawCandidateMayRecenterSequentialMissing,
     unitEventUsesWholeSeriesBaseline,
@@ -2261,6 +2262,32 @@ describe("isAuthoritativeWholeSeriesCheckpoint", () => {
         ];
 
         expect(isAuthoritativeWholeSeriesCheckpoint(alias)).toBe(false);
+    });
+});
+
+describe("pathFixedWholeBaselinePreemptsLocalPath", () => {
+    it("lets a validated fixed-side whole baseline establish the coordinate frame", () => {
+        const whole = {
+            ...wholeSeriesEvent(20),
+            shiftYears: 20,
+        };
+        whole.evidence.notes = [
+            ...whole.evidence.notes,
+            "candidate_hard_gate_passed",
+            "whole_baseline_source=path_fixed_side_lag",
+            "path_fixed_side_newer_context_years=146",
+        ];
+
+        expect(pathFixedWholeBaselinePreemptsLocalPath(whole, [])).toBe(true);
+    });
+
+    it("does not give an ordinary whole candidate authority over local evidence", () => {
+        const whole = {
+            ...wholeSeriesEvent(20),
+            shiftYears: 20,
+        };
+
+        expect(pathFixedWholeBaselinePreemptsLocalPath(whole, [])).toBe(false);
     });
 });
 

@@ -5136,6 +5136,17 @@ export const isAuthoritativeWholeSeriesCheckpoint = (
         && (globallyConsistent || newerEdgeConsistent);
 };
 
+/** A validated fixed-side whole baseline owns the coordinate frame unless unit steps exhaust it. */
+export const pathFixedWholeBaselinePreemptsLocalPath = (
+    event: DiagnosisEvent,
+    pathEvents: readonly DiagnosisEvent[],
+): boolean => {
+    const shiftYears = wholeSeriesMoveShiftYears(event);
+    return shiftYears !== null
+        && evidenceClaimsFor(event).has("whole_path_fixed_baseline")
+        && !completeUnitTransitionChainExplainsWholeShift(pathEvents, shiftYears);
+};
+
 type CumulativePartialComponent = {
     event: DiagnosisEvent;
     operation: JointCounterfactualOperationScore;
@@ -10382,8 +10393,13 @@ export const makeDiagnosisEvents = (
                 const boundedPathSupport = boundedPathBaseline !== undefined
                     && !completeUnitPathAlias
                     && supportsNonTerminalWholeSeriesCandidate(stateConsistency);
+                const pathFixedSupport = pathFixedWholeBaselinePreemptsLocalPath(
+                    event,
+                    passRawPathEvents.events,
+                );
                 return supportsDominantWholeSeriesBaseline(stateConsistency)
                     || boundedPathSupport
+                    || pathFixedSupport
                     ? {
                         event: {
                             ...event,
@@ -10395,6 +10411,9 @@ export const makeDiagnosisEvents = (
                                     ...(boundedPathSupport
                                         ? ["bounded_constant_lag_baseline"]
                                         : []),
+                                    ...(pathFixedSupport
+                                        ? ["path_fixed_whole_baseline_authority"]
+                                        : []),
                                 ])),
                                 notes: Array.from(new Set([
                                     ...event.evidence.notes,
@@ -10404,6 +10423,9 @@ export const makeDiagnosisEvents = (
                                         `bounded_constant_path_whole_gain=${
                                             boundedPathBaseline.wholeLagGain.toFixed(6)
                                         }`,
+                                    ] : []),
+                                    ...(pathFixedSupport ? [
+                                        "whole_baseline_source=validated_path_fixed_side",
                                     ] : []),
                                     "whole_baseline_preempts_weak_local_path",
                                 ])),
