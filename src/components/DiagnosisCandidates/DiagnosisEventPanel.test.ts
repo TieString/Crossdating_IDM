@@ -40,7 +40,7 @@ describe("DiagnosisEventPanel", () => {
     }));
 
     expect(html).toContain("可能缺轮");
-    expect(html).toContain("Top1 1907");
+    expect(html).toContain("#1 1907");
     expect(html).toContain("窗口年份");
     expect(html).toContain("选择年份 1900 作为应用边界");
     expect(html).not.toContain("可能多个近距离事件");
@@ -78,7 +78,7 @@ describe("DiagnosisEventPanel", () => {
     expect(html).toContain("JS 事件级诊断");
     expect(html).toContain("可能缺轮");
     expect(html).toContain("1880-1886");
-    expect(html).toContain("Top1 1883");
+    expect(html).toContain("#1 1883");
     expect(html).toContain("选择年份 1886 作为应用边界");
     expect(html).toContain("aria-pressed=\"true\"");
     expect(html).toContain("aria-pressed=\"false\"");
@@ -131,7 +131,7 @@ describe("DiagnosisEventPanel", () => {
     }));
 
     expect(html).toContain("断点选项");
-    expect(html).toContain("Top1 1881");
+    expect(html).toContain("#1 1881");
     expect(html).toContain("#2 1880");
     expect(html).toContain("选择断点 1882");
     expect(html).toContain("aria-pressed=\"true\"");
@@ -457,7 +457,7 @@ describe("DiagnosisEventPanel", () => {
     expect(html).not.toContain("按连续缺段处理");
     expect(html).toContain("整条序列向老年份移动 1 年");
     expect(html).not.toContain("1768-2002");
-    expect(html).not.toContain("Top1");
+    expect(html).not.toContain("#1");
     expect(html).not.toContain("窗口年份");
     expect(selectDiagnosisEventInterpretation(whole, "alternative")).toBe(missing);
   });

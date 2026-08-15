@@ -192,9 +192,7 @@ const defaultSelectedYear = (
 
 const yearOptionLabel = (row: SelectableEventYear) => row.rank === null
   ? `${row.year}`
-  : row.rank === 1
-    ? `Top1 ${row.year}`
-    : `#${row.rank} ${row.year}`;
+  : `#${row.rank} ${row.year}`;
 
 export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Props) {
   const [selectedYears, setSelectedYears] = useState<Record<string, number>>({});
