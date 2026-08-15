@@ -1086,6 +1086,15 @@ export type BoundedLagStateEventSet = {
     events: DiagnosisEvent[];
 };
 
+/** A local breakpoint is identifiable only when its newer, fixed side overlaps the reference. */
+export const boundedLagPathHasObservedFixedSide = (
+    result: BoundedLagStateEventSet,
+): boolean => {
+    if (!result.events.some((event) => event.eventType !== "wholeSeriesMove")) return true;
+    const newestRun = result.path.runs[result.path.runs.length - 1];
+    return newestRun === undefined || newestRun.samplePairs > 0;
+};
+
 /** Projects the complete path into immutable event hypotheses without choosing a UI winner. */
 export const locateBoundedLagStateEvents = (
     diagnosis: SeriesCoreDiagnosis,
@@ -1181,6 +1190,9 @@ export const locateBoundedLagStateEvents = (
                         `bounded_path_transition_gain=${path.transitionGain.toFixed(6)}`,
                         `bounded_path_runner_up_margin=${path.runnerUpMargin.toFixed(6)}`,
                         `bounded_path_location_concentration=${concentration.toFixed(6)}`,
+                        `bounded_path_older_sample_pairs=${older.samplePairs}`,
+                        `bounded_path_newer_sample_pairs=${newer.samplePairs}`,
+                        `bounded_path_fixed_side_observed=${newer.samplePairs > 0}`,
                         `bounded_path_reference_view=${referenceView}`,
                         "bounded_path_complete_hypothesis=true",
                         "score_is_relative_not_probability",

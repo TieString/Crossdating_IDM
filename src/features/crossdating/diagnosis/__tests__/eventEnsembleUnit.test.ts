@@ -30,6 +30,7 @@ import {
     selectStableUnitPathLocationCheckpoints,
     selectCumulativeLagPathFrontier,
     selectStableBoundedLagPathFrontier,
+    selectUnobservedFixedSideWholeLag,
     selectCandidateBackedCumulativeUnitFrontier,
     reconcileCumulativeUnitOperationWithCompletedLocation,
     refineBoundedPathLocationWithOperation,
@@ -63,7 +64,10 @@ import {
     unitEventExplainsWholeSeriesCandidate,
     wholeSeriesEventIsLocalUnitAlias,
 } from "../eventEnsemble";
-import type { BoundedLagStateEventSet } from "../eventPath";
+import {
+    boundedLagPathHasObservedFixedSide,
+    type BoundedLagStateEventSet,
+} from "../eventPath";
 import type { JointCounterfactualOperationScore } from "../jointCounterfactualOperation";
 import type { CompletedPartialMissingComposition } from "../discreteMissingStaircaseCompetition";
 
@@ -2338,6 +2342,94 @@ describe("selectCumulativePartialFrontier", () => {
             runnerUpMargin: 1,
         },
         events,
+    });
+
+    it("rejects a local bounded breakpoint whose fixed side has no reference pairs", () => {
+        const local = pathEvent(-50, -50, 0, 2006);
+        const unsupported = boundedPath([local]);
+        unsupported.path.runs = [
+            {
+                lag: -50,
+                startYear: 1766,
+                endYear: 2005,
+                startIndex: 0,
+                endIndex: 239,
+                score: 120,
+                samplePairs: 471,
+            },
+            {
+                lag: 0,
+                startYear: 2006,
+                endYear: 2023,
+                startIndex: 240,
+                endIndex: 257,
+                score: 0,
+                samplePairs: 0,
+            },
+        ];
+
+        expect(boundedLagPathHasObservedFixedSide(unsupported)).toBe(false);
+        expect(selectStableBoundedLagPathFrontier(unsupported, unsupported)).toBeNull();
+
+        unsupported.path.runs[1]!.samplePairs = 12;
+        expect(boundedLagPathHasObservedFixedSide(unsupported)).toBe(true);
+    });
+
+    it("does not require a fixed-side breakpoint for a whole-only bounded frame", () => {
+        const whole = wholeSeriesEvent(-50);
+        const result = boundedPath([whole]);
+        result.path.runs = [{
+            lag: -50,
+            startYear: 1766,
+            endYear: 2023,
+            startIndex: 0,
+            endIndex: 257,
+            score: 120,
+            samplePairs: 471,
+        }];
+
+        expect(boundedLagPathHasObservedFixedSide(result)).toBe(true);
+    });
+
+    it("recovers a stable observed whole lag from an unobserved zero-lag tail", () => {
+        const makePath = (boundaryYear: number): BoundedLagStateEventSet => {
+            const terminalAlias = pathEvent(-50, -50, 0, boundaryYear);
+            terminalAlias.evidence.algorithmSources = ["bounded_complete_lag_path"];
+            const result = boundedPath([terminalAlias]);
+            result.path.transitionGain = 30;
+            result.path.runs = [
+                {
+                    lag: -50,
+                    startYear: 1766,
+                    endYear: boundaryYear - 1,
+                    startIndex: 0,
+                    endIndex: 239,
+                    score: 120,
+                    samplePairs: 471,
+                },
+                {
+                    lag: 0,
+                    startYear: boundaryYear,
+                    endYear: 2023,
+                    startIndex: 240,
+                    endIndex: 257,
+                    score: 0,
+                    samplePairs: 0,
+                },
+            ];
+            return result;
+        };
+
+        expect(selectUnobservedFixedSideWholeLag(
+            makePath(2006),
+            makePath(2007),
+            new Set([-50]),
+        )).toBe(-50);
+        expect(selectUnobservedFixedSideWholeLag(
+            makePath(2006),
+            makePath(2007),
+            new Set([-57]),
+        )).toBeNull();
     });
 
     it("selects a distant multiscale path frontier only when both penalties agree", () => {

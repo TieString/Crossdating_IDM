@@ -36,6 +36,7 @@ import {
     makePartialMoveInterpretation,
 } from "./missingPartialInterpretation";
 import {
+    boundedLagPathHasObservedFixedSide,
     createLagPathCache,
     diagnoseLagPath,
     locateBoundedLagStateEvents,
@@ -51,7 +52,10 @@ import {
     type SharedExplicitZeroMarker,
     type TwoStepMissingStaircase,
 } from "./eventPath";
-import { makeDiagnosisEventsFromCandidates } from "./events";
+import {
+    makeDiagnosisEventsFromCandidates,
+    wholeEventFromCandidate,
+} from "./events";
 import {
     compareCompletedPartialPair,
     type CompletedPartialPairCompetition,
@@ -5364,6 +5368,60 @@ const selectStableStructuralPartialTransition = (
     || right.topYear - left.topYear
 ))[0]!;
 
+const unobservedFixedSideWholeLag = (
+    path: BoundedLagStateEventSet,
+    minimumObservedPairs: number,
+): { lag: number; boundaryYear: number } | null => {
+    const terminal = path.path.runs[path.path.runs.length - 1];
+    const observed = path.path.runs[path.path.runs.length - 2];
+    if (!terminal
+        || !observed
+        || terminal.lag !== 0
+        || terminal.samplePairs !== 0
+        || observed.lag === 0
+        || observed.samplePairs < minimumObservedPairs
+        || path.path.transitionGain < 8) return null;
+    const matchingTransition = path.events.some((event) => (
+        event.eventType === "partialMove"
+        && event.shiftYears === observed.lag
+        && event.evidence.lagBefore === observed.lag
+        && event.evidence.lagAfter === 0
+    ));
+    return matchingTransition ? {
+        lag: observed.lag,
+        boundaryYear: observed.endYear + 1,
+    } : null;
+};
+
+/**
+ * Converts an unobservable bark-side zero state into the whole baseline supported by all
+ * observed years. Two regularizations and an independent whole candidate must agree.
+ */
+export const selectUnobservedFixedSideWholeLag = (
+    penaltyOnePath: BoundedLagStateEventSet | null,
+    penaltyHalfPath: BoundedLagStateEventSet | null,
+    candidateWholeLags: ReadonlySet<number>,
+    minimumObservedPairs = 30,
+    maximumBoundaryDrift = 2,
+): number | null => {
+    if (!penaltyOnePath || !penaltyHalfPath) return null;
+    const stronger = unobservedFixedSideWholeLag(
+        penaltyOnePath,
+        minimumObservedPairs,
+    );
+    const weaker = unobservedFixedSideWholeLag(
+        penaltyHalfPath,
+        minimumObservedPairs,
+    );
+    return stronger
+        && weaker
+        && stronger.lag === weaker.lag
+        && Math.abs(stronger.boundaryYear - weaker.boundaryYear) <= maximumBoundaryDrift
+        && candidateWholeLags.has(stronger.lag)
+        ? stronger.lag
+        : null;
+};
+
 /**
  * A distant multi-event decomposition is authoritative only when two independently regularized
  * complete paths agree on every operation and changepoint. This prevents a long corrected older
@@ -5378,6 +5436,8 @@ export const selectStableBoundedLagPathFrontier = (
     penaltyLabel = "1,0.5",
 ): StableBoundedLagPathFrontier | null => {
     if (!penaltyOnePath || !penaltyHalfPath) return null;
+    if (!boundedLagPathHasObservedFixedSide(penaltyOnePath)
+        || !boundedLagPathHasObservedFixedSide(penaltyHalfPath)) return null;
     const penaltyOneTransitions = exactCompleteTransitionChain(
         penaltyOnePath,
         baselineLag,
@@ -9334,6 +9394,7 @@ export const makeDiagnosisEvents = (
             result: BoundedLagStateEventSet | null,
         ): result is BoundedLagStateEventSet => {
             if (!result) return false;
+            if (!boundedLagPathHasObservedFixedSide(result)) return false;
             const boundedWhole = result.events.find((event) => (
                 event.eventType === "wholeSeriesMove"
             ));
@@ -9809,6 +9870,58 @@ export const makeDiagnosisEvents = (
                     parsimoniousStablePathMaxSegments,
                 )
             : null;
+        const candidateWholeLags = new Set(ownCandidates.flatMap((candidate) => (
+            candidate.operationType === "SHIFT_RANGE"
+            && candidate.mode === "wholeSeriesMove"
+            && candidate.ambiguous !== true
+                ? [candidate.deltaYears ?? candidate.suggestedLag]
+                : []
+        )));
+        const unobservedFixedSideBaselineLag = selectUnobservedFixedSideWholeLag(
+            rawPenaltyOneStablePath,
+            rawPenaltyHalfStablePath,
+            candidateWholeLags,
+        );
+        const unobservedFixedSideWholeCandidate = unobservedFixedSideBaselineLag === null
+            ? null
+            : ownCandidates
+                .filter((candidate) => (
+                    candidate.operationType === "SHIFT_RANGE"
+                    && candidate.mode === "wholeSeriesMove"
+                    && (candidate.deltaYears ?? candidate.suggestedLag)
+                        === unobservedFixedSideBaselineLag
+                ))
+                .sort((left, right) => right.score - left.score)[0] ?? null;
+        const unobservedFixedSideWholeBaseline = unobservedFixedSideWholeCandidate
+            ? (() => {
+                    const event = wholeEventFromCandidate(
+                        diagnosis,
+                        unobservedFixedSideWholeCandidate,
+                    );
+                    return {
+                        ...event,
+                        evidence: {
+                            ...event.evidence,
+                            algorithmSources: Array.from(new Set([
+                                ...event.evidence.algorithmSources,
+                                "unobserved_fixed_side_whole_baseline",
+                            ])).sort(),
+                            notes: Array.from(new Set([
+                                ...event.evidence.notes,
+                                "whole_baseline_source=unobserved_fixed_side_lag",
+                                `unobserved_fixed_side_lag=${unobservedFixedSideBaselineLag}`,
+                                "unobserved_fixed_side_pairs=0",
+                                `unobserved_fixed_side_regularized_gain=${
+                                    rawPenaltyOneStablePath!.path.transitionGain.toFixed(6)
+                                }`,
+                                `unobserved_fixed_side_permissive_gain=${
+                                    rawPenaltyHalfStablePath!.path.transitionGain.toFixed(6)
+                                }`,
+                            ])),
+                        },
+                    };
+                })()
+            : null;
         const operationAnchoredRegularizedAggregate = trustedPartialOperation
             ? selectOperationAnchoredRegularizedAggregatePartialFrontier(
                     rawPenaltyOneStablePath,
@@ -10206,6 +10319,13 @@ export const makeDiagnosisEvents = (
             }
             return cachedSequentialFalse;
         };
+        if (unobservedFixedSideWholeBaseline
+            && !completeUnitTransitionChainExplainsWholeShift(
+                passRawPathEvents.events,
+                unobservedFixedSideBaselineLag!,
+            )) {
+            return finalize([unobservedFixedSideWholeBaseline], [], false);
+        }
         const boundedWholeShiftHasAnchor = (event: DiagnosisEvent): boolean => {
             const shiftYears = wholeSeriesMoveShiftYears(event);
             if (shiftYears === null) return false;

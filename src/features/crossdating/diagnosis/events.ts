@@ -193,7 +193,7 @@ const eventFromCluster = (
     };
 };
 
-const wholeEventFromCandidate = (
+export const wholeEventFromCandidate = (
     diagnosis: SeriesCoreDiagnosis,
     candidate: DiagnosisCandidateOperation,
 ): DiagnosisEvent => {
