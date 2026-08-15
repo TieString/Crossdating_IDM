@@ -16,6 +16,8 @@ after this split is committed.
 - Development: 9 complete RWL files and 128 frozen target series. `co612` is development-only.
 - Final holdout: 25 disjoint complete RWL files and 500 frozen target series.
 - Each final file contributes exactly 20 targets selected by a hash fixed before injection.
+- The final run is hard-capped at exactly 500 cases per A/B/C/D family; changing that count requires
+  a new protocol version and a newly frozen manifest.
 - Target eligibility uses only clean COFECHA metadata: at least 200 years, master correlation at
   least 0.80, and zero clean problem segments.
 - File and target selection do not use injected signal strength or diagnosis output.

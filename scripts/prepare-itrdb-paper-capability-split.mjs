@@ -19,6 +19,7 @@ const scenarioSeed = "itrdb-operation-capability-paper-scenarios-2026-08-15-v1";
 const targetSelectionSeed = "itrdb-operation-capability-paper-targets-2026-08-15-v1";
 const finalFileCount = 25;
 const targetsPerFile = 20;
+const requiredFinalCasesPerFamily = 500;
 const forcedDevelopmentFiles = new Set(["co612"]);
 
 const digest = (value) => createHash("sha256").update(value).digest("hex");
@@ -109,6 +110,13 @@ const orderedIds = (ids) => baseManifest.files
     .map((file) => file.fileId);
 const developmentFileIds = orderedIds(developmentIds);
 const holdoutFileIds = orderedIds(holdoutIds);
+const finalCasesPerFamily = holdoutFileIds.length * targetsPerFile;
+if (finalCasesPerFamily !== requiredFinalCasesPerFamily) {
+    throw new Error(
+        `final holdout must contain exactly ${requiredFinalCasesPerFamily} cases per family; `
+        + `selected ${finalCasesPerFamily}`,
+    );
+}
 const developmentConfig = makeConfig("development", developmentFileIds);
 const holdoutConfig = makeConfig("finalHoldout", holdoutFileIds);
 const split = {
@@ -131,7 +139,7 @@ const split = {
     counts: {
         developmentFiles: developmentFileIds.length,
         finalHoldoutFiles: holdoutFileIds.length,
-        finalCasesPerFamily: holdoutFileIds.length * targetsPerFile,
+        finalCasesPerFamily,
     },
     files: baseManifest.files.map((file) => ({
         fileId: file.fileId,
@@ -155,7 +163,7 @@ console.log(`ITRDB_PAPER_CAPABILITY_SPLIT ${JSON.stringify({
     holdoutConfigPath,
     developmentFiles: developmentFileIds.length,
     finalHoldoutFiles: holdoutFileIds.length,
-    finalCasesPerFamily: holdoutFileIds.length * targetsPerFile,
+    finalCasesPerFamily,
     developmentFileIds,
     holdoutFileIds,
 })}`);
