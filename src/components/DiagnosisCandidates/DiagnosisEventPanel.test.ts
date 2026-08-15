@@ -41,6 +41,8 @@ describe("DiagnosisEventPanel", () => {
 
     expect(html).toContain("可能缺轮");
     expect(html).toContain("Top1 1907");
+    expect(html).toContain("窗口年份");
+    expect(html).toContain("选择年份 1900 作为应用边界");
     expect(html).not.toContain("可能多个近距离事件");
     expect(html).not.toContain("不能直接应用为单个操作");
     expect(html).not.toContain("disabled=\"\"");
@@ -77,6 +79,9 @@ describe("DiagnosisEventPanel", () => {
     expect(html).toContain("可能缺轮");
     expect(html).toContain("1880-1886");
     expect(html).toContain("Top1 1883");
+    expect(html).toContain("选择年份 1886 作为应用边界");
+    expect(html).toContain("aria-pressed=\"true\"");
+    expect(html).toContain("aria-pressed=\"false\"");
     expect(html).toContain("事件置信 高");
     expect(html).toContain("年份证据 不足");
     expect(html).toContain("不代表首选年份正确概率");
@@ -86,7 +91,7 @@ describe("DiagnosisEventPanel", () => {
     expect(html).not.toContain("忽略");
   });
 
-  it("shows only one Top1 breakpoint for a partial move", () => {
+  it("offers every year in the partial-move main window as a breakpoint", () => {
     const event: DiagnosisEvent = {
       id: "event-apply",
       seriesId: "ABC01A",
@@ -125,10 +130,12 @@ describe("DiagnosisEventPanel", () => {
       onApplyEvent: () => true,
     }));
 
+    expect(html).toContain("断点选项");
     expect(html).toContain("Top1 1881");
-    expect(html).not.toContain("#2 1880");
-    expect(html).not.toContain("选择断点 1882");
-    expect(html).not.toContain("aria-pressed");
+    expect(html).toContain("#2 1880");
+    expect(html).toContain("选择断点 1882");
+    expect(html).toContain("aria-pressed=\"true\"");
+    expect(html).toContain("aria-pressed=\"false\"");
     expect(html).toContain("较老侧向老年份移动 2 年");
     expect(html).toContain("年份证据 较一致");
     expect(html).toContain("应用");
@@ -451,6 +458,7 @@ describe("DiagnosisEventPanel", () => {
     expect(html).toContain("整条序列向老年份移动 1 年");
     expect(html).not.toContain("1768-2002");
     expect(html).not.toContain("Top1");
+    expect(html).not.toContain("窗口年份");
     expect(selectDiagnosisEventInterpretation(whole, "alternative")).toBe(missing);
   });
 });

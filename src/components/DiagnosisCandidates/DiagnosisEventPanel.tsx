@@ -46,6 +46,18 @@ const interpretationButtonStyle: CSSProperties = {
   color: "#315d36",
 };
 
+const yearButtonStyle: CSSProperties = {
+  appearance: "none",
+  padding: "1px 4px",
+  borderRadius: 3,
+  border: "1px solid #d4e4d2",
+  background: "#fff",
+  color: "#315d36",
+  cursor: "pointer",
+  font: "inherit",
+  lineHeight: 1.4,
+};
+
 const eventTypeLabels: Record<DiagnosisEventType, string> = {
   missingRing: "可能缺轮",
   falseRing: "可能伪轮",
@@ -146,12 +158,60 @@ export const selectDiagnosisEventInterpretation = (
     : event
 );
 
+type SelectableEventYear = {
+  year: number;
+  rank: number | null;
+};
+
+export const selectableEventYears = (event: DiagnosisEvent): SelectableEventYear[] => {
+  if (event.eventType === "wholeSeriesMove") return [];
+  const rankedYears = [...event.rankedYears]
+    .filter((row, index, rows) => (
+      row.year >= event.startYear
+      && row.year <= event.endYear
+      && rows.findIndex((candidate) => candidate.year === row.year) === index
+    ))
+    .sort((left, right) => left.rank - right.rank)
+    .map((row) => ({ year: row.year, rank: row.rank }));
+  const rankedYearSet = new Set(rankedYears.map((row) => row.year));
+  const unrankedYears = Array.from(
+    { length: Math.max(0, event.endYear - event.startYear + 1) },
+    (_, index) => event.startYear + index,
+  )
+    .filter((year) => !rankedYearSet.has(year))
+    .map((year) => ({ year, rank: null }));
+  return [...rankedYears, ...unrankedYears];
+};
+
+const defaultSelectedYear = (
+  event: DiagnosisEvent,
+  selectableYears: SelectableEventYear[],
+) => selectableYears.find((row) => row.rank === 1)?.year
+  ?? selectableYears[0]?.year
+  ?? Math.round((event.startYear + event.endYear) / 2);
+
+const yearOptionLabel = (row: SelectableEventYear) => row.rank === null
+  ? `${row.year}`
+  : row.rank === 1
+    ? `Top1 ${row.year}`
+    : `#${row.rank} ${row.year}`;
+
 export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Props) {
+  const [selectedYears, setSelectedYears] = useState<Record<string, number>>({});
   const [selectedInterpretations, setSelectedInterpretations] = useState<
     Record<string, InterpretationSelection>
   >({});
 
   useEffect(() => {
+    const currentIds = new Set(events.flatMap((event) => [
+      event.id,
+      ...(event.interpretationAmbiguity
+        ? [event.interpretationAmbiguity.alternative.id]
+        : []),
+    ]));
+    setSelectedYears((previous) => Object.fromEntries(
+      Object.entries(previous).filter(([eventId]) => currentIds.has(eventId)),
+    ));
     const currentPrimaryIds = new Set(events.map((event) => event.id));
     setSelectedInterpretations((previous) => Object.fromEntries(
       Object.entries(previous).filter(([eventId]) => currentPrimaryIds.has(eventId)),
@@ -195,17 +255,13 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
         );
         const interpretation = event.interpretationAmbiguity;
         const width = selectedEvent.endYear - selectedEvent.startYear + 1;
-        const rankedYears = [...selectedEvent.rankedYears]
-          .filter((row, index, rows) => (
-            row.year >= selectedEvent.startYear
-            && row.year <= selectedEvent.endYear
-            && rows.findIndex((candidate) => candidate.year === row.year) === index
-          ))
-          .sort((a, b) => a.rank - b.rank);
-        const preferredYear = rankedYears[0]?.year;
-        const selectedYear = preferredYear
-          ?? Math.round((selectedEvent.startYear + selectedEvent.endYear) / 2);
         const isWholeSeriesMove = selectedEvent.eventType === "wholeSeriesMove";
+        const selectableYears = selectableEventYears(selectedEvent);
+        const savedYear = selectedYears[selectedEvent.id];
+        const selectedYear = savedYear !== undefined
+          && selectableYears.some((row) => row.year === savedYear)
+          ? savedYear
+          : defaultSelectedYear(selectedEvent, selectableYears);
         const shiftText = selectedEvent.eventType === "partialMove" && selectedEvent.shiftYears
           ? ` · 较老侧向老年份移动 ${Math.abs(selectedEvent.shiftYears)} 年`
           : "";
@@ -269,9 +325,40 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
                 ) : null}
               </div>
 
-              {!isWholeSeriesMove ? (
-                <div style={{ marginTop: 4 }}>
-                  Top1 {selectedYear}
+              {selectableYears.length > 0 ? (
+                <div
+                  title={selectableYears.map(yearOptionLabel).join(" · ")}
+                  style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4, marginTop: 4 }}
+                >
+                  <span>{selectedEvent.eventType === "partialMove" ? "断点选项" : "窗口年份"}</span>
+                  {selectableYears.map((row) => {
+                    const selected = row.year === selectedYear;
+                    return (
+                      <button
+                        type="button"
+                        key={row.year}
+                        aria-pressed={selected}
+                        title={selectedEvent.eventType === "partialMove"
+                          ? `选择断点 ${row.year}；${row.year} 年起保持不动`
+                          : `选择年份 ${row.year} 作为应用边界`}
+                        onClick={() => {
+                          setSelectedYears((previous) => ({
+                            ...previous,
+                            [selectedEvent.id]: row.year,
+                          }));
+                          onFocusEvent?.(selectedEvent, row.year);
+                        }}
+                        style={{
+                          ...yearButtonStyle,
+                          borderColor: selected ? "#397342" : "#d4e4d2",
+                          background: selected ? "#dcefdc" : "#fff",
+                          fontWeight: row.rank === 1 || selected ? 700 : 500,
+                        }}
+                      >
+                        {yearOptionLabel(row)}
+                      </button>
+                    );
+                  })}
                 </div>
               ) : null}
 
@@ -361,8 +448,12 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
                         ...previous,
                         [event.id]: nextSelection,
                       }));
-                      const nextYear = [...nextEvent.rankedYears]
-                        .sort((left, right) => left.rank - right.rank)[0]?.year;
+                      const nextSelectableYears = selectableEventYears(nextEvent);
+                      const savedNextYear = selectedYears[nextEvent.id];
+                      const nextYear = savedNextYear !== undefined
+                        && nextSelectableYears.some((row) => row.year === savedNextYear)
+                        ? savedNextYear
+                        : defaultSelectedYear(nextEvent, nextSelectableYears);
                       onFocusEvent?.(nextEvent, nextYear);
                     }}
                     style={event.stale ? disabledButtonStyle : interpretationButtonStyle}
@@ -387,7 +478,7 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
               <button
                 type="button"
                 disabled={!onFocusEvent}
-                title={isWholeSeriesMove ? "定位整条序列" : `定位到 Top1 年份 ${selectedYear}`}
+                title={isWholeSeriesMove ? "定位整条序列" : `定位到所选年份 ${selectedYear}`}
                 onClick={() => onFocusEvent?.(selectedEvent, selectedYear)}
                 style={onFocusEvent ? buttonStyle : disabledButtonStyle}
               >
