@@ -113,6 +113,7 @@ import { wholeSeriesMoveShiftYears } from "./wholeSeriesMoveSemantics";
 import {
     measureWholeSeriesStateConsistency,
     supportsDominantWholeSeriesBaseline,
+    supportsNonTerminalWholeSeriesCandidate,
     wholeSeriesStateConsistencyNotes,
 } from "./wholeSeriesStateConsistency";
 import {
@@ -9117,8 +9118,16 @@ export const makeDiagnosisEvents = (
         const independentlySupportedWholeHypotheses = wholeBaselineHypotheses.filter(
             (event) => {
                 const claims = evidenceClaimsFor(event);
+                const shiftYears = wholeSeriesMoveShiftYears(event);
+                const stateConsistency = shiftYears === null
+                    ? null
+                    : measureWholeSeriesStateConsistency(diagnosis, shiftYears);
                 return claims.has("whole_terminal_baseline")
                     || claims.has("whole_global_lag")
+                    || (
+                        stateConsistency !== null
+                        && supportsNonTerminalWholeSeriesCandidate(stateConsistency)
+                    )
                     || (
                         event.confidenceLevel === "high"
                         && (event.evidence.correlationGain
@@ -9135,9 +9144,21 @@ export const makeDiagnosisEvents = (
                 event.shiftYears === undefined ? [] : [event.shiftYears]
             )),
         )];
+        const globalTerminalLag = diagnosis.globalSlidingMatch.bestGlobalLag;
+        const globalTerminalStateConsistency = globalTerminalLag === 0
+            ? null
+            : measureWholeSeriesStateConsistency(diagnosis, globalTerminalLag);
+        const globallySupportedTerminalLag = globalTerminalStateConsistency
+            && supportsNonTerminalWholeSeriesCandidate(
+                globalTerminalStateConsistency,
+            )
+            ? globalTerminalLag
+            : null;
         const boundedTerminalLags = supportedWholeLags.length > 0
             ? supportedWholeLags
-            : [0];
+            : globallySupportedTerminalLag === null
+                ? [0]
+                : [0, globallySupportedTerminalLag];
         const boundedOperationBaseline = boundedTerminalLags.length === 1
             ? boundedTerminalLags[0]
             : 0;
@@ -9304,9 +9325,16 @@ export const makeDiagnosisEvents = (
             const boundedWhole = result.events.find((event) => (
                 event.eventType === "wholeSeriesMove"
             ));
+            const boundedWholeShift = boundedWhole
+                ? wholeSeriesMoveShiftYears(boundedWhole)
+                : null;
+            const globallyAnchoredWhole = boundedWholeShift !== null
+                && boundedWholeShift === globallySupportedTerminalLag
+                && result.path.wholeLagGain >= 8;
             return !boundedWhole
+                || globallyAnchoredWhole
                 || independentlySupportedWholeHypotheses.some((whole) => (
-                    whole.shiftYears === boundedWhole.shiftYears
+                    whole.shiftYears === boundedWholeShift
                 ));
         };
         const hasBoundedLocalEvent = (result: BoundedLagStateEventSet): boolean => (
@@ -9361,7 +9389,13 @@ export const makeDiagnosisEvents = (
             if (support.localEventCount === 0) return true;
             const hasSupportedWhole = result.events.some((event) => (
                 event.eventType === "wholeSeriesMove"
-                && supportedWholeLags.includes(event.shiftYears ?? 0)
+                && (
+                    supportedWholeLags.includes(event.shiftYears ?? 0)
+                    || (
+                        event.shiftYears === globallySupportedTerminalLag
+                        && result.path.wholeLagGain >= 8
+                    )
+                )
             ));
             if (hasSupportedWhole && result.path.wholeLagGain >= 8) return true;
             const strongUnitPath = [...support.directCorrections].some(
@@ -9446,7 +9480,7 @@ export const makeDiagnosisEvents = (
             return preferBoundedResult(supportedTerminal, zeroTerminal);
         };
         const initialCofechaBoundedResult = locateBoundedEvents(true);
-        const zeroTerminalCofechaResult = supportedWholeLags.length > 0
+        const zeroTerminalCofechaResult = boundedTerminalLags.some((lag) => lag !== 0)
             ? locateBoundedEvents(true, undefined, [0])
             : null;
         const supportedInitialCofecha = boundedFrameIsSupported(
@@ -9511,7 +9545,7 @@ export const makeDiagnosisEvents = (
             ? locateBoundedEvents(true, boundedRestrictedLags)
             : null;
         const restrictedZeroTerminalCofechaResult = needsRestrictedBoundedView
-            && supportedWholeLags.length > 0
+            && boundedTerminalLags.some((lag) => lag !== 0)
             ? locateBoundedEvents(true, boundedRestrictedLags, [0])
             : null;
         const supportedRestrictedTerminalCofecha = boundedFrameIsSupported(
@@ -10160,8 +10194,34 @@ export const makeDiagnosisEvents = (
             }
             return cachedSequentialFalse;
         };
-        const dominantWholeSeriesBaseline = displayed
-            .filter((event) => event.eventType === "wholeSeriesMove")
+        const boundedSelectedWholeBaseline = selectedBoundedResult
+            && selectedBoundedResult.path.wholeLagGain >= 8
+            ? boundedPathEvents.find((event) => (
+                event.eventType === "wholeSeriesMove"
+            )) ?? null
+            : null;
+        const boundedRawWholeBaseline = rawBoundedResult
+            && rawBoundedResult.path.wholeLagGain >= 8
+            ? rawBoundedResult.events.find((event) => (
+                event.eventType === "wholeSeriesMove"
+            )) ?? null
+            : null;
+        const boundedWholeBaselines = [
+            ...(boundedSelectedWholeBaseline ? [{
+                event: boundedSelectedWholeBaseline,
+                wholeLagGain: selectedBoundedResult!.path.wholeLagGain,
+                source: "bounded_selected_constant_path",
+            }] : []),
+            ...(boundedRawWholeBaseline ? [{
+                event: boundedRawWholeBaseline,
+                wholeLagGain: rawBoundedResult!.path.wholeLagGain,
+                source: "bounded_raw_constant_path",
+            }] : []),
+        ];
+        const dominantWholeSeriesBaseline = [
+            ...displayed.filter((event) => event.eventType === "wholeSeriesMove"),
+            ...boundedWholeBaselines.map((entry) => entry.event),
+        ]
             .map((event) => {
                 const shiftYears = wholeSeriesMoveShiftYears(event);
                 if (shiftYears === null) return null;
@@ -10169,7 +10229,13 @@ export const makeDiagnosisEvents = (
                     diagnosis,
                     shiftYears,
                 );
+                const boundedPathBaseline = boundedWholeBaselines.find((entry) => (
+                    entry.event === event
+                ));
+                const boundedPathSupport = boundedPathBaseline !== undefined
+                    && supportsNonTerminalWholeSeriesCandidate(stateConsistency);
                 return supportsDominantWholeSeriesBaseline(stateConsistency)
+                    || boundedPathSupport
                     ? {
                         event: {
                             ...event,
@@ -10178,10 +10244,19 @@ export const makeDiagnosisEvents = (
                                 algorithmSources: Array.from(new Set([
                                     ...event.evidence.algorithmSources,
                                     "dominant_whole_state_consensus",
+                                    ...(boundedPathSupport
+                                        ? ["bounded_constant_lag_baseline"]
+                                        : []),
                                 ])),
                                 notes: Array.from(new Set([
                                     ...event.evidence.notes,
                                     ...wholeSeriesStateConsistencyNotes(stateConsistency),
+                                    ...(boundedPathSupport ? [
+                                        `whole_baseline_source=${boundedPathBaseline.source}`,
+                                        `bounded_constant_path_whole_gain=${
+                                            boundedPathBaseline.wholeLagGain.toFixed(6)
+                                        }`,
+                                    ] : []),
                                     "whole_baseline_preempts_weak_local_path",
                                 ])),
                             },

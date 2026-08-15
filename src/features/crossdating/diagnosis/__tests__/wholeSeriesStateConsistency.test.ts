@@ -163,6 +163,30 @@ describe("whole-series state consistency", () => {
         expect(supportsNonTerminalWholeSeriesCandidate(evidence)).toBe(false);
     });
 
+    it("does not let negligible endpoint overlap veto an otherwise global state", () => {
+        const globalLag = -50;
+        const evidence = measureWholeSeriesStateConsistency({
+            ...diagnosis([], globalLag),
+            segments: [
+                ...Array.from({ length: 8 }, (_, index) => (
+                    segment(1800 + index * 25, globalLag)
+                )),
+                {
+                    ...segment(2000, 0, 0.1),
+                    samplePairs: 8,
+                },
+                {
+                    ...segment(2025, 0, 0.1),
+                    samplePairs: 8,
+                },
+            ],
+        }, globalLag);
+
+        expect(evidence.newerEdgeSupportFraction).toBe(0);
+        expect(evidence.weightedSupportFraction).toBeGreaterThan(0.99);
+        expect(supportsNonTerminalWholeSeriesCandidate(evidence)).toBe(true);
+    });
+
     it("uses direct global-lag probes without widening local best-lag states", () => {
         const globalLag = 11;
         const evidence = measureWholeSeriesStateConsistency({

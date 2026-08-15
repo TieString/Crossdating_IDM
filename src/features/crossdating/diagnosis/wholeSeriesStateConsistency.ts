@@ -105,10 +105,13 @@ export const supportsNonTerminalWholeSeriesCandidate = (
     evidence: WholeSeriesStateConsistency,
 ): boolean => {
     if (evidence.segmentCount < 3) return false;
+    const overlapTruncatedGlobalConsensus = evidence.globalLagMatchesShift
+        && evidence.supportFraction >= 0.8
+        && evidence.weightedSupportFraction >= 0.96;
     const stableZeroNewerSide = evidence.newestLag === 0
         && evidence.newerEdgeSupportFraction === 0
         && evidence.zeroSupportCount >= 2;
-    if (stableZeroNewerSide) return false;
+    if (stableZeroNewerSide && !overlapTruncatedGlobalConsensus) return false;
     const stableNewerState = evidence.newerEdgeSupportFraction === 1;
     const broadGlobalConsensus = evidence.globalLagMatchesShift
         && evidence.supportFraction >= 2 / 3
@@ -117,7 +120,10 @@ export const supportsNonTerminalWholeSeriesCandidate = (
         && evidence.shiftSupportCount >= 5
         && evidence.supportFraction > 0.5
         && evidence.weightedSupportFraction > 0.55;
-    return stableNewerState || broadGlobalConsensus || robustSegmentMajority;
+    return stableNewerState
+        || overlapTruncatedGlobalConsensus
+        || broadGlobalConsensus
+        || robustSegmentMajority;
 };
 
 /**

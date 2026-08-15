@@ -33,6 +33,10 @@ import {
     selectDynamicJointOperation,
     selectDynamicUnitOperation,
 } from "@/features/crossdating/diagnosis/jointOperationSelector";
+import {
+    measureWholeSeriesStateConsistency,
+    supportsNonTerminalWholeSeriesCandidate,
+} from "@/features/crossdating/diagnosis/wholeSeriesStateConsistency";
 import { preprocessSeries } from "@/features/crossdating/diagnosis/series";
 import { diagnoseSeriesCore } from "@/features/crossdating/diagnosis/segments";
 import type {
@@ -555,9 +559,23 @@ export const diagnoseTruthBlind = (input: {
                         };
                     })()
                     : null;
+                const globalWholeStateConsistency = core.globalSlidingMatch.bestGlobalLag === 0
+                    ? null
+                    : measureWholeSeriesStateConsistency(
+                        core,
+                        core.globalSlidingMatch.bestGlobalLag,
+                    );
                 return {
                     jointDecision: diagnosis.jointEventDecisions?.[0] ?? null,
                     coreGlobalSlidingMatch: core.globalSlidingMatch,
+                    coreGlobalWholeStateConsistency: globalWholeStateConsistency
+                        ? {
+                            ...globalWholeStateConsistency,
+                            supported: supportsNonTerminalWholeSeriesCandidate(
+                                globalWholeStateConsistency,
+                            ),
+                        }
+                        : null,
                     cofechaCoreGlobalSlidingMatch: cofechaCore?.globalSlidingMatch ?? null,
                     operations: operations.map((operation) => ({
                         eventType: operation.eventType,
