@@ -13,7 +13,7 @@ export type TitleMenuKind = "file" | "edit" | "run";
 export const TREE_ALL_OPTION_LABEL = "📜 全部";
 export const TREE_WARNING_MARK = "⚠️";
 export const TREE_NORMAL_MARK = "🪵";
-export const WELCOME_TEXT = "开发团队：何志浩、张同文、张瑞波、靳春寒、喻树龙、尚华明、秦莉";
+export const WELCOME_TEXT = "研发团队：何志浩、张同文、张瑞波、靳春寒、喻树龙、尚华明、秦莉";
 
 export const COFECHA_PART_OPTIONS = [
     { value: ALL_OPTION_VALUE, label: "📜 全部内容" },

@@ -94,12 +94,9 @@ const NICE_YEAR_STEPS = [1, 2, 5, 10, 15, 20, 25, 50, 100, 200]
 const LINE_HIT_THRESHOLD_PX = 5   // 鼠标距离折线小于5px时点击选择该折线
 const HOVER_LINE_HIT_THRESHOLD_PX = 10
 const SAMPLE_SIZE_AXIS_ID = 'sampleSize'
-const DYNAMIC_REFERENCE_AXIS_ID = 'dynamicReference'
 const SAMPLE_SIZE_LABEL = '样本量'
 const SAMPLE_SIZE_COLOR = 'rgba(104, 110, 120, 0.62)'
 const MANUAL_REFERENCE_COLOR = '#dc2626'
-const DYNAMIC_REFERENCE_LABEL = 'COFECHA-pass'
-const DYNAMIC_REFERENCE_COLOR = 'rgba(35, 99, 68, 0.9)'
 const MISSING_RING_COLOR = '#2ecc71'
 
 export type ChartDiagnosisEventRange = {
@@ -810,8 +807,6 @@ type Props = {
   missingRingYears?: ReadonlyMap<string, readonly number[]>
   sampleSizeData?: ReadonlyMap<string, ReadonlyMap<number, number | null>>
   referenceSeries?: ReferenceSeries | null
-  dynamicReferenceSeries?: ReferenceSeries | null
-  showDynamicReference?: boolean
   showPersistentTooltip?: boolean
   hoverSimulation?: LocalCrossdatingSimulation | null
   highlightedTreeCode?: string | null
@@ -854,8 +849,6 @@ export function MultiLineChart({
   missingRingYears,
   sampleSizeData,
   referenceSeries,
-  dynamicReferenceSeries,
-  showDynamicReference = false,
   showPersistentTooltip = false,
   hoverSimulation,
   highlightedTreeCode = null,
@@ -895,7 +888,6 @@ export function MultiLineChart({
     cofechaPart6Trees.map(normalizeCofechaSeriesId),
   ), [cofechaPart6Trees])
   const highlightedIndex = highlightedTreeCode ? treeCodes.indexOf(highlightedTreeCode) : -1
-  const visibleDynamicReferenceSeries = showDynamicReference ? dynamicReferenceSeries : null
 
   const emitZoomWindow = useCallback((chart: ChartJSInstance<'line'> | ChartJS | null = chartRef.current) => {
     if (!chart || !onZoomWindowChange) return
@@ -928,10 +920,6 @@ export function MultiLineChart({
       if (year < minYear) minYear = year
       if (year > maxYear) maxYear = year
     })
-    visibleDynamicReferenceSeries?.data.forEach((_, year) => {
-      if (year < minYear) minYear = year
-      if (year > maxYear) maxYear = year
-    })
     if (jumpTarget && Number.isFinite(jumpTarget.year)) {
       if (jumpTarget.year < minYear) minYear = jumpTarget.year
       if (jumpTarget.year > maxYear) maxYear = jumpTarget.year
@@ -945,7 +933,7 @@ export function MultiLineChart({
     const years: number[] = []
     for (let y = minYear - pad; y <= maxYear + pad; y++) years.push(y)
     return years
-  }, [data, jumpTarget, referenceSeries, visibleDynamicReferenceSeries])
+  }, [data, jumpTarget, referenceSeries])
 
   const sampleSize = useMemo(() => {
     let max = 0
@@ -973,8 +961,6 @@ export function MultiLineChart({
   const referenceDisplayData = useMemo(() => (
     referenceSeries?.data ?? null
   ), [referenceSeries])
-  const hasWidthAxisData = data.size > 0 || Boolean(referenceDisplayData?.size)
-  const dynamicReferenceUsesWidthAxis = Boolean(visibleDynamicReferenceSeries && !hasWidthAxisData)
 
   // 构造 Chart.js datasets。
   const datasets: ChartData<'line'>['datasets'] = useMemo(() => {
@@ -1035,41 +1021,6 @@ export function MultiLineChart({
       })
     }
 
-    if (visibleDynamicReferenceSeries && visibleDynamicReferenceSeries.data.size > 0) {
-      nextDatasets.push({
-        label: DYNAMIC_REFERENCE_LABEL,
-        data: allYears.map(year => visibleDynamicReferenceSeries.data.get(year) ?? null),
-        yAxisID: dynamicReferenceUsesWidthAxis ? undefined : DYNAMIC_REFERENCE_AXIS_ID,
-        borderColor: DYNAMIC_REFERENCE_COLOR,
-        backgroundColor: DYNAMIC_REFERENCE_COLOR,
-        fill: false,
-        borderWidth: 2,
-        borderDash: [6, 4],
-        spanGaps: false,
-        tension: 0.008,
-        cubicInterpolationMode: 'default',
-        pointRadius: 0,
-        pointHoverRadius: 0,
-        pointHitRadius: 0,
-        order: -15,
-        referenceDepth: allYears.map(year => visibleDynamicReferenceSeries.sampleDepth.get(year) ?? null),
-        referenceSd: allYears.map(year => visibleDynamicReferenceSeries.sdByYear?.get(year) ?? null),
-        referenceSe: allYears.map(year => visibleDynamicReferenceSeries.seByYear?.get(year) ?? null),
-        referenceActual: allYears.map(year => visibleDynamicReferenceSeries.data.get(year) ?? null),
-        referenceDisplayScaled: false,
-        referenceMode: visibleDynamicReferenceSeries.mode,
-        isReferenceDataset: true,
-      } as ChartData<'line'>['datasets'][number] & {
-        referenceDepth: Array<number | null>
-        referenceSd: Array<number | null>
-        referenceSe: Array<number | null>
-        referenceActual: Array<number | null>
-        referenceDisplayScaled: boolean
-        referenceMode: ReferenceSeries['mode']
-        isReferenceDataset: boolean
-      })
-    }
-
     if (showSampleSize && sampleSize.counts.length > 0) {
       nextDatasets.push({
         label: SAMPLE_SIZE_LABEL,
@@ -1089,7 +1040,7 @@ export function MultiLineChart({
     }
 
     return nextDatasets
-  }, [allYears, data, dynamicReferenceUsesWidthAxis, highlightedIndex, referenceDisplayData, referenceSeries, sampleSize, seriesColors, showSampleSize, visibleDynamicReferenceSeries])
+  }, [allYears, data, highlightedIndex, referenceDisplayData, referenceSeries, sampleSize, seriesColors, showSampleSize])
 
   // 记忆化 chartData，避免每次渲染（含鼠标移动）都生成新引用导致 react-chartjs-2 重复 update 卡顿。
   const chartData: ChartData<'line'> = useMemo(() => ({
@@ -1208,14 +1159,6 @@ export function MultiLineChart({
         if (value > globalMax) globalMax = value
       }
     })
-    if (dynamicReferenceUsesWidthAxis) {
-      visibleDynamicReferenceSeries?.data.forEach(value => {
-        if (typeof value === 'number' && !isNaN(value)) {
-          if (value < globalMin) globalMin = value
-          if (value > globalMax) globalMax = value
-        }
-      })
-    }
     if (!Number.isFinite(globalMin) || !Number.isFinite(globalMax)) {
       return [0, 1]
     }
@@ -1223,7 +1166,7 @@ export function MultiLineChart({
       ? Math.max(1, Math.abs(globalMax) * 0.1)
       : (globalMax - globalMin) * 0.1
     return [globalMin - yMargin, globalMax + yMargin]
-  }, [data, dynamicReferenceUsesWidthAxis, referenceDisplayData, visibleDynamicReferenceSeries])
+  }, [data, referenceDisplayData])
 
   // Y 轴视觉缩放窗口应用到图表（仅改 Y 轴 min/max，不动 X 轴范围，不改原始数据）。
   // 用命令式方式设置，避免把 yViewWindow 放进 memo 化的 options 而重建 options、连带重置 X 缩放。
@@ -1287,12 +1230,8 @@ export function MultiLineChart({
             min: yMin,
             max: yMax,
           },
-          // 次级 Y 轴（样本量 / 动态参考）锁定在各自原始范围，'xy' 平移时不随主轴上下移动。
+          // 样本量次级 Y 轴锁定在原始范围，'xy' 平移时不随主轴上下移动。
           [SAMPLE_SIZE_AXIS_ID]: {
-            min: 'original',
-            max: 'original',
-          },
-          [DYNAMIC_REFERENCE_AXIS_ID]: {
             min: 'original',
             max: 'original',
           },
@@ -1382,7 +1321,7 @@ export function MultiLineChart({
         },
         title: {
           display: true,
-          text: dynamicReferenceUsesWidthAxis ? 'COFECHA-pass reference' : 'Ring width (mm)',
+          text: 'Ring width (mm)',
           font: { family: CHART_FONT_FAMILY, size: 13, weight: 'bold' },
           color: '#222',
           padding: { bottom: 6 },
@@ -1418,23 +1357,10 @@ export function MultiLineChart({
           color: '#222',
           padding: { bottom: 6 },
         },
-      },
-      [DYNAMIC_REFERENCE_AXIS_ID]: {
-        type: 'linear',
-        axis: 'y',
-        display: false,
-        position: 'right',
-        grid: {
-          drawOnChartArea: false,
-          drawTicks: false,
-        },
-        ticks: {
-          display: false,
-        },
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [allYears.length, dynamicReferenceUsesWidthAxis, sampleSize.max, yMin, yMax, showSampleSize])
+  }), [allYears.length, sampleSize.max, yMin, yMax, showSampleSize])
 
   // 点击折线时切换高亮，并保存当前缩放状态。
   const getClosestTreeAtPoint = useCallback((

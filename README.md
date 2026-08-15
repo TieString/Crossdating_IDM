@@ -71,7 +71,7 @@ npm run build-storybook
 
 动态参考序列按 COFECHA master dating series 的默认转换流程生成：每条 anchor 样芯先做 32 年、50% frequency response 的 cubic smoothing spline 去趋势，计算 `raw / spline` 的 dimensionless index，再进行 AR(p) 预白化、默认 log transform、可选 first difference。所有转换后的样芯值按年份 accumulator/counter 算术平均，最终 master 标准化为 `mean = 0`、`sd = 1`，并保存每年的 replication、sd、se 和 weight。0 值 absent ring 默认不参与 reference。
 
-用户在折线图里手动生成参考后会切换到 manual 模式；“恢复动态”会回到最新 COFECHA-pass reference。RWL 编辑后动态 reference 标记为 stale，直到重新运行 COFECHA。
+用户仍可在折线图里生成并查看 manual reference。COFECHA-pass reference 的数值只供内部诊断与贝叶斯定年使用，折线图不再展示其状态模块或曲线；PART 6 分类仍用于可靠序列快捷选择和 A 标记提示。RWL 编辑后动态 reference 标记为 stale，直到重新运行 COFECHA。
 
 ## 文档
 

@@ -112,7 +112,7 @@
 - 缺轮和伪轮的完整区间定位器保留约 25 年粗搜索证据；逐年虚拟纠正只计算四条冻结定位曲线，预处理、参考拟合和纠正结果均按诊断实例缓存。UI 只接收一个主窗口，不接收内部模式或逐年候选。学习定位器先输出 9/13 年窗，随后独立物理定位器只能在当前 9 年窗内部提出 7/5 年窗：7 年要求完整嵌套，缺轮 5 年还要求 operation remote margin ≥0.13，伪轮 5 年要求 margin ≥0.09 且 side-step 锚点距当前主年份 ≤4 年。13 年窗不直接收窄，旧 `adaptiveWindowRisk` 的 17 年或粗区间回退不进入正式入口。
 - 自动交叉定年主管线第一版已经完成；当前算法层在同一入口中显式包含 Baillie & Pilcher-style global sliding match、Holmes/COFECHA-like segmented diagnosis、Van Deusen/Wenk-style local edit alignment，以及 Hassan-style MVP relative-confidence ranking。
 - 折线图候选生成由“生成候选”按钮触发；本轮不使用 hover 触发自动分析。
-- COFECHA-pass 动态参考序列已接入：每次 COFECHA 完成后复用 PART 6 `[A] Segment` 判断，把无 A flag 样芯作为 `anchor_pass` 参考锚定组，有 A flag 样芯作为 `candidate_flagged` 待检查组，并用标准化后的 anchor 序列生成 `COFECHA-pass 参考序列`。用户手动生成参考后会切到 manual 模式；折线图提供“恢复动态”回到最新 COFECHA-pass 参考。
+- COFECHA-pass 动态参考序列已接入：每次 COFECHA 完成后复用 PART 6 `[A] Segment` 判断，把无 A flag 样芯作为 `anchor_pass` 参考锚定组，有 A flag 样芯作为 `candidate_flagged` 待检查组，并用标准化后的 anchor 序列生成 `COFECHA-pass 参考序列`。参考数值只供内部诊断与贝叶斯定年使用，折线图不再显示其状态模块或曲线；PART 6 分类仍用于可靠序列快捷选择和 A 标记提示。
 - [src/features/crossdating/reference.ts](src/features/crossdating/reference.ts)：动态参考生成按 COFECHA master dating series 流程执行：每条样芯先做 32 年 50% response cubic smoothing spline 去趋势，计算 `raw / spline` 的 dimensionless index，再用 AR(p) 预白化、默认 log transform、可选 first difference；随后按年份 accumulator/counter 算术平均，并把最终 master 标准化为 mean=0、sd=1。0 值 absent ring 默认不进入 reference。Spline 线性系统使用带宽 2 的 Cholesky O(n) 求解，保留共轭梯度作为数值异常回退。
 
 **约束**：

@@ -452,7 +452,6 @@ type ExpandedChartPageProps = {
     diagnosisBatchResult: DiagnosisBatchApplyResult | null;
     showPersistentTooltip?: boolean;
     onReferenceConfigChange: (config: ReferenceSeriesConfig | null) => void;
-    onResetReferenceToDynamic: () => void;
     onApplyDiagnosisCandidate: (candidate: DiagnosisCandidateOperation) => void;
     onApplyDiagnosisCandidateBatch: (candidates: DiagnosisCandidateOperation[]) => void;
     onApplyLocalSimulation: (request: LocalSimulationApplyRequest) => void;
@@ -479,7 +478,6 @@ export function ExpandedChartPage({
     diagnosisBatchResult,
     showPersistentTooltip = false,
     onReferenceConfigChange,
-    onResetReferenceToDynamic,
     onApplyDiagnosisCandidate,
     onApplyDiagnosisCandidateBatch,
     onApplyLocalSimulation,
@@ -540,7 +538,6 @@ export function ExpandedChartPage({
                         diagnosis={diagnosis}
                         diagnosisBatchResult={diagnosisBatchResult}
                         onReferenceConfigChange={onReferenceConfigChange}
-                        onResetReferenceToDynamic={onResetReferenceToDynamic}
                         onApplyDiagnosisCandidate={onApplyDiagnosisCandidate}
                         onApplyDiagnosisCandidateBatch={onApplyDiagnosisCandidateBatch}
                         onApplyLocalSimulation={onApplyLocalSimulation}

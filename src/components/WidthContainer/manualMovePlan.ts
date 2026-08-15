@@ -6,6 +6,11 @@ export interface ManualSeriesMovePlan {
     yearOffset: number;
 }
 
+export interface ManualMoveShiftTarget {
+    sourceYear: number;
+    targetYear: number;
+}
+
 export interface ManualMoveSelection {
     tree: string;
     startYear: number;
@@ -65,6 +70,36 @@ export function createOlderSidePartialMovePlan(
         selectedEndYear: firstFixedYear - 1,
         yearOffset: -yearCount,
     };
+}
+
+/**
+ * Maps moved cells to their final years while using an adjacent visual origin.
+ *
+ * The data still jumps by the complete year offset in one undoable edit.  The
+ * animation origin is deliberately only one grid cell away so multi-year moves
+ * reuse the single-delete row-wrap animation instead of creating one cross-row
+ * ghost for every crossed column.
+ */
+export function createManualMoveShiftTargets(
+    plan: ManualSeriesMovePlan,
+    sourceYears: Iterable<number>,
+): ManualMoveShiftTarget[] {
+    if (plan.yearOffset === 0) return [];
+
+    const selectedStartYear = Math.min(plan.selectedStartYear, plan.selectedEndYear);
+    const selectedEndYear = Math.max(plan.selectedStartYear, plan.selectedEndYear);
+    const visualStep = Math.sign(plan.yearOffset);
+
+    return Array.from(new Set(sourceYears))
+        .filter((year) => year >= selectedStartYear && year <= selectedEndYear)
+        .sort((yearA, yearB) => yearA - yearB)
+        .map((dataSourceYear) => {
+            const targetYear = dataSourceYear + plan.yearOffset;
+            return {
+                sourceYear: targetYear - visualStep,
+                targetYear,
+            };
+        });
 }
 
 export function remapSelectionForMoveHistory<T extends ManualMoveSelection>(

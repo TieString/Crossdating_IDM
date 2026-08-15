@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { moveSeriesTailByOffset } from "@/features/rwl/edit";
 import {
+    createManualMoveShiftTargets,
     createOlderSidePartialMovePlan,
     createWholeSeriesMovePlan,
     remapSelectionForMoveHistory,
@@ -57,6 +58,29 @@ describe("manual move plans", () => {
         ]);
         expect(moved.has(1900)).toBe(false);
         expect(moved.has(1903)).toBe(false);
+    });
+
+    it("maps moved cells to their final years from an adjacent visual origin", () => {
+        const plan = createOlderSidePartialMovePlan(1900, 1906, 1904, 3);
+
+        expect(plan).not.toBeNull();
+        expect(createManualMoveShiftTargets(plan!, [1899, 1900, 1901, 1903, 1904, 1906])).toEqual([
+            { sourceYear: 1898, targetYear: 1897 },
+            { sourceYear: 1899, targetYear: 1898 },
+            { sourceYear: 1901, targetYear: 1900 },
+        ]);
+    });
+
+    it("keeps every multi-year visual shift to one neighboring cell", () => {
+        const plan = createWholeSeriesMovePlan(1900, 1902, "newer", 5);
+        const targets = createManualMoveShiftTargets(plan!, [1900, 1901, 1902]);
+
+        expect(targets).toEqual([
+            { sourceYear: 1904, targetYear: 1905 },
+            { sourceYear: 1905, targetYear: 1906 },
+            { sourceYear: 1906, targetYear: 1907 },
+        ]);
+        expect(targets.every(({ sourceYear, targetYear }) => Math.abs(targetYear - sourceYear) === 1)).toBe(true);
     });
 
     it("rejects empty fixed sides and non-positive movement magnitudes", () => {

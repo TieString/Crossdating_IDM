@@ -12,6 +12,8 @@ import { stopMarker } from "@/shared/constants";
 // 插年：在year处插入0，之前的年份总体向前移动1年，最新年份不变
 export type MissingInsertSide = "left" | "right";
 export type DeleteMode = "direct" | "left" | "right" | "both";
+// 多年删除后的补位来源：保持原区间为空，或由左/右侧序列收紧补位。
+export type DeleteRangeFill = "missing" | "left" | "right";
 // 删除后用哪一侧的格子来填补缺口（即"向哪个方向靠"）：
 // - "right"（默认）：左侧格子整体向右靠，最新（最右）年份不变。
 // - "left"：右侧格子整体向左靠，最早（最左）年份不变。
@@ -21,6 +23,7 @@ export type RwlEditOperation =
     | { type: "insert-missing"; tree: string; year: number; side: MissingInsertSide }
     | { type: "move-selection"; tree: string; selectedStartYear: number; selectedEndYear: number; yearOffset: number }
     | { type: "delete-year"; tree: string; year: number; mode: DeleteMode; shift?: DeleteShift }
+    | { type: "delete-year-range"; tree: string; startYear: number; endYear: number; fill: DeleteRangeFill }
     | { type: "mark-missing-range"; tree: string; startYear: number; endYear: number }
     | { type: "restore-deletion"; tree: string; markerYear: number; index: number }
     | { type: "delete-series"; tree: string }
@@ -181,6 +184,7 @@ const BASIC_OPERATION_LOG_TYPES = new Set<RwlEditOperation["type"]>([
     "insert-missing",
     "move-selection",
     "delete-year",
+    "delete-year-range",
     "mark-missing-range",
     "restore-deletion",
     "change-width",
@@ -412,11 +416,18 @@ const getDeleteShiftLabel = (shift: DeleteShift | undefined) => (
     shift === "left" ? "右侧左靠" : "左侧右靠"
 );
 
+const getDeleteRangeFillLabel = (fill: DeleteRangeFill) => {
+    if (fill === "left") return "左侧补位";
+    if (fill === "right") return "右侧补位";
+    return "保持缺失";
+};
+
 const getOperationType = (operation: RwlEditOperation | undefined): string | undefined => {
     switch (operation?.type) {
         case "insert-missing": return "INSERT_MISSING_RING";
         case "move-selection": return "SHIFT_RANGE";
         case "delete-year": return "DELETE_FALSE_RING";
+        case "delete-year-range": return "DELETE_YEAR_RANGE";
         case "mark-missing-range": return "MARK_SUSPICIOUS";
         case "restore-deletion": return "REVERT_OPERATION";
         case "delete-series": return "DELETE_SERIES";
@@ -431,6 +442,7 @@ const getOperationTargetYear = (operation: RwlEditOperation | undefined): number
     if (!operation) return undefined;
     if ("year" in operation) return operation.year;
     if (operation.type === "move-selection") return operation.selectedStartYear;
+    if (operation.type === "delete-year-range") return operation.startYear;
     if (operation.type === "mark-missing-range") return operation.startYear;
     if (operation.type === "restore-deletion") return operation.markerYear;
     return undefined;
@@ -440,6 +452,7 @@ const getOperationNewYear = (operation: RwlEditOperation | undefined): number | 
     if (!operation) return undefined;
     if (operation.type === "move-selection") return operation.selectedStartYear + operation.yearOffset;
     if ("year" in operation) return operation.year;
+    if (operation.type === "delete-year-range") return operation.startYear;
     if (operation.type === "mark-missing-range") return operation.startYear;
     if (operation.type === "restore-deletion") return operation.markerYear;
     return undefined;
@@ -453,6 +466,12 @@ const getOperationAffectedRange = (
         return {
             startYear: Math.min(operation.selectedStartYear, operation.selectedEndYear),
             endYear: Math.max(operation.selectedStartYear, operation.selectedEndYear),
+        };
+    }
+    if (operation.type === "delete-year-range") {
+        return {
+            startYear: Math.min(operation.startYear, operation.endYear),
+            endYear: Math.max(operation.startYear, operation.endYear),
         };
     }
     if (operation.type === "mark-missing-range") {
@@ -492,6 +511,12 @@ export function describeRwlEditOperation(operation: RwlEditOperation | undefined
             return {
                 summary: "删除年份",
                 detail: `${operation.tree} · ${operation.year} · ${getDeleteModeLabel(operation.mode)} · ${getDeleteShiftLabel(operation.shift)}`,
+                tree: operation.tree,
+            };
+        case "delete-year-range":
+            return {
+                summary: "删除年份范围",
+                detail: `${operation.tree} · ${operation.startYear}-${operation.endYear} · ${getDeleteRangeFillLabel(operation.fill)}`,
                 tree: operation.tree,
             };
         case "mark-missing-range":
@@ -721,6 +746,33 @@ export function markYearRangeAsMissing(
     return sortedTreeData(
         editableEntries(rwlData).filter(([year]) => year < startYear || year > endYear)
     );
+}
+
+export function deleteYearRange(
+    rwlData: RwlTreeData,
+    selectedStartYear: number,
+    selectedEndYear: number,
+    fill: DeleteRangeFill,
+): RwlTreeData {
+    const startYear = Math.min(selectedStartYear, selectedEndYear);
+    const endYear = Math.max(selectedStartYear, selectedEndYear);
+
+    if (fill === "missing") {
+        return markYearRangeAsMissing(rwlData, startYear, endYear);
+    }
+
+    const rangeLength = endYear - startYear + 1;
+    // 左侧补位时反复删除选区右端，右侧补位时反复删除选区左端；
+    // 这样每次滑入的仍是待删除值，最终恰好舍弃原选区且不分配宽度。
+    const shift: DeleteShift = fill === "left" ? "right" : "left";
+    const deletionYear = fill === "left" ? endYear : startYear;
+    let working = new Map(rwlData);
+
+    for (let index = 0; index < rangeLength; index += 1) {
+        working = deleteYearWithMode(working, deletionYear, "direct", shift);
+    }
+
+    return working;
 }
 
 // 更改年：在year处更改为width，其他年份不变
@@ -1271,6 +1323,47 @@ export class RwlEditor {
         let updatedTree = deleteYearWithMode(treeData, year, mode, shift);
         this.rwlData.set(tree, updatedTree);
         this.appendOperationLog(operation, tree, beforeState, logMetadata);
+        this.notifyChange();
+    }
+
+    deleteYearRange(
+        tree: string,
+        selectedStartYear: number,
+        selectedEndYear: number,
+        fill: DeleteRangeFill,
+    ): void {
+        if (!this.rwlData.has(tree)) return;
+
+        const startYear = Math.min(selectedStartYear, selectedEndYear);
+        const endYear = Math.max(selectedStartYear, selectedEndYear);
+        const treeData = this.rwlData.get(tree)!;
+        const updatedTree = deleteYearRange(treeData, startYear, endYear, fill);
+        const hasChanged = treeData.size !== updatedTree.size || Array.from(treeData.entries()).some(
+            ([year, width]) => updatedTree.get(year) !== width,
+        );
+
+        if (!hasChanged) return;
+
+        const operation: RwlEditOperation = { type: "delete-year-range", tree, startYear, endYear, fill };
+        const beforeState = this.captureTreeLogState(tree);
+        this.saveToUndoStack(operation);
+        this.redoStack = [];
+
+        if (fill !== "missing") {
+            const rangeLength = endYear - startYear + 1;
+            const shift: DeleteShift = fill === "left" ? "right" : "left";
+            const deletionYear = fill === "left" ? endYear : startYear;
+            let markerWorking = new Map(treeData);
+
+            for (let index = 0; index < rangeLength; index += 1) {
+                const info = this.captureDeletionInfo(markerWorking, deletionYear, "direct", shift);
+                this.recordDeletionMarkerForDelete(tree, deletionYear, info, shift);
+                markerWorking = deleteYearWithMode(markerWorking, deletionYear, "direct", shift);
+            }
+        }
+
+        this.rwlData.set(tree, updatedTree);
+        this.appendOperationLog(operation, tree, beforeState);
         this.notifyChange();
     }
 

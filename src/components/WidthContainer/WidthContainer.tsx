@@ -1,11 +1,14 @@
 import { memo, ReactNode, RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { RwlSiteData } from '@/features/rwl';
-import { moveSeriesTailByOffset as previewMoveSeriesTailByOffset } from '@/features/rwl/edit';
+import {
+    deleteYearRange as previewDeleteYearRange,
+    moveSeriesTailByOffset as previewMoveSeriesTailByOffset,
+} from '@/features/rwl/edit';
 import { BayesianDateButton } from '@/features/rwl/components/BayesianDateButton';
 import type { BayesianDatingCandidate, BayesianMcmcDatingResult } from '@/features/rwl/bayesianDating';
 import type { CofechaPassReference } from '@/features/crossdating/reference';
-import type { DeleteMode, DeleteShift, DeletionMarkerInfo, RwlDeletionMarkers, RwlHistoryAnimation, RwlMoveConflictPolicy } from '@/features/rwl/edit';
+import type { DeleteMode, DeleteRangeFill, DeleteShift, DeletionMarkerInfo, RwlDeletionMarkers, RwlHistoryAnimation, RwlMoveConflictPolicy } from '@/features/rwl/edit';
 import { RollingNumber } from '@/components/RollingNumber/RollingNumber';
 import WidthGrid from './WidthGrid';
 import WidthGridContextMenu from './WidthGridContextMenu';
@@ -42,12 +45,14 @@ import {
     type ShiftedCellAnimation,
 } from "./widthGridAnimationPlan";
 import {
+    createManualMoveShiftTargets,
     createOlderSidePartialMovePlan,
     createWholeSeriesMovePlan,
     remapSelectionForMoveHistory,
     type ManualSeriesMovePlan,
     type WholeSeriesMoveDirection,
 } from "./manualMovePlan";
+import { createRangeDeleteAnimationPlan } from "./rangeDeleteAnimationPlan";
 import {
     getGridSelectAllRange,
     isGridSelectAllShortcut,
@@ -88,12 +93,22 @@ const CROSS_ROW_SOURCE_EXIT_EASING = "cubic-bezier(0.16, 1, 0.3, 1)";
 const ANIMATION_PLAN_CLEAR_PADDING_MS = 360;
 const DELETE_BURST_ANIMATION_MS = 820;
 const DELETE_BURST_SWEEP_MS = 420;
+const MAX_RANGE_DELETE_BURST_CELLS = 16;
 const SERIES_DELETE_ANIMATION_MS = 900;
 const COFECHA_JUMP_HIGHLIGHT_MS = 3200;
 
 const scaleAnimationMs = (durationMs: number, animationSpeed: number) => (
     Math.max(1, Math.round(durationMs / animationSpeed))
 );
+
+const sampleEvenly = <T,>(items: T[], maxItems: number): T[] => {
+    if (items.length <= maxItems) return items;
+    if (maxItems <= 1) return items.slice(0, Math.max(0, maxItems));
+
+    return Array.from({ length: maxItems }, (_, index) => (
+        items[Math.round(index * (items.length - 1) / (maxItems - 1))]
+    ));
+};
 
 type WidthHistoryAnimation = RwlHistoryAnimation & { id: number };
 
@@ -726,8 +741,8 @@ export type WidthContainerProps = {
     ) => void,
     /** Deletes one year and applies the selected redistribution mode. */
     onDeleteYearWithMode?: (tree: string, year: number, mode: DeleteMode, shift?: DeleteShift) => void,
-    /** Marks a year range as missing. */
-    onMarkYearRangeAsMissing?: (tree: string, startYear: number, endYear: number) => void,
+    /** Deletes a year range and optionally fills it from one side. */
+    onDeleteYearRange?: (tree: string, startYear: number, endYear: number, fill: DeleteRangeFill) => void,
     /** Restores one deletion marker stack entry. */
     onRestoreDeletion?: (tree: string, markerYear: number, index: number) => void,
     /** Deletes an entire series. */
@@ -924,7 +939,7 @@ function WidthContainer({
     onInsertMissingYearAtSide,
     onMoveSeriesTailByOffset,
     onDeleteYearWithMode,
-    onMarkYearRangeAsMissing,
+    onDeleteYearRange,
     onRestoreDeletion,
     onDeleteSeries,
     onEditAsText,
@@ -1525,7 +1540,7 @@ function WidthContainer({
         }
 
         if (historyAnimation.type === "move-selection") {
-            const { movedYears, gapYears } = getMoveAnimationYears(
+            const { gapYears } = getMoveAnimationYears(
                 historyAnimation.selectedStartYear,
                 historyAnimation.selectedEndYear,
                 historyAnimation.yearOffset,
@@ -1536,7 +1551,8 @@ function WidthContainer({
                 tree: historyAnimation.tree,
                 insertedYears: [],
                 shiftedYears: [],
-                movedYears,
+                // 撤销/重做移动时同样不再播放目标格上浮回落，只保留缺口等历史反馈。
+                movedYears: [],
                 gapYears,
                 overwrittenYears: [],
             });
@@ -2097,23 +2113,100 @@ function WidthContainer({
         handleInsertMissingYearAtSide(tree, year, side);
     }, [handleInsertMissingYearAtSide]);
 
-    const applyContextMenuMovePlan = useCallback((tree: string, plan: ManualSeriesMovePlan) => {
+    const applyContextMenuMovePlan = useCallback((
+        tree: string,
+        plan: ManualSeriesMovePlan,
+        animateAsDeleteShift = false,
+    ) => {
         if (!onMoveSeriesTailByOffset) {
             return;
         }
 
-        onMoveSeriesTailByOffset(
-            tree,
-            plan.selectedStartYear,
-            plan.selectedEndYear,
-            plan.yearOffset,
-        );
-        setSelection(normalizeSelection(
+        const targetSelection = normalizeSelection(
             tree,
             plan.selectedStartYear + plan.yearOffset,
             plan.selectedEndYear + plan.yearOffset,
-        ));
-    }, [onMoveSeriesTailByOffset]);
+        );
+
+        if (!animateAsDeleteShift || !shouldAnimateDeleteYear) {
+            onMoveSeriesTailByOffset(
+                tree,
+                plan.selectedStartYear,
+                plan.selectedEndYear,
+                plan.yearOffset,
+            );
+            setSelection(targetSelection);
+            return;
+        }
+
+        const treeData = visibleSite.get(tree);
+        const container = containerRef.current;
+        let shiftedYears: number[] = [];
+        let shiftedCells: ShiftedCellAnimation[] = [];
+        const animationSide: PlusSide = plan.yearOffset < 0 ? "right" : "left";
+
+        pendingInsertFlipRef.current = null;
+        clearInsertAnimations();
+        clearDeleteBurstAnimations();
+
+        if (treeData && container) {
+            const sourceElements = getTreeYearGridElements(container, tree);
+            const shiftTargets = createManualMoveShiftTargets(plan, sourceElements.keys());
+            const previewTree = previewMoveSeriesTailByOffset(
+                treeData,
+                plan.selectedStartYear,
+                plan.selectedEndYear,
+                plan.yearOffset,
+            );
+            const animation = buildShiftPlan({
+                shiftTargets,
+                sourceElements,
+                firstYearBefore: getFirstSeriesYear(treeData),
+                firstYearAfter: getFirstSeriesYear(previewTree),
+                shiftAnchorTargetYear: plan.yearOffset < 0
+                    ? targetSelection.endYear
+                    : targetSelection.startYear,
+                // 与单格删除保持一致，不因移动跨度增加而强制改走坐标直线。
+                useFlightShift: shouldUseFlightShift,
+            });
+            shiftedYears = animation.shiftedYears;
+            shiftedCells = animation.shiftedCells;
+            pendingInsertFlipRef.current = {
+                tree,
+                side: animationSide,
+                cells: animation.ghostCells,
+            };
+        }
+
+        // 复用单年删除的侧向收紧动画；局部移动不销毁宽度，因此不播放删除像素爆裂。
+        flushSync(() => {
+            onMoveSeriesTailByOffset(
+                tree,
+                plan.selectedStartYear,
+                plan.selectedEndYear,
+                plan.yearOffset,
+            );
+            setSelection(targetSelection);
+            showAnimationPlan({
+                tree,
+                insertSide: animationSide,
+                insertedYears: [],
+                shiftedYears,
+                shiftedCells,
+                movedYears: [],
+                gapYears: [],
+                overwrittenYears: [],
+            });
+        });
+    }, [
+        clearDeleteBurstAnimations,
+        clearInsertAnimations,
+        onMoveSeriesTailByOffset,
+        shouldAnimateDeleteYear,
+        shouldUseFlightShift,
+        showAnimationPlan,
+        visibleSite,
+    ]);
 
     const handleContextMenuMoveWholeSeries = useCallback((
         tree: string,
@@ -2149,7 +2242,7 @@ function WidthContainer({
             window.alert(`断点年份必须位于 ${range[0] + 1} 至 ${range[1]}；断点年及较新侧保持不动。`);
             return;
         }
-        applyContextMenuMovePlan(tree, plan);
+        applyContextMenuMovePlan(tree, plan, true);
     }, [applyContextMenuMovePlan, visibleSite]);
 
     const handleContextMenuDelete = useCallback((tree: string, year: number, mode: DeleteMode, shift: DeleteShift = "right") => {
@@ -2238,16 +2331,111 @@ function WidthContainer({
         });
     }, [animationSpeed, clearDeleteBurstAnimations, onDeleteYearWithMode, showAnimationPlan, visibleSite, shouldAnimateDeleteYear, shouldUseFlightShift]);
 
-    const handleContextMenuDeleteRange = useCallback((tree: string, startYear: number, endYear: number) => {
+    const handleContextMenuDeleteRange = useCallback((
+        tree: string,
+        startYear: number,
+        endYear: number,
+        fill: DeleteRangeFill,
+    ) => {
         const nextSelection = normalizeSelection(tree, startYear, endYear);
 
         pendingInsertFlipRef.current = null;
         clearInsertAnimations();
         clearDeleteBurstAnimations();
-        setAnimationPlan(null);
-        setSelection(nextSelection);
-        onMarkYearRangeAsMissing?.(tree, nextSelection.startYear, nextSelection.endYear);
-    }, [clearDeleteBurstAnimations, clearInsertAnimations, onMarkYearRangeAsMissing]);
+
+        if (!shouldAnimateDeleteYear) {
+            setAnimationPlan(null);
+            setSelection(nextSelection);
+            onDeleteYearRange?.(tree, nextSelection.startYear, nextSelection.endYear, fill);
+            return;
+        }
+
+        const treeData = visibleSite.get(tree);
+        const container = containerRef.current;
+        let animationSide: PlusSide | undefined;
+        let shiftedYears: number[] = [];
+        let shiftedCells: ShiftedCellAnimation[] = [];
+
+        if (treeData && container) {
+            const sourceElements = getTreeYearGridElements(container, tree);
+            const burstElements = Array.from(sourceElements.entries())
+                .filter(([year]) => (
+                    year >= nextSelection.startYear
+                    && year <= nextSelection.endYear
+                    && getRollingWidthValue(treeData.get(year)) !== undefined
+                ))
+                .sort(([yearA], [yearB]) => yearA - yearB)
+                .map(([, element]) => element);
+            deleteBurstCleanupRef.current = sampleEvenly(
+                burstElements,
+                MAX_RANGE_DELETE_BURST_CELLS,
+            ).map((element) => createDeletePixelBurst(container, element, animationSpeed))
+                .filter((cleanup): cleanup is () => void => cleanup !== null);
+
+            const rangeAnimation = createRangeDeleteAnimationPlan(
+                sourceElements.keys(),
+                nextSelection.startYear,
+                nextSelection.endYear,
+                fill,
+            );
+
+            if (rangeAnimation) {
+                const previewTree = previewDeleteYearRange(
+                    treeData,
+                    nextSelection.startYear,
+                    nextSelection.endYear,
+                    fill,
+                );
+                const animation = buildShiftPlan({
+                    shiftTargets: rangeAnimation.shiftTargets,
+                    sourceElements,
+                    firstYearBefore: getFirstSeriesYear(treeData),
+                    firstYearAfter: getFirstSeriesYear(previewTree),
+                    shiftAnchorTargetYear: rangeAnimation.anchorTargetYear,
+                    // 与单格删除保持一致：仅在用户明确选择 flight-shift 时才走坐标直线，
+                    // 其余模式沿网格逐格平移，并在跨行处复用行尾/行首衔接动画。
+                    useFlightShift: shouldUseFlightShift,
+                });
+                animationSide = rangeAnimation.animationSide;
+                shiftedYears = animation.shiftedYears;
+                shiftedCells = animation.shiftedCells;
+                pendingInsertFlipRef.current = {
+                    tree,
+                    side: animationSide,
+                    cells: animation.ghostCells,
+                };
+            }
+        }
+
+        flushSync(() => {
+            onDeleteYearRange?.(tree, nextSelection.startYear, nextSelection.endYear, fill);
+            setSelection(nextSelection);
+
+            if (animationSide) {
+                showAnimationPlan({
+                    tree,
+                    insertSide: animationSide,
+                    insertedYears: [],
+                    shiftedYears,
+                    shiftedCells,
+                    movedYears: [],
+                    gapYears: [],
+                    overwrittenYears: [],
+                });
+            } else {
+                setAnimationPlan(null);
+            }
+        });
+    }, [
+        animationSpeed,
+        clearDeleteBurstAnimations,
+        clearInsertAnimations,
+        onDeleteYearRange,
+        shouldAnimateDeleteYear,
+        shouldUseFlightShift,
+        showAnimationPlan,
+        visibleSite,
+    ]);
 
     const handleContextMenuEditAsText = useCallback((tree: string) => {
         setContextMenu(null);
@@ -2486,7 +2674,6 @@ function WidthContainer({
                 interaction.startYear + interaction.yearOffset,
                 interaction.endYear + interaction.yearOffset
             );
-            const movedYears = getYearRange(targetSelection.startYear, targetSelection.endYear);
             const gapYears = getYearRange(interaction.startYear, interaction.endYear).filter((year) => (
                 year < targetSelection.startYear || year > targetSelection.endYear
             ));
@@ -2522,7 +2709,8 @@ function WidthContainer({
                         tree: interaction.tree,
                         insertedYears: [],
                         shiftedYears: [],
-                        movedYears,
+                        // 拖动预览已经展示最终落点，松手时无需再做上浮回落；覆盖提示仍由 overwrittenYears 驱动。
+                        movedYears: [],
                         gapYears,
                         overwrittenYears,
                     });

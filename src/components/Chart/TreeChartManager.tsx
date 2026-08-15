@@ -88,7 +88,6 @@ type Props = {
   diagnosis?: CrossdatingDiagnosis
   diagnosisBatchResult?: DiagnosisBatchApplyResult | null
   onReferenceConfigChange?: (config: ReferenceSeriesConfig | null) => void
-  onResetReferenceToDynamic?: () => void
   onApplyDiagnosisCandidate?: (candidate: DiagnosisCandidateOperation) => void
   onApplyDiagnosisCandidateBatch?: (candidates: DiagnosisCandidateOperation[]) => void
   onApplyLocalSimulation?: (request: LocalSimulationApplyRequest) => void
@@ -115,7 +114,6 @@ function TreeChartManagerBase({
   diagnosis,
   onApplyLocalSimulation,
   onReferenceConfigChange,
-  onResetReferenceToDynamic: _onResetReferenceToDynamic,
   onInsertMissingYearAtSide,
   onDeleteYearWithMode,
   onMoveSeriesTailByOffset,
@@ -133,7 +131,6 @@ function TreeChartManagerBase({
   const [treeOffsets, setTreeOffsets] = useState<Map<string, number>>(new Map())
   const [zoomWindow, setZoomWindow] = useState<ChartZoomWindow>(null)
   const [search, setSearch] = useState('')
-  const [showDynamicReference, setShowDynamicReference] = useState(false)
   const [pickerHeight, setPickerHeight] = useState<number>(readStoredPickerHeight)
   const [isResizingPicker, setIsResizingPicker] = useState(false)
   const [localSimulation, setLocalSimulation] = useState<LocalCrossdatingSimulation | null>(null)
@@ -410,14 +407,9 @@ function TreeChartManagerBase({
     referenceConfig?.mode === 'dynamic' ? null : buildReferenceSeries(fullData, referenceConfig)
   ), [fullData, referenceConfig])
 
-  const dynamicReferenceSeries = useMemo(() => (
-    dynamicReferenceConfig?.mode === 'dynamic' ? buildReferenceSeries(fullData, dynamicReferenceConfig) : null
-  ), [dynamicReferenceConfig, fullData])
-
   const referenceSourceSet = useMemo(() => (
     new Set(referenceConfig?.selectedTrees ?? [])
   ), [referenceConfig])
-  const dynamicReferenceSummary = dynamicReferenceSeries?.summary
   const cofechaClassification = dynamicReferenceConfig?.classification
     ?? referenceConfig?.classification
   const cofechaFlaggedSourceSet = useMemo(() => new Set(
@@ -430,23 +422,6 @@ function TreeChartManagerBase({
     )
     return allTreeCodes.filter((treeCode) => anchorSet.has(normalizeCofechaSeriesId(treeCode)))
   }, [allTreeCodes, cofechaClassification])
-  const dynamicReferenceStatusLabel = useMemo(() => {
-    if (!dynamicReferenceConfig) return null
-    const pairwiseBootstrap = dynamicReferenceConfig.cofechaPassReference?.source === 'pairwise_bootstrap'
-    const total = dynamicReferenceConfig.classification?.allSeriesIds.length ?? allTreeCodes.length
-    const anchorCount = dynamicReferenceConfig.classification?.anchorPassIds.length ?? dynamicReferenceConfig.selectedTrees.length
-    const candidateCount = dynamicReferenceConfig.classification?.candidateFlaggedIds.length ?? 0
-    const stale = dynamicReferenceConfig.isStale ? ' stale' : ''
-    const invalid = dynamicReferenceConfig.unavailableReason ? ` ${dynamicReferenceConfig.unavailableReason}` : ''
-    const range = dynamicReferenceSummary?.startYear != null && dynamicReferenceSummary.endYear != null
-      ? ` ${dynamicReferenceSummary.startYear}-${dynamicReferenceSummary.endYear}`
-      : ''
-    const replication = dynamicReferenceSummary?.meanReplication != null
-      ? ` mean n=${dynamicReferenceSummary.meanReplication.toFixed(1)}`
-      : ''
-    const label = pairwiseBootstrap ? 'Pairwise-bootstrap 临时参考' : 'COFECHA-pass algorithm reference'
-    return `${label} ${anchorCount} / ${total}; candidates ${candidateCount}${range}${replication}${stale}${invalid}`
-  }, [allTreeCodes.length, dynamicReferenceConfig, dynamicReferenceSummary])
   const referenceSummary = referenceSeries?.summary
   const referenceStatusLabel = useMemo(() => {
     if (referenceConfig?.mode === 'dynamic') {
@@ -717,7 +692,7 @@ function TreeChartManagerBase({
     clearLocalSimulation()
   }
 
-  const chartNode = filteredData.size > 0 || referenceSeries || (showDynamicReference && dynamicReferenceSeries) ? (
+  const chartNode = filteredData.size > 0 || referenceSeries ? (
     <div style={{
       display: 'flex',
       flexDirection: 'column',
@@ -872,8 +847,6 @@ function TreeChartManagerBase({
           missingRingYears={missingRingYears}
           sampleSizeData={fullData}
           referenceSeries={referenceSeries}
-          dynamicReferenceSeries={dynamicReferenceSeries}
-          showDynamicReference={showDynamicReference}
           showPersistentTooltip={showPersistentTooltip}
           hoverSimulation={localSimulation && selectedLocalOption
             ? { ...localSimulation, bestOption: selectedLocalOption }
@@ -1037,67 +1010,6 @@ function TreeChartManagerBase({
           </span>
           {referenceSummary?.minReplication != null ? (
             <span style={{ color: '#6b7280' }}>最低 n={referenceSummary.minReplication}</span>
-          ) : null}
-        </div>
-      ) : null}
-
-      {dynamicReferenceStatusLabel ? (
-        <div style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: 6,
-          alignItems: 'center',
-          marginBottom: 7,
-          color: dynamicReferenceConfig?.isStale ? '#7a2e0e' : '#236344',
-          fontFamily: 'Segoe UI, system-ui, sans-serif',
-          fontSize: 11,
-          lineHeight: 1.35,
-        }}>
-          <span style={{
-            border: `1px solid ${dynamicReferenceConfig?.isStale ? '#f2c79a' : '#b7dec7'}`,
-            borderRadius: 10,
-            padding: '1px 8px',
-            background: dynamicReferenceConfig?.isStale ? '#fff3e4' : '#e9f6ef',
-            fontWeight: 650,
-          }}>
-            {dynamicReferenceStatusLabel}
-          </span>
-          {dynamicReferenceSeries ? (
-            <label
-              title="显示/隐藏 COFECHA-pass 动态参考序列"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '1px 8px',
-                border: '1px solid #b7dec7',
-                borderRadius: 10,
-                background: showDynamicReference ? '#e9f6ef' : '#fff',
-                color: '#236344',
-                fontFamily: 'Segoe UI, system-ui, sans-serif',
-                fontSize: 11,
-                fontWeight: 650,
-                lineHeight: 1.35,
-                cursor: 'pointer',
-                userSelect: 'none',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={showDynamicReference}
-                onChange={(event) => setShowDynamicReference(event.target.checked)}
-                style={{ width: 12, height: 12, margin: 0, accentColor: '#236344' }}
-              />
-              <span
-                aria-hidden="true"
-                style={{ width: 22, height: 0, borderTop: '2px dashed rgba(35, 99, 68, 0.9)' }}
-              />
-              <span>COFECHA-pass</span>
-            </label>
-          ) : null}
-          {dynamicReferenceSummary?.minReplication != null ? (
-            <span style={{ color: '#6b7280' }}>min n={dynamicReferenceSummary.minReplication}</span>
           ) : null}
         </div>
       ) : null}

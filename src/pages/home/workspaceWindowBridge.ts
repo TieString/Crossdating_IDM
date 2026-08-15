@@ -189,7 +189,6 @@ export type WorkspaceWindowCommand =
     | { kind: "line-chart"; type: "edit-as-text"; tree: string }
     | { kind: "line-chart"; type: "locate-cofecha"; tree: string }
     | { kind: "line-chart"; type: "set-reference"; config: ReferenceSeriesConfig | null }
-    | { kind: "line-chart"; type: "reset-reference-dynamic" }
     | { kind: "line-chart"; type: "apply-diagnosis-candidate"; candidate: DiagnosisCandidateOperation }
     | { kind: "line-chart"; type: "apply-diagnosis-candidates"; candidates: DiagnosisCandidateOperation[] }
     | { kind: "line-chart"; type: "apply-local-simulation"; request: LocalSimulationApplyRequest }

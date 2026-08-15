@@ -364,12 +364,12 @@ export default function Home() {
         fileName,
         getCurrentRwlText,
         handleDeleteSeries,
+        handleDeleteYearRange,
         handleDeleteYearWithMode,
         handleDeleteYearWithModeFromChart,
         handleInsertMissingYearAtSide,
         handleInsertMissingYearAtSideFromChart,
         handleLoad: handleWorkspaceLoad,
-        handleMarkYearRangeAsMissing,
         handleMoveSeriesTailByOffset,
         handleApplyDiagnosisCandidate,
         handleApplyDiagnosisCandidateBatch,
@@ -379,7 +379,6 @@ export default function Home() {
         handleApplyLocalSimulation,
         handleConfirmCurrentEventYear,
         handleReferenceConfigChange,
-        handleResetReferenceToDynamic,
         handleRedo,
         handleReplaceTreeData,
         handleResetToRawData,
@@ -525,7 +524,6 @@ export default function Home() {
         || selectedTreeEvents.length > 0
         || isEventDiagnosisRunning;
     const problemTabAvailable = Boolean(selectedProblemText);
-    const showProblemsPanel = problemTabAvailable || candidateTabAvailable;
     const activeProblemTab: "problems" | "candidates" = problemTab === "candidates" && candidateTabAvailable
         ? "candidates"
         : problemTab === "problems" && problemTabAvailable
@@ -543,12 +541,11 @@ export default function Home() {
         flex: `0 0 ${layout.mainSplitRatio * 100}%`,
         ...(!mainDividerCollapsed ? { maxWidth: `calc(100% - ${PANEL_DIVIDER_GUTTER_SIZE}px)` } : {}),
     };
-    const dataContainerStyle = showProblemsPanel
-        ? {
-            flex: `0 0 ${layout.leftBottomRatio * 100}%`,
-            ...(!leftBottomDividerCollapsed ? { maxHeight: `calc(100% - ${PANEL_DIVIDER_GUTTER_SIZE}px)` } : {}),
-        }
-        : undefined;
+    // 问题面板保持挂载，避免问题/建议状态变化时宽度网格区域突然伸缩。
+    const dataContainerStyle = {
+        flex: `0 0 ${layout.leftBottomRatio * 100}%`,
+        ...(!leftBottomDividerCollapsed ? { maxHeight: `calc(100% - ${PANEL_DIVIDER_GUTTER_SIZE}px)` } : {}),
+    };
     const shouldShowRightSkeleton = isFileLoading;
     const shouldShowWidthSkeleton = shouldShowWelcome || isFileLoading || (!hasChart && shouldShowProcessing);
     const shouldShowRightBottomPane = hasChart || shouldShowWelcome || shouldShowRightSkeleton;
@@ -933,8 +930,6 @@ export default function Home() {
                     handleJumpToCofechaPart6(command.tree);
                 } else if (command.type === "set-reference") {
                     handleReferenceConfigChange(command.config);
-                } else if (command.type === "reset-reference-dynamic") {
-                    handleResetReferenceToDynamic();
                 } else if (command.type === "apply-diagnosis-candidate") {
                     handleApplyDiagnosisCandidate(command.candidate);
                 } else if (command.type === "apply-diagnosis-candidates") {
@@ -971,7 +966,6 @@ export default function Home() {
         handleInsertMissingYearAtSideFromChart,
         handleMoveSeriesTailByOffset,
         handleReferenceConfigChange,
-        handleResetReferenceToDynamic,
         handleRunCofechaValidation,
         handleResetToRawData,
         handleUndoOperationLogEntry,
@@ -1496,7 +1490,7 @@ export default function Home() {
                                                     onInsertMissingYearAtSide={handleInsertMissingYearAtSide}
                                                     onMoveSeriesTailByOffset={handleMoveSeriesTailByOffset}
                                                     onDeleteYearWithMode={handleDeleteYearWithMode}
-                                                    onMarkYearRangeAsMissing={handleMarkYearRangeAsMissing}
+                                                    onDeleteYearRange={handleDeleteYearRange}
                                                     onRestoreDeletion={handleRestoreDeletion}
                                                     onDeleteSeries={handleDeleteSeries}
                                                     onEditAsText={handleOpenRawEditorForTree}
@@ -1518,8 +1512,7 @@ export default function Home() {
                                     )}
                                 </FloatingScrollArea>
 
-                                {showProblemsPanel ? (
-                                    <>
+                                <>
                                         <div
                                             role="separator"
                                             aria-orientation="horizontal"
@@ -1602,8 +1595,7 @@ export default function Home() {
                                                 )}
                                             </FloatingScrollArea>
                                         </div>
-                                    </>
-                                ) : null}
+                                </>
                             </div>
                         </div>
                     )}
@@ -1789,7 +1781,6 @@ export default function Home() {
                                                     diagnosis={crossdatingDiagnosis}
                                                     diagnosisBatchResult={diagnosisBatchResult}
                                                     onReferenceConfigChange={handleReferenceConfigChange}
-                                                    onResetReferenceToDynamic={handleResetReferenceToDynamic}
                                                     onApplyDiagnosisCandidate={handleApplyDiagnosisCandidate}
                                                     onApplyDiagnosisCandidateBatch={handleApplyDiagnosisCandidateBatch}
                                                     onApplyLocalSimulation={handleApplyLocalSimulation}

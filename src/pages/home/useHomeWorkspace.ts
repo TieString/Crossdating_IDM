@@ -35,7 +35,7 @@ import {
     RwlMoveConflictError,
     registerChangeYearWidth,
 } from "@/features/rwl/edit";
-import type { DeleteMode, DeleteShift, RwlDeletionMarkers, RwlHistoryAnimation, RwlHistoryStatus, RwlMoveConflictPolicy, RwlOperationLogEntry } from "@/features/rwl/edit";
+import type { DeleteMode, DeleteRangeFill, DeleteShift, RwlDeletionMarkers, RwlHistoryAnimation, RwlHistoryStatus, RwlMoveConflictPolicy, RwlOperationLogEntry } from "@/features/rwl/edit";
 import type { RwlSiteData } from "@/features/rwl/types";
 import { runCofecha } from "@/services/cofecha/runner";
 import { readRwlFile, saveFile } from "@/services/fs/io";
@@ -1530,8 +1530,13 @@ export function useHomeWorkspace() {
         rwlEditorRef.current.deleteYearWithMode(tree, nextYear, mode, shift);
     }, []);
 
-    const handleMarkYearRangeAsMissing = useCallback((tree: string, startYear: number, endYear: number) => {
-        rwlEditorRef.current.markYearRangeAsMissing(tree, startYear, endYear);
+    const handleDeleteYearRange = useCallback((
+        tree: string,
+        startYear: number,
+        endYear: number,
+        fill: DeleteRangeFill,
+    ) => {
+        rwlEditorRef.current.deleteYearRange(tree, startYear, endYear, fill);
     }, []);
 
     const handleRestoreDeletion = useCallback((tree: string, markerYear: number, index: number) => {
@@ -1551,23 +1556,6 @@ export function useHomeWorkspace() {
             ...previous,
             createReferenceOperationLogEntry(manualOnly, referenceOperationCounterRef.current, filePathRef.current),
         ].slice(-MAX_REFERENCE_OPERATION_LOG_ENTRIES));
-    }, []);
-
-    const handleResetReferenceToDynamic = useCallback(() => {
-        const currentData = rwlEditorRef.current.getData();
-        const currentHash = hashRwlSiteData(currentData);
-        const latestDynamic = latestDynamicReferenceConfigRef.current;
-        const nextDynamic = latestDynamic
-            ? {
-                ...latestDynamic,
-                isStale: latestDynamic.isStale || latestDynamic.rwlHash !== currentHash,
-            }
-            : null;
-
-        setDynamicReferenceConfig(nextDynamic);
-        if (nextDynamic?.mode === "dynamic") {
-            latestDynamicReferenceConfigRef.current = nextDynamic;
-        }
     }, []);
 
     const handleReplaceTreeData = useCallback((tree: string, data: Map<number, number | null>) => {
@@ -2331,7 +2319,7 @@ export function useHomeWorkspace() {
         handleInsertMissingYearAtSide,
         handleInsertMissingYearAtSideFromChart,
         handleLoad,
-        handleMarkYearRangeAsMissing,
+        handleDeleteYearRange,
         handleMoveSeriesTailByOffset,
         handleApplyDiagnosisCandidate,
         handleApplyDiagnosisCandidateBatch,
@@ -2341,7 +2329,6 @@ export function useHomeWorkspace() {
         handleApplyLocalSimulation,
         handleConfirmCurrentEventYear: confirmCurrentEventYear,
         handleReferenceConfigChange,
-        handleResetReferenceToDynamic,
         handleRedo,
         handleReplaceTreeData,
         handleResetToRawData,

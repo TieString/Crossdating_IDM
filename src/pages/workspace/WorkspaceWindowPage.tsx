@@ -204,9 +204,6 @@ export default function WorkspaceWindowPage() {
             onReferenceConfigChange={(config) => {
                 void sendCommand({ kind: "line-chart", type: "set-reference", config });
             }}
-            onResetReferenceToDynamic={() => {
-                void sendCommand({ kind: "line-chart", type: "reset-reference-dynamic" });
-            }}
             onApplyDiagnosisCandidate={(candidate) => {
                 void sendCommand({ kind: "line-chart", type: "apply-diagnosis-candidate", candidate });
             }}

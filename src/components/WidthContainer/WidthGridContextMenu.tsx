@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { DeleteMode, DeleteShift, MissingInsertSide } from "@/features/rwl/edit";
+import type { DeleteMode, DeleteRangeFill, DeleteShift, MissingInsertSide } from "@/features/rwl/edit";
 import type { WholeSeriesMoveDirection } from "./manualMovePlan";
+import {
+    loadWidthGridContextMenuPreferences,
+    saveWidthGridContextMenuPreferences,
+    type WidthGridContextMenuPreferences,
+} from "./widthGridContextMenuPreferences";
+import { getWheelSteppedIntegerValue, type IntegerWheelStepOptions } from "./numberInputWheel";
 import style from "./WidthGridContextMenu.module.css";
 
 type DropdownKind = "insert" | "delete" | "shift" | "whole-move" | null;
@@ -16,7 +22,7 @@ export interface WidthGridContextMenuProps {
     defaultDeleteEndYear?: number;
     onInsert: (tree: string, year: number, side: MissingInsertSide) => void;
     onDelete: (tree: string, year: number, mode: DeleteMode, shift: DeleteShift) => void;
-    onDeleteRange?: (tree: string, startYear: number, endYear: number) => void;
+    onDeleteRange?: (tree: string, startYear: number, endYear: number, fill: DeleteRangeFill) => void;
     onMoveWholeSeries: (tree: string, direction: WholeSeriesMoveDirection, yearCount: number) => void;
     onMoveOlderSide: (tree: string, firstFixedYear: number, yearCount: number) => void;
     onDeleteSeries?: (tree: string) => void;
@@ -47,6 +53,12 @@ const DELETE_OPTIONS: Array<{ mode: DeleteMode; label: string; chip: string }> =
 const SHIFT_OPTIONS: Array<{ shift: DeleteShift; label: string; chip: string }> = [
     { shift: "right", label: "左侧向右补位", chip: "左侧" },
     { shift: "left", label: "右侧向左补位", chip: "右侧" },
+];
+
+const RANGE_DELETE_FILL_OPTIONS: Array<{ fill: DeleteRangeFill; label: string; chip: string }> = [
+    { fill: "missing", label: "保持缺失", chip: "缺失" },
+    { fill: "left", label: "左侧补位", chip: "左侧" },
+    { fill: "right", label: "右侧补位", chip: "右侧" },
 ];
 
 const WHOLE_MOVE_DIRECTION_OPTIONS: Array<{ direction: WholeSeriesMoveDirection; label: string; chip: string }> = [
@@ -101,11 +113,11 @@ export default function WidthGridContextMenu({
     const [deleteYear, setDeleteYear] = useState<string>(defaultYear.toString());
     const [deleteStartYear, setDeleteStartYear] = useState<string>(resolvedDefaultDeleteStartYear.toString());
     const [deleteEndYear, setDeleteEndYear] = useState<string>(resolvedDefaultDeleteEndYear.toString());
-    const [insertSide, setInsertSide] = useState<MissingInsertSide>("right");
-    const [deleteMode, setDeleteMode] = useState<DeleteMode>("direct");
-    const [deleteShift, setDeleteShift] = useState<DeleteShift>("right");
+    const [preferences, setPreferences] = useState<WidthGridContextMenuPreferences>(
+        loadWidthGridContextMenuPreferences,
+    );
+    const { insertSide, deleteMode, deleteShift, rangeDeleteFill, wholeMoveDirection } = preferences;
     const [wholeMoveYears, setWholeMoveYears] = useState("1");
-    const [wholeMoveDirection, setWholeMoveDirection] = useState<WholeSeriesMoveDirection>("older");
     const [partialFirstFixedYear, setPartialFirstFixedYear] = useState(defaultYear.toString());
     const [partialMoveYears, setPartialMoveYears] = useState("1");
     const [dropdown, setDropdown] = useState<DropdownKind>(null);
@@ -129,21 +141,44 @@ export default function WidthGridContextMenu({
     const wholeMoveChipRef = useRef<HTMLButtonElement | null>(null);
     const dropdownRef = useRef<HTMLDivElement | null>(null);
 
+    // React may delegate wheel as a passive event. Register a local non-passive
+    // listener so stepping an input never scrolls the workspace behind the menu.
+    useEffect(() => {
+        if (!open) return;
+
+        const menuNode = menuRef.current;
+        if (!menuNode) return;
+
+        const preventInputWheelScroll = (event: WheelEvent) => {
+            if (event.target instanceof HTMLInputElement) {
+                event.preventDefault();
+            }
+        };
+
+        menuNode.addEventListener("wheel", preventInputWheelScroll, { passive: false });
+        return () => menuNode.removeEventListener("wheel", preventInputWheelScroll);
+    }, [open]);
+
+    const updatePreferences = useCallback((update: Partial<WidthGridContextMenuPreferences>) => {
+        setPreferences((previous) => {
+            const next = { ...previous, ...update };
+            saveWidthGridContextMenuPreferences(next);
+            return next;
+        });
+    }, []);
+
     useEffect(() => {
         if (!open) {
             return;
         }
+        setPreferences(loadWidthGridContextMenuPreferences());
         setInsertYear(defaultYear.toString());
         setDeleteYear(defaultYear.toString());
         setDeleteStartYear(resolvedDefaultDeleteStartYear.toString());
         setDeleteEndYear(resolvedDefaultDeleteEndYear.toString());
         setWholeMoveYears("1");
-        setWholeMoveDirection("older");
         setPartialFirstFixedYear(defaultYear.toString());
         setPartialMoveYears("1");
-        if (isRangeDelete) {
-            setDeleteMode("direct");
-        }
         setDropdown(null);
     }, [open, defaultYear, resolvedDefaultDeleteStartYear, resolvedDefaultDeleteEndYear, isRangeDelete, tree, x, y]);
 
@@ -151,8 +186,7 @@ export default function WidthGridContextMenu({
         if (!open || !isRangeDelete) {
             return;
         }
-        setDeleteMode("direct");
-        setDropdown((previous) => (previous === "delete" || previous === "shift" ? null : previous));
+        setDropdown((previous) => (previous === "delete" ? null : previous));
     }, [open, isRangeDelete]);
 
     useLayoutEffect(() => {
@@ -239,7 +273,7 @@ export default function WidthGridContextMenu({
                 ? previous
                 : { left, top, alignRight, flipY }
         ));
-    }, [open, dropdown, menuPosition.left, menuPosition.top, insertSide, deleteMode, deleteShift, wholeMoveDirection]);
+    }, [open, dropdown, menuPosition.left, menuPosition.top, insertSide, deleteMode, deleteShift, rangeDeleteFill, wholeMoveDirection]);
 
     useEffect(() => {
         if (!open) {
@@ -332,7 +366,11 @@ export default function WidthGridContextMenu({
             ? directDeleteChipLabel
             : DELETE_OPTIONS.find((option) => option.mode === deleteMode)?.chip ?? ""
     ), [deleteMode, directDeleteChipLabel, isRangeDelete]);
-    const shiftChipLabel = useMemo(() => SHIFT_OPTIONS.find((option) => option.shift === deleteShift)?.chip ?? "", [deleteShift]);
+    const shiftChipLabel = useMemo(() => (
+        isRangeDelete
+            ? RANGE_DELETE_FILL_OPTIONS.find((option) => option.fill === rangeDeleteFill)?.chip ?? ""
+            : SHIFT_OPTIONS.find((option) => option.shift === deleteShift)?.chip ?? ""
+    ), [deleteShift, isRangeDelete, rangeDeleteFill]);
     const wholeMoveChipLabel = useMemo(() => (
         WHOLE_MOVE_DIRECTION_OPTIONS.find((option) => option.direction === wholeMoveDirection)?.chip ?? ""
     ), [wholeMoveDirection]);
@@ -383,6 +421,22 @@ export default function WidthGridContextMenu({
         previewYear(parseYear(nextValue));
     }, [previewYear]);
 
+    const handleInputWheel = useCallback((
+        event: React.WheelEvent<HTMLInputElement>,
+        currentValue: string,
+        setValue: (nextValue: string) => void,
+        options: IntegerWheelStepOptions,
+        onStepped?: (nextValue: number) => void,
+    ) => {
+        const nextValue = getWheelSteppedIntegerValue(currentValue, event.deltaY, options);
+        if (nextValue === null) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        setValue(nextValue.toString());
+        onStepped?.(nextValue);
+    }, []);
+
     const handleInsertActivate = useCallback(() => {
         if (parsedInsertYear === null) {
             return;
@@ -396,7 +450,7 @@ export default function WidthGridContextMenu({
             if (parsedDeleteRange === null || !onDeleteRange) {
                 return;
             }
-            onDeleteRange(tree, parsedDeleteRange.startYear, parsedDeleteRange.endYear);
+            onDeleteRange(tree, parsedDeleteRange.startYear, parsedDeleteRange.endYear, rangeDeleteFill);
             onClose();
             return;
         }
@@ -406,7 +460,7 @@ export default function WidthGridContextMenu({
         }
         onDelete(tree, parsedDeleteYear, deleteMode, deleteShift);
         onClose();
-    }, [deleteMode, deleteShift, isRangeDelete, onClose, onDelete, onDeleteRange, parsedDeleteRange, parsedDeleteYear, tree]);
+    }, [deleteMode, deleteShift, isRangeDelete, onClose, onDelete, onDeleteRange, parsedDeleteRange, parsedDeleteYear, rangeDeleteFill, tree]);
 
     const handleWholeMoveActivate = useCallback(() => {
         if (parsedWholeMoveYears === null) {
@@ -519,6 +573,13 @@ export default function WidthGridContextMenu({
                         onChange={handleInsertYearChange}
                         onFocus={() => previewYear(parsedInsertYear)}
                         onKeyDown={handleInsertKeyDown}
+                        onWheel={(event) => handleInputWheel(
+                            event,
+                            insertYear,
+                            setInsertYear,
+                            { fallback: defaultYear },
+                            previewYear,
+                        )}
                         onClick={(event) => event.stopPropagation()}
                         onPointerDown={(event) => event.stopPropagation()}
                         spellCheck={false}
@@ -545,7 +606,7 @@ export default function WidthGridContextMenu({
                 {/* <div className={style["menu-separator"]} role="separator" /> */}
 
                 <div
-                    className={`${style["menu-row"]} ${dropdown === "delete" ? style["menu-row-active"] : ""}`}
+                    className={`${style["menu-row"]} ${dropdown === "delete" || dropdown === "shift" ? style["menu-row-active"] : ""}`}
                     role="menuitem"
                     onClick={(event) => {
                         const target = event.target as HTMLElement;
@@ -572,6 +633,13 @@ export default function WidthGridContextMenu({
                                 onChange={handleDeleteStartYearChange}
                                 onFocus={() => previewYearRange(parsedDeleteStartYear, parsedDeleteEndYear)}
                                 onKeyDown={handleDeleteKeyDown}
+                                onWheel={(event) => handleInputWheel(
+                                    event,
+                                    deleteStartYear,
+                                    setDeleteStartYear,
+                                    { fallback: resolvedDefaultDeleteStartYear },
+                                    (nextYear) => previewYearRange(nextYear, parsedDeleteEndYear),
+                                )}
                                 onClick={(event) => event.stopPropagation()}
                                 onPointerDown={(event) => event.stopPropagation()}
                                 spellCheck={false}
@@ -586,6 +654,13 @@ export default function WidthGridContextMenu({
                                 onChange={handleDeleteEndYearChange}
                                 onFocus={() => previewYearRange(parsedDeleteStartYear, parsedDeleteEndYear)}
                                 onKeyDown={handleDeleteKeyDown}
+                                onWheel={(event) => handleInputWheel(
+                                    event,
+                                    deleteEndYear,
+                                    setDeleteEndYear,
+                                    { fallback: resolvedDefaultDeleteEndYear },
+                                    (nextYear) => previewYearRange(parsedDeleteStartYear, nextYear),
+                                )}
                                 onClick={(event) => event.stopPropagation()}
                                 onPointerDown={(event) => event.stopPropagation()}
                                 spellCheck={false}
@@ -602,6 +677,13 @@ export default function WidthGridContextMenu({
                                 onChange={handleDeleteYearChange}
                                 onFocus={() => previewYear(parsedDeleteYear)}
                                 onKeyDown={handleDeleteKeyDown}
+                                onWheel={(event) => handleInputWheel(
+                                    event,
+                                    deleteYear,
+                                    setDeleteYear,
+                                    { fallback: defaultYear },
+                                    previewYear,
+                                )}
                                 onClick={(event) => event.stopPropagation()}
                                 onPointerDown={(event) => event.stopPropagation()}
                                 spellCheck={false}
@@ -636,23 +718,17 @@ export default function WidthGridContextMenu({
                         <button
                             ref={shiftChipRef}
                             type="button"
-                            className={`${style["menu-row-mode-chip"]} ${dropdown === "shift" && !isRangeDelete ? style["menu-row-mode-chip-open"] : ""} ${isRangeDelete ? style["menu-row-mode-chip-disabled"] : ""}`}
-                            aria-haspopup={isRangeDelete ? undefined : "menu"}
-                            aria-expanded={isRangeDelete ? undefined : dropdown === "shift"}
-                            disabled={isRangeDelete}
-                            title="删除后的填补方向"
+                            className={`${style["menu-row-mode-chip"]} ${dropdown === "shift" ? style["menu-row-mode-chip-open"] : ""}`}
+                            aria-haspopup="menu"
+                            aria-expanded={dropdown === "shift"}
+                            title={isRangeDelete ? "删除范围后的补位" : "删除后的填补方向"}
                             onClick={(event) => {
                                 event.stopPropagation();
-                                if (isRangeDelete) {
-                                    return;
-                                }
                                 toggleDropdown("shift");
                             }}
                         >
                             <span>{shiftChipLabel}</span>
-                            {isRangeDelete ? null : (
-                                <span className={style["menu-row-mode-chip-arrow"]} aria-hidden="true">▾</span>
-                            )}
+                            <span className={style["menu-row-mode-chip-arrow"]} aria-hidden="true">▾</span>
                         </button>
                     </span>
                 </div>
@@ -682,6 +758,12 @@ export default function WidthGridContextMenu({
                         value={wholeMoveYears}
                         onChange={(event) => setWholeMoveYears(event.target.value)}
                         onKeyDown={handleWholeMoveKeyDown}
+                        onWheel={(event) => handleInputWheel(
+                            event,
+                            wholeMoveYears,
+                            setWholeMoveYears,
+                            { min: 1, fallback: 0 },
+                        )}
                         onClick={(event) => event.stopPropagation()}
                         onPointerDown={(event) => event.stopPropagation()}
                         inputMode="numeric"
@@ -729,6 +811,13 @@ export default function WidthGridContextMenu({
                         onChange={handlePartialFirstFixedYearChange}
                         onFocus={() => previewYear(parsedPartialFirstFixedYear)}
                         onKeyDown={handlePartialMoveKeyDown}
+                        onWheel={(event) => handleInputWheel(
+                            event,
+                            partialFirstFixedYear,
+                            setPartialFirstFixedYear,
+                            { fallback: defaultYear },
+                            previewYear,
+                        )}
                         onClick={(event) => event.stopPropagation()}
                         onPointerDown={(event) => event.stopPropagation()}
                         spellCheck={false}
@@ -744,6 +833,12 @@ export default function WidthGridContextMenu({
                         value={partialMoveYears}
                         onChange={(event) => setPartialMoveYears(event.target.value)}
                         onKeyDown={handlePartialMoveKeyDown}
+                        onWheel={(event) => handleInputWheel(
+                            event,
+                            partialMoveYears,
+                            setPartialMoveYears,
+                            { min: 1, fallback: 0 },
+                        )}
                         onClick={(event) => event.stopPropagation()}
                         onPointerDown={(event) => event.stopPropagation()}
                         inputMode="numeric"
@@ -874,7 +969,7 @@ export default function WidthGridContextMenu({
                             role="menuitemradio"
                             aria-checked={insertSide === option.side}
                             onClick={() => {
-                                setInsertSide(option.side);
+                                updatePreferences({ insertSide: option.side });
                                 setDropdown(null);
                             }}
                         >
@@ -901,7 +996,7 @@ export default function WidthGridContextMenu({
                             role="menuitemradio"
                             aria-checked={deleteMode === option.mode}
                             onClick={() => {
-                                setDeleteMode(option.mode);
+                                updatePreferences({ deleteMode: option.mode });
                                 setDropdown(null);
                             }}
                         >
@@ -911,7 +1006,7 @@ export default function WidthGridContextMenu({
                 </div>
             ) : null}
 
-            {dropdown === "shift" && !isRangeDelete ? (
+            {dropdown === "shift" ? (
                 <div
                     ref={dropdownRef}
                     className={style["dropdown"]}
@@ -921,20 +1016,35 @@ export default function WidthGridContextMenu({
                     onClick={stopPortalPropagation}
                     onContextMenu={(event) => event.preventDefault()}
                 >
-                    {SHIFT_OPTIONS.map((option) => (
-                        <div
-                            key={option.shift}
-                            className={`${style["dropdown-item"]} ${deleteShift === option.shift ? style["dropdown-item-checked"] : ""}`}
-                            role="menuitemradio"
-                            aria-checked={deleteShift === option.shift}
-                            onClick={() => {
-                                setDeleteShift(option.shift);
-                                setDropdown(null);
-                            }}
-                        >
-                            <span className={style["dropdown-item-label"]}>{option.label}</span>
-                        </div>
-                    ))}
+                    {isRangeDelete
+                        ? RANGE_DELETE_FILL_OPTIONS.map((option) => (
+                            <div
+                                key={option.fill}
+                                className={`${style["dropdown-item"]} ${rangeDeleteFill === option.fill ? style["dropdown-item-checked"] : ""}`}
+                                role="menuitemradio"
+                                aria-checked={rangeDeleteFill === option.fill}
+                                onClick={() => {
+                                    updatePreferences({ rangeDeleteFill: option.fill });
+                                    setDropdown(null);
+                                }}
+                            >
+                                <span className={style["dropdown-item-label"]}>{option.label}</span>
+                            </div>
+                        ))
+                        : SHIFT_OPTIONS.map((option) => (
+                            <div
+                                key={option.shift}
+                                className={`${style["dropdown-item"]} ${deleteShift === option.shift ? style["dropdown-item-checked"] : ""}`}
+                                role="menuitemradio"
+                                aria-checked={deleteShift === option.shift}
+                                onClick={() => {
+                                    updatePreferences({ deleteShift: option.shift });
+                                    setDropdown(null);
+                                }}
+                            >
+                                <span className={style["dropdown-item-label"]}>{option.label}</span>
+                            </div>
+                        ))}
                 </div>
             ) : null}
 
@@ -955,7 +1065,7 @@ export default function WidthGridContextMenu({
                             role="menuitemradio"
                             aria-checked={wholeMoveDirection === option.direction}
                             onClick={() => {
-                                setWholeMoveDirection(option.direction);
+                                updatePreferences({ wholeMoveDirection: option.direction });
                                 setDropdown(null);
                             }}
                         >

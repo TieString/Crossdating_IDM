@@ -238,7 +238,7 @@ function AboutSection() {
             <Row label="版本"><span className={styles["about-text"]}>1.2.0</span></Row>
             <Row label="技术栈"><span className={styles["about-text"]}>Tauri · React · TypeScript</span></Row>
             <Row label="COFECHA"><span className={styles["about-text"]}>International Tree-Ring Data Bank</span></Row>
-            <Row label="开发团队" align="top">
+            <Row label="研发团队" align="top">
                 <span className={styles["about-text"]}>
                     何志浩、张同文、张瑞波<br />
                     靳春寒、喻树龙、尚华明、秦莉
