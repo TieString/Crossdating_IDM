@@ -48,6 +48,11 @@ import {
     type ManualSeriesMovePlan,
     type WholeSeriesMoveDirection,
 } from "./manualMovePlan";
+import {
+    getGridSelectAllRange,
+    isGridSelectAllShortcut,
+    resolveGridSelectAllTree,
+} from "./gridSelectAll";
 
 interface YearCell {
     year: number;
@@ -960,6 +965,7 @@ function WidthContainer({
     const handledEditIdRef = useRef<number | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
     const interactionRef = useRef<GridInteraction | null>(null);
+    const lastInteractedTreeRef = useRef<string | null>(null);
     const animationPlanIdRef = useRef(0);
     const handledHistoryAnimationIdRef = useRef<number | null>(null);
     const pendingInsertFlipRef = useRef<PendingInsertFlip | null>(null);
@@ -1983,6 +1989,41 @@ function WidthContainer({
         setIsDraggingSelection(false);
     }, []);
 
+    useEffect(() => {
+        const handleSelectAllKeyDown = (event: KeyboardEvent) => {
+            if (!isGridSelectAllShortcut(event)) {
+                return;
+            }
+
+            const target = event.target;
+            if (
+                target instanceof Element
+                && target.closest("input, textarea, select, [contenteditable='true'], [contenteditable='plaintext-only'], [role='textbox']")
+            ) {
+                return;
+            }
+
+            const tree = resolveGridSelectAllTree(selected, site, lastInteractedTreeRef.current);
+            const nextSelection = tree
+                ? getGridSelectAllRange(tree, site.get(tree), stopMarker.value)
+                : null;
+            if (!nextSelection) {
+                return;
+            }
+
+            event.preventDefault();
+            interactionRef.current = null;
+            setDragPreview(null);
+            setDragYearOffset(0);
+            setIsDraggingSelection(false);
+            setContextMenu(null);
+            setSelection(nextSelection);
+        };
+
+        window.addEventListener("keydown", handleSelectAllKeyDown);
+        return () => window.removeEventListener("keydown", handleSelectAllKeyDown);
+    }, [selected, site]);
+
     const handleContainerPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
         const target = event.target;
 
@@ -2009,6 +2050,8 @@ function WidthContainer({
         if (!tree || rawYear === undefined) {
             return;
         }
+
+        lastInteractedTreeRef.current = tree;
 
         const year = Number(rawYear);
         if (!Number.isFinite(year)) {
@@ -2323,6 +2366,8 @@ function WidthContainer({
     }, [onYearClick]);
 
     const handleGridPointerDown = useCallback((event: React.PointerEvent<HTMLSpanElement>, tree: string, year: number) => {
+        lastInteractedTreeRef.current = tree;
+
         if (event.button !== 0) {
             return;
         }
