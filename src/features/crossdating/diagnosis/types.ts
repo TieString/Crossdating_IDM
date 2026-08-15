@@ -50,6 +50,7 @@ export type DiagnosisEvidenceClaim =
     | "continuous_gap_consensus"
     | "whole_global_lag"
     | "whole_terminal_baseline"
+    | "whole_path_fixed_baseline"
     | "bounded_lag_state_path";
 
 export type DiagnosisPresenceEvidenceEntry = {

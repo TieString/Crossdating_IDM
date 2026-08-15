@@ -9123,6 +9123,7 @@ export const makeDiagnosisEvents = (
                     ? null
                     : measureWholeSeriesStateConsistency(diagnosis, shiftYears);
                 return claims.has("whole_terminal_baseline")
+                    || claims.has("whole_path_fixed_baseline")
                     || claims.has("whole_global_lag")
                     || (
                         stateConsistency !== null
@@ -9139,8 +9140,18 @@ export const makeDiagnosisEvents = (
                     );
             },
         );
+        const fixedFrameWholeHypotheses = independentlySupportedWholeHypotheses.filter(
+            (event) => {
+                const claims = evidenceClaimsFor(event);
+                return claims.has("whole_terminal_baseline")
+                    || claims.has("whole_path_fixed_baseline");
+            },
+        );
+        const anchoredWholeHypotheses = fixedFrameWholeHypotheses.length > 0
+            ? fixedFrameWholeHypotheses
+            : independentlySupportedWholeHypotheses;
         const supportedWholeLags = [...new Set(
-            independentlySupportedWholeHypotheses.flatMap((event) => (
+            anchoredWholeHypotheses.flatMap((event) => (
                 event.shiftYears === undefined ? [] : [event.shiftYears]
             )),
         )];
@@ -10194,16 +10205,25 @@ export const makeDiagnosisEvents = (
             }
             return cachedSequentialFalse;
         };
+        const boundedWholeShiftHasAnchor = (event: DiagnosisEvent): boolean => {
+            const shiftYears = wholeSeriesMoveShiftYears(event);
+            if (shiftYears === null) return false;
+            return supportedWholeLags.length > 0
+                ? supportedWholeLags.includes(shiftYears)
+                : shiftYears === globallySupportedTerminalLag;
+        };
         const boundedSelectedWholeBaseline = selectedBoundedResult
             && selectedBoundedResult.path.wholeLagGain >= 8
             ? boundedPathEvents.find((event) => (
                 event.eventType === "wholeSeriesMove"
+                && boundedWholeShiftHasAnchor(event)
             )) ?? null
             : null;
         const boundedRawWholeBaseline = rawBoundedResult
             && rawBoundedResult.path.wholeLagGain >= 8
             ? rawBoundedResult.events.find((event) => (
                 event.eventType === "wholeSeriesMove"
+                && boundedWholeShiftHasAnchor(event)
             )) ?? null
             : null;
         const boundedWholeBaselines = [

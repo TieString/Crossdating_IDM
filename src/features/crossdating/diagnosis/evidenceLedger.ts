@@ -103,6 +103,13 @@ const operationClaims = (event: DiagnosisEvent): DiagnosisEvidenceClaim[] => {
         && (event.shiftYears ?? 0) !== 0) {
         claims.push("whole_terminal_baseline");
     }
+    if (event.eventType === "wholeSeriesMove"
+        && tokens.has("whole_baseline_source=path_fixed_side_lag")
+        && tokens.has("candidate_hard_gate_passed")
+        && (numberFromNotes(event, ["path_fixed_side_newer_context_years="]) ?? 0) >= 50
+        && (event.shiftYears ?? 0) !== 0) {
+        claims.push("whole_path_fixed_baseline");
+    }
     return claims;
 };
 

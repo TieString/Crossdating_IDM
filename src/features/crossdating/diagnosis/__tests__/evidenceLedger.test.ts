@@ -124,6 +124,26 @@ describe("diagnosis evidence ledger", () => {
         expect(evidenceClaimsFor(endpoint)).not.toContain("endpoint_unit_resolution");
     });
 
+    it("records a whole baseline resolved by a long fixed-side path", () => {
+        const whole = event();
+        whole.eventType = "wholeSeriesMove";
+        whole.shiftYears = 50;
+        whole.evidence.notes.push(
+            "candidate_hard_gate_passed",
+            "whole_baseline_source=path_fixed_side_lag",
+            "path_fixed_side_newer_context_years=170",
+        );
+
+        expect(evidenceClaimsFor(whole)).toContain("whole_path_fixed_baseline");
+
+        whole.evidence.notes = whole.evidence.notes.map((note) => (
+            note === "path_fixed_side_newer_context_years=170"
+                ? "path_fixed_side_newer_context_years=49"
+                : note
+        ));
+        expect(evidenceClaimsFor(whole)).not.toContain("whole_path_fixed_baseline");
+    });
+
     it("is append-only and idempotent across repeated normalization", () => {
         const once = withEvidenceLedger(event());
         const twice = withEvidenceLedger(once);

@@ -193,6 +193,7 @@ const claimWeight: Record<DiagnosisEvidenceClaim, number> = {
     continuous_gap_consensus: 0.9,
     whole_global_lag: 0.6,
     whole_terminal_baseline: 0.9,
+    whole_path_fixed_baseline: 0.9,
     bounded_lag_state_path: 1.2,
 };
 
