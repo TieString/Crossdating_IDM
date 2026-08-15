@@ -1,4 +1,4 @@
-import type { SeriesCoreDiagnosis } from "./types";
+import type { DiagnosisEvent, SeriesCoreDiagnosis } from "./types";
 
 export type WholeSeriesStateConsistency = {
     segmentCount: number;
@@ -142,3 +142,23 @@ export const supportsDominantWholeSeriesBaseline = (
         evidence.olderEdgeSupportFraction,
         evidence.newerEdgeSupportFraction,
     ) >= 0.9;
+
+/** A complete same-direction unit chain explains a local cumulative lag without a whole shift. */
+export const completeUnitTransitionChainExplainsWholeShift = (
+    events: readonly DiagnosisEvent[],
+    shiftYears: number,
+): boolean => {
+    if (!Number.isInteger(shiftYears) || Math.abs(shiftYears) < 2) return false;
+    const direction = Math.sign(shiftYears);
+    const eventType = direction > 0 ? "falseRing" : "missingRing";
+    const transitions = new Set(events.filter((event) => (
+        event.eventType === eventType
+        && event.evidence.lagBefore !== null
+        && event.evidence.lagAfter !== null
+        && event.evidence.lagAfter === event.evidence.lagBefore - direction
+    )).map((event) => `${event.evidence.lagBefore}:${event.evidence.lagAfter}`));
+    for (let lag = shiftYears; lag !== 0; lag -= direction) {
+        if (!transitions.has(`${lag}:${lag - direction}`)) return false;
+    }
+    return true;
+};

@@ -111,6 +111,7 @@ import {
 } from "./eventOperationRecovery";
 import { wholeSeriesMoveShiftYears } from "./wholeSeriesMoveSemantics";
 import {
+    completeUnitTransitionChainExplainsWholeShift,
     measureWholeSeriesStateConsistency,
     supportsDominantWholeSeriesBaseline,
     supportsNonTerminalWholeSeriesCandidate,
@@ -10252,7 +10253,14 @@ export const makeDiagnosisEvents = (
                 const boundedPathBaseline = boundedWholeBaselines.find((entry) => (
                     entry.event === event
                 ));
+                const completeUnitPathAlias = boundedPathBaseline !== undefined
+                    && stateConsistency.newerEdgeSupportFraction === 0
+                    && completeUnitTransitionChainExplainsWholeShift(
+                        passRawPathEvents.events,
+                        shiftYears,
+                    );
                 const boundedPathSupport = boundedPathBaseline !== undefined
+                    && !completeUnitPathAlias
                     && supportsNonTerminalWholeSeriesCandidate(stateConsistency);
                 return supportsDominantWholeSeriesBaseline(stateConsistency)
                     || boundedPathSupport

@@ -2,14 +2,44 @@ import { describe, expect, it } from "vitest";
 import { selectWholeSeriesCandidate } from "../events";
 import type {
     DiagnosisCandidateOperation,
+    DiagnosisEvent,
     SegmentDiagnosis,
     SeriesCoreDiagnosis,
 } from "../types";
 import {
+    completeUnitTransitionChainExplainsWholeShift,
     measureWholeSeriesStateConsistency,
     supportsDominantWholeSeriesBaseline,
     supportsNonTerminalWholeSeriesCandidate,
 } from "../wholeSeriesStateConsistency";
+
+const unitTransition = (
+    eventType: "missingRing" | "falseRing",
+    lagBefore: number,
+    lagAfter: number,
+): DiagnosisEvent => ({
+    id: `${eventType}-${lagBefore}-${lagAfter}`,
+    seriesId: "T",
+    eventType,
+    startYear: 1900,
+    endYear: 1906,
+    rankedYears: [{ year: 1903, rank: 1, score: 1, evidenceTags: [] }],
+    confidenceLevel: "high",
+    evidence: {
+        algorithmSources: ["bounded_complete_lag_path"],
+        score: 1,
+        scoreMargin: 1,
+        baselineCorrelation: 0.2,
+        correctedCorrelation: 0.5,
+        correlationGain: 0.3,
+        lagBefore,
+        lagAfter,
+        samplePairs: 50,
+        candidateIds: [],
+        notes: [],
+    },
+    alternativeTypes: [],
+});
 
 const segment = (
     startYear: number,
@@ -60,6 +90,23 @@ const diagnosis = (lags: number[], globalLag: number) => ({
 });
 
 describe("whole-series state consistency", () => {
+    it("recognizes a complete cumulative false-ring chain returning to zero", () => {
+        expect(completeUnitTransitionChainExplainsWholeShift([
+            unitTransition("falseRing", 1, 0),
+            unitTransition("falseRing", 2, 1),
+        ], 2)).toBe(true);
+    });
+
+    it("does not treat an incomplete or opposing unit path as a whole alias", () => {
+        expect(completeUnitTransitionChainExplainsWholeShift([
+            unitTransition("falseRing", 2, 1),
+        ], 2)).toBe(false);
+        expect(completeUnitTransitionChainExplainsWholeShift([
+            unitTransition("missingRing", -2, -1),
+            unitTransition("missingRing", -1, 0),
+        ], 2)).toBe(false);
+    });
+
     it("recognizes a shift supported across both chronology ends", () => {
         const evidence = measureWholeSeriesStateConsistency(
             diagnosis([-4, -4, -4, -4], -4),
