@@ -1002,6 +1002,40 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("does not shrink a low-concentration 13-year terminal window to a weak interior candidate", () => {
+        const terminal = event("terminal-false", "falseRing", 1812, 1824, 1818);
+        terminal.evidence.algorithmSources = [
+            "candidate_anchored_positive_staircase",
+            "stable_terminal_unit_staircase_frontier",
+        ];
+        terminal.evidence.notes = [
+            "terminal_unit_staircase_depth=2",
+            "terminal_unit_staircase_aggregate_shift=2",
+            "terminal_unit_staircase_boundary_year=1818",
+            "terminal_unit_staircase_maximum_year_drift=2",
+            "terminal_unit_staircase_stronger_gain=81",
+            "terminal_unit_staircase_weaker_gain=83",
+        ];
+        const candidate = event("weak-interior", "falseRing", 1814, 1820, 1817, -12.6);
+        candidate.evidence.algorithmSources = ["candidate_ranking"];
+        candidate.evidence.notes = ["candidate_hard_gate_passed"];
+        candidate.evidence.lagBefore = 2;
+        candidate.evidence.lagAfter = 1;
+        candidate.evidence.scoreMargin = 0.13;
+        candidate.evidence.correlationGain = 0.03;
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", candidate),
+            { ...checkpoint("final", terminal), authority: "selected" },
+        ]);
+
+        expect(decision.event).toMatchObject({
+            id: "terminal-false",
+            startYear: 1812,
+            endYear: 1824,
+        });
+    });
+
     it("uses a decisive equivalent partial hypothesis to locate a missing staircase", () => {
         const terminal = event("terminal-missing", "missingRing", 1814, 1822, 1818);
         terminal.evidence.algorithmSources = [
@@ -1404,6 +1438,50 @@ describe("joint event adjudicator", () => {
                 startYear: 1973,
                 endYear: 1985,
             },
+        });
+    });
+
+    it("does not let an unrelated newer bounded operation enter a corroborated mode", () => {
+        const selected = event("selected-false", "falseRing", 1689, 1697, 1693);
+        selected.evidence.notes = ["candidate_hard_gate_passed"];
+        const boundedFalse = event("bounded-false", "falseRing", 1687, 1699, 1693);
+        boundedFalse.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        boundedFalse.evidence.notes = ["bounded_path_complete_hypothesis=true"];
+        boundedFalse.evidence.locationEvidence = [{
+            source: "bounded_complete_lag_path",
+            startYear: 1687,
+            endYear: 1699,
+            topYear: 1693,
+            referenceCount: 20,
+            concentration: 0.75,
+            remoteMargin: 2,
+            calibrated: false,
+        }];
+        const remoteMissing = event("remote-missing", "missingRing", 1821, 1833, 1827);
+        remoteMissing.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        remoteMissing.evidence.notes = ["bounded_path_complete_hypothesis=true"];
+        remoteMissing.evidence.locationEvidence = [{
+            source: "bounded_complete_lag_path",
+            startYear: 1821,
+            endYear: 1833,
+            topYear: 1827,
+            referenceCount: 20,
+            concentration: 0.81,
+            remoteMargin: 9,
+            calibrated: false,
+        }];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: selected },
+            { stage: "final", authority: "supplemental", event: boundedFalse },
+            { stage: "final", authority: "supplemental", event: remoteMissing },
+        ]);
+
+        expect(decision.event).toMatchObject({
+            eventType: "falseRing",
+            startYear: 1687,
+            endYear: 1699,
+            rankedYears: [{ year: 1693 }],
         });
     });
 

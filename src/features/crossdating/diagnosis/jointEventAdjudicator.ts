@@ -688,6 +688,12 @@ const projectTerminalUnitCompatibleLocation = (
     if (!support) return terminal;
 
     const location = support.checkpoint.event;
+    const weakInteriorCandidate = support.kind === "exact_unit_frontier"
+        && eventWidth(terminal) === 13
+        && location.startYear >= terminal.startYear
+        && location.endYear <= terminal.endYear
+        && location.evidence.scoreMargin < 0.25;
+    if (weakInteriorCandidate) return terminal;
     const terminalBoundaryYear = noteNumber(
         terminal,
         "terminal_unit_staircase_boundary_year=",
@@ -1693,8 +1699,20 @@ const finalFrontierClusters = (
             })
         ));
         if (corroboratedSelected.length > 0) {
+            const corroboratingBounded = boundedPathClusters.filter((bounded) => (
+                corroboratedSelected.some((selected) => (
+                    sameOperation(
+                        representative(selected).event,
+                        representative(bounded).event,
+                    )
+                    && sameLocationMode(
+                        representative(selected).event,
+                        representative(bounded).event,
+                    )
+                ))
+            ));
             return [[...new Set([
-                ...boundedPathClusters,
+                ...corroboratingBounded,
                 ...corroboratedSelected,
             ])].sort((left, right) => (
                 (topYear(representative(right).event) ?? Number.NEGATIVE_INFINITY)
