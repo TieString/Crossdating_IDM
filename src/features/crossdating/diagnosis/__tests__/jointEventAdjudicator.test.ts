@@ -954,6 +954,54 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("uses the highest-ranked older exact frontier on a flat terminal plateau", () => {
+        const terminal = event("terminal-missing", "missingRing", 1802, 1810, 1806);
+        terminal.evidence.algorithmSources = [
+            "candidate_anchored_negative_staircase",
+            "stable_terminal_unit_staircase_frontier",
+        ];
+        terminal.evidence.notes = [
+            "terminal_unit_staircase_depth=4",
+            "terminal_unit_staircase_aggregate_shift=-4",
+            "terminal_unit_staircase_boundary_year=1806",
+            "terminal_unit_staircase_maximum_year_drift=2",
+            "terminal_unit_staircase_stronger_gain=17",
+            "terminal_unit_staircase_weaker_gain=21",
+        ];
+        const older = event("older-exact", "missingRing", 1798, 1804, 1801, 4.06);
+        older.evidence.algorithmSources = ["candidate_ranking"];
+        older.evidence.notes = ["candidate_hard_gate_passed"];
+        older.evidence.lagBefore = -4;
+        older.evidence.lagAfter = -3;
+        older.evidence.scoreMargin = 0;
+        older.evidence.correlationGain = 0.01;
+        const newer = event("newer-exact", "missingRing", 1805, 1811, 1808, 2.12);
+        newer.evidence.algorithmSources = ["candidate_ranking"];
+        newer.evidence.notes = ["candidate_hard_gate_passed"];
+        newer.evidence.lagBefore = -4;
+        newer.evidence.lagAfter = -3;
+        newer.evidence.scoreMargin = 4.44;
+        newer.evidence.correlationGain = 0.012;
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", older),
+            checkpoint("candidate", newer),
+            { ...checkpoint("final", terminal), authority: "selected" },
+        ]);
+
+        expect(decision.event).toMatchObject({
+            eventType: "missingRing",
+            startYear: 1798,
+            endYear: 1806,
+            evidence: {
+                notes: expect.arrayContaining([
+                    "terminal_unit_location_projected_top_year=1801",
+                    "terminal_unit_location_boundary_union=1798-1806",
+                ]),
+            },
+        });
+    });
+
     it("uses a decisive equivalent partial hypothesis to locate a missing staircase", () => {
         const terminal = event("terminal-missing", "missingRing", 1814, 1822, 1818);
         terminal.evidence.algorithmSources = [

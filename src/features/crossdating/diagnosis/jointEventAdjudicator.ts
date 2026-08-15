@@ -587,6 +587,8 @@ const exactTerminalUnitCandidate = (
 ): boolean => {
     const event = checkpoint.event;
     const direction = Math.sign(aggregateShiftYears);
+    const eventTop = topYear(event);
+    const terminalTop = topYear(terminal);
     return checkpoint.stage === "candidate"
         && checkpoint.authority !== "supplemental"
         && sameOperation(event, terminal)
@@ -596,7 +598,14 @@ const exactTerminalUnitCandidate = (
         && event.evidence.lagBefore === aggregateShiftYears
         && event.evidence.lagAfter === aggregateShiftYears - direction
         && (event.evidence.correlationGain ?? 0) > 0
-        && event.evidence.scoreMargin >= 0.25;
+        && (
+            event.evidence.scoreMargin >= 0.25
+            || (
+                eventTop !== null
+                && terminalTop !== null
+                && eventTop < terminalTop
+            )
+        );
 };
 
 const workflowEquivalentTerminalPartial = (
@@ -654,9 +663,10 @@ const projectTerminalUnitCompatibleLocation = (
         terminal,
         aggregateShiftYears,
     )).sort((left, right) => (
-        right.event.evidence.scoreMargin - left.event.evidence.scoreMargin
+        right.event.evidence.score - left.event.evidence.score
         || (right.event.evidence.correlationGain ?? 0)
             - (left.event.evidence.correlationGain ?? 0)
+        || right.event.evidence.scoreMargin - left.event.evidence.scoreMargin
         || (topYear(right.event) ?? Number.NEGATIVE_INFINITY)
             - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
     ))[0];
