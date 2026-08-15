@@ -7,6 +7,10 @@
  */
 import type { RwlSiteData } from "@/features/rwl/types";
 import { scoreBoundaryLocalCounterfactual } from "./boundaryLocalCounterfactual";
+import {
+    preservesStrongBoundedPathMode,
+    strongBoundedPathLocation,
+} from "./locationAuthority";
 import { scoreNegativePartialMoveBoundaries } from "./partialBreakpointRefinement";
 import { scorePerReferenceCounterfactualEvidence } from "./perReferenceCounterfactualEvidence";
 import type {
@@ -23,6 +27,20 @@ export type StablePartialLocationConsensus = {
     centerYear: number;
 };
 
+export type StablePartialRankEdgeShift = -2 | 0 | 2;
+
+export const selectStablePartialRankEdgeShift = (
+    rankedYears: readonly DiagnosisRankedYear[],
+): StablePartialRankEdgeShift => {
+    if (rankedYears.length !== 13) return 0;
+    const chronological = [...rankedYears].sort((left, right) => left.year - right.year);
+    const olderRank = Math.min(...chronological.slice(0, 2).map(({ rank }) => rank));
+    const newerRank = Math.min(...chronological.slice(-2).map(({ rank }) => rank));
+    if (olderRank <= 3 && newerRank >= 7) return -2;
+    if (newerRank <= 3 && olderRank >= 7) return 2;
+    return 0;
+};
+
 const medianYear = (years: readonly number[]): number => {
     const ordered = [...years].sort((left, right) => left - right);
     const middle = Math.floor(ordered.length / 2);
@@ -30,6 +48,25 @@ const medianYear = (years: readonly number[]): number => {
         ? ordered[middle]!
         : Math.round((ordered[middle - 1]! + ordered[middle]!) / 2);
 };
+
+const noteNumber = (event: DiagnosisEvent, prefix: string): number | null => {
+    const note = [...event.evidence.notes].reverse().find((value) => (
+        value.startsWith(prefix)
+    ));
+    const parsed = Number(note?.slice(prefix.length));
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
+export const allowsNewerUnitChainLocationConsensus = (
+    event: DiagnosisEvent,
+    proposedStartYear: number,
+): boolean => (
+    (noteNumber(event, "stable_bounded_path_transition_count=") ?? 0) >= 2
+    && event.evidence.notes.includes(
+        "stable_bounded_path_all_transitions_partial=false",
+    )
+    && proposedStartYear > event.endYear
+);
 
 export const selectStablePartialLocationConsensus = (
     pathYear: number,
@@ -120,11 +157,29 @@ export const refineStablePartialMoveLocation = (
         || event.shiftYears >= -1
         // The local scorers compare the fixed side with lag zero. A non-zero whole baseline
         // needs its own baseline-aware location views and must retain the upstream window.
-        || fixedSideBaselineLag !== 0
         || !event.evidence.algorithmSources.includes(
             "stable_multiscale_bounded_path_frontier",
         )
     ) return event;
+
+    // The stable frontier has already combined the path and the exhaustive operation-year
+    // scan. A third location model may add evidence, but must not re-center that joint result.
+    if (event.evidence.notes.some((note) => (
+        note.startsWith("stable_bounded_path_operation_year=")
+    ))) {
+        return {
+            ...event,
+            evidence: {
+                ...event.evidence,
+                notes: Array.from(new Set([
+                    ...event.evidence.notes,
+                    "stable_partial_location_retained=joint_operation_year_calibration",
+                ])),
+            },
+        };
+    }
+    // The local scorers below assume that the fixed side is at lag zero.
+    if (fixedSideBaselineLag !== 0) return event;
 
     const localCorrelationYear = bestLocalYear(
         scoreNegativePartialMoveBoundaries(diagnosis, event.shiftYears),
@@ -165,6 +220,20 @@ export const refineStablePartialMoveLocation = (
         boundedReferenceVoteYear,
     );
     const { startYear, endYear } = boundedWindow(consensus.centerYear, diagnosis);
+    if (!preservesStrongBoundedPathMode(event, startYear, endYear)
+        && !allowsNewerUnitChainLocationConsensus(event, startYear)) {
+        return {
+            ...event,
+            evidence: {
+                ...event.evidence,
+                notes: Array.from(new Set([
+                    ...event.evidence.notes,
+                    "stable_partial_location_rejected=detached_from_strong_bounded_path",
+                    `stable_partial_location_rejected_window=${startYear}-${endYear}`,
+                ])),
+            },
+        };
+    }
     return {
         ...event,
         id: `${event.id}-location-consensus`,
@@ -217,6 +286,60 @@ export const refineStablePartialMoveLocation = (
                     ? []
                     : [`stable_partial_location_clipped_reference_year=${referenceVoteYear}`]),
                 `stable_partial_location_center=${consensus.centerYear}`,
+            ])),
+        },
+    };
+};
+
+export const addStablePartialRankEdgeGuard = (
+    event: DiagnosisEvent,
+    diagnosis: Pick<SeriesCoreDiagnosis, "targetRange">,
+): DiagnosisEvent => {
+    if (event.eventType !== "partialMove"
+        || strongBoundedPathLocation(event) === null) return event;
+    const shift = selectStablePartialRankEdgeShift(event.rankedYears);
+    if (shift === 0) return event;
+    const width = event.endYear - event.startYear + 1;
+    let startYear = event.startYear + shift;
+    startYear = Math.max(
+        diagnosis.targetRange.startYear,
+        Math.min(startYear, diagnosis.targetRange.endYear - width + 1),
+    );
+    const endYear = startYear + width - 1;
+    if ((startYear === event.startYear && endYear === event.endYear)
+        || !preservesStrongBoundedPathMode(event, startYear, endYear)) return event;
+    const prior = new Map(event.rankedYears.map((row) => [row.year, row]));
+    const minimumScore = Math.min(...event.rankedYears.map(({ score }) => score));
+    const rankedYears = Array.from({ length: width }, (_, index) => {
+        const year = startYear + index;
+        const existing = prior.get(year);
+        return existing ? { ...existing } : {
+            year,
+            rank: 0,
+            score: minimumScore - 1,
+            evidenceTags: ["stable_partial_rank_edge_guard"],
+        };
+    }).sort((left, right) => (
+        right.score - left.score || right.year - left.year
+    )).map((row, index) => ({ ...row, rank: index + 1 }));
+    return {
+        ...event,
+        id: `${event.id}-rank-edge-${shift > 0 ? "newer" : "older"}`,
+        startYear,
+        endYear,
+        rankedYears,
+        evidence: {
+            ...event.evidence,
+            algorithmSources: Array.from(new Set([
+                ...event.evidence.algorithmSources,
+                "stable_partial_rank_edge_guard",
+            ])).sort(),
+            notes: Array.from(new Set([
+                ...event.evidence.notes,
+                `stable_partial_rank_edge_shift=${shift}`,
+                `stable_partial_rank_edge_previous_window=${
+                    event.startYear
+                }-${event.endYear}`,
             ])),
         },
     };

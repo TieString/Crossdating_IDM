@@ -397,6 +397,43 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("keeps a strong selected bounded-path window over an earlier survival plateau", () => {
+        const persisted = event("persisted", "missingRing", 1852, 1858, 1853);
+        const bounded = event("selected-bounded", "missingRing", 1856, 1868, 1862);
+        bounded.evidence.algorithmSources = [
+            "bounded_complete_lag_path",
+            "stable_multiscale_bounded_path_frontier",
+        ];
+        bounded.evidence.locationEvidence = [{
+            source: "bounded_complete_lag_path",
+            startYear: 1856,
+            endYear: 1868,
+            topYear: 1862,
+            referenceCount: 28,
+            concentration: 0.55,
+            remoteMargin: 0.61,
+            calibrated: false,
+        }];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("detected", persisted),
+            checkpoint("fused", persisted),
+            checkpoint("retained", persisted),
+            checkpoint("displayed", persisted),
+            { stage: "final", authority: "selected", event: bounded },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "final",
+            event: {
+                id: "selected-bounded",
+                startYear: 1856,
+                endYear: 1868,
+            },
+        });
+    });
+
     it("keeps a selected completed unit frontier over an older displayed unit window", () => {
         const displayed = event("displayed-unit", "missingRing", 1821, 1829, 1824);
         displayed.evidence.algorithmSources = ["reference_core_pair_voting"];
@@ -692,6 +729,69 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("uses the local transition that lands on a persisted whole-series baseline", () => {
+        const whole = event("whole", "wholeSeriesMove", 866, 1135, 1135);
+        whole.shiftYears = 4;
+        whole.rankedYears = [];
+        whole.evidence.lagBefore = 4;
+        whole.evidence.lagAfter = 4;
+        const zeroTerminal = event("zero-terminal", "falseRing", 1022, 1034, 1028);
+        zeroTerminal.evidence.algorithmSources = [
+            "candidate_anchored_positive_staircase",
+            "positive_unit_staircase_direction",
+            "sequential_false_staircase_head",
+        ];
+        zeroTerminal.evidence.notes = [
+            "sequential_false_path_start_lag=4",
+            "sequential_false_transition_count=4",
+            "sequential_false_candidate_depth=4",
+            "sequential_false_gain_over_direct=14",
+            "sequential_false_direction_master_margin=0.1",
+        ];
+        const baselineCompatible = event(
+            "baseline-compatible",
+            "falseRing",
+            1029,
+            1041,
+            1035,
+        );
+        baselineCompatible.evidence.lagBefore = 5;
+        baselineCompatible.evidence.lagAfter = 4;
+        baselineCompatible.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        baselineCompatible.evidence.notes = ["bounded_path_complete_hypothesis=true"];
+        baselineCompatible.evidence.locationEvidence = [{
+            source: "bounded_complete_lag_path",
+            startYear: 1029,
+            endYear: 1041,
+            topYear: 1035,
+            referenceCount: 45,
+            concentration: 0.83,
+            remoteMargin: 9,
+            calibrated: false,
+        }];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", whole),
+            checkpoint("detected", whole),
+            checkpoint("fused", whole),
+            checkpoint("retained", whole),
+            checkpoint("displayed", whole),
+            { stage: "final", authority: "selected", event: zeroTerminal },
+            { stage: "final", authority: "supplemental", event: baselineCompatible },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "final",
+            event: {
+                id: "baseline-compatible",
+                eventType: "falseRing",
+                startYear: 1029,
+                endYear: 1041,
+            },
+        });
+    });
+
     it("uses an overlapping independently localized window for a terminal unit operation", () => {
         const final = event("terminal-false", "falseRing", 1851, 1863, 1857);
         final.evidence.algorithmSources = [
@@ -776,6 +876,45 @@ describe("joint event adjudicator", () => {
                 algorithmSources: expect.arrayContaining([
                     "stable_terminal_unit_staircase_frontier",
                     "terminal_unit_exact_unit_frontier_location",
+                ]),
+            },
+        });
+    });
+
+    it("keeps the terminal boundary inside an exact-frontier location window", () => {
+        const terminal = event("terminal-false", "falseRing", 1785, 1793, 1789);
+        terminal.evidence.algorithmSources = [
+            "candidate_anchored_positive_staircase",
+            "stable_terminal_unit_staircase_frontier",
+        ];
+        terminal.evidence.notes = [
+            "terminal_unit_staircase_depth=3",
+            "terminal_unit_staircase_aggregate_shift=3",
+            "terminal_unit_staircase_boundary_year=1789",
+            "terminal_unit_staircase_maximum_year_drift=2",
+            "terminal_unit_staircase_stronger_gain=5",
+            "terminal_unit_staircase_weaker_gain=3",
+        ];
+        const candidate = event("exact-frontier", "falseRing", 1790, 1796, 1793);
+        candidate.evidence.algorithmSources = ["candidate_ranking"];
+        candidate.evidence.notes = ["candidate_hard_gate_passed"];
+        candidate.evidence.lagBefore = 3;
+        candidate.evidence.lagAfter = 2;
+        candidate.evidence.scoreMargin = 0.41;
+        candidate.evidence.correlationGain = 0.04;
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", candidate),
+            { ...checkpoint("final", terminal), authority: "selected" },
+        ]);
+
+        expect(decision.event).toMatchObject({
+            eventType: "falseRing",
+            startYear: 1789,
+            endYear: 1797,
+            evidence: {
+                notes: expect.arrayContaining([
+                    "terminal_unit_location_boundary_union=1789-1797",
                 ]),
             },
         });

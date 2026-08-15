@@ -70,7 +70,14 @@ import {
 import { locateDenseLagProfileEvents } from "./denseLagProfile";
 import { locateSegmentedLagEvents } from "./segmentedEventPath";
 import { refinePartialMoveWithRepeatedBlock } from "./partialBreakpointRefinement";
-import { refineStablePartialMoveLocation } from "./stablePartialLocationConsensus";
+import {
+    addStablePartialRankEdgeGuard,
+    refineStablePartialMoveLocation,
+} from "./stablePartialLocationConsensus";
+import {
+    projectUnitLocationFromIndependentConsensus,
+    strongBoundedPathLocation,
+} from "./locationAuthority";
 import { refineUnitEventWithIndependentBreakpoints } from "./pairedCoreBreakpoint";
 import { diagnoseSeriesCore } from "./segments";
 import {
@@ -5449,6 +5456,77 @@ export const selectStableBoundedLagPathFrontier = (
     };
 };
 
+/**
+ * Keeps a regularized direct partial when a permissive path only decomposes that same state
+ * change and the independently scored operation supports the aggregate amplitude. This is a
+ * model-complexity decision; it does not merge unrelated transitions or invent a new location.
+ */
+export const selectOperationAnchoredRegularizedAggregatePartialFrontier = (
+    regularizedPath: BoundedLagStateEventSet | null,
+    permissivePath: BoundedLagStateEventSet | null,
+    operation: JointCounterfactualOperationScore | null,
+    baselineLag = 0,
+    maximumAmplitudeDrift = 1,
+): StableBoundedLagPathFrontier | null => {
+    if (!regularizedPath || !permissivePath || operation?.eventType !== "partialMove") {
+        return null;
+    }
+    const regularized = exactCompleteTransitionChain(regularizedPath, baselineLag, 14);
+    const permissive = exactCompleteTransitionChain(permissivePath, baselineLag, 14);
+    const direct = regularized?.[regularized.length - 1];
+    if (!regularized || !permissive || !direct
+        || direct.event.eventType !== "partialMove"
+        || Math.abs(direct.shiftYears - operation.shiftYears) > maximumAmplitudeDrift) {
+        return null;
+    }
+    const firstIndex = permissive.findIndex((transition) => (
+        transition.event.eventType === "partialMove"
+        && transition.event.evidence.lagBefore === direct.event.evidence.lagBefore
+        && Math.abs(transition.topYear - direct.topYear) <= 2
+        && Math.sign(transition.shiftYears) === Math.sign(direct.shiftYears)
+    ));
+    if (firstIndex < 0) return null;
+    let aggregateShiftYears = 0;
+    let previousLagAfter = direct.event.evidence.lagBefore;
+    let decomposedCount = 0;
+    for (let index = firstIndex; index < permissive.length; index += 1) {
+        const transition = permissive[index];
+        if (transition.event.eventType !== "partialMove"
+            || transition.event.evidence.lagBefore !== previousLagAfter
+            || Math.sign(transition.shiftYears) !== Math.sign(direct.shiftYears)) break;
+        aggregateShiftYears += transition.shiftYears;
+        previousLagAfter = transition.event.evidence.lagAfter;
+        decomposedCount += 1;
+        if (previousLagAfter !== direct.event.evidence.lagAfter) continue;
+        if (decomposedCount < 2 || aggregateShiftYears !== direct.shiftYears) return null;
+        const stable = selectStableBoundedLagPathFrontier(
+            regularizedPath,
+            regularizedPath,
+            baselineLag,
+        );
+        if (!stable || stable.event.id !== direct.event.id) return null;
+        const event = {
+            ...stable.event,
+            evidence: {
+                ...stable.event.evidence,
+                algorithmSources: Array.from(new Set([
+                    ...stable.event.evidence.algorithmSources,
+                    "operation_anchored_regularized_aggregate",
+                ])).sort(),
+                notes: Array.from(new Set([
+                    ...stable.event.evidence.notes,
+                    "stable_bounded_path_preserved_regularized_aggregate=true",
+                    `regularized_aggregate_shift=${direct.shiftYears}`,
+                    `regularized_aggregate_operation_shift=${operation.shiftYears}`,
+                    `regularized_aggregate_decomposed_count=${decomposedCount}`,
+                ])),
+            },
+        };
+        return { ...stable, event, newestEvent: event };
+    }
+    return null;
+};
+
 export const calibratedTerminalUnitStaircaseWindowWidth = (
     frontier: StableTerminalUnitStaircaseFrontier,
 ): 9 | 13 => {
@@ -9685,6 +9763,14 @@ export const makeDiagnosisEvents = (
                     parsimoniousStablePathMaxSegments,
                 )
             : null;
+        const operationAnchoredRegularizedAggregate = trustedPartialOperation
+            ? selectOperationAnchoredRegularizedAggregatePartialFrontier(
+                    rawPenaltyOneStablePath,
+                    rawPenaltyHalfStablePath,
+                    trustedPartialOperation,
+                    terminalBaselineIsUnsupportedAlias ? 0 : terminalBaselineLag,
+                )
+            : null;
         const parsimoniousStrongMultiscaleBoundedFrontier =
             selectStableBoundedLagPathFrontier(
                 rawPenaltyOneStablePath,
@@ -9787,6 +9873,7 @@ export const makeDiagnosisEvents = (
             : [];
         const stableMultiscaleBoundedFrontier = decomposedWholeAliasFrontier
             ?? stableStrongFrontier
+            ?? operationAnchoredRegularizedAggregate
             ?? aggregateAnchoredRegularizedPartialFrontier
             ?? (weakUnitPulseFrontier
                 && (
@@ -9874,10 +9961,24 @@ export const makeDiagnosisEvents = (
             supplementalFinalHypotheses: DiagnosisEvent[] = [],
             includeBoundedPathHypotheses = true,
         ): DiagnosisEvent[] => {
-            const automaticSemanticsRejectedCount = sourceEvents.filter(
+            const independentlyLocatedEvents = sourceEvents.map((event) => (
+                projectUnitLocationFromIndependentConsensus(
+                    event,
+                    candidateEvents,
+                    passRawPathEvents.events,
+                    boundedUnitSelection ? {
+                        eventType: boundedUnitSelection.operation.eventType,
+                        bestYear: boundedUnitSelection.operation.bestYear,
+                        score: boundedUnitSelection.score,
+                        scoreMargin: boundedUnitSelection.scoreMargin,
+                    } : null,
+                    diagnosis.targetRange,
+                )
+            ));
+            const automaticSemanticsRejectedCount = independentlyLocatedEvents.filter(
                 (event) => !isValidAutomaticEvent(event),
             ).length;
-            const finalEvents = validAutomaticEvents(sourceEvents)
+            const finalEvents = validAutomaticEvents(independentlyLocatedEvents)
                 .map((event) => event.eventType === "partialMove"
                         ? attachUniversalPartialMissingWorkflow(
                             event,
@@ -10059,11 +10160,109 @@ export const makeDiagnosisEvents = (
             }
             return cachedSequentialFalse;
         };
+        const dominantWholeSeriesBaseline = displayed
+            .filter((event) => event.eventType === "wholeSeriesMove")
+            .map((event) => {
+                const shiftYears = wholeSeriesMoveShiftYears(event);
+                if (shiftYears === null) return null;
+                const stateConsistency = measureWholeSeriesStateConsistency(
+                    diagnosis,
+                    shiftYears,
+                );
+                return supportsDominantWholeSeriesBaseline(stateConsistency)
+                    ? {
+                        event: {
+                            ...event,
+                            evidence: {
+                                ...event.evidence,
+                                algorithmSources: Array.from(new Set([
+                                    ...event.evidence.algorithmSources,
+                                    "dominant_whole_state_consensus",
+                                ])),
+                                notes: Array.from(new Set([
+                                    ...event.evidence.notes,
+                                    ...wholeSeriesStateConsistencyNotes(stateConsistency),
+                                    "whole_baseline_preempts_weak_local_path",
+                                ])),
+                            },
+                        },
+                        stateConsistency,
+                    }
+                    : null;
+            })
+            .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+            .sort((left, right) => (
+                right.stateConsistency.weightedSupportFraction
+                    - left.stateConsistency.weightedSupportFraction
+                || right.stateConsistency.supportFraction
+                    - left.stateConsistency.supportFraction
+                || right.event.evidence.score - left.event.evidence.score
+            ))[0]?.event ?? null;
+        if (dominantWholeSeriesBaseline && (
+            stableBoundedPathFrontier
+            || boundedPathEvents.length > 0
+            || stableTerminalSequentialUnit
+        )) {
+            // Establish the global coordinate frame before interpreting a cumulative terminal
+            // staircase. The next diagnosis can localize the local step on that fixed baseline.
+            return finalize([dominantWholeSeriesBaseline], [], false);
+        }
+        const wholeFramedTerminalHypothesis = (
+            terminal: DiagnosisEvent,
+        ): DiagnosisEvent | null => {
+            const terminalYear = rankedEventYear(terminal);
+            const wholeBaselineShifts = displayed.flatMap((event) => {
+                const shiftYears = wholeSeriesMoveShiftYears(event);
+                return shiftYears === null ? [] : [shiftYears];
+            });
+            const wholeFramedTerminal = [
+                ...(rawBoundedResult?.events ?? []),
+                ...(rawPenaltyOneStablePath?.events ?? []),
+                ...(rawNearPenaltyTwoPath?.events ?? []),
+            ]
+                .filter((event) => (
+                    event.eventType === terminal.eventType
+                    && wholeBaselineShifts.includes(event.evidence.lagAfter ?? NaN)
+                    && strongBoundedPathLocation(event) !== null
+                    && terminalYear !== null
+                    && rankedEventYear(event) !== null
+                    && Math.abs(rankedEventYear(event)! - terminalYear) <= 13
+                ))
+                .sort((left, right) => (
+                    (strongBoundedPathLocation(right)?.concentration ?? 0)
+                        - (strongBoundedPathLocation(left)?.concentration ?? 0)
+                    || (strongBoundedPathLocation(right)?.remoteMargin ?? 0)
+                        - (strongBoundedPathLocation(left)?.remoteMargin ?? 0)
+                ))[0] ?? null;
+            return wholeFramedTerminal ? {
+                ...wholeFramedTerminal,
+                evidence: {
+                    ...wholeFramedTerminal.evidence,
+                    algorithmSources: Array.from(new Set([
+                        ...wholeFramedTerminal.evidence.algorithmSources,
+                        "whole_baseline_compatible_bounded_location",
+                    ])).sort(),
+                    notes: Array.from(new Set([
+                        ...wholeFramedTerminal.evidence.notes,
+                        `whole_baseline_compatible_lag=${
+                            wholeFramedTerminal.evidence.lagAfter
+                        }`,
+                    ])),
+                },
+            } : null;
+        };
         if (stableTerminalSequentialUnit) {
             // The two regularizations and the independently estimated cumulative depth agree on
             // the complete signed unit suffix. Older path contamination cannot reverse this
             // newest operation or compress the staircase into one automatic range move.
-            return finalize([stableTerminalSequentialUnit], [], false);
+            const wholeFramedHypothesis = wholeFramedTerminalHypothesis(
+                stableTerminalSequentialUnit,
+            );
+            return finalize(
+                [stableTerminalSequentialUnit],
+                wholeFramedHypothesis ? [wholeFramedHypothesis] : [],
+                false,
+            );
         }
         const candidateAnchoredSequentialFalse = cumulativeUnitCandidateDepths.some(
             (depth) => depth > 1,
@@ -10076,7 +10275,14 @@ export const makeDiagnosisEvents = (
             // Resolve a candidate-depth positive staircase before an unrelated negative bounded
             // path can return early. The helper has already required exact depth, monotone unit
             // transitions, fixed-tail support, and same-region operation direction.
-            return finalize([candidateAnchoredSequentialFalse], [], false);
+            const wholeFramedHypothesis = wholeFramedTerminalHypothesis(
+                candidateAnchoredSequentialFalse,
+            );
+            return finalize(
+                [candidateAnchoredSequentialFalse],
+                wholeFramedHypothesis ? [wholeFramedHypothesis] : [],
+                false,
+            );
         }
         const directTerminalUnitFrontier =
             selectDirectTerminalUnitBeforeDerivedStablePartial(
@@ -10123,61 +10329,18 @@ export const makeDiagnosisEvents = (
                 return finalize([residualSequentialMissing.event], [], false);
             }
         }
-        const dominantWholeSeriesBaseline = displayed
-            .filter((event) => event.eventType === "wholeSeriesMove")
-            .map((event) => {
-                const shiftYears = wholeSeriesMoveShiftYears(event);
-                if (shiftYears === null) return null;
-                const stateConsistency = measureWholeSeriesStateConsistency(
-                    diagnosis,
-                    shiftYears,
-                );
-                return supportsDominantWholeSeriesBaseline(stateConsistency)
-                    ? {
-                        event: {
-                            ...event,
-                            evidence: {
-                                ...event.evidence,
-                                algorithmSources: Array.from(new Set([
-                                    ...event.evidence.algorithmSources,
-                                    "dominant_whole_state_consensus",
-                                ])),
-                                notes: Array.from(new Set([
-                                    ...event.evidence.notes,
-                                    ...wholeSeriesStateConsistencyNotes(stateConsistency),
-                                    "whole_baseline_preempts_weak_local_path",
-                                ])),
-                            },
-                        },
-                        stateConsistency,
-                    }
-                    : null;
-            })
-            .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
-            .sort((left, right) => (
-                right.stateConsistency.weightedSupportFraction
-                    - left.stateConsistency.weightedSupportFraction
-                || right.stateConsistency.supportFraction
-                    - left.stateConsistency.supportFraction
-                || right.event.evidence.score - left.event.evidence.score
-            ))[0]?.event ?? null;
-        if (dominantWholeSeriesBaseline && (
-            stableBoundedPathFrontier
-            || boundedPathEvents.length > 0
-        )) {
-            // A broad global baseline is a valid first correction even when unresolved local
-            // transitions remain. Re-diagnosis after that edit preserves the serial workflow.
-            return finalize([dominantWholeSeriesBaseline], [], false);
-        }
         if (stableBoundedPathFrontier && stablePathHasFinalAuthority) {
             // The complete path has already resolved the serial frontier. Aggregate move
             // hypotheses are intentionally excluded so later review cannot recombine it.
             const locatedStableFrontier = stableBoundedPathFrontier.eventType === "partialMove"
-                ? refineStablePartialMoveLocation(
-                        stableBoundedPathFrontier,
+                ? addStablePartialRankEdgeGuard(
+                        refineStablePartialMoveLocation(
+                            stableBoundedPathFrontier,
+                            diagnosis,
+                            siteData,
+                            stableMultiscaleBoundedFrontier?.baselineLag ?? 0,
+                        ),
                         diagnosis,
-                        siteData,
-                        stableMultiscaleBoundedFrontier?.baselineLag ?? 0,
                     )
                 : refineStableUnitEventWithLocalConsensus(
                         stableBoundedPathFrontier,

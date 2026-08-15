@@ -25,6 +25,7 @@ import {
     recoverStableBoundedLagPathFrontier,
     selectDirectTerminalUnitBeforeDerivedStablePartial,
     selectAggregateAnchoredRegularizedPartialFrontier,
+    selectOperationAnchoredRegularizedAggregatePartialFrontier,
     selectCandidateAnchoredStableBoundedLagPathFrontier,
     selectStableUnitPathLocationCheckpoints,
     selectCumulativeLagPathFrontier,
@@ -2499,6 +2500,58 @@ describe("selectCumulativePartialFrontier", () => {
                 ...aggregate,
                 evidence: { ...aggregate.evidence, candidateIds: [] },
             }],
+        )).toBeNull();
+    });
+
+    it("keeps a direct regularized partial when a trusted operation explains a permissive split", () => {
+        const falseTransition = {
+            ...pathEvent(1, -19, -20, 1354),
+            eventType: "falseRing" as const,
+            shiftYears: undefined,
+            shiftSide: undefined,
+        };
+        const regularized = boundedPath([
+            pathEvent(-71, -90, -19, 1146),
+            falseTransition,
+            pathEvent(-20, -20, 0, 1386),
+        ]);
+        const permissive = boundedPath([
+            pathEvent(-71, -90, -19, 1146),
+            falseTransition,
+            pathEvent(-11, -20, -9, 1386),
+            pathEvent(-9, -9, 0, 1406),
+        ]);
+
+        const selected = selectOperationAnchoredRegularizedAggregatePartialFrontier(
+            regularized,
+            permissive,
+            operation(-19, 1386),
+        );
+
+        expect(selected).toMatchObject({
+            event: {
+                eventType: "partialMove",
+                shiftYears: -20,
+                evidence: {
+                    algorithmSources: expect.arrayContaining([
+                        "operation_anchored_regularized_aggregate",
+                    ]),
+                },
+            },
+        });
+        expect(selected?.event.rankedYears[0]?.year).toBe(1386);
+    });
+
+    it("does not collapse a permissive split without aggregate operation support", () => {
+        const regularized = boundedPath([pathEvent(-20, -20, 0, 1386)]);
+        const permissive = boundedPath([
+            pathEvent(-11, -20, -9, 1386),
+            pathEvent(-9, -9, 0, 1406),
+        ]);
+        expect(selectOperationAnchoredRegularizedAggregatePartialFrontier(
+            regularized,
+            permissive,
+            operation(-6, 1386),
         )).toBeNull();
     });
 

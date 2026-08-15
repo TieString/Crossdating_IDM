@@ -8,6 +8,12 @@ import {
     withEvidenceLedger,
 } from "./evidenceLedger";
 import { attachEndpointWholeMissingInterpretation } from "./endpointWholeMissingInterpretation";
+import {
+    projectUnsupportedLocationToStrongBoundedPath,
+    preservesStrongBoundedPathMode,
+    strongBoundedPathLocation,
+} from "./locationAuthority";
+import { addStablePartialRankEdgeGuard } from "./stablePartialLocationConsensus";
 import type {
     DiagnosisEvidenceClaim,
     DiagnosisEvent,
@@ -436,6 +442,22 @@ const preferredStrongBoundedLocation = (
         : null;
 };
 
+const preferredStrongSelectedBoundedLocation = (
+    cluster: HypothesisCluster,
+): DiagnosisReviewEventCheckpoint | null => cluster.checkpoints
+    .filter((checkpoint) => (
+        checkpoint.stage === "final"
+        && checkpoint.authority !== "supplemental"
+        && strongBoundedPathLocation(checkpoint.event) !== null
+    ))
+    .sort((left, right) => (
+        eventLocationQuality(right.event) - eventLocationQuality(left.event)
+        || (strongBoundedPathLocation(right.event)?.concentration ?? 0)
+            - (strongBoundedPathLocation(left.event)?.concentration ?? 0)
+        || (topYear(right.event) ?? Number.NEGATIVE_INFINITY)
+            - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
+    ))[0] ?? null;
+
 const isSelectedCompletedCompositionCheckpoint = (
     checkpoint: DiagnosisReviewEventCheckpoint,
 ): boolean => checkpoint.stage === "final"
@@ -489,6 +511,28 @@ const preferredValidatedFinalSequentialUnit = (
         || stagePriority[right.stage] - stagePriority[left.stage]
     ))[0] ?? null;
     if (!location) return selected;
+    if (!preservesStrongBoundedPathMode(
+        selected.event,
+        location.event.startYear,
+        location.event.endYear,
+    )) {
+        return {
+            ...selected,
+            event: withEvidenceLedger({
+                ...selected.event,
+                evidence: {
+                    ...selected.event.evidence,
+                    notes: Array.from(new Set([
+                        ...selected.event.evidence.notes,
+                        "terminal_unit_location_rejected=detached_from_strong_bounded_path",
+                        `terminal_unit_location_rejected_window=${
+                            location.event.startYear
+                        }-${location.event.endYear}`,
+                    ])),
+                },
+            }),
+        };
+    }
     return {
         ...selected,
         event: withEvidenceLedger({
@@ -633,14 +677,66 @@ const projectTerminalUnitCompatibleLocation = (
     if (!support) return terminal;
 
     const location = support.checkpoint.event;
+    const terminalBoundaryYear = noteNumber(
+        terminal,
+        "terminal_unit_staircase_boundary_year=",
+    );
+    let projectedStartYear = location.startYear;
+    let projectedEndYear = location.endYear;
+    let projectedRankedYears = location.rankedYears.map((row) => ({ ...row }));
+    if (terminalBoundaryYear !== null
+        && (terminalBoundaryYear < location.startYear
+            || terminalBoundaryYear > location.endYear)) {
+        const minimumYear = Math.min(location.startYear, terminalBoundaryYear);
+        const maximumYear = Math.max(location.endYear, terminalBoundaryYear);
+        const requiredSpan = maximumYear - minimumYear + 1;
+        const width = [5, 7, 9, 13].find((value) => value >= requiredSpan);
+        if (width === undefined) return terminal;
+        projectedStartYear = minimumYear;
+        projectedStartYear = Math.max(
+            projectedStartYear,
+            maximumYear - width + 1,
+        );
+        if (terminal.seriesRange) {
+            projectedStartYear = Math.max(
+                terminal.seriesRange.startYear,
+                Math.min(
+                    projectedStartYear,
+                    terminal.seriesRange.endYear - width + 1,
+                ),
+            );
+        }
+        projectedEndYear = projectedStartYear + width - 1;
+        const prior = new Map([
+            ...terminal.rankedYears,
+            ...location.rankedYears,
+        ].map((row) => [row.year, row]));
+        const minimumScore = Math.min(
+            0,
+            ...terminal.rankedYears.map(({ score }) => score),
+            ...location.rankedYears.map(({ score }) => score),
+        );
+        projectedRankedYears = Array.from(
+            { length: width },
+            (_, index) => projectedStartYear + index,
+        ).map((year) => prior.get(year) ?? {
+            year,
+            rank: 0,
+            score: minimumScore - 1,
+            evidenceTags: ["terminal_unit_boundary_union"],
+        }).sort((left, right) => (
+            right.score - left.score
+            || right.year - left.year
+        )).map((row, index) => ({ ...row, rank: index + 1 }));
+    }
     return withEvidenceLedger({
         ...terminal,
         id: `${terminal.id}-${support.kind}-location-${
             topYear(location) ?? "window"
         }`,
-        startYear: location.startYear,
-        endYear: location.endYear,
-        rankedYears: location.rankedYears.map((row) => ({ ...row })),
+        startYear: projectedStartYear,
+        endYear: projectedEndYear,
+        rankedYears: projectedRankedYears,
         reviewCoreRange: location.reviewCoreRange,
         evidence: {
             ...terminal.evidence,
@@ -665,6 +761,16 @@ const projectTerminalUnitCompatibleLocation = (
                 `terminal_unit_location_support_stage=${support.checkpoint.stage}`,
                 `terminal_unit_location_previous_top_year=${topYear(terminal) ?? "none"}`,
                 `terminal_unit_location_projected_top_year=${topYear(location) ?? "none"}`,
+                ...(terminalBoundaryYear !== null
+                    && (projectedStartYear !== location.startYear
+                        || projectedEndYear !== location.endYear)
+                    ? [
+                        `terminal_unit_location_boundary_year=${terminalBoundaryYear}`,
+                        `terminal_unit_location_boundary_union=${
+                            projectedStartYear
+                        }-${projectedEndYear}`,
+                    ]
+                    : []),
             ])),
         },
     });
@@ -781,6 +887,7 @@ const representative = (
         ?? preferredHighConfidenceBarkSidePartialCandidate(cluster)
         ?? preferredAcceptedFinalLocation(cluster)
         ?? preferredStrongBoundedLocation(cluster)
+        ?? preferredStrongSelectedBoundedLocation(cluster)
         ?? preferredSelectedFinalLocation(cluster)
         ?? ranked;
     return preferredEndpointCandidate(cluster, selected)
@@ -1431,6 +1538,43 @@ const finalFrontierClusters = (
             && checkpoint.authority !== "supplemental"
         ))
     ));
+    const persistedWholeBaseline = clusters.filter((cluster) => {
+        const event = representative(cluster).event;
+        const stages = new Set(cluster.checkpoints.map(({ stage }) => stage));
+        return event.eventType === "wholeSeriesMove"
+            && event.shiftYears !== undefined
+            && event.shiftYears !== 0
+            && stages.has("candidate")
+            && stages.has("displayed")
+            && stages.size >= 4;
+    }).sort((left, right) => (
+        new Set(right.checkpoints.map(({ stage }) => stage)).size
+            - new Set(left.checkpoints.map(({ stage }) => stage)).size
+        || confidenceScore(representative(right).event)
+            - confidenceScore(representative(left).event)
+    ))[0] ?? null;
+    if (persistedWholeBaseline) {
+        const baselineLag = representative(persistedWholeBaseline).event.shiftYears!;
+        const compatibleBoundedCheckpoints = allFinalClusters.flatMap((cluster) => (
+            cluster.checkpoints.filter((checkpoint) => (
+                checkpoint.stage === "final"
+                && evidenceClaimsFor(checkpoint.event).has("bounded_lag_state_path")
+                && checkpoint.event.eventType !== "wholeSeriesMove"
+                && checkpoint.event.evidence.lagAfter === baselineLag
+                && strongBoundedPathLocation(checkpoint.event) !== null
+            ))
+        )).sort((left, right) => (
+            (topYear(right.event) ?? Number.NEGATIVE_INFINITY)
+                - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
+            || eventLocationQuality(right.event) - eventLocationQuality(left.event)
+        ));
+        if (compatibleBoundedCheckpoints.length > 0) {
+            // A persistent global frame fixes the untouched side's lag. Prefer the direct local
+            // transition that lands on that frame over a zero-terminal staircase synthesized
+            // from the same cumulative displacement.
+            return [{ checkpoints: [compatibleBoundedCheckpoints[0]!] }];
+        }
+    }
     const validatedSelectedSequentialFalse = selectedFinalClusters.filter((cluster) => (
         cluster.checkpoints.some(isValidatedSelectedSequentialUnit)
     ));
@@ -1813,7 +1957,14 @@ export const adjudicateJointEventHypotheses = (
             },
         )
         : baseSelectedEvent;
-    const selectedEvent = endpointResolvedEvent;
+    const evidenceLocatedEvent = endpointResolvedEvent
+        ? projectUnsupportedLocationToStrongBoundedPath(endpointResolvedEvent)
+        : endpointResolvedEvent;
+    const selectedEvent = evidenceLocatedEvent?.seriesRange
+        ? addStablePartialRankEdgeGuard(evidenceLocatedEvent, {
+            targetRange: evidenceLocatedEvent.seriesRange,
+        })
+        : evidenceLocatedEvent;
     return {
         seriesId,
         status: selectedEvent ? "selected" : "refused",

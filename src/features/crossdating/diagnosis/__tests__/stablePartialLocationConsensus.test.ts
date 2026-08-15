@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { selectStablePartialLocationConsensus } from "../stablePartialLocationConsensus";
+import {
+    allowsNewerUnitChainLocationConsensus,
+    selectStablePartialLocationConsensus,
+    selectStablePartialRankEdgeShift,
+} from "../stablePartialLocationConsensus";
+import type { DiagnosisEvent } from "../types";
 
 describe("stable partial location consensus", () => {
     it("moves a lag-path plateau to the robust boundary consensus", () => {
@@ -42,5 +47,51 @@ describe("stable partial location consensus", () => {
             1869,
             1864,
         ).centerYear).toBe(1864);
+    });
+
+    it("lets a multi-unit staircase expose its newer unresolved frontier", () => {
+        const input = {
+            endYear: 1918,
+            evidence: {
+                notes: [
+                    "stable_bounded_path_transition_count=2",
+                    "stable_bounded_path_all_transitions_partial=false",
+                ],
+            },
+        } as DiagnosisEvent;
+        expect(allowsNewerUnitChainLocationConsensus(input, 1919)).toBe(true);
+        expect(allowsNewerUnitChainLocationConsensus(input, 1906)).toBe(false);
+        input.evidence.notes = [
+            "stable_bounded_path_transition_count=2",
+            "stable_bounded_path_all_transitions_partial=true",
+        ];
+        expect(allowsNewerUnitChainLocationConsensus(input, 1919)).toBe(false);
+    });
+});
+
+describe("stable partial ranked-edge continuation", () => {
+    const rows = (ranks: number[]) => ranks.map((rank, index) => ({
+        year: 1800 + index,
+        rank,
+        score: 20 - rank,
+        evidenceTags: [],
+    }));
+
+    it("moves toward a newer Top3 edge when the older edge is exhausted", () => {
+        expect(selectStablePartialRankEdgeShift(rows([
+            13, 12, 11, 10, 9, 2, 1, 4, 5, 8, 6, 7, 3,
+        ]))).toBe(2);
+    });
+
+    it("moves toward an older Top3 edge when the newer edge is exhausted", () => {
+        expect(selectStablePartialRankEdgeShift(rows([
+            2, 3, 7, 8, 5, 4, 1, 6, 9, 10, 11, 12, 13,
+        ]))).toBe(-2);
+    });
+
+    it("keeps a window whose ranked mass is not clipped at one edge", () => {
+        expect(selectStablePartialRankEdgeShift(rows([
+            6, 5, 4, 3, 2, 1, 7, 8, 9, 10, 11, 12, 13,
+        ]))).toBe(0);
     });
 });

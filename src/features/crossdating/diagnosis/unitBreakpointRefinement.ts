@@ -12,6 +12,7 @@ import type {
     NumericSeries,
     SeriesCoreDiagnosis,
 } from "./types";
+import { preservesStrongBoundedPathMode } from "./locationAuthority";
 
 export type UnitBreakpointScore = {
     year: number;
@@ -612,6 +613,23 @@ export const refineStableUnitEventWithLocalConsensus = (
         ),
     );
     const window = { startYear, endYear: startYear + width - 1 };
+    if (!preservesStrongBoundedPathMode(
+        event,
+        window.startYear,
+        window.endYear,
+    )) {
+        return {
+            ...event,
+            evidence: {
+                ...event.evidence,
+                notes: Array.from(new Set([
+                    ...event.evidence.notes,
+                    "stable_unit_local_rejected=detached_from_strong_bounded_path",
+                    `stable_unit_local_rejected_window=${window.startYear}-${window.endYear}`,
+                ])),
+            },
+        };
+    }
     return {
         ...event,
         id: `${event.id}-stable-unit-local-consensus-${consensus.year}`,
