@@ -231,6 +231,36 @@ describe("lower review-window display gate", () => {
         expect(result.event).toBe(strict);
     });
 
+    it("shows an unflagged exact cumulative unit frontier after working-data edits", () => {
+        const frontier = strictEvent();
+        frontier.evidence = {
+            ...frontier.evidence,
+            algorithmSources: ["cumulative_lag_path_frontier", "piecewise_lag_path"],
+            score: 10.8,
+            scoreMargin: 0.5,
+            correlationGain: 0.6,
+            samplePairs: 66,
+            notes: [
+                "cumulative_path_aggregate_shift=-2",
+                "cumulative_path_component_shift=-1",
+                "cumulative_path_companion_shift=-1",
+                "cumulative_path_component_year=1899",
+                "cumulative_path_operation_year=1900",
+                "cumulative_path_component_score=10.800000",
+                "cumulative_path_transition_count=2",
+            ],
+        };
+
+        expect(selectReviewWindowDisplay(
+            audit([], { cofechaFlagged: false }),
+            [frontier],
+        )).toMatchObject({
+            status: "strict",
+            reason: "strict_event",
+            event: frontier,
+        });
+    });
+
     it("does not let a final-stage label bypass the unflagged clean-series gate", () => {
         const strict = strictEvent();
         expect(selectReviewWindowDisplay(

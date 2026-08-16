@@ -63,6 +63,26 @@ const operationClaims = (event: DiagnosisEvent): DiagnosisEvidenceClaim[] => {
         && hasToken(tokens, "terminal_whole_alias_removed")) {
         claims.push("fixed_side_resolution");
     }
+    const topYear = event.rankedYears.slice().sort((left, right) => (
+        left.rank - right.rank || right.score - left.score || right.year - left.year
+    ))[0]?.year;
+    const nominalBoundaryYear = numberFromNotes(event, ["nominal_boundary_year="]);
+    const profileBoundaryYear = numberFromNotes(event, ["profile_boundary_year="]);
+    if ((event.eventType === "missingRing" || event.eventType === "falseRing")
+        && hasToken(tokens, "direct_terminal_unit_frontier_checkpoint")
+        && hasToken(tokens, "piecewise_lag_path")
+        && hasToken(tokens, "counterfactual_window_refinement")
+        && hasToken(tokens, "joint_event_counterfactual")
+        && event.evidence.lagAfter === 0
+        && event.evidence.samplePairs >= 30
+        && event.evidence.scoreMargin >= 0.05
+        && (event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY) >= 0.1
+        && topYear !== undefined
+        && nominalBoundaryYear !== null
+        && nominalBoundaryYear === profileBoundaryYear
+        && Math.abs(topYear - nominalBoundaryYear) <= 1) {
+        claims.push("fixed_side_resolution");
+    }
     const nearNewerEndpoint = event.seriesRange !== undefined
         && event.endYear >= event.seriesRange.endYear - 2;
     if (event.eventType === "missingRing"

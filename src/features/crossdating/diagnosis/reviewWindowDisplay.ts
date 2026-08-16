@@ -63,7 +63,36 @@ const yearSupportsWindow = (
     && year >= event.startYear - toleranceYears
     && year <= event.endYear + toleranceYears;
 
+const hasConfirmedCumulativeUnitFrontier = (event: DiagnosisEvent): boolean => {
+    if (event.eventType !== "missingRing" && event.eventType !== "falseRing") {
+        return false;
+    }
+    const expectedShift = event.eventType === "missingRing" ? -1 : 1;
+    const componentShift = numericNote(event, "cumulative_path_component_shift");
+    const companionShift = numericNote(event, "cumulative_path_companion_shift");
+    const aggregateShift = numericNote(event, "cumulative_path_aggregate_shift");
+    const transitionCount = numericNote(event, "cumulative_path_transition_count") ?? 0;
+    const componentScore = numericNote(event, "cumulative_path_component_score")
+        ?? Number.NEGATIVE_INFINITY;
+    const operationYear = numericNote(event, "cumulative_path_operation_year")
+        ?? numericNote(event, "cumulative_path_component_year");
+    return event.evidence.algorithmSources.includes("cumulative_lag_path_frontier")
+        && componentShift === expectedShift
+        && companionShift !== null
+        && aggregateShift === componentShift + companionShift
+        && transitionCount >= 2
+        && componentScore >= 4.5
+        && event.evidence.lagBefore === expectedShift
+        && event.evidence.lagAfter === 0
+        && event.confidenceLevel === "high"
+        && event.evidence.scoreMargin >= 0.05
+        && (event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY) >= 0.1
+        && event.evidence.samplePairs >= 30
+        && yearSupportsWindow(event, operationYear, 0);
+};
+
 const hasUnflaggedReviewAuthority = (event: DiagnosisEvent): boolean => {
+    if (hasConfirmedCumulativeUnitFrontier(event)) return true;
     const claims = evidenceClaimsFor(event);
     const decisiveClaims: DiagnosisEvidenceClaim[] = [
         "bounded_lag_state_path",

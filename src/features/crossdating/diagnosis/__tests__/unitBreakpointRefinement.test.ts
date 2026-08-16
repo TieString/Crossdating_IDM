@@ -5,6 +5,7 @@ import {
     refineStableUnitEventWithLocalConsensus,
     selectMissingRingNeighborYear,
     selectStableUnitLocalConsensus,
+    wouldMoveBehindConfirmedStableUnitFrontier,
 } from "../unitBreakpointRefinement";
 import type { DiagnosisEvent, SeriesCoreDiagnosis } from "../types";
 
@@ -142,6 +143,34 @@ describe("missing-ring neighbour ranking", () => {
 });
 
 describe("stable unit local consensus", () => {
+    it("does not move a confirmed multi-event frontier toward an older mode", () => {
+        const event = eventFor(1971, 1983, 1977, [
+            "stable_bounded_path_transition_count=4",
+            "stable_bounded_path_operation_year=1977",
+        ]);
+
+        expect(wouldMoveBehindConfirmedStableUnitFrontier(event, 1977, 1970))
+            .toBe(true);
+        expect(wouldMoveBehindConfirmedStableUnitFrontier(event, 1977, 1978))
+            .toBe(false);
+    });
+
+    it("still allows local refinement without an independently confirmed frontier", () => {
+        const single = eventFor(1971, 1983, 1977, [
+            "stable_bounded_path_transition_count=1",
+            "stable_bounded_path_operation_year=1977",
+        ]);
+        const unconfirmed = eventFor(1971, 1983, 1977, [
+            "stable_bounded_path_transition_count=4",
+            "stable_bounded_path_operation_year=1975",
+        ]);
+
+        expect(wouldMoveBehindConfirmedStableUnitFrontier(single, 1977, 1970))
+            .toBe(false);
+        expect(wouldMoveBehindConfirmedStableUnitFrontier(unconfirmed, 1977, 1970))
+            .toBe(false);
+    });
+
     it("does not apply zero-baseline scores to an intermediate lag transition", () => {
         const event = eventFor(1848, 1860, 1854);
         event.evidence.algorithmSources.push("stable_multiscale_bounded_path_frontier");

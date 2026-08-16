@@ -124,6 +124,25 @@ describe("diagnosis evidence ledger", () => {
         expect(evidenceClaimsFor(endpoint)).not.toContain("endpoint_unit_resolution");
     });
 
+    it("records an independently localized terminal unit as a fixed-side resolution", () => {
+        const frontier = event();
+        frontier.evidence.algorithmSources = [
+            "counterfactual_window_refinement",
+            "direct_terminal_unit_frontier_checkpoint",
+            "joint_event_counterfactual",
+            "piecewise_lag_path",
+        ];
+        frontier.evidence.notes = [
+            "nominal_boundary_year=1902",
+            "profile_boundary_year=1902",
+        ];
+
+        expect(evidenceClaimsFor(frontier)).toContain("fixed_side_resolution");
+
+        frontier.evidence.notes[1] = "profile_boundary_year=1901";
+        expect(evidenceClaimsFor(frontier)).not.toContain("fixed_side_resolution");
+    });
+
     it("records a whole baseline resolved by a long fixed-side path", () => {
         const whole = event();
         whole.eventType = "wholeSeriesMove";

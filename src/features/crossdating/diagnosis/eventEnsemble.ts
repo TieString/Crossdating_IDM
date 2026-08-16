@@ -6187,11 +6187,9 @@ export const recoverStableBoundedLagPathFrontier = (
 };
 
 /**
- * A multi-transition path may compress several unresolved unit steps into one partial move. When
- * that operation exists only in the path/operation scan, it must not replace an overlapping
- * terminal -1 -> 0 event already localized by independent year-level evidence. The unit event is
- * the executable bark-side frontier; the remaining cumulative state is reconsidered after it is
- * applied.
+ * A multi-transition path may miss a newer terminal unit step or compress several unresolved
+ * steps into one partial move. A separately localized terminal step is the executable bark-side
+ * frontier; the remaining cumulative state is reconsidered after it is applied.
  */
 export const selectDirectTerminalUnitBeforeDerivedStablePartial = (
     frontier: StableBoundedLagPathFrontier | null,
@@ -6200,12 +6198,61 @@ export const selectDirectTerminalUnitBeforeDerivedStablePartial = (
     candidateEvents: readonly DiagnosisEvent[] = [],
 ): DiagnosisEvent | null => {
     if (!frontier
-        || stableEvent?.eventType !== "partialMove"
-        || stableEvent.shiftYears === undefined
-        || frontier.transitionCount < 2
-        || frontier.aggregateShiftYears === stableEvent.shiftYears) return null;
+        || !stableEvent
+        || frontier.transitionCount < 2) return null;
 
     const stableYear = rankedEventYear(stableEvent);
+    const hypotheses = [...displayed, ...candidateEvents];
+    const terminalUnits = hypotheses.filter((event) => {
+        if (event.eventType !== "missingRing" && event.eventType !== "falseRing") return false;
+        const expectedShift = event.eventType === "missingRing" ? -1 : 1;
+        const year = rankedEventYear(event);
+        const nominalBoundaryYear = noteYear(event, "nominal_boundary_year=");
+        const profileBoundaryYear = noteYear(event, "profile_boundary_year=");
+        const sources = new Set(event.evidence.algorithmSources);
+        return lagPathTransitionShift(event) === expectedShift
+            && event.evidence.lagAfter === 0
+            && sources.has("piecewise_lag_path")
+            && sources.has("counterfactual_window_refinement")
+            && sources.has("joint_event_counterfactual")
+            && event.evidence.scoreMargin >= 0.05
+            && (event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY) >= 0.1
+            && event.evidence.samplePairs >= 30
+            && nominalBoundaryYear !== null
+            && nominalBoundaryYear === profileBoundaryYear
+            && Math.abs(year - nominalBoundaryYear) <= 1;
+    });
+    const remoteDirectUnit = terminalUnits
+        .filter((event) => rankedEventYear(event) > stableEvent.endYear + 2)
+        .sort((left, right) => (
+            rankedEventYear(right) - rankedEventYear(left)
+            || right.evidence.score - left.evidence.score
+        ))[0];
+    if (remoteDirectUnit) {
+        return {
+            ...remoteDirectUnit,
+            id: `${remoteDirectUnit.id}-terminal-unit-frontier-checkpoint`,
+            alternativeTypes: [],
+            locationAlternatives: undefined,
+            operationAlternatives: undefined,
+            evidence: {
+                ...remoteDirectUnit.evidence,
+                algorithmSources: Array.from(new Set([
+                    ...remoteDirectUnit.evidence.algorithmSources,
+                    "direct_terminal_unit_frontier_checkpoint",
+                ])).sort(),
+                notes: Array.from(new Set([
+                    ...remoteDirectUnit.evidence.notes,
+                    `older_stable_path_deferred_year=${stableYear}`,
+                    `older_stable_path_transition_count=${frontier.transitionCount}`,
+                ])),
+            },
+        };
+    }
+
+    if (stableEvent.eventType !== "partialMove"
+        || stableEvent.shiftYears === undefined
+        || frontier.aggregateShiftYears === stableEvent.shiftYears) return null;
     const hasIndependentPartial = [...displayed, ...candidateEvents].some((event) => (
         event.eventType === "partialMove"
         && event.shiftYears === stableEvent.shiftYears
@@ -6731,10 +6778,42 @@ const recoverCumulativeLagPathFrontier = (
     const companionShift = aggregateShiftYears - componentShift;
     const componentYear = selected.rankedYears[0]?.year;
     if (componentYear === undefined) return null;
+    const nominalBoundaryYear = noteYear(selected, "nominal_boundary_year=");
+    const profileBoundaryYear = noteYear(selected, "profile_boundary_year=");
+    const operationYear = (selected.eventType === "missingRing"
+        || selected.eventType === "falseRing")
+        && nominalBoundaryYear !== null
+        && nominalBoundaryYear === profileBoundaryYear
+        && nominalBoundaryYear >= selected.startYear
+        && nominalBoundaryYear <= selected.endYear
+        && Math.abs(nominalBoundaryYear - componentYear) <= 2
+        ? nominalBoundaryYear
+        : componentYear;
+    const maximumRankScore = Math.max(
+        0,
+        ...selected.rankedYears.map((row) => row.score),
+    );
+    const rankedYears = operationYear === componentYear
+        ? selected.rankedYears
+        : selected.rankedYears.map((row) => ({
+            ...row,
+            score: row.year === operationYear
+                ? maximumRankScore + Math.max(1e-9, Math.abs(maximumRankScore) * 1e-12)
+                : row.score,
+            evidenceTags: Array.from(new Set([
+                ...row.evidenceTags,
+                ...(row.year === operationYear
+                    ? ["cumulative_frontier_operation_year"]
+                    : []),
+            ])).sort(),
+        })).sort((left, right) => (
+            right.score - left.score || right.year - left.year
+        )).map((row, index) => ({ ...row, rank: index + 1 }));
     const authority = aggregate ?? whole!;
     return {
         ...selected,
         id: `${authority.id}-cumulative-lag-path-frontier-${selected.eventType}-${componentShift}`,
+        rankedYears,
         confidenceLevel: selected.confidenceLevel === "low" ? "medium" : selected.confidenceLevel,
         alternativeTypes: [],
         locationAlternatives: undefined,
@@ -6762,6 +6841,7 @@ const recoverCumulativeLagPathFrontier = (
                 `cumulative_path_component_shift=${componentShift}`,
                 `cumulative_path_companion_shift=${companionShift}`,
                 `cumulative_path_component_year=${componentYear}`,
+                `cumulative_path_operation_year=${operationYear}`,
                 `cumulative_path_component_score=${selected.evidence.score.toFixed(6)}`,
                 `cumulative_path_transition_count=${
                     selected.evidence.notes.find((note) => (
@@ -10539,7 +10619,7 @@ export const makeDiagnosisEvents = (
             selectDirectTerminalUnitBeforeDerivedStablePartial(
                 stableMultiscaleBoundedFrontier,
                 stableBoundedPathFrontier,
-                displayed,
+                [...displayed, ...detectedBeforeFusion],
                 candidateEvents,
             );
         if (directTerminalUnitFrontier && stablePathHasFinalAuthority) {

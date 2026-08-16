@@ -548,6 +548,36 @@ const stablePathComponentLagAfter = (event: DiagnosisEvent): number | null => {
     return Number.isFinite(parsed) ? parsed : event.evidence.lagAfter;
 };
 
+const stablePathNoteNumber = (
+    event: DiagnosisEvent,
+    prefix: string,
+): number | null => {
+    const note = [...event.evidence.notes].reverse().find((row) => (
+        row.startsWith(prefix)
+    ));
+    const parsed = Number(note?.slice(prefix.length));
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
+/** A local plateau must not move an independently confirmed multi-event frontier pithward. */
+export const wouldMoveBehindConfirmedStableUnitFrontier = (
+    event: DiagnosisEvent,
+    currentTopYear: number,
+    proposedTopYear: number,
+) => {
+    const transitionCount = stablePathNoteNumber(
+        event,
+        "stable_bounded_path_transition_count=",
+    );
+    const operationYear = stablePathNoteNumber(
+        event,
+        "stable_bounded_path_operation_year=",
+    );
+    return (transitionCount ?? 0) >= 2
+        && operationYear === currentTopYear
+        && proposedTopYear < currentTopYear;
+};
+
 /** Selects a local center only when at least three independent score families agree within a year. */
 export const selectStableUnitLocalConsensus = (
     scores: readonly StableUnitLocalScore[],
@@ -604,6 +634,23 @@ export const refineStableUnitEventWithLocalConsensus = (
         currentTopYear,
     );
     if (!consensus || consensus.year === currentTopYear) return event;
+    if (wouldMoveBehindConfirmedStableUnitFrontier(
+        event,
+        currentTopYear,
+        consensus.year,
+    )) {
+        return {
+            ...event,
+            evidence: {
+                ...event.evidence,
+                notes: Array.from(new Set([
+                    ...event.evidence.notes,
+                    "stable_unit_local_rejected=behind_confirmed_multi_event_frontier",
+                    `stable_unit_local_rejected_year=${consensus.year}`,
+                ])),
+            },
+        };
+    }
     const width = event.endYear - event.startYear + 1;
     const startYear = Math.max(
         diagnosis.targetRange.startYear,

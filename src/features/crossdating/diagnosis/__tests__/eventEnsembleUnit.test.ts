@@ -3171,6 +3171,67 @@ describe("selectCumulativePartialFrontier", () => {
         )).toBeNull();
     });
 
+    it("keeps a newer independently localized unit ahead of an older stable path", () => {
+        const olderTerminalOne = pathEvent(-1, -1, 0, 1902);
+        olderTerminalOne.eventType = "missingRing";
+        const olderTerminalHalf = pathEvent(-1, -1, 0, 1903);
+        olderTerminalHalf.eventType = "missingRing";
+        const selected = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                pathEvent(-10, -11, -1, 1810),
+                olderTerminalOne,
+            ]),
+            boundedPath([
+                pathEvent(-10, -11, -1, 1811),
+                olderTerminalHalf,
+            ]),
+        );
+        const stable = selected?.event ?? null;
+        const newer = falseRingEvent(1974, false);
+        newer.eventType = "missingRing";
+        newer.startYear = 1973;
+        newer.endYear = 1979;
+        newer.rankedYears = [{ year: 1977, rank: 1, score: 3, evidenceTags: [] }];
+        newer.evidence = {
+            ...newer.evidence,
+            score: 3,
+            scoreMargin: 0.7,
+            correlationGain: 0.4,
+            samplePairs: 66,
+            lagBefore: -1,
+            lagAfter: 0,
+            algorithmSources: [
+                "counterfactual_window_refinement",
+                "joint_event_counterfactual",
+                "piecewise_lag_path",
+            ],
+            notes: [
+                "nominal_boundary_year=1977",
+                "profile_boundary_year=1977",
+            ],
+        };
+
+        expect(selectDirectTerminalUnitBeforeDerivedStablePartial(
+            selected,
+            stable,
+            [newer],
+        )).toMatchObject({
+            eventType: "missingRing",
+            rankedYears: [{ year: 1977 }],
+        });
+        expect(selectDirectTerminalUnitBeforeDerivedStablePartial(
+            selected,
+            stable,
+            [{
+                ...newer,
+                evidence: {
+                    ...newer.evidence,
+                    notes: ["nominal_boundary_year=1977", "profile_boundary_year=1976"],
+                },
+            }],
+        )).toBeNull();
+    });
+
     it("uses a displayed cumulative operation to authorize the newest path component", () => {
         const selected = selectStableBoundedLagPathFrontier(
             boundedPath([
