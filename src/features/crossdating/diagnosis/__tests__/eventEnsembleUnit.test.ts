@@ -22,6 +22,7 @@ import {
     pruneLocalEventsDisconnectedFromWholeBaseline,
     projectSequentialUnitChainHead,
     recoverCandidateBackedPartialConsensus,
+    recoverCandidateAnchoredRawPartialFrontier,
     recoverAggregatePartialUnitFrontier,
     recoverStableBoundedLagPathFrontier,
     selectDirectTerminalUnitBeforeDerivedStablePartial,
@@ -254,14 +255,14 @@ describe("selectDistantSequentialMissingFrontier", () => {
             .toContain("cumulative_sequential_missing_staircase");
     });
 
-    it("allows a path-fixed missing alias but preserves a matching whole baseline", () => {
+    it("allows a globally inconsistent whole alias but preserves a matching whole baseline", () => {
         const events = [
             missingStep(1902, -2, -1),
             missingStep(1977, -1, 0),
         ];
         const alias = wholeSeriesEvent(-1);
         alias.evidence.notes = [
-            "path_fixed_side_event_type=missingRing",
+            "path_fixed_side_event_type=partialMove",
             "whole_state_global_lag_matches_shift=false",
         ];
         const whole = wholeSeriesEvent(-2);
@@ -281,6 +282,63 @@ describe("selectDistantSequentialMissingFrontier", () => {
             2002,
             whole,
         )).toBeNull();
+    });
+
+    it("allows a deep old-side whole alias when the newer edge returns through -1", () => {
+        const events = [
+            missingStep(1902, -2, -1),
+            missingStep(1977, -1, 0),
+        ];
+        const cumulativeAlias = wholeSeriesEvent(-5);
+        cumulativeAlias.evidence.notes = [
+            "whole_state_global_lag_matches_shift=true",
+            "whole_state_newer_edge_support_fraction=0.000000",
+            "whole_state_newest_lag=-1",
+        ];
+        const stableWhole = wholeSeriesEvent(-5);
+        stableWhole.evidence.notes = [
+            "whole_state_global_lag_matches_shift=true",
+            "whole_state_newer_edge_support_fraction=1.000000",
+            "whole_state_newest_lag=-5",
+        ];
+
+        expect(selectDistantSequentialMissingFrontier(
+            events,
+            [],
+            [-5],
+            2002,
+            cumulativeAlias,
+        )?.rankedYears[0]?.year).toBe(1977);
+        expect(selectDistantSequentialMissingFrontier(
+            events,
+            [],
+            [-5],
+            2002,
+            stableWhole,
+        )).toBeNull();
+    });
+
+    it("uses an independently located zero-return frontier when older steps are unresolved", () => {
+        const cumulativeAlias = wholeSeriesEvent(-5);
+        cumulativeAlias.evidence.notes = [
+            "whole_state_global_lag_matches_shift=true",
+            "whole_state_newer_edge_support_fraction=0.000000",
+            "whole_state_newest_lag=-1",
+        ];
+
+        const selected = selectDistantSequentialMissingFrontier(
+            [missingStep(1977, -1, 0)],
+            [],
+            [-5],
+            2002,
+            cumulativeAlias,
+        );
+
+        expect(selected?.rankedYears[0]?.year).toBe(1977);
+        expect(selected?.evidence.notes)
+            .toContain("distant_sequential_predecessor_year=unresolved");
+        expect(selected?.evidence.notes)
+            .toContain("distant_sequential_evidence_source=independent_zero_return_frontier");
     });
 
     it("does not promote a bark-near or incomplete unit chain", () => {
@@ -344,6 +402,79 @@ describe("selectDistantSequentialMissingFrontier", () => {
         expect(selected?.rankedYears[0]).toMatchObject({ year: 1977, rank: 1 });
         expect(selected?.evidence.algorithmSources)
             .toContain("raw_piecewise_sequential_missing_chain");
+    });
+});
+
+describe("recoverCandidateAnchoredRawPartialFrontier", () => {
+    const detached = (): DiagnosisEvent => {
+        const event = partialMoveEvent(-2);
+        event.startYear = 1556;
+        event.endYear = 1564;
+        event.rankedYears = [{
+            year: 1560,
+            rank: 1,
+            score: 16,
+            evidenceTags: ["full_interval_counterfactual_locator"],
+        }];
+        event.evidence.algorithmSources = [
+            "piecewise_lag_path",
+            "full_interval_counterfactual_locator",
+        ];
+        event.evidence.notes = [
+            "partial_gap_raw31_year=1686",
+            "counterfactual_coarse_current_candidate_consensus=false",
+            "counterfactual_window_concentration=0.45",
+            "counterfactual_window_remote_margin=0.025",
+        ];
+        event.evidence.samplePairs = 80;
+        return event;
+    };
+
+    it("restores a weak detached -2 locator to the raw profile and candidate region", () => {
+        const selected = recoverCandidateAnchoredRawPartialFrontier(
+            detached(),
+            [candidatePartial({
+                shiftYears: -10,
+                anchorYear: 1699,
+                candidateId: "regional",
+                source: "segmented_diagnosis",
+            })],
+            { startYear: 1440, endYear: 2000 },
+        );
+
+        expect(selected).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -2,
+            startYear: 1680,
+            endYear: 1692,
+        });
+        expect(selected?.rankedYears[0]).toMatchObject({ year: 1686, rank: 1 });
+        expect(selected?.evidence.algorithmSources)
+            .toContain("candidate_anchored_raw_partial_frontier");
+    });
+
+    it("keeps a detached raw profile internal without an independent regional candidate", () => {
+        expect(recoverCandidateAnchoredRawPartialFrontier(
+            detached(),
+            [],
+            { startYear: 1440, endYear: 2000 },
+        )).toBeNull();
+        const strong = detached();
+        strong.evidence.notes = strong.evidence.notes.map((note) => (
+            note.startsWith("counterfactual_window_concentration=")
+                ? "counterfactual_window_concentration=0.8"
+                : note
+        ));
+        expect(recoverCandidateAnchoredRawPartialFrontier(
+            strong,
+            [candidatePartial({
+                shiftYears: -10,
+                anchorYear: 1699,
+                candidateId: "regional",
+                source: "segmented_diagnosis",
+            })],
+            { startYear: 1440, endYear: 2000 },
+        )).toBeNull();
     });
 });
 

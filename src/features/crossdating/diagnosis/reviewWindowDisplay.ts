@@ -164,6 +164,25 @@ const hasReviewablePartialMoveEvidence = (
         config,
     );
     if (referenceVote || exhaustiveVote) return true;
+    const rawFallbackYear = numericNote(
+        event,
+        "candidate_anchored_raw_partial_year",
+    );
+    const rawFallbackRegionYear = numericNote(
+        event,
+        "candidate_anchored_raw_partial_region_year",
+    );
+    if (sources.has("candidate_anchored_raw_partial_frontier")
+        && shiftYears === -2
+        && rawFallbackYear !== null
+        && rawFallbackRegionYear !== null
+        && Math.abs(rawFallbackRegionYear - rawFallbackYear) <= 13
+        && yearSupportsWindow(
+            event,
+            rawFallbackYear,
+            config.partialVoteWindowToleranceYears,
+        )
+        && event.evidence.samplePairs >= 30) return true;
 
     const jointCorrection = numericNote(event, "joint_operation_correction");
     const jointGain = Math.max(

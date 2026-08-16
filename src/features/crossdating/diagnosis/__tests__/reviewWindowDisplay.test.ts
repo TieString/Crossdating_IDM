@@ -320,6 +320,27 @@ describe("lower review-window display gate", () => {
         });
     });
 
+    it("shows a candidate-anchored raw -2 frontier after a weak detached locator", () => {
+        const partial = reviewablePartial(-2, {
+            samplePairs: 80,
+            algorithmSources: [
+                "full_interval_counterfactual_locator",
+                "candidate_anchored_raw_partial_frontier",
+            ],
+            notes: [
+                "counterfactual_correction_years=-2",
+                "candidate_anchored_raw_partial_year=1900",
+                "candidate_anchored_raw_partial_region_year=1913",
+            ],
+        });
+
+        expect(selectReviewWindowDisplay(audit([]), [partial])).toMatchObject({
+            status: "strict",
+            reason: "strict_event",
+            event: partial,
+        });
+    });
+
     it("rejects a partial move when the latest correction still disagrees", () => {
         const partial = reviewablePartial(-6, {
             correlationGain: 0.12,

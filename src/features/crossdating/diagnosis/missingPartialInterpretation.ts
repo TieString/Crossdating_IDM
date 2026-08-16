@@ -611,6 +611,62 @@ export const attachMissingPartialInterpretation = (
     };
 };
 
+/**
+ * Makes an independently validated bark-side unit step the current workflow frontier while
+ * retaining the aggregate physical-gap interpretation for sample-based review.
+ */
+export const promoteValidatedSequentialMissingInterpretation = (
+    event: DiagnosisEvent,
+    hasIndependentUnitLocation: boolean,
+): DiagnosisEvent => {
+    const ambiguity = event.interpretationAmbiguity;
+    if (event.eventType !== "partialMove"
+        || ambiguity?.kind !== "missingRingsOrPartialMove"
+        || ambiguity.alternative.eventType !== "missingRing") return event;
+    const virtual = ambiguity.evidence.virtualCountEvaluation;
+    if (!virtual || virtual.validatedSteps < 1) return event;
+
+    const primaryYear = rankedTopYear(event);
+    const alternativeYear = rankedTopYear(ambiguity.alternative);
+    const isMixedCumulativePath = event.evidence.notes.includes(
+        "stable_bounded_path_all_transitions_partial=false",
+    );
+    if ((!isMixedCumulativePath && !hasIndependentUnitLocation)
+        || alternativeYear < primaryYear) return event;
+
+    const partialAlternative: DiagnosisEvent = {
+        ...event,
+        interpretationAmbiguity: undefined,
+        evidence: {
+            ...event.evidence,
+            notes: Array.from(new Set([
+                ...event.evidence.notes,
+                "validated_sequential_frontier_retains_partial_interpretation",
+            ])),
+        },
+    };
+    const missingPrimary: DiagnosisEvent = {
+        ...ambiguity.alternative,
+        id: `${ambiguity.alternative.id}-workflow-frontier`,
+        evidence: {
+            ...ambiguity.alternative.evidence,
+            algorithmSources: Array.from(new Set([
+                ...ambiguity.alternative.evidence.algorithmSources,
+                "validated_sequential_missing_frontier_priority",
+            ])).sort(),
+            notes: Array.from(new Set([
+                ...ambiguity.alternative.evidence.notes,
+                "validated_sequential_frontier_preempts_aggregate_partial",
+            ])),
+        },
+    };
+    return attachMissingPartialInterpretation(
+        missingPrimary,
+        partialAlternative,
+        ambiguity.evidence,
+    );
+};
+
 const rankedTopYear = (event: DiagnosisEvent): number => (
     [...event.rankedYears].sort((left, right) => (
         left.rank - right.rank || right.score - left.score || right.year - left.year

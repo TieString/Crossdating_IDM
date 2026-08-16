@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -34,7 +35,7 @@ import { diagnoseSeriesCore } from "@/features/crossdating/diagnosis/segments";
 import { scoreJointCounterfactualOperations } from "@/features/crossdating/diagnosis/jointCounterfactualOperation";
 import { compareTwoStepUnitDirections } from "@/features/crossdating/diagnosis/discreteMissingStaircaseCompetition";
 import { cofechaStyleStandardize } from "@/features/crossdating/reference";
-import type { DiagnosisEvent } from "../types";
+import type { DiagnosisEvent, DiagnosisEventAuditSnapshot } from "../types";
 import {
     applyInsertRestore,
     buildMultiMissingCorrupted,
@@ -47,8 +48,8 @@ import {
 
 const FIXTURE_PATH = process.env.CO612_RWL_PATH ?? "D:/软件测试/co612.rwl";
 const OUT_PATH = process.env.CO612_OUT_PATH ?? "D:/软件测试/co612.OUT";
-const NATURAL_FIXTURE_PATH = process.env.CO612_NATURAL_RWL_PATH
-    ?? "D:/软件测试/co612已定年.rwl";
+const NATURAL_FIXTURE_PATH =
+    "D:/软件测试/数据/ITRDB/itrdb_download/measurements/northamerica/usa/co612.rwl";
 const TARGET_ID = "mon052";
 const COFECHA_EXE = fileURLToPath(new URL(
     "../../../../../src-tauri/bin/cofecha-x86_64-pc-windows-msvc.exe",
@@ -77,6 +78,23 @@ const summarize = (events: readonly DiagnosisEvent[]) => events.map((event) => (
     sources: event.evidence.algorithmSources,
     notes: event.evidence.notes,
 }));
+
+const summarizeAudit = (events: readonly DiagnosisEventAuditSnapshot[]) => events.map(
+    (event) => ({
+        type: event.eventType,
+        range: [event.startYear, event.endYear],
+        topYear: event.topYear,
+        shiftYears: event.shiftYears,
+        lagBefore: event.lagBefore,
+        lagAfter: event.lagAfter,
+        score: event.score,
+        sources: event.algorithmSources,
+    }),
+);
+
+const fileSha256 = (path: string): string => createHash("sha256")
+    .update(readFileSync(path))
+    .digest("hex");
 
 const fixtureDescribe = existsSync(FIXTURE_PATH) && existsSync(OUT_PATH)
     ? describe
@@ -756,6 +774,308 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
             } : null,
         }))).toEqual([]);
     }, 240_000);
+
+    naturalCofechaIt("keeps mon271 responsive at its twelfth bark-side frontier", () => {
+        const seriesId = "mon271";
+        const sourceHash = fileSha256(NATURAL_FIXTURE_PATH);
+        const natural = parseRwl(readFileSync(NATURAL_FIXTURE_PATH, "utf8"));
+        const targetSeries = natural.get(seriesId)!;
+        const truthYears = Array.from(targetSeries.valuesByYear)
+            .filter(([, value]) => value === 0)
+            .map(([year]) => year)
+            .sort((left, right) => right - left);
+        const firstFrontier = truthYears[0]!;
+        const twelfthFrontier = truthYears[11]!;
+        const cleanSite: RwlSiteData = new Map(
+            Array.from(natural, ([id, series]) => [id, new Map(series.valuesByYear)]),
+        );
+        const buildState = (remainingTruthYears: number[], label: string) => {
+            const site = new Map(cleanSite);
+            site.set(seriesId, buildMultiMissingCorrupted(
+                targetSeries.valuesByYear,
+                remainingTruthYears,
+            ));
+            const outText = runBundledCofecha(site);
+            const parts = splitReportByParts(outText);
+            return {
+                site,
+                outText,
+                reference: createCofechaMasterReferenceConfig({
+                    siteData: site,
+                    flaggedAIds: extractPart6FlaggedASeriesIds(
+                        parts.get("PART 6") ?? "",
+                    ),
+                    cofechaRunId: `co612-mon271-${label}`,
+                    rwlHash: `co612-mon271-${label}`,
+                    masterDatingSeries: parseCofechaResult(outText).masterDatingSeries,
+                }),
+            };
+        };
+        const cleanSaved = buildState([], "clean");
+        const allMissing = buildState(truthYears, "all-missing");
+        const previousSaved = buildState(truthYears.slice(10), "after-10");
+        const current = buildState(truthYears.slice(11), "after-11");
+        const runs = [
+            {
+                state: "all-missing-before-save",
+                frontier: firstFrontier,
+                site: allMissing.site,
+                diagnosis: diagnoseCrossdating(allMissing.site, {
+                    referenceConfig: cleanSaved.reference,
+                    targetTrees: [seriesId],
+                    reviewWindowDisplayMode: "review",
+                    includeEventDecisionAudits: true,
+                }),
+            },
+            {
+                state: "all-missing-after-save",
+                frontier: firstFrontier,
+                site: allMissing.site,
+                diagnosis: diagnoseCrossdating(allMissing.site, {
+                    referenceConfig: allMissing.reference,
+                    targetTrees: [seriesId],
+                    cofechaText: allMissing.outText,
+                    reviewWindowDisplayMode: "review",
+                    includeEventDecisionAudits: true,
+                }),
+            },
+            {
+                state: "twelfth-before-save",
+                frontier: twelfthFrontier,
+                site: current.site,
+                diagnosis: diagnoseCrossdating(current.site, {
+                    referenceConfig: previousSaved.reference,
+                    targetTrees: [seriesId],
+                    reviewWindowDisplayMode: "review",
+                    includeEventDecisionAudits: true,
+                }),
+            },
+            {
+                state: "twelfth-after-save",
+                frontier: twelfthFrontier,
+                site: current.site,
+                diagnosis: diagnoseCrossdating(current.site, {
+                    referenceConfig: current.reference,
+                    targetTrees: [seriesId],
+                    cofechaText: current.outText,
+                    reviewWindowDisplayMode: "review",
+                    includeEventDecisionAudits: true,
+                }),
+            },
+        ].map(({ state, frontier, diagnosis }) => {
+            const displayed = getDisplayedDiagnosisEvents(diagnosis).filter(
+                (event) => event.seriesId === seriesId,
+            );
+            const event = displayed[0];
+            const missing = event?.eventType === "missingRing"
+                ? event
+                : event?.interpretationAmbiguity?.kind === "missingRingsOrPartialMove"
+                    || event?.interpretationAmbiguity?.kind
+                        === "wholeSeriesMoveOrMissingRing"
+                    ? event.interpretationAmbiguity.alternative
+                    : null;
+            const audit = diagnosis.eventDecisionAudits?.find(
+                (row) => row.seriesId === seriesId,
+            );
+            return {
+                state,
+                frontier,
+                displayed,
+                missing,
+                diagnosis,
+                audit,
+            };
+        });
+        const failures = runs.filter(({ state, frontier, displayed, missing }) => {
+            const primary = displayed[0];
+            const initialFrontierMustBeUnit = state.startsWith("all-missing");
+            const workflowEquivalentOperation = primary?.eventType === "missingRing"
+                || (
+                    state.startsWith("twelfth")
+                    && primary?.eventType === "partialMove"
+                    && primary.shiftYears === -2
+                    && primary.shiftSide === "older"
+                );
+            return displayed.length !== 1
+                || (initialFrontierMustBeUnit && primary?.eventType !== "missingRing")
+                || !workflowEquivalentOperation
+                || missing?.eventType !== "missingRing"
+                || missing.startYear > frontier
+                || missing.endYear < frontier;
+        });
+
+        expect(fileSha256(NATURAL_FIXTURE_PATH)).toBe(sourceHash);
+        expect(firstFrontier).toBe(1902);
+        expect(twelfthFrontier).toBe(1685);
+        expect(failures.map(({
+            state,
+            frontier,
+            displayed,
+            missing,
+            diagnosis,
+            audit,
+        }) => ({
+            state,
+            frontier,
+            displayed: summarize(displayed),
+            missing: missing ? summarize([missing])[0] : null,
+            production: summarize(diagnosis.events.filter((event) => (
+                event.seriesId === seriesId
+            ))),
+            final: audit?.finalEvents.map((event) => ({
+                type: event.eventType,
+                range: [event.startYear, event.endYear],
+                topYear: event.topYear,
+                shiftYears: event.shiftYears,
+                sources: event.algorithmSources,
+            })),
+            stages: audit ? {
+                candidate: summarizeAudit(audit.candidateProjectedEvents),
+                detected: summarizeAudit(audit.detectedBeforeFusion),
+                fused: summarizeAudit(audit.detectedAfterFusion),
+                retained: summarizeAudit(audit.retainedAfterEndpointGuard),
+                displayed: summarizeAudit(audit.displayedBeforeLocator),
+            } : null,
+            decisions: diagnosis.reviewWindowDecisions?.map((decision) => ({
+                status: decision.status,
+                reason: decision.reason,
+                strictReason: decision.strictReason,
+                sourceStage: decision.sourceStage,
+            })),
+            joint: diagnosis.jointEventDecisions?.[0] ? {
+                status: diagnosis.jointEventDecisions[0].status,
+                reason: diagnosis.jointEventDecisions[0].reason,
+                event: diagnosis.jointEventDecisions[0].event
+                    ? summarize([diagnosis.jointEventDecisions[0].event!])[0]
+                    : null,
+                hypotheses: diagnosis.jointEventDecisions[0].hypotheses,
+            } : null,
+        }))).toEqual([]);
+    }, 240_000);
+
+    naturalCofechaIt("keeps mon071 on the bark-side frontier after one through seven removals", () => {
+        const seriesId = "mon071";
+        const sourceHash = fileSha256(NATURAL_FIXTURE_PATH);
+        const natural = parseRwl(readFileSync(NATURAL_FIXTURE_PATH, "utf8"));
+        const targetSeries = natural.get(seriesId)!;
+        const truthYears = Array.from(targetSeries.valuesByYear)
+            .filter(([, value]) => value === 0)
+            .map(([year]) => year)
+            .sort((left, right) => right - left);
+        const cleanSite: RwlSiteData = new Map(
+            Array.from(natural, ([id, series]) => [id, new Map(series.valuesByYear)]),
+        );
+        const cleanOut = runBundledCofecha(cleanSite);
+        const cleanParts = splitReportByParts(cleanOut);
+        const cleanReference = createCofechaMasterReferenceConfig({
+            siteData: cleanSite,
+            flaggedAIds: extractPart6FlaggedASeriesIds(cleanParts.get("PART 6") ?? ""),
+            cofechaRunId: "co612-mon071-clean",
+            rwlHash: "co612-mon071-clean",
+            masterDatingSeries: parseCofechaResult(cleanOut).masterDatingSeries,
+        });
+        const diagnoseState = (
+            removedCount: number,
+            mode: "before-save" | "after-save",
+        ) => {
+            const site = new Map(cleanSite);
+            site.set(seriesId, buildMultiMissingCorrupted(
+                targetSeries.valuesByYear,
+                truthYears.slice(0, removedCount),
+            ));
+            let reference = cleanReference;
+            let cofechaText: string | undefined;
+            if (mode === "after-save") {
+                cofechaText = runBundledCofecha(site);
+                const parts = splitReportByParts(cofechaText);
+                reference = createCofechaMasterReferenceConfig({
+                    siteData: site,
+                    flaggedAIds: extractPart6FlaggedASeriesIds(
+                        parts.get("PART 6") ?? "",
+                    ),
+                    cofechaRunId: `co612-mon071-${removedCount}`,
+                    rwlHash: `co612-mon071-${removedCount}`,
+                    masterDatingSeries: parseCofechaResult(cofechaText).masterDatingSeries,
+                });
+            }
+            const diagnosis = diagnoseCrossdating(site, {
+                referenceConfig: reference,
+                targetTrees: [seriesId],
+                ...(cofechaText ? { cofechaText } : {}),
+                reviewWindowDisplayMode: "review",
+                includeEventDecisionAudits: true,
+            });
+            const displayed = getDisplayedDiagnosisEvents(diagnosis).filter(
+                (event) => event.seriesId === seriesId,
+            );
+            return { removedCount, mode, displayed, diagnosis };
+        };
+        const runs = [
+            ...truthYears.slice(0, 6).map((_, index) => (
+                diagnoseState(index + 1, "before-save")
+            )),
+            diagnoseState(4, "after-save"),
+            diagnoseState(5, "after-save"),
+            diagnoseState(7, "after-save"),
+        ];
+        const frontier = truthYears[0]!;
+        const failures = runs.filter(({ displayed }) => {
+            const event = displayed[0];
+            return displayed.length !== 1
+                || event?.eventType !== "missingRing"
+                || event.startYear > frontier
+                || event.endYear < frontier;
+        });
+
+        expect(fileSha256(NATURAL_FIXTURE_PATH)).toBe(sourceHash);
+        expect(truthYears).toEqual([1977, 1879, 1861, 1851, 1845, 1778, 1773]);
+        expect(failures.map(({ removedCount, mode, displayed, diagnosis }) => ({
+            removedCount,
+            mode,
+            displayed: summarize(displayed),
+            production: summarize(diagnosis.events.filter((event) => (
+                event.seriesId === seriesId
+            ))),
+            final: diagnosis.eventDecisionAudits?.[0]?.finalEvents.map((event) => ({
+                type: event.eventType,
+                range: [event.startYear, event.endYear],
+                topYear: event.topYear,
+                shiftYears: event.shiftYears,
+                sources: event.algorithmSources,
+            })),
+            stages: diagnosis.eventDecisionAudits?.[0] ? {
+                candidate: summarizeAudit(
+                    diagnosis.eventDecisionAudits[0].candidateProjectedEvents,
+                ),
+                detected: summarizeAudit(
+                    diagnosis.eventDecisionAudits[0].detectedBeforeFusion,
+                ),
+                fused: summarizeAudit(
+                    diagnosis.eventDecisionAudits[0].detectedAfterFusion,
+                ),
+                retained: summarizeAudit(
+                    diagnosis.eventDecisionAudits[0].retainedAfterEndpointGuard,
+                ),
+                displayed: summarizeAudit(
+                    diagnosis.eventDecisionAudits[0].displayedBeforeLocator,
+                ),
+            } : null,
+            decisions: diagnosis.reviewWindowDecisions?.map((decision) => ({
+                status: decision.status,
+                reason: decision.reason,
+                strictReason: decision.strictReason,
+                sourceStage: decision.sourceStage,
+            })),
+            joint: diagnosis.jointEventDecisions?.[0] ? {
+                status: diagnosis.jointEventDecisions[0].status,
+                reason: diagnosis.jointEventDecisions[0].reason,
+                event: diagnosis.jointEventDecisions[0].event
+                    ? summarize([diagnosis.jointEventDecisions[0].event!])[0]
+                    : null,
+                hypotheses: diagnosis.jointEventDecisions[0].hypotheses,
+            } : null,
+        }))).toEqual([]);
+    }, 300_000);
 
     bundledCofechaIt("shows only the newest missing ring after fresh COFECHA", () => {
         const corrupted = buildMultiMissingCorrupted(

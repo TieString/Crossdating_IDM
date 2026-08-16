@@ -12,6 +12,7 @@ import {
     evaluateLocalizedTwoStepMissingInterpretation,
     evaluateMissingPartialInterpretationTie,
     attachUniversalPartialMissingWorkflow,
+    promoteValidatedSequentialMissingInterpretation,
     makeMissingRingInterpretation,
     makePartialMoveInterpretation,
 } from "../missingPartialInterpretation";
@@ -602,6 +603,92 @@ describe("missing/partial interpretation tie", () => {
         expect(result.interpretationAmbiguity?.alternative.evidence.notes).toContain(
             "missing_partial_virtual_count_status=skipped",
         );
+    });
+
+    it("promotes a validated unit frontier from a mixed cumulative path", () => {
+        const partial = partialEvent();
+        partial.evidence.notes.push("stable_bounded_path_all_transitions_partial=false");
+        const attached = attachUniversalPartialMissingWorkflow(partial, null, new Map());
+        const ambiguity = missingPartialAmbiguity(attached);
+        const validated: DiagnosisEvent = {
+            ...attached,
+            interpretationAmbiguity: {
+                ...ambiguity,
+                alternative: {
+                    ...ambiguity.alternative,
+                    rankedYears: [{
+                        year: 1907,
+                        rank: 1,
+                        score: 1,
+                        evidenceTags: ["virtual_sequential_missing_frontier"],
+                    }],
+                },
+                evidence: {
+                    ...ambiguity.evidence,
+                    frontierYear: 1907,
+                    virtualCountEvaluation: {
+                        status: "inconclusive",
+                        validatedSteps: 1,
+                        years: [1907],
+                        minimumReferenceCount: 15,
+                        minimumReferenceVoteRatio: 0.72,
+                        minimumRawGain: 0.2,
+                    },
+                },
+            },
+        };
+
+        const promoted = promoteValidatedSequentialMissingInterpretation(
+            validated,
+            false,
+        );
+
+        expect(promoted.eventType).toBe("missingRing");
+        expect(promoted.rankedYears[0]?.year).toBe(1907);
+        expect(promoted.interpretationAmbiguity?.alternative.eventType)
+            .toBe("partialMove");
+        expect(promoted.evidence.algorithmSources)
+            .toContain("validated_sequential_missing_frontier_priority");
+    });
+
+    it("does not promote one virtual step for an otherwise physical partial move", () => {
+        const attached = attachUniversalPartialMissingWorkflow(
+            partialEvent(),
+            null,
+            new Map(),
+        );
+        const ambiguity = missingPartialAmbiguity(attached);
+        const validated: DiagnosisEvent = {
+            ...attached,
+            interpretationAmbiguity: {
+                ...ambiguity,
+                alternative: {
+                    ...ambiguity.alternative,
+                    rankedYears: [{
+                        year: 1907,
+                        rank: 1,
+                        score: 1,
+                        evidenceTags: ["virtual_sequential_missing_frontier"],
+                    }],
+                },
+                evidence: {
+                    ...ambiguity.evidence,
+                    virtualCountEvaluation: {
+                        status: "inconclusive",
+                        validatedSteps: 1,
+                        years: [1907],
+                        minimumReferenceCount: 15,
+                        minimumReferenceVoteRatio: 0.72,
+                        minimumRawGain: 0.2,
+                    },
+                },
+            },
+        };
+
+        expect(promoteValidatedSequentialMissingInterpretation(validated, false))
+            .toBe(validated);
+        expect(promoteValidatedSequentialMissingInterpretation(validated, true).eventType)
+            .toBe("missingRing");
     });
 
     it("keeps an already calibrated staircase without replacing it with virtual guesses", () => {

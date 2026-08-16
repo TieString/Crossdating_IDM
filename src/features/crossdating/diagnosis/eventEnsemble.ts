@@ -34,6 +34,7 @@ import {
     evaluateMissingPartialInterpretationTie,
     makeMissingRingInterpretation,
     makePartialMoveInterpretation,
+    promoteValidatedSequentialMissingInterpretation,
 } from "./missingPartialInterpretation";
 import {
     boundedLagPathHasObservedFixedSide,
@@ -1967,6 +1968,88 @@ const boundedSequentialWindow = (
         Math.min(startYear, range.endYear - actualWidth + 1),
     );
     return { startYear, endYear: startYear + actualWidth - 1 };
+};
+
+/**
+ * Recovers an adjacent two-step frontier when a weak fused locator jumps away from both the raw
+ * breakpoint profile and an independently generated candidate region. The operation remains a
+ * reviewable -2 partial/missing ambiguity; this helper only restores its local boundary.
+ */
+export const recoverCandidateAnchoredRawPartialFrontier = (
+    event: DiagnosisEvent,
+    candidateEvents: readonly DiagnosisEvent[],
+    range: { startYear: number; endYear: number },
+): DiagnosisEvent | null => {
+    if (event.eventType !== "partialMove"
+        || event.shiftSide !== "older"
+        || event.shiftYears !== -2
+        || !event.evidence.algorithmSources.includes(
+            "full_interval_counterfactual_locator",
+        )
+        || !event.evidence.notes.includes(
+            "counterfactual_coarse_current_candidate_consensus=false",
+        )) return null;
+    const rawYear = noteYear(event, "partial_gap_raw31_year=");
+    const concentration = noteYear(event, "counterfactual_window_concentration=");
+    const remoteMargin = noteYear(event, "counterfactual_window_remote_margin=");
+    const currentYear = rankedEventYear(event);
+    if (rawYear === null
+        || concentration === null
+        || remoteMargin === null
+        || concentration >= 0.55
+        || remoteMargin >= 0.08
+        || Math.abs(rawYear - currentYear) <= 13) return null;
+
+    const regionalCandidate = candidateEvents
+        .filter((candidate) => (
+            candidate.eventType === "partialMove"
+            && candidate.shiftSide === "older"
+            && candidate.evidence.algorithmSources.includes("candidate_ranking")
+            && Math.abs(rankedEventYear(candidate) - rawYear) <= 13
+        ))
+        .sort((left, right) => (
+            Math.abs(rankedEventYear(left) - rawYear)
+                - Math.abs(rankedEventYear(right) - rawYear)
+            || right.evidence.score - left.evidence.score
+        ))[0] ?? null;
+    if (!regionalCandidate) return null;
+
+    const window = boundedSequentialWindow(rawYear, 13, range);
+    const rankedYears = Array.from(
+        { length: window.endYear - window.startYear + 1 },
+        (_, index) => {
+            const year = window.startYear + index;
+            return {
+                year,
+                score: event.evidence.score - Math.abs(year - rawYear) * 0.01,
+                evidenceTags: ["candidate_anchored_raw_partial_frontier"],
+            };
+        },
+    ).sort((left, right) => (
+        right.score - left.score || right.year - left.year
+    )).map((row, index) => ({ ...row, rank: index + 1 }));
+    return {
+        ...event,
+        id: `${event.id}-candidate-anchored-raw-frontier-${rawYear}`,
+        ...window,
+        rankedYears,
+        reviewCoreRange: { ...window },
+        evidence: {
+            ...event.evidence,
+            algorithmSources: Array.from(new Set([
+                ...event.evidence.algorithmSources,
+                "candidate_anchored_raw_partial_frontier",
+            ])).sort(),
+            notes: Array.from(new Set([
+                ...event.evidence.notes,
+                `candidate_anchored_raw_partial_year=${rawYear}`,
+                `candidate_anchored_raw_partial_region_year=${
+                    rankedEventYear(regionalCandidate)
+                }`,
+                "locator_adjudication=raw_profile_candidate_fallback",
+            ])),
+        },
+    };
 };
 
 const legacySequentialWindowWidth = (
@@ -6330,11 +6413,31 @@ export const selectDistantSequentialMissingFrontier = (
     minimumEventSeparationYears = 14,
 ): DiagnosisEvent | null => {
     if (!cumulativeDepths.some((depth) => depth <= -2)) return null;
+    let competingWholeAllowsDirectReturn = false;
     if (competingWhole) {
         const notes = new Set(competingWhole.evidence.notes);
-        const isMissingDerivedAlias = notes.has("path_fixed_side_event_type=missingRing")
-            && notes.has("whole_state_global_lag_matches_shift=false");
+        const shiftYears = wholeSeriesMoveShiftYears(competingWhole);
+        const newerEdgeSupport = noteYear(
+            competingWhole,
+            "whole_state_newer_edge_support_fraction=",
+        );
+        const newestLag = noteYear(competingWhole, "whole_state_newest_lag=");
+        const globallyInconsistentAlias = notes.has(
+            "whole_state_global_lag_matches_shift=false",
+        );
+        const oldSideCumulativeAlias = (
+            shiftYears !== null
+            && shiftYears <= -2
+            && newerEdgeSupport === 0
+            && newestLag === -1
+        );
+        const isMissingDerivedAlias = globallyInconsistentAlias
+            || (
+                oldSideCumulativeAlias
+            );
         if (!isMissingDerivedAlias) return null;
+        competingWholeAllowsDirectReturn = globallyInconsistentAlias
+            || oldSideCumulativeAlias;
     }
     const isExactMissingStep = (event: DiagnosisEvent): boolean => (
         event.eventType === "missingRing"
@@ -6356,10 +6459,8 @@ export const selectDistantSequentialMissingFrontier = (
         && event.evidence.score >= 6
         && event.evidence.samplePairs >= 50
     );
-    const findChain = (
-        steps: readonly DiagnosisEvent[],
-    ): { frontier: DiagnosisEvent; predecessor: DiagnosisEvent } | null => {
-        const frontier = steps
+    const findFrontier = (steps: readonly DiagnosisEvent[]): DiagnosisEvent | null => (
+        steps
             .filter((event) => (
                 event.evidence.lagBefore === -1
                 && event.evidence.lagAfter === 0
@@ -6369,7 +6470,12 @@ export const selectDistantSequentialMissingFrontier = (
             .sort((left, right) => (
                 rankedEventYear(right) - rankedEventYear(left)
                 || right.evidence.score - left.evidence.score
-            ))[0];
+            ))[0] ?? null
+    );
+    const findChain = (
+        steps: readonly DiagnosisEvent[],
+    ): { frontier: DiagnosisEvent; predecessor: DiagnosisEvent } | null => {
+        const frontier = findFrontier(steps);
         if (!frontier) return null;
         const frontierYear = rankedEventYear(frontier);
         const predecessor = steps
@@ -6389,8 +6495,18 @@ export const selectDistantSequentialMissingFrontier = (
         ? findChain(rawPathEvents.filter(isStrongRawPathMissingStep))
         : null;
     const selectedChain = independentlyLocatedChain ?? rawPathChain;
-    if (!selectedChain) return null;
-    const { frontier, predecessor } = selectedChain;
+    const directIndependentFrontier = competingWholeAllowsDirectReturn
+        ? findFrontier(events.filter(isIndependentMissingStep))
+        : null;
+    const directRawPathFrontier = competingWholeAllowsDirectReturn
+        && directIndependentFrontier === null
+        ? findFrontier(rawPathEvents.filter(isStrongRawPathMissingStep))
+        : null;
+    const frontier = selectedChain?.frontier
+        ?? directIndependentFrontier
+        ?? directRawPathFrontier;
+    if (!frontier) return null;
+    const predecessor = selectedChain?.predecessor ?? null;
     const rankedFrontierYear = rankedEventYear(frontier);
     const nominalBoundaryYear = rawPathChain
         ? noteYear(frontier, "nominal_boundary_year=")
@@ -6427,7 +6543,11 @@ export const selectDistantSequentialMissingFrontier = (
         )).map((row, index) => ({ ...row, rank: index + 1 }));
     const chainSource = independentlyLocatedChain
         ? "independent_counterfactual_path_chain"
-        : "raw_piecewise_path_chain";
+        : rawPathChain
+            ? "raw_piecewise_path_chain"
+            : directIndependentFrontier
+                ? "independent_zero_return_frontier"
+                : "raw_piecewise_zero_return_frontier";
 
     return {
         ...frontier,
@@ -6446,7 +6566,9 @@ export const selectDistantSequentialMissingFrontier = (
             ])).sort(),
             notes: Array.from(new Set([
                 ...frontier.evidence.notes,
-                `distant_sequential_predecessor_year=${rankedEventYear(predecessor)}`,
+                ...(predecessor ? [
+                    `distant_sequential_predecessor_year=${rankedEventYear(predecessor)}`,
+                ] : ["distant_sequential_predecessor_year=unresolved"]),
                 `distant_sequential_frontier_year=${frontierYear}`,
                 `distant_sequential_minimum_separation=${minimumEventSeparationYears}`,
                 `distant_sequential_evidence_source=${chainSource}`,
@@ -10375,16 +10497,45 @@ export const makeDiagnosisEvents = (
             const automaticSemanticsRejectedCount = independentlyLocatedEvents.filter(
                 (event) => !isValidAutomaticEvent(event),
             ).length;
+            const attachAndPrioritizeMissingWorkflow = (
+                event: DiagnosisEvent,
+            ): DiagnosisEvent => {
+                const localBoundary = recoverCandidateAnchoredRawPartialFrontier(
+                    event,
+                    candidateEvents,
+                    diagnosis.targetRange,
+                ) ?? event;
+                const interpreted = localBoundary.eventType === "partialMove"
+                    ? attachUniversalPartialMissingWorkflow(
+                        localBoundary,
+                        getCofechaDiagnosis(),
+                        siteData,
+                        localLagTransitionEvidence,
+                        candidateEvents,
+                    )
+                    : event;
+                if (interpreted.eventType !== "partialMove") return interpreted;
+                const alternative = interpreted.interpretationAmbiguity?.kind
+                    === "missingRingsOrPartialMove"
+                    ? interpreted.interpretationAmbiguity.alternative
+                    : null;
+                const alternativeYear = alternative
+                    ? rankedEventYear(alternative)
+                    : null;
+                const hasIndependentUnitLocation = alternativeYear !== null
+                    && detectedBeforeFusion.some((candidate) => (
+                        candidate.eventType === "missingRing"
+                        && candidate.evidence.lagBefore === -1
+                        && candidate.evidence.lagAfter === 0
+                        && Math.abs(rankedEventYear(candidate) - alternativeYear) <= 3
+                    ));
+                return promoteValidatedSequentialMissingInterpretation(
+                    interpreted,
+                    hasIndependentUnitLocation,
+                );
+            };
             const finalEvents = validAutomaticEvents(independentlyLocatedEvents)
-                .map((event) => event.eventType === "partialMove"
-                        ? attachUniversalPartialMissingWorkflow(
-                            event,
-                            getCofechaDiagnosis(),
-                            siteData,
-                            localLagTransitionEvidence,
-                            candidateEvents,
-                        )
-                    : event)
+                .map(attachAndPrioritizeMissingWorkflow)
                 .map(withEvidenceLedger);
             const boundedFinalEvents = includeBoundedPathHypotheses
                 ? boundedPathEvents.flatMap((event) => validAutomaticEvents([event]))
@@ -10392,7 +10543,7 @@ export const makeDiagnosisEvents = (
             const supplementalFinalEvents = [
                 ...boundedFinalEvents,
                 ...validAutomaticEvents(supplementalFinalHypotheses),
-            ].map(withEvidenceLedger);
+            ].map(attachAndPrioritizeMissingWorkflow).map(withEvidenceLedger);
             let finalReason: DiagnosisEventDecisionReason = "post_location_rejected";
             if (finalEvents.length > 0) {
                 finalReason = "emitted";
