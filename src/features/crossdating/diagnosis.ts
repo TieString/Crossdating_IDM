@@ -24,6 +24,10 @@ export {
 } from "./diagnosis/eventLocationAlternatives";
 export { getDisplayedDiagnosisEvents } from "./diagnosis/eventDisplay";
 export {
+    projectActiveDiagnosisEventInterpretation,
+    refreshActiveDiagnosisEventInterpretation,
+} from "./diagnosis/activeEventInterpretation";
+export {
     stabilizeDiagnosisAcrossEvidenceRefresh,
     type EvidenceRefreshDecision,
     type EvidenceRefreshDecisionReason,

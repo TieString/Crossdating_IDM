@@ -9,10 +9,13 @@ import {
 import {
     applyLocalCrossdatingOption,
     getDisplayedDiagnosisEvents,
+    projectActiveDiagnosisEventInterpretation,
+    refreshActiveDiagnosisEventInterpretation,
     simulateDiagnosisEventPreview,
   type CrossdatingDiagnosis,
   type DiagnosisBatchApplyResult,
   type DiagnosisCandidateOperation,
+  type DiagnosisEvent,
   type LocalCrossdatingSimulation,
   type LocalSimulationApplyRequest,
   type LocalSimulationOption,
@@ -86,6 +89,7 @@ type Props = {
   referenceConfig?: ReferenceSeriesConfig | null
   dynamicReferenceConfig?: ReferenceSeriesConfig | null
   diagnosis?: CrossdatingDiagnosis
+  activeDiagnosisEvent?: DiagnosisEvent | null
   diagnosisBatchResult?: DiagnosisBatchApplyResult | null
   onReferenceConfigChange?: (config: ReferenceSeriesConfig | null) => void
   onApplyDiagnosisCandidate?: (candidate: DiagnosisCandidateOperation) => void
@@ -112,6 +116,7 @@ function TreeChartManagerBase({
   referenceConfig = null,
   dynamicReferenceConfig = null,
   diagnosis,
+  activeDiagnosisEvent = null,
   onApplyLocalSimulation,
   onReferenceConfigChange,
   onInsertMissingYearAtSide,
@@ -143,6 +148,12 @@ function TreeChartManagerBase({
   const selectedTreesRef = useRef(selectedTrees)
   const handledJumpIdRef = useRef<number | null>(null)
   const diagnosisEvents = useMemo(() => getDisplayedDiagnosisEvents(diagnosis), [diagnosis])
+  const resolvedActiveDiagnosisEvent = useMemo(() => (
+    refreshActiveDiagnosisEventInterpretation(diagnosisEvents, activeDiagnosisEvent)
+  ), [activeDiagnosisEvent, diagnosisEvents])
+  const projectedDiagnosisEvents = useMemo(() => (
+    projectActiveDiagnosisEventInterpretation(diagnosisEvents, resolvedActiveDiagnosisEvent)
+  ), [diagnosisEvents, resolvedActiveDiagnosisEvent])
 
   useEffect(() => {
     selectedTreesRef.current = selectedTrees
@@ -348,7 +359,7 @@ function TreeChartManagerBase({
 
   const handleLinePointClick = useCallback((target: { tree: string; year: number }) => {
     const sourceYear = target.year - (treeOffsets.get(target.tree) ?? 0)
-    const matchingEvent = diagnosisEvents
+    const matchingEvent = projectedDiagnosisEvents
       .filter((event) => (
         !event.stale
         && event.seriesId === target.tree
@@ -379,13 +390,23 @@ function TreeChartManagerBase({
     })
     setSelectedLocalOption(simulation.bestOption)
     setIsConfirmingLocalApply(false)
-  }, [clearLocalSimulation, diagnosisEvents, fullData, referenceConfig, treeOffsets])
+  }, [clearLocalSimulation, fullData, projectedDiagnosisEvents, referenceConfig, treeOffsets])
 
   useEffect(() => {
     if (localSimulation && !visibleTrees.includes(localSimulation.targetTree)) {
       clearLocalSimulation()
     }
   }, [clearLocalSimulation, localSimulation, visibleTrees])
+
+  useEffect(() => {
+    const sourceEventId = localSimulation?.sourceEventId
+    if (
+      sourceEventId
+      && !projectedDiagnosisEvents.some((event) => event.id === sourceEventId)
+    ) {
+      clearLocalSimulation()
+    }
+  }, [clearLocalSimulation, localSimulation?.sourceEventId, projectedDiagnosisEvents])
 
   const localPreviewTreeData = useMemo(() => {
     if (
@@ -446,12 +467,12 @@ function TreeChartManagerBase({
 
   const diagnosisEventCountByTree = useMemo(() => {
     const counts = new Map<string, number>()
-    diagnosisEvents.forEach((event) => {
+    projectedDiagnosisEvents.forEach((event) => {
       if (event.stale) return
       counts.set(event.seriesId, (counts.get(event.seriesId) ?? 0) + 1)
     })
     return counts
-  }, [diagnosisEvents])
+  }, [projectedDiagnosisEvents])
 
   const activeDiagnosisEventCount = useMemo(() => (
     Array.from(diagnosisEventCountByTree.values()).reduce((sum, count) => sum + count, 0)
@@ -509,7 +530,7 @@ function TreeChartManagerBase({
   }, [fullData, localPreviewTreeData, treeOffsets, visibleTrees])
 
   const diagnosisEventRanges = useMemo<ChartDiagnosisEventRange[]>(() => (
-    diagnosisEvents.flatMap((event) => {
+    projectedDiagnosisEvents.flatMap((event) => {
       if (
         event.stale
         || event.eventType === 'wholeSeriesMove'
@@ -526,7 +547,7 @@ function TreeChartManagerBase({
         endYear: event.endYear + yearOffset,
       }]
     })
-  ), [diagnosisEvents, treeOffsets, visibleTrees])
+  ), [projectedDiagnosisEvents, treeOffsets, visibleTrees])
 
   const filteredTreeCodes = useMemo(() =>
     search.trim() === '' ? allTreeCodes : allTreeCodes.filter(c => c.toLowerCase().includes(search.toLowerCase())),
@@ -646,7 +667,7 @@ function TreeChartManagerBase({
   }
 
   const matchingLocalEvent = localSimulation
-    ? diagnosisEvents.find((event) => (
+    ? projectedDiagnosisEvents.find((event) => (
       !event.stale
       && event.seriesId === localSimulation.targetTree
       && (localSimulation.sourceEventId
@@ -655,6 +676,11 @@ function TreeChartManagerBase({
           && localSimulation.year <= event.endYear)
     ))
     : undefined
+  const activeReviewLabel = resolvedActiveDiagnosisEvent
+    ? resolvedActiveDiagnosisEvent.eventType === 'wholeSeriesMove'
+      ? `${resolvedActiveDiagnosisEvent.seriesId} · 整体移动 ${resolvedActiveDiagnosisEvent.shiftYears ?? 0} 年`
+      : `${resolvedActiveDiagnosisEvent.seriesId} · 复核窗口 ${resolvedActiveDiagnosisEvent.startYear}-${resolvedActiveDiagnosisEvent.endYear}`
+    : null
   const localYearStatus = !matchingLocalEvent
     ? '诊断事件'
     : matchingLocalEvent.rankedYears[0]?.year === localSimulation?.year
@@ -721,7 +747,9 @@ function TreeChartManagerBase({
       >
         <strong style={{ color: '#24352a', fontSize: 12 }}>建议预览</strong>
         {!localSimulation || !selectedLocalOption ? (
-          <span style={{ color: '#7b8490' }}>未预览建议</span>
+          <span style={{ color: activeReviewLabel ? '#315d36' : '#7b8490', fontWeight: activeReviewLabel ? 650 : 400 }}>
+            {activeReviewLabel ?? '未预览建议'}
+          </span>
         ) : (
           <>
             <span style={{ fontWeight: 650 }}>

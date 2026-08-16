@@ -196,6 +196,7 @@ export default function WorkspaceWindowPage() {
             selectedTrees={state.selectedTrees}
             focusedTree={state.focusedTree}
             jumpTarget={state.jumpTarget}
+            activeDiagnosisEvent={state.activeDiagnosisEvent}
             showPersistentTooltip
             referenceConfig={state.referenceConfig}
             dynamicReferenceConfig={state.dynamicReferenceConfig}

@@ -7,6 +7,7 @@ import type {
     CrossdatingDiagnosis,
     DiagnosisBatchApplyResult,
     DiagnosisCandidateOperation,
+    DiagnosisEvent,
     LocalSimulationApplyRequest,
 } from "@/features/crossdating/diagnosis";
 import type { CrossdatingValidationSummary } from "@/features/crossdating/validation";
@@ -446,6 +447,7 @@ type ExpandedChartPageProps = {
     selectedTrees: readonly string[];
     focusedTree: string | null;
     jumpTarget?: ChartJumpTarget;
+    activeDiagnosisEvent?: DiagnosisEvent | null;
     referenceConfig: ReferenceSeriesConfig | null;
     dynamicReferenceConfig?: ReferenceSeriesConfig | null;
     diagnosis: CrossdatingDiagnosis;
@@ -472,6 +474,7 @@ export function ExpandedChartPage({
     selectedTrees,
     focusedTree,
     jumpTarget,
+    activeDiagnosisEvent = null,
     referenceConfig,
     dynamicReferenceConfig = null,
     diagnosis,
@@ -533,6 +536,7 @@ export function ExpandedChartPage({
                         selectedTrees={selectedTrees}
                         focusedTree={focusedTree}
                         jumpTarget={jumpTarget}
+                        activeDiagnosisEvent={activeDiagnosisEvent}
                         referenceConfig={referenceConfig}
                         dynamicReferenceConfig={dynamicReferenceConfig}
                         diagnosis={diagnosis}

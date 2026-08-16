@@ -8,6 +8,8 @@ import { CurrentEventSuggestionPanel } from "@/components/DiagnosisCandidates/Cu
 import { DiagnosisEventPanel } from "@/components/DiagnosisCandidates/DiagnosisEventPanel";
 import {
     getDisplayedDiagnosisEvents,
+    projectActiveDiagnosisEventInterpretation,
+    refreshActiveDiagnosisEventInterpretation,
     type DiagnosisEvent,
 } from "@/features/crossdating/diagnosis";
 import { hashRwlSiteData } from "@/features/crossdating/reference";
@@ -341,6 +343,7 @@ export default function Home() {
     const [findMatchIndex, setFindMatchIndex] = useState(0);
     const [problemTab, setProblemTab] = useState<"problems" | "candidates">("problems");
     const [focusedCurrentEventSuggestion, setFocusedCurrentEventSuggestion] = useState<CurrentEventSuggestion | null>(null);
+    const [activeDiagnosisEvent, setActiveDiagnosisEvent] = useState<DiagnosisEvent | null>(null);
     const [chartSelectedTrees, setChartSelectedTrees] = useState<string[]>([]);
     const chartSelectionFileRef = useRef<string | null>(null);
     const {
@@ -457,6 +460,22 @@ export default function Home() {
         )),
         [displayedDiagnosisEvents, selectedTree],
     );
+    useEffect(() => {
+        setActiveDiagnosisEvent((previous) => {
+            const refreshed = refreshActiveDiagnosisEventInterpretation(
+                displayedDiagnosisEvents,
+                previous,
+            );
+            return refreshed?.seriesId === selectedTree ? refreshed : null;
+        });
+    }, [displayedDiagnosisEvents, selectedTree]);
+    const projectedDiagnosisEvents = useMemo(
+        () => projectActiveDiagnosisEventInterpretation(
+            displayedDiagnosisEvents,
+            activeDiagnosisEvent,
+        ),
+        [activeDiagnosisEvent, displayedDiagnosisEvents],
+    );
     const currentSiteHash = useMemo(() => hashRwlSiteData(siteData), [siteData]);
     const visibleCurrentEventSession = useMemo(() => {
         const context = currentEventRankerSession.context;
@@ -483,7 +502,7 @@ export default function Home() {
     }, [visibleCurrentEventSession.requestId, selectedTree]);
     const suggestedRangeHighlights = useMemo(
         () => [
-            ...displayedDiagnosisEvents.flatMap((event) => (
+            ...projectedDiagnosisEvents.flatMap((event) => (
                 !event.stale && event.eventType !== "wholeSeriesMove"
                     ? [{
                         tree: event.seriesId,
@@ -513,7 +532,7 @@ export default function Home() {
                 }]
                 : []),
         ],
-        [displayedDiagnosisEvents, focusedCurrentEventSuggestion, selectedTree, visibleCurrentEventSession],
+        [focusedCurrentEventSuggestion, projectedDiagnosisEvents, selectedTree, visibleCurrentEventSession],
     );
     const currentEventTabAvailable = CURRENT_EVENT_PYTHON_MODELS_ENABLED
         && Boolean(fileName && selectedTree !== ALL_OPTION_VALUE);
@@ -712,15 +731,28 @@ export default function Home() {
     }, [getCurrentRwlText, handleTreeSelectionChange, selectedTree, siteData]);
 
     const handleFocusDiagnosisEvent = useCallback((event: DiagnosisEvent, selectedYear?: number) => {
+        setActiveDiagnosisEvent(event);
         if (event.eventType === "wholeSeriesMove") {
             handleCofechaCellReferenceClick({ tree: event.seriesId });
+            setChartSelectedTrees((previous) => (
+                previous.includes(event.seriesId) ? previous : [...previous, event.seriesId]
+            ));
+            if (externalWorkspaceWindows["line-chart"]) {
+                handleOpenWorkspaceWindow("line-chart");
+            }
             return;
         }
         const preferredYear = selectedYear
             ?? event.rankedYears[0]?.year
             ?? Math.round((event.startYear + event.endYear) / 2);
         handleCofechaCellReferenceClick({ tree: event.seriesId, year: preferredYear });
-    }, [handleCofechaCellReferenceClick]);
+        handleJumpToChart(event.seriesId, preferredYear);
+    }, [
+        externalWorkspaceWindows,
+        handleCofechaCellReferenceClick,
+        handleJumpToChart,
+        handleOpenWorkspaceWindow,
+    ]);
 
     const linkedReport = useMemo(() => (
         renderCofechaHtmlWithLinks(reportText, treeOptions, cofechaPart6JumpTarget?.tree ?? null)
@@ -829,13 +861,14 @@ export default function Home() {
             selectedTrees: chartSelectedTrees,
             focusedTree: selectedTree === ALL_OPTION_VALUE ? null : selectedTree,
             jumpTarget: chartJumpTarget ?? undefined,
+            activeDiagnosisEvent,
             referenceConfig,
             dynamicReferenceConfig,
             diagnosis: crossdatingDiagnosis,
             diagnosisBatchResult,
             cofechaPart6Trees: cofechaPart6TreeList,
         },
-    }), [canResetToRawData, chartJumpTarget, chartSelectedTrees, cofechaPart6JumpTarget, cofechaPart6TreeList, cofechaResult, crossdatingDiagnosis, crossdatingValidationSummary, diagnosisBatchResult, dynamicReferenceConfig, fileName, isCofechaOutdated, isCofechaRunning, linkedReport, operationLog, referenceConfig, selectedPart, selectedTree, siteData]);
+    }), [activeDiagnosisEvent, canResetToRawData, chartJumpTarget, chartSelectedTrees, cofechaPart6JumpTarget, cofechaPart6TreeList, cofechaResult, crossdatingDiagnosis, crossdatingValidationSummary, diagnosisBatchResult, dynamicReferenceConfig, fileName, isCofechaOutdated, isCofechaRunning, linkedReport, operationLog, referenceConfig, selectedPart, selectedTree, siteData]);
 
     const handleCofechaTextClick = useCallback((event: MouseEvent<HTMLParagraphElement>) => {
         const target = event.target;
@@ -1779,6 +1812,7 @@ export default function Home() {
                                                     referenceConfig={referenceConfig}
                                                     dynamicReferenceConfig={dynamicReferenceConfig}
                                                     diagnosis={crossdatingDiagnosis}
+                                                    activeDiagnosisEvent={activeDiagnosisEvent}
                                                     diagnosisBatchResult={diagnosisBatchResult}
                                                     onReferenceConfigChange={handleReferenceConfigChange}
                                                     onApplyDiagnosisCandidate={handleApplyDiagnosisCandidate}

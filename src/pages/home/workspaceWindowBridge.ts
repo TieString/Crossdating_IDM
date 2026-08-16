@@ -4,6 +4,7 @@ import type {
     CrossdatingDiagnosis,
     DiagnosisBatchApplyResult,
     DiagnosisCandidateOperation,
+    DiagnosisEvent,
     LocalSimulationApplyRequest,
 } from "@/features/crossdating/diagnosis";
 import type { CrossdatingValidationSummary } from "@/features/crossdating/validation";
@@ -150,6 +151,7 @@ export type LineChartWindowState = {
     selectedTrees: string[];
     focusedTree: string | null;
     jumpTarget?: ChartJumpTarget;
+    activeDiagnosisEvent?: DiagnosisEvent | null;
     referenceConfig: ReferenceSeriesConfig | null;
     dynamicReferenceConfig: ReferenceSeriesConfig | null;
     diagnosis: CrossdatingDiagnosis;
