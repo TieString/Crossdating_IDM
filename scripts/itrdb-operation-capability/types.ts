@@ -13,7 +13,8 @@ export type CapabilityConfig = {
     protocolVersion:
         | "itrdb-operation-capability-v1"
         | "itrdb-operation-capability-v2"
-        | "itrdb-operation-capability-v3";
+        | "itrdb-operation-capability-v3"
+        | "itrdb-operation-capability-v4-1000";
     frozenDate: string;
     seed: string;
     scenarioGeneratorVersion: 3 | 4 | 5;
@@ -37,6 +38,8 @@ export type CapabilityConfig = {
         minimumNewerContextYears: number;
         maximumTargetsPerFile?: number;
         targetSelectionSeed?: string;
+        globalTargetCount?: number;
+        priorTargetsRetained?: number;
         excludeFilesWithoutEligibleTargets?: boolean;
         usesSignalStrength: false;
         usesDiagnosisOutput: false;
@@ -56,8 +59,10 @@ export type CapabilityConfig = {
     design?: {
         scenarioSampling: "exhaustivePerTarget" | "balancedOnePerFamily";
         splitId: string;
-        datasetRole: "development" | "finalHoldout";
+        datasetRole: "development" | "finalHoldout" | "expandedFrozenHoldoutReuse";
         casesPerTargetPerFamily: number;
+        priorProtocolVersion?: string;
+        targetExpansion?: "retainPrior500PlusDeterministic500";
     };
     statistics?: {
         clusterUnit: "file";
@@ -126,6 +131,13 @@ export type CapabilityManifest = {
         totalSeries: number;
         eligibleTargetsBeforeLimit?: number;
         eligibleTargets: number;
+    };
+    expansion?: {
+        priorProtocolVersion: string;
+        priorTargetCount: number;
+        addedTargetCount: number;
+        availableTargetCount: number;
+        selectionSeed: string;
     };
 };
 
