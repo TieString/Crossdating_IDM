@@ -6,13 +6,15 @@ import type {
 
 const REVIEWABLE_WHOLE_SHIFTS = new Set([-1, -2, -3]);
 const SYNTHETIC_ENDPOINT_WINDOW_WIDTH = 13;
+const ALLOWED_REVIEW_WINDOW_WIDTHS = [5, 7, 9, 13] as const;
 
 const endpointReviewRange = (
     whole: DiagnosisEvent,
     width: number,
+    endOffsetYears = 0,
 ): { startYear: number; endYear: number } => {
     const seriesStart = whole.seriesRange?.startYear ?? whole.startYear;
-    const endYear = whole.seriesRange?.endYear ?? whole.endYear;
+    const endYear = (whole.seriesRange?.endYear ?? whole.endYear) - endOffsetYears;
     return {
         startYear: Math.max(seriesStart, endYear - width + 1),
         endYear,
@@ -24,6 +26,9 @@ const rankedEndpointYears = (
     previous: DiagnosisEvent["rankedYears"],
 ): DiagnosisEvent["rankedYears"] => {
     const previousByYear = new Map(previous.map((row) => [row.year, row]));
+    const minimumPreviousScore = previous.length > 0
+        ? Math.min(...previous.map((row) => row.score))
+        : null;
     return Array.from(
         { length: range.endYear - range.startYear + 1 },
         (_, index) => {
@@ -32,7 +37,9 @@ const rankedEndpointYears = (
             return {
                 year,
                 rank: 0,
-                score: retained?.score ?? 1 / (1 + range.endYear - year),
+                score: retained?.score ?? (minimumPreviousScore === null
+                    ? 1 / (1 + range.endYear - year)
+                    : minimumPreviousScore - 1 - (range.endYear - year) / 100),
                 evidenceTags: Array.from(new Set([
                     ...(retained?.evidenceTags ?? []),
                     "endpoint_whole_missing_review_window",
@@ -51,9 +58,22 @@ const alignMissingReviewToEndpoint = (
     const endpointYear = whole.seriesRange?.endYear ?? whole.endYear;
     const endpointDistance = endpointYear - missing.endYear;
     if (endpointDistance <= 0 || endpointDistance > 15) return missing;
-    const width = missing.endYear - missing.startYear + 1;
-    if (![5, 7, 9, 13].includes(width)) return missing;
-    const range = endpointReviewRange(whole, width);
+    const topYear = missing.rankedYears[0]?.year
+        ?? Math.round((missing.startYear + missing.endYear) / 2);
+    const completeCandidateSpan = endpointYear - missing.startYear + 1;
+    const topYearSpan = endpointYear - topYear + 1;
+    const requiredSpan = completeCandidateSpan <= SYNTHETIC_ENDPOINT_WINDOW_WIDTH
+        ? completeCandidateSpan
+        : topYearSpan;
+    const width = ALLOWED_REVIEW_WINDOW_WIDTHS.find(
+        (candidateWidth) => candidateWidth >= requiredSpan,
+    ) ?? (topYearSpan <= 16 ? SYNTHETIC_ENDPOINT_WINDOW_WIDTH : null);
+    if (!width) return missing;
+    const range = endpointReviewRange(
+        whole,
+        width,
+        Math.max(0, topYearSpan - width),
+    );
     return {
         ...missing,
         ...range,
@@ -69,6 +89,7 @@ const alignMissingReviewToEndpoint = (
                 ...missing.evidence.notes,
                 `endpoint_missing_original_window=${missing.startYear}-${missing.endYear}`,
                 `endpoint_missing_aligned_window=${range.startYear}-${range.endYear}`,
+                `endpoint_missing_bridge_top_year=${topYear}`,
             ])),
         },
     };
@@ -126,7 +147,6 @@ export const attachEndpointWholeMissingInterpretation = (
     const width = alignedMissing.endYear - alignedMissing.startYear + 1;
     const alignedEvidence: DiagnosisWholeMissingInterpretationEvidence = {
         ...evidence,
-        endpointDistanceYears: Math.max(0, whole.endYear - alignedMissing.endYear),
         missingWindowWidth: width as 5 | 7 | 9 | 13,
     };
     return {

@@ -694,6 +694,42 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("keeps a candidate-anchored distant final ahead of a persisted adjacent platform", () => {
+        const selected = event("candidate-frontier", "missingRing", 1974, 1980, 1977);
+        selected.evidence.lagBefore = -1;
+        selected.evidence.lagAfter = 0;
+        selected.evidence.algorithmSources = [
+            "candidate_anchored_distant_missing_frontier",
+            "candidate_ranking",
+            "cumulative_sequential_missing_staircase",
+            "local_edit_alignment",
+            "sequential_missing_staircase_head",
+        ];
+        selected.evidence.notes = [
+            "distant_sequential_predecessor_year=1787",
+            "distant_candidate_whole_correlation_advantage=0.011972",
+        ];
+        const adjacent = event("adjacent-platform", "missingRing", 1970, 1976, 1974);
+        adjacent.evidence.lagBefore = -1;
+        adjacent.evidence.lagAfter = 0;
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("detected", adjacent),
+            checkpoint("fused", adjacent),
+            checkpoint("retained", adjacent),
+            checkpoint("displayed", adjacent),
+            checkpoint("final", selected),
+        ]);
+
+        expect(decision.event).toMatchObject({
+            id: "candidate-frontier",
+            eventType: "missingRing",
+            startYear: 1974,
+            endYear: 1980,
+            rankedYears: [{ year: 1977, rank: 1 }],
+        });
+    });
+
     it("keeps a candidate-anchored positive staircase over a distant bounded mode", () => {
         const selected = event("sequential-false", "falseRing", 1847, 1859, 1853);
         selected.evidence.algorithmSources = [
@@ -2581,11 +2617,14 @@ describe("joint event adjudicator", () => {
                 alternative: {
                     id: "endpoint-candidate",
                     eventType: "missingRing",
-                    startYear: 1988,
+                    startYear: 1986,
                     endYear: 1994,
                 },
             },
         });
+        expect(
+            decision.event?.interpretationAmbiguity?.alternative.rankedYears[0],
+        ).toMatchObject({ year: 1990, rank: 1 });
     });
 
     it.each([-2, -3] as const)(
@@ -2632,6 +2671,32 @@ describe("joint event adjudicator", () => {
             });
         },
     );
+
+    it("shifts a thirteen-year endpoint review just enough to retain its local mode", () => {
+        const whole = event("terminal-unit", "wholeSeriesMove", 1480, 1878, 0);
+        whole.shiftYears = -1;
+        whole.seriesRange = { startYear: 1480, endYear: 1878 };
+        const local = event("local-endpoint-mode", "missingRing", 1861, 1867, 1864);
+        local.evidence.algorithmSources = [
+            "candidate_ranking",
+            "local_edit_alignment",
+            "segmented_diagnosis",
+        ];
+        local.evidence.notes = ["candidate_hard_gate_passed"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", local),
+            checkpoint("final", whole),
+        ]);
+        const alternative = decision.event?.interpretationAmbiguity?.alternative;
+
+        expect(alternative).toMatchObject({
+            eventType: "missingRing",
+            startYear: 1864,
+            endYear: 1876,
+        });
+        expect(alternative?.rankedYears[0]).toMatchObject({ year: 1864, rank: 1 });
+    });
 
     it("does not expose the missing-ring shortcut for a four-year whole shift", () => {
         const whole = event("terminal-4", "wholeSeriesMove", 1732, 1994, 0);

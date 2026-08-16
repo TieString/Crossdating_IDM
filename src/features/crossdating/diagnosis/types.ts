@@ -149,7 +149,10 @@ export type DiagnosisMissingPartialInterpretationEvidence = {
     /** Exact counts require independently localized unit years; otherwise N is cumulative lag. */
     countEvidence?: "multiReferenceStaircase" | "cumulativeLagOnly";
     frontierYear?: number;
-    frontierLocalization?: "multiReferenceCounterfactual" | "partialBoundaryFallback";
+    frontierLocalization?:
+        | "multiReferenceCounterfactual"
+        | "partialBoundaryFallback"
+        | "endpointAggregateReview";
     virtualCountEvaluation?: {
         status: "confirmed" | "inconclusive" | "skipped";
         validatedSteps: number;

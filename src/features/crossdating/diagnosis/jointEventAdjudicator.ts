@@ -174,6 +174,33 @@ const eventLocationQuality = (event: DiagnosisEvent): number => {
     return Math.max(...entries.map(locationEntryQuality));
 };
 
+const isCandidateAnchoredDistantMissingEvent = (
+    event: DiagnosisEvent,
+): boolean => {
+    const eventTop = topYear(event);
+    const predecessorYear = noteYear(event, "distant_sequential_predecessor_year=");
+    const wholeAdvantage = noteNumber(
+        event,
+        "distant_candidate_whole_correlation_advantage=",
+    );
+    return event.eventType === "missingRing"
+        && event.evidence.lagBefore === -1
+        && event.evidence.lagAfter === 0
+        && eventTop !== null
+        && predecessorYear !== null
+        && eventTop - predecessorYear >= 14
+        && wholeAdvantage !== null
+        && wholeAdvantage >= 0.01
+        && event.evidence.algorithmSources.includes(
+            "candidate_anchored_distant_missing_frontier",
+        )
+        && event.evidence.algorithmSources.includes("candidate_ranking")
+        && event.evidence.algorithmSources.includes("local_edit_alignment")
+        && event.evidence.algorithmSources.includes(
+            "cumulative_sequential_missing_staircase",
+        );
+};
+
 const eventHasIndependentLocationAuthority = (event: DiagnosisEvent): boolean => {
     const claims = evidenceClaimsFor(event);
     if (claims.has("independent_reference_staircase")
@@ -188,6 +215,7 @@ const eventHasIndependentLocationAuthority = (event: DiagnosisEvent): boolean =>
         || event.evidence.algorithmSources.includes(
             "sequential_missing_checkpoint_location",
         )
+        || isCandidateAnchoredDistantMissingEvent(event)
         || (
             claims.has("continuous_gap_consensus")
             && event.evidence.algorithmSources.includes(
@@ -447,10 +475,17 @@ const isValidatedSelectedTerminalUnitStaircaseCheckpoint = (
         && (noteNumber(event, "terminal_unit_staircase_maximum_year_drift=") ?? Infinity) <= 2;
 };
 
+const isValidatedSelectedCandidateAnchoredDistantMissingCheckpoint = (
+    checkpoint: DiagnosisReviewEventCheckpoint,
+): boolean => checkpoint.stage === "final"
+    && checkpoint.authority !== "supplemental"
+    && isCandidateAnchoredDistantMissingEvent(checkpoint.event);
+
 const isValidatedSelectedSequentialUnit = (
     checkpoint: DiagnosisReviewEventCheckpoint,
 ): boolean => isValidatedSelectedSequentialFalseCheckpoint(checkpoint)
-    || isValidatedSelectedTerminalUnitStaircaseCheckpoint(checkpoint);
+    || isValidatedSelectedTerminalUnitStaircaseCheckpoint(checkpoint)
+    || isValidatedSelectedCandidateAnchoredDistantMissingCheckpoint(checkpoint);
 
 const preferredStrongBoundedLocation = (
     cluster: HypothesisCluster,

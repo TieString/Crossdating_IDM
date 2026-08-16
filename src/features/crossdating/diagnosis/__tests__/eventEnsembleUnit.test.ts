@@ -26,7 +26,9 @@ import {
     recoverAggregatePartialUnitFrontier,
     recoverStableBoundedLagPathFrontier,
     selectDirectTerminalUnitBeforeDerivedStablePartial,
+    selectCandidateAnchoredDistantMissingFrontier,
     selectDistantSequentialMissingFrontier,
+    selectEndpointAggregatePartialFrontier,
     selectAggregateAnchoredRegularizedPartialFrontier,
     selectOperationAnchoredRegularizedAggregatePartialFrontier,
     selectCandidateAnchoredStableBoundedLagPathFrontier,
@@ -402,6 +404,93 @@ describe("selectDistantSequentialMissingFrontier", () => {
         expect(selected?.rankedYears[0]).toMatchObject({ year: 1977, rank: 1 });
         expect(selected?.evidence.algorithmSources)
             .toContain("raw_piecewise_sequential_missing_chain");
+    });
+
+    it("recovers a hard-gated distant candidate only when an older step completes the chain", () => {
+        const candidate = missingStep(1977, -1, -1);
+        candidate.evidence.algorithmSources = [
+            "candidate_ranking",
+            "local_edit_alignment",
+            "propagation_pattern",
+            "segmented_diagnosis",
+        ];
+        candidate.evidence.notes = ["candidate_hard_gate_passed"];
+        candidate.evidence.score = 7;
+        candidate.evidence.samplePairs = 50;
+        candidate.evidence.correctedCorrelation = 0.36;
+        const predecessor = missingStep(1786, -2, -1);
+        predecessor.evidence.score = 3;
+        const whole = wholeSeriesEvent(-1);
+        whole.evidence.correctedCorrelation = 0.34;
+
+        const selected = selectCandidateAnchoredDistantMissingFrontier(
+            [candidate],
+            [predecessor],
+            2000,
+            whole,
+        );
+
+        expect(selected).toMatchObject({
+            eventType: "missingRing",
+            startYear: 1974,
+            endYear: 1980,
+            evidence: { lagBefore: -1, lagAfter: 0 },
+        });
+        expect(selected?.evidence.algorithmSources)
+            .toContain("candidate_anchored_distant_missing_frontier");
+        expect(selectCandidateAnchoredDistantMissingFrontier(
+            [candidate],
+            [],
+            2000,
+            whole,
+        )).toBeNull();
+        whole.evidence.correctedCorrelation = 0.355;
+        expect(selectCandidateAnchoredDistantMissingFrontier(
+            [candidate],
+            [predecessor],
+            2000,
+            whole,
+        )).toBeNull();
+    });
+});
+
+describe("selectEndpointAggregatePartialFrontier", () => {
+    it("keeps a near-end aggregate partial when the competing whole has no newer-edge support", () => {
+        const partial = partialMoveEvent(-4);
+        partial.startYear = 1977;
+        partial.endYear = 1985;
+        partial.rankedYears = [{
+            year: 1981,
+            rank: 1,
+            score: 1,
+            evidenceTags: [],
+        }];
+        partial.evidence.algorithmSources = [
+            "full_interval_counterfactual_scan",
+            "joint_year_operation_evidence",
+            "partial_move_preferred_over_global_lag",
+        ];
+        const whole = wholeSeriesEvent(-4);
+        whole.shiftYears = -4;
+        whole.evidence.notes = [
+            "whole_state_newer_edge_support_fraction=0.000000",
+            "whole_state_older_edge_support_fraction=1.000000",
+        ];
+
+        expect(selectEndpointAggregatePartialFrontier(
+            [partial],
+            whole,
+            2000,
+        )?.evidence.algorithmSources).toContain("endpoint_aggregate_partial_frontier");
+        whole.evidence.notes = [
+            "whole_state_newer_edge_support_fraction=1.000000",
+            "whole_state_older_edge_support_fraction=1.000000",
+        ];
+        expect(selectEndpointAggregatePartialFrontier(
+            [partial],
+            whole,
+            2000,
+        )).toBeNull();
     });
 });
 

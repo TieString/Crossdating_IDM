@@ -769,21 +769,43 @@ const evaluateVirtualSequentialMissingCount = (
         partial.startYear,
         Math.min(partial.endYear, rankedTopYear(partial) - 1),
     );
+    const endpointAggregateSearch = candidateSearchAnchor === null
+        && partial.evidence.lagAfter === 0
+        && partial.evidence.algorithmSources.includes(
+            "endpoint_aggregate_partial_frontier",
+        )
+        && diagnosis.targetRange.endYear - partial.endYear <= 15;
+    const endpointSearchEnd = diagnosis.targetRange.endYear - 2;
     const searchRadiusYears = candidateSearchAnchor === null
-        ? Math.max(2, partial.endYear - partial.startYear + 1)
+        ? endpointAggregateSearch
+            ? Math.min(30, Math.max(
+                    partial.endYear - partial.startYear + 1,
+                    endpointSearchEnd - initialSearchAnchor,
+                ))
+            : Math.max(2, partial.endYear - partial.startYear + 1)
         : virtualFrontierSearchRadius(expectedCount);
     for (let step = 0; step < expectedCount; step += 1) {
         const fallbackYear: number = previousYear === null
             ? initialSearchAnchor
             : Math.max(partial.startYear, previousYear - 1);
         const scanStartYear = candidateSearchAnchor === null
-            ? partial.startYear
+            ? endpointAggregateSearch
+                ? Math.max(
+                        workingDiagnosis.targetRange.startYear + 30,
+                        fallbackYear - searchRadiusYears,
+                    )
+                : partial.startYear
             : Math.max(
                     workingDiagnosis.targetRange.startYear + 30,
                     fallbackYear - searchRadiusYears,
                 );
         const scanEndYear = candidateSearchAnchor === null
-            ? partial.endYear
+            ? endpointAggregateSearch
+                ? Math.min(
+                        endpointSearchEnd,
+                        previousYear === null ? endpointSearchEnd : previousYear - 1,
+                    )
+                : partial.endYear
             : Math.min(
                     workingDiagnosis.targetRange.endYear - 30,
                     fallbackYear + searchRadiusYears,
@@ -1007,7 +1029,35 @@ export const attachUniversalPartialMissingWorkflow = (
     // Consensus and best-score rows are exploratory until one virtual correction passes all
     // reference, remote-mode, and raw-gain gates. A zero-step probe must not move the user's
     // missing-ring interpretation away from the already validated partial boundary.
-    const selectedYear = virtual.frontierYear ?? fallbackYear;
+    const endpointAggregateReview = virtual.frontierYear === null
+        && partial.evidence.algorithmSources.includes(
+            "endpoint_aggregate_partial_frontier",
+        )
+        && diagnosis !== null;
+    const endpointReviewRange = endpointAggregateReview ? {
+        startYear: Math.max(
+            diagnosis!.targetRange.startYear,
+            diagnosis!.targetRange.endYear - 14,
+        ),
+        endYear: diagnosis!.targetRange.endYear - 2,
+    } : null;
+    const endpointReviewRows = endpointReviewRange
+        ? scores.filter((row) => (
+                row.year >= endpointReviewRange.startYear
+                && row.year <= endpointReviewRange.endYear
+            )).sort((left, right) => (
+                unitFrontierScore(right) - unitFrontierScore(left)
+                || right.referencePeakVoteRatio - left.referencePeakVoteRatio
+                || right.rawGain31 - left.rawGain31
+                || right.year - left.year
+            ))
+        : [];
+    const endpointReviewTopYear = endpointReviewRows[0]?.year
+        ?? (endpointReviewRange
+            ? Math.round((endpointReviewRange.startYear + endpointReviewRange.endYear) / 2)
+            : fallbackYear);
+    const selectedYear = virtual.frontierYear
+        ?? (endpointAggregateReview ? endpointReviewTopYear : fallbackYear);
     const selectedScore = scores.find((row) => row.year === selectedYear) ?? bestScore;
     const multiReferenceLocalized = virtual.frontierYear !== null
         && consensus !== null
@@ -1040,10 +1090,12 @@ export const attachUniversalPartialMissingWorkflow = (
         frontierYear: selectedYear,
         frontierLocalization: multiReferenceLocalized
             ? "multiReferenceCounterfactual"
+            : endpointAggregateReview
+                ? "endpointAggregateReview"
             : "partialBoundaryFallback",
         virtualCountEvaluation: publicVirtualCountEvaluation(virtual),
     };
-    const alternative = makeMissingRingInterpretation(
+    const baseAlternative = makeMissingRingInterpretation(
         partial,
         evidence,
         partial.seriesRange ?? diagnosis?.targetRange ?? {
@@ -1051,6 +1103,41 @@ export const attachUniversalPartialMissingWorkflow = (
             endYear: partial.endYear,
         },
     );
+    const alternative = endpointReviewRange ? {
+        ...baseAlternative,
+        id: `${baseAlternative.id}-endpoint-aggregate-review`,
+        ...endpointReviewRange,
+        reviewCoreRange: { ...endpointReviewRange },
+        rankedYears: Array.from(
+            { length: endpointReviewRange.endYear - endpointReviewRange.startYear + 1 },
+            (_, index) => endpointReviewRange.startYear + index,
+        ).map((year) => {
+            const row = endpointReviewRows.find((candidate) => candidate.year === year);
+            return {
+                year,
+                rank: 0,
+                score: row ? unitFrontierScore(row) : Number.NEGATIVE_INFINITY,
+                evidenceTags: ["endpoint_aggregate_missing_review"],
+            };
+        }).sort((left, right) => (
+            right.score - left.score || right.year - left.year
+        )).map((row, index) => ({ ...row, rank: index + 1 })),
+        confidenceLevel: "low" as const,
+        evidence: {
+            ...baseAlternative.evidence,
+            algorithmSources: Array.from(new Set([
+                ...baseAlternative.evidence.algorithmSources,
+                "endpoint_aggregate_missing_review",
+            ])).sort(),
+            notes: Array.from(new Set([
+                ...baseAlternative.evidence.notes,
+                `endpoint_aggregate_missing_review_window=${
+                    endpointReviewRange.startYear
+                }-${endpointReviewRange.endYear}`,
+                "endpoint_aggregate_missing_review=low_confidence_unique_window",
+            ])),
+        },
+    } : baseAlternative;
     return attachMissingPartialInterpretation(
         partial,
         appendMissingWorkflowNotes(alternative, localLagEvidence),

@@ -6577,6 +6577,149 @@ export const selectDistantSequentialMissingFrontier = (
     };
 };
 
+/**
+ * Recovers a zero-return frontier that candidate scoring located but the lag path left in the
+ * whole baseline state. A hard candidate alone is insufficient: an older -2 -> -1 step must
+ * complete the staircase and the local correction must outperform the competing -1 whole fit.
+ */
+export const selectCandidateAnchoredDistantMissingFrontier = (
+    candidateEvents: readonly DiagnosisEvent[],
+    pathEvents: readonly DiagnosisEvent[],
+    targetEndYear: number,
+    competingWhole: DiagnosisEvent | null,
+    maximumBarkAmbiguityDistanceYears = 15,
+    minimumEventSeparationYears = 14,
+    minimumCorrectedCorrelationAdvantage = 0.01,
+): DiagnosisEvent | null => {
+    if (wholeSeriesMoveShiftYears(competingWhole) !== -1) return null;
+    const candidates = candidateEvents.filter((event) => {
+        const year = rankedEventYear(event);
+        const sources = new Set(event.evidence.algorithmSources);
+        return event.eventType === "missingRing"
+            && year !== null
+            && targetEndYear - year > maximumBarkAmbiguityDistanceYears
+            && event.evidence.notes.includes("candidate_hard_gate_passed")
+            && sources.has("candidate_ranking")
+            && sources.has("local_edit_alignment")
+            && event.evidence.score >= 3
+            && event.evidence.samplePairs >= 30;
+    }).sort((left, right) => (
+        rankedEventYear(right) - rankedEventYear(left)
+        || right.evidence.score - left.evidence.score
+    ));
+    const wholeCorrected = competingWhole?.evidence.correctedCorrelation ?? null;
+    const candidate = candidates.find((event) => {
+        const candidateCorrected = event.evidence.correctedCorrelation;
+        return wholeCorrected !== null
+            && candidateCorrected !== null
+            && candidateCorrected - wholeCorrected
+                >= minimumCorrectedCorrelationAdvantage;
+    }) ?? null;
+    const candidateYear = candidate ? rankedEventYear(candidate) : null;
+    if (!candidate || candidateYear === null || wholeCorrected === null) return null;
+    const predecessor = pathEvents.filter((event) => (
+        event.eventType === "missingRing"
+        && event.evidence.lagBefore === -2
+        && event.evidence.lagAfter === -1
+        && candidateYear - rankedEventYear(event) >= minimumEventSeparationYears
+        && event.evidence.algorithmSources.includes("piecewise_lag_path")
+        && event.evidence.score >= 2.5
+    )).sort((left, right) => (
+        rankedEventYear(right) - rankedEventYear(left)
+        || right.evidence.score - left.evidence.score
+    ))[0] ?? null;
+    if (!predecessor) return null;
+    const candidateCorrected = candidate.evidence.correctedCorrelation!;
+    return {
+        ...candidate,
+        id: `${candidate.id}-candidate-anchored-distant-missing-frontier`,
+        alternativeTypes: [],
+        locationAlternatives: undefined,
+        operationAlternatives: undefined,
+        evidence: {
+            ...candidate.evidence,
+            lagBefore: -1,
+            lagAfter: 0,
+            algorithmSources: Array.from(new Set([
+                ...candidate.evidence.algorithmSources,
+                "candidate_anchored_distant_missing_frontier",
+                "cumulative_sequential_missing_staircase",
+                "sequential_missing_staircase_head",
+            ])).sort(),
+            notes: Array.from(new Set([
+                ...candidate.evidence.notes,
+                `distant_sequential_predecessor_year=${rankedEventYear(predecessor)}`,
+                `distant_candidate_whole_correlation_advantage=${
+                    (candidateCorrected - wholeCorrected).toFixed(6)
+                }`,
+                "distant_sequential_evidence_source=candidate_anchored_path_chain",
+            ])),
+        },
+    };
+};
+
+/**
+ * A deep aggregate lag is local, not global, when a verified partial correction returns the
+ * older side to zero while the competing whole state has no support at the newer edge. The
+ * endpoint-aware virtual unit scan will decide whether its newest step can be shown as a missing
+ * ring; this selector only prevents the unsupported whole baseline from deleting that evidence.
+ */
+export const selectEndpointAggregatePartialFrontier = (
+    events: readonly DiagnosisEvent[],
+    competingWhole: DiagnosisEvent | null,
+    targetEndYear: number,
+): DiagnosisEvent | null => {
+    const wholeShift = wholeSeriesMoveShiftYears(competingWhole);
+    if (wholeShift === null || wholeShift > -4) return null;
+    const newerEdgeSupport = noteYear(
+        competingWhole!,
+        "whole_state_newer_edge_support_fraction=",
+    );
+    const olderEdgeSupport = noteYear(
+        competingWhole!,
+        "whole_state_older_edge_support_fraction=",
+    );
+    if (newerEdgeSupport === null
+        || newerEdgeSupport > 0.05
+        || olderEdgeSupport === null
+        || olderEdgeSupport < 0.9) return null;
+    const selected = events.filter((event) => {
+        const eventTop = rankedEventYear(event);
+        const sources = new Set(event.evidence.algorithmSources);
+        return event.eventType === "partialMove"
+            && event.shiftSide === "older"
+            && event.shiftYears === wholeShift
+            && event.evidence.lagBefore === wholeShift
+            && event.evidence.lagAfter === 0
+            && targetEndYear - event.endYear <= 15
+            && targetEndYear - eventTop <= 30
+            && sources.has("partial_move_preferred_over_global_lag")
+            && sources.has("full_interval_counterfactual_scan")
+            && sources.has("joint_year_operation_evidence");
+    }).sort((left, right) => (
+        rankedEventYear(right) - rankedEventYear(left)
+        || right.evidence.score - left.evidence.score
+    ))[0] ?? null;
+    if (!selected) return null;
+    return {
+        ...selected,
+        id: `${selected.id}-endpoint-aggregate-partial-frontier`,
+        evidence: {
+            ...selected.evidence,
+            algorithmSources: Array.from(new Set([
+                ...selected.evidence.algorithmSources,
+                "endpoint_aggregate_partial_frontier",
+            ])).sort(),
+            notes: Array.from(new Set([
+                ...selected.evidence.notes,
+                "stable_bounded_path_all_transitions_partial=false",
+                `endpoint_aggregate_whole_newer_edge_support=${newerEdgeSupport.toFixed(6)}`,
+                `endpoint_aggregate_whole_older_edge_support=${olderEdgeSupport.toFixed(6)}`,
+            ])),
+        },
+    };
+};
+
 export const selectCumulativeLagPathFrontier = (
     aggregate: DiagnosisEvent,
     pathEvents: readonly DiagnosisEvent[],
@@ -10850,6 +10993,31 @@ export const makeDiagnosisEvents = (
         const competingWhole = dominantWholeSeriesBaseline
             ?? displayed.find((event) => event.eventType === "wholeSeriesMove")
             ?? null;
+        const candidateAnchoredDistantMissingFrontier =
+            selectCandidateAnchoredDistantMissingFrontier(
+                candidateEvents,
+                [...detectedBeforeFusion, ...passRawPathEvents.events],
+                diagnosis.targetRange.endYear,
+                competingWhole,
+            );
+        if (candidateAnchoredDistantMissingFrontier) {
+            return finalize(
+                [candidateAnchoredDistantMissingFrontier],
+                retainDisplayedMissingHypothesesDuringSequentialRecovery(
+                    displayed,
+                    candidateAnchoredDistantMissingFrontier,
+                ),
+                false,
+            );
+        }
+        const endpointAggregatePartialFrontier = selectEndpointAggregatePartialFrontier(
+            displayed,
+            competingWhole,
+            diagnosis.targetRange.endYear,
+        );
+        if (endpointAggregatePartialFrontier) {
+            return finalize([endpointAggregatePartialFrontier], [], false);
+        }
         const detectedDistantMissingFrontier = targetHasExplicitZero
             ? selectDistantSequentialMissingFrontier(
                 detectedBeforeFusion,

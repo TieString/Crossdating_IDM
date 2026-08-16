@@ -811,4 +811,51 @@ describe("missing/partial interpretation tie", () => {
         expect(result.interpretationAmbiguity?.alternative.rankedYears[0]?.year)
             .toBe(1940);
     });
+
+    it("keeps one endpoint review window when an aggregate partial cannot resolve a unit frontier", () => {
+        const { site, targetId } = buildDeterministicMissingSite([], 4);
+        const diagnosis = diagnoseSeriesCore(
+            site,
+            targetId,
+            getConfig({ referenceConfig: null }),
+        );
+        expect(diagnosis).not.toBeNull();
+        const partial = partialEvent();
+        partial.seriesId = targetId;
+        partial.startYear = 1977;
+        partial.endYear = 1985;
+        partial.shiftYears = -4;
+        partial.evidence.lagBefore = -4;
+        partial.evidence.algorithmSources.push("endpoint_aggregate_partial_frontier");
+        partial.rankedYears = [{
+            year: 1981,
+            rank: 1,
+            score: 1,
+            evidenceTags: ["endpoint_aggregate_partial_frontier"],
+        }];
+        partial.seriesRange = diagnosis!.targetRange;
+
+        const result = attachUniversalPartialMissingWorkflow(
+            partial,
+            diagnosis,
+            site,
+        );
+        const ambiguity = missingPartialAmbiguity(result);
+
+        expect(ambiguity.evidence).toMatchObject({
+            countEvidence: "cumulativeLagOnly",
+            missingYears: [],
+            frontierLocalization: "endpointAggregateReview",
+        });
+        expect(ambiguity.alternative).toMatchObject({
+            eventType: "missingRing",
+            startYear: 1986,
+            endYear: 1998,
+            reviewCoreRange: { startYear: 1986, endYear: 1998 },
+            confidenceLevel: "low",
+        });
+        expect(ambiguity.alternative.rankedYears).toHaveLength(13);
+        expect(ambiguity.alternative.evidence.algorithmSources)
+            .toContain("endpoint_aggregate_missing_review");
+    });
 });
