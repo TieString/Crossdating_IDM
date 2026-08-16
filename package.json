@@ -27,6 +27,7 @@
     "analyze:unit-window-stability": "node scripts/analyze-unit-window-stability.mjs",
     "benchmark:zsl-exhaustive": "node scripts/run-zsl-exhaustive-window-coverage.mjs",
     "benchmark:co612-multi-missing": "node scripts/run-co612-multi-missing.mjs",
+    "benchmark:co612-zero-frontier-matrix": "node scripts/run-co612-zero-frontier-matrix.mjs",
     "benchmark:co612-bootstrap": "node scripts/run-co612-all-series-bootstrap.mjs",
     "benchmark:co612-review-initial": "node scripts/run-co612-review-window-initial.mjs",
     "benchmark:co612-review-bootstrap": "node scripts/run-co612-review-window-bootstrap.mjs",
