@@ -601,6 +601,44 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("does not revive a remote bounded window after selecting an independent unit frontier", () => {
+        const selected = event("selected-frontier", "missingRing", 1854, 1862, 1861);
+        selected.evidence.algorithmSources = [
+            "cumulative_sequential_missing_staircase",
+            "sequential_missing_checkpoint_location",
+            "sequential_missing_staircase_head",
+        ];
+        const remote = event("remote-bounded", "missingRing", 1814, 1826, 1820, 117);
+        remote.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        remote.evidence.notes = ["bounded_path_complete_hypothesis=true"];
+        remote.evidence.locationEvidence = [{
+            source: "bounded_complete_lag_path",
+            startYear: 1814,
+            endYear: 1826,
+            topYear: 1820,
+            referenceCount: 55,
+            concentration: 0.99,
+            remoteMargin: 19,
+            calibrated: false,
+        }];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: selected },
+            { stage: "final", authority: "supplemental", event: remote },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "final",
+            event: {
+                id: "selected-frontier",
+                startYear: 1854,
+                endYear: 1862,
+                rankedYears: [{ year: 1861 }],
+            },
+        });
+    });
+
     it("keeps a candidate-anchored positive staircase over a distant bounded mode", () => {
         const selected = event("sequential-false", "falseRing", 1847, 1859, 1853);
         selected.evidence.algorithmSources = [

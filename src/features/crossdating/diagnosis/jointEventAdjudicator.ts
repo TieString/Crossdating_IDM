@@ -1753,14 +1753,29 @@ const finalFrontierClusters = (
             // bounded plateau cannot acquire authority merely by having a larger path score.
             return [acceptedSelectedLocator[0]!];
         }
-        const independentlyLocatedSelectedUnit = selectedFinalClusters.filter((cluster) => {
-            const event = representative(cluster).event;
-            return (event.eventType === "missingRing" || event.eventType === "falseRing")
-                && event.evidence.notes.includes("candidate_hard_gate_passed")
-                && hasIndependentLocationAuthority(cluster);
-        });
+        const independentlyLocatedSelectedUnit = operationProtectedSelectedLocal.flatMap(
+            (cluster) => {
+                const selectedCheckpoints = cluster.checkpoints.filter((checkpoint) => {
+                    const event = checkpoint.event;
+                    return checkpoint.stage === "final"
+                        && checkpoint.authority !== "supplemental"
+                        && (event.eventType === "missingRing"
+                            || event.eventType === "falseRing")
+                        && eventHasIndependentLocationAuthority(event);
+                });
+                return selectedCheckpoints.length > 0
+                    ? [{ checkpoints: selectedCheckpoints }]
+                    : [];
+            },
+        );
         if (independentlyLocatedSelectedUnit.length > 0) {
-            return independentlyLocatedSelectedUnit;
+            // A selected unit frontier with its own location authority is the adjudicated result.
+            // A remote supplemental path may corroborate the operation, but cannot resurrect a
+            // location that the production pass already replaced.
+            return independentlyLocatedSelectedUnit.sort((left, right) => (
+                (topYear(representative(right).event) ?? Number.NEGATIVE_INFINITY)
+                    - (topYear(representative(left).event) ?? Number.NEGATIVE_INFINITY)
+            ));
         }
         const strongRemoteBounded = boundedMatchingSelectedOperation.filter(
             hasIndependentLocationAuthority,

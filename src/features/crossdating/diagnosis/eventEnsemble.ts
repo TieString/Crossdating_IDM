@@ -10876,6 +10876,31 @@ export const makeDiagnosisEvents = (
                 return finalize([residualSequentialMissing.event], [], false);
             }
         }
+        const stablePathContainsMixedTransitionFamilies = stableBoundedPathFrontier
+            ?.evidence.notes.includes("stable_bounded_path_all_transitions_partial=false")
+            ?? false;
+        const sequentialAheadOfMixedStablePartial = stableBoundedPathFrontier?.eventType
+            === "partialMove"
+            && stablePathContainsMixedTransitionFamilies
+            && mayRecoverSequentialMissing
+            ? getSequentialMissing()
+            : null;
+        if (sequentialAheadOfMixedStablePartial?.event.eventType === "missingRing"
+            && sequentialAheadOfMixedStablePartial.event.evidence.algorithmSources.some(
+                (source) => source === "cumulative_sequential_missing_staircase"
+                    || source === "marker_anchored_sequential_missing_staircase",
+            )
+            && sequentialAheadOfMixedStablePartial.event.startYear
+                > stableBoundedPathFrontier!.endYear) {
+            return finalize(
+                [sequentialAheadOfMixedStablePartial.event],
+                retainDisplayedMissingHypothesesDuringSequentialRecovery(
+                    displayed,
+                    sequentialAheadOfMixedStablePartial.event,
+                ),
+                false,
+            );
+        }
         if (stableBoundedPathFrontier && stablePathHasFinalAuthority) {
             // The complete path has already resolved the serial frontier. Aggregate move
             // hypotheses are intentionally excluded so later review cannot recombine it.
