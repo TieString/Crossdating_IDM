@@ -28,11 +28,6 @@ export {
     refreshActiveDiagnosisEventInterpretation,
 } from "./diagnosis/activeEventInterpretation";
 export {
-    stabilizeDiagnosisAcrossEvidenceRefresh,
-    type EvidenceRefreshDecision,
-    type EvidenceRefreshDecisionReason,
-} from "./diagnosis/evidenceRefreshAdjudicator";
-export {
     applyLocalCrossdatingOption,
     diagnoseCrossdating,
     getDiagnosisCandidateLabel,

@@ -271,6 +271,101 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
         });
     }, 180_000);
 
+    bundledCofechaIt("keeps mon142 three-ring recovery on the bark-side saved frontier", () => {
+        const seriesId = "mon142";
+        const series = parsed.get(seriesId)!;
+        const truthYears = [1932, 1863, 1853];
+        let working = buildMultiMissingCorrupted(series.valuesByYear, truthYears);
+        const steps: Array<Record<string, unknown>> = [];
+
+        truthYears.forEach((truthYear, index) => {
+            const site = new Map(cleanSite);
+            site.set(seriesId, new Map(working));
+            const outText = runBundledCofecha(site);
+            const parts = splitReportByParts(outText);
+            const savedReference = createCofechaMasterReferenceConfig({
+                siteData: site,
+                flaggedAIds: extractPart6FlaggedASeriesIds(parts.get("PART 6") ?? ""),
+                cofechaRunId: `co612-mon142-frontier-${index}`,
+                rwlHash: `co612-mon142-frontier-${index}`,
+                masterDatingSeries: parseCofechaResult(outText).masterDatingSeries,
+            });
+            const diagnosis = diagnoseCrossdating(site, {
+                referenceConfig: savedReference,
+                targetTrees: [seriesId],
+                cofechaText: outText,
+                reviewWindowDisplayMode: "review",
+                includeEventDecisionAudits: true,
+            });
+            const events = getDisplayedDiagnosisEvents(diagnosis).filter(
+                (event) => event.seriesId === seriesId,
+            );
+            const event = events[0];
+            const missing = event?.eventType === "missingRing"
+                ? event
+                : event?.interpretationAmbiguity?.kind === "wholeSeriesMoveOrMissingRing"
+                    ? event.interpretationAmbiguity.alternative
+                    : null;
+            steps.push({
+                truthYear,
+                events: summarize(events),
+                alternative: missing && missing !== event ? summarize([missing])[0] : null,
+                decision: diagnosis.reviewWindowDecisions,
+                audit: diagnosis.eventDecisionAudits?.find(
+                    (candidate) => candidate.seriesId === seriesId,
+                ),
+            });
+            const context = JSON.stringify(steps);
+
+            expect(events, context).toHaveLength(1);
+            expect(event?.eventType, context).toBe("missingRing");
+            expect(missing?.eventType, context).toBe("missingRing");
+            expect(missing?.startYear, context).toBeLessThanOrEqual(truthYear);
+            expect(missing?.endYear, context).toBeGreaterThanOrEqual(truthYear);
+            working = applyInsertRestore(working, truthYear);
+        });
+    }, 240_000);
+
+    bundledCofechaIt("does not collapse separated mon142 missing rings into a whole move", () => {
+        const seriesId = "mon142";
+        const series = parsed.get(seriesId)!;
+        const truthYears = [1932, 1853];
+        const working = buildMultiMissingCorrupted(series.valuesByYear, truthYears);
+        const site = new Map(cleanSite);
+        site.set(seriesId, working);
+        const outText = runBundledCofecha(site);
+        const parts = splitReportByParts(outText);
+        const savedReference = createCofechaMasterReferenceConfig({
+            siteData: site,
+            flaggedAIds: extractPart6FlaggedASeriesIds(parts.get("PART 6") ?? ""),
+            cofechaRunId: "co612-mon142-separated-pair",
+            rwlHash: "co612-mon142-separated-pair",
+            masterDatingSeries: parseCofechaResult(outText).masterDatingSeries,
+        });
+        const diagnosis = diagnoseCrossdating(site, {
+            referenceConfig: savedReference,
+            targetTrees: [seriesId],
+            cofechaText: outText,
+            reviewWindowDisplayMode: "review",
+            includeEventDecisionAudits: true,
+        });
+        const events = getDisplayedDiagnosisEvents(diagnosis).filter(
+            (event) => event.seriesId === seriesId,
+        );
+        const context = JSON.stringify({
+            events: summarize(events),
+            decisions: diagnosis.reviewWindowDecisions,
+            audit: diagnosis.eventDecisionAudits?.find(
+                (candidate) => candidate.seriesId === seriesId,
+            ),
+        });
+
+        expect(events, context).toHaveLength(1);
+        expect(events[0].eventType, context).toBe("missingRing");
+        expect(events[0].startYear, context).toBeLessThanOrEqual(1932);
+        expect(events[0].endYear, context).toBeGreaterThanOrEqual(1932);
+    }, 180_000);
+
     bundledCofechaIt("shows only the newest missing ring after fresh COFECHA", () => {
         const corrupted = buildMultiMissingCorrupted(
             target.valuesByYear,

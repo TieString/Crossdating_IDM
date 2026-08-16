@@ -11,7 +11,6 @@ import {
     markDiagnosisEventsStale,
     planDiagnosisEventEdit,
     selectSafeDiagnosisCandidateBatch,
-    stabilizeDiagnosisAcrossEvidenceRefresh,
     type DiagnosisBatchApplyResult,
     type DiagnosisBatchCandidateResult,
     type DiagnosisCandidateOperation,
@@ -101,15 +100,6 @@ type DiagnosisResultCache = {
     cofechaText: string | undefined;
     results: Map<string, CrossdatingDiagnosis>;
     reviewResults: Map<string, CrossdatingDiagnosis>;
-};
-
-type DiagnosisEvidenceSnapshot = {
-    siteDataSignature: string;
-    targetTree: string;
-    referenceMode: "manual" | "dynamic" | "automatic";
-    cofechaRunId: string | null;
-    cofechaFresh: boolean;
-    diagnosis: CrossdatingDiagnosis;
 };
 
 type BreadthScanContext = {
@@ -233,7 +223,6 @@ export function useHomeWorkspace() {
     const historyPersistTimerRef = useRef<number | null>(null);
     const diagnosisRequestIdRef = useRef(0);
     const diagnosisWorkerRef = useRef<Worker | null>(null);
-    const diagnosisEvidenceSnapshotRef = useRef<DiagnosisEvidenceSnapshot | null>(null);
     const breadthDiagnosisRequestIdRef = useRef(0);
     const breadthDiagnosisWorkerRef = useRef<Worker | null>(null);
     const breadthScanContextRef = useRef<BreadthScanContext | null>(null);
@@ -491,7 +480,6 @@ export function useHomeWorkspace() {
         setAllRwlOperationLog(nextEditor.getAllAppliedOperationLogEntries());
         setHistoryStatus(nextEditor.getHistoryStatus());
         setHistoryAnimation(null);
-        diagnosisEvidenceSnapshotRef.current = null;
         setCrossdatingDiagnosis(createEmptyCrossdatingDiagnosis());
         setIsModified(!rwlDataEquals(baseline, nextData));
     }, [syncEditor]);
@@ -1815,7 +1803,6 @@ export function useHomeWorkspace() {
         if (!targetTree) {
             diagnosisWorkerRef.current?.terminate();
             diagnosisWorkerRef.current = null;
-            diagnosisEvidenceSnapshotRef.current = null;
             setIsEventDiagnosisRunning(false);
             startTransition(() => setCrossdatingDiagnosis(createEmptyCrossdatingDiagnosis()));
             return undefined;
@@ -1824,7 +1811,6 @@ export function useHomeWorkspace() {
         if (!diagnosisReferenceConfig) {
             diagnosisWorkerRef.current?.terminate();
             diagnosisWorkerRef.current = null;
-            diagnosisEvidenceSnapshotRef.current = null;
             setIsEventDiagnosisRunning(false);
             startTransition(() => setCrossdatingDiagnosis(createEmptyCrossdatingDiagnosis()));
             return undefined;
@@ -1835,13 +1821,6 @@ export function useHomeWorkspace() {
             && lastValidation !== null
             && lastValidation.inputSignature === siteDataSignature;
         const diagnosisCofechaText = cofechaFresh ? outFileContent : undefined;
-        const evidenceContext = {
-            siteDataSignature,
-            targetTree,
-            referenceMode: diagnosisReferenceConfig?.mode ?? "automatic",
-            cofechaRunId: diagnosisReferenceConfig?.cofechaRunId ?? null,
-            cofechaFresh,
-        } satisfies Omit<DiagnosisEvidenceSnapshot, "diagnosis">;
         let resultCache = diagnosisResultCacheRef.current;
         if (resultCache?.siteData !== siteData
             || resultCache.referenceConfig !== diagnosisReferenceConfig
@@ -1859,10 +1838,6 @@ export function useHomeWorkspace() {
         }
         const cachedDiagnosis = resultCache.results.get(targetTree);
         if (cachedDiagnosis) {
-            diagnosisEvidenceSnapshotRef.current = {
-                ...evidenceContext,
-                diagnosis: cachedDiagnosis,
-            };
             setIsEventDiagnosisRunning(false);
             startTransition(() => setCrossdatingDiagnosis(cachedDiagnosis));
             return undefined;
@@ -1905,36 +1880,7 @@ export function useHomeWorkspace() {
                     return;
                 }
 
-                let resolvedDiagnosis = response.diagnosis;
-                const previousEvidence = diagnosisEvidenceSnapshotRef.current;
-                const sameDataVersion = previousEvidence?.siteDataSignature
-                    === evidenceContext.siteDataSignature
-                    && previousEvidence.targetTree === evidenceContext.targetTree;
-                const dynamicEvidenceRefresh = sameDataVersion
-                    && evidenceContext.cofechaFresh
-                    && previousEvidence.referenceMode !== "manual"
-                    && evidenceContext.referenceMode !== "manual"
-                    && (
-                        !previousEvidence.cofechaFresh
-                        || previousEvidence.cofechaRunId !== evidenceContext.cofechaRunId
-                    );
-                if (previousEvidence && dynamicEvidenceRefresh) {
-                    const stabilized = stabilizeDiagnosisAcrossEvidenceRefresh(
-                        previousEvidence.diagnosis,
-                        response.diagnosis,
-                        targetTree,
-                    );
-                    resolvedDiagnosis = stabilized.diagnosis;
-                    console.info("[JS 事件诊断] 保存证据刷新裁决", {
-                        targetTree,
-                        ...stabilized.decision,
-                    });
-                }
-
-                diagnosisEvidenceSnapshotRef.current = {
-                    ...evidenceContext,
-                    diagnosis: resolvedDiagnosis,
-                };
+                const resolvedDiagnosis = response.diagnosis;
                 setIsEventDiagnosisRunning(false);
                 console.info(`[JS 事件诊断] ${targetTree} · ${Math.round(response.elapsedMs)} ms`);
                 resultCache.results.set(targetTree, resolvedDiagnosis);
