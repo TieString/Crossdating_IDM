@@ -7493,18 +7493,19 @@ const recoverSequentialMissingHeadEvent = (
                 wholeShift,
                 diagnosis.targetRange.endYear,
             );
-        const independentWholeBaseline = wholeShift !== null && (
-            hasAuthoritativeWholeCheckpoint
-            || (
-                wholeShift !== head.pathStartLag
-                && detected.some((event) => (
-                    event.eventType !== "wholeSeriesMove"
-                    && event.evidence.lagAfter === wholeShift
-                ))
-                && !zeroLagFixedTailResolvesWhole
-                && !terminalCumulativeStaircaseResolvesWhole
-            )
-        );
+        const independentWholeBaseline = wholeShift !== null
+            && !terminalCumulativeStaircaseResolvesWhole
+            && (
+                hasAuthoritativeWholeCheckpoint
+                || (
+                    wholeShift !== head.pathStartLag
+                    && detected.some((event) => (
+                        event.eventType !== "wholeSeriesMove"
+                        && event.evidence.lagAfter === wholeShift
+                    ))
+                    && !zeroLagFixedTailResolvesWhole
+                )
+            );
         const hasIndependentStaircaseSupport = hasExistingUnitEvent
             || hasCumulativeMissingStaircase
             || hasMarkerAnchoredMissingStaircase
@@ -10868,25 +10869,21 @@ export const makeDiagnosisEvents = (
                 false,
             );
         }
-        const mayHaveDistantCumulativeMissingFrontier = !targetHasExplicitZero
-            && cumulativeUnitCandidateDepths.some((depth) => depth <= -2);
-        const earlySequentialMissing = mayHaveDistantCumulativeMissingFrontier
+        const mayHaveCumulativeMissingFrontier = cumulativeUnitCandidateDepths.some(
+            (depth) => depth <= -2,
+        );
+        const earlySequentialMissing = mayHaveCumulativeMissingFrontier
             ? getSequentialMissing()
             : null;
-        const sequentialFrontierYear = earlySequentialMissing
-            ? rankedEventYear(earlySequentialMissing.event)
-            : null;
-        const distantCumulativeMissingFrontier = earlySequentialMissing
+        const cumulativeMissingFrontier = earlySequentialMissing
             && !earlySequentialMissing.preserveWholeBaseline
             && earlySequentialMissing.event.eventType === "missingRing"
-            && sequentialFrontierYear !== null
-            && diagnosis.targetRange.endYear - sequentialFrontierYear >= 15
             && earlySequentialMissing.event.evidence.algorithmSources.some((source) => (
                 source === "cumulative_sequential_missing_staircase"
                 || source === "marker_anchored_sequential_missing_staircase"
                 || source === "shared_explicit_zero_marker"
             ));
-        if (distantCumulativeMissingFrontier) {
+        if (cumulativeMissingFrontier) {
             return finalize(
                 [earlySequentialMissing.event],
                 retainDisplayedMissingHypothesesDuringSequentialRecovery(
