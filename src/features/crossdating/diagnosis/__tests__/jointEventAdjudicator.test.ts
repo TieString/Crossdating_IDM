@@ -403,6 +403,61 @@ describe("joint event adjudicator", () => {
         );
     });
 
+    it("keeps a calibrated strong locator when its strength comes from local channels", () => {
+        const located = event("located", "missingRing", 1769, 1781, 1781);
+        located.evidence.algorithmSources = ["full_interval_counterfactual_locator"];
+        located.evidence.notes = [
+            "scan_top_year=1773",
+            "direct_transition_year=1773",
+            "unit_local_difference31_year=1773",
+            "unit_local_whitened31_year=1773",
+            "counterfactual_coarse_overlap_consensus=0.811926",
+            "counterfactual_coarse_model_margin=0.520415",
+            "locator_adjudication=accepted_overlapping_strong_mode",
+            "locator_proposed_window=1769-1781",
+        ];
+        located.evidence.locationEvidence = [{
+            source: "full_interval_counterfactual_locator",
+            startYear: 1769,
+            endYear: 1781,
+            topYear: 1781,
+            referenceCount: 16,
+            concentration: 0,
+            remoteMargin: 0,
+            calibrated: true,
+        }];
+        const bounded = event("bounded", "missingRing", 1777, 1789, 1783);
+        bounded.evidence.score = 93.69;
+        bounded.evidence.scoreMargin = 5.57;
+        bounded.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        bounded.evidence.notes = ["bounded_path_complete_hypothesis=true"];
+        bounded.evidence.locationEvidence = [{
+            source: "bounded_complete_lag_path",
+            startYear: 1777,
+            endYear: 1789,
+            topYear: 1783,
+            referenceCount: 32,
+            concentration: 0.76,
+            remoteMargin: 5.57,
+            calibrated: false,
+        }];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: located },
+            { stage: "final", authority: "supplemental", event: bounded },
+        ]);
+
+        expect(decision.event).toMatchObject({
+            id: "located",
+            eventType: "missingRing",
+            startYear: 1769,
+            endYear: 1781,
+        });
+        expect(decision.event?.evidence.algorithmSources).toContain(
+            "bounded_complete_lag_path",
+        );
+    });
+
     it("uses strong bounded location evidence when the selected final window is unsupported", () => {
         const unsupported = event("unsupported", "missingRing", 1744, 1756, 1756);
         unsupported.evidence.algorithmSources = ["full_interval_counterfactual_locator"];

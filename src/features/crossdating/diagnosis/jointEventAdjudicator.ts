@@ -79,6 +79,22 @@ const noteNumber = (event: DiagnosisEvent, prefix: string): number | null => {
     return Number.isFinite(value) ? value : null;
 };
 
+const noteRange = (
+    event: DiagnosisEvent,
+    prefix: string,
+): { startYear: number; endYear: number } | null => {
+    const note = [...event.evidence.notes]
+        .reverse()
+        .find((value) => value.startsWith(prefix));
+    const match = note?.slice(prefix.length).match(/^(-?\d+)-(-?\d+)$/);
+    if (!match) return null;
+    const startYear = Number(match[1]);
+    const endYear = Number(match[2]);
+    return Number.isInteger(startYear) && Number.isInteger(endYear)
+        ? { startYear, endYear }
+        : null;
+};
+
 const sameOperation = (left: DiagnosisEvent, right: DiagnosisEvent): boolean => (
     left.eventType === right.eventType
     && (
@@ -185,6 +201,28 @@ const eventHasIndependentLocationAuthority = (event: DiagnosisEvent): boolean =>
             && (entry.remoteMargin ?? 0) >= 0.04
         )
     ));
+};
+
+const acceptedStrongLocatorEvidence = (
+    event: DiagnosisEvent,
+): ReturnType<typeof matchingLocationEvidence>[number] | null => {
+    if (!event.evidence.notes.includes(
+        "locator_adjudication=accepted_overlapping_strong_mode",
+    )) return null;
+    const proposedWindow = noteRange(event, "locator_proposed_window=");
+    if (proposedWindow?.startYear !== event.startYear
+        || proposedWindow.endYear !== event.endYear) return null;
+    return matchingLocationEvidence(event).find((entry) => (
+        entry.source === "full_interval_counterfactual_locator"
+        && entry.referenceCount >= 3
+        && (
+            entry.calibrated
+            || (
+                (entry.concentration ?? 0) >= 0.2
+                && (entry.remoteMargin ?? 0) >= 0.04
+            )
+        )
+    )) ?? null;
 };
 
 const claimWeight: Record<DiagnosisEvidenceClaim, number> = {
@@ -320,8 +358,13 @@ const preferredAcceptedFinalLocation = (
                 note === "locator_adjudication=accepted_overlapping_mode"
                 || note === "locator_adjudication=accepted_overlapping_strong_mode"
             ))
-            && location?.calibrated === true
-            && (location.remoteMargin ?? 0) >= 0.04;
+            && (
+                acceptedStrongLocatorEvidence(event) !== null
+                || (
+                    location?.calibrated === true
+                    && (location.remoteMargin ?? 0) >= 0.04
+                )
+            );
     })
     .sort((left, right) => (
         eventLocationQuality(right.event) - eventLocationQuality(left.event)
@@ -343,6 +386,7 @@ const hasAcceptedStrongSelectedLocator = (
             note === "locator_adjudication=accepted_overlapping_mode"
             || note === "locator_adjudication=accepted_overlapping_strong_mode"
         ))) return false;
+    if (acceptedStrongLocatorEvidence(event)) return true;
     return matchingLocationEvidence(event).some((entry) => (
         entry.source === "full_interval_counterfactual_locator"
         && entry.referenceCount >= 3

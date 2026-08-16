@@ -627,6 +627,136 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
         });
     }, 240_000);
 
+    naturalCofechaIt("keeps every single mtr721 natural missing ring inside its window", () => {
+        const seriesId = "mtr721";
+        const natural = parseRwl(readFileSync(NATURAL_FIXTURE_PATH, "utf8"));
+        const targetSeries = natural.get(seriesId)!;
+        const truthYears = Array.from(targetSeries.valuesByYear)
+            .filter(([, value]) => value === 0)
+            .map(([year]) => year)
+            .sort((left, right) => right - left);
+        const site = new Map(
+            Array.from(natural, ([id, series]) => [id, new Map(series.valuesByYear)]),
+        );
+        const cleanOut = runBundledCofecha(site);
+        const cleanParts = splitReportByParts(cleanOut);
+        const cleanReference = createCofechaMasterReferenceConfig({
+            siteData: site,
+            flaggedAIds: extractPart6FlaggedASeriesIds(cleanParts.get("PART 6") ?? ""),
+            cofechaRunId: "co612-mtr721-single-clean",
+            rwlHash: "co612-mtr721-single-clean",
+            masterDatingSeries: parseCofechaResult(cleanOut).masterDatingSeries,
+        });
+        const results = truthYears.flatMap((truthYear) => {
+            const corruptedSite = new Map(site);
+            corruptedSite.set(seriesId, buildMultiMissingCorrupted(
+                targetSeries.valuesByYear,
+                [truthYear],
+            ));
+            const savedOut = runBundledCofecha(corruptedSite);
+            const savedParts = splitReportByParts(savedOut);
+            const savedReference = createCofechaMasterReferenceConfig({
+                siteData: corruptedSite,
+                flaggedAIds: extractPart6FlaggedASeriesIds(
+                    savedParts.get("PART 6") ?? "",
+                ),
+                cofechaRunId: `co612-mtr721-single-${truthYear}`,
+                rwlHash: `co612-mtr721-single-${truthYear}`,
+                masterDatingSeries: parseCofechaResult(savedOut).masterDatingSeries,
+            });
+            return [
+                {
+                    state: "before-save",
+                    diagnosis: diagnoseCrossdating(corruptedSite, {
+                        referenceConfig: cleanReference,
+                        targetTrees: [seriesId],
+                        reviewWindowDisplayMode: "review",
+                        includeEventDecisionAudits: true,
+                    }),
+                },
+                {
+                    state: "after-save",
+                    diagnosis: diagnoseCrossdating(corruptedSite, {
+                        referenceConfig: savedReference,
+                        targetTrees: [seriesId],
+                        cofechaText: savedOut,
+                        reviewWindowDisplayMode: "review",
+                        includeEventDecisionAudits: true,
+                    }),
+                },
+            ].map(({ state, diagnosis }) => {
+                const events = getDisplayedDiagnosisEvents(diagnosis).filter(
+                    (event) => event.seriesId === seriesId,
+                );
+                const event = events[0];
+                return {
+                    truthYear,
+                    state,
+                    single: events.length === 1,
+                    operationCorrect: event?.eventType === "missingRing",
+                    covered: Boolean(
+                        event
+                        && event.startYear <= truthYear
+                        && event.endYear >= truthYear
+                    ),
+                    displayed: summarize(events),
+                    raw: diagnosis.events.filter((candidate) => (
+                        candidate.seriesId === seriesId
+                    )),
+                    final: diagnosis.eventDecisionAudits?.[0]?.finalEvents,
+                    decisions: diagnosis.reviewWindowDecisions,
+                    joint: diagnosis.jointEventDecisions?.[0],
+                };
+            });
+        });
+        const failures = results.filter((row) => (
+            !row.single || !row.operationCorrect || !row.covered
+        ));
+
+        expect(truthYears).toEqual([1803, 1798, 1778, 1773]);
+        expect(results.filter((row) => row.truthYear === 1773).map((row) => ({
+            state: row.state,
+            range: row.displayed[0]?.range,
+            type: row.displayed[0]?.type,
+        }))).toEqual([
+            { state: "before-save", range: [1769, 1781], type: "missingRing" },
+            { state: "after-save", range: [1769, 1781], type: "missingRing" },
+        ]);
+        expect(failures.map((row) => ({
+            truthYear: row.truthYear,
+            state: row.state,
+            displayed: row.displayed,
+            raw: row.raw.map((event) => ({
+                type: event.eventType,
+                range: [event.startYear, event.endYear],
+                topYear: event.rankedYears[0]?.year,
+                locationEvidence: event.evidence.locationEvidence,
+            })),
+            final: row.final?.map((event) => ({
+                type: event.eventType,
+                range: [event.startYear, event.endYear],
+                topYear: event.topYear,
+                notes: event.notes.filter((note) => (
+                    note.startsWith("locator_")
+                    || note.startsWith("counterfactual_main_window=")
+                )),
+            })),
+            decision: row.decisions?.map((decision) => ({
+                status: decision.status,
+                reason: decision.reason,
+                sourceStage: decision.sourceStage,
+            })),
+            joint: row.joint ? {
+                status: row.joint.status,
+                reason: row.joint.reason,
+                sourceStage: row.joint.sourceStage,
+                event: row.joint.event ? summarize([row.joint.event])[0] : null,
+                productionAgreement: row.joint.productionAgreement,
+                productionExactMatch: row.joint.productionExactMatch,
+            } : null,
+        }))).toEqual([]);
+    }, 240_000);
+
     bundledCofechaIt("shows only the newest missing ring after fresh COFECHA", () => {
         const corrupted = buildMultiMissingCorrupted(
             target.valuesByYear,
