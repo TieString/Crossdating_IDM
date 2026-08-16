@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "checkedAt": "2026-08-16T08:29:04.635454+00:00",
+  "checkedAt": "2026-08-16T20:41:39.590481+00:00",
   "backend": "python",
   "figureDir": "D:\\Code\\Crossdating_Tauri_js-diagnosis-events-v1\\docs\\figures\\js-diagnosis-events-v1",
   "figures": {
@@ -195,6 +195,46 @@
         "pixels": [
           6580,
           4621
+        ],
+        "mode": "RGBA",
+        "dpi": [
+          600.0,
+          600.0
+        ],
+        "pass": true
+      }
+    },
+    "fig07_lag_state_diagnostic_grammar": {
+      "svg": {
+        "bytes": 55527,
+        "editableTextNodes": 84,
+        "timesNewRomanReferences": 84,
+        "pass": true
+      },
+      "pdf": {
+        "bytes": 72047,
+        "pages": 1,
+        "extractedCharacters": 963,
+        "pass": true
+      },
+      "png": {
+        "bytes": 595173,
+        "pixels": [
+          2865,
+          3980
+        ],
+        "mode": "RGBA",
+        "dpi": [
+          350.012,
+          350.012
+        ],
+        "pass": true
+      },
+      "tiff": {
+        "bytes": 3703048,
+        "pixels": [
+          4910,
+          6826
         ],
         "mode": "RGBA",
         "dpi": [

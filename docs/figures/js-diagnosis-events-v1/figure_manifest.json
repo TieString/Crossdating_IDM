@@ -2,11 +2,12 @@
   "schemaVersion": 1,
   "generatedAt": "2026-08-16T08:27:07.543972+00:00",
   "backend": "python-matplotlib",
+  "supplementalGenerator": "scripts/figures/generate-lag-state-diagnostic-grammar.py",
   "figureContract": {
     "conclusion": "Constrained lag topology, executable counterfactuals and multi-core evidence resolve one traceable event operation, shift and focused review window.",
     "archetype": "schematic-led composite + quantitative grid",
     "target": "research manuscript, project report and presentation; editable English vector figures",
-    "finalSize": "8.5 × 10.2 in（架构竖版），12.5 × 8.6 in（判别），10.8 × 8.4 in（统计），13 × 9.4 in（表），11.2 × 8.4 in（验证设计）",
+    "finalSize": "8.5 × 10.2 in（架构竖版），12.5 × 8.6 in（判别），10.8 × 8.4 in（统计），13 × 9.4 in（表），11.2 × 8.4 in（验证设计），8.3 × 11.2 in（lag 状态诊断）",
     "reviewerRisk": "Keep metric denominators explicit and preserve the distinction between lag recognition, operation recovery and review-window localization."
   },
   "benchmark": {
@@ -38,6 +39,10 @@
     "fig05_validation_design_and_failures.pdf",
     "fig05_validation_design_and_failures.png",
     "fig05_validation_design_and_failures.tiff",
+    "fig07_lag_state_diagnostic_grammar.svg",
+    "fig07_lag_state_diagnostic_grammar.pdf",
+    "fig07_lag_state_diagnostic_grammar.png",
+    "fig07_lag_state_diagnostic_grammar.tiff",
     "js_diagnosis_events_figure_set.pdf",
     "source_data/family_metrics.csv",
     "source_data/single_event_metrics.csv",
@@ -51,7 +56,7 @@
   ],
   "qa": {
     "report": "qa_report.json",
-    "checkedAt": "2026-08-16T08:29:04.635454+00:00",
+    "checkedAt": "2026-08-16T20:41:39.590481+00:00",
     "pass": true,
     "failures": []
   }

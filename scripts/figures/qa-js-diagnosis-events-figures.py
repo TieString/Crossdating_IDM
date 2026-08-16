@@ -20,7 +20,10 @@ FIGURE_STEMS = [
     "fig03_event_definition_table",
     "fig04_complex_case_discrimination",
     "fig05_validation_design_and_failures",
+    "fig07_lag_state_diagnostic_grammar",
 ]
+
+MULTIPAGE_FIGURE_STEMS = FIGURE_STEMS[:5]
 
 
 def parse_args() -> argparse.Namespace:
@@ -128,7 +131,7 @@ def main() -> int:
     report["multipagePdf"] = {
         "bytes": multipage.stat().st_size,
         "pages": len(reader.pages),
-        "pass": len(reader.pages) == len(FIGURE_STEMS),
+        "pass": len(reader.pages) == len(MULTIPAGE_FIGURE_STEMS),
     }
     if not report["multipagePdf"]["pass"]:
         failures.append("failed:multipage_pdf")

@@ -1,6 +1,6 @@
 # JS 定年建议论文图组（v2 版式）
 
-本目录包含基于 `js-diagnosis-events-v1` 工作树与现有跨文件测试结果生成的论文图组。全部图件由 `scripts/figures/generate-js-diagnosis-events-figures.py` 使用 Python / matplotlib 绘制，统一采用英文 Times New Roman，并提供可编辑矢量版本。
+本目录包含基于 `js-diagnosis-events-v1` 工作树与现有跨文件测试结果生成的论文图组。图 1—5 由 `scripts/figures/generate-js-diagnosis-events-figures.py` 绘制，lag 状态诊断组图由 `scripts/figures/generate-lag-state-diagnostic-grammar.py` 绘制；两者均使用 Python / matplotlib、英文 Times New Roman，并提供可编辑矢量版本。
 
 ## 图件结构
 
@@ -9,6 +9,7 @@
 3. `fig03_event_definition_table`：用四列明确定义事件与可执行编辑、lag 指纹、生态/样品含义和识别证据。
 4. `fig04_complex_case_discrimination`：展示六类 lag 指纹、三组易混模式的区分线索、证据融合和逐事件更新流程。
 5. `fig05_validation_design_and_failures`：展示文件级隔离协议、A–D 场景家族、能力覆盖矩阵及可复现更新路径；文件名为兼容旧引用而保留。
+6. `fig07_lag_state_diagnostic_grammar`：以六面板展示 lag 状态字典、整体与局部移动、单位事件方向、连续缺段与缺轮阶梯、相邻抵消事件及反事实—逐参考芯共识。
 
 ## 当前定量输入
 
@@ -24,6 +25,12 @@
 python scripts/figures/generate-js-diagnosis-events-figures.py `
   --result-json <new-result.json> `
   --output-dir docs/figures/js-diagnosis-events-v2
+```
+
+lag 状态诊断组图可独立重绘：
+
+```powershell
+python scripts/figures/generate-lag-state-diagnostic-grammar.py
 ```
 
 ## 图注要点
@@ -47,6 +54,10 @@ Discrimination of complex crossdating patterns. Transition count, intermediate l
 ### Figure 5
 
 Cross-file benchmark design and capability coverage. The benchmark isolates RWL files, injects four frozen scenario families, executes the product-equivalent diagnostic path and scores one event at a time. The coverage matrix and reproducibility cards summarize the tested capabilities and direct JSON-to-publication update path.
+
+### Figure 7（论文图 2）
+
+Lag-state topology grammar for event-level dating diagnosis. Stable whole-series baselines, signed unit transitions, large partial steps, event staircases and cancelling pulses map to executable edit hypotheses; full-interval counterfactual gains and concordant source-core evidence determine the suggested operation and focused review window.
 
 ## 文献设计依据
 
