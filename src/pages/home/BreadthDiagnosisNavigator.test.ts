@@ -14,12 +14,22 @@ const makeSuggestion = (seriesId: string, order: number): BreadthDiagnosisSugges
     topYear: 1900,
     confidenceLevel: "medium",
     reviewOnly: true,
+    priority: {
+        reliabilityTier: 5,
+        frontierRatio: 0.8,
+        sharedOverlapYears: 50,
+        weightedReferenceOverlap: 120,
+        newerEndDistanceYears: 10,
+        windowWidth: 5,
+        evidenceMargin: 0.2,
+        correlationGain: 0.1,
+    },
     firstSeenAt: order * 1000,
     firstSeenOrder: order,
 });
 
 describe("BreadthDiagnosisNavigator", () => {
-    it("shows scan progress and only the first three FIFO review rows", () => {
+    it("shows scan progress and only the first three priority-ranked review rows", () => {
         const html = renderToStaticMarkup(createElement(BreadthDiagnosisNavigator, {
             navigator: {
                 status: "scanning",
@@ -44,6 +54,8 @@ describe("BreadthDiagnosisNavigator", () => {
         expect(html).not.toContain("mtr841");
         expect(html).toContain("还有 1 条");
         expect(html).toContain("可能缺轮");
+        expect(html).toContain("高可信 · 前沿");
+        expect(html).toContain("预计可重新对齐约 50 个重叠年");
         expect(html).toContain("role=\"progressbar\"");
         expect(html).toContain(">扫描中</button>");
         expect(html).toContain("disabled");

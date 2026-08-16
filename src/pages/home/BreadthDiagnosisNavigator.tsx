@@ -1,6 +1,7 @@
 import type { MouseEventHandler } from "react";
 import {
     getBreadthOperationLabel,
+    getBreadthPriorityLabel,
     type BreadthDiagnosisNavigatorState,
     type BreadthDiagnosisSuggestion,
 } from "./breadthDiagnosis";
@@ -122,7 +123,13 @@ export function BreadthDiagnosisNavigator({
                             key={`${suggestion.seriesId}:${suggestion.firstSeenOrder}`}
                             type="button"
                             className={styles["breadth-suggestion"]}
-                            title={`选择 ${suggestion.seriesId} 并定位到 ${suggestion.topYear} 年`}
+                            title={[
+                                `选择 ${suggestion.seriesId} 并定位到 ${suggestion.topYear} 年`,
+                                getBreadthPriorityLabel(suggestion),
+                                suggestion.priority.sharedOverlapYears > 0
+                                    ? `预计可重新对齐约 ${suggestion.priority.sharedOverlapYears} 个重叠年`
+                                    : "",
+                            ].filter(Boolean).join("；")}
                             onClick={makeClickHandler(suggestion)}
                         >
                             <span className={styles["breadth-series"]}>{suggestion.seriesId}</span>
@@ -135,6 +142,7 @@ export function BreadthDiagnosisNavigator({
                                     && Math.abs(suggestion.shiftYears) > 1
                                     ? ` ${suggestion.shiftYears}`
                                     : ""}
+                                {` · ${getBreadthPriorityLabel(suggestion)}`}
                             </span>
                         </button>
                     ))}

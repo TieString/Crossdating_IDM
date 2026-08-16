@@ -2035,8 +2035,15 @@ export function useHomeWorkspace() {
             ...(diagnosisReferenceConfig?.classification?.candidateFlaggedIds ?? []),
             ...possibleProblemsDetail.keys(),
         ];
+        const previousPriorityTrees = sortBreadthDiagnosisSuggestions(
+            breadthLastSuggestionBySeriesRef.current.values(),
+        ).map((suggestion) => suggestion.seriesId);
         const generation = ++breadthGenerationCounterRef.current;
-        const pending = orderBreadthScanTargets(Array.from(siteData.keys()), priorityTrees);
+        const pending = orderBreadthScanTargets(
+            Array.from(siteData.keys()),
+            priorityTrees,
+            previousPriorityTrees,
+        );
 
         breadthScanContextRef.current = {
             generation,
@@ -2130,6 +2137,8 @@ export function useHomeWorkspace() {
                     reviewEvent,
                     previous,
                     ++breadthFirstSeenOrderRef.current,
+                    Date.now(),
+                    context.siteData,
                 );
                 context.suggestions.set(targetTree, suggestion);
                 breadthLastSuggestionBySeriesRef.current.set(targetTree, suggestion);
