@@ -24,6 +24,11 @@ import {
 } from "./legacy-generalization/evaluator";
 import { buildCapabilityCases } from "./itrdb-operation-capability/scenarios";
 import { summarizeClusteredMetric } from "./itrdb-operation-capability/clusteredStatistics";
+import {
+    countWorkflowSuggestionAttempts,
+    diagnosisShiftYears,
+    matchWorkflowSuggestion,
+} from "./itrdb-operation-capability/workflowSuggestionMetric";
 import type {
     CapabilityCase,
     CapabilityConfig,
@@ -71,12 +76,14 @@ type StepRow = {
     alternativeWindowCovered: boolean;
     workflowEquivalentOperationCorrect: boolean;
     workflowEquivalentWindowCovered: boolean;
+    workflowSuggestionCorrect: boolean;
     localWindowEvaluated: boolean;
     primaryLocalWindowCovered: boolean;
     workflowEquivalentLocalWindowCovered: boolean;
     outOfOrderEvent: boolean;
     partialMoveMisclassification: boolean;
     wholeSeriesMoveMisclassification: boolean;
+    positiveWholeSeriesMoveOutput: boolean;
     acceptedInterpretation: Interpretation | null;
     acceptedTruthId: string | null;
     acceptedTruthType: CapabilityOperation | null;
@@ -180,14 +187,9 @@ const stableHash = (value: string): number => Number.parseInt(
     createHash("sha256").update(value).digest("hex").slice(0, 12),
     16,
 );
-const effectiveShift = (event: DiagnosisEvent): number => event.eventType === "missingRing"
-    ? -1
-    : event.eventType === "falseRing"
-        ? 1
-        : event.shiftYears ?? event.evidence.lagBefore ?? 0;
 const preview = (event: DiagnosisEvent | null): EventPreview | null => event ? ({
     eventType: event.eventType,
-    shiftYears: effectiveShift(event),
+    shiftYears: diagnosisShiftYears(event),
     startYear: event.startYear,
     endYear: event.endYear,
     topYear: event.rankedYears[0]?.year ?? null,
@@ -199,7 +201,8 @@ const preview = (event: DiagnosisEvent | null): EventPreview | null => event ? (
     reviewOnly: event.reviewOnly === true,
 }) : null;
 const operationMatches = (event: DiagnosisEvent, truth: CapabilityTruth): boolean => (
-    event.eventType === truth.eventType && effectiveShift(event) === truth.shiftYears
+    event.eventType === truth.eventType
+    && diagnosisShiftYears(event) === truth.shiftYears
 );
 const windowCovers = (event: DiagnosisEvent, truth: CapabilityTruth): boolean => (
     truth.eventType === "wholeSeriesMove"
@@ -324,13 +327,15 @@ const runCase = async (input: {
         const alternativeOperationTruth = matchingTruth(alternative, frontierTruths, false);
         const primaryCoveredTruth = matchingTruth(primary, frontierTruths, true);
         const alternativeCoveredTruth = matchingTruth(alternative, frontierTruths, true);
-        const acceptedTruth = primaryCoveredTruth ?? alternativeCoveredTruth;
-        const acceptedInterpretation: Interpretation | null = primaryCoveredTruth
-            ? "primary"
-            : alternativeCoveredTruth
-                ? "alternative"
-                : null;
-        const acceptedEvent = acceptedInterpretation === "primary" ? primary : alternative;
+        const workflowSuggestion = matchWorkflowSuggestion(
+            primary,
+            alternative,
+            frontierTruths,
+        );
+        const acceptedTruth = workflowSuggestion?.truth ?? null;
+        const acceptedInterpretation: Interpretation | null =
+            workflowSuggestion?.interpretation ?? null;
+        const acceptedEvent = workflowSuggestion?.event ?? null;
         const width = acceptedEvent && acceptedEvent.eventType !== "wholeSeriesMove"
             ? acceptedEvent.endYear - acceptedEvent.startYear + 1
             : null;
@@ -355,6 +360,8 @@ const runCase = async (input: {
             && primaryOperationTruth === null;
         const wholeSeriesMoveMisclassification = primary?.eventType === "wholeSeriesMove"
             && primaryOperationTruth === null;
+        const positiveWholeSeriesMoveOutput = primary?.eventType === "wholeSeriesMove"
+            && diagnosisShiftYears(primary) > 0;
         if (isClean) {
             stopReason = primary ? "clean_false_positive" : "clean_pass";
         } else if (!primary) {
@@ -396,12 +403,14 @@ const runCase = async (input: {
             alternativeWindowCovered: alternativeCoveredTruth !== null,
             workflowEquivalentOperationCorrect,
             workflowEquivalentWindowCovered,
+            workflowSuggestionCorrect: workflowSuggestion !== null,
             localWindowEvaluated,
             primaryLocalWindowCovered,
             workflowEquivalentLocalWindowCovered,
             outOfOrderEvent: stopReason === "out_of_order_frontier",
             partialMoveMisclassification,
             wholeSeriesMoveMisclassification,
+            positiveWholeSeriesMoveOutput,
             acceptedInterpretation,
             acceptedTruthId: acceptedTruth?.truthId ?? null,
             acceptedTruthType: acceptedTruth?.eventType ?? null,
@@ -517,6 +526,9 @@ const summarize = (cases: CaseRow[], steps: StepRow[]) => {
         row.acceptedTruthType !== null && row.acceptedTruthType !== "wholeSeriesMove"
     ));
     const promptedLocalSteps = attemptedEventSteps.filter((row) => row.localWindowEvaluated);
+    const workflowSuggestionCounts = countWorkflowSuggestionAttempts(
+        attemptedEventSteps,
+    );
     const widths = acceptedLocalSteps.map((row) => row.windowWidth)
         .filter((value): value is number => value !== null);
     const truthCount = eventCases.reduce((sum, row) => sum + row.truthCount, 0);
@@ -560,13 +572,19 @@ const summarize = (cases: CaseRow[], steps: StepRow[]) => {
             respondedSteps.filter((row) => row.primaryOperationCorrect).length,
             respondedSteps.length,
         ),
-        workflowEquivalentAccuracy: rate(
+        workflowEquivalentOperationAccuracy: rate(
             attemptedEventSteps.filter((row) => row.workflowEquivalentOperationCorrect).length,
             attemptedEventSteps.length,
         ),
-        workflowEquivalentAccuracyAnswered: rate(
+        workflowEquivalentOperationAccuracyAnswered: rate(
             respondedSteps.filter((row) => row.workflowEquivalentOperationCorrect).length,
             respondedSteps.length,
+        ),
+        workflowSuggestionCorrect: workflowSuggestionCounts.numerator,
+        workflowSuggestionAttempts: workflowSuggestionCounts.denominator,
+        workflowSuggestionAccuracy: rate(
+            workflowSuggestionCounts.numerator,
+            workflowSuggestionCounts.denominator,
         ),
         mainWindowCoverage: rate(
             attemptedEventSteps.filter((row) => row.primaryWindowCovered).length,
@@ -609,6 +627,9 @@ const summarize = (cases: CaseRow[], steps: StepRow[]) => {
             respondedSteps.filter((row) => row.wholeSeriesMoveMisclassification).length,
             respondedSteps.length,
         ),
+        positiveWholeSeriesMoveOutputs: respondedSteps.filter((row) => (
+            row.positiveWholeSeriesMoveOutput
+        )).length,
         cleanFalsePositiveRate: rate(
             cleanCases.filter((row) => row.cleanFalsePositive).length,
             cleanCases.length,
@@ -646,7 +667,7 @@ type ClusterMetricName =
     | "responseRate"
     | "refusalRate"
     | "strictOperationAccuracy"
-    | "workflowEquivalentAccuracy"
+    | "workflowSuggestionAccuracy"
     | "serialRecoveryRate"
     | "serialStrictMainWindowCoverage"
     | "serialWorkflowEquivalentWindowCoverage"
@@ -666,6 +687,7 @@ const clusterMetricCounts = (
     const truthCount = eventCases.reduce((sum, row) => sum + row.truthCount, 0);
     const localTruthCount = eventCases.reduce((sum, row) => sum + row.localTruthCount, 0);
     const promptedLocal = attempted.filter((row) => row.localWindowEvaluated);
+    const workflowSuggestionCounts = countWorkflowSuggestionAttempts(attempted);
     return {
         responseRate: {
             numerator: attempted.filter((row) => row.response).length,
@@ -677,12 +699,9 @@ const clusterMetricCounts = (
         },
         strictOperationAccuracy: {
             numerator: attempted.filter((row) => row.primaryOperationCorrect).length,
-            denominator: truthCount,
+            denominator: attempted.length,
         },
-        workflowEquivalentAccuracy: {
-            numerator: attempted.filter((row) => row.workflowEquivalentOperationCorrect).length,
-            denominator: truthCount,
-        },
+        workflowSuggestionAccuracy: workflowSuggestionCounts,
         serialRecoveryRate: {
             numerator: eventCases.reduce((sum, row) => sum + row.recoveredTruths, 0),
             denominator: truthCount,
@@ -750,8 +769,7 @@ const clusteredInference = (
     const allCounts = clusterMetricCounts(familyCases, familySteps);
     const metricNames = Object.keys(allCounts) as ClusterMetricName[];
     const targetMetrics = new Set<ClusterMetricName>([
-        "promptedStrictLocalWindowCoverage",
-        "promptedWorkflowEquivalentLocalWindowCoverage",
+        "workflowSuggestionAccuracy",
     ]);
     const metrics = Object.fromEntries(metricNames.map((metricName) => {
         const inference = summarizeClusteredMetric(fileIds.map((fileId) => ({
@@ -1082,6 +1100,11 @@ const runParent = async (): Promise<void> => {
         byAcceptanceTier: grouped(cases, steps, (row) => row.acceptanceTier),
         byScenario: grouped(cases, steps, (row) => row.scenarioId),
         byFile: grouped(cases, steps, (row) => row.fileId),
+        byWholeShift: grouped(
+            cases.filter((row) => row.wholeTruthCount > 0),
+            steps,
+            (row) => String(row.wholeShiftYears),
+        ),
         clusteredInferenceByFamily: config.statistics
             ? Object.fromEntries(requestedFamilies.map((family) => [
                     family,

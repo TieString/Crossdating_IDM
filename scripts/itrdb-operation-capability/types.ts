@@ -12,10 +12,11 @@ export type CapabilityConfig = {
     schemaVersion: 1;
     protocolVersion:
         | "itrdb-operation-capability-v1"
-        | "itrdb-operation-capability-v2";
+        | "itrdb-operation-capability-v2"
+        | "itrdb-operation-capability-v3";
     frozenDate: string;
     seed: string;
-    scenarioGeneratorVersion: 3 | 4;
+    scenarioGeneratorVersion: 3 | 4 | 5;
     itrdbRoot: string;
     fileIds: string[];
     generalizationSelection?: {
@@ -65,6 +66,13 @@ export type CapabilityConfig = {
         targetCoverage: number;
         seed: string;
     };
+    evaluationProtocol?: {
+        version: "frontier-workflow-suggestion-v1";
+        mainMetric: "workflowSuggestionAccuracy";
+        denominator: "actualFrontierDiagnosisAttempts";
+        unreachedEvents: "serialRecoveryOnly";
+        wholeSeriesMoveSuccess: "negativeExactShiftNoWindow";
+    };
     runtime: {
         workers: number;
         cofechaTimeoutSeconds: number;
@@ -102,7 +110,7 @@ export type CapabilityExcludedFile = {
 export type CapabilityManifest = {
     schemaVersion: 1;
     protocolVersion: CapabilityConfig["protocolVersion"];
-    scenarioGeneratorVersion: 3 | 4;
+    scenarioGeneratorVersion: 3 | 4 | 5;
     createdAt: string;
     gitCommit: string;
     configPath: string;

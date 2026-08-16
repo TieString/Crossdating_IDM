@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": "itrdb-operation-capability-v3",
+  "scenarioGeneratorVersion": 5,
+  "frozenDate": "2026-08-16",
+  "seed": "itrdb-operation-capability-paper-scenarios-2026-08-16-v3",
+  "itrdbRoot": "D:/软件测试/数据/ITRDB/itrdb_download/measurements",
+  "fileIds": [
+    "ca612",
+    "co612",
+    "co632",
+    "co699",
+    "mt001",
+    "nm026",
+    "or093",
+    "paki033",
+    "ut529"
+  ],
+  "selection": {
+    "minimumSeriesYears": 200,
+    "minimumMasterCorrelation": 0.8,
+    "maximumProblemSegments": 0,
+    "minimumOlderContextYears": 45,
+    "minimumNewerContextYears": 35,
+    "maximumTargetsPerFile": 20,
+    "targetSelectionSeed": "itrdb-operation-capability-paper-targets-2026-08-15-v1",
+    "excludeFilesWithoutEligibleTargets": true,
+    "usesSignalStrength": false,
+    "usesDiagnosisOutput": false
+  },
+  "injection": {
+    "falseRingMode": "moderate",
+    "partialShiftYears": [
+      -6,
+      -20
+    ],
+    "wholeShiftYears": [
+      -4,
+      -11,
+      -20,
+      -50
+    ],
+    "distantSpacingYears": 30,
+    "distantEventCounts": [
+      2,
+      3,
+      4
+    ],
+    "nearSpacingYears": [
+      2,
+      5,
+      9,
+      13
+    ],
+    "nearUnitEventCounts": [
+      2,
+      3,
+      4
+    ],
+    "includeAdjacentOptionalSuccess": false,
+    "allowedWindowWidths": [
+      5,
+      7,
+      9,
+      13
+    ]
+  },
+  "families": {
+    "Clean": "one untouched control for every frozen target series",
+    "A": "one balanced single missing, false, partial, or whole event per target",
+    "B": "one balanced distant same-type multi-event chain per target",
+    "C": "one balanced 2-13 year same-direction missing or false chain per target",
+    "D": "one balanced distant two-, three-, or four-operation composition per target"
+  },
+  "design": {
+    "scenarioSampling": "balancedOnePerFamily",
+    "splitId": "itrdb-operation-capability-paper-file-split-2026-08-15-v1",
+    "datasetRole": "development",
+    "casesPerTargetPerFamily": 1
+  },
+  "statistics": {
+    "clusterUnit": "file",
+    "bootstrapReplicates": 10000,
+    "confidenceLevel": 0.95,
+    "targetCoverage": 0.9,
+    "seed": "itrdb-operation-capability-paper-bootstrap-development-v3"
+  },
+  "runtime": {
+    "workers": 16,
+    "cofechaTimeoutSeconds": 60
+  },
+  "evaluationProtocol": {
+    "version": "frontier-workflow-suggestion-v1",
+    "mainMetric": "workflowSuggestionAccuracy",
+    "denominator": "actualFrontierDiagnosisAttempts",
+    "unreachedEvents": "serialRecoveryOnly",
+    "wholeSeriesMoveSuccess": "negativeExactShiftNoWindow"
+  }
+}

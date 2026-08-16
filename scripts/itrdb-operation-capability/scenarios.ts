@@ -425,15 +425,38 @@ const configuredNearSpacings = (config: CapabilityConfig): number[] => {
     return valid;
 };
 
-const buildCapabilityCasesV4 = (
+const buildBalancedCapabilityCases = (
     config: CapabilityConfig,
     manifest: CapabilityManifest,
+    generatorVersion: 4 | 5,
 ): CapabilityCase[] => {
     if (config.design?.scenarioSampling !== "balancedOnePerFamily"
         || config.design.casesPerTargetPerFamily !== 1) {
-        throw new Error("scenario generator v4 requires one balanced case per target and family");
+        throw new Error(
+            `scenario generator v${generatorVersion}`
+            + " requires one balanced case per target and family",
+        );
+    }
+    if (generatorVersion === 5 && (
+        config.injection.wholeShiftYears.length === 0
+        || config.injection.wholeShiftYears.some((shift) => (
+            !Number.isInteger(shift) || shift >= 0
+        ))
+    )) {
+        throw new Error("scenario generator v5 allows only negative whole-series shifts");
     }
     const cases: CapabilityCase[] = [];
+    const wholeShiftCounters: Record<"A" | "D", number> = { A: 0, D: 0 };
+    const nextWholeShift = (family: "A" | "D"): number => {
+        if (generatorVersion === 4) {
+            throw new Error("v4 whole shifts remain target-balanced");
+        }
+        const shifts = config.injection.wholeShiftYears;
+        const phase = stableHash(`${config.seed}:${family}:whole-shift-phase`) % shifts.length;
+        const shift = shifts[(phase + wholeShiftCounters[family]) % shifts.length];
+        wholeShiftCounters[family] += 1;
+        return shift;
+    };
     const singlePatterns: SinglePattern[] = [
         { slug: "missing", operation: "missingRing" },
         { slug: "false", operation: "falseRing" },
@@ -493,9 +516,9 @@ const buildCapabilityCasesV4 = (
         };
         addCase(cases, {
             ...common,
-            caseId: `${file.fileId}:${target.targetId}:Clean0-control-v4`,
+            caseId: `${file.fileId}:${target.targetId}:Clean0-control-v${generatorVersion}`,
             family: "Clean",
-            scenarioId: "Clean0-control-v4",
+            scenarioId: `Clean0-control-v${generatorVersion}`,
             spacingYears: null,
             evaluationMode: "sequentialFrontier",
             acceptanceTier: "blocking",
@@ -513,9 +536,14 @@ const buildCapabilityCasesV4 = (
             0,
             `${baseKey}:A:${single.slug}`,
         ).single;
-        const aScenarioId = `A-${single.slug}-v4`;
+        const aScenarioId = `A-${single.slug}-v${generatorVersion}`;
+        const aWholeShiftYears = single.operation === "wholeSeriesMove"
+            && generatorVersion === 5
+            ? nextWholeShift("A")
+            : wholeShiftYears;
         addCase(cases, {
             ...common,
+            wholeShiftYears: aWholeShiftYears,
             caseId: `${file.fileId}:${target.targetId}:${aScenarioId}`,
             family: "A",
             scenarioId: aScenarioId,
@@ -523,7 +551,7 @@ const buildCapabilityCasesV4 = (
             evaluationMode: "sequentialFrontier",
             acceptanceTier: "blocking",
             truths: [single.operation === "wholeSeriesMove"
-                ? wholeTruth("event-1", wholeShiftYears)
+                ? wholeTruth("event-1", aWholeShiftYears)
                 : localTruth(
                         "event-1",
                         single.operation,
@@ -537,7 +565,7 @@ const buildCapabilityCasesV4 = (
             targetIndex,
             `${config.seed}:${file.fileId}:B-pattern`,
         );
-        const bScenarioId = `B-${sameType.slug}-v4`;
+        const bScenarioId = `B-${sameType.slug}-v${generatorVersion}`;
         const bYears = yearsForPattern(
             config,
             target,
@@ -566,7 +594,7 @@ const buildCapabilityCasesV4 = (
             targetIndex,
             `${config.seed}:${file.fileId}:C-pattern`,
         );
-        const cScenarioId = `C-${nearUnit.slug}-v4`;
+        const cScenarioId = `C-${nearUnit.slug}-v${generatorVersion}`;
         const cYears = yearsForPattern(
             config,
             target,
@@ -595,7 +623,11 @@ const buildCapabilityCasesV4 = (
             targetIndex,
             `${config.seed}:${file.fileId}:D-pattern`,
         );
-        const dScenarioId = `D-${mixed.slug}-v4`;
+        const dScenarioId = `D-${mixed.slug}-v${generatorVersion}`;
+        const dWholeShiftYears = mixed.operations.includes("wholeSeriesMove")
+            && generatorVersion === 5
+            ? nextWholeShift("D")
+            : wholeShiftYears;
         const localCount = mixed.operations.filter((operation) => (
             operation !== "wholeSeriesMove"
         )).length;
@@ -608,6 +640,7 @@ const buildCapabilityCasesV4 = (
         );
         addCase(cases, {
             ...common,
+            wholeShiftYears: dWholeShiftYears,
             caseId: `${file.fileId}:${target.targetId}:${dScenarioId}`,
             family: "D",
             scenarioId: dScenarioId,
@@ -621,7 +654,7 @@ const buildCapabilityCasesV4 = (
                 dYears,
                 partialShiftYears,
                 secondPartialShiftYears,
-                wholeShiftYears,
+                dWholeShiftYears,
             ),
         });
     }));
@@ -634,5 +667,7 @@ export const buildCapabilityCases = (
 ): CapabilityCase[] => config.scenarioGeneratorVersion === 3
     ? buildCapabilityCasesV3(config, manifest)
     : config.scenarioGeneratorVersion === 4
-        ? buildCapabilityCasesV4(config, manifest)
-        : (() => { throw new Error("unsupported scenario generator version"); })();
+        ? buildBalancedCapabilityCases(config, manifest, 4)
+        : config.scenarioGeneratorVersion === 5
+            ? buildBalancedCapabilityCases(config, manifest, 5)
+            : (() => { throw new Error("unsupported scenario generator version"); })();
