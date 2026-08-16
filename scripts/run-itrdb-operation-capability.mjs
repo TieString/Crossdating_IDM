@@ -1,6 +1,9 @@
 import { spawnSync } from "node:child_process";
+import { mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildSync } from "esbuild";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const rawArgs = process.argv.slice(2).filter((argument) => argument !== "--");
@@ -52,16 +55,26 @@ for (const [name, flag] of [
 const forwardedArgs = rawArgs.some((argument) => argument.startsWith("--"))
     ? rawArgs
     : npmForwardedArgs;
-const result = spawnSync(process.execPath, [
-    join(repoRoot, "node_modules", "vite-node", "vite-node.mjs"),
-    join(repoRoot, "scripts", "benchmark-itrdb-operation-capability.ts"),
-    "--",
-    ...forwardedArgs,
-], {
+const bundleDir = join(tmpdir(), "crossdating-itrdb-capability");
+const bundlePath = join(bundleDir, `benchmark-${process.pid}.mjs`);
+mkdirSync(bundleDir, { recursive: true });
+buildSync({
+    entryPoints: [join(repoRoot, "scripts", "benchmark-itrdb-operation-capability.ts")],
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    target: "node22",
+    tsconfig: join(repoRoot, "tsconfig.itrdb-operation-capability.json"),
+    outfile: bundlePath,
+    logLevel: "warning",
+});
+const result = spawnSync(process.execPath, [bundlePath, ...forwardedArgs], {
     cwd: repoRoot,
+    env: { ...process.env, CROSSDATING_REPO_ROOT: repoRoot },
     stdio: "inherit",
     windowsHide: true,
 });
+rmSync(bundlePath, { force: true });
 
 if (result.error) throw result.error;
 process.exitCode = result.status ?? 1;

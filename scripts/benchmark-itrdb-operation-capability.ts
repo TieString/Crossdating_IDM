@@ -144,7 +144,10 @@ type RunPlan = {
     executionGitCommit?: string;
 };
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = resolve(
+    process.env.CROSSDATING_REPO_ROOT
+    ?? resolve(dirname(fileURLToPath(import.meta.url)), ".."),
+);
 const scriptPath = fileURLToPath(import.meta.url);
 const viteNodePath = join(repoRoot, "node_modules", "vite-node", "vite-node.mjs");
 const args = process.argv.slice(2).filter((argument) => argument !== "--");
@@ -1040,10 +1043,7 @@ const runParent = async (): Promise<void> => {
         resolveWorker,
         rejectWorker,
     ) => {
-        const child = spawn(process.execPath, [
-            viteNodePath,
-            scriptPath,
-            "--",
+        const workerArgs = [
             "--config", configPath,
             "--manifest", manifestPath,
             "--run-dir", runDir,
@@ -1052,7 +1052,10 @@ const runParent = async (): Promise<void> => {
             "--worker-index", String(index),
             "--cofecha-exe", cofechaExe,
             ...(keepDiagnosisAudits ? ["--keep-diagnosis-audits"] : []),
-        ], {
+        ];
+        const child = spawn(process.execPath, scriptPath.endsWith(".mjs")
+            ? [scriptPath, ...workerArgs]
+            : [viteNodePath, scriptPath, "--", ...workerArgs], {
             cwd: repoRoot,
             windowsHide: true,
             stdio: ["ignore", "pipe", "pipe"],
