@@ -20,8 +20,9 @@ import {
     getDisplayedDiagnosisEvents,
 } from "@/features/crossdating/diagnosis";
 import { createCofechaMasterReferenceConfig } from "@/features/crossdating/reference";
+import { deleteYearWithMode } from "@/features/rwl/edit";
 import { formatTucson } from "@/features/rwl/parsers/tucson";
-import type { RwlSiteData } from "@/features/rwl/types";
+import type { RwlSiteData, RwlTreeData } from "@/features/rwl/types";
 import {
     createWholeSeriesMoveCase,
     parseRwl,
@@ -76,6 +77,140 @@ fixtureDescribe("co612 mon232 whole-series move regression", () => {
         rwlHash: "co612-mon232-whole-regression",
         masterDatingSeries: parseCofechaResult(outText).masterDatingSeries,
     });
+
+    it("keeps the missing-ring review path after deleting 1994 and 1990", () => {
+        const after1994 = deleteYearWithMode(
+            new Map(target.valuesByYear),
+            1994,
+            "direct",
+            "right",
+        );
+        const after1990 = deleteYearWithMode(
+            after1994,
+            1990,
+            "direct",
+            "right",
+        );
+        const afterFirstSite = new Map(cleanSite);
+        afterFirstSite.set(TARGET_ID, after1994);
+        const afterFirstDiagnosis = diagnoseCrossdating(afterFirstSite, {
+            referenceConfig,
+            targetTrees: [TARGET_ID],
+            reviewWindowDisplayMode: "review",
+            includeEventDecisionAudits: true,
+        });
+        const site = new Map(cleanSite);
+        site.set(TARGET_ID, after1990);
+
+        const diagnosis = diagnoseCrossdating(site, {
+            referenceConfig,
+            targetTrees: [TARGET_ID],
+            reviewWindowDisplayMode: "review",
+            includeEventDecisionAudits: true,
+        });
+        const firstDisplayed = getDisplayedDiagnosisEvents(afterFirstDiagnosis)
+            .filter((event) => event.seriesId === TARGET_ID);
+        const displayed = getDisplayedDiagnosisEvents(diagnosis)
+            .filter((event) => event.seriesId === TARGET_ID);
+        const event = displayed[0];
+        const globalSliding = diagnosis.globalSlidingMatches.find((match) => (
+            match.seriesId === TARGET_ID
+        ));
+        const details = JSON.stringify({
+            afterFirstDelete: firstDisplayed.map((item) => ({
+                type: item.eventType,
+                shiftYears: item.shiftYears,
+                ambiguity: item.interpretationAmbiguity?.kind,
+                alternative: item.interpretationAmbiguity?.alternative.eventType,
+            })),
+            globalSliding: globalSliding ? {
+                bestGlobalLag: globalSliding.bestGlobalLag,
+                bestGlobalR: globalSliding.bestGlobalR,
+                currentR: globalSliding.currentR,
+                overlapYears: globalSliding.overlapYears,
+            } : null,
+            candidates: diagnosis.candidates
+                .filter((candidate) => candidate.targetTree === TARGET_ID)
+                .map((candidate) => ({
+                    mode: candidate.mode,
+                    targetYear: candidate.targetYear,
+                    shiftYears: candidate.deltaYears,
+                    score: candidate.score,
+                    strength: candidate.candidateStrength,
+                    sources: candidate.algorithmSource,
+                })),
+            displayed: displayed.map((item) => ({
+                type: item.eventType,
+                shiftYears: item.shiftYears,
+                range: [item.startYear, item.endYear],
+                ambiguity: item.interpretationAmbiguity?.kind,
+                alternative: item.interpretationAmbiguity ? {
+                    type: item.interpretationAmbiguity.alternative.eventType,
+                    range: [
+                        item.interpretationAmbiguity.alternative.startYear,
+                        item.interpretationAmbiguity.alternative.endYear,
+                    ],
+                    topYear: item.interpretationAmbiguity.alternative.rankedYears[0]?.year,
+                } : null,
+            })),
+        }, null, 2);
+
+        expect(firstDisplayed[0], details).toMatchObject({
+            eventType: "wholeSeriesMove",
+            shiftYears: -1,
+            interpretationAmbiguity: {
+                kind: "wholeSeriesMoveOrMissingRing",
+            },
+        });
+        expect(displayed, details).toHaveLength(1);
+        expect(event, details).toMatchObject({
+            eventType: "wholeSeriesMove",
+            shiftYears: -2,
+            interpretationAmbiguity: {
+                kind: "wholeSeriesMoveOrMissingRing",
+                evidence: {
+                    wholeShiftYears: -2,
+                },
+                alternative: {
+                    eventType: "missingRing",
+                },
+            },
+        });
+    }, 120_000);
+
+    it("keeps the missing-ring review path at the three-year boundary", () => {
+        const corrupted = [1994, 1990, 1986].reduce<RwlTreeData>(
+            (values, year) => deleteYearWithMode(values, year, "direct", "right"),
+            new Map(target.valuesByYear),
+        );
+        const site = new Map(cleanSite);
+        site.set(TARGET_ID, corrupted);
+        const diagnosis = diagnoseCrossdating(site, {
+            referenceConfig,
+            targetTrees: [TARGET_ID],
+            reviewWindowDisplayMode: "review",
+            includeEventDecisionAudits: true,
+        });
+        const displayed = getDisplayedDiagnosisEvents(diagnosis)
+            .filter((event) => event.seriesId === TARGET_ID);
+        const details = JSON.stringify(displayed.map((item) => ({
+            type: item.eventType,
+            shiftYears: item.shiftYears,
+            ambiguity: item.interpretationAmbiguity?.kind,
+            alternative: item.interpretationAmbiguity?.alternative.eventType,
+        })));
+
+        expect(displayed, details).toHaveLength(1);
+        expect(displayed[0], details).toMatchObject({
+            eventType: "wholeSeriesMove",
+            shiftYears: -3,
+            interpretationAmbiguity: {
+                kind: "wholeSeriesMoveOrMissingRing",
+                evidence: { wholeShiftYears: -3 },
+                alternative: { eventType: "missingRing" },
+            },
+        });
+    }, 120_000);
 
     it.each([-10, -11, -20, -50])(
         "keeps a %i-year whole move classified as wholeSeriesMove",

@@ -995,7 +995,7 @@ export function MultiLineChart({
         borderColor: MANUAL_REFERENCE_COLOR,
         backgroundColor: MANUAL_REFERENCE_COLOR,
         fill: false,
-        borderWidth: 3.25,
+        borderWidth: 2.5,
         spanGaps: false,
         tension: 0.008,
         cubicInterpolationMode: 'default',

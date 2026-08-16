@@ -373,12 +373,12 @@ export default function Home() {
         handleInsertMissingYearAtSide,
         handleInsertMissingYearAtSideFromChart,
         handleLoad: handleWorkspaceLoad,
+        handleLoadTreeRingScanFolder,
         handleMoveSeriesTailByOffset,
         handleApplyDiagnosisCandidate,
         handleApplyDiagnosisCandidateBatch,
         handleApplyDiagnosisEvent,
         handleApplyCurrentEventConfirmedYears,
-        handleApplyBayesianStartYear,
         handleApplyLocalSimulation,
         handleConfirmCurrentEventYear,
         handleReferenceConfigChange,
@@ -392,6 +392,7 @@ export default function Home() {
         handleSave: handleStructuredSave,
         handleSaveAs: handleStructuredSaveAs,
         handleTreeSelectionChange,
+        handleTreeRingScanSeriesChange,
         handleUndoCurrentEventConfirmation,
         handleUndo,
         handleUndoOperationLogEntry,
@@ -404,6 +405,7 @@ export default function Home() {
         isFileLoading,
         isModified,
         operationLog,
+        rwlOperationLog,
         possibleProblemsDetail,
         problemTextColor,
         referenceConfig,
@@ -420,6 +422,7 @@ export default function Home() {
         shouldShowProcessing,
         shouldShowWelcome,
         siteData,
+        treeRingScanState,
         treeOptions,
         windowTitle,
     } = useHomeWorkspace();
@@ -536,20 +539,19 @@ export default function Home() {
     );
     const currentEventTabAvailable = CURRENT_EVENT_PYTHON_MODELS_ENABLED
         && Boolean(fileName && selectedTree !== ALL_OPTION_VALUE);
-    const currentEventSuggestionCount = visibleCurrentEventSession.status === "advice"
-        ? visibleCurrentEventSession.result?.suggestions.length ?? 0
-        : 0;
     const candidateTabAvailable = currentEventTabAvailable
         || selectedTreeEvents.length > 0
         || isEventDiagnosisRunning;
     const problemTabAvailable = Boolean(selectedProblemText);
-    const activeProblemTab: "problems" | "candidates" = problemTab === "candidates" && candidateTabAvailable
+    const activeProblemTab: "problems" | "candidates" | null = problemTab === "candidates" && candidateTabAvailable
         ? "candidates"
         : problemTab === "problems" && problemTabAvailable
             ? "problems"
             : candidateTabAvailable
                 ? "candidates"
-                : "problems";
+                : problemTabAvailable
+                    ? "problems"
+                    : null;
 
     const mainDividerCollapsed = isPanelRatioCollapsed(layout.mainSplitRatio);
     const leftBottomDividerCollapsed = layout.leftBottomRatio >= COLLAPSED_PANEL_RATIO;
@@ -1511,7 +1513,6 @@ export default function Home() {
                                                     selected={selectedTree}
                                                     suggestedRanges={suggestedRangeHighlights}
                                                     masterSeries={cofechaResult?.masterDatingSeries}
-                                                    cofechaPassReference={dynamicReferenceConfig?.cofechaPassReference ?? null}
                                                     masterCorrelations={cofechaResult?.masterCorrelations}
                                                     seriesProblemCounts={cofechaResult?.seriesProblemCounts}
                                                     historyAnimation={historyAnimation}
@@ -1519,6 +1520,10 @@ export default function Home() {
                                                     editHighlightTarget={editHighlightTarget}
                                                     deleteSeriesRequest={deleteSeriesRequest}
                                                     deletionMarkers={deletionMarkers}
+                                                    treeRingScanState={treeRingScanState}
+                                                    rwlOperationLog={rwlOperationLog}
+                                                    onLoadTreeRingScanFolder={handleLoadTreeRingScanFolder}
+                                                    onTreeRingScanSeriesChange={handleTreeRingScanSeriesChange}
                                                     scrollContainerRef={dataContainerRef}
                                                     onInsertMissingYearAtSide={handleInsertMissingYearAtSide}
                                                     onMoveSeriesTailByOffset={handleMoveSeriesTailByOffset}
@@ -1529,7 +1534,6 @@ export default function Home() {
                                                     onEditAsText={handleOpenRawEditorForTree}
                                                     onDeleteSeriesRequestHandled={handleDeleteSeriesRequestHandled}
                                                     onReplaceTreeData={handleReplaceTreeData}
-                                                    onApplyBayesianStartYear={handleApplyBayesianStartYear}
                                                     onJumpToChart={handleJumpToChart}
                                                     onJumpToCofecha={handleJumpToCofechaPart6}
                                                     cofechaPart6Trees={cofechaPart6Trees}
@@ -1566,6 +1570,8 @@ export default function Home() {
                                                     type="button"
                                                     className={`${style["problem-tab"]} ${activeProblemTab === "problems" ? style["problem-tab-active"] : ""}`}
                                                     disabled={!problemTabAvailable}
+                                                    aria-pressed={activeProblemTab === "problems"}
+                                                    title={problemTabAvailable ? "查看当前序列的可能问题" : "当前序列没有可能问题"}
                                                     onClick={() => setProblemTab("problems")}
                                                 >
                                                     可能问题
@@ -1574,21 +1580,25 @@ export default function Home() {
                                                     type="button"
                                                     className={`${style["problem-tab"]} ${activeProblemTab === "candidates" ? style["problem-tab-active"] : ""}`}
                                                     disabled={!candidateTabAvailable}
+                                                    aria-pressed={activeProblemTab === "candidates"}
+                                                    title={candidateTabAvailable ? "查看当前序列的定年建议" : "当前序列没有定年建议"}
                                                     onClick={() => setProblemTab("candidates")}
                                                 >
                                                     定年建议
-                                                    {currentEventTabAvailable
-                                                        ? visibleCurrentEventSession.status === "running"
-                                                            ? " · 模型计算中"
-                                                            : ` · 模型 ${currentEventSuggestionCount}`
+                                                    {(currentEventTabAvailable
+                                                        && visibleCurrentEventSession.status === "running")
+                                                        || isEventDiagnosisRunning
+                                                        ? " · 计算中"
                                                         : ""}
-                                                    {selectedTreeEvents.length > 0 ? ` · 事件 ${selectedTreeEvents.length}` : ""}
-                                                    {isEventDiagnosisRunning ? " · 计算中" : ""}
                                                 </button>
                                             </div>
 
                                             <FloatingScrollArea className={style["problem-tab-body"]}>
-                                                {activeProblemTab === "candidates" ? (
+                                                {activeProblemTab === null ? (
+                                                    <div className={style["problem-tab-empty"]}>
+                                                        当前序列没有可能问题或定年建议
+                                                    </div>
+                                                ) : activeProblemTab === "candidates" ? (
                                                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                                                         {currentEventTabAvailable ? (
                                                             <CurrentEventSuggestionPanel

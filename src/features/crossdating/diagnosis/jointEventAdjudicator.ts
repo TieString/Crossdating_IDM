@@ -14,7 +14,10 @@ import {
     strongBoundedPathLocation,
 } from "./locationAuthority";
 import { addStablePartialRankEdgeGuard } from "./stablePartialLocationConsensus";
-import { isAllowedAutomaticDiagnosisEvent } from "./wholeSeriesMoveSemantics";
+import {
+    isAllowedAutomaticDiagnosisEvent,
+    wholeSeriesMoveShiftYears,
+} from "./wholeSeriesMoveSemantics";
 import type {
     DiagnosisEvidenceClaim,
     DiagnosisEvent,
@@ -1312,6 +1315,15 @@ const ENDPOINT_MISSING_CLAIMS = new Set<DiagnosisEvidenceClaim>([
     "whole_baseline_exhausted_by_missing_staircase",
 ]);
 
+type ReviewableWholeMissingShift = -1 | -2 | -3;
+
+const reviewableWholeMissingShift = (
+    event: DiagnosisEvent,
+): ReviewableWholeMissingShift | null => {
+    const shift = wholeSeriesMoveShiftYears(event);
+    return shift === -1 || shift === -2 || shift === -3 ? shift : null;
+};
+
 const endpointMissingAuthority = (event: DiagnosisEvent): number => {
     const claims = evidenceClaimsFor(event);
     if (claims.has("whole_baseline_exhausted_by_missing_staircase")) return 5;
@@ -1323,8 +1335,11 @@ const endpointMissingAuthority = (event: DiagnosisEvent): number => {
         "sequential_missing_staircase_head",
     ) || event.evidence.notes.includes("candidate_hard_gate_passed");
     return independentlyReviewedUnit
-        && event.evidence.lagBefore === -1
-        && event.evidence.lagAfter === 0
+        && event.evidence.lagBefore !== null
+        && event.evidence.lagAfter !== null
+        && event.evidence.lagBefore >= -3
+        && event.evidence.lagBefore < 0
+        && event.evidence.lagAfter === event.evidence.lagBefore + 1
         ? 0
         : -1;
 };
@@ -1333,7 +1348,8 @@ const selectEndpointMissingInterpretation = (
     clusters: readonly HypothesisCluster[],
     whole: DiagnosisEvent,
 ): DiagnosisEvent | null => {
-    if (whole.eventType !== "wholeSeriesMove" || whole.shiftYears !== -1) return null;
+    if (whole.eventType !== "wholeSeriesMove"
+        || reviewableWholeMissingShift(whole) === null) return null;
     return clusters.flatMap((cluster) => cluster.checkpoints)
         .filter((checkpoint) => {
             const { event } = checkpoint;
@@ -1968,15 +1984,18 @@ export const adjudicateJointEventHypotheses = (
     const baseSelectedEvent = reason === "selected"
         ? projectTerminalUnitCompatibleLocation(winnerEvent, submitted)
         : null;
+    const endpointWholeShift = baseSelectedEvent
+        ? reviewableWholeMissingShift(baseSelectedEvent)
+        : null;
     const endpointMissing = baseSelectedEvent
         ? selectEndpointMissingInterpretation(clusters, baseSelectedEvent)
         : null;
-    const endpointResolvedEvent = baseSelectedEvent && endpointMissing
+    const endpointResolvedEvent = baseSelectedEvent && endpointMissing && endpointWholeShift
         ? attachEndpointWholeMissingInterpretation(
             baseSelectedEvent,
             endpointMissing,
             {
-                wholeShiftYears: -1,
+                wholeShiftYears: endpointWholeShift,
                 endpointDistanceYears: baseSelectedEvent.endYear - endpointMissing.endYear,
                 missingWindowWidth: (
                     endpointMissing.endYear - endpointMissing.startYear + 1

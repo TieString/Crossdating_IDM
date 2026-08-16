@@ -5,10 +5,17 @@ import {
     deleteYearRange as previewDeleteYearRange,
     moveSeriesTailByOffset as previewMoveSeriesTailByOffset,
 } from '@/features/rwl/edit';
-import { BayesianDateButton } from '@/features/rwl/components/BayesianDateButton';
-import type { BayesianDatingCandidate, BayesianMcmcDatingResult } from '@/features/rwl/bayesianDating';
-import type { CofechaPassReference } from '@/features/crossdating/reference';
-import type { DeleteMode, DeleteRangeFill, DeleteShift, DeletionMarkerInfo, RwlDeletionMarkers, RwlHistoryAnimation, RwlMoveConflictPolicy } from '@/features/rwl/edit';
+import type { DeleteMode, DeleteRangeFill, DeleteShift, DeletionMarkerInfo, RwlDeletionMarkers, RwlHistoryAnimation, RwlMoveConflictPolicy, RwlOperationLogEntry } from '@/features/rwl/edit';
+import {
+    buildTreeRingYearMapping,
+    createEmptyTreeRingScanState,
+    getTreeRingScanFile,
+    getTreeRingScanSeriesState,
+    isTreeRingScanCalibrated,
+    type PersistedTreeRingScanState,
+    type TreeRingImageMode,
+    type TreeRingScanSeriesState,
+} from "@/features/treeRingScans";
 import { RollingNumber } from '@/components/RollingNumber/RollingNumber';
 import WidthGrid from './WidthGrid';
 import WidthGridContextMenu from './WidthGridContextMenu';
@@ -58,6 +65,15 @@ import {
     isGridSelectAllShortcut,
     resolveGridSelectAllTree,
 } from "./gridSelectAll";
+import { TreeRingFloatingViewer } from "./TreeRingFloatingViewer";
+import {
+    TreeRingPreview,
+    type TreeRingViewerAnchor,
+    type TreeRingViewerRequest,
+} from "./TreeRingPreview";
+import { prewarmTreeRingArtworkCache } from "./treeRingArtwork";
+import { TreeRingScanPreview } from "./TreeRingScanPreview";
+import { TreeRingImageContextMenu } from "./TreeRingImageContextMenu";
 
 interface YearCell {
     year: number;
@@ -707,8 +723,6 @@ export type WidthContainerProps = {
     siteData: RwlSiteData,
     /** Optional derived reference/master series keyed by year. */
     masterSeries?: Map<number, number>,
-    /** Dynamic COFECHA-pass reference used by Bayesian dating. */
-    cofechaPassReference?: CofechaPassReference | null,
     /** COFECHA PART 7 各序列与主序列的整体相关性，键为大写序列号。 */
     masterCorrelations?: Map<string, number>,
     /** COFECHA PART 7 各序列的潜在问题分段数（Flags），键为大写序列号。 */
@@ -727,6 +741,14 @@ export type WidthContainerProps = {
     deleteSeriesRequest?: { id: number; tree: string } | null,
     /** Deletion marker stacks keyed by series and marker year. */
     deletionMarkers?: RwlDeletionMarkers,
+    /** Per-file scan-folder matches, anchor calibration and preferred image mode. */
+    treeRingScanState?: PersistedTreeRingScanState,
+    /** Complete applied editor operations used to map physical/original years to current years. */
+    rwlOperationLog?: readonly RwlOperationLogEntry[],
+    /** Opens a directory picker and indexes same-named scan images. */
+    onLoadTreeRingScanFolder?: () => Promise<number>,
+    /** Persists one series' scan mode and anchor calibration. */
+    onTreeRingScanSeriesChange?: (tree: string, state: TreeRingScanSeriesState) => void,
     /** Called when an editable year cell is clicked. */
     onYearClick?: (tree: string, year: number) => void,
     /** Inserts a missing year on the requested side of an existing year. */
@@ -759,13 +781,6 @@ export type WidthContainerProps = {
     onDeleteSeriesRequestHandled?: (id: number) => void,
     /** Replaces one series with parsed text-editor data. */
     onReplaceTreeData?: (tree: string, data: Map<number, number | null>) => void,
-    /** Applies a Bayesian posterior start-year choice to one series. */
-    onApplyBayesianStartYear?: (
-        tree: string,
-        startYear: number,
-        result: BayesianMcmcDatingResult,
-        candidate: BayesianDatingCandidate,
-    ) => void,
     /** Parent scroll container for jump/highlight coordination. */
     scrollContainerRef?: RefObject<HTMLElement | null>,
     /** Actual scrolling element. Preferred over scrollContainerRef when provided. */
@@ -779,6 +794,13 @@ interface ContextMenuState {
     endYear: number;
     x: number;
     y: number;
+}
+
+interface TreeRingContextMenuState {
+    tree: string;
+    x: number;
+    y: number;
+    anchor: TreeRingViewerAnchor;
 }
 
 function WidthGridHeader(): ReactNode {
@@ -926,7 +948,6 @@ function WidthContainer({
     siteData: site,
     masterSeries,
     suggestedRanges,
-    cofechaPassReference,
     masterCorrelations,
     seriesProblemCounts,
     selected,
@@ -935,6 +956,10 @@ function WidthContainer({
     editHighlightTarget,
     deleteSeriesRequest,
     deletionMarkers,
+    treeRingScanState = createEmptyTreeRingScanState(),
+    rwlOperationLog = [],
+    onLoadTreeRingScanFolder,
+    onTreeRingScanSeriesChange,
     onYearClick,
     onInsertMissingYearAtSide,
     onMoveSeriesTailByOffset,
@@ -948,7 +973,6 @@ function WidthContainer({
     cofechaPart6Trees,
     onDeleteSeriesRequestHandled,
     onReplaceTreeData,
-    onApplyBayesianStartYear,
     scrollContainerRef,
     scrollElement
 }: WidthContainerProps): ReactNode {
@@ -967,9 +991,12 @@ function WidthContainer({
     const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
     const [animationPlan, setAnimationPlan] = useState<GridAnimationPlan | null>(null);
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+    const [treeRingContextMenu, setTreeRingContextMenu] = useState<TreeRingContextMenuState | null>(null);
     const [hoveredMarker, setHoveredMarker] = useState<DeletionHoverState | null>(null);
     const [deletingTree, setDeletingTree] = useState<string | null>(null);
     const [textEditTree, setTextEditTree] = useState<string | null>(null);
+    const [treeRingViewer, setTreeRingViewer] = useState<TreeRingViewerRequest | null>(null);
+    const [treeRingFocus, setTreeRingFocus] = useState<{ tree: string; year: number } | null>(null);
     const [jumpHighlight, setJumpHighlight] = useState<GridJumpTarget | null>(null);
     const [editHighlight, setEditHighlight] = useState<{ id: number; keys: Set<string> } | null>(null);
     const seriesBlockRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -982,6 +1009,7 @@ function WidthContainer({
     const interactionRef = useRef<GridInteraction | null>(null);
     const lastInteractedTreeRef = useRef<string | null>(null);
     const animationPlanIdRef = useRef(0);
+    const treeRingViewerIdRef = useRef(0);
     const handledHistoryAnimationIdRef = useRef<number | null>(null);
     const pendingInsertFlipRef = useRef<PendingInsertFlip | null>(null);
     const insertAnimationCleanupRef = useRef<Array<() => void>>([]);
@@ -1004,6 +1032,81 @@ function WidthContainer({
     const shouldAnimateInsertYear = animationsEnabled && insertYearAnim !== "none";
     const shouldAnimateDeleteYear = animationsEnabled && deleteYearAnim !== "none";
     const shouldAnimateDeleteSeries = animationsEnabled && deleteSeriesAnim !== "none";
+
+    const treeRingYearMappings = useMemo(() => {
+        const mappings = new Map<string, ReturnType<typeof buildTreeRingYearMapping>>();
+        site.forEach((_, tree) => {
+            mappings.set(
+                tree,
+                buildTreeRingYearMapping(tree, getTreeRingScanSeriesState(treeRingScanState, tree), rwlOperationLog),
+            );
+        });
+        return mappings;
+    }, [rwlOperationLog, site, treeRingScanState]);
+
+    useEffect(() => prewarmTreeRingArtworkCache(site, stopMarker.value), [site]);
+
+    useEffect(() => {
+        if (treeRingViewer && !site.has(treeRingViewer.seriesId)) {
+            setTreeRingViewer(null);
+        }
+    }, [site, treeRingViewer]);
+
+    const handleOpenTreeRingViewer = useCallback((
+        seriesId: string,
+        anchor: TreeRingViewerAnchor,
+        initialMode: TreeRingImageMode = "generated",
+    ) => {
+        treeRingViewerIdRef.current += 1;
+        setTreeRingViewer({ id: treeRingViewerIdRef.current, seriesId, anchor, initialMode });
+    }, []);
+
+    const handleCloseTreeRingViewer = useCallback(() => {
+        setTreeRingViewer(null);
+    }, []);
+
+    const handleCloseTreeRingContextMenu = useCallback(() => {
+        setTreeRingContextMenu(null);
+    }, []);
+
+    const handleTreeRingContextMenu = useCallback((
+        event: React.MouseEvent<HTMLButtonElement>,
+        tree: string,
+    ) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const rect = event.currentTarget.getBoundingClientRect();
+        setContextMenu(null);
+        setTreeRingContextMenu({
+            tree,
+            x: event.clientX,
+            y: event.clientY,
+            anchor: {
+                left: rect.left,
+                right: rect.right,
+                top: rect.top,
+                bottom: rect.bottom,
+                width: rect.width,
+                height: rect.height,
+            },
+        });
+    }, []);
+
+    const handleTreeRingModeChange = useCallback((tree: string, mode: TreeRingImageMode) => {
+        if (!onTreeRingScanSeriesChange) return;
+        const file = getTreeRingScanFile(treeRingScanState, tree);
+        const current = getTreeRingScanSeriesState(treeRingScanState, tree) ?? {
+            mode: "generated" as const,
+            anchors: [],
+            imagePath: file?.path,
+        };
+        onTreeRingScanSeriesChange(tree, { ...current, mode });
+    }, [onTreeRingScanSeriesChange, treeRingScanState]);
+
+    const handleOpenTreeRingScanFromMenu = useCallback(() => {
+        if (!treeRingContextMenu) return;
+        handleOpenTreeRingViewer(treeRingContextMenu.tree, treeRingContextMenu.anchor, "scan");
+    }, [handleOpenTreeRingViewer, treeRingContextMenu]);
 
     const shouldUseFlightShift = insertYearAnim === "flight-shift";
     const insertCellMotion = insertYearAnim === "side-pop-shift"
@@ -1722,10 +1825,27 @@ function WidthContainer({
     }, [clearDeleteBurstAnimations, clearInsertAnimations]);
 
     const handleYearClick = useCallback((tree: string, year: number) => {
+        setTreeRingFocus({ tree, year });
         if (onYearClick) {
             onYearClick(tree, year);
         }
     }, [onYearClick]);
+
+    const handleTreeRingYearSelect = useCallback((tree: string, year: number) => {
+        setSelection(normalizeSelection(tree, year, year));
+        handleYearClick(tree, year);
+        const targetSeries = virtualSeries.series.find((series) => series.treeCode === tree);
+        const rowIndex = targetSeries?.rows.findIndex((row) => row.cells.some((cell) => cell?.year === year)) ?? -1;
+        const scrollContainer = scrollElement ?? scrollContainerRef?.current;
+        if (!targetSeries || rowIndex < 0 || !scrollContainer) return;
+        const rowTop = targetSeries.top + SERIES_HEADER_HEIGHT + ROW_GAP + rowIndex * (ROW_HEIGHT + ROW_GAP);
+        const viewportLead = Math.max(56, Math.floor(scrollContainer.clientHeight * 0.35));
+        const maximum = Math.max(0, scrollContainer.scrollHeight - scrollContainer.clientHeight);
+        scrollContainer.scrollTo({
+            top: Math.min(maximum, Math.max(0, rowTop - viewportLead)),
+            behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+        });
+    }, [handleYearClick, scrollElement, scrollContainerRef, virtualSeries.series]);
 
     // 红线和 ghost 是兄弟元素而非父子，鼠标在它们之间移动时会先触发红线 mouseLeave，
     // 用一个小延迟保证 ghost mouseEnter 能在 hovered 被清掉之前把它取消。
@@ -2000,6 +2120,7 @@ function WidthContainer({
     const clearSelection = useCallback(() => {
         interactionRef.current = null;
         setSelection(null);
+        setTreeRingFocus(null);
         setDragPreview(null);
         setDragYearOffset(0);
         setIsDraggingSelection(false);
@@ -2544,14 +2665,14 @@ function WidthContainer({
 
     const handleContextMenuPreviewYearChange = useCallback((tree: string, year: number) => {
         setSelection(normalizeSelection(tree, year, year));
-        onYearClick?.(tree, year);
-    }, [onYearClick]);
+        handleYearClick(tree, year);
+    }, [handleYearClick]);
 
     const handleContextMenuPreviewYearRangeChange = useCallback((tree: string, startYear: number, endYear: number) => {
         const nextSelection = normalizeSelection(tree, startYear, endYear);
         setSelection(nextSelection);
-        onYearClick?.(tree, nextSelection.startYear);
-    }, [onYearClick]);
+        handleYearClick(tree, nextSelection.startYear);
+    }, [handleYearClick]);
 
     const handleGridPointerDown = useCallback((event: React.PointerEvent<HTMLSpanElement>, tree: string, year: number) => {
         lastInteractedTreeRef.current = tree;
@@ -2559,6 +2680,10 @@ function WidthContainer({
         if (event.button !== 0) {
             return;
         }
+
+        // Interrupt-pad cells do not emit WidthGrid's editable click callback, so focus the
+        // tree-ring marker at pointer-down for both measured and missing years.
+        setTreeRingFocus({ tree, year });
 
         setDragPreview(null);
         setDragYearOffset(0);
@@ -2802,6 +2927,31 @@ function WidthContainer({
     const bottomSpacerHeight = visibleSeries.length > 0
         ? Math.max(0, virtualSeries.totalHeight - visibleSeries[visibleSeries.length - 1].bottom)
         : virtualSeries.totalHeight;
+    const floatingTreeRingSeries = treeRingViewer
+        ? site.get(treeRingViewer.seriesId)
+        : undefined;
+    const floatingTreeRingScanFile = treeRingViewer
+        ? getTreeRingScanFile(treeRingScanState, treeRingViewer.seriesId)
+        : undefined;
+    const floatingTreeRingScanState = treeRingViewer
+        ? (getTreeRingScanSeriesState(treeRingScanState, treeRingViewer.seriesId) ?? {
+            mode: "generated" as const,
+            anchors: [],
+            imagePath: floatingTreeRingScanFile?.path,
+        })
+        : undefined;
+    const floatingTreeRingYearMapping = treeRingViewer
+        ? treeRingYearMappings.get(treeRingViewer.seriesId)
+        : undefined;
+    const contextTreeRingScanFile = treeRingContextMenu
+        ? getTreeRingScanFile(treeRingScanState, treeRingContextMenu.tree)
+        : undefined;
+    const contextTreeRingScanState = treeRingContextMenu
+        ? getTreeRingScanSeriesState(treeRingScanState, treeRingContextMenu.tree)
+        : undefined;
+    const contextTreeRingYearMapping = treeRingContextMenu
+        ? treeRingYearMappings.get(treeRingContextMenu.tree)
+        : undefined;
 
     return (
         <div
@@ -2824,6 +2974,16 @@ function WidthContainer({
                 const yearRange = seriesYearRanges.get(series.treeCode);
                 const masterCorrelation = masterCorrelations?.get(series.treeCode.toUpperCase());
                 const problemCount = seriesProblemCounts?.get(series.treeCode.toUpperCase());
+                const seriesData = visibleSite.get(series.treeCode) ?? new Map<number, number | null>();
+                const scanFile = getTreeRingScanFile(treeRingScanState, series.treeCode);
+                const scanSeriesState = getTreeRingScanSeriesState(treeRingScanState, series.treeCode);
+                const scanYearMapping = treeRingYearMappings.get(series.treeCode);
+                const showScanPreview = Boolean(
+                    scanFile
+                    && scanSeriesState?.mode === "scan"
+                    && isTreeRingScanCalibrated(scanSeriesState)
+                    && scanYearMapping?.valid
+                );
                 return (
                 <div
                     ref={(el) => {
@@ -2837,46 +2997,65 @@ function WidthContainer({
                     {textEditTree === series.treeCode ? (
                         <SeriesTextEditor
                             treeCode={series.treeCode}
-                            initialText={seriesDataToText(visibleSite.get(series.treeCode) ?? new Map(), stopMarker.value)}
+                            initialText={seriesDataToText(seriesData, stopMarker.value)}
                             stopMarkerValue={stopMarker.value}
                             onClose={(newText) => handleTextEditorClose(series.treeCode, newText)}
                         />
                     ) : (
                         <>
                             <div className={style["series-header"]}>
-                                <span className={style["series-header-name"]}>{series.treeCode}</span>
-                                {yearRange && (
-                                    <span className={style["series-header-range"]}>
-                                        {yearRange[0]}–{yearRange[1]} · {yearRange[1] - yearRange[0] + 1} 年
-                                    </span>
+                                <span className={style["series-header-meta"]}>
+                                    <span className={style["series-header-name"]}>{series.treeCode}</span>
+                                    {yearRange && (
+                                        <span className={style["series-header-range"]}>
+                                            {yearRange[0]}–{yearRange[1]} · {yearRange[1] - yearRange[0] + 1} 年
+                                        </span>
+                                    )}
+                                </span>
+                                {showScanPreview && scanFile && scanSeriesState && scanYearMapping ? (
+                                    <TreeRingScanPreview
+                                        seriesId={series.treeCode}
+                                        file={scanFile}
+                                        scanState={scanSeriesState}
+                                        yearMapping={scanYearMapping}
+                                        highlightedYear={treeRingFocus?.tree === series.treeCode ? treeRingFocus.year : undefined}
+                                        onYearSelect={handleTreeRingYearSelect}
+                                        onOpen={(tree, anchor) => handleOpenTreeRingViewer(tree, anchor, "scan")}
+                                        onContextMenu={(event) => handleTreeRingContextMenu(event, series.treeCode)}
+                                    />
+                                ) : (
+                                    <TreeRingPreview
+                                        seriesId={series.treeCode}
+                                        series={seriesData}
+                                        stopMarkerValue={stopMarker.value}
+                                        highlightedYear={treeRingFocus?.tree === series.treeCode ? treeRingFocus.year : undefined}
+                                        onYearSelect={handleTreeRingYearSelect}
+                                        onOpen={handleOpenTreeRingViewer}
+                                        onContextMenu={(event) => handleTreeRingContextMenu(event, series.treeCode)}
+                                    />
                                 )}
-                                <span className={style["series-header-spacer"]} aria-hidden="true" />
-                                {(typeof masterCorrelation === "number" || typeof problemCount === "number") && (
-                                    <span className={style["series-header-stats"]}>
-                                        {typeof problemCount === "number" && (
-                                            <span
-                                                className={`${style["series-header-problems"]}${problemCount > 0 ? ` ${style["series-header-problems-flagged"]}` : ""}`}
-                                                title="该样芯被标记为潜在问题（A/B）的分段数"
-                                            >
-                                                problem count：{problemCount}
-                                            </span>
-                                        )}
-                                        {typeof masterCorrelation === "number" && (
-                                            <span
-                                                className={style["series-header-corr"]}
-                                                title="该序列与主序列的整体相关性"
-                                            >
-                                                r={masterCorrelation.toFixed(3)}
-                                            </span>
-                                        )}
-                                    </span>
-                                )}
-                                <BayesianDateButton
-                                    seriesId={series.treeCode}
-                                    series={visibleSite.get(series.treeCode) ?? new Map()}
-                                    reference={cofechaPassReference}
-                                    onApplyStartYear={onApplyBayesianStartYear}
-                                />
+                                <span className={style["series-header-actions"]}>
+                                    {(typeof masterCorrelation === "number" || typeof problemCount === "number") && (
+                                        <span className={style["series-header-stats"]}>
+                                            {typeof problemCount === "number" && (
+                                                <span
+                                                    className={`${style["series-header-problems"]}${problemCount > 0 ? ` ${style["series-header-problems-flagged"]}` : ""}`}
+                                                    title="该样芯被标记为潜在问题（A/B）的分段数"
+                                                >
+                                                    problem count：{problemCount}
+                                                </span>
+                                            )}
+                                            {typeof masterCorrelation === "number" && (
+                                                <span
+                                                    className={style["series-header-corr"]}
+                                                    title="该序列与主序列的整体相关性"
+                                                >
+                                                    r={masterCorrelation.toFixed(3)}
+                                                </span>
+                                            )}
+                                        </span>
+                                    )}
+                                </span>
                             </div>
                             {series.rows.map((row, rowIndex) => (
                         <div className={style["series-row"]} key={`${series.treeCode}-${rowIndex}-${row.startYear}`}>
@@ -2968,6 +3147,7 @@ function WidthContainer({
                                             data-tree={series.treeCode}
                                             data-year={cell.year}
                                             onPointerDown={(event) => handleGridPointerDown(event, series.treeCode, cell.year)}
+                                            onYearClick={handleYearClick}
                                             onDeletionMarkHoverChange={handleDeletionMarkHoverChange}
                                             onDeletionMarkDoubleClick={handleRedLineDoubleClick}
                                         />
@@ -3107,6 +3287,46 @@ function WidthContainer({
                 }),
                 document.body,
             ) : null}
+
+            {treeRingViewer && floatingTreeRingSeries ? (
+                <TreeRingFloatingViewer
+                    key={treeRingViewer.id}
+                    seriesId={treeRingViewer.seriesId}
+                    series={floatingTreeRingSeries}
+                    stopMarkerValue={stopMarker.value}
+                    anchor={treeRingViewer.anchor}
+                    initialMode={treeRingViewer.initialMode}
+                    scanFile={floatingTreeRingScanFile}
+                    scanState={floatingTreeRingScanState}
+                    operationLog={rwlOperationLog}
+                    yearMapping={floatingTreeRingYearMapping}
+                    onScanStateChange={onTreeRingScanSeriesChange
+                        ? (nextState) => onTreeRingScanSeriesChange(treeRingViewer.seriesId, nextState)
+                        : undefined}
+                    highlightedYear={treeRingFocus?.tree === treeRingViewer.seriesId ? treeRingFocus.year : undefined}
+                    onClose={handleCloseTreeRingViewer}
+                />
+            ) : null}
+
+            <TreeRingImageContextMenu
+                open={treeRingContextMenu !== null}
+                x={treeRingContextMenu?.x ?? 0}
+                y={treeRingContextMenu?.y ?? 0}
+                seriesId={treeRingContextMenu?.tree ?? ""}
+                folderPath={treeRingScanState.folderPath}
+                matchedCount={Object.keys(treeRingScanState.filesBySeries).length}
+                totalSeriesCount={site.size}
+                scanFile={contextTreeRingScanFile}
+                scanState={contextTreeRingScanState}
+                mappingValid={contextTreeRingYearMapping?.valid ?? false}
+                mappingInvalidReason={contextTreeRingYearMapping?.invalidReason}
+                onLoadFolder={onLoadTreeRingScanFolder ?? (async () => 0)}
+                onSetMode={(mode) => {
+                    if (treeRingContextMenu) handleTreeRingModeChange(treeRingContextMenu.tree, mode);
+                }}
+                onOpenScan={handleOpenTreeRingScanFromMenu}
+                onClose={handleCloseTreeRingContextMenu}
+            />
 
 
             <WidthGridContextMenu

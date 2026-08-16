@@ -1,6 +1,10 @@
 import type { ICofechaResult } from "@/features/cofecha/types";
 import type { ReferenceSeriesConfig } from "@/features/crossdating/reference";
 import { RwlEditor, type RwlOperationLogEntry } from "@/features/rwl/edit";
+import {
+    isPersistedTreeRingScanState,
+    type PersistedTreeRingScanState,
+} from "@/features/treeRingScans";
 import { isTauri } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { exists, mkdir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
@@ -9,9 +13,10 @@ import type { CofechaVersion } from "./homeShared";
 const COFECHA_STORAGE_PREFIX = "crossdating:cofecha-state:v1:";
 const REFERENCE_STORAGE_PREFIX = "crossdating:reference-state:v1:";
 const HISTORY_STORAGE_PREFIX = "crossdating:rwl-operation-journal:v1:";
+const TREE_RING_SCAN_STORAGE_PREFIX = "crossdating:tree-ring-scans:v1:";
 const WORKSPACE_STATE_DIR_NAME = "workspace-state-v1";
 
-type WorkspaceStateKind = "cofecha" | "reference" | "history";
+type WorkspaceStateKind = "cofecha" | "reference" | "history" | "tree-ring-scans";
 
 type WorkspaceStateEnvelope<T> = {
     version: 1;
@@ -64,6 +69,8 @@ const getLegacyStorageKey = (kind: WorkspaceStateKind, filePath: string) => {
             return getReferenceStorageKey(filePath);
         case "history":
             return getHistoryStorageKey(filePath);
+        case "tree-ring-scans":
+            return `${TREE_RING_SCAN_STORAGE_PREFIX}${filePath}`;
     }
 };
 
@@ -296,6 +303,20 @@ export const persistHistorySnapshot = (filePath: string, editor: RwlEditor) => (
     persistWorkspaceState("history", filePath, editor.toHistorySnapshot(), "操作日志")
 );
 
+export const loadPersistedTreeRingScanState = (filePath: string) => (
+    loadWorkspaceState("tree-ring-scans", filePath, isPersistedTreeRingScanState, "树轮扫描影像状态")
+);
+
+export const persistTreeRingScanState = (
+    filePath: string,
+    state: PersistedTreeRingScanState,
+) => persistWorkspaceState(
+    "tree-ring-scans",
+    filePath,
+    { ...state, version: 1, savedAt: new Date().toISOString() } satisfies PersistedTreeRingScanState,
+    "树轮扫描影像状态",
+);
+
 /** Moves legacy per-file localStorage payloads into app-data files without dropping failed migrations. */
 export const migrateLegacyWorkspaceStorage = () => {
     if (!runningInTauri()) {
@@ -315,6 +336,7 @@ export const migrateLegacyWorkspaceStorage = () => {
             { kind: "cofecha", prefix: COFECHA_STORAGE_PREFIX, label: "COFECHA 状态", isValid: isPersistedCofechaState },
             { kind: "reference", prefix: REFERENCE_STORAGE_PREFIX, label: "参考序列状态", isValid: isPersistedReferenceState },
             { kind: "history", prefix: HISTORY_STORAGE_PREFIX, label: "操作日志", isValid: RwlEditor.isPersistedHistorySnapshot },
+            { kind: "tree-ring-scans", prefix: TREE_RING_SCAN_STORAGE_PREFIX, label: "树轮扫描影像状态", isValid: isPersistedTreeRingScanState },
         ];
         const keys = Array.from({ length: window.localStorage.length }, (_, index) => (
             window.localStorage.key(index)

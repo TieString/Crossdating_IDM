@@ -29,7 +29,6 @@ import {
 } from "@/features/crossdating/reference";
 import type { ICofechaResult } from "@/features/cofecha/types";
 import { detectPrecision, readRwlString } from "@/features/rwl";
-import { rebuildTreeDataFromStartYear, type BayesianDatingCandidate, type BayesianMcmcDatingResult } from "@/features/rwl/bayesianDating";
 import {
     RwlEditor,
     RwlMoveConflictError,
@@ -37,6 +36,14 @@ import {
 } from "@/features/rwl/edit";
 import type { DeleteMode, DeleteRangeFill, DeleteShift, RwlDeletionMarkers, RwlHistoryAnimation, RwlHistoryStatus, RwlMoveConflictPolicy, RwlOperationLogEntry } from "@/features/rwl/edit";
 import type { RwlSiteData } from "@/features/rwl/types";
+import {
+    createEmptyTreeRingScanState,
+    clearTreeRingScanImageCache,
+    indexTreeRingScanFolder,
+    normalizeTreeRingScanSeriesKey,
+    type PersistedTreeRingScanState,
+    type TreeRingScanSeriesState,
+} from "@/features/treeRingScans";
 import { runCofecha } from "@/services/cofecha/runner";
 import { readRwlFile, saveFile } from "@/services/fs/io";
 import {
@@ -66,10 +73,12 @@ import {
     loadPersistedCofechaState,
     loadPersistedHistorySnapshot,
     loadPersistedReferenceState,
+    loadPersistedTreeRingScanState,
     migrateLegacyWorkspaceStorage,
     persistCofechaState,
     persistHistorySnapshot,
     persistReferenceState,
+    persistTreeRingScanState,
 } from "./workspacePersistence";
 import {
     createEmptyCrossdatingDiagnosis,
@@ -246,6 +255,12 @@ export function useHomeWorkspace() {
     const siteDataSignature = useMemo(() => hashRwlSiteData(siteData), [siteData]);
     const [deletionMarkers, setDeletionMarkers] = useState<RwlDeletionMarkers>(() => rwlEditorRef.current.getDeletionMarkers());
     const [operationLog, setOperationLog] = useState<RwlOperationLogEntry[]>(() => rwlEditorRef.current.getOperationLog());
+    const [allRwlOperationLog, setAllRwlOperationLog] = useState<RwlOperationLogEntry[]>(
+        () => rwlEditorRef.current.getAllAppliedOperationLogEntries(),
+    );
+    const [treeRingScanState, setTreeRingScanState] = useState<PersistedTreeRingScanState>(
+        createEmptyTreeRingScanState,
+    );
     const [referenceConfig, setReferenceConfig] = useState<ReferenceSeriesConfig | null>(null);
     const [referenceOperationLog, setReferenceOperationLog] = useState<RwlOperationLogEntry[]>([]);
     const [historyStatus, setHistoryStatus] = useState<RwlHistoryStatus>(() => rwlEditorRef.current.getHistoryStatus());
@@ -342,6 +357,12 @@ export function useHomeWorkspace() {
         }, HISTORY_SNAPSHOT_PERSIST_DELAY_MS);
     }, []);
 
+    const scheduleTreeRingScanPersist = useCallback((filePath: string, state: PersistedTreeRingScanState) => {
+        // Anchor clicks and mode switches are sparse, so persist immediately; this also
+        // preserves the last point if the application closes directly after annotation.
+        void persistTreeRingScanState(filePath, state);
+    }, []);
+
     useEffect(() => () => {
         if (historyPersistTimerRef.current !== null) {
             window.clearTimeout(historyPersistTimerRef.current);
@@ -366,6 +387,7 @@ export function useHomeWorkspace() {
             ));
             setDeletionMarkers(editor.getDeletionMarkers());
             setOperationLog(editor.getOperationLog());
+            setAllRwlOperationLog(editor.getAllAppliedOperationLogEntries());
             setHistoryStatus(editor.getHistoryStatus());
             setDynamicReferenceConfig((previous) => (
                 previous?.mode === "dynamic" && !previous.isStale
@@ -466,12 +488,72 @@ export function useHomeWorkspace() {
         setSiteData(nextData);
         setDeletionMarkers(nextEditor.getDeletionMarkers());
         setOperationLog(nextEditor.getOperationLog());
+        setAllRwlOperationLog(nextEditor.getAllAppliedOperationLogEntries());
         setHistoryStatus(nextEditor.getHistoryStatus());
         setHistoryAnimation(null);
         diagnosisEvidenceSnapshotRef.current = null;
         setCrossdatingDiagnosis(createEmptyCrossdatingDiagnosis());
         setIsModified(!rwlDataEquals(baseline, nextData));
     }, [syncEditor]);
+
+    const commitTreeRingScanState = useCallback((
+        updater: (previous: PersistedTreeRingScanState) => PersistedTreeRingScanState,
+    ) => {
+        setTreeRingScanState((previous) => {
+            const next = {
+                ...updater(previous),
+                version: 1 as const,
+                savedAt: new Date().toISOString(),
+            };
+            if (filePathRef.current) {
+                scheduleTreeRingScanPersist(filePathRef.current, next);
+            }
+            return next;
+        });
+    }, [scheduleTreeRingScanPersist]);
+
+    const handleLoadTreeRingScanFolder = useCallback(async (): Promise<number> => {
+        const folderPath = await open({
+            directory: true,
+            multiple: false,
+            title: "选择树轮扫描影像文件夹",
+        });
+        if (!folderPath || typeof folderPath !== "string") return 0;
+
+        const seriesIds = Array.from(rwlEditorRef.current.getData().keys());
+        clearTreeRingScanImageCache();
+        const filesBySeries = await indexTreeRingScanFolder(folderPath, seriesIds);
+        commitTreeRingScanState((previous) => {
+            const series: Record<string, TreeRingScanSeriesState> = {};
+            Object.entries(filesBySeries).forEach(([seriesKey, file]) => {
+                const existing = previous.series[seriesKey];
+                series[seriesKey] = existing?.imagePath === file.path
+                    ? existing
+                    : { mode: "generated", anchors: [], imagePath: file.path };
+            });
+            return {
+                ...previous,
+                folderPath,
+                filesBySeries,
+                series,
+            };
+        });
+        return Object.keys(filesBySeries).length;
+    }, [commitTreeRingScanState]);
+
+    const handleTreeRingScanSeriesChange = useCallback((
+        seriesId: string,
+        nextSeriesState: TreeRingScanSeriesState,
+    ) => {
+        const seriesKey = normalizeTreeRingScanSeriesKey(seriesId);
+        commitTreeRingScanState((previous) => ({
+            ...previous,
+            series: {
+                ...previous.series,
+                [seriesKey]: nextSeriesState,
+            },
+        }));
+    }, [commitTreeRingScanState]);
 
     const runCofechaAndApplyResult = useCallback(async (
         input: string,
@@ -590,10 +672,11 @@ export function useHomeWorkspace() {
             let nextEditor = new RwlEditor(rwlData.data, rwlData.readOptions, rwlData.format);
             // 在恢复草稿前抓取磁盘内容快照，作为"已保存基线"。
             const diskBaseline = nextEditor.getData();
-            const [persistedReference, persistedCofecha, persistedHistory] = await Promise.all([
+            const [persistedReference, persistedCofecha, persistedHistory, persistedTreeRingScans] = await Promise.all([
                 loadPersistedReferenceState(filePath),
                 loadPersistedCofechaState(filePath),
                 loadPersistedHistorySnapshot(filePath),
+                loadPersistedTreeRingScanState(filePath),
             ]);
 
             // 恢复本地缓存草稿（操作日志快照）。草稿可能因未保存的编辑、或磁盘文件被外部
@@ -673,6 +756,7 @@ export function useHomeWorkspace() {
             selectedTreeRef.current = ALL_OPTION_VALUE;
             setSelectedTree(ALL_OPTION_VALUE);
             setFileName(filePath);
+            setTreeRingScanState(persistedTreeRingScans ?? createEmptyTreeRingScanState());
             setDiagnosisBatchResult(null);
 
             try {
@@ -994,6 +1078,7 @@ export function useHomeWorkspace() {
                         referenceOperationLog,
                         referenceOperationCounterRef.current,
                     ),
+                    persistTreeRingScanState(filePathToSave, treeRingScanState),
                 ]);
                 resetCurrentEventRanker();
                 return markDataSnapshotAsSaved(savedData);
@@ -1020,7 +1105,7 @@ export function useHomeWorkspace() {
         } catch (error) {
             console.error("写入文件时出错:", error);
         }
-    }, [dynamicReferenceConfig, enqueueSave, markDataSnapshotAsSaved, referenceConfig, referenceOperationLog, resetCurrentEventRanker, runCofechaAndApplyResult, runCurrentEventRankerForSavedFile]);
+    }, [dynamicReferenceConfig, enqueueSave, markDataSnapshotAsSaved, referenceConfig, referenceOperationLog, resetCurrentEventRanker, runCofechaAndApplyResult, runCurrentEventRankerForSavedFile, treeRingScanState]);
 
     const handleSaveRawTextAs = useCallback(async (rawText: string) => {
         if (isFileLoadingRef.current) {
@@ -1073,6 +1158,7 @@ export function useHomeWorkspace() {
                         referenceOperationLog,
                         referenceOperationCounterRef.current,
                     ),
+                    persistTreeRingScanState(filePathToSave, treeRingScanState),
                 ]);
                 resetCurrentEventRanker();
                 return markDataSnapshotAsSaved(savedData);
@@ -1100,7 +1186,7 @@ export function useHomeWorkspace() {
             console.error("写入文本编辑内容时出错:", error);
             throw error;
         }
-    }, [applyParsedRwlText, dynamicReferenceConfig, enqueueSave, markDataSnapshotAsSaved, referenceConfig, referenceOperationLog, resetCurrentEventRanker, runCofechaAndApplyResult, runCurrentEventRankerForSavedFile]);
+    }, [applyParsedRwlText, dynamicReferenceConfig, enqueueSave, markDataSnapshotAsSaved, referenceConfig, referenceOperationLog, resetCurrentEventRanker, runCofechaAndApplyResult, runCurrentEventRankerForSavedFile, treeRingScanState]);
 
     const handleUndo = useCallback(() => {
         triggerHistoryAnimation(rwlEditorRef.current.undo());
@@ -1561,55 +1647,6 @@ export function useHomeWorkspace() {
     const handleReplaceTreeData = useCallback((tree: string, data: Map<number, number | null>) => {
         rwlEditorRef.current.replaceTreeData(tree, data);
     }, []);
-
- const handleApplyBayesianStartYear = useCallback((
-        tree: string,
-        startYear: number,
-        result: BayesianMcmcDatingResult,
-        candidate: BayesianDatingCandidate,
-    ) => {
-        const currentSeries = rwlEditorRef.current.getData().get(tree);
-        if (!currentSeries) {
-            return;
-        }
-
-        const oldYears = Array.from(currentSeries.keys()).sort((a, b) => a - b);
-        const oldStartYear = oldYears[0];
-        const newData = rebuildTreeDataFromStartYear(currentSeries, startYear);
-        const best = candidate;
-        const second = result.secondBest;
-
-        rwlEditorRef.current.replaceTreeData(tree, newData, {
-            operationType: "BAYESIAN_DATE_SERIES",
-            source: "auto-suggested",
-            reason: `Bayesian MCMC dating applied ${best.startYear}-${best.endYear} with posterior ${(best.posterior * 100).toFixed(1)}%.`,
-            oldYear: oldStartYear,
-            newYear: startYear,
-            metricsBefore: {
-                originalStartYear: oldStartYear ?? null,
-                originalEndYear: oldYears[oldYears.length - 1] ?? null,
-                targetLength: result.targetLength,
-            },
-            metricsAfter: {
-                bestStartYear: best.startYear,
-                bestEndYear: best.endYear,
-                bestPosterior: best.posterior,
-                secondStartYear: second?.startYear ?? null,
-                secondPosterior: second?.posterior ?? null,
-                hpd95Count: result.hpd95.length,
-                candidateCount: result.candidateCount,
-                overlap: best.overlap,
-                correlation: best.correlation ?? null,
-                tValue: best.tValue ?? null,
-                decision: result.decision.status,
-            },
-        });
-        triggerHistoryAnimation({
-            type: "replace-tree-data",
-            tree,
-            direction: "redo",
-        });
-    }, [triggerHistoryAnimation]);
 
     const handleInsertMissingYearAtSideFromChart = useCallback((tree: string, nextYear: number, side: "left" | "right") => {
         rwlEditorRef.current.insertMissingYearAtSide(tree, nextYear, side);
@@ -2319,13 +2356,13 @@ export function useHomeWorkspace() {
         handleInsertMissingYearAtSide,
         handleInsertMissingYearAtSideFromChart,
         handleLoad,
+        handleLoadTreeRingScanFolder,
         handleDeleteYearRange,
         handleMoveSeriesTailByOffset,
         handleApplyDiagnosisCandidate,
         handleApplyDiagnosisCandidateBatch,
         handleApplyDiagnosisEvent,
         handleApplyCurrentEventConfirmedYears,
-        handleApplyBayesianStartYear,
         handleApplyLocalSimulation,
         handleConfirmCurrentEventYear: confirmCurrentEventYear,
         handleReferenceConfigChange,
@@ -2341,6 +2378,7 @@ export function useHomeWorkspace() {
         handleSave,
         handleSaveAs,
         handleTreeSelectionChange,
+        handleTreeRingScanSeriesChange,
         handleUndoCurrentEventConfirmation: undoCurrentEventConfirmation,
         handleUndo,
         handleUndoOperationLogEntry,
@@ -2356,6 +2394,7 @@ export function useHomeWorkspace() {
         isFileLoading,
         isModified,
         operationLog: workspaceOperationLog,
+        rwlOperationLog: allRwlOperationLog,
         possibleProblemsDetail,
         problemTextColor,
         referenceConfig,
@@ -2373,6 +2412,7 @@ export function useHomeWorkspace() {
         shouldShowProcessing,
         shouldShowWelcome,
         siteData,
+        treeRingScanState,
         treeOptions,
         windowTitle,
     };

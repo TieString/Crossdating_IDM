@@ -1,0 +1,192 @@
+.frame {
+    position: relative;
+    overflow: hidden;
+    background: #eef1f4;
+    cursor: grab;
+    touch-action: none;
+    overscroll-behavior: contain;
+}
+
+.frame:active { cursor: grabbing; }
+.pointTool { cursor: crosshair; }
+.cropTool { cursor: crosshair; }
+.panTool { cursor: grab; }
+
+.imageStage {
+    position: absolute;
+    z-index: 1;
+    transform-origin: center;
+    will-change: transform;
+}
+
+.scanCanvas {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    user-select: none;
+}
+
+.cropSelection {
+    position: absolute;
+    z-index: 3;
+    box-sizing: border-box;
+    border: 2px dashed rgba(27, 112, 196, 0.95);
+    background: rgba(66, 153, 225, 0.12);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.86), 0 0 0 9999px rgba(20, 28, 38, 0.18);
+    pointer-events: none;
+}
+
+.cropSelectionDraft {
+    border-style: solid;
+    background: rgba(66, 153, 225, 0.2);
+}
+
+.currentYearLine {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 1;
+    width: 2px;
+    transform-origin: center;
+    background: rgba(43, 121, 204, 0.82);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.66);
+    pointer-events: none;
+}
+
+.anchor {
+    position: absolute;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 5px;
+    transform-origin: center;
+    pointer-events: none;
+}
+
+.anchorDots {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.74);
+}
+
+.anchorDots i {
+    width: 6px;
+    height: 6px;
+    border: 1px solid #ffffff;
+    border-radius: 50%;
+    background: #e43f35;
+    box-shadow: 0 0 0 1px rgba(91, 23, 18, 0.72);
+}
+
+.anchorYear {
+    padding: 1px 4px;
+    border-radius: 3px;
+    color: #ffffff;
+    background: rgba(31, 41, 55, 0.76);
+    font: 10px/14px "Segoe UI", sans-serif;
+}
+
+.toolbar {
+    position: absolute;
+    top: 7px;
+    left: 7px;
+    right: 7px;
+    z-index: 5;
+    min-height: 28px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 5px;
+    border: 1px solid rgba(117, 130, 146, 0.4);
+    border-radius: 6px;
+    background: rgba(250, 252, 255, 0.9);
+    box-shadow: 0 2px 8px rgba(24, 36, 53, 0.12);
+    backdrop-filter: blur(4px);
+    font: 10px "Segoe UI", sans-serif;
+}
+
+.toolbar button {
+    min-height: 22px;
+    padding: 2px 6px;
+    border: 1px solid #c8d1dd;
+    border-radius: 4px;
+    color: #364252;
+    background: #ffffff;
+    font: inherit;
+    cursor: pointer;
+}
+
+.toolbar button:hover:not(:disabled) { border-color: #7699c5; }
+.toolbar button:disabled { color: #a0a8b3; cursor: not-allowed; }
+.toolbar .activeTool { color: #1f5d9c; border-color: #6f9ed2; background: #e9f2fc; }
+
+.nextAnchor {
+    min-width: 0;
+    overflow: hidden;
+    color: #485565;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.zoom {
+    margin-left: auto;
+    color: #637082;
+    font-variant-numeric: tabular-nums;
+}
+
+.fullResolution {
+    position: absolute;
+    top: 44px;
+    right: 10px;
+    z-index: 4;
+    padding: 1px 4px;
+    border-radius: 3px;
+    color: #27613a;
+    background: rgba(220, 245, 226, 0.92);
+    box-shadow: 0 1px 3px rgba(32, 71, 42, 0.14);
+    font: 10px/16px "Segoe UI", sans-serif;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+.guide {
+    position: absolute;
+    left: 50%;
+    bottom: 10px;
+    z-index: 4;
+    width: min(82%, 410px);
+    transform: translateX(-50%);
+    padding: 5px 8px;
+    border-radius: 5px;
+    color: #3e4a59;
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 2px 8px rgba(24, 36, 53, 0.12);
+    font: 10px/15px "Segoe UI", sans-serif;
+    text-align: center;
+    pointer-events: none;
+}
+
+.message,
+.error {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    box-sizing: border-box;
+    color: #6c7887;
+    background: #f8fafc;
+    font: 12px "Segoe UI", sans-serif;
+    text-align: center;
+}
+
+.error { color: #a25049; }

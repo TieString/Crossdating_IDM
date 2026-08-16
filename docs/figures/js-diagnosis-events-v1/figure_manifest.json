@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-16T08:27:07.543972+00:00",
+  "backend": "python-matplotlib",
+  "figureContract": {
+    "conclusion": "Constrained lag topology, executable counterfactuals and multi-core evidence resolve one traceable event operation, shift and focused review window.",
+    "archetype": "schematic-led composite + quantitative grid",
+    "target": "research manuscript, project report and presentation; editable English vector figures",
+    "finalSize": "8.5 × 10.2 in（架构竖版），12.5 × 8.6 in（判别），10.8 × 8.4 in（统计），13 × 9.4 in（表），11.2 × 8.4 in（验证设计）",
+    "reviewerRisk": "Keep metric denominators explicit and preserve the distinction between lag recognition, operation recovery and review-window localization."
+  },
+  "benchmark": {
+    "createdAt": "2026-08-13T03:50:07.265Z",
+    "executionGitCommit": "e903486ef0d7ff9c7e11ef6e31dfa5903abd9e46",
+    "manifestGitCommit": "5bbccb8ae8b392f73dbe5a7626ddcb234af083fc",
+    "verdict": "strict_generalization_target_not_met",
+    "inputSha256": "9efc8593443b81bb8d37f29622c81f77d492120aec3be5e14a8c0b12be40e08a",
+    "note": "Existing frozen result; not a rerun and not a blind test of later code."
+  },
+  "outputs": [
+    "fig01_system_architecture.svg",
+    "fig01_system_architecture.pdf",
+    "fig01_system_architecture.png",
+    "fig01_system_architecture.tiff",
+    "fig02_performance_validation.svg",
+    "fig02_performance_validation.pdf",
+    "fig02_performance_validation.png",
+    "fig02_performance_validation.tiff",
+    "fig03_event_definition_table.svg",
+    "fig03_event_definition_table.pdf",
+    "fig03_event_definition_table.png",
+    "fig03_event_definition_table.tiff",
+    "fig04_complex_case_discrimination.svg",
+    "fig04_complex_case_discrimination.pdf",
+    "fig04_complex_case_discrimination.png",
+    "fig04_complex_case_discrimination.tiff",
+    "fig05_validation_design_and_failures.svg",
+    "fig05_validation_design_and_failures.pdf",
+    "fig05_validation_design_and_failures.png",
+    "fig05_validation_design_and_failures.tiff",
+    "js_diagnosis_events_figure_set.pdf",
+    "source_data/family_metrics.csv",
+    "source_data/single_event_metrics.csv",
+    "source_data/per_file_metrics.csv",
+    "source_data/event_definitions.csv",
+    "source_data/benchmark_family_design.csv",
+    "source_data/terminal_outcomes.csv",
+    "README.md",
+    "QA_NOTES.md",
+    "qa_report.json"
+  ],
+  "qa": {
+    "report": "qa_report.json",
+    "checkedAt": "2026-08-16T08:29:04.635454+00:00",
+    "pass": true,
+    "failures": []
+  }
+}

@@ -181,6 +181,63 @@ export const makeGlobalSlidingDrafts = (
     }];
 };
 
+/**
+ * A -2/-3 whole lag can be the unresolved sum of nearby missing rings. The ordinary
+ * propagation drafts may disappear once short adjacent transitions blur into one
+ * constant segmented lag, so retain a small bark-side one-ring counterfactual scan.
+ * Every draft still passes the normal before/after hard gate; this only restores recall.
+ */
+export const makeIterativeEndpointMissingDrafts = (
+    diagnosis: SeriesCoreDiagnosis,
+    config: EffectiveDiagnosisConfig,
+): CandidateDraft[] => {
+    const globalLag = diagnosis.globalSlidingMatch.bestGlobalLag;
+    if ((globalLag !== -2 && globalLag !== -3)
+        || makeGlobalSlidingDrafts(diagnosis).length === 0) return [];
+
+    const endpointSpan = Math.max(30, Math.floor(config.segmentLength * 0.75));
+    const startYear = Math.max(
+        diagnosis.targetRange.startYear + 2,
+        diagnosis.targetRange.endYear - endpointSpan,
+    );
+    const endYear = diagnosis.targetRange.endYear - 2;
+    const anchorYears = prescanEditYearsInRegion(
+        diagnosis,
+        "insert",
+        startYear,
+        endYear,
+        endYear,
+        config,
+        8,
+    );
+
+    return anchorYears.flatMap((anchorYear) => {
+        const sourceSegment = getSegmentNearYear(diagnosis.segments, anchorYear);
+        if (!sourceSegment) return [];
+        const { alignment } = getLocalEditAlignmentForSegment(
+            diagnosis,
+            sourceSegment,
+            "insertMissingYear",
+            anchorYear,
+            config,
+        );
+        const draft = createLocalEditDraft(
+            diagnosis,
+            sourceSegment,
+            "insertMissingYear",
+            anchorYear,
+            alignment,
+        );
+        return [{
+            ...draft,
+            recallSourceTags: [
+                "iterative_endpoint_missing_review",
+                `iterative_whole_lag:${globalLag}`,
+            ],
+        }];
+    });
+};
+
 export const terminalResidualPatternSupport = (
     patterns: PropagationPattern[],
     terminalLag: number,

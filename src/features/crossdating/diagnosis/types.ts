@@ -168,7 +168,7 @@ export type DiagnosisMissingPartialInterpretationEvidence = {
 };
 
 export type DiagnosisWholeMissingInterpretationEvidence = {
-    wholeShiftYears: -1;
+    wholeShiftYears: -1 | -2 | -3;
     endpointDistanceYears: number;
     missingWindowWidth: 5 | 7 | 9 | 13;
     operationScoreMargin: number | null;

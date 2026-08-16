@@ -2469,6 +2469,74 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it.each([-2, -3] as const)(
+        "exposes one reviewed missing-ring step for a terminal %i-year whole shift",
+        (shiftYears) => {
+            const whole = event(`terminal-${Math.abs(shiftYears)}`, "wholeSeriesMove", 1732, 1994, 0);
+            whole.shiftYears = shiftYears;
+            whole.evidence.lagBefore = shiftYears;
+            whole.evidence.notes = [
+                "whole_baseline_source=cofecha_terminal_lag",
+                "cofecha_terminal_segments=2",
+                "cofecha_terminal_consistency=1.000000",
+            ];
+            const endpoint = event(`endpoint-${Math.abs(shiftYears)}`, "missingRing", 1987, 1993, 1990);
+            endpoint.evidence.lagBefore = shiftYears;
+            endpoint.evidence.lagAfter = shiftYears + 1;
+            endpoint.evidence.algorithmSources = [
+                "candidate_ranking",
+                "cofecha_segment_lag",
+                "local_edit_alignment",
+                "segmented_diagnosis",
+            ];
+            endpoint.evidence.notes = ["candidate_hard_gate_passed"];
+
+            const decision = adjudicateJointEventHypotheses("TARGET", [
+                checkpoint("candidate", whole),
+                checkpoint("candidate", endpoint),
+                checkpoint("detected", whole),
+                checkpoint("displayed", whole),
+                checkpoint("final", whole),
+            ]);
+
+            expect(decision.event).toMatchObject({
+                eventType: "wholeSeriesMove",
+                shiftYears,
+                interpretationAmbiguity: {
+                    kind: "wholeSeriesMoveOrMissingRing",
+                    evidence: { wholeShiftYears: shiftYears },
+                    alternative: {
+                        id: endpoint.id,
+                        eventType: "missingRing",
+                    },
+                },
+            });
+        },
+    );
+
+    it("does not expose the missing-ring shortcut for a four-year whole shift", () => {
+        const whole = event("terminal-4", "wholeSeriesMove", 1732, 1994, 0);
+        whole.shiftYears = -4;
+        whole.evidence.lagBefore = -4;
+        const endpoint = event("endpoint-4", "missingRing", 1987, 1993, 1990);
+        endpoint.evidence.algorithmSources = [
+            "candidate_ranking",
+            "local_edit_alignment",
+        ];
+        endpoint.evidence.notes = ["candidate_hard_gate_passed"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", endpoint),
+            checkpoint("final", whole),
+        ]);
+
+        expect(decision.event).toMatchObject({
+            eventType: "wholeSeriesMove",
+            shiftYears: -4,
+        });
+        expect(decision.event?.interpretationAmbiguity).toBeUndefined();
+    });
+
     it("does not expose a remote candidate as a bark-end missing interpretation", () => {
         const whole = event("terminal-unit", "wholeSeriesMove", 1732, 1994, 0);
         whole.shiftYears = -1;

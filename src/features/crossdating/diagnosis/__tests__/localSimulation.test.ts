@@ -126,5 +126,19 @@ describe("local chart simulation", () => {
         expect(simulation?.options).toHaveLength(1);
         expect(simulation?.bestOption.operationType).toBe("SHIFT_RANGE");
         expect(simulation?.bestOption.shift).toBe(-4);
+
+        const selectedYearSimulation = simulateDiagnosisEventPreview(site, event, {
+            previewYear: 1858,
+        });
+        expect(selectedYearSimulation).not.toBeNull();
+        expect(selectedYearSimulation?.year).toBe(1858);
+        expect(selectedYearSimulation?.displayYear).toBe(1858);
+        expect(selectedYearSimulation?.selectedEndYear).toBe(1857);
+        expect(selectedYearSimulation?.bestOption.label).toContain("断点 1858");
+        expect(event.rankedYears[0]?.year).toBe(1860);
+
+        expect(simulateDiagnosisEventPreview(site, event, {
+            previewYear: 1855,
+        })).toBeNull();
     });
 });

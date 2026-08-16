@@ -1,4 +1,4 @@
-/** Review-only ambiguity between a terminal whole-series -1 lag and one endpoint missing ring. */
+/** Review-only ambiguity between a terminal whole-series -1..-3 lag and one next missing-ring step. */
 import type {
     DiagnosisEvent,
     DiagnosisWholeMissingInterpretationEvidence,

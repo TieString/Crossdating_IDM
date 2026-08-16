@@ -26,11 +26,13 @@ import {
     makeCofechaDrivenDrafts,
     makeCofechaTerminalWholeDrafts,
     makeGlobalSlidingDrafts,
+    makeIterativeEndpointMissingDrafts,
     makePatternDrafts,
     makeSegmentDrafts,
 } from "./drafts";
 import { makeBayesianRecallDrafts } from "./candidateRecallExpansion";
 import { evaluateDraft } from "./evaluation";
+import { makeDiagnosisEventsFromCandidates } from "./events";
 import { parseCofechaHints } from "./cofechaHints";
 import {
     INTERNAL_EVENT_ENSEMBLE_OPTIONS,
@@ -199,6 +201,26 @@ export function diagnoseCrossdating(
         const cutoff = editCutoffByTree.get(candidate.targetTree);
         return cutoff === undefined || candidate.targetYear >= cutoff;
     });
+    // A short cluster of endpoint missing rings can collapse into one stable -2/-3 segmented
+    // state. Recover one independently hard-gated insertion only for the interpretation switch;
+    // keeping it out of `candidates` prevents a review aid from changing production selection.
+    const iterativeEndpointMissingCandidates = options.reviewWindowDisplayMode === "review"
+        ? rankDiagnosisCandidates(dedupeDiagnosisCandidates(seriesDiagnoses.flatMap((diagnosis) => (
+            makeIterativeEndpointMissingDrafts(diagnosis, config)
+                .map((draft) => evaluateDraft(
+                    siteData,
+                    diagnosis,
+                    draft,
+                    config,
+                    cofechaHints,
+                    preprocessCache,
+                ))
+                .filter((candidate): candidate is DiagnosisCandidateOperation => (
+                    candidate !== null
+                    && candidate.candidateStrength === "strong"
+                ))
+        ))))
+        : [];
     // 范围建议：同序列同类型(缺轮/伪轮)保留下来的候选若聚集成小窗（跨度 <= suggestedRangeMaxWidth），
     // 标注 suggestedRange——保证真值落在其内、且窗口远小于 COFECHA 段，供人工复核（用户的伪轮口径）。
     const rangeYears = new Map<string, number[]>();
@@ -252,6 +274,27 @@ export function diagnoseCrossdating(
             supplementalCandidates,
         },
     );
+    if (reviewEventCheckpoints && iterativeEndpointMissingCandidates.length > 0) {
+        const targetRangeByTree = new Map(seriesDiagnoses.map((diagnosis) => [
+            diagnosis.targetTree,
+            diagnosis.targetRange,
+        ]));
+        makeDiagnosisEventsFromCandidates(
+            seriesDiagnoses,
+            iterativeEndpointMissingCandidates,
+        ).forEach((event) => {
+            reviewEventCheckpoints.push({
+                stage: "candidate",
+                event: {
+                    ...event,
+                    seriesRange: { ...(targetRangeByTree.get(event.seriesId) ?? {
+                        startYear: event.startYear,
+                        endYear: event.endYear,
+                    }) },
+                },
+            });
+        });
+    }
     supplementalCandidates.forEach((candidate) => {
         if (!candidates.some((existing) => existing.id === candidate.id)) {
             candidates.push(candidate);
@@ -479,7 +522,7 @@ export function applyLocalCrossdatingOption(
 export function simulateDiagnosisEventPreview(
     siteData: RwlSiteData,
     event: DiagnosisEvent,
-    options: DiagnosisOptions = {},
+    options: DiagnosisOptions & { previewYear?: number } = {},
 ): LocalCrossdatingSimulation | null {
     if (event.stale || event.eventType === "wholeSeriesMove") return null;
     const config = getConfig(options);
@@ -490,8 +533,9 @@ export function simulateDiagnosisEventPreview(
     const rawTarget = toNumericSeries(treeData);
     const targetRange = getRangeForSeries(rawTarget);
     if (!targetRange) return null;
-    const year = event.rankedYears[0]?.year;
+    const year = options.previewYear ?? event.rankedYears[0]?.year;
     if (year === undefined) return null;
+    if (year < event.startYear || year > event.endYear) return null;
     if (year < targetRange.startYear || year > targetRange.endYear) return null;
 
     const master = buildScoringMaster(siteData, targetTree, config.referenceConfig);

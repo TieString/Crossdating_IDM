@@ -1090,6 +1090,17 @@ export class RwlEditor {
             .map((entry) => this.cloneOperationLogEntryWithAvailability(entry));
     }
 
+    /**
+     * Return every currently applied editor operation, including whole-tree replacements.
+     * Scan-image provenance uses this complete stream to avoid silently retaining an
+     * invalid original/current year mapping after a text replacement.
+     */
+    getAllAppliedOperationLogEntries(): RwlOperationLogEntry[] {
+        return flattenOperationLogBySeries(this.operationLogBySeries)
+            .filter((entry) => entry.operation && !(entry.isReverted ?? entry.undone))
+            .map((entry) => this.cloneOperationLogEntryWithAvailability(entry));
+    }
+
     getHistoryStatus(): RwlHistoryStatus {
         return {
             undoCount: this.undoStack.length,

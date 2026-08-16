@@ -1,0 +1,170 @@
+.viewer {
+    position: fixed;
+    z-index: 2147483000;
+    box-sizing: border-box;
+    overflow: hidden;
+    border: 1px solid #afbac9;
+    border-radius: 8px;
+    background: #ffffff;
+    box-shadow: 0 12px 36px rgba(24, 36, 53, 0.28);
+    touch-action: none;
+    user-select: none;
+}
+
+.dragging {
+    box-shadow: 0 16px 44px rgba(24, 36, 53, 0.34);
+}
+
+.resizing {
+    box-shadow: 0 16px 44px rgba(24, 36, 53, 0.34);
+}
+
+.titleBar {
+    height: 36px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 7px 0 11px;
+    border-bottom: 1px solid #d9e0e9;
+    background: #f4f7fb;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    cursor: move;
+}
+
+.title {
+    min-width: 0;
+    overflow: hidden;
+    color: #202b38;
+    font-size: 13px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.meta {
+    min-width: 0;
+    margin-left: auto;
+    overflow: hidden;
+    color: #6f7b89;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.modeSwitch {
+    flex: 0 0 auto;
+    display: inline-flex;
+    padding: 1px;
+    border: 1px solid #ccd5e0;
+    border-radius: 5px;
+    background: #e9eef5;
+}
+
+.modeSwitch button {
+    min-width: 34px;
+    height: 20px;
+    padding: 0 5px;
+    border: 0;
+    border-radius: 3px;
+    color: #687585;
+    background: transparent;
+    font: 10px "Segoe UI", system-ui, sans-serif;
+    cursor: pointer;
+}
+
+.modeSwitch button:disabled {
+    color: #a7afb9;
+    cursor: not-allowed;
+}
+
+.modeSwitch .modeActive {
+    color: #245d99;
+    background: #ffffff;
+    box-shadow: 0 1px 2px rgba(32, 43, 56, 0.14);
+}
+
+.closeButton {
+    width: 24px;
+    height: 24px;
+    flex: 0 0 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: #566170;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.closeButton:hover {
+    background: #e6ebf2;
+    color: #1f2935;
+}
+
+.closeButton:focus-visible,
+.resizeHandle:focus-visible {
+    outline: 2px solid #3b82f6;
+    outline-offset: -2px;
+}
+
+.imageFrame {
+    position: relative;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: #ffffff;
+    cursor: zoom-in;
+    touch-action: none;
+    overscroll-behavior: contain;
+}
+
+.imageFrameZoomed {
+    cursor: grab;
+}
+
+.imageFramePanning {
+    cursor: grabbing;
+}
+
+.scanImageFrame {
+    display: block;
+    cursor: default;
+    background: #eef1f4;
+}
+
+.fullViewport {
+    display: block;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    user-select: none;
+}
+
+.resizeHandle {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    z-index: 4;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    border-radius: 8px 0 7px;
+    background:
+        linear-gradient(135deg, transparent 46%, rgba(75, 88, 104, 0.72) 47%, rgba(75, 88, 104, 0.72) 53%, transparent 54%) 7px 7px / 9px 9px no-repeat,
+        linear-gradient(135deg, transparent 46%, rgba(75, 88, 104, 0.42) 47%, rgba(75, 88, 104, 0.42) 53%, transparent 54%) 3px 3px / 13px 13px no-repeat,
+        rgba(247, 249, 252, 0.82);
+    cursor: nwse-resize;
+}
+
+.resizeHandle:hover {
+    background-color: rgba(226, 232, 240, 0.94);
+}

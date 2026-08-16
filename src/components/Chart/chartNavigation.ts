@@ -2,6 +2,8 @@ export type ChartJumpTarget = {
     id: number;
     tree: string;
     year: number;
+    /** When present, the jump also requests a preview of this diagnosis event at `year`. */
+    diagnosisPreviewEventId?: string;
 };
 
 export type ChartViewport = {

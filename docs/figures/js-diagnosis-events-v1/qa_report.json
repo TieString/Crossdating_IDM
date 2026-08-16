@@ -1,0 +1,260 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-08-16T08:29:04.635454+00:00",
+  "backend": "python",
+  "figureDir": "D:\\Code\\Crossdating_Tauri_js-diagnosis-events-v1\\docs\\figures\\js-diagnosis-events-v1",
+  "figures": {
+    "fig01_system_architecture": {
+      "svg": {
+        "bytes": 37154,
+        "editableTextNodes": 73,
+        "timesNewRomanReferences": 73,
+        "pass": true
+      },
+      "pdf": {
+        "bytes": 79045,
+        "pages": 1,
+        "extractedCharacters": 1946,
+        "pass": true
+      },
+      "png": {
+        "bytes": 797930,
+        "pixels": [
+          2375,
+          2818
+        ],
+        "mode": "RGBA",
+        "dpi": [
+          350.012,
+          350.012
+        ],
+        "pass": true
+      },
+      "tiff": {
+        "bytes": 2428258,
+        "pixels": [
+          4072,
+          4832
+        ],
+        "mode": "RGBA",
+        "dpi": [
+          600.0,
+          600.0
+        ],
+        "pass": true
+      }
+    },
+    "fig02_performance_validation": {
+      "svg": {
+        "bytes": 78272,
+        "editableTextNodes": 114,
+        "timesNewRomanReferences": 114,
+        "pass": true
+      },
+      "pdf": {
+        "bytes": 79532,
+        "pages": 1,
+        "extractedCharacters": 1140,
+        "pass": true
+      },
+      "png": {
+        "bytes": 590460,
+        "pixels": [
+          4001,
+          2590
+        ],
+        "mode": "RGBA",
+        "dpi": [
+          350.012,
+          350.012
+        ],
+        "pass": true
+      },
+      "tiff": {
+        "bytes": 3788682,
+        "pixels": [
+          6859,
+          4440
+        ],
+        "mode": "RGBA",
+        "dpi": [
+          600.0,
+          600.0
+        ],
+        "pass": true
+      }
+    },
+    "fig03_event_definition_table": {
+      "svg": {
+        "bytes": 22360,
+        "editableTextNodes": 76,
+        "timesNewRomanReferences": 76,
+        "pass": true
+      },
+      "pdf": {
+        "bytes": 62484,
+        "pages": 1,
+        "extractedCharacters": 2298,
+        "pass": true
+      },
+      "png": {
+        "bytes": 846675,
+        "pixels": [
+          3541,
+          2333
+        ],
+        "mode": "RGBA",
+        "dpi": [
+          350.012,
+          350.012
+        ],
+        "pass": true
+      },
+      "tiff": {
+        "bytes": 3148156,
+        "pixels": [
+          6072,
+          4000
+        ],
+        "mode": "RGBA",
+        "dpi": [
+          600.0,
+          600.0
+        ],
+        "pass": true
+      }
+    },
+    "fig04_complex_case_discrimination": {
+      "svg": {
+        "bytes": 65874,
+        "editableTextNodes": 111,
+        "timesNewRomanReferences": 111,
+        "pass": true
+      },
+      "pdf": {
+        "bytes": 72131,
+        "pages": 1,
+        "extractedCharacters": 2034,
+        "pass": true
+      },
+      "png": {
+        "bytes": 741333,
+        "pixels": [
+          4315,
+          2751
+        ],
+        "mode": "RGBA",
+        "dpi": [
+          350.012,
+          350.012
+        ],
+        "pass": true
+      },
+      "tiff": {
+        "bytes": 2923684,
+        "pixels": [
+          7397,
+          4716
+        ],
+        "mode": "RGBA",
+        "dpi": [
+          600.0,
+          600.0
+        ],
+        "pass": true
+      }
+    },
+    "fig05_validation_design_and_failures": {
+      "svg": {
+        "bytes": 40911,
+        "editableTextNodes": 109,
+        "timesNewRomanReferences": 109,
+        "pass": true
+      },
+      "pdf": {
+        "bytes": 77697,
+        "pages": 1,
+        "extractedCharacters": 1265,
+        "pass": true
+      },
+      "png": {
+        "bytes": 525703,
+        "pixels": [
+          3838,
+          2697
+        ],
+        "mode": "RGBA",
+        "dpi": [
+          350.012,
+          350.012
+        ],
+        "pass": true
+      },
+      "tiff": {
+        "bytes": 3225908,
+        "pixels": [
+          6580,
+          4621
+        ],
+        "mode": "RGBA",
+        "dpi": [
+          600.0,
+          600.0
+        ],
+        "pass": true
+      }
+    }
+  },
+  "sourceData": {
+    "benchmark_family_design.csv": {
+      "bytes": 306,
+      "lines": 5,
+      "pass": true
+    },
+    "event_definitions.csv": {
+      "bytes": 2218,
+      "lines": 8,
+      "pass": true
+    },
+    "family_metrics.csv": {
+      "bytes": 734,
+      "lines": 5,
+      "pass": true
+    },
+    "per_file_metrics.csv": {
+      "bytes": 1843,
+      "lines": 24,
+      "pass": true
+    },
+    "single_event_metrics.csv": {
+      "bytes": 744,
+      "lines": 5,
+      "pass": true
+    },
+    "terminal_outcomes.csv": {
+      "bytes": 510,
+      "lines": 11,
+      "pass": true
+    }
+  },
+  "multipagePdf": {
+    "bytes": 116768,
+    "pages": 5,
+    "pass": true
+  },
+  "visualReview": {
+    "performedOn": "PNG previews at original resolution",
+    "checks": [
+      "English Times New Roman labels readable",
+      "text retains internal padding from boxes and table rules",
+      "no cross-column table overflow",
+      "workflow arrows have visible shafts and do not cross core text",
+      "panel labels present",
+      "quantitative labels and denominators visible",
+      "capabilities and test evidence are foregrounded without long defensive footnotes"
+    ],
+    "pass": true
+  },
+  "failures": [],
+  "pass": true
+}

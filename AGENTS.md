@@ -76,6 +76,10 @@
 - 折线图普通序列多选由 Home 统一持有，并通过 [src/pages/home/workspaceWindowBridge.ts](src/pages/home/workspaceWindowBridge.ts) 同步到独立折线图窗口；折线高亮只属于图表本地交互，不会直接切换宽度模块。选中折线后可在右键菜单按鼠标所在年份执行“在宽度模块中定位”；若尚未选中折线，在折线附近直接右键会先命中并高亮最近折线再打开菜单。序列按钮会显示 COFECHA PART 6 `[A]` 状态。
 - [src/components/Chart/MultiLineChart.tsx](src/components/Chart/MultiLineChart.tsx)：以加粗红色实线绘制手动 reference series，以绿色虚线绘制 COFECHA-pass 动态参考，并显式保留空缺年份断点、在 tooltip 中显示 sample depth；普通序列调色板不使用红色，当前可见序列的 flagged/problem segments 作为淡色背景带显示。
 - [src/components/WidthContainer/WidthGridContextMenu.tsx](src/components/WidthContainer/WidthGridContextMenu.tsx)：宽度元素右键“在图表中定位”会选中对应折线，以固定 50 年窗口定位到目标年份，并复用图表单击标记线显示该年份；标记状态保存日历年而非数组索引，独立折线图窗口复用同一跳转目标。
+- [src/components/WidthContainer/treeRingArtwork.ts](src/components/WidthContainer/treeRingArtwork.ts)：按 RWL 宽度值 `÷1000` 转为毫米，复现早材白底、六层晚材点纹和 0.18 mm 年轮边界；文件载入后按空闲时间分片预热各序列，并以宽度签名和有界 Blob URL 缓存一份完整物理截面，径向预览与完整悬浮窗复用该 SVG。每个 `series-header` 中间的窗口占满标题统计项以外的剩余宽度；预览以 10 mm 为基准，再按 SVG 实际像素比例动态扩展或收窄垂直物理视窗，使树心到树皮始终完整、四边填满且不发生横纵独立拉伸。动态 `viewBox` 提供 1–32 倍滚轮缩放与横向拖动，不需要逐帧重绘 Canvas；年轮上的滚轮由非被动捕获监听消费，不允许继续滚动工作区。悬停年份提示显示在按钮上方，单击会选择对应宽度格并在图中标出该轮，已缩放时同步将其移入视窗；双击才打开唯一完整圆形截面。完整悬浮窗的标题栏负责移动窗口，图片区域支持鼠标锚点滚轮缩放和放大后二维平移，双击图片恢复全图，右下角手柄可调窗口大小且始终限制在可视区域。中间缺失年份以不虚构物理宽度的分隔标记显示，显式 0 宽缺轮单独标记；编辑后的当前序列使用新宽度签名自动更新。宽度模块不再显示贝叶斯定年按钮，旧算法实现文件暂予保留。
+- [src/features/treeRingScans](src/features/treeRingScans)：扫描影像文件夹只按不区分大小写的同名文件建立索引，不在载入文件夹时批量读取影像。双击绘制版进入完整视图后才能切换扫描版并依次标注锚点：首点是序列最新年份之前最近的整十年，随后每点递减 10 年；整 50 年显示两个竖排点，整百年显示三个。至少两个锚点后才允许在 `series-header` 显示扫描图 1 cm 近似窗口。锚点保留校准时的原始年份身份，之后通过已应用的 RWL 操作日志重放为当前年份；悬停显示“原年份 / 现年份”，单击按当前年份定位宽度格，替换整段数据等无法可靠追踪身份的操作会要求重新校准。
+- [src/components/WidthContainer/useTreeRingScanImage.ts](src/components/WidthContainer/useTreeRingScanImage.ts) 与 Tauri `prepare_tree_ring_scan_image` 命令：外部扫描图按需复制到 app cache；大型 TIFF 使用分块读取生成总览，用户自由选框后按原始像素提取样本截面，不静默降采样。完整扫描窗口使用按 `devicePixelRatio` 配置的高 DPI Canvas，缩放、平移或旋转时直接从原始裁切图重绘当前视口，禁止放大低分辨率 SVG 中间层。前端 Blob URL 缓存有数量和字节上限，Rust 缓存按 2 GiB 上限清理旧文件。支持 SVG、PNG、JPEG、WebP、BMP、GIF 和 TIFF。扫描图选择、截面选框、90° 旋转、锚点、校准基线与显示模式按 RWL 文件路径持久化，重启后恢复。
+- [scripts/export-tree-ring-scan-fixtures.ts](scripts/export-tree-ring-scan-fixtures.ts)：把 RWL 中全部序列导出为与序列 ID 同名的完整绘制版 SVG，可直接作为扫描影像工作流的文件夹测试夹具。
 - 宽度网格与折线图复用同一右键菜单：插入、删除、删除序列、文本编辑和可用时的 COFECHA PART 6 定位保持一致；宽度网格额外提供“在图表中定位”，折线图对应提供“在宽度模块中定位”。独立折线图通过窗口桥接把文本编辑和 COFECHA 定位命令交回主窗口执行。
 - [src/pages/home/useHomeWorkspace.ts](src/pages/home/useHomeWorkspace.ts)：按文件路径持久化 reference config 和参考辅助日志。
 - [src/pages/home/workspacePersistence.ts](src/pages/home/workspacePersistence.ts)：COFECHA、reference 与 RWL history 等大工作区状态保存到应用数据目录 `workspace-state-v1`；启动时安全迁移旧 localStorage 项，localStorage 只保留小型界面设置。
@@ -112,7 +116,7 @@
 - 缺轮和伪轮的完整区间定位器保留约 25 年粗搜索证据；逐年虚拟纠正只计算四条冻结定位曲线，预处理、参考拟合和纠正结果均按诊断实例缓存。UI 只接收一个主窗口，不接收内部模式或逐年候选。学习定位器先输出 9/13 年窗，随后独立物理定位器只能在当前 9 年窗内部提出 7/5 年窗：7 年要求完整嵌套，缺轮 5 年还要求 operation remote margin ≥0.13，伪轮 5 年要求 margin ≥0.09 且 side-step 锚点距当前主年份 ≤4 年。13 年窗不直接收窄，旧 `adaptiveWindowRisk` 的 17 年或粗区间回退不进入正式入口。
 - 自动交叉定年主管线第一版已经完成；当前算法层在同一入口中显式包含 Baillie & Pilcher-style global sliding match、Holmes/COFECHA-like segmented diagnosis、Van Deusen/Wenk-style local edit alignment，以及 Hassan-style MVP relative-confidence ranking。
 - 折线图候选生成由“生成候选”按钮触发；本轮不使用 hover 触发自动分析。
-- COFECHA-pass 动态参考序列已接入：每次 COFECHA 完成后复用 PART 6 `[A] Segment` 判断，把无 A flag 样芯作为 `anchor_pass` 参考锚定组，有 A flag 样芯作为 `candidate_flagged` 待检查组，并用标准化后的 anchor 序列生成 `COFECHA-pass 参考序列`。参考数值只供内部诊断与贝叶斯定年使用，折线图不再显示其状态模块或曲线；PART 6 分类仍用于可靠序列快捷选择和 A 标记提示。
+- COFECHA-pass 动态参考序列已接入：每次 COFECHA 完成后复用 PART 6 `[A] Segment` 判断，把无 A flag 样芯作为 `anchor_pass` 参考锚定组，有 A flag 样芯作为 `candidate_flagged` 待检查组，并用标准化后的 anchor 序列生成 `COFECHA-pass 参考序列`。参考数值供内部诊断使用，折线图不再显示其状态模块或曲线；PART 6 分类仍用于可靠序列快捷选择和 A 标记提示。
 - [src/features/crossdating/reference.ts](src/features/crossdating/reference.ts)：动态参考生成按 COFECHA master dating series 流程执行：每条样芯先做 32 年 50% response cubic smoothing spline 去趋势，计算 `raw / spline` 的 dimensionless index，再用 AR(p) 预白化、默认 log transform、可选 first difference；随后按年份 accumulator/counter 算术平均，并把最终 master 标准化为 mean=0、sd=1。0 值 absent ring 默认不进入 reference。Spline 线性系统使用带宽 2 的 Cholesky O(n) 求解，保留共轭梯度作为数值异常回退。
 
 **约束**：
@@ -182,6 +186,8 @@
 - `npm run validate:legacy-generalization -- --phase <co612|pilot|single|serial|all> [--quick]` — 执行 co612 复现门禁、外部单次/串行泛化、文件级 bootstrap、checkpoint 与产物校验
 - `npm run typecheck:legacy-generalization` — 独立类型检查 Legacy manifest、worker、runner、汇总和评估器脚本
 - `npm run trial:auto-crossdating` — 在临时目录对 RAW 样例应用自动诊断候选并跑 COFECHA 对比；每轮每条序列只应用一个候选，不修改源文件
+- `npm run export:tree-ring-scan-fixtures -- <input.rwl> <output-folder>` — 为每条序列导出同名完整年轮 SVG 与测试清单，供扫描影像文件夹流程验收
+- `npm run validate:tree-ring-scan-pair -- <input.rwl> <scan-image>` — 只读校验扫描影像文件名能否匹配 RWL 中的同名序列，并输出该序列年份范围
 - `node scripts/profile-js-diagnosis.mjs <file.rwl> --target=<series>` — 测量单目标 JS 事件诊断解析与计算耗时
 - `npm run tauri`
 

@@ -1,0 +1,294 @@
+.panel {
+  --ink: #26342d;
+  --muted: #6c7872;
+  --line: #e2e8e4;
+  --accent: #2f684b;
+  --accent-soft: #eaf3ed;
+  display: flex;
+  flex-direction: column;
+  color: var(--ink);
+  font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.empty {
+  padding: 6px 0;
+  color: #7b8580;
+  font-size: 12px;
+}
+
+.suggestion {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
+  padding: 1px 0 2px;
+}
+
+.suggestion + .suggestion {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.body {
+  min-width: 0;
+}
+
+.heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.eventType {
+  color: #20372c;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.range {
+  color: #506159;
+  font-variant-numeric: tabular-nums;
+}
+
+.metadata {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 7px;
+  color: #77827d;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.metadata > span + span::before {
+  margin-right: 7px;
+  color: #bdc5c0;
+  content: "·";
+}
+
+.warning {
+  color: #8a5a18;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.yearSelector {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 7px 9px;
+  margin-top: 10px;
+}
+
+.yearLabel {
+  padding-top: 2px;
+  color: #78837d;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.yearOptions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.yearButton {
+  appearance: none;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: #536159;
+  cursor: pointer;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.45;
+  box-shadow: none;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.yearButton:hover {
+  background: #f1f5f2;
+  color: #2f4c3d;
+}
+
+.yearButtonRanked {
+  font-weight: 600;
+}
+
+.yearButtonActive {
+  border-color: #c8ddcf;
+  background: var(--accent-soft);
+  color: #21593d;
+  font-weight: 700;
+}
+
+.metricLine {
+  margin-top: 9px;
+  color: #4f6057;
+  font-variant-numeric: tabular-nums;
+}
+
+.detailLine {
+  margin-top: 2px;
+  color: #69766f;
+  font-variant-numeric: tabular-nums;
+}
+
+.interpretation {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 9px;
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+  color: #596a61;
+}
+
+.correlationRow {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 9px;
+  margin-top: 7px;
+  color: #728079;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.evidenceDetails {
+  min-width: 0;
+}
+
+.evidenceDetails summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #5b6d64;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.evidenceDetails summary::-webkit-details-marker {
+  display: none;
+}
+
+.evidenceDetails summary::after {
+  color: #97a39c;
+  content: "›";
+  font-size: 14px;
+  line-height: 1;
+  transition: transform 120ms ease;
+}
+
+.evidenceDetails[open] {
+  flex-basis: 100%;
+}
+
+.evidenceDetails[open] summary::after {
+  transform: rotate(90deg);
+}
+
+.evidenceText {
+  margin-top: 4px;
+  padding-left: 8px;
+  border-left: 1px solid #d8e0db;
+  color: #849089;
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 1px;
+}
+
+.button,
+.interpretationButton {
+  font: inherit;
+  cursor: pointer;
+  box-shadow: none;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.button {
+  min-height: 28px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.secondaryButton {
+  border: 1px solid #c8d2cc;
+  background: #fff;
+  color: #405249;
+}
+
+.secondaryButton:hover:not(:disabled) {
+  border-color: #8fa397;
+  background: #f7f9f8;
+}
+
+.primaryButton {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.primaryButton:hover:not(:disabled) {
+  border-color: #285b41;
+  background: #285b41;
+}
+
+.interpretationButton {
+  padding: 1px 2px;
+  border: 0;
+  background: transparent;
+  color: #315f48;
+  font-size: 11px;
+  font-weight: 650;
+  text-decoration: underline;
+  text-decoration-color: #b9cbbf;
+  text-underline-offset: 2px;
+}
+
+.interpretationButton:hover:not(:disabled) {
+  color: #214c36;
+  text-decoration-color: #6f9b7d;
+}
+
+.disabledButton {
+  cursor: default;
+  opacity: 0.42;
+}
+
+@media (max-width: 780px) {
+  .suggestion {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .actions {
+    justify-content: flex-end;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button,
+  .interpretationButton,
+  .yearButton,
+  .evidenceDetails summary::after {
+    transition: none;
+  }
+}
