@@ -7,7 +7,10 @@ import {
     locationEvidenceFor,
     withEvidenceLedger,
 } from "./evidenceLedger";
-import { attachEndpointWholeMissingInterpretation } from "./endpointWholeMissingInterpretation";
+import {
+    attachEndpointWholeMissingInterpretation,
+    makeEndpointMissingReviewFromWhole,
+} from "./endpointWholeMissingInterpretation";
 import {
     projectUnsupportedLocationToStrongBoundedPath,
     preservesStrongBoundedPathMode,
@@ -2049,6 +2052,7 @@ export const adjudicateJointEventHypotheses = (
         : null;
     const endpointMissing = baseSelectedEvent
         ? selectEndpointMissingInterpretation(clusters, baseSelectedEvent)
+            ?? makeEndpointMissingReviewFromWhole(baseSelectedEvent)
         : null;
     const endpointDistance = baseSelectedEvent && endpointMissing
         ? baseSelectedEvent.endYear - endpointMissing.endYear

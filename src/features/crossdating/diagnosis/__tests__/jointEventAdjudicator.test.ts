@@ -2581,8 +2581,8 @@ describe("joint event adjudicator", () => {
                 alternative: {
                     id: "endpoint-candidate",
                     eventType: "missingRing",
-                    startYear: 1987,
-                    endYear: 1993,
+                    startYear: 1988,
+                    endYear: 1994,
                 },
             },
         });
@@ -2656,7 +2656,7 @@ describe("joint event adjudicator", () => {
         expect(decision.event?.interpretationAmbiguity).toBeUndefined();
     });
 
-    it("does not expose a remote candidate as a bark-end missing interpretation", () => {
+    it("ignores a remote candidate but retains a constrained bark-end missing review", () => {
         const whole = event("terminal-unit", "wholeSeriesMove", 1732, 1994, 0);
         whole.shiftYears = -1;
         whole.evidence.notes = [
@@ -2679,8 +2679,19 @@ describe("joint event adjudicator", () => {
         expect(decision.event).toMatchObject({
             eventType: "wholeSeriesMove",
             shiftYears: -1,
+            interpretationAmbiguity: {
+                kind: "wholeSeriesMoveOrMissingRing",
+                alternative: {
+                    eventType: "missingRing",
+                    startYear: 1982,
+                    endYear: 1994,
+                    reviewOnly: true,
+                },
+            },
         });
-        expect(decision.event?.interpretationAmbiguity).toBeUndefined();
+        expect(
+            decision.event?.interpretationAmbiguity?.alternative.evidence.algorithmSources,
+        ).toContain("synthetic_endpoint_missing_review");
     });
 
     it("selects a hard-gated endpoint unit hypothesis over its terminal -1 alias", () => {
@@ -2712,7 +2723,7 @@ describe("joint event adjudicator", () => {
         });
     });
 
-    it("does not reinterpret a terminal whole from an unreviewed endpoint alias", () => {
+    it("keeps a constrained missing review available for an unreviewed terminal alias", () => {
         const whole = event("terminal-unit", "wholeSeriesMove", 1800, 2004, 0);
         whole.shiftYears = -1;
         whole.evidence.notes = [
@@ -2735,7 +2746,39 @@ describe("joint event adjudicator", () => {
         expect(decision.event).toMatchObject({
             eventType: "wholeSeriesMove",
             shiftYears: -1,
+            interpretationAmbiguity: {
+                kind: "wholeSeriesMoveOrMissingRing",
+                alternative: {
+                    eventType: "missingRing",
+                    startYear: 1992,
+                    endYear: 2004,
+                    reviewOnly: true,
+                },
+            },
         });
-        expect(decision.event?.interpretationAmbiguity).toBeUndefined();
+    });
+
+    it("synthesizes one endpoint missing review when a unit whole has no local candidate", () => {
+        const whole = event("terminal-unit", "wholeSeriesMove", 1600, 2002, 0);
+        whole.shiftYears = -1;
+        whole.seriesRange = { startYear: 1600, endYear: 2002 };
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("final", whole),
+        ]);
+
+        expect(decision.event).toMatchObject({
+            eventType: "wholeSeriesMove",
+            shiftYears: -1,
+            interpretationAmbiguity: {
+                kind: "wholeSeriesMoveOrMissingRing",
+                alternative: {
+                    eventType: "missingRing",
+                    startYear: 1990,
+                    endYear: 2002,
+                    reviewOnly: true,
+                },
+            },
+        });
     });
 });
