@@ -14,6 +14,7 @@ import {
     strongBoundedPathLocation,
 } from "./locationAuthority";
 import { addStablePartialRankEdgeGuard } from "./stablePartialLocationConsensus";
+import { isAllowedAutomaticDiagnosisEvent } from "./wholeSeriesMoveSemantics";
 import type {
     DiagnosisEvidenceClaim,
     DiagnosisEvent,
@@ -1875,6 +1876,7 @@ export const adjudicateJointEventHypotheses = (
     const config = { ...DEFAULT_JOINT_EVENT_ADJUDICATION_CONFIG, ...overrides };
     const submitted = checkpoints.filter(({ event }) => (
         event.seriesId === seriesId
+        && isAllowedAutomaticDiagnosisEvent(event)
     ));
     const submittedClusters = clusterCheckpoints(submitted);
     const hypotheses = submittedClusters.map(summary);

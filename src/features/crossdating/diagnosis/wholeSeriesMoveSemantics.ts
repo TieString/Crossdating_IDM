@@ -17,3 +17,12 @@ export const wholeSeriesMoveShiftYears = (
         ? legacyLag
         : null;
 };
+
+/** Automatic diagnosis only models whole-series corrections toward older years. */
+export const isAllowedAutomaticDiagnosisEvent = (
+    event: DiagnosisEvent,
+): boolean => {
+    if (event.eventType !== "wholeSeriesMove") return true;
+    const shiftYears = wholeSeriesMoveShiftYears(event);
+    return shiftYears !== null && shiftYears < 0;
+};

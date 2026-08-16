@@ -64,6 +64,7 @@ import {
     compareJointDecisionToProduction,
 } from "./jointEventAdjudicator";
 import { attachUniversalPartialMissingWorkflow } from "./missingPartialInterpretation";
+import { isAllowedAutomaticDiagnosisEvent } from "./wholeSeriesMoveSemantics";
 
 export {
     getDiagnosisCandidateLabel,
@@ -308,10 +309,13 @@ export function diagnoseCrossdating(
             - (treeOrder.get(right.seriesId) ?? Infinity)
         ));
     }
-    const selectedJointEventDecisions = reviewEventCheckpoints && eventDecisionAudits
+    const adjudicationCheckpoints = reviewEventCheckpoints?.filter(({ event }) => (
+        isAllowedAutomaticDiagnosisEvent(event)
+    )) ?? null;
+    const selectedJointEventDecisions = adjudicationCheckpoints && eventDecisionAudits
         ? eventDecisionAudits.map((audit) => adjudicateJointEventHypotheses(
             audit.seriesId,
-            reviewEventCheckpoints,
+            adjudicationCheckpoints,
         ))
         : null;
     const rawReviewWindowDisplay = options.reviewWindowDisplayMode === "review"
@@ -331,7 +335,7 @@ export function diagnoseCrossdating(
         audit,
     ]) ?? []);
     const candidateEventsByTree = new Map<string, DiagnosisEvent[]>();
-    reviewEventCheckpoints?.forEach((checkpoint) => {
+    adjudicationCheckpoints?.forEach((checkpoint) => {
         if (checkpoint.stage !== "candidate") return;
         const rows = candidateEventsByTree.get(checkpoint.event.seriesId) ?? [];
         rows.push(checkpoint.event);

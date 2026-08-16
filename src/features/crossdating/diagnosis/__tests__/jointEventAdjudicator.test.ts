@@ -47,6 +47,57 @@ const checkpoint = (
 ): DiagnosisReviewEventCheckpoint => ({ stage, event: candidate });
 
 describe("joint event adjudicator", () => {
+    it("removes a positive whole-series hypothesis before operation adjudication", () => {
+        const local = event("local", "missingRing", 1898, 1906, 1902);
+        const positiveWhole = {
+            ...event("positive-whole", "wholeSeriesMove", 1700, 2000, 2000, 99),
+            shiftYears: 20,
+        };
+        positiveWhole.evidence.lagBefore = 20;
+        positiveWhole.evidence.algorithmSources = ["dominant_whole_state_consensus"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", positiveWhole),
+            checkpoint("displayed", positiveWhole),
+            { ...checkpoint("final", positiveWhole), authority: "selected" },
+            checkpoint("detected", local),
+            checkpoint("displayed", local),
+            { ...checkpoint("final", local), authority: "selected" },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            event: {
+                id: "local",
+                eventType: "missingRing",
+            },
+        });
+        expect(decision.hypotheses).not.toContainEqual(expect.objectContaining({
+            eventType: "wholeSeriesMove",
+        }));
+    });
+
+    it("still allows an exact negative whole-series hypothesis", () => {
+        const negativeWhole = {
+            ...event("negative-whole", "wholeSeriesMove", 1700, 2000, 2000),
+            shiftYears: -20,
+        };
+        negativeWhole.evidence.lagBefore = -20;
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", negativeWhole),
+            { ...checkpoint("final", negativeWhole), authority: "selected" },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            event: {
+                eventType: "wholeSeriesMove",
+                shiftYears: -20,
+            },
+        });
+    });
+
     it("keeps a multi-transition path projected as one ordinary frontier event", () => {
         const frontier = event("frontier", "missingRing", 1898, 1906, 1904);
         frontier.seriesRange = { startYear: 1700, endYear: 2000 };
@@ -729,7 +780,7 @@ describe("joint event adjudicator", () => {
         });
     });
 
-    it("uses the local transition that lands on a persisted whole-series baseline", () => {
+    it("ignores a local transition tied only to a positive whole-series baseline", () => {
         const whole = event("whole", "wholeSeriesMove", 866, 1135, 1135);
         whole.shiftYears = 4;
         whole.rankedYears = [];
@@ -784,10 +835,10 @@ describe("joint event adjudicator", () => {
             status: "selected",
             sourceStage: "final",
             event: {
-                id: "baseline-compatible",
+                id: "zero-terminal",
                 eventType: "falseRing",
-                startYear: 1029,
-                endYear: 1041,
+                startYear: 1022,
+                endYear: 1034,
             },
         });
     });
@@ -1572,15 +1623,15 @@ describe("joint event adjudicator", () => {
 
     it("applies a dominant whole baseline before an unsupported bounded transition", () => {
         const whole = event("whole", "wholeSeriesMove", 1100, 1500, 1500);
-        whole.shiftYears = 4;
+        whole.shiftYears = -4;
         whole.rankedYears = [];
-        whole.evidence.lagBefore = 4;
+        whole.evidence.lagBefore = -4;
         whole.evidence.lagAfter = 0;
         whole.evidence.algorithmSources = ["dominant_whole_state_consensus"];
         const local = event("local", "partialMove", 1120, 1132, 1126);
         local.shiftYears = -73;
-        local.evidence.lagBefore = -69;
-        local.evidence.lagAfter = 4;
+        local.evidence.lagBefore = -77;
+        local.evidence.lagAfter = -4;
         local.evidence.correlationGain = 0.011;
         local.evidence.algorithmSources = ["bounded_complete_lag_path"];
         local.evidence.notes = ["bounded_path_complete_hypothesis=true"];
@@ -1592,7 +1643,7 @@ describe("joint event adjudicator", () => {
 
         expect(decision).toMatchObject({
             status: "selected",
-            event: { id: "whole", eventType: "wholeSeriesMove", shiftYears: 4 },
+            event: { id: "whole", eventType: "wholeSeriesMove", shiftYears: -4 },
         });
     });
 

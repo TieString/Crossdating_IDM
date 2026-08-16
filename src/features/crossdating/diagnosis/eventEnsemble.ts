@@ -113,7 +113,10 @@ import {
     rerankEventYearsByAnchorConsensus,
     type EventOperationRecoveryConfig,
 } from "./eventOperationRecovery";
-import { wholeSeriesMoveShiftYears } from "./wholeSeriesMoveSemantics";
+import {
+    isAllowedAutomaticDiagnosisEvent,
+    wholeSeriesMoveShiftYears,
+} from "./wholeSeriesMoveSemantics";
 import {
     completeUnitTransitionChainExplainsWholeShift,
     measureWholeSeriesStateConsistency,
@@ -10063,18 +10066,21 @@ export const makeDiagnosisEvents = (
             ...displayed,
         ].filter(preservesDecisiveExactPartial);
         const isValidAutomaticEvent = (event: DiagnosisEvent): boolean => (
-            event.eventType !== "partialMove"
-            || (
-                event.shiftSide === "older"
-                && isAutomaticPartialShift(event.shiftYears, {
-                    maxPartialGapYears: effectiveConfig.maxPartialGapYears,
-                    lagMin: effectiveConfig.lagMin,
-                    seriesLength:
-                        diagnosis.targetRange.endYear
-                        - diagnosis.targetRange.startYear + 1,
-                    minimumSideYears:
-                        DEFAULT_EVENT_OPERATION_RECOVERY_CONFIG.minimumSideYears,
-                })
+            isAllowedAutomaticDiagnosisEvent(event)
+            && (
+                event.eventType !== "partialMove"
+                || (
+                    event.shiftSide === "older"
+                    && isAutomaticPartialShift(event.shiftYears, {
+                        maxPartialGapYears: effectiveConfig.maxPartialGapYears,
+                        lagMin: effectiveConfig.lagMin,
+                        seriesLength:
+                            diagnosis.targetRange.endYear
+                            - diagnosis.targetRange.startYear + 1,
+                        minimumSideYears:
+                            DEFAULT_EVENT_OPERATION_RECOVERY_CONFIG.minimumSideYears,
+                    })
+                )
             )
         );
         const validAutomaticEvents = (events: DiagnosisEvent[]): DiagnosisEvent[] => {
