@@ -48,7 +48,7 @@ import {
 const FIXTURE_PATH = process.env.CO612_RWL_PATH ?? "D:/软件测试/co612.rwl";
 const OUT_PATH = process.env.CO612_OUT_PATH ?? "D:/软件测试/co612.OUT";
 const NATURAL_FIXTURE_PATH = process.env.CO612_NATURAL_RWL_PATH
-    ?? "D:/软件测试/数据/ITRDB/itrdb_download/measurements/northamerica/usa/co612.rwl";
+    ?? "D:/软件测试/co612已定年.rwl";
 const TARGET_ID = "mon052";
 const COFECHA_EXE = fileURLToPath(new URL(
     "../../../../../src-tauri/bin/cofecha-x86_64-pc-windows-msvc.exe",
@@ -611,6 +611,7 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
         const failures = results.filter((row) => (
             !row.hasSingleSuggestion || !row.operationCorrect || !row.covered
         ));
+        const fourthFrontier = results.find((row) => row.frontier === 1861);
 
         expect(failures.map((row) => ({
             frontier: row.frontier,
@@ -621,6 +622,9 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
             missing: row.context.missing,
             sequentialHead: row.context.sequentialHead,
         }))).toEqual([]);
+        expect(fourthFrontier?.context.displayed[0]).toMatchObject({
+            type: "missingRing",
+        });
     }, 240_000);
 
     bundledCofechaIt("shows only the newest missing ring after fresh COFECHA", () => {

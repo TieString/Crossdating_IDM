@@ -10885,13 +10885,21 @@ export const makeDiagnosisEvents = (
             && mayRecoverSequentialMissing
             ? getSequentialMissing()
             : null;
+        const stablePartialTopYear = stableBoundedPathFrontier
+            ? rankedEventYear(stableBoundedPathFrontier)
+            : null;
+        const sequentialMissingTopYear = sequentialAheadOfMixedStablePartial
+            ? rankedEventYear(sequentialAheadOfMixedStablePartial.event)
+            : null;
+        const sequentialMissingModeIsBarkSide = stablePartialTopYear !== null
+            && sequentialMissingTopYear !== null
+            && sequentialMissingTopYear - stablePartialTopYear >= 3;
         if (sequentialAheadOfMixedStablePartial?.event.eventType === "missingRing"
             && sequentialAheadOfMixedStablePartial.event.evidence.algorithmSources.some(
                 (source) => source === "cumulative_sequential_missing_staircase"
                     || source === "marker_anchored_sequential_missing_staircase",
             )
-            && sequentialAheadOfMixedStablePartial.event.startYear
-                > stableBoundedPathFrontier!.endYear) {
+            && sequentialMissingModeIsBarkSide) {
             return finalize(
                 [sequentialAheadOfMixedStablePartial.event],
                 retainDisplayedMissingHypothesesDuringSequentialRecovery(
