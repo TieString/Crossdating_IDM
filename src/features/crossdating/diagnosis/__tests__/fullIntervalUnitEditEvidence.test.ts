@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getConfig } from "../config";
 import {
+    scoreFullIntervalShiftDifferenceEvidence,
     scoreFullIntervalShiftEvidence,
     scoreFullIntervalUnitEditEvidence,
 } from "../fullIntervalUnitEditEvidence";
@@ -107,7 +108,17 @@ suite("full-interval unit-edit prefix evidence", () => {
                 shiftYears,
                 20,
             );
+            const differenceOnly = scoreFullIntervalShiftDifferenceEvidence(
+                diagnosis!,
+                shiftYears,
+                20,
+            );
             expect(prefix).toHaveLength(exhaustive.length);
+            expect(differenceOnly).toEqual(prefix.map((row) => ({
+                year: row.year,
+                differenceCorrelation: row.differenceCorrelation,
+                differencePairs: row.differencePairs,
+            })));
             prefix.forEach((row, index) => {
                 // Prefix evidence stays on the internal lastMovedYear axis.
                 expect(row.year + 1).toBe(exhaustive[index].year);

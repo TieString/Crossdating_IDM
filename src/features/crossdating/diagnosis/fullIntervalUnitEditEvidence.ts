@@ -42,6 +42,11 @@ export type FullIntervalBaselineEvidence = {
     differencePairs: number;
 };
 
+export type FullIntervalShiftDifferenceEvidenceRow = Pick<
+    FullIntervalUnitEditEvidenceRow,
+    "year" | "differenceCorrelation" | "differencePairs"
+>;
+
 type Sufficient = {
     count: number;
     sumX: number;
@@ -282,6 +287,131 @@ const sideEvidence = (
     };
 };
 
+type DifferenceCandidateEvidence = {
+    olderEnd: number;
+    newerStart: number;
+    olderCorrected: Sufficient;
+    olderBaseline: Sufficient;
+    newerFixed: Sufficient;
+    newerShifted: Sufficient;
+    corrected: Sufficient;
+};
+
+const differenceCandidateEvidence = (
+    context: FullIntervalShiftEvidenceContext,
+    differenceOlder: Prefix,
+    shiftYears: number,
+    year: number,
+): DifferenceCandidateEvidence => {
+    const {
+        startYear,
+        endYear,
+        target,
+        masterDifference,
+        differenceNewer,
+    } = context;
+    const olderEnd = shiftYears > 0 ? year - shiftYears : year;
+    const olderCorrected = range(
+        differenceOlder,
+        startYear + 1,
+        olderEnd,
+    );
+    const olderBaseline = range(
+        differenceNewer,
+        startYear + 1,
+        olderEnd,
+    );
+    const newerStart = shiftYears > 0 ? year + shiftYears + 2 : year + 2;
+    const newerFixed = range(differenceNewer, newerStart, endYear);
+    const newerShifted = range(differenceOlder, newerStart, endYear);
+    let corrected = add(olderCorrected, newerFixed);
+    if (shiftYears > 0) {
+        const correctedValue = (destinationYear: number): number | undefined => {
+            if (destinationYear > year && target.has(destinationYear)) {
+                return target.get(destinationYear);
+            }
+            const sourceYear = destinationYear - shiftYears;
+            return sourceYear <= year
+                && !(shiftYears === 1 && sourceYear === year)
+                ? target.get(sourceYear)
+                : undefined;
+        };
+        for (
+            let destinationYear = year + 1;
+            destinationYear <= year + shiftYears + 1;
+            destinationYear += 1
+        ) {
+            const previous = correctedValue(destinationYear - 1);
+            const next = correctedValue(destinationYear);
+            corrected = add(
+                corrected,
+                pair(
+                    previous === undefined || next === undefined
+                        ? undefined
+                        : next - previous,
+                    masterDifference.get(destinationYear),
+                ),
+            );
+        }
+    }
+    return {
+        olderEnd,
+        newerStart,
+        olderCorrected,
+        olderBaseline,
+        newerFixed,
+        newerShifted,
+        corrected,
+    };
+};
+
+const shiftCandidateYears = (
+    context: FullIntervalShiftEvidenceContext,
+    edgeYears: number,
+): number[] => [...context.target.keys()]
+    .filter((year) => (
+        year >= context.startYear + edgeYears
+        && year <= context.endYear - edgeYears
+    ))
+    .sort((left, right) => left - right);
+
+/** Lightweight profile used by reference voting, which consumes only differenced correlation. */
+export const scoreFullIntervalShiftDifferenceEvidence = (
+    diagnosis: SeriesCoreDiagnosis,
+    shiftYears: number,
+    edgeYears = 15,
+    comparisonSeries: NumericSeries = diagnosis.master.data,
+    baselineLag = 0,
+    sharedContext?: FullIntervalShiftEvidenceContext,
+): FullIntervalShiftDifferenceEvidenceRow[] => {
+    if (!Number.isInteger(shiftYears) || shiftYears === 0) return [];
+    const context = sharedContext ?? createFullIntervalShiftEvidenceContext(
+        diagnosis,
+        comparisonSeries,
+        baselineLag,
+    );
+    const differenceOlder = buildPrefix(
+        context.targetDifference,
+        context.masterDifference,
+        context.startYear,
+        context.endYear,
+        baselineLag + shiftYears,
+    );
+    return shiftCandidateYears(context, edgeYears).map((year) => {
+        const difference = differenceCandidateEvidence(
+            context,
+            differenceOlder,
+            shiftYears,
+            year,
+        ).corrected;
+        return {
+            year,
+            differenceCorrelation: correlation(difference, 30),
+            differencePairs: difference.count,
+        };
+    });
+};
+
 export const scoreFullIntervalShiftEvidence = (
     diagnosis: SeriesCoreDiagnosis,
     shiftYears: number,
@@ -320,12 +450,7 @@ export const scoreFullIntervalShiftEvidence = (
         endYear,
         baselineLag + shiftYears,
     );
-    const candidateYears = [...target.keys()]
-        .filter((year) => (
-            year >= startYear + edgeYears
-            && year <= endYear - edgeYears
-        ))
-        .sort((left, right) => left - right);
+    const candidateYears = shiftCandidateYears(context, edgeYears);
     const sideMinimumPairs = Math.max(8, Math.min(20, edgeYears));
     return candidateYears.map((year): FullIntervalUnitEditEvidenceRow => {
         const olderStart = startYear;
@@ -351,61 +476,14 @@ export const scoreFullIntervalShiftEvidence = (
                 }
             }
         }
-        const differenceOlderCorrected = range(
-            differenceOlder,
-            startYear + 1,
-            olderEnd,
-        );
-        const differenceOlderBaseline = range(
-            differenceNewer,
-            startYear + 1,
-            olderEnd,
-        );
-        const differenceNewerStart =
-            shiftYears > 0 ? year + shiftYears + 2 : year + 2;
-        const differenceNewerFixed = range(
-            differenceNewer,
-            differenceNewerStart,
-            endYear,
-        );
-        const differenceNewerShifted = range(
-            differenceOlder,
-            differenceNewerStart,
-            endYear,
-        );
-        let difference = add(
-            differenceOlderCorrected,
-            differenceNewerFixed,
-        );
-        if (shiftYears > 0) {
-            const correctedValue = (destinationYear: number): number | undefined => {
-                if (destinationYear > year && target.has(destinationYear)) {
-                    return target.get(destinationYear);
-                }
-                const sourceYear = destinationYear - shiftYears;
-                return sourceYear <= year
-                    && !(shiftYears === 1 && sourceYear === year)
-                    ? target.get(sourceYear)
-                    : undefined;
-            };
-            for (
-                let destinationYear = year + 1;
-                destinationYear <= year + shiftYears + 1;
-                destinationYear += 1
-            ) {
-                const previous = correctedValue(destinationYear - 1);
-                const next = correctedValue(destinationYear);
-                difference = add(
-                    difference,
-                    pair(
-                        previous === undefined || next === undefined
-                            ? undefined
-                            : next - previous,
-                        masterDifference.get(destinationYear),
-                    ),
-                );
-            }
-        }
+        const {
+            newerStart: differenceNewerStart,
+            olderCorrected: differenceOlderCorrected,
+            olderBaseline: differenceOlderBaseline,
+            newerFixed: differenceNewerFixed,
+            newerShifted: differenceNewerShifted,
+            corrected: difference,
+        } = differenceCandidateEvidence(context, differenceOlder, shiftYears, year);
         const rawCorrelation = correlation(raw, 30);
         const differenceCorrelation = correlation(difference, 30);
         const sideCorrelations = [

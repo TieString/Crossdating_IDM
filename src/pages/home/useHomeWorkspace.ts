@@ -1851,12 +1851,8 @@ export function useHomeWorkspace() {
         const runDiagnosis = () => {
             if (cancelled) return;
 
-            // Vite cannot replace code inside an already-running module worker. Recreate it for
-            // each development diagnosis so edits to the event engine are reflected immediately.
-            if (import.meta.env.DEV && diagnosisWorkerRef.current) {
-                diagnosisWorkerRef.current.terminate();
-                diagnosisWorkerRef.current = null;
-            }
+            // Keep the module worker warm across diagnoses. Recreating it in development reloads
+            // the full diagnosis bundle and makes every series switch pay worker startup again.
             const worker = diagnosisWorkerRef.current
                 ?? new Worker(new URL("./diagnosisWorker.ts", import.meta.url), { type: "module" });
             workerForRequest = worker;

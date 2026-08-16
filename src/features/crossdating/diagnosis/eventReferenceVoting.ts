@@ -7,9 +7,8 @@
  */
 import type { RwlSiteData } from "@/features/rwl/types";
 import {
-    ar1WhitenSeries,
+    ar1WhitenSeriesUnscaled,
     correlationForSegment,
-    preprocessSeries,
     toNumericSeries,
 } from "./series";
 import {
@@ -17,7 +16,11 @@ import {
     firstFixedYearFromLastMovedYear,
     getAutomaticPartialShiftCandidates,
 } from "./partialMoveSemantics";
-import { scoreFullIntervalShiftEvidence } from "./fullIntervalUnitEditEvidence";
+import {
+    createFullIntervalShiftEvidenceContext,
+    scoreFullIntervalShiftDifferenceEvidence,
+    scoreFullIntervalShiftEvidence,
+} from "./fullIntervalUnitEditEvidence";
 import type {
     DiagnosisConfidence,
     DiagnosisEvent,
@@ -170,7 +173,9 @@ const firstDifferences = (series: NumericSeries): NumericSeries => {
         const [previousYear, previousValue] = entries[index - 1];
         if (year === previousYear + 1) result.set(year, value - previousValue);
     }
-    return preprocessSeries(result);
+    // Pearson correlation is invariant to affine scaling, so global z-scoring here only repeats
+    // O(years) work for every virtual edit without changing any vote.
+    return result;
 };
 
 const mean = (values: number[]): number => (
@@ -262,13 +267,29 @@ const makeReferenceSet = (
     };
 };
 
+const votingContextCache = new WeakMap<
+    SeriesCoreDiagnosis,
+    WeakMap<RwlSiteData, VotingContext>
+>();
+
 const buildContext = (
     diagnosis: SeriesCoreDiagnosis,
     siteData: RwlSiteData,
-): VotingContext => ({
-    difference: makeReferenceSet(diagnosis, siteData, firstDifferences),
-    whitened: makeReferenceSet(diagnosis, siteData, ar1WhitenSeries),
-});
+): VotingContext => {
+    let bySite = votingContextCache.get(diagnosis);
+    if (!bySite) {
+        bySite = new WeakMap();
+        votingContextCache.set(diagnosis, bySite);
+    }
+    const cached = bySite.get(siteData);
+    if (cached) return cached;
+    const context = {
+        difference: makeReferenceSet(diagnosis, siteData, firstDifferences),
+        whitened: makeReferenceSet(diagnosis, siteData, ar1WhitenSeriesUnscaled),
+    };
+    bySite.set(siteData, context);
+    return context;
+};
 
 const simulateInsert = (series: NumericSeries, year: number): NumericSeries => {
     const result = new Map<number, number>();
@@ -333,7 +354,7 @@ const scanFalse = (
         simulateDelete(diagnosis.rawTarget, year),
         diagnosis,
         context.whitened,
-        ar1WhitenSeries,
+        ar1WhitenSeriesUnscaled,
         median,
         context.whitened.baselineMedian,
     ),
@@ -351,13 +372,19 @@ const scanPartial = (
             diagnosis.targetRange.endYear - diagnosis.targetRange.startYear + 1,
         minimumSideYears: 20,
     });
+    const referenceContexts = context.difference.rawReferences.map((reference) => ({
+        reference,
+        evidence: createFullIntervalShiftEvidenceContext(diagnosis, reference),
+    }));
     return shifts.flatMap((shiftYears) => {
-        const byReference = context.difference.rawReferences.map((reference) => (
-            new Map(scoreFullIntervalShiftEvidence(
+        const byReference = referenceContexts.map(({ reference, evidence }) => (
+            new Map(scoreFullIntervalShiftDifferenceEvidence(
                 diagnosis,
                 shiftYears,
                 20,
                 reference,
+                0,
+                evidence,
             ).map((row) => [row.year, row.differenceCorrelation]))
         ));
         return candidateYears(diagnosis, 20).map((lastMovedYear) => {

@@ -71,9 +71,9 @@ const preprocessTree = (
  * 使段级 lag/缺轮区域检测更锐利（实测真实缺轮 top5 0.70→0.80）。比固定系数=1 的一阶差分更温和。
  * 仅在相邻年（无缺口）处取残差。用作**无 COFECHA 输出时的缺轮召回兜底预处理**（COFECHA 优先）。
  */
-export const ar1WhitenSeries = (series: NumericSeries): NumericSeries => {
+export const ar1WhitenSeriesUnscaled = (series: NumericSeries): NumericSeries => {
     const sorted = Array.from(series.entries()).sort((a, b) => a[0] - b[0]);
-    if (sorted.length < 4) return zScoreSeries(series);
+    if (sorted.length < 4) return new Map(series);
     const vals = sorted.map((e) => e[1]);
     const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
     let num = 0;
@@ -92,8 +92,12 @@ export const ar1WhitenSeries = (series: NumericSeries): NumericSeries => {
             resid.set(year, value - phi * sorted[i - 1][1]);
         }
     }
-    return resid.size >= 3 ? zScoreSeries(resid) : zScoreSeries(series);
+    return resid.size >= 3 ? resid : new Map(series);
 };
+
+export const ar1WhitenSeries = (series: NumericSeries): NumericSeries => (
+    zScoreSeries(ar1WhitenSeriesUnscaled(series))
+);
 
 export const getRangeForSeries = (series: NumericSeries): YearRange | null => {
     const years = Array.from(series.keys()).sort((a, b) => a - b);
