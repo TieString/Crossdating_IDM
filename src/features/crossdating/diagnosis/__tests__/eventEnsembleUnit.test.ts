@@ -25,6 +25,7 @@ import {
     recoverAggregatePartialUnitFrontier,
     recoverStableBoundedLagPathFrontier,
     selectDirectTerminalUnitBeforeDerivedStablePartial,
+    selectDistantSequentialMissingFrontier,
     selectAggregateAnchoredRegularizedPartialFrontier,
     selectOperationAnchoredRegularizedAggregatePartialFrontier,
     selectCandidateAnchoredStableBoundedLagPathFrontier,
@@ -211,6 +212,138 @@ describe("calibratedTerminalUnitStaircaseWindowWidth", () => {
         expect(calibratedTerminalUnitStaircaseWindowWidth(frontier(4, 0.96, 1.1))).toBe(13);
         expect(calibratedTerminalUnitStaircaseWindowWidth(frontier(4, 0.94, 1.1))).toBe(9);
         expect(calibratedTerminalUnitStaircaseWindowWidth(frontier(4, 0.96, 1.2))).toBe(9);
+    });
+});
+
+describe("selectDistantSequentialMissingFrontier", () => {
+    const missingStep = (
+        year: number,
+        lagBefore: number,
+        lagAfter: number,
+    ): DiagnosisEvent => {
+        const event = falseRingEvent(year - 3, true);
+        event.id = `missing-${year}-${lagBefore}-${lagAfter}`;
+        event.eventType = "missingRing";
+        event.startYear = year - 3;
+        event.endYear = year + 3;
+        event.rankedYears = [{ year, rank: 1, score: 4, evidenceTags: [] }];
+        event.evidence.score = 4;
+        event.evidence.samplePairs = 40;
+        event.evidence.lagBefore = lagBefore;
+        event.evidence.lagAfter = lagAfter;
+        event.evidence.algorithmSources = [
+            "joint_event_counterfactual",
+            "piecewise_lag_path",
+        ];
+        return event;
+    };
+
+    it("selects the bark-side unit from a well-separated -2 to zero chain", () => {
+        const selected = selectDistantSequentialMissingFrontier([
+            missingStep(1902, -2, -1),
+            missingStep(1977, -1, 0),
+        ], [], [-2], 2002, null);
+
+        expect(selected).toMatchObject({
+            eventType: "missingRing",
+            startYear: 1974,
+            endYear: 1980,
+            rankedYears: [{ year: 1977, rank: 1 }],
+        });
+        expect(selected?.evidence.algorithmSources)
+            .toContain("cumulative_sequential_missing_staircase");
+    });
+
+    it("allows a path-fixed missing alias but preserves a matching whole baseline", () => {
+        const events = [
+            missingStep(1902, -2, -1),
+            missingStep(1977, -1, 0),
+        ];
+        const alias = wholeSeriesEvent(-1);
+        alias.evidence.notes = [
+            "path_fixed_side_event_type=missingRing",
+            "whole_state_global_lag_matches_shift=false",
+        ];
+        const whole = wholeSeriesEvent(-2);
+        whole.evidence.notes = ["whole_state_global_lag_matches_shift=true"];
+
+        expect(selectDistantSequentialMissingFrontier(
+            events,
+            [],
+            [-2],
+            2002,
+            alias,
+        )?.rankedYears[0]?.year).toBe(1977);
+        expect(selectDistantSequentialMissingFrontier(
+            events,
+            [],
+            [-2],
+            2002,
+            whole,
+        )).toBeNull();
+    });
+
+    it("does not promote a bark-near or incomplete unit chain", () => {
+        const predecessor = missingStep(1902, -2, -1);
+        const barkNear = missingStep(1990, -1, 0);
+        const distant = missingStep(1977, -1, 0);
+
+        expect(selectDistantSequentialMissingFrontier(
+            [predecessor, barkNear],
+            [],
+            [-2],
+            2002,
+            null,
+        )).toBeNull();
+        expect(selectDistantSequentialMissingFrontier(
+            [distant],
+            [],
+            [-2],
+            2002,
+            null,
+        )).toBeNull();
+    });
+
+    it("recovers the chain from strong raw path transitions after fusion collapses it", () => {
+        const frontier = missingStep(1976, -1, 0);
+        const predecessor = missingStep(1902, -2, -1);
+        [frontier, predecessor].forEach((event) => {
+            event.evidence.algorithmSources = ["piecewise_lag_path"];
+            event.evidence.score = 8;
+            event.evidence.samplePairs = 74;
+        });
+        frontier.evidence.notes = [
+            "nominal_boundary_year=1977",
+            "profile_boundary_year=1977",
+        ];
+        frontier.rankedYears.push({
+            year: 1977,
+            rank: 2,
+            score: 3.5,
+            evidenceTags: ["piecewise_lag_path"],
+        });
+        const alias = wholeSeriesEvent(-1);
+        alias.evidence.notes = [
+            "path_fixed_side_event_type=missingRing",
+            "whole_state_global_lag_matches_shift=false",
+        ];
+
+        const selected = selectDistantSequentialMissingFrontier(
+            [alias],
+            [frontier, predecessor],
+            [-2],
+            2002,
+            alias,
+        );
+
+        expect(selected).toMatchObject({
+            eventType: "missingRing",
+            startYear: 1973,
+            endYear: 1979,
+        });
+        expect(selected?.rankedYears[0]).toMatchObject({ year: 1977, rank: 1 });
+        expect(selected?.evidence.algorithmSources)
+            .toContain("raw_piecewise_sequential_missing_chain");
     });
 });
 

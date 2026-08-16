@@ -366,11 +366,12 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
         expect(events[0].endYear, context).toBeGreaterThanOrEqual(1932);
     }, 180_000);
 
-    bundledCofechaIt("keeps distant mon031 and mon032 missing frontiers after save", () => {
+    bundledCofechaIt("keeps distant missing frontiers ahead of whole aliases after save", () => {
         const cases = [
             { seriesId: "mon031", truthYears: [1977] },
             { seriesId: "mon032", truthYears: [1977] },
             { seriesId: "mon032", truthYears: [1977, 1902] },
+            { seriesId: "mtr642", truthYears: [1977, 1902] },
         ];
         const results = cases.flatMap(({ seriesId, truthYears }, caseIndex) => {
             const series = parsed.get(seriesId)!;

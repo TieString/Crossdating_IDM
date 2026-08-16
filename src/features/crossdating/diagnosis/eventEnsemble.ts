@@ -6314,6 +6314,147 @@ export const selectDirectTerminalUnitBeforeDerivedStablePartial = (
     };
 };
 
+/**
+ * Keeps the newest independently located unit step ahead of a false aggregate move. This is
+ * deliberately limited to a completed, well-separated -2 -> -1 -> 0 chain: a real constant
+ * whole lag remains authoritative, while a path-fixed whole alias may be decomposed one step at
+ * a time.
+ */
+export const selectDistantSequentialMissingFrontier = (
+    events: readonly DiagnosisEvent[],
+    rawPathEvents: readonly DiagnosisEvent[],
+    cumulativeDepths: readonly number[],
+    targetEndYear: number,
+    competingWhole: DiagnosisEvent | null,
+    maximumBarkAmbiguityDistanceYears = 15,
+    minimumEventSeparationYears = 14,
+): DiagnosisEvent | null => {
+    if (!cumulativeDepths.some((depth) => depth <= -2)) return null;
+    if (competingWhole) {
+        const notes = new Set(competingWhole.evidence.notes);
+        const isMissingDerivedAlias = notes.has("path_fixed_side_event_type=missingRing")
+            && notes.has("whole_state_global_lag_matches_shift=false");
+        if (!isMissingDerivedAlias) return null;
+    }
+    const isExactMissingStep = (event: DiagnosisEvent): boolean => (
+        event.eventType === "missingRing"
+        && event.evidence.lagBefore !== null
+        && event.evidence.lagAfter !== null
+        && event.evidence.lagAfter - event.evidence.lagBefore === 1
+    );
+    const isIndependentMissingStep = (event: DiagnosisEvent): boolean => {
+        const sources = new Set(event.evidence.algorithmSources);
+        return isExactMissingStep(event)
+            && sources.has("joint_event_counterfactual")
+            && sources.has("piecewise_lag_path")
+            && event.evidence.score >= 3
+            && event.evidence.samplePairs >= 30;
+    };
+    const isStrongRawPathMissingStep = (event: DiagnosisEvent): boolean => (
+        isExactMissingStep(event)
+        && event.evidence.algorithmSources.includes("piecewise_lag_path")
+        && event.evidence.score >= 6
+        && event.evidence.samplePairs >= 50
+    );
+    const findChain = (
+        steps: readonly DiagnosisEvent[],
+    ): { frontier: DiagnosisEvent; predecessor: DiagnosisEvent } | null => {
+        const frontier = steps
+            .filter((event) => (
+                event.evidence.lagBefore === -1
+                && event.evidence.lagAfter === 0
+                && targetEndYear - rankedEventYear(event)
+                    > maximumBarkAmbiguityDistanceYears
+            ))
+            .sort((left, right) => (
+                rankedEventYear(right) - rankedEventYear(left)
+                || right.evidence.score - left.evidence.score
+            ))[0];
+        if (!frontier) return null;
+        const frontierYear = rankedEventYear(frontier);
+        const predecessor = steps
+            .filter((event) => (
+                event.evidence.lagBefore === -2
+                && event.evidence.lagAfter === -1
+                && frontierYear - rankedEventYear(event) >= minimumEventSeparationYears
+            ))
+            .sort((left, right) => (
+                rankedEventYear(right) - rankedEventYear(left)
+                || right.evidence.score - left.evidence.score
+            ))[0];
+        return predecessor ? { frontier, predecessor } : null;
+    };
+    const independentlyLocatedChain = findChain(events.filter(isIndependentMissingStep));
+    const rawPathChain = independentlyLocatedChain === null
+        ? findChain(rawPathEvents.filter(isStrongRawPathMissingStep))
+        : null;
+    const selectedChain = independentlyLocatedChain ?? rawPathChain;
+    if (!selectedChain) return null;
+    const { frontier, predecessor } = selectedChain;
+    const rankedFrontierYear = rankedEventYear(frontier);
+    const nominalBoundaryYear = rawPathChain
+        ? noteYear(frontier, "nominal_boundary_year=")
+        : null;
+    const profileBoundaryYear = rawPathChain
+        ? noteYear(frontier, "profile_boundary_year=")
+        : null;
+    const frontierYear = nominalBoundaryYear !== null
+        && nominalBoundaryYear === profileBoundaryYear
+        && nominalBoundaryYear >= frontier.startYear
+        && nominalBoundaryYear <= frontier.endYear
+        && Math.abs(nominalBoundaryYear - rankedFrontierYear) <= 2
+        ? nominalBoundaryYear
+        : rankedFrontierYear;
+    const maximumRankScore = Math.max(
+        0,
+        ...frontier.rankedYears.map((row) => row.score),
+    );
+    const rankedYears = frontierYear === rankedFrontierYear
+        ? frontier.rankedYears
+        : frontier.rankedYears.map((row) => ({
+            ...row,
+            score: row.year === frontierYear
+                ? maximumRankScore + Math.max(1e-9, Math.abs(maximumRankScore) * 1e-12)
+                : row.score,
+            evidenceTags: Array.from(new Set([
+                ...row.evidenceTags,
+                ...(row.year === frontierYear
+                    ? ["raw_path_terminal_boundary_consensus"]
+                    : []),
+            ])).sort(),
+        })).sort((left, right) => (
+            right.score - left.score || right.year - left.year
+        )).map((row, index) => ({ ...row, rank: index + 1 }));
+    const chainSource = independentlyLocatedChain
+        ? "independent_counterfactual_path_chain"
+        : "raw_piecewise_path_chain";
+
+    return {
+        ...frontier,
+        id: `${frontier.id}-distant-sequential-missing-frontier`,
+        rankedYears,
+        alternativeTypes: [],
+        locationAlternatives: undefined,
+        operationAlternatives: undefined,
+        evidence: {
+            ...frontier.evidence,
+            algorithmSources: Array.from(new Set([
+                ...frontier.evidence.algorithmSources,
+                "cumulative_sequential_missing_staircase",
+                ...(rawPathChain ? ["raw_piecewise_sequential_missing_chain"] : []),
+                "sequential_missing_staircase_head",
+            ])).sort(),
+            notes: Array.from(new Set([
+                ...frontier.evidence.notes,
+                `distant_sequential_predecessor_year=${rankedEventYear(predecessor)}`,
+                `distant_sequential_frontier_year=${frontierYear}`,
+                `distant_sequential_minimum_separation=${minimumEventSeparationYears}`,
+                `distant_sequential_evidence_source=${chainSource}`,
+            ])),
+        },
+    };
+};
+
 export const selectCumulativeLagPathFrontier = (
     aggregate: DiagnosisEvent,
     pathEvents: readonly DiagnosisEvent[],
@@ -10554,6 +10695,28 @@ export const makeDiagnosisEvents = (
         const targetHasExplicitZero = Array.from(
             siteData.get(diagnosis.targetTree)?.values() ?? [],
         ).some((value) => value === 0);
+        const competingWhole = dominantWholeSeriesBaseline
+            ?? displayed.find((event) => event.eventType === "wholeSeriesMove")
+            ?? null;
+        const detectedDistantMissingFrontier = targetHasExplicitZero
+            ? selectDistantSequentialMissingFrontier(
+                detectedBeforeFusion,
+                passRawPathEvents.events,
+                cumulativeUnitCandidateDepths,
+                diagnosis.targetRange.endYear,
+                competingWhole,
+            )
+            : null;
+        if (detectedDistantMissingFrontier) {
+            return finalize(
+                [detectedDistantMissingFrontier],
+                retainDisplayedMissingHypothesesDuringSequentialRecovery(
+                    displayed,
+                    detectedDistantMissingFrontier,
+                ),
+                false,
+            );
+        }
         const mayHaveDistantCumulativeMissingFrontier = !targetHasExplicitZero
             && cumulativeUnitCandidateDepths.some((depth) => depth <= -2);
         const earlySequentialMissing = mayHaveDistantCumulativeMissingFrontier
