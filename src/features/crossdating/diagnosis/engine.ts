@@ -23,8 +23,6 @@ import {
 import { diagnoseSeriesCore, createSeriesSummary } from "./segments";
 import {
     makeArRecallInsertDrafts,
-    makeCofechaDrivenDrafts,
-    makeCofechaTerminalWholeDrafts,
     makeGlobalSlidingDrafts,
     makeIterativeEndpointMissingDrafts,
     makePatternDrafts,
@@ -33,7 +31,6 @@ import {
 import { makeBayesianRecallDrafts } from "./candidateRecallExpansion";
 import { evaluateDraft } from "./evaluation";
 import { makeDiagnosisEventsFromCandidates } from "./events";
-import { parseCofechaHints } from "./cofechaHints";
 import {
     INTERNAL_EVENT_ENSEMBLE_OPTIONS,
     makeDiagnosisEvents,
@@ -96,7 +93,6 @@ export function diagnoseCrossdating(
 ): CrossdatingDiagnosis {
     const config = getConfig(options);
     const preprocessCache = createSeriesPreprocessCache();
-    const cofechaHints = options.cofechaText ? parseCofechaHints(options.cofechaText) : null;
     const treeCodes = options.targetTrees === undefined
         ? Array.from(siteData.keys())
         : Array.from(new Set(options.targetTrees)).filter((tree) => siteData.has(tree));
@@ -114,21 +110,19 @@ export function diagnoseCrossdating(
     const globalSlidingMatches = seriesDiagnoses.map((diagnosis) => diagnosis.globalSlidingMatch);
     const candidateDrafts = seriesDiagnoses.flatMap((diagnosis) => [
         ...makeGlobalSlidingDrafts(diagnosis),
-        ...makeCofechaTerminalWholeDrafts(diagnosis, config, cofechaHints),
         ...makePatternDrafts(diagnosis, config),
         ...makeSegmentDrafts(diagnosis, config),
-        // COFECHA [A] 段级 lag 表驱动候选（仅在用户提供 cofechaText 时生效）：用 COFECHA 干净的段级定年
-        // 确定缺/伪轮区域与类型，解决内部分段在弱相关区检测不到真区域的召回问题。无 COFECHA 时不影响。
-        ...makeCofechaDrivenDrafts(diagnosis, config, cofechaHints),
+        // COFECHA output may gate which series needs review, but its 50-year [A] lag table does
+        // not submit or score operations. Operation, shift and location stay internal decisions.
         // AR 预白化兜底（默认关闭，见 config.arRecallFallback；仅在无 COFECHA 输出且显式开启时）：
         // 去自相关、锐化缺轮区域检测，补充缺轮(INSERT)召回候选，仍交回 z-score evaluation 排序。
-        ...(CrossdateConfig.arRecallFallback.enabled && !cofechaHints
+        ...(CrossdateConfig.arRecallFallback.enabled
             ? makeArRecallInsertDrafts(siteData, diagnosis, config)
             : []),
         // COFECHA-like 贝叶斯段级 lag 路径召回扩展（默认关闭，见 config.bayesian.enableRecallInjection）：
         // 经实测并入候选池会稀释 ±1 精排并引入 clean 假阳性，故默认不并入；模块保留并单元测试。
         ...(CrossdateConfig.bayesian.enableRecallInjection
-            ? makeBayesianRecallDrafts(diagnosis, config, cofechaHints).drafts
+            ? makeBayesianRecallDrafts(diagnosis, config, null).drafts
             : []),
     ]);
     const evaluatedCandidates = dedupeDiagnosisCandidates(
@@ -136,7 +130,7 @@ export function diagnoseCrossdating(
             .map((draft) => {
                 const before = seriesDiagnoses.find((diagnosis) => diagnosis.targetTree === draft.targetTree);
                 return before
-                    ? evaluateDraft(siteData, before, draft, config, cofechaHints, preprocessCache)
+                    ? evaluateDraft(siteData, before, draft, config, null, preprocessCache)
                     : null;
             })
             .filter((candidate): candidate is DiagnosisCandidateOperation => candidate !== null)
@@ -164,37 +158,33 @@ export function diagnoseCrossdating(
             config.maxTopCandidates,
         ).sort(compareDiagnosisCandidates))
         .sort(compareDiagnosisCandidates);
-    // 每次只建议最近的一处编辑：仅当同序列确有**多处“强”编辑建议**（分处于多个区域）时，
-    // 才只保留最新（最靠树皮）那一处、隐藏更早的——处理它并重新诊断后，下一处会自然浮现（逐个向树心）。
-    // 只在有 COFECHA 输出时生效：COFECHA 驱动的候选会紧密聚在 flagged 小窗内（~7 年），多个窗=多处真实编辑；
-    // 无 COFECHA 时候选过于零散、不可靠，不做收窄以免误删单处编辑的真值。
+    // 每次只建议最近的一处编辑：仅当内部诊断在多个分离区域形成高置信单位事件时，
+    // 才保留最靠树皮的一处。该规则不依赖是否附带 COFECHA OUT，避免保存改变建议语义。
     const editCutoffByTree = new Map<string, number>();
-    if (cofechaHints) {
-        const acceptanceThreshold = CrossdateConfig.evaluationV2.acceptanceThreshold;
-        const strongEditYearsByTree = new Map<string, number[]>();
-        rankedCandidates.forEach((candidate) => {
-            if (candidate.targetYear === undefined) return;
-            if (candidate.operationType !== "INSERT_MISSING_RING" && candidate.operationType !== "DELETE_FALSE_RING") return;
-            // 仅“高置信”的编辑才算作一处真实编辑区域，避免单处编辑旁的杂散强候选被误判成第二处而误删真值。
-            if (candidate.score < acceptanceThreshold || candidate.ambiguous || candidate.confidenceLevel !== "high") return;
-            const years = strongEditYearsByTree.get(candidate.targetTree) ?? [];
-            years.push(candidate.targetYear);
-            strongEditYearsByTree.set(candidate.targetTree, years);
+    const acceptanceThreshold = CrossdateConfig.evaluationV2.acceptanceThreshold;
+    const strongEditYearsByTree = new Map<string, number[]>();
+    rankedCandidates.forEach((candidate) => {
+        if (candidate.targetYear === undefined) return;
+        if (candidate.operationType !== "INSERT_MISSING_RING" && candidate.operationType !== "DELETE_FALSE_RING") return;
+        // 仅“高置信”的编辑才算作一处真实编辑区域，避免单处编辑旁的杂散强候选被误判成第二处而误删真值。
+        if (candidate.score < acceptanceThreshold || candidate.ambiguous || candidate.confidenceLevel !== "high") return;
+        const years = strongEditYearsByTree.get(candidate.targetTree) ?? [];
+        years.push(candidate.targetYear);
+        strongEditYearsByTree.set(candidate.targetTree, years);
+    });
+    strongEditYearsByTree.forEach((years, tree) => {
+        const sorted = Array.from(new Set(years)).sort((a, b) => b - a); // 新→老
+        const regions: number[][] = [];
+        sorted.forEach((year) => {
+            const last = regions[regions.length - 1];
+            if (last && Math.abs(last[last.length - 1] - year) <= CrossdateConfig.suggestedRangeMaxWidth) last.push(year);
+            else regions.push([year]);
         });
-        strongEditYearsByTree.forEach((years, tree) => {
-            const sorted = Array.from(new Set(years)).sort((a, b) => b - a); // 新→老
-            const regions: number[][] = [];
-            sorted.forEach((year) => {
-                const last = regions[regions.length - 1];
-                if (last && Math.abs(last[last.length - 1] - year) <= CrossdateConfig.suggestedRangeMaxWidth) last.push(year);
-                else regions.push([year]);
-            });
-            if (regions.length < 2) return; // 只有一处强编辑：保持原样，不隐藏（避免单处编辑被杂散候选误删真值）
-            // 确有多处强编辑：只保留最新那一处及其窗口，隐藏更早处（处理后复诊会浮现下一处）。
-            const cutoff = Math.min(...regions[0]) - CrossdateConfig.suggestedRangeMaxWidth;
-            editCutoffByTree.set(tree, cutoff);
-        });
-    }
+        if (regions.length < 2) return; // 只有一处强编辑：保持原样，不隐藏（避免单处编辑被杂散候选误删真值）
+        // 确有多处强编辑：只保留最新那一处及其窗口，隐藏更早处（处理后复诊会浮现下一处）。
+        const cutoff = Math.min(...regions[0]) - CrossdateConfig.suggestedRangeMaxWidth;
+        editCutoffByTree.set(tree, cutoff);
+    });
     const candidates = rankedCandidates.filter((candidate) => {
         if (candidate.targetYear === undefined) return true;
         if (candidate.operationType !== "INSERT_MISSING_RING" && candidate.operationType !== "DELETE_FALSE_RING") return true;
@@ -212,7 +202,7 @@ export function diagnoseCrossdating(
                     diagnosis,
                     draft,
                     config,
-                    cofechaHints,
+                    null,
                     preprocessCache,
                 ))
                 .filter((candidate): candidate is DiagnosisCandidateOperation => (

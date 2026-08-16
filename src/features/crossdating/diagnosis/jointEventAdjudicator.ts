@@ -1307,6 +1307,7 @@ const retainFinalClaimAuthority = (
 
 const ENDPOINT_REVIEW_WIDTHS = new Set([5, 7, 9, 13]);
 const MAX_CANDIDATE_ENDPOINT_INTERPRETATION_DISTANCE_YEARS = 15;
+const MAX_WHOLE_MISSING_AMBIGUITY_DISTANCE_YEARS = 15;
 const ENDPOINT_MISSING_CLAIMS = new Set<DiagnosisEvidenceClaim>([
     "endpoint_unit_resolution",
     "fixed_side_resolution",
@@ -1990,22 +1991,28 @@ export const adjudicateJointEventHypotheses = (
     const endpointMissing = baseSelectedEvent
         ? selectEndpointMissingInterpretation(clusters, baseSelectedEvent)
         : null;
+    const endpointDistance = baseSelectedEvent && endpointMissing
+        ? baseSelectedEvent.endYear - endpointMissing.endYear
+        : null;
     const endpointResolvedEvent = baseSelectedEvent && endpointMissing && endpointWholeShift
-        ? attachEndpointWholeMissingInterpretation(
-            baseSelectedEvent,
-            endpointMissing,
-            {
-                wholeShiftYears: endpointWholeShift,
-                endpointDistanceYears: baseSelectedEvent.endYear - endpointMissing.endYear,
-                missingWindowWidth: (
-                    endpointMissing.endYear - endpointMissing.startYear + 1
-                ) as 5 | 7 | 9 | 13,
-                operationScoreMargin: operationMargin,
-                finalEvidenceClaims: [...evidenceClaimsFor(endpointMissing)]
-                    .filter((claim) => ENDPOINT_MISSING_CLAIMS.has(claim))
-                    .sort(),
-            },
-        )
+        ? endpointDistance !== null
+            && endpointDistance > MAX_WHOLE_MISSING_AMBIGUITY_DISTANCE_YEARS
+            ? endpointMissing
+            : attachEndpointWholeMissingInterpretation(
+                baseSelectedEvent,
+                endpointMissing,
+                {
+                    wholeShiftYears: endpointWholeShift,
+                    endpointDistanceYears: endpointDistance ?? 0,
+                    missingWindowWidth: (
+                        endpointMissing.endYear - endpointMissing.startYear + 1
+                    ) as 5 | 7 | 9 | 13,
+                    operationScoreMargin: operationMargin,
+                    finalEvidenceClaims: [...evidenceClaimsFor(endpointMissing)]
+                        .filter((claim) => ENDPOINT_MISSING_CLAIMS.has(claim))
+                        .sort(),
+                },
+            )
         : baseSelectedEvent;
     const evidenceLocatedEvent = endpointResolvedEvent
         ? projectUnsupportedLocationToStrongBoundedPath(endpointResolvedEvent)

@@ -1,10 +1,9 @@
 /**
- * 真实 COFECHA 输出驱动候选生成（集成测试）。
+ * COFECHA 输出解析与诊断隔离测试。
  *
  * 用仓库内真实 COFECHA 输出 笔记/数据/EBD/RAW.OUT（对应 EBD/RAW.rwl）验证：
- * 当提供 cofechaText 时，诊断流程用 [A] 段级 lag 表确定单位事件或负向局部移动，
- * 在 COFECHA flagged 的区域内产出对应类型的候选（algorithmSource 含 cofecha_segment_lag）。
- * 这是“参考 COFECHA 输出”能力的回归护栏。数据缺失则 skip。
+ * [A] 段仍可供报告展示和独立解析，但不得生成、评分或改写自动诊断操作。
+ * COFECHA master 与 pass 分类通过 referenceConfig 单独进入生产流程。数据缺失则 skip。
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -528,7 +527,7 @@ describe("path fixed-side whole baseline", () => {
     });
 });
 
-d("COFECHA [A] 驱动候选（EBD 真实输出）", () => {
+d("COFECHA [A] 解析与生产诊断隔离（EBD 真实输出）", () => {
     it("解析序列级 [A] 并定位最新 flagged 段", () => {
         const out = loadCofechaOut("EBD");
         expect(out).not.toBeNull();
@@ -542,44 +541,36 @@ d("COFECHA [A] 驱动候选（EBD 真实输出）", () => {
         expect(ebd031?.editType).toBe("insert");
     });
 
-    it("提供 cofechaText 时，flagged 序列产出区域内对应类型候选", () => {
+    it("提供 cofechaText 不生成段级候选，也不改变内部诊断结果", () => {
         const folder = loadDataFolder("EBD");
         const out = loadCofechaOut("EBD");
         if (!folder || !out) return;
         const site: RwlSiteData = new Map();
         folder.raw.forEach((series, id) => site.set(id, seriesToTreeData(series)));
-        const hints = parseCofechaHints(out);
-
+        const withoutCofecha = diagnoseCrossdating(site, { referenceConfig: null });
         const withCofecha = diagnoseCrossdating(site, { referenceConfig: null, cofechaText: out });
+        const candidateSignature = (diagnosis: typeof withCofecha) => diagnosis.candidates.map((candidate) => ({
+            targetTree: candidate.targetTree,
+            operationType: candidate.operationType,
+            targetYear: candidate.targetYear,
+            anchorYear: candidate.anchorYear,
+            deltaYears: candidate.deltaYears,
+            score: candidate.score,
+            algorithmSource: candidate.algorithmSource,
+        }));
+        const eventSignature = (diagnosis: typeof withCofecha) => diagnosis.events.map((event) => ({
+            seriesId: event.seriesId,
+            eventType: event.eventType,
+            startYear: event.startYear,
+            endYear: event.endYear,
+            shiftYears: event.shiftYears,
+            topYear: event.rankedYears[0]?.year,
+        }));
 
-        // 至少应有若干来自 COFECHA 段级 lag 的候选。
-        const cofechaCands = withCofecha.candidates.filter((c) => c.algorithmSource.includes("cofecha_segment_lag"));
-        expect(cofechaCands.length).toBeGreaterThan(0);
-
-        // 每个 COFECHA 驱动候选：单位 lag 映射缺/伪轮；负向大 lag 保留完整幅度并使用 firstFixedYear。
-        let inRegionMatched = 0;
-        cofechaCands.forEach((c) => {
-            const region = getNewestFlaggedCofechaSegment(hints, c.targetTree);
-            if (!region) return;
-            const typeOk = region.lag === 1
-                ? c.operationType === (
-                    region.editType === "insert"
-                        ? "INSERT_MISSING_RING"
-                        : "DELETE_FALSE_RING"
-                )
-                : region.editType === "insert"
-                    && c.operationType === "SHIFT_RANGE"
-                    && c.mode === "partialRangeMove"
-                    && c.deltaYears === -region.lag
-                    && c.selectedRange?.endYear === region.endYear;
-            const y = region.lag === 1
-                ? c.targetYear ?? -9999
-                : c.anchorYear;
-            const inRegion = y >= region.startYear - 5 && y <= region.endYear + Math.ceil(50 / 2) + 5;
-            if (typeOk && inRegion) inRegionMatched += 1;
-        });
-        // 绝大多数 COFECHA 驱动候选应类型正确且落在 flagged 区域内。
-        expect(inRegionMatched).toBeGreaterThan(0);
-        expect(inRegionMatched).toBeGreaterThanOrEqual(Math.ceil(cofechaCands.length * 0.7));
+        expect(withCofecha.candidates.some((candidate) => (
+            candidate.algorithmSource.includes("cofecha_segment_lag")
+        ))).toBe(false);
+        expect(candidateSignature(withCofecha)).toEqual(candidateSignature(withoutCofecha));
+        expect(eventSignature(withCofecha)).toEqual(eventSignature(withoutCofecha));
     });
 });

@@ -2429,6 +2429,32 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("promotes a reviewed missing frontier outside the bark ambiguity range", () => {
+        const whole = event("terminal-unit", "wholeSeriesMove", 1600, 2000, 0);
+        whole.shiftYears = -1;
+        whole.evidence.notes = [
+            "whole_baseline_source=bounded_constant_lag_path",
+            "bounded_path_fixed_side_observed=false",
+        ];
+        const frontier = event("distant-frontier", "missingRing", 1973, 1979, 1977);
+        frontier.evidence.lagBefore = -1;
+        frontier.evidence.lagAfter = 0;
+        frontier.evidence.algorithmSources = ["sequential_missing_staircase_head"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("detected", whole),
+            checkpoint("final", frontier),
+        ]);
+
+        expect(decision.event).toMatchObject({
+            id: "distant-frontier",
+            eventType: "missingRing",
+            startYear: 1973,
+            endYear: 1979,
+        });
+        expect(decision.event?.interpretationAmbiguity).toBeUndefined();
+    });
+
     it("exposes a hard-gated near-bark candidate as the missing-ring interpretation", () => {
         const whole = event("terminal-unit", "wholeSeriesMove", 1732, 1994, 0);
         whole.shiftYears = -1;

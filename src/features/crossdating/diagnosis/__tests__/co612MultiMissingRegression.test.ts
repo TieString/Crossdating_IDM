@@ -366,6 +366,134 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
         expect(events[0].endYear, context).toBeGreaterThanOrEqual(1932);
     }, 180_000);
 
+    bundledCofechaIt("keeps distant mon031 and mon032 missing frontiers after save", () => {
+        const cases = [
+            { seriesId: "mon031", truthYears: [1977] },
+            { seriesId: "mon032", truthYears: [1977] },
+            { seriesId: "mon032", truthYears: [1977, 1902] },
+        ];
+        const results = cases.flatMap(({ seriesId, truthYears }, caseIndex) => {
+            const series = parsed.get(seriesId)!;
+            const working = buildMultiMissingCorrupted(series.valuesByYear, truthYears);
+            const site = new Map(cleanSite);
+            site.set(seriesId, working);
+            const outText = runBundledCofecha(site);
+            const parts = splitReportByParts(outText);
+            const savedReference = createCofechaMasterReferenceConfig({
+                siteData: site,
+                flaggedAIds: extractPart6FlaggedASeriesIds(parts.get("PART 6") ?? ""),
+                cofechaRunId: `co612-distant-frontier-${caseIndex}`,
+                rwlHash: `co612-distant-frontier-${caseIndex}`,
+                masterDatingSeries: parseCofechaResult(outText).masterDatingSeries,
+            });
+            const diagnoses = [
+                {
+                    state: "before-save",
+                    diagnosis: diagnoseCrossdating(site, {
+                        referenceConfig,
+                        targetTrees: [seriesId],
+                        reviewWindowDisplayMode: "review",
+                        includeEventDecisionAudits: true,
+                    }),
+                },
+                {
+                    state: "after-save",
+                    diagnosis: diagnoseCrossdating(site, {
+                        referenceConfig: savedReference,
+                        targetTrees: [seriesId],
+                        cofechaText: outText,
+                        reviewWindowDisplayMode: "review",
+                        includeEventDecisionAudits: true,
+                    }),
+                },
+            ];
+            return diagnoses.map(({ state, diagnosis }) => {
+                const events = getDisplayedDiagnosisEvents(diagnosis).filter(
+                    (event) => event.seriesId === seriesId,
+                );
+                const event = events[0];
+                const audit = diagnosis.eventDecisionAudits?.find(
+                    (candidate) => candidate.seriesId === seriesId,
+                );
+                const summarizeAuditEvents = (
+                    rows: NonNullable<typeof audit>["detectedBeforeFusion"],
+                ) => (
+                    rows.map((row) => ({
+                        type: row.eventType,
+                        range: [row.startYear, row.endYear],
+                        topYear: row.topYear,
+                        shiftYears: row.shiftYears,
+                        lagBefore: row.lagBefore,
+                        lagAfter: row.lagAfter,
+                        score: row.score,
+                        sources: row.algorithmSources,
+                        notes: row.notes.filter((note) => (
+                            note.startsWith("whole_baseline_source=")
+                            || note.startsWith("path_fixed_side_")
+                            || note.startsWith("whole_state_")
+                            || note.startsWith("bounded_path_")
+                            || note.startsWith("event_order=")
+                        )),
+                    }))
+                );
+                return {
+                    seriesId,
+                    truthYears,
+                    state,
+                    events: events.map((row) => ({
+                        type: row.eventType,
+                        range: [row.startYear, row.endYear],
+                        topYear: row.rankedYears[0]?.year,
+                        shiftYears: row.shiftYears,
+                        lagBefore: row.evidence.lagBefore,
+                        lagAfter: row.evidence.lagAfter,
+                        score: row.evidence.score,
+                        sources: row.evidence.algorithmSources,
+                        notes: row.evidence.notes.filter((note) => (
+                            note.startsWith("whole_baseline_source=")
+                            || note.startsWith("path_fixed_side_")
+                            || note.startsWith("whole_state_")
+                            || note.startsWith("bounded_path_")
+                            || note.startsWith("event_order=")
+                        )),
+                    })),
+                    operationCorrect: events.length === 1
+                        && event?.eventType === "missingRing",
+                    frontierCovered: Boolean(
+                        event
+                        && event.startYear <= truthYears[0]
+                        && event.endYear >= truthYears[0]
+                    ),
+                    decisions: (diagnosis.reviewWindowDecisions ?? []).map((decision) => ({
+                        status: decision.status,
+                        reason: decision.reason,
+                        strictReason: decision.strictReason,
+                        sourceStage: decision.sourceStage,
+                    })),
+                    audit: audit ? {
+                        cofechaFlagged: audit.cofechaFlagged,
+                        candidateProjectedEvents: summarizeAuditEvents(
+                            audit.candidateProjectedEvents,
+                        ),
+                        detectedBeforeFusion: summarizeAuditEvents(audit.detectedBeforeFusion),
+                        detectedAfterFusion: summarizeAuditEvents(audit.detectedAfterFusion),
+                        retainedAfterEndpointGuard: summarizeAuditEvents(
+                            audit.retainedAfterEndpointGuard,
+                        ),
+                        displayedBeforeLocator: summarizeAuditEvents(audit.displayedBeforeLocator),
+                        finalEvents: summarizeAuditEvents(audit.finalEvents),
+                        terminalUnitStaircaseEvidence: audit.terminalUnitStaircaseEvidence,
+                    } : null,
+                };
+            });
+        });
+        const failures = results.filter((row) => (
+            !row.operationCorrect || !row.frontierCovered
+        ));
+
+        expect(failures, JSON.stringify(results)).toEqual([]);
+    }, 240_000);
+
     bundledCofechaIt("shows only the newest missing ring after fresh COFECHA", () => {
         const corrupted = buildMultiMissingCorrupted(
             target.valuesByYear,

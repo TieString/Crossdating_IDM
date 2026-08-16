@@ -10416,6 +10416,28 @@ export const makeDiagnosisEvents = (
             }
             return cachedSequentialFalse;
         };
+        let cachedSequentialMissing: SequentialMissingRecovery | null | undefined;
+        const getSequentialMissing = (): SequentialMissingRecovery | null => {
+            if (cachedSequentialMissing === undefined) {
+                const currentCofechaDiagnosis = getCofechaDiagnosis();
+                cachedSequentialMissing = mayRecoverSequentialMissing
+                    && currentCofechaDiagnosis
+                    ? recoverSequentialMissingHeadEvent(
+                            displayed,
+                            [...detectedBeforeFusion, ...stableUnitPathLocationCheckpoints],
+                            diagnosis,
+                            currentCofechaDiagnosis,
+                            siteData,
+                            candidates,
+                            candidateEvents,
+                            effectiveConfig,
+                            options,
+                            locatorPathCache,
+                        )
+                    : null;
+            }
+            return cachedSequentialMissing;
+        };
         if (unobservedFixedSideWholeBaseline
             && !completeUnitTransitionChainExplainsWholeShift(
                 passRawPathEvents.events,
@@ -10529,6 +10551,37 @@ export const makeDiagnosisEvents = (
                     - left.stateConsistency.supportFraction
                 || right.event.evidence.score - left.event.evidence.score
             ))[0]?.event ?? null;
+        const targetHasExplicitZero = Array.from(
+            siteData.get(diagnosis.targetTree)?.values() ?? [],
+        ).some((value) => value === 0);
+        const mayHaveDistantCumulativeMissingFrontier = !targetHasExplicitZero
+            && cumulativeUnitCandidateDepths.some((depth) => depth <= -2);
+        const earlySequentialMissing = mayHaveDistantCumulativeMissingFrontier
+            ? getSequentialMissing()
+            : null;
+        const sequentialFrontierYear = earlySequentialMissing
+            ? rankedEventYear(earlySequentialMissing.event)
+            : null;
+        const distantCumulativeMissingFrontier = earlySequentialMissing
+            && !earlySequentialMissing.preserveWholeBaseline
+            && earlySequentialMissing.event.eventType === "missingRing"
+            && sequentialFrontierYear !== null
+            && diagnosis.targetRange.endYear - sequentialFrontierYear >= 15
+            && earlySequentialMissing.event.evidence.algorithmSources.some((source) => (
+                source === "cumulative_sequential_missing_staircase"
+                || source === "marker_anchored_sequential_missing_staircase"
+                || source === "shared_explicit_zero_marker"
+            ));
+        if (distantCumulativeMissingFrontier) {
+            return finalize(
+                [earlySequentialMissing.event],
+                retainDisplayedMissingHypothesesDuringSequentialRecovery(
+                    displayed,
+                    earlySequentialMissing.event,
+                ),
+                false,
+            );
+        }
         if (dominantWholeSeriesBaseline && (
             stableBoundedPathFrontier
             || boundedPathEvents.length > 0
@@ -10812,20 +10865,7 @@ export const makeDiagnosisEvents = (
         if (cumulativePartialFrontier) {
             return finalize([cumulativePartialFrontier]);
         }
-        const sequentialMissing = mayRecoverSequentialMissing
-            ? recoverSequentialMissingHeadEvent(
-                displayed,
-                [...detectedBeforeFusion, ...stableUnitPathLocationCheckpoints],
-                diagnosis,
-                cofechaDiagnosis,
-                siteData,
-                candidates,
-                candidateEvents,
-                effectiveConfig,
-                options,
-                locatorPathCache,
-            )
-            : null;
+        const sequentialMissing = earlySequentialMissing ?? getSequentialMissing();
         // A directly validated positive unit staircase is the operation-direction authority.
         // Evaluate it before a deep aggregate missing path can claim the same serial frontier.
         const sequentialFalse = getSequentialFalse();
