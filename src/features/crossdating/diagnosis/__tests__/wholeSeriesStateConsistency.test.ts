@@ -9,6 +9,7 @@ import type {
 import {
     completeUnitTransitionChainExplainsWholeShift,
     measureWholeSeriesStateConsistency,
+    supportsCompleteWholeSeriesState,
     supportsDominantWholeSeriesBaseline,
     supportsNonTerminalWholeSeriesCandidate,
 } from "../wholeSeriesStateConsistency";
@@ -284,6 +285,7 @@ describe("whole-series state consistency", () => {
         expect(evidence.newestLag).toBe(0);
         expect(supportsNonTerminalWholeSeriesCandidate(evidence)).toBe(false);
         expect(supportsDominantWholeSeriesBaseline(evidence)).toBe(false);
+        expect(supportsCompleteWholeSeriesState(evidence)).toBe(false);
     });
 
     it("lets dominant whole-state evidence outrank a conflicting terminal label", () => {
@@ -341,6 +343,7 @@ describe("whole-series state consistency", () => {
         );
 
         expect(supportsDominantWholeSeriesBaseline(evidence)).toBe(true);
+        expect(supportsCompleteWholeSeriesState(evidence)).toBe(true);
     });
 
     it("accepts one noisy chronology edge when the remaining evidence is broad", () => {
@@ -362,6 +365,7 @@ describe("whole-series state consistency", () => {
 
         expect(evidence.supportFraction).toBe(0.75);
         expect(supportsDominantWholeSeriesBaseline(evidence)).toBe(false);
+        expect(supportsCompleteWholeSeriesState(evidence)).toBe(false);
     });
 
     it("rejects broad segment support when the global lag disagrees", () => {

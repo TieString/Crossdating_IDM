@@ -46,10 +46,10 @@ import {
     sameSeries,
 } from "./rdmFixture";
 
-const FIXTURE_PATH = process.env.CO612_RWL_PATH ?? "D:/软件测试/co612.rwl";
-const OUT_PATH = process.env.CO612_OUT_PATH ?? "D:/软件测试/co612.OUT";
 const NATURAL_FIXTURE_PATH =
     "D:/软件测试/数据/ITRDB/itrdb_download/measurements/northamerica/usa/co612.rwl";
+const FIXTURE_PATH = process.env.CO612_RWL_PATH ?? NATURAL_FIXTURE_PATH;
+const OUT_PATH = process.env.CO612_OUT_PATH ?? null;
 const TARGET_ID = "mon052";
 const COFECHA_EXE = fileURLToPath(new URL(
     "../../../../../src-tauri/bin/cofecha-x86_64-pc-windows-msvc.exe",
@@ -96,7 +96,9 @@ const fileSha256 = (path: string): string => createHash("sha256")
     .update(readFileSync(path))
     .digest("hex");
 
-const fixtureDescribe = existsSync(FIXTURE_PATH) && existsSync(OUT_PATH)
+const fixtureDescribe = process.platform === "win32"
+    && existsSync(COFECHA_EXE)
+    && existsSync(FIXTURE_PATH)
     ? describe
     : describe.skip;
 const bundledCofechaIt = process.platform === "win32" && existsSync(COFECHA_EXE)
@@ -133,7 +135,9 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
             new Map(series.valuesByYear),
         ]),
     );
-    const cleanOut = readFileSync(OUT_PATH, "utf8");
+    const cleanOut = OUT_PATH && existsSync(OUT_PATH)
+        ? readFileSync(OUT_PATH, "utf8")
+        : runBundledCofecha(cleanSite);
     const cleanParts = splitReportByParts(cleanOut);
     const referenceConfig = createCofechaMasterReferenceConfig({
         siteData: cleanSite,

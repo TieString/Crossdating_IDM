@@ -97,6 +97,14 @@ export const wholeSeriesStateConsistencyNotes = (
     `whole_state_global_lag_matches_shift=${evidence.globalLagMatchesShift}`,
 ];
 
+/** A genuine whole move has the same non-zero state at both chronology edges. */
+export const supportsCompleteWholeSeriesState = (
+    evidence: WholeSeriesStateConsistency,
+): boolean => evidence.globalLagMatchesShift
+    && evidence.supportFraction >= 0.9
+    && evidence.newerEdgeSupportFraction >= 0.9
+    && evidence.zeroSupportCount === 0;
+
 /**
  * Non-terminal whole candidates need either a stable newer-end state or broad independent
  * agreement with the global lag. Terminal COFECHA baselines are validated separately.

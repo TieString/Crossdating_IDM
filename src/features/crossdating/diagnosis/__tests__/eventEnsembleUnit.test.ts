@@ -38,7 +38,10 @@ import {
     selectCumulativeLagPathFrontier,
     selectStableBoundedLagPathFrontier,
     selectConservativeStableBoundedLagPathFrontier,
+    selectParsimoniousPartialOperationCheckpoint,
     selectRegularizedPartialOperationConsensus,
+    selectRegularizedPartialConsensusCheckpoint,
+    stableFrontierHasRepeatedOperationSupport,
     selectUnobservedFixedSideWholeLag,
     selectCandidateBackedCumulativeUnitFrontier,
     reconcileCumulativeUnitOperationWithCompletedLocation,
@@ -2535,6 +2538,51 @@ describe("hasCandidateBackedSequentialFalseDirection", () => {
             .toBe(true);
     });
 
+    it("keeps a production counterfactual false ring without a legacy joint source tag", () => {
+        const candidateBacked = falseRingEvent(1900, true);
+        candidateBacked.evidence.algorithmSources = [
+            "candidate_ranking",
+            "local_edit_alignment",
+            "segmented_diagnosis",
+            "piecewise_lag_path",
+        ];
+        candidateBacked.evidence.notes = ["counterfactual_candidate_support"];
+        candidateBacked.evidence.scoreMargin = 0.02;
+
+        expect(hasCandidateBackedSequentialFalseDirection([candidateBacked]))
+            .toBe(true);
+    });
+
+    it("keeps a hard-gated false operation when cumulative history distorts its lag-after state", () => {
+        const candidateBacked = falseRingEvent(1900, true);
+        candidateBacked.evidence.lagBefore = 1;
+        candidateBacked.evidence.lagAfter = -3;
+        candidateBacked.evidence.algorithmSources = [
+            "candidate_ranking",
+            "local_edit_alignment",
+            "segmented_diagnosis",
+        ];
+        candidateBacked.evidence.notes = ["candidate_hard_gate_passed"];
+
+        expect(hasCandidateBackedSequentialFalseDirection([candidateBacked]))
+            .toBe(true);
+    });
+
+    it("rejects a weak production false draft without margin or gain", () => {
+        const candidateBacked = falseRingEvent(1900, true);
+        candidateBacked.evidence.algorithmSources = [
+            "candidate_ranking",
+            "local_edit_alignment",
+            "segmented_diagnosis",
+        ];
+        candidateBacked.evidence.notes = ["counterfactual_candidate_support"];
+        candidateBacked.evidence.scoreMargin = 0.009;
+        candidateBacked.evidence.correlationGain = 0.039;
+
+        expect(hasCandidateBackedSequentialFalseDirection([candidateBacked]))
+            .toBe(false);
+    });
+
     it("rejects isolated joint and candidate aliases without cross-channel agreement", () => {
         const jointOnly = falseRingEvent(1900, false);
         jointOnly.evidence.algorithmSources.push("joint_event_counterfactual");
@@ -3296,6 +3344,136 @@ describe("selectCumulativePartialFrontier", () => {
             permissive,
             operation(-6, 1386),
         )).toBeNull();
+    });
+
+    it("uses a parsimonious operation checkpoint when no stable component exists", () => {
+        const strongerSingle = boundedPath([pathEvent(-20, -20, 0, 1823)]);
+        const regularizedSingle = boundedPath([pathEvent(-20, -20, 0, 1824)]);
+
+        const selected = selectParsimoniousPartialOperationCheckpoint(
+            strongerSingle,
+            regularizedSingle,
+            operation(-20, 1822),
+            [],
+            null,
+            { startYear: 1600, endYear: 2000 },
+        );
+
+        expect(selected).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -20,
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "parsimonious_partial_operation_checkpoint",
+                    "two_state_bounded_path_consensus",
+                ]),
+            },
+        });
+        expect(selected?.startYear).toBeLessThanOrEqual(1822);
+        expect(selected?.endYear).toBeGreaterThanOrEqual(1823);
+    });
+
+    it("does not collapse a repeated stable partial sequence into its cumulative shift", () => {
+        const repeated = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                pathEvent(-6, -12, -6, 1800),
+                pathEvent(-6, -6, 0, 1840),
+            ]),
+            boundedPath([
+                pathEvent(-6, -12, -6, 1801),
+                pathEvent(-6, -6, 0, 1841),
+            ]),
+        );
+
+        expect(stableFrontierHasRepeatedOperationSupport(repeated)).toBe(true);
+        expect(selectParsimoniousPartialOperationCheckpoint(
+            boundedPath([pathEvent(-12, -12, 0, 1820)]),
+            boundedPath([pathEvent(-12, -12, 0, 1821)]),
+            operation(-12, 1820),
+            [],
+            repeated,
+            { startYear: 1600, endYear: 2000 },
+        )).toBeNull();
+        expect(recoverStableBoundedLagPathFrontier(
+            repeated,
+            [],
+            [],
+            { startYear: 1600, endYear: 2000 },
+        )).toMatchObject({ eventType: "partialMove", shiftYears: -6 });
+    });
+
+    it("leaves compact unit aggregates and adjacent partial-plus-unit amplitudes to serial recovery", () => {
+        expect(selectParsimoniousPartialOperationCheckpoint(
+            boundedPath([pathEvent(-4, -4, 0, 1820)]),
+            boundedPath([pathEvent(-4, -4, 0, 1821)]),
+            operation(-4, 1820),
+            [],
+            null,
+            { startYear: 1600, endYear: 2000 },
+        )).toBeNull();
+
+        const olderMissing = {
+            ...pathEvent(-1, -21, -20, 1780),
+            eventType: "missingRing" as const,
+            shiftYears: undefined,
+            shiftSide: undefined,
+        };
+        const partialPlusUnit = selectStableBoundedLagPathFrontier(
+            boundedPath([olderMissing, pathEvent(-20, -20, 0, 1820)]),
+            boundedPath([{
+                ...olderMissing,
+                rankedYears: [{ year: 1781, rank: 1, score: 1, evidenceTags: [] }],
+            }, pathEvent(-20, -20, 0, 1821)]),
+        );
+        expect(selectParsimoniousPartialOperationCheckpoint(
+            boundedPath([pathEvent(-21, -21, 0, 1820)]),
+            boundedPath([pathEvent(-21, -21, 0, 1821)]),
+            operation(-21, 1820),
+            [],
+            partialPlusUnit,
+            { startYear: 1600, endYear: 2000 },
+        )).toBeNull();
+    });
+
+    it("lets regularized aggregate consensus replace only an irregular weak path", () => {
+        const irregular = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                pathEvent(-18, -20, -2, 1800),
+                pathEvent(-2, -2, 0, 1840),
+            ]),
+            boundedPath([
+                pathEvent(-18, -20, -2, 1801),
+                pathEvent(-2, -2, 0, 1841),
+            ]),
+        );
+        const consensus = partialMoveEvent(-20);
+        consensus.evidence.algorithmSources.push("regularized_partial_operation_consensus");
+
+        expect(selectRegularizedPartialConsensusCheckpoint(irregular, consensus))
+            .toMatchObject({
+                eventType: "partialMove",
+                shiftYears: -20,
+                evidence: {
+                    algorithmSources: expect.arrayContaining([
+                        "regularized_consensus_preempts_irregular_decomposition",
+                    ]),
+                },
+            });
+
+        const repeated = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                pathEvent(-6, -12, -6, 1800),
+                pathEvent(-6, -6, 0, 1840),
+            ]),
+            boundedPath([
+                pathEvent(-6, -12, -6, 1801),
+                pathEvent(-6, -6, 0, 1841),
+            ]),
+        );
+        expect(selectRegularizedPartialConsensusCheckpoint(repeated, {
+            ...consensus,
+            shiftYears: -12,
+        })).toBeNull();
     });
 
     it("keeps only multiscale-stable unit path locations as sequential checkpoints", () => {

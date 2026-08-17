@@ -121,6 +121,7 @@ import {
 import {
     completeUnitTransitionChainExplainsWholeShift,
     measureWholeSeriesStateConsistency,
+    supportsCompleteWholeSeriesState,
     supportsDominantWholeSeriesBaseline,
     supportsNonTerminalWholeSeriesCandidate,
     wholeSeriesStateConsistencyNotes,
@@ -5144,10 +5145,10 @@ export const hasCandidateBackedSequentialFalseDirection = (
     event.eventType === "falseRing"
     && event.evidence.lagBefore !== null
     && event.evidence.lagAfter !== null
-    && event.evidence.lagBefore === event.evidence.lagAfter + 1
     && (
         (
-            event.evidence.algorithmSources.includes("joint_event_counterfactual")
+            event.evidence.lagBefore === event.evidence.lagAfter + 1
+            && event.evidence.algorithmSources.includes("joint_event_counterfactual")
             && (
                 event.evidence.notes.includes("counterfactual_candidate_support")
                 || event.evidence.notes.includes("candidate_hard_gate_passed")
@@ -5160,6 +5161,27 @@ export const hasCandidateBackedSequentialFalseDirection = (
             event.evidence.notes.includes("candidate_hard_gate_passed")
             && event.evidence.algorithmSources.includes("candidate_ranking")
             && event.evidence.algorithmSources.includes("local_edit_alignment")
+            && event.evidence.algorithmSources.includes("segmented_diagnosis")
+            && (
+                event.evidence.lagBefore === event.evidence.lagAfter + 1
+                || (
+                    event.evidence.candidateIds.length > 0
+                    && event.evidence.lagBefore === 1
+                    && event.evidence.lagAfter <= 0
+                )
+            )
+        )
+        || (
+            event.evidence.lagBefore === event.evidence.lagAfter + 1
+            && event.evidence.candidateIds.length > 0
+            && event.evidence.notes.includes("counterfactual_candidate_support")
+            && event.evidence.algorithmSources.includes("candidate_ranking")
+            && event.evidence.algorithmSources.includes("local_edit_alignment")
+            && event.evidence.algorithmSources.includes("segmented_diagnosis")
+            && (
+                event.evidence.scoreMargin >= 0.01
+                || (event.evidence.correlationGain ?? 0) >= 0.04
+            )
         )
     )
 ));
@@ -5642,6 +5664,19 @@ export const selectStableBoundedLagPathFrontier = (
     };
 };
 
+/** Two regularizations agreeing on the same component is direct multi-event operation evidence. */
+export const stableFrontierHasRepeatedOperationSupport = (
+    frontier: StableBoundedLagPathFrontier | null,
+): boolean => {
+    if (!frontier) return false;
+    const selectedShift = lagPathTransitionShift(frontier.event);
+    if (selectedShift === null) return false;
+    return frontier.transitions.filter(({ event, shiftYears }) => (
+        event.eventType === frontier.event.eventType
+        && shiftYears === selectedShift
+    )).length >= 2;
+};
+
 /**
  * Uses the two more strongly regularized complete paths as an operation-family checkpoint.
  * Distant mixed events remain eligible; a dense path is accepted only when every transition is
@@ -5769,6 +5804,200 @@ export const selectRegularizedPartialOperationConsensus = (
                     stronger.shiftYears},${regularized.shiftYears},${candidate.shiftYears}`,
                 `regularized_partial_consensus_candidate_year=${candidateYear}`,
                 `regularized_partial_consensus_selected_year=${nearestYear}`,
+            ])),
+        },
+    };
+};
+
+/**
+ * Keeps a single partial operation when two parsimonious paths and the full counterfactual grid
+ * agree. A repeated component in the stable multi-event path wins instead, so this checkpoint
+ * cannot collapse a real sequence of equal partial moves into one cumulative operation.
+ */
+export const selectParsimoniousPartialOperationCheckpoint = (
+    strongerSinglePath: BoundedLagStateEventSet | null,
+    regularizedSinglePath: BoundedLagStateEventSet | null,
+    operation: JointCounterfactualOperationScore | null,
+    hypotheses: readonly DiagnosisEvent[],
+    competingFrontier: StableBoundedLagPathFrontier | null,
+    targetRange: { startYear: number; endYear: number },
+    _baselineLag = 0,
+    maximumYearDrift = 2,
+    maximumOperationDistance = 8,
+): DiagnosisEvent | null => {
+    if (!strongerSinglePath
+        || operation?.eventType !== "partialMove"
+        || !boundedLagPathHasObservedFixedSide(strongerSinglePath)
+        || strongerSinglePath.path.transitionGain < 8
+        || (regularizedSinglePath !== null
+            && !boundedLagPathHasObservedFixedSide(regularizedSinglePath))) return null;
+    const directPartial = (path: BoundedLagStateEventSet): ExactLagPathTransition | null => {
+        const transitions = exactLagPathTransitions(path.events, Number.NEGATIVE_INFINITY);
+        const transition = transitions.length === 1 ? transitions[0] : null;
+        return transition
+            && transition.event.eventType === "partialMove"
+            && transition.shiftYears === operation.shiftYears
+            ? transition
+            : null;
+    };
+    const stronger = directPartial(strongerSinglePath);
+    const regularized = regularizedSinglePath
+        ? directPartial(regularizedSinglePath)
+        : null;
+    if (!stronger) return null;
+    const regularizedAgrees = regularized !== null
+        && regularizedSinglePath!.path.transitionGain >= 8
+        && stronger.shiftYears === regularized.shiftYears
+        && stronger.event.evidence.lagAfter === regularized.event.evidence.lagAfter
+        && Math.abs(stronger.topYear - regularized.topYear) <= maximumYearDrift;
+    const localOperationSupport = hypotheses.some((event) => (
+        event.eventType === "partialMove"
+        && event.shiftYears === operation.shiftYears
+        && Math.abs(rankedEventYear(event) - stronger.topYear) <= maximumOperationDistance
+        && (
+            event.evidence.candidateIds.length > 0
+            || event.evidence.algorithmSources.includes("piecewise_lag_path")
+            || event.evidence.algorithmSources.includes("joint_year_operation_evidence")
+            || event.evidence.algorithmSources.includes("decisive_joint_operation_fusion")
+        )
+    ));
+    if (!regularizedAgrees && !localOperationSupport) return null;
+    const pathYear = regularizedAgrees
+        ? Math.round((stronger.topYear + regularized!.topYear) / 2)
+        : stronger.topYear;
+    if (Math.abs(pathYear - operation.bestYear) > maximumOperationDistance
+        || operation.bestYear > targetRange.endYear - 14) return null;
+    const competingShift = competingFrontier
+        ? lagPathTransitionShift(competingFrontier.event)
+        : null;
+    if ((!competingFrontier && Math.abs(operation.shiftYears) <= 4)
+        || (
+            competingFrontier?.event.eventType === "partialMove"
+            && competingShift !== null
+            && competingShift !== operation.shiftYears
+        )
+        || (
+            competingFrontier !== null
+            && (competingFrontier.event.eventType === "missingRing"
+                || competingFrontier.event.eventType === "falseRing")
+            && competingShift !== null
+            && Math.sign(competingShift) === Math.sign(operation.shiftYears)
+        )) return null;
+    if (competingFrontier
+        && competingShift !== operation.shiftYears
+        && stableFrontierHasRepeatedOperationSupport(competingFrontier)
+        && (
+            competingFrontier.event.eventType === "partialMove"
+            || (
+                competingFrontier.aggregateShiftYears !== 0
+                && Math.sign(lagPathTransitionShift(competingFrontier.event) ?? 0)
+                    === Math.sign(competingFrontier.aggregateShiftYears)
+            )
+        )) return null;
+    const centerYear = Math.round((pathYear + operation.bestYear) / 2);
+    const window = boundedSequentialWindow(centerYear, 13, targetRange);
+    const template = stronger.event;
+    const pathBaselineLag = stronger.event.evidence.lagAfter ?? 0;
+    const existingYears = new Map(template.rankedYears.map((row) => [row.year, row]));
+    const maximumScore = Math.max(0, ...template.rankedYears.map((row) => row.score));
+    const preferredYear = operation.bestYear >= window.startYear
+        && operation.bestYear <= window.endYear
+        ? operation.bestYear
+        : pathYear;
+    const rankedYears = Array.from(
+        { length: window.endYear - window.startYear + 1 },
+        (_, offset) => window.startYear + offset,
+    ).map((year) => {
+        const existing = existingYears.get(year);
+        return {
+            year,
+            score: year === preferredYear
+                ? maximumScore + Math.max(1e-9, Math.abs(maximumScore) * 1e-12)
+                : existing?.score ?? 0,
+            rank: 0,
+            evidenceTags: Array.from(new Set([
+                ...(existing?.evidenceTags ?? []),
+                "parsimonious_partial_operation_checkpoint",
+            ])),
+        };
+    }).sort((left, right) => (
+        right.score - left.score || right.year - left.year
+    )).map((row, index) => ({ ...row, rank: index + 1 }));
+    return {
+        ...template,
+        id: `${template.id}-parsimonious-operation-checkpoint`,
+        eventType: "partialMove",
+        shiftYears: operation.shiftYears,
+        shiftSide: "older",
+        ...window,
+        rankedYears,
+        confidenceLevel: template.confidenceLevel === "low" ? "medium" : template.confidenceLevel,
+        alternativeTypes: [],
+        locationAlternatives: undefined,
+        operationAlternatives: undefined,
+        evidence: {
+            ...template.evidence,
+            algorithmSources: Array.from(new Set([
+                ...template.evidence.algorithmSources,
+                "dynamic_joint_operation_consensus",
+                "parsimonious_partial_operation_checkpoint",
+                "two_state_bounded_path_consensus",
+            ])).sort(),
+            score: Math.min(
+                strongerSinglePath.path.transitionGain,
+                regularizedAgrees
+                    ? regularizedSinglePath!.path.transitionGain
+                    : strongerSinglePath.path.transitionGain,
+            ),
+            scoreMargin: Math.min(
+                strongerSinglePath.path.runnerUpMargin,
+                regularizedAgrees
+                    ? regularizedSinglePath!.path.runnerUpMargin
+                    : strongerSinglePath.path.runnerUpMargin,
+            ),
+            lagBefore: pathBaselineLag + operation.shiftYears,
+            lagAfter: pathBaselineLag,
+            notes: Array.from(new Set([
+                ...template.evidence.notes,
+                `parsimonious_partial_shift=${operation.shiftYears}`,
+                `parsimonious_partial_stronger_year=${stronger.topYear}`,
+                `parsimonious_partial_regularized_year=${
+                    regularizedAgrees ? regularized!.topYear : "unsupported"
+                }`,
+                `parsimonious_partial_operation_year=${operation.bestYear}`,
+                `parsimonious_partial_center_year=${centerYear}`,
+                `parsimonious_partial_local_support=${localOperationSupport}`,
+                "parsimonious_partial_preserves_repeated_components=true",
+            ])),
+        },
+    };
+};
+
+/** A three-channel aggregate consensus may replace only a weak, irregular partial decomposition. */
+export const selectRegularizedPartialConsensusCheckpoint = (
+    frontier: StableBoundedLagPathFrontier | null,
+    consensus: DiagnosisEvent | null,
+): DiagnosisEvent | null => {
+    if (!consensus || consensus.eventType !== "partialMove") return null;
+    if (!frontier) return consensus;
+    const frontierShift = lagPathTransitionShift(frontier.event);
+    if (frontier.event.eventType === "partialMove"
+        && frontierShift === consensus.shiftYears) return null;
+    if (!frontier.allTransitionsPartial
+        || frontier.aggregateShiftYears !== consensus.shiftYears
+        || stableFrontierHasRepeatedOperationSupport(frontier)) return null;
+    return {
+        ...consensus,
+        evidence: {
+            ...consensus.evidence,
+            algorithmSources: Array.from(new Set([
+                ...consensus.evidence.algorithmSources,
+                "regularized_consensus_preempts_irregular_decomposition",
+            ])).sort(),
+            notes: Array.from(new Set([
+                ...consensus.evidence.notes,
+                `irregular_decomposition_component_shift=${frontierShift}`,
+                `irregular_decomposition_aggregate_shift=${frontier.aggregateShiftYears}`,
             ])),
         },
     };
@@ -6131,6 +6360,8 @@ export const hasIndependentStableFrontierOperationSupport = (
     if (!pathFrontier
         || recoveredFrontier?.eventType !== "partialMove"
         || recoveredFrontier.shiftYears === undefined) return false;
+    if (pathFrontier.allTransitionsPartial
+        && stableFrontierHasRepeatedOperationSupport(pathFrontier)) return true;
     const frontierYear = rankedEventYear(recoveredFrontier);
     const hasLocalExactPartial = frontierYear !== null && hypotheses.some((event) => (
         event.eventType === "partialMove"
@@ -6245,6 +6476,7 @@ export const recoverStableBoundedLagPathFrontier = (
             ))[0] ?? null
         : null;
     const componentShift = structuralCalibration?.calibratedShift ?? pathComponentShift;
+    const repeatedStableComponentSupport = stableFrontierHasRepeatedOperationSupport(frontier);
     const componentHypotheses = [...displayed, ...candidateEvents];
     const matchingDisplayedComponent = componentHypotheses.find((event) => (
         event.eventType === frontierEvent.eventType
@@ -6336,6 +6568,7 @@ export const recoverStableBoundedLagPathFrontier = (
         && !matchingDisplayedWholeComponent
         && !matchingDisplayedWholeAggregate
         && !partialOperationSupported
+        && !repeatedStableComponentSupport
         && structuralCalibration === null) return null;
     const selectedPathEvent = aggregateOperationDominates
         ? exactDisplayedAggregate
@@ -9949,6 +10182,8 @@ export const makeDiagnosisEvents = (
         const globalTerminalStateConsistency = globalTerminalLag === 0
             ? null
             : measureWholeSeriesStateConsistency(diagnosis, globalTerminalLag);
+        const globallyCompleteWholeSeriesState = globalTerminalStateConsistency !== null
+            && supportsCompleteWholeSeriesState(globalTerminalStateConsistency);
         const globallySupportedTerminalLag = globalTerminalStateConsistency
             && supportsNonTerminalWholeSeriesCandidate(
                 globalTerminalStateConsistency,
@@ -9998,6 +10233,9 @@ export const makeDiagnosisEvents = (
             ));
         const boundedOperationSelection = selectDynamicJointOperation(boundedOperations);
         const boundedUnitSelection = selectDynamicUnitOperation(boundedOperations);
+        const localCompositionOperationSelection = selectDynamicJointOperation(
+            localCompositionOperations,
+        );
         const localCompositionUnitSelection = selectDynamicUnitOperation(
             localCompositionOperations,
         );
@@ -10508,6 +10746,56 @@ export const makeDiagnosisEvents = (
                 2,
             )
             : null;
+        const rawNearSinglePenaltyTwoPath = nearClusterProbeEligible
+            ? locateBoundedEvents(
+                false,
+                nearClusterLags,
+                stableTerminalLags,
+                2,
+                2,
+                false,
+                2,
+                18,
+            )
+            : null;
+        const rawNearSinglePenaltyOnePath = rawNearSinglePenaltyTwoPath
+            ? locateBoundedEvents(
+                false,
+                nearClusterLags,
+                stableTerminalLags,
+                1,
+                2,
+                false,
+                2,
+                18,
+            )
+            : null;
+        const rawZeroTerminalSinglePenaltyTwoPath = nearClusterProbeEligible
+            && terminalBaselineLag !== 0
+            && !globallyCompleteWholeSeriesState
+            ? locateBoundedEvents(
+                false,
+                nearClusterLags,
+                [0],
+                2,
+                2,
+                false,
+                2,
+                18,
+            )
+            : null;
+        const rawZeroTerminalSinglePenaltyOnePath = rawZeroTerminalSinglePenaltyTwoPath
+            ? locateBoundedEvents(
+                false,
+                nearClusterLags,
+                [0],
+                1,
+                2,
+                false,
+                2,
+                18,
+            )
+            : null;
         const stableNearLagCluster = selectStableNearLagCluster(
             rawNearPenaltyTwoPath,
             rawNearPenaltyOnePath,
@@ -10764,6 +11052,33 @@ export const makeDiagnosisEvents = (
             ))
             ? zeroTerminalWholeAliasFrontier
             : null;
+        const zeroTerminalFrontierYear = zeroTerminalWholeAliasFrontier
+            ? rankedEventYear(zeroTerminalWholeAliasFrontier.event)
+            : null;
+        const zeroTerminalLocalPartialFrontier = zeroTerminalWholeAliasFrontier
+            ?.event.eventType === "partialMove"
+            && zeroTerminalFrontierYear !== null
+            && zeroTerminalFrontierYear <= diagnosis.targetRange.endYear - 14
+            && boundedHypotheses.some((event) => (
+                event.eventType === "partialMove"
+                && event.shiftYears === zeroTerminalWholeAliasFrontier.event.shiftYears
+                && (
+                    event.startYear <= zeroTerminalWholeAliasFrontier.event.endYear
+                        && event.endYear >= zeroTerminalWholeAliasFrontier.event.startYear
+                    || Math.abs(rankedEventYear(event) - zeroTerminalFrontierYear) <= 8
+                )
+                && (
+                    event.evidence.candidateIds.length > 0
+                    || event.evidence.algorithmSources.includes(
+                        "joint_year_operation_evidence",
+                    )
+                    || event.evidence.algorithmSources.includes(
+                        "decisive_joint_operation_fusion",
+                    )
+                )
+            ))
+            ? zeroTerminalWholeAliasFrontier
+            : null;
         const rawPenaltyQuarterStablePath = needsStableMultiscaleBoundedPath
             && stableStrongFrontier === null
             ? locateBoundedEvents(
@@ -10801,6 +11116,7 @@ export const makeDiagnosisEvents = (
                 )
             : [];
         const stableMultiscaleBoundedFrontier = decomposedWholeAliasFrontier
+            ?? zeroTerminalLocalPartialFrontier
             ?? stableStrongFrontier
             ?? operationAnchoredRegularizedAggregate
             ?? aggregateAnchoredRegularizedPartialFrontier
@@ -10817,19 +11133,80 @@ export const makeDiagnosisEvents = (
                 ? weakUnitPulseFrontier
                 : null)
             ?? unflaggedUnitPulseFrontier;
-        const stableBoundedPathFrontier = recoverStableBoundedLagPathFrontier(
+        const parsimoniousPartialOperation = [
+            boundedOperationSelection,
+            localCompositionOperationSelection,
+        ].filter((selection): selection is NonNullable<typeof selection> => (
+            selection !== null
+            && selection.operation.eventType === "partialMove"
+            && selection.score >= 0.08
+            && selection.scoreMargin >= 0.05
+            && (selection.shiftScoreMargin ?? 0) >= 0.008
+        )).sort((left, right) => (
+            right.score - left.score
+            || right.scoreMargin - left.scoreMargin
+        ))[0]?.operation ?? trustedPartialOperation;
+        const zeroTerminalParsimoniousPartialCheckpoint =
+            selectParsimoniousPartialOperationCheckpoint(
+                rawZeroTerminalSinglePenaltyTwoPath,
+                rawZeroTerminalSinglePenaltyOnePath,
+                parsimoniousPartialOperation,
+                boundedHypotheses,
+                stableMultiscaleBoundedFrontier,
+                diagnosis.targetRange,
+                0,
+            );
+        const parsimoniousPartialOperationCheckpoint =
+            zeroTerminalParsimoniousPartialCheckpoint
+            ??
+            selectParsimoniousPartialOperationCheckpoint(
+                rawNearSinglePenaltyTwoPath,
+                rawNearSinglePenaltyOnePath,
+                parsimoniousPartialOperation,
+                boundedHypotheses,
+                stableMultiscaleBoundedFrontier,
+                diagnosis.targetRange,
+                terminalBaselineIsUnsupportedAlias ? 0 : terminalBaselineLag,
+            );
+        const regularizedPartialConsensusCheckpoint =
+            selectRegularizedPartialConsensusCheckpoint(
+                stableMultiscaleBoundedFrontier,
+                regularizedPartialOperationConsensus,
+            );
+        const terminalCompatibleParsimoniousPartialCheckpoint =
+            stableTerminalSequentialUnit === null
+                ? parsimoniousPartialOperationCheckpoint
+                : null;
+        const recoveredStableBoundedPathFrontier = recoverStableBoundedLagPathFrontier(
             stableMultiscaleBoundedFrontier,
             displayed,
             boundedOperations,
             diagnosis.targetRange,
             candidateEvents,
-        ) ?? regularizedPartialOperationConsensus;
+        );
+        const stableBoundedPathFrontier = regularizedPartialConsensusCheckpoint
+            ?? terminalCompatibleParsimoniousPartialCheckpoint
+            ?? recoveredStableBoundedPathFrontier
+            ?? regularizedPartialOperationConsensus;
         const stableFrontierHasIndependentOperationSupport =
             hasIndependentStableFrontierOperationSupport(
                 stableMultiscaleBoundedFrontier,
                 stableBoundedPathFrontier,
                 boundedHypotheses,
                 cumulativeUnitCandidateDepths,
+            );
+        const stablePartialPathOwnsOperation = stableBoundedPathFrontier?.eventType
+            === "partialMove"
+            && (
+                terminalCompatibleParsimoniousPartialCheckpoint !== null
+                || regularizedPartialConsensusCheckpoint !== null
+                || (
+                    stableMultiscaleBoundedFrontier?.allTransitionsPartial === true
+                    && stableFrontierHasRepeatedOperationSupport(
+                        stableMultiscaleBoundedFrontier,
+                    )
+                )
+                || stableFrontierHasIndependentOperationSupport
             );
         const decisiveExactPartialHypotheses = [
             ...boundedPathEvents,
@@ -11054,6 +11431,28 @@ export const makeDiagnosisEvents = (
                         finalAuthority: stablePathHasFinalAuthority,
                         independentOperationSupport:
                             stableFrontierHasIndependentOperationSupport,
+                        repeatedOperationSupport:
+                            stableFrontierHasRepeatedOperationSupport(
+                                stableMultiscaleBoundedFrontier,
+                            ),
+                        parsimoniousPartialCheckpoint:
+                            parsimoniousPartialOperationCheckpoint
+                                ? auditEvent(parsimoniousPartialOperationCheckpoint)
+                                : null,
+                        parsimoniousOperationSelection: parsimoniousPartialOperation ? {
+                            shiftYears: parsimoniousPartialOperation.shiftYears,
+                            bestYear: parsimoniousPartialOperation.bestYear,
+                        } : null,
+                        parsimoniousSinglePathProbes: {
+                            defaultStronger:
+                                rawNearSinglePenaltyTwoPath?.events.map(auditEvent) ?? [],
+                            defaultRegularized:
+                                rawNearSinglePenaltyOnePath?.events.map(auditEvent) ?? [],
+                            zeroTerminalStronger:
+                                rawZeroTerminalSinglePenaltyTwoPath?.events.map(auditEvent) ?? [],
+                            zeroTerminalRegularized:
+                                rawZeroTerminalSinglePenaltyOnePath?.events.map(auditEvent) ?? [],
+                        },
                         regularizedPartialConsensus:
                             regularizedPartialOperationConsensus
                                 ? auditEvent(regularizedPartialOperationConsensus)
@@ -11385,7 +11784,9 @@ export const makeDiagnosisEvents = (
             stableBoundedPathFrontier
             || boundedPathEvents.length > 0
             || stableTerminalSequentialUnit
-        )) {
+        )
+            && !terminalCompatibleParsimoniousPartialCheckpoint
+            && !stableFrontierHasIndependentOperationSupport) {
             // Establish the global coordinate frame before interpreting a cumulative terminal
             // staircase. The next diagnosis can localize the local step on that fixed baseline.
             return finalize([dominantWholeSeriesBaseline], [], false);
@@ -11434,7 +11835,7 @@ export const makeDiagnosisEvents = (
                 },
             } : null;
         };
-        if (stableTerminalSequentialUnit) {
+        if (stableTerminalSequentialUnit && !stablePartialPathOwnsOperation) {
             // The two regularizations and the independently estimated cumulative depth agree on
             // the complete signed unit suffix. Older path contamination cannot reverse this
             // newest operation or compress the staircase into one automatic range move.
@@ -11452,7 +11853,8 @@ export const makeDiagnosisEvents = (
         )
             ? getSequentialFalse()
             : null;
-        if (candidateAnchoredSequentialFalse?.evidence.algorithmSources.includes(
+        if (!stablePartialPathOwnsOperation
+            && candidateAnchoredSequentialFalse?.evidence.algorithmSources.includes(
             "candidate_anchored_positive_staircase",
         )) {
             // Resolve a candidate-depth positive staircase before an unrelated negative bounded
@@ -11474,7 +11876,9 @@ export const makeDiagnosisEvents = (
                 [...displayed, ...detectedBeforeFusion],
                 candidateEvents,
             );
-        if (directTerminalUnitFrontier && stablePathHasFinalAuthority) {
+        if (directTerminalUnitFrontier
+            && stablePathHasFinalAuthority
+            && !stablePartialPathOwnsOperation) {
             return finalize([directTerminalUnitFrontier], [], false);
         }
         const stableFrontierYear = stableBoundedPathFrontier

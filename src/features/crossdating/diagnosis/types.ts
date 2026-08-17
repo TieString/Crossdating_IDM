@@ -341,6 +341,18 @@ export type DiagnosisEventDecisionAudit = {
         aggregateShiftYears: number | null;
         finalAuthority: boolean;
         independentOperationSupport: boolean;
+        repeatedOperationSupport: boolean;
+        parsimoniousPartialCheckpoint: DiagnosisEventAuditSnapshot | null;
+        parsimoniousOperationSelection: {
+            shiftYears: number;
+            bestYear: number;
+        } | null;
+        parsimoniousSinglePathProbes: {
+            defaultStronger: DiagnosisEventAuditSnapshot[];
+            defaultRegularized: DiagnosisEventAuditSnapshot[];
+            zeroTerminalStronger: DiagnosisEventAuditSnapshot[];
+            zeroTerminalRegularized: DiagnosisEventAuditSnapshot[];
+        };
         regularizedPartialConsensus: DiagnosisEventAuditSnapshot | null;
         conservativeStrongerPath: {
             transitionGain: number;
