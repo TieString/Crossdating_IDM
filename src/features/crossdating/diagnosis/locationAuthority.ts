@@ -164,7 +164,20 @@ export const projectMultiEventLocationConsensus = (
         (sum, year) => sum + year,
         0,
     ) / selectedYears.length);
-    const window = clampWindowToRange(centerYear - 6, 13, targetRange);
+    let window = clampWindowToRange(centerYear - 6, 13, targetRange);
+    const terminalBoundaryNote = [...event.evidence.notes].reverse().find((note) => (
+        note.startsWith("terminal_unit_staircase_boundary_year=")
+    ));
+    const terminalBoundaryYear = Number(terminalBoundaryNote?.split("=")[1]);
+    const guardedByTerminalBoundary = event.evidence.algorithmSources.includes(
+        "stable_terminal_unit_staircase_frontier",
+    ) && Number.isInteger(terminalBoundaryYear)
+        && (terminalBoundaryYear < window.startYear || terminalBoundaryYear > window.endYear);
+    if (guardedByTerminalBoundary) {
+        window = terminalBoundaryYear < window.startYear
+            ? clampWindowToRange(terminalBoundaryYear, 13, targetRange)
+            : clampWindowToRange(terminalBoundaryYear - 12, 13, targetRange);
+    }
     if (event.startYear === window.startYear && event.endYear === window.endYear) return event;
 
     const prior = new Map(event.rankedYears.map((row) => [row.year, row]));
@@ -242,6 +255,9 @@ export const projectMultiEventLocationConsensus = (
                 `multi_frontier_evidence_years=${selectedYears.join(",")}`,
                 `multi_frontier_center_year=${centerYear}`,
                 `multi_frontier_consensus_window=${window.startYear}-${window.endYear}`,
+                ...(guardedByTerminalBoundary ? [
+                    `multi_frontier_terminal_boundary_guard=${terminalBoundaryYear}`,
+                ] : []),
             ])),
         },
     });

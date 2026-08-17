@@ -109,6 +109,34 @@ describe("multi-event frontier location consensus", () => {
         });
     });
 
+    it("keeps the stable terminal boundary inside an averaged multi-event window", () => {
+        const input = event();
+        input.eventType = "falseRing";
+        input.startYear = 1876;
+        input.endYear = 1884;
+        input.rankedYears = [{ year: 1880, rank: 1, score: 4, evidenceTags: [] }];
+        input.evidence.algorithmSources.push(
+            "stable_terminal_unit_staircase_frontier",
+        );
+        input.evidence.notes.push("terminal_unit_staircase_boundary_year=1880");
+
+        expect(projectMultiEventLocationConsensus(
+            input,
+            [1866, 1871],
+            { startYear: 1400, endYear: 2000 },
+            true,
+        )).toMatchObject({
+            eventType: "falseRing",
+            startYear: 1868,
+            endYear: 1880,
+            evidence: {
+                notes: expect.arrayContaining([
+                    "multi_frontier_terminal_boundary_guard=1880",
+                ]),
+            },
+        });
+    });
+
     it("chooses the newer compact mode instead of joining a distant older peak", () => {
         const input = event();
         input.startYear = 1863;
