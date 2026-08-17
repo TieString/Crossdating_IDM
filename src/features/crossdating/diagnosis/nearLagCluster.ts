@@ -20,6 +20,7 @@ export type StableTerminalUnitStaircaseFrontier = {
     maximumYearDrift: number;
     strongerTransitionGain: number;
     weakerTransitionGain: number;
+    olderContinuationAccepted: boolean;
 };
 
 type LocalTransition = {
@@ -70,6 +71,7 @@ type TerminalUnitStaircase = {
     boundaryYear: number;
     transitionYears: number[];
     maximumAdjacentTransitionGapYears: number;
+    olderContinuation: boolean;
 };
 
 const terminalUnitStaircase = (
@@ -77,6 +79,7 @@ const terminalUnitStaircase = (
     aggregateShiftYears: number,
     terminalLag: number,
     minimumFixedTailYears: number,
+    allowOlderContinuation = false,
 ): TerminalUnitStaircase | null => {
     if (!Number.isInteger(aggregateShiftYears) || aggregateShiftYears === 0) return null;
     const direction = Math.sign(aggregateShiftYears);
@@ -94,7 +97,9 @@ const terminalUnitStaircase = (
         if (!run || run.lag !== terminalLag + direction * offset) return null;
     }
     const precedingRun = runs[runs.length - eventCount - 2];
-    if (precedingRun?.lag === terminalLag + direction * (eventCount + 1)) return null;
+    const olderContinuation = precedingRun?.lag
+        === terminalLag + direction * (eventCount + 1);
+    if (olderContinuation && !allowOlderContinuation) return null;
     const transitionLag = terminalLag + direction;
     const expectedType: DiagnosisEventType = direction > 0 ? "falseRing" : "missingRing";
     const representative = path.events.find((event) => (
@@ -116,22 +121,19 @@ const terminalUnitStaircase = (
             boundaryYear: terminalRun.startYear,
             transitionYears,
             maximumAdjacentTransitionGapYears,
+            olderContinuation,
         }
         : null;
 };
 
-/**
- * Finds the newest unit event in a cumulative staircase without requiring the older, already
- * contaminated part of the path to be globally coherent. Both regularizations must reproduce
- * the complete terminal suffix, while the caller supplies an independently estimated depth.
- */
-export const selectStableTerminalUnitStaircaseFrontier = (
+const stableTerminalFrontier = (
     strongerPenaltyPath: BoundedLagStateEventSet | null,
     weakerPenaltyPath: BoundedLagStateEventSet | null,
     aggregateShiftYears: number,
-    terminalLag = 0,
-    maximumYearDrift = 2,
-    minimumFixedTailYears = 8,
+    terminalLag: number,
+    maximumYearDrift: number,
+    minimumFixedTailYears: number,
+    allowOlderContinuation: boolean,
 ): StableTerminalUnitStaircaseFrontier | null => {
     if (!strongerPenaltyPath || !weakerPenaltyPath) return null;
     const stronger = terminalUnitStaircase(
@@ -139,12 +141,14 @@ export const selectStableTerminalUnitStaircaseFrontier = (
         aggregateShiftYears,
         terminalLag,
         minimumFixedTailYears,
+        allowOlderContinuation,
     );
     const weaker = terminalUnitStaircase(
         weakerPenaltyPath,
         aggregateShiftYears,
         terminalLag,
         minimumFixedTailYears,
+        allowOlderContinuation,
     );
     if (
         !stronger
@@ -166,7 +170,60 @@ export const selectStableTerminalUnitStaircaseFrontier = (
         maximumYearDrift,
         strongerTransitionGain: strongerPenaltyPath.path.transitionGain,
         weakerTransitionGain: weakerPenaltyPath.path.transitionGain,
+        olderContinuationAccepted: stronger.olderContinuation || weaker.olderContinuation,
     };
+};
+
+/**
+ * Finds the newest unit event in a cumulative staircase without requiring the older, already
+ * contaminated part of the path to be globally coherent. Both regularizations must reproduce
+ * the complete terminal suffix, while the caller supplies an independently estimated depth.
+ */
+export const selectStableTerminalUnitStaircaseFrontier = (
+    strongerPenaltyPath: BoundedLagStateEventSet | null,
+    weakerPenaltyPath: BoundedLagStateEventSet | null,
+    aggregateShiftYears: number,
+    terminalLag = 0,
+    maximumYearDrift = 2,
+    minimumFixedTailYears = 8,
+): StableTerminalUnitStaircaseFrontier | null => stableTerminalFrontier(
+    strongerPenaltyPath,
+    weakerPenaltyPath,
+    aggregateShiftYears,
+    terminalLag,
+    maximumYearDrift,
+    minimumFixedTailYears,
+    false,
+);
+
+/**
+ * A candidate-anchored positive suffix still identifies the newest false ring when an older
+ * same-direction event extends only one regularized path. This is operation-family evidence;
+ * callers must supply the independently estimated positive candidate depth.
+ */
+export const selectStablePositiveTerminalUnitOperationFrontier = (
+    strongerPenaltyPath: BoundedLagStateEventSet | null,
+    weakerPenaltyPath: BoundedLagStateEventSet | null,
+    aggregateShiftYears: number,
+    terminalLag = 0,
+    maximumYearDrift = 2,
+    minimumFixedTailYears = 8,
+): StableTerminalUnitStaircaseFrontier | null => {
+    if (aggregateShiftYears <= 1) return null;
+    const frontier = stableTerminalFrontier(
+        strongerPenaltyPath,
+        weakerPenaltyPath,
+        aggregateShiftYears,
+        terminalLag,
+        maximumYearDrift,
+        minimumFixedTailYears,
+        true,
+    );
+    if (
+        !frontier?.olderContinuationAccepted
+        || Math.min(frontier.strongerTransitionGain, frontier.weakerTransitionGain) <= 0
+    ) return null;
+    return frontier;
 };
 
 const overlapsEvent = (

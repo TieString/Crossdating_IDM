@@ -212,6 +212,7 @@ describe("calibratedTerminalUnitStaircaseWindowWidth", () => {
             maximumYearDrift: 2,
             strongerTransitionGain: 20,
             weakerTransitionGain: 18,
+            olderContinuationAccepted: false,
         };
     };
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
     selectStableNearLagCluster,
+    selectStablePositiveTerminalUnitOperationFrontier,
     selectStableTerminalUnitStaircaseFrontier,
 } from "../nearLagCluster";
 import type { BoundedLagStateEventSet } from "../eventPath";
@@ -293,5 +294,75 @@ describe("stable terminal unit staircase frontier", () => {
             boundaryYear: 1901,
             maximumAdjacentTransitionGapYears: 30,
         });
+    });
+
+    it("keeps the positive operation family when one path includes an older +4 continuation", () => {
+        const extended = (boundaryYear: number) => pathWithRuns([
+            { lag: 4, startYear: 1500, endYear: 1550 },
+            { lag: 3, startYear: 1551, endYear: boundaryYear - 18 },
+            { lag: 2, startYear: boundaryYear - 17, endYear: boundaryYear - 10 },
+            { lag: 1, startYear: boundaryYear - 9, endYear: boundaryYear - 1 },
+            { lag: 0, startYear: boundaryYear, endYear: 2000 },
+        ], [
+            event(boundaryYear - 17, 3, 2),
+            event(boundaryYear - 9, 2, 1),
+            event(boundaryYear, 1, 0),
+            event(1551, 4, 3),
+        ]);
+
+        expect(selectStableTerminalUnitStaircaseFrontier(
+            positiveThree(1877),
+            extended(1878),
+            3,
+        )).toBeNull();
+        expect(selectStablePositiveTerminalUnitOperationFrontier(
+            positiveThree(1877),
+            extended(1878),
+            3,
+        )).toMatchObject({
+            eventCount: 3,
+            aggregateShiftYears: 3,
+            boundaryYear: 1878,
+            olderContinuationAccepted: true,
+            representative: { eventType: "falseRing" },
+        });
+    });
+
+    it("does not relax negative staircases or a nonzero terminal run", () => {
+        const negativeExtended = pathWithRuns([
+            { lag: -4, startYear: 1500, endYear: 1550 },
+            { lag: -3, startYear: 1551, endYear: 1859 },
+            { lag: -2, startYear: 1860, endYear: 1867 },
+            { lag: -1, startYear: 1868, endYear: 1876 },
+            { lag: 0, startYear: 1877, endYear: 2000 },
+        ], [
+            event(1551, -4, -3),
+            event(1860, -3, -2),
+            event(1868, -2, -1),
+            event(1877, -1, 0),
+        ]);
+        const reversedTail = pathWithRuns([
+            { lag: 3, startYear: 1500, endYear: 1859 },
+            { lag: 2, startYear: 1860, endYear: 1867 },
+            { lag: 1, startYear: 1868, endYear: 1876 },
+            { lag: 0, startYear: 1877, endYear: 1885 },
+            { lag: 1, startYear: 1886, endYear: 2000 },
+        ], [
+            event(1860, 3, 2),
+            event(1868, 2, 1),
+            event(1877, 1, 0),
+            event(1886, 0, 1),
+        ]);
+
+        expect(selectStablePositiveTerminalUnitOperationFrontier(
+            negativeExtended,
+            negativeExtended,
+            -3,
+        )).toBeNull();
+        expect(selectStablePositiveTerminalUnitOperationFrontier(
+            reversedTail,
+            reversedTail,
+            3,
+        )).toBeNull();
     });
 });

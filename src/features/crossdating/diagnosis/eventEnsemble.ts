@@ -147,6 +147,7 @@ import { evidenceClaimsFor, withEvidenceLedger } from "./evidenceLedger";
 import {
     hasNearLagClusterCandidate,
     selectStableNearLagCluster,
+    selectStablePositiveTerminalUnitOperationFrontier,
     selectStableTerminalUnitStaircaseFrontier,
     type StableTerminalUnitStaircaseFrontier,
 } from "./nearLagCluster";
@@ -6106,6 +6107,9 @@ const projectStableTerminalSequentialUnit = (
     const directionSource = frontier.aggregateShiftYears > 0
         ? "positive_unit_staircase_direction"
         : "negative_unit_staircase_direction";
+    const olderContinuationSource = frontier.olderContinuationAccepted
+        ? "candidate_anchored_positive_terminal_operation_suffix"
+        : null;
     const matchingCandidateIds = candidates.filter((candidate) => {
         const shift = candidate.deltaYears ?? candidate.suggestedLag;
         return candidate.targetTree === diagnosis.targetTree
@@ -6117,6 +6121,10 @@ const projectStableTerminalSequentialUnit = (
         : frontier.aggregateShiftYears > 0
             ? "candidate_anchored_positive_staircase"
             : "candidate_anchored_negative_staircase";
+    const sequentialFalseSource = matchingCandidateIds.length > 0
+        && frontier.aggregateShiftYears > 0
+        ? "sequential_false_staircase_head"
+        : null;
     const windowWidth = calibratedTerminalUnitStaircaseWindowWidth(frontier);
     const window = boundedSequentialWindow(
         presentationYear,
@@ -6137,6 +6145,8 @@ const projectStableTerminalSequentialUnit = (
                 evidenceTags: [
                     "stable_terminal_unit_staircase_frontier",
                     directionSource,
+                    ...(olderContinuationSource ? [olderContinuationSource] : []),
+                    ...(sequentialFalseSource ? [sequentialFalseSource] : []),
                 ],
             };
         },
@@ -6161,6 +6171,8 @@ const projectStableTerminalSequentialUnit = (
                 candidateSource,
                 directionSource,
                 "stable_terminal_unit_staircase_frontier",
+                ...(olderContinuationSource ? [olderContinuationSource] : []),
+                ...(sequentialFalseSource ? [sequentialFalseSource] : []),
             ])).sort(),
             score: baseScore,
             scoreMargin: Math.min(
@@ -6193,6 +6205,9 @@ const projectStableTerminalSequentialUnit = (
                     frontier.weakerTransitionGain.toFixed(6)
                 }`,
                 `terminal_unit_staircase_window_width=${windowWidth}`,
+                `terminal_unit_staircase_older_continuation_accepted=${
+                    frontier.olderContinuationAccepted
+                }`,
                 `terminal_unit_staircase_window_rule=${
                     windowWidth === 13
                         ? frontier.eventCount === 2
@@ -10816,7 +10831,7 @@ export const makeDiagnosisEvents = (
             || Math.abs(right) - Math.abs(left)
             || right - left
         ));
-        const stableTerminalSequentialUnit = terminalUnitDepths
+        const strictTerminalSequentialUnitFrontier = terminalUnitDepths
             .map((depth) => selectStableTerminalUnitStaircaseFrontier(
                 rawNearPenaltyTwoPath,
                 rawNearPenaltyOnePath,
@@ -10824,12 +10839,30 @@ export const makeDiagnosisEvents = (
             ))
             .filter((frontier): frontier is StableTerminalUnitStaircaseFrontier => (
                 frontier !== null && Math.abs(frontier.aggregateShiftYears) > 1
-            ))
-            .map((frontier) => projectStableTerminalSequentialUnit(
-                frontier,
+            ))[0] ?? null;
+        const positiveTerminalOperationFrontier = strictTerminalSequentialUnitFrontier
+            ? null
+            : terminalUnitDepths
+                .filter((depth) => (
+                    depth > 1 && cumulativeUnitCandidateDepths.includes(depth)
+                ))
+                .map((depth) => selectStablePositiveTerminalUnitOperationFrontier(
+                    rawNearPenaltyTwoPath,
+                    rawNearPenaltyOnePath,
+                    depth,
+                ))
+                .filter((frontier): frontier is StableTerminalUnitStaircaseFrontier => (
+                    frontier !== null
+                ))[0] ?? null;
+        const stableTerminalSequentialUnitFrontier = strictTerminalSequentialUnitFrontier
+            ?? positiveTerminalOperationFrontier;
+        const stableTerminalSequentialUnit = stableTerminalSequentialUnitFrontier
+            ? projectStableTerminalSequentialUnit(
+                stableTerminalSequentialUnitFrontier,
                 diagnosis,
                 ownCandidates,
-            ))[0] ?? null;
+            )
+            : null;
         const localLagTransitionEvidence: DiagnosisLocalLagTransitionEvidence | null =
             stableNearLagCluster ? {
                 eventCount: stableNearLagCluster.eventCount,
