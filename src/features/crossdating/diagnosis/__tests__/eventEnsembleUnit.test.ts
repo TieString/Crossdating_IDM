@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DiagnosisEvent, SeriesCoreDiagnosis } from "../types";
 import {
     allowStableBoundedPathFinalAuthority,
+    hasIndependentStableFrontierOperationSupport,
     maySequentialMissingPreemptStableJointFrontier,
     calibratedTerminalUnitStaircaseWindowWidth,
     hasIndependentPartialBoundaryAnchor,
@@ -37,6 +38,7 @@ import {
     selectCumulativeLagPathFrontier,
     selectStableBoundedLagPathFrontier,
     selectConservativeStableBoundedLagPathFrontier,
+    selectRegularizedPartialOperationConsensus,
     selectUnobservedFixedSideWholeLag,
     selectCandidateBackedCumulativeUnitFrontier,
     reconcileCumulativeUnitOperationWithCompletedLocation,
@@ -2602,6 +2604,48 @@ describe("isAuthoritativeWholeSeriesCheckpoint", () => {
         expect(isAuthoritativeWholeSeriesCheckpoint(alias)).toBe(false);
     });
 
+    it("accepts an exact, well-supported recent-tail whole baseline", () => {
+        const recentTail = whole();
+        recentTail.shiftYears = -4;
+        recentTail.evidence.score = -1.3;
+        recentTail.evidence.correlationGain = 0.2;
+        recentTail.evidence.notes = [
+            "candidate_hard_gate_passed",
+            "whole_baseline_source=recent_tail_lag",
+            "recent_tail_lag=-4",
+            "recent_tail_path_lag=-4",
+            "recent_tail_support_count=4",
+            "recent_tail_total_count=4",
+            "recent_tail_median_r=0.81",
+            "recent_tail_path_margin=0.24",
+            "whole_state_support_fraction=0.4",
+            "whole_state_newer_edge_support_fraction=1",
+        ];
+
+        expect(isAuthoritativeWholeSeriesCheckpoint(recentTail)).toBe(true);
+    });
+
+    it("rejects a recent-tail whole alias without broader state support", () => {
+        const alias = whole();
+        alias.shiftYears = -1;
+        alias.evidence.score = -25;
+        alias.evidence.correlationGain = 0.056;
+        alias.evidence.notes = [
+            "candidate_hard_gate_passed",
+            "whole_baseline_source=recent_tail_lag",
+            "recent_tail_lag=-1",
+            "recent_tail_path_lag=-1",
+            "recent_tail_support_count=4",
+            "recent_tail_total_count=4",
+            "recent_tail_median_r=0.63",
+            "recent_tail_path_margin=8.2",
+            "whole_state_support_fraction=0.055556",
+            "whole_state_newer_edge_support_fraction=0.5",
+        ];
+
+        expect(isAuthoritativeWholeSeriesCheckpoint(alias)).toBe(false);
+    });
+
     it("does not treat a local terminal alias as an independently supported whole baseline", () => {
         const alias = whole();
         alias.evidence.correlationGain = 0.2;
@@ -2682,6 +2726,12 @@ describe("selectCumulativePartialFrontier", () => {
             partialMoveEvent(-6),
             false,
         )).toBe(true);
+        expect(maySequentialMissingPreemptStableJointFrontier(
+            partialMoveEvent(-6),
+            true,
+            -74,
+            true,
+        )).toBe(false);
     });
 
     const candidate = (
@@ -2756,6 +2806,149 @@ describe("selectCumulativePartialFrontier", () => {
             runnerUpMargin: 1,
         },
         events,
+    });
+
+    it("requires independent operation evidence before a stable partial blocks a staircase", () => {
+        const stable = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                pathEvent(-20, -26, -6, 1748),
+                pathEvent(-6, -6, 0, 1779),
+            ]),
+            boundedPath([
+                pathEvent(-20, -26, -6, 1749),
+                pathEvent(-6, -6, 0, 1780),
+            ]),
+        );
+        const localPartial = partialMoveEvent(-6);
+        localPartial.startYear = 1774;
+        localPartial.endYear = 1782;
+        localPartial.rankedYears = [{
+            year: 1778,
+            rank: 1,
+            score: 1,
+            evidenceTags: [],
+        }];
+
+        expect(hasIndependentStableFrontierOperationSupport(
+            stable,
+            stable?.event ?? null,
+            [localPartial],
+            [-26],
+        )).toBe(true);
+    });
+
+    it("accepts an exact terminal partial from a mixed-direction complete path", () => {
+        const missing = pathEvent(-1, -6, -5, 1835);
+        missing.eventType = "missingRing";
+        missing.shiftYears = undefined;
+        missing.shiftSide = undefined;
+        const falseRing = pathEvent(1, -5, -6, 1867);
+        falseRing.eventType = "falseRing";
+        falseRing.shiftYears = undefined;
+        falseRing.shiftSide = undefined;
+        const events = [
+            pathEvent(-21, -27, -6, 1686),
+            missing,
+            falseRing,
+            pathEvent(-6, -6, 0, 1896),
+        ];
+        const stable = selectStableBoundedLagPathFrontier(
+            boundedPath(events),
+            boundedPath(events),
+        );
+        const recovered = stable?.event ?? null;
+        if (recovered) {
+            recovered.evidence.scoreMargin = 0.5;
+            recovered.evidence.correlationGain = 0.5;
+            recovered.evidence.locationEvidence = [{
+                source: "bounded_complete_lag_path",
+                startYear: 1890,
+                endYear: 1902,
+                topYear: 1896,
+                referenceCount: 12,
+                concentration: 0.85,
+                remoteMargin: 2,
+                calibrated: false,
+            }];
+        }
+
+        expect(hasIndependentStableFrontierOperationSupport(
+            stable,
+            recovered,
+            [],
+            [-6],
+        )).toBe(true);
+    });
+
+    it("does not treat a same-direction compressed path as independent partial evidence", () => {
+        const events = [
+            pathEvent(-40, -42, -2, 1700),
+            pathEvent(-2, -2, 0, 1852),
+        ];
+        const stable = selectStableBoundedLagPathFrontier(
+            boundedPath(events),
+            boundedPath(events),
+        );
+        const recovered = stable?.event ?? null;
+        if (recovered) {
+            recovered.evidence.scoreMargin = 0.5;
+            recovered.evidence.correlationGain = 0.5;
+            recovered.evidence.locationEvidence = [{
+                source: "bounded_complete_lag_path",
+                startYear: 1846,
+                endYear: 1858,
+                topYear: 1852,
+                referenceCount: 12,
+                concentration: 0.9,
+                remoteMargin: 2,
+                calibrated: false,
+            }];
+        }
+
+        expect(hasIndependentStableFrontierOperationSupport(
+            stable,
+            recovered,
+            [],
+            [-2],
+        )).toBe(false);
+    });
+
+    it("uses three-channel consensus to resolve adjacent partial amplitudes", () => {
+        const stronger = boundedPath([pathEvent(-6, -6, 0, 1694)]);
+        const regularized = boundedPath([pathEvent(-7, -7, 0, 1680)]);
+        regularized.path.runnerUpMargin = 0.05;
+        const rankedCandidate = candidate("ranked-partial", -5, -5, 0, 1678);
+        rankedCandidate.evidence.algorithmSources = ["candidate_ranking"];
+
+        const selected = selectRegularizedPartialOperationConsensus(
+            stronger,
+            regularized,
+            [rankedCandidate],
+        );
+
+        expect(selected).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -6,
+            evidence: { lagBefore: -6, lagAfter: 0 },
+        });
+        expect(selected?.rankedYears[0]?.year).toBe(1680);
+        expect(selected?.evidence.algorithmSources).toContain(
+            "regularized_partial_operation_consensus",
+        );
+    });
+
+    it("rejects partial amplitude consensus without a nearby ranked candidate", () => {
+        const stronger = boundedPath([pathEvent(-6, -6, 0, 1694)]);
+        const regularized = boundedPath([pathEvent(-7, -7, 0, 1680)]);
+        regularized.path.runnerUpMargin = 0.05;
+        const remote = candidate("remote-partial", -5, -5, 0, 1600);
+        remote.evidence.algorithmSources = ["candidate_ranking"];
+
+        expect(selectRegularizedPartialOperationConsensus(
+            stronger,
+            regularized,
+            [remote],
+        )).toBeNull();
     });
 
     it("keeps a strongly regularized distant mixed frontier", () => {

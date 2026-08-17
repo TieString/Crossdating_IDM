@@ -340,6 +340,8 @@ export type DiagnosisEventDecisionAudit = {
         transitionCount: number;
         aggregateShiftYears: number | null;
         finalAuthority: boolean;
+        independentOperationSupport: boolean;
+        regularizedPartialConsensus: DiagnosisEventAuditSnapshot | null;
         conservativeStrongerPath: {
             transitionGain: number;
             runnerUpMargin: number;
