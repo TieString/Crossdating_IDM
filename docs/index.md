@@ -48,11 +48,17 @@ Crossdating-IDM 的定位是衔接 COFECHA 与专家判读的事件级辅助决�
 
 ### 软件架构
 
-Crossdating-IDM 采用 Tauri、React、TypeScript 和 Rust 构建桌面应用。React 负责工作区布局、宽度网格、序列图、报告视图和用户交互；统一工作区状态保存当前文件路径、原始基线、工作数据、参考配置、COFECHA 结果和操作记录。RWL 解析、参考序列处理和事件诊断使用 TypeScript 实现，耗时诊断在独立 Web Worker 中执行，使长序列和多候选扫描不阻塞主界面。
+Crossdating-IDM 采用 Tauri、React、TypeScript 和 Rust 构建分层桌面架构。Tauri WebView 承载 React 交互层，统一组织工作区布局、宽度网格、联动序列图、扫描影像、COFECHA 报告和事件复核界面。用户对目标序列、参考序列、候选年份和编辑操作的选择均回到同一工作区编排层。
 
-Rust/Tauri 层提供受控文件读写、工作目录管理、扫描影像处理和外部命令调用。运行 COFECHA 时，系统将编辑器当前导出的工作 RWL 写入应用数据目录，调用随程序分发的 sidecar，读取 `VERYCOF.OUT`，并在条件允许时把输出镜像保存到源 RWL 文件旁。前端解析报告中的主定年序列、问题区段和统计摘要，使外部质量控制结果进入与编辑器相同的数据坐标。
+工作区状态由 `useHomeWorkspace` 统一编排，包括文件与目标标识、参考配置、COFECHA 结果、扫描影像状态和诊断结果；`RwlEditor` 作为数据编辑的单一入口，同时维护原始基线、工作数据、读写格式元数据、撤销/恢复历史和操作日志。历史快照、参考配置、COFECHA 状态和影像标定按源文件路径持久化到应用数据目录，使重开文件后可恢复同一工作状态。
 
-事件建议引擎在运行时完全由 TypeScript 执行。规则证据、Viterbi 滞后路径、反事实扫描和静态树模型排序均在 Web Worker 内完成。该结构将交互界面、数据状态、诊断计算和 COFECHA 调用分离，同时通过工作区版本号和数据哈希保证各层使用同一份工作序列。
+RWL 解析与格式化、参考年表构建、COFECHA 报告解析和事件建议均由 TypeScript 实现。当前可见目标诊断和全文件广度扫描分别在独立的模块化 Web Worker 实例中执行，请求快照包含当前工作数据、目标序列、参考配置和与当前数据匹配的 COFECHA 文本。规则证据、全局与分段匹配、受约束滞后状态路径、反事实编辑扫描、多芯证据融合、嵌入式静态树模型推理和联合事件裁决均在 Worker 内执行，运行时不调用 Python。
+
+桌面服务层由 Tauri 插件和 Rust 命令组成。文件系统、对话框、路径和 shell 插件负责受控 I/O 与外部命令；Rust 命令负责 TIFF 解码、裁切与缓存，以及将 OUT 文本写入源 RWL 文件旁。运行 COFECHA 时，系统将编辑器当前导出的工作 RWL 写入 `cofecha-work`，调用随程序分发的 sidecar，读取 `VERYCOF.OUT`，并解析 PART 1、PART 3、PART 6 和 PART 7 中的统计摘要、主定年序列、问题区段和逐序列统计。请求编号拦截过期 Worker 结果，工作区 epoch 防止异步保存跨文件回写，RWL 数据哈希则判定 COFECHA 结果是否对应当前工作序列；动态参考记录同一哈希，并在工作数据改变后立即标记为待更新。
+
+<img src="figures/js-diagnosis-events-v1/fig08_software_architecture.png" alt="Crossdating-IDM software architecture" style="zoom:50%;" />
+
+图 1　Crossdating-IDM 软件架构。React/WebView 负责交互，TypeScript 工作区层维护可编辑数据与证据状态，独立 Web Worker 执行事件诊断，Tauri/Rust 层连接持久化存储、扫描影像和 COFECHA sidecar。请求编号、工作区 epoch、RWL 哈希和过期标记共同维持异步结果与当前工作序列的一致性。
 
 ### 工作流程
 
@@ -60,7 +66,7 @@ Rust/Tauri 层提供受控文件读写、工作目录管理、扫描影像处理
 
 <img src="figures/js-diagnosis-events-v1/fig01_system_architecture.png" alt="fig01_system_architecture" style="zoom:50%;" />
 
-图 1　Crossdating-IDM 系统架构与交叉定年工作流。数据状态、参考年表、事件证据和编辑操作沿同一工作副本传递；每轮输出每条目标序列当前复核前沿的一个可执行事件及一个聚焦复核窗口。
+图 2　Crossdating-IDM 事件诊断与逐次修订工作流。数据状态、参考年表、事件证据和编辑操作沿同一工作副本传递；每轮输出每条目标序列当前复核前沿的一个可执行事件及一个聚焦复核窗口。
 
 ### 核心模块
 
@@ -167,7 +173,7 @@ g_{k}^{\mathrm{W}}(u)=u-k,
 
 ![Lag-state diagnostic grammar](figures/js-diagnosis-events-v1/fig07_lag_state_diagnostic_grammar.png)
 
-图 2　定年建议的 lag 状态拓扑语法。a，基本状态字典；b，整体移动与局部移动；c，缺轮与伪轮；d，连续缺段与离散缺轮阶梯；e，相邻缺轮—伪轮抵消事件；f，操作反事实与逐参考芯共识将状态解释转为操作和复核位置。
+图 3　定年建议的 lag 状态拓扑语法。a，基本状态字典；b，整体移动与局部移动；c，缺轮与伪轮；d，连续缺段与离散缺轮阶梯；e，相邻缺轮—伪轮抵消事件；f，操作反事实与逐参考芯共识将状态解释转为操作和复核位置。
 
 **位置融合与联合事件定位。** 缺轮和伪轮先在粗候选区间内逐年模拟插入或删除，局部移动则联合搜索位移量与断点。原始宽度、差分、预白化、COFECHA 标准化、累计变化点及不同窗口尺度分别产生位置证据；相邻视图指向同一区域时强化该位置，逐参考芯支持比例、增益分布和远距离次峰差进一步确定主位置模式。若同一序列包含两个或三个相互影响的局部事件，系统联合枚举各事件邻近年份组合，要求修正后的完整 lag 链首尾衔接，再以主定年序列、配对芯和独立参考芯的局部—全局恢复分数选择年份组合，避免分别选择互不相容的局部最高点。
 
@@ -189,7 +195,7 @@ COFECHA PART 6[A] 对被标记区段逐年列出当前位置前后 −10 至 +10
 
 ![fig04_complex_case_discrimination](figures/js-diagnosis-events-v1/fig04_complex_case_discrimination.png)
 
-图 3　复杂事件的滞后拓扑与识别逻辑。恒定滞后、单阶跃、单位阶梯、相邻反向阶跃及“全局基线＋局部阶跃”分别对应整体移动、局部移动、离散同向事件、相邻抵消事件和整体—局部组合；多视图反事实与逐参考芯投票用于确定操作类型和位置。
+图 4　复杂事件的滞后拓扑与识别逻辑。恒定滞后、单阶跃、单位阶梯、相邻反向阶跃及“全局基线＋局部阶跃”分别对应整体移动、局部移动、离散同向事件、相邻抵消事件和整体—局部组合；多视图反事实与逐参考芯投票用于确定操作类型和位置。
 
 ### 联合事件裁决
 

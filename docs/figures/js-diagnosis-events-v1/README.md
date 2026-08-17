@@ -1,6 +1,6 @@
 # JS 定年建议论文图组（v2 版式）
 
-本目录包含基于 `js-diagnosis-events-v1` 工作树与现有跨文件测试结果生成的论文图组。图 1—5 由 `scripts/figures/generate-js-diagnosis-events-figures.py` 绘制，lag 状态诊断组图由 `scripts/figures/generate-lag-state-diagnostic-grammar.py` 绘制；两者均使用 Python / matplotlib、英文 Times New Roman，并提供可编辑矢量版本。
+本目录包含基于 `js-diagnosis-events-v1` 工作树与现有跨文件测试结果生成的论文图组。主图组由 `scripts/figures/generate-js-diagnosis-events-figures.py` 绘制，lag 状态诊断组图和软件架构图分别由独立 Python 脚本绘制；所有图件均使用 matplotlib、英文 Times New Roman，并提供可编辑矢量版本。
 
 ## 图件结构
 
@@ -10,6 +10,7 @@
 4. `fig04_complex_case_discrimination`：展示六类 lag 指纹、三组易混模式的区分线索、证据融合和逐事件更新流程。
 5. `fig05_validation_design_and_failures`：展示文件级隔离协议、A–D 场景家族、能力覆盖矩阵及可复现更新路径；文件名为兼容旧引用而保留。
 6. `fig07_lag_state_diagnostic_grammar`：以六面板展示 lag 状态字典、整体与局部移动、单位事件方向、连续缺段与缺轮阶梯、相邻抵消事件及反事实—逐参考芯共识。
+7. `fig08_software_architecture`：展示 React 交互层、TypeScript 工作区状态、Web Worker 诊断、Tauri/Rust 桌面服务、COFECHA sidecar 及持久化资源之间的数据流。
 
 ## 当前定量输入
 
@@ -31,6 +32,12 @@ lag 状态诊断组图可独立重绘：
 
 ```powershell
 python scripts/figures/generate-lag-state-diagnostic-grammar.py
+```
+
+软件架构图可独立重绘：
+
+```powershell
+python scripts/figures/generate-software-architecture.py
 ```
 
 ## 图注要点
@@ -55,9 +62,13 @@ Discrimination of complex crossdating patterns. Transition count, intermediate l
 
 Cross-file benchmark design and capability coverage. The benchmark isolates RWL files, injects four frozen scenario families, executes the product-equivalent diagnostic path and scores one event at a time. The coverage matrix and reproducibility cards summarize the tested capabilities and direct JSON-to-publication update path.
 
-### Figure 7（论文图 2）
+### Figure 7（论文图 3）
 
 Lag-state topology grammar for event-level dating diagnosis. Stable whole-series baselines, signed unit transitions, large partial steps, event staircases and cancelling pulses map to executable edit hypotheses; full-interval counterfactual gains and concordant source-core evidence determine the suggested operation and focused review window.
+
+### Figure 8（论文图 1）
+
+Crossdating-IDM software architecture. React/WebView provides linked expert interaction; the TypeScript workspace layer maintains editable data and evidence state; dedicated Web Workers execute event diagnosis; and Tauri/Rust services connect persistent state, scan-image processing and bundled COFECHA sidecars. Request identifiers, workspace epochs and RWL hashes keep asynchronous results aligned with the current working series.
 
 ## 文献设计依据
 
