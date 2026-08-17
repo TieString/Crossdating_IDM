@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DiagnosisEvent, SeriesCoreDiagnosis } from "../types";
 import {
     allowStableBoundedPathFinalAuthority,
+    maySequentialMissingPreemptStableJointFrontier,
     calibratedTerminalUnitStaircaseWindowWidth,
     hasIndependentPartialBoundaryAnchor,
     decisiveExactPartialRejectsWeakUnitComposition,
@@ -35,6 +36,7 @@ import {
     selectStableUnitPathLocationCheckpoints,
     selectCumulativeLagPathFrontier,
     selectStableBoundedLagPathFrontier,
+    selectConservativeStableBoundedLagPathFrontier,
     selectUnobservedFixedSideWholeLag,
     selectCandidateBackedCumulativeUnitFrontier,
     reconcileCumulativeUnitOperationWithCompletedLocation,
@@ -2650,6 +2652,38 @@ describe("selectCumulativePartialFrontier", () => {
         expect(allowStableBoundedPathFinalAuthority(true)).toBe(false);
     });
 
+    it("does not let a sequential missing staircase rewrite an authoritative operation family", () => {
+        const missing = falseRingEvent(1900, true);
+        missing.eventType = "missingRing";
+
+        expect(maySequentialMissingPreemptStableJointFrontier(missing)).toBe(true);
+        expect(maySequentialMissingPreemptStableJointFrontier(
+            falseRingEvent(1900, true),
+        )).toBe(false);
+        expect(maySequentialMissingPreemptStableJointFrontier(
+            partialMoveEvent(-6),
+        )).toBe(false);
+        expect(maySequentialMissingPreemptStableJointFrontier(
+            falseRingEvent(1900, true),
+            true,
+            0,
+        )).toBe(true);
+        expect(maySequentialMissingPreemptStableJointFrontier(
+            partialMoveEvent(-3),
+            true,
+            -6,
+        )).toBe(true);
+        expect(maySequentialMissingPreemptStableJointFrontier(
+            partialMoveEvent(-6),
+            true,
+            -7,
+        )).toBe(false);
+        expect(maySequentialMissingPreemptStableJointFrontier(
+            partialMoveEvent(-6),
+            false,
+        )).toBe(true);
+    });
+
     const candidate = (
         id: string,
         shiftYears: number,
@@ -2722,6 +2756,50 @@ describe("selectCumulativePartialFrontier", () => {
             runnerUpMargin: 1,
         },
         events,
+    });
+
+    it("keeps a strongly regularized distant mixed frontier", () => {
+        const missing = pathEvent(-1, -7, -6, 1817);
+        missing.eventType = "missingRing";
+        const partial = pathEvent(-6, -6, 0, 1849);
+
+        const selected = selectConservativeStableBoundedLagPathFrontier(
+            boundedPath([missing, partial]),
+            boundedPath([missing, partial]),
+        );
+
+        expect(selected?.newestEvent.eventType).toBe("partialMove");
+        expect(selected?.newestEvent.shiftYears).toBe(-6);
+    });
+
+    it("keeps a strongly regularized dense same-direction unit frontier", () => {
+        const events = [1788, 1797, 1806, 1815].map((year, index) => {
+            const event = pathEvent(1, 4 - index, 3 - index, year);
+            event.eventType = "falseRing";
+            event.shiftYears = undefined;
+            return event;
+        });
+
+        const selected = selectConservativeStableBoundedLagPathFrontier(
+            boundedPath(events),
+            boundedPath(events),
+        );
+
+        expect(selected?.newestEvent.eventType).toBe("falseRing");
+        expect(selected?.newestEvent.rankedYears[0]?.year).toBe(1815);
+    });
+
+    it("does not admit a dense mixed-operation path", () => {
+        const missing = pathEvent(-1, 0, 1, 1806);
+        missing.eventType = "missingRing";
+        const falseRing = pathEvent(1, 1, 0, 1815);
+        falseRing.eventType = "falseRing";
+        falseRing.shiftYears = undefined;
+
+        expect(selectConservativeStableBoundedLagPathFrontier(
+            boundedPath([missing, falseRing]),
+            boundedPath([missing, falseRing]),
+        )).toBeNull();
     });
 
     it("rejects a local bounded breakpoint whose fixed side has no reference pairs", () => {

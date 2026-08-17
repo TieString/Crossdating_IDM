@@ -1119,6 +1119,8 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
         const runs = [
             diagnoseRemoved(truthYears, "all"),
             diagnoseRemoved(truthYears.slice(1), "without-endpoint"),
+            diagnoseRemoved(truthYears.slice(2), "serial-step-3"),
+            diagnoseRemoved(truthYears.slice(6), "serial-step-7"),
         ];
         const failures = runs.filter(({ removedYears, displayed }) => {
             const event = displayed[0];
@@ -1158,6 +1160,7 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
                 final: audit?.finalEvents ?? [],
                 localLagTransitionEvidence: audit?.localLagTransitionEvidence ?? null,
                 terminalUnitStaircaseEvidence: audit?.terminalUnitStaircaseEvidence ?? null,
+                stableBoundedPathEvidence: audit?.stableBoundedPathEvidence ?? null,
                 decision: diagnosis.jointEventDecisions?.[0] ?? null,
             };
         })).toEqual([]);

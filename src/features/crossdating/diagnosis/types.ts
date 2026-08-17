@@ -333,6 +333,24 @@ export type DiagnosisEventDecisionAudit = {
         weakerTerminalLags: number[];
         selectedBoundaryYear: number | null;
     };
+    stableBoundedPathEvidence?: {
+        selectedPathEvent: DiagnosisEventAuditSnapshot | null;
+        newestPathEvent: DiagnosisEventAuditSnapshot | null;
+        recoveredFrontier: DiagnosisEventAuditSnapshot | null;
+        transitionCount: number;
+        aggregateShiftYears: number | null;
+        finalAuthority: boolean;
+        conservativeStrongerPath: {
+            transitionGain: number;
+            runnerUpMargin: number;
+            events: DiagnosisEventAuditSnapshot[];
+        } | null;
+        conservativeRegularizedPath: {
+            transitionGain: number;
+            runnerUpMargin: number;
+            events: DiagnosisEventAuditSnapshot[];
+        } | null;
+    };
     locatorDecisions?: DiagnosisLocatorDecisionAudit[];
     automaticSemanticsRejectedCount: number;
     finalReason: DiagnosisEventDecisionReason;

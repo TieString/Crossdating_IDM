@@ -5288,7 +5288,7 @@ type ExactLagPathChain = {
     transitionCount: number;
 };
 
-type StableBoundedLagPathFrontier = {
+export type StableBoundedLagPathFrontier = {
     event: DiagnosisEvent;
     newestEvent: DiagnosisEvent;
     transitions: readonly ExactLagPathTransition[];
@@ -5616,6 +5616,47 @@ export const selectStableBoundedLagPathFrontier = (
 };
 
 /**
+ * Uses the two more strongly regularized complete paths as an operation-family checkpoint.
+ * Distant mixed events remain eligible; a dense path is accepted only when every transition is
+ * the same signed unit operation, so nearby missing/false chains cannot be reversed by an
+ * unrelated cumulative staircase.
+ */
+export const selectConservativeStableBoundedLagPathFrontier = (
+    strongerPath: BoundedLagStateEventSet | null,
+    regularizedPath: BoundedLagStateEventSet | null,
+    baselineLag = 0,
+): StableBoundedLagPathFrontier | null => {
+    if (!strongerPath || !regularizedPath
+        || strongerPath.path.transitionGain < 8
+        || regularizedPath.path.transitionGain < 8
+        || strongerPath.path.runnerUpMargin < 1
+        || regularizedPath.path.runnerUpMargin < 1) return null;
+    const distant = selectStableBoundedLagPathFrontier(
+        strongerPath,
+        regularizedPath,
+        baselineLag,
+        14,
+        2,
+        "strong,1",
+    );
+    if (distant) return distant;
+    const dense = selectStableBoundedLagPathFrontier(
+        strongerPath,
+        regularizedPath,
+        baselineLag,
+        2,
+        2,
+        "strong,1-dense-unit",
+    );
+    if (!dense || dense.transitionCount < 2) return null;
+    const operationTypes = new Set(dense.transitions.map(({ event }) => event.eventType));
+    const onlyType = operationTypes.size === 1
+        ? dense.transitions[0]?.event.eventType
+        : null;
+    return onlyType === "missingRing" || onlyType === "falseRing" ? dense : null;
+};
+
+/**
  * Keeps a regularized direct partial when a permissive path only decomposes that same state
  * change and the independently scored operation supports the aggregate amplitude. This is a
  * model-complexity decision; it does not merge unrelated transitions or invent a new location.
@@ -5717,9 +5758,17 @@ const projectStableTerminalSequentialUnit = (
     const directionSource = frontier.aggregateShiftYears > 0
         ? "positive_unit_staircase_direction"
         : "negative_unit_staircase_direction";
-    const candidateSource = frontier.aggregateShiftYears > 0
-        ? "candidate_anchored_positive_staircase"
-        : "candidate_anchored_negative_staircase";
+    const matchingCandidateIds = candidates.filter((candidate) => {
+        const shift = candidate.deltaYears ?? candidate.suggestedLag;
+        return candidate.targetTree === diagnosis.targetTree
+            && candidate.operationType === "SHIFT_RANGE"
+            && shift === frontier.aggregateShiftYears;
+    }).map((candidate) => candidate.id);
+    const candidateSource = matchingCandidateIds.length === 0
+        ? "complete_terminal_unit_staircase"
+        : frontier.aggregateShiftYears > 0
+            ? "candidate_anchored_positive_staircase"
+            : "candidate_anchored_negative_staircase";
     const windowWidth = calibratedTerminalUnitStaircaseWindowWidth(frontier);
     const window = boundedSequentialWindow(
         presentationYear,
@@ -5746,12 +5795,6 @@ const projectStableTerminalSequentialUnit = (
     ).sort((left, right) => (
         right.score - left.score || right.year - left.year
     )).map((row, index) => ({ ...row, rank: index + 1 }));
-    const matchingCandidateIds = candidates.filter((candidate) => {
-        const shift = candidate.deltaYears ?? candidate.suggestedLag;
-        return candidate.targetTree === diagnosis.targetTree
-            && candidate.operationType === "SHIFT_RANGE"
-            && shift === frontier.aggregateShiftYears;
-    }).map((candidate) => candidate.id);
     return {
         ...frontier.representative,
         id: `diagnosis-event-${diagnosis.targetTree}-terminal-sequential-${eventType}-${
@@ -5932,6 +5975,27 @@ export const selectStableUnitPathLocationCheckpoints = (
 export const allowStableBoundedPathFinalAuthority = (
     preferRemotePairedMissingFrontier = false,
 ): boolean => !preferRemotePairedMissingFrontier;
+
+/**
+ * A verified complete path owns the operation family. Sequential missing recovery may still
+ * refine a missing-ring path, but it must not rewrite an agreed false-ring or partial frontier.
+ */
+export const maySequentialMissingPreemptStableJointFrontier = (
+    stableFrontier: DiagnosisEvent | null,
+    stablePathHasFinalAuthority = true,
+    stableAggregateShiftYears?: number | null,
+): boolean => {
+    if (!stablePathHasFinalAuthority
+        || stableFrontier === null
+        || stableAggregateShiftYears === 0
+        || stableFrontier.eventType === "missingRing") return true;
+    if (stableFrontier.eventType !== "partialMove"
+        || stableAggregateShiftYears === null
+        || stableAggregateShiftYears === undefined
+        || stableFrontier.shiftYears === undefined) return false;
+    return Math.abs(stableFrontier.shiftYears)
+        < Math.abs(stableAggregateShiftYears) * 0.75;
+};
 
 export const recoverStableBoundedLagPathFrontier = (
     frontier: StableBoundedLagPathFrontier | null,
@@ -10285,7 +10349,21 @@ export const makeDiagnosisEvents = (
             rawNearPenaltyOnePath,
             boundedHypotheses,
         );
-        const stableTerminalSequentialUnit = cumulativeUnitCandidateDepths
+        const terminalUnitDepths = Array.from(new Set([
+            ...cumulativeUnitCandidateDepths,
+            ...Array.from(
+                {
+                    length: effectiveConfig.lagMax - effectiveConfig.lagMin + 1,
+                },
+                (_, index) => effectiveConfig.lagMin + index,
+            ).filter((depth) => Math.abs(depth) > 1),
+        ])).sort((left, right) => (
+            Number(cumulativeUnitCandidateDepths.includes(right))
+                - Number(cumulativeUnitCandidateDepths.includes(left))
+            || Math.abs(right) - Math.abs(left)
+            || right - left
+        ));
+        const stableTerminalSequentialUnit = terminalUnitDepths
             .map((depth) => selectStableTerminalUnitStaircaseFrontier(
                 rawNearPenaltyTwoPath,
                 rawNearPenaltyOnePath,
@@ -10461,6 +10539,19 @@ export const makeDiagnosisEvents = (
                 extendedStrongMultiscaleBoundedFrontier,
                 candidateEvents,
             );
+        const rawPenaltyTwoConservativePath = needsStableMultiscaleBoundedPath
+            && strongMultiscaleBoundedFrontier === null
+            && cumulativeUnitCandidateDepths.length > 0
+            ? locateBoundedEvents(
+                    false,
+                    undefined,
+                    stableTerminalLags,
+                    2,
+                    2,
+                    false,
+                    parsimoniousStablePathMaxSegments,
+                )
+            : null;
         const strongFrontierUsesExtendedPath = strongMultiscaleBoundedFrontier !== null
             && strongMultiscaleBoundedFrontier === extendedStrongMultiscaleBoundedFrontier;
         const selectedPenaltyHalfStablePath = strongFrontierUsesExtendedPath
@@ -10469,7 +10560,14 @@ export const makeDiagnosisEvents = (
         const selectedStablePathMaxSegments = strongFrontierUsesExtendedPath
             ? 6
             : parsimoniousStablePathMaxSegments;
-        const stableStrongFrontier = strongMultiscaleBoundedFrontier;
+        const conservativeStrongMultiscaleBoundedFrontier =
+            selectConservativeStableBoundedLagPathFrontier(
+                rawPenaltyTwoConservativePath,
+                rawPenaltyOneStablePath,
+                terminalBaselineIsUnsupportedAlias ? 0 : terminalBaselineLag,
+            );
+        const stableStrongFrontier = strongMultiscaleBoundedFrontier
+            ?? conservativeStrongMultiscaleBoundedFrontier;
         const zeroTerminalPenaltyOneStablePath = needsStableMultiscaleBoundedPath
             && terminalBaselineLag !== 0
             && !hasAuthoritativeWholeBaseline
@@ -10548,6 +10646,13 @@ export const makeDiagnosisEvents = (
                 ? weakUnitPulseFrontier
                 : null)
             ?? unflaggedUnitPulseFrontier;
+        const stableBoundedPathFrontier = recoverStableBoundedLagPathFrontier(
+            stableMultiscaleBoundedFrontier,
+            displayed,
+            boundedOperations,
+            diagnosis.targetRange,
+            candidateEvents,
+        );
         const decisiveExactPartialHypotheses = [
             ...boundedPathEvents,
             ...displayed,
@@ -10754,6 +10859,34 @@ export const makeDiagnosisEvents = (
                             ? rankedEventYear(stableTerminalSequentialUnit)
                             : null,
                     },
+                    stableBoundedPathEvidence: {
+                        selectedPathEvent: stableMultiscaleBoundedFrontier
+                            ? auditEvent(stableMultiscaleBoundedFrontier.event)
+                            : null,
+                        newestPathEvent: stableMultiscaleBoundedFrontier
+                            ? auditEvent(stableMultiscaleBoundedFrontier.newestEvent)
+                            : null,
+                        recoveredFrontier: stableBoundedPathFrontier
+                            ? auditEvent(stableBoundedPathFrontier)
+                            : null,
+                        transitionCount:
+                            stableMultiscaleBoundedFrontier?.transitionCount ?? 0,
+                        aggregateShiftYears:
+                            stableMultiscaleBoundedFrontier?.aggregateShiftYears ?? null,
+                        finalAuthority: stablePathHasFinalAuthority,
+                        conservativeStrongerPath: rawPenaltyTwoConservativePath ? {
+                            transitionGain:
+                                rawPenaltyTwoConservativePath.path.transitionGain,
+                            runnerUpMargin:
+                                rawPenaltyTwoConservativePath.path.runnerUpMargin,
+                            events: rawPenaltyTwoConservativePath.events.map(auditEvent),
+                        } : null,
+                        conservativeRegularizedPath: rawPenaltyOneStablePath ? {
+                            transitionGain: rawPenaltyOneStablePath.path.transitionGain,
+                            runnerUpMargin: rawPenaltyOneStablePath.path.runnerUpMargin,
+                            events: rawPenaltyOneStablePath.events.map(auditEvent),
+                        } : null,
+                    },
                     locatorDecisions: locatorDecisionAudits.map((decision) => ({
                         ...decision,
                         preLocatorEvent: { ...decision.preLocatorEvent },
@@ -10814,13 +10947,6 @@ export const makeDiagnosisEvents = (
             (event) => event.eventType !== "wholeSeriesMove",
         );
         const mayRecoverSequentialMissing = cofechaFlagged;
-        const stableBoundedPathFrontier = recoverStableBoundedLagPathFrontier(
-            stableMultiscaleBoundedFrontier,
-            displayed,
-            boundedOperations,
-            diagnosis.targetRange,
-            candidateEvents,
-        );
         let cachedCofechaDiagnosis: ReturnType<typeof diagnoseSeriesCore> | undefined;
         const getCofechaDiagnosis = (): ReturnType<typeof diagnoseSeriesCore> => {
             if (cachedCofechaDiagnosis === undefined) {
@@ -11046,6 +11172,15 @@ export const makeDiagnosisEvents = (
         const cumulativeMissingFrontier = earlySequentialMissing
             && !earlySequentialMissing.preserveWholeBaseline
             && earlySequentialMissing.event.eventType === "missingRing"
+            && maySequentialMissingPreemptStableJointFrontier(
+                stableBoundedPathFrontier,
+                stablePathHasFinalAuthority,
+                stableMultiscaleBoundedFrontier?.aggregateShiftYears,
+            )
+            && maySequentialMissingPreemptStableJointFrontier(
+                stableTerminalSequentialUnit,
+                stablePathHasFinalAuthority,
+            )
             && earlySequentialMissing.event.evidence.algorithmSources.some((source) => (
                 source === "cumulative_sequential_missing_staircase"
                 || source === "marker_anchored_sequential_missing_staircase"
@@ -11169,6 +11304,15 @@ export const makeDiagnosisEvents = (
         if (stableBoundedPathFrontier
             && stablePathHasFinalAuthority
             && stableFrontierMatchesConfirmedZero
+            && maySequentialMissingPreemptStableJointFrontier(
+                stableBoundedPathFrontier,
+                stablePathHasFinalAuthority,
+                stableMultiscaleBoundedFrontier?.aggregateShiftYears,
+            )
+            && maySequentialMissingPreemptStableJointFrontier(
+                stableTerminalSequentialUnit,
+                stablePathHasFinalAuthority,
+            )
             && mayRecoverSequentialMissing
             && options.enableCounterfactualEventLocator === true) {
             const confirmedFrontierCofechaDiagnosis = getCofechaDiagnosis();
@@ -11385,6 +11529,11 @@ export const makeDiagnosisEvents = (
             return finalize([sequentialFalse]);
         }
         const sequentialMissingPreemptsComposition = sequentialMissing
+            && maySequentialMissingPreemptStableJointFrontier(
+                stableBoundedPathFrontier,
+                stablePathHasFinalAuthority,
+                stableMultiscaleBoundedFrontier?.aggregateShiftYears,
+            )
             && !displayed.some((event) => event.eventType === "falseRing")
             && sequentialMissing.event.evidence.algorithmSources.some((source) => (
                 source === "cumulative_sequential_missing_staircase"
