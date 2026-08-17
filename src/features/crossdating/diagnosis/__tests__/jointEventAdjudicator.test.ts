@@ -1465,6 +1465,49 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("keeps a preserved missing interpretation on the final partial window", () => {
+        const final = event("recentered-partial", "partialMove", 1532, 1544, 1536);
+        final.shiftYears = -3;
+        final.shiftSide = "older";
+        final.evidence.lagBefore = -3;
+        final.evidence.lagAfter = 0;
+        const alternative = event("stale-missing", "missingRing", 1530, 1542, 1535);
+        alternative.evidence.notes = [
+            "interpretation_window=preserved_multi_event_consensus",
+        ];
+        final.interpretationAmbiguity = {
+            kind: "missingRingsOrPartialMove",
+            alternative,
+            evidence: {
+                missingRingCount: 3,
+                cumulativeShiftYears: -3,
+                missingYears: [],
+                partialFirstFixedYear: 1536,
+                normalizedCounterfactualGainDifference: 0,
+                masterMargin: 0,
+                referenceMedianMargin: 0,
+                referenceCount: 10,
+                missingReferenceSupport: 0,
+                partialReferenceSupport: 0,
+            },
+        };
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: final },
+        ]);
+
+        expect(decision.event?.interpretationAmbiguity?.alternative).toMatchObject({
+            eventType: "missingRing",
+            startYear: 1532,
+            endYear: 1544,
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "shared_missing_partial_frontier_window",
+                ]),
+            },
+        });
+    });
+
     it("does not let a low-confidence bark-side partial candidate rewrite the final mode", () => {
         const final = event("kept-final-partial", "partialMove", 1836, 1848, 1842);
         final.shiftYears = -4;

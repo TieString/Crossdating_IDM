@@ -15,6 +15,7 @@ import {
     promoteValidatedSequentialMissingInterpretation,
     makeMissingRingInterpretation,
     makePartialMoveInterpretation,
+    synchronizePreservedMissingPartialWindow,
 } from "../missingPartialInterpretation";
 import { planDiagnosisEventEdit } from "../eventApply";
 import { diagnoseSeriesCore } from "../segments";
@@ -748,6 +749,81 @@ describe("missing/partial interpretation tie", () => {
                 ]),
             },
         });
+    });
+
+    it("resynchronizes a preserved missing interpretation after final partial recentering", () => {
+        const partial = partialEvent();
+        partial.startYear = 1898;
+        partial.endYear = 1910;
+        partial.evidence.algorithmSources.push(
+            "multi_event_frontier_location_consensus",
+        );
+        const evidence = {
+            ...evaluateMissingPartialInterpretationTie(smallCompetition(), gate)!,
+            frontierYear: 1904,
+        };
+        const attached = attachMissingPartialInterpretation(
+            partial,
+            makeMissingRingInterpretation(partial, evidence, partial.seriesRange!),
+            evidence,
+        );
+        const recentered = {
+            ...attached,
+            startYear: 1900,
+            endYear: 1912,
+            rankedYears: [{
+                year: 1906,
+                rank: 1,
+                score: 2,
+                evidenceTags: ["stable_partial_rank_edge_guard"],
+            }],
+        };
+
+        const synchronized = synchronizePreservedMissingPartialWindow(recentered);
+        expect(synchronized.interpretationAmbiguity?.alternative).toMatchObject({
+            startYear: 1900,
+            endYear: 1912,
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "shared_missing_partial_frontier_window",
+                ]),
+                notes: expect.arrayContaining([
+                    "shared_interpretation_previous_window=1898-1910",
+                    "shared_interpretation_final_window=1900-1912",
+                ]),
+            },
+        });
+        expect(synchronized.interpretationAmbiguity?.alternative.rankedYears)
+            .toHaveLength(13);
+    });
+
+    it("does not overwrite an independently located missing interpretation", () => {
+        const partial = partialEvent();
+        const evidence = evaluateMissingPartialInterpretationTie(
+            smallCompetition(),
+            gate,
+        )!;
+        const alternative = makeMissingRingInterpretation(
+            partial,
+            evidence,
+            partial.seriesRange!,
+        );
+        alternative.evidence.notes = alternative.evidence.notes.filter((note) => (
+            note !== "interpretation_window=preserved_multi_event_consensus"
+        ));
+        const attached = attachMissingPartialInterpretation(partial, alternative, evidence);
+
+        const result = synchronizePreservedMissingPartialWindow({
+            ...attached,
+            startYear: 1910,
+            endYear: 1922,
+        });
+        expect(result.interpretationAmbiguity?.alternative).toMatchObject({
+            startYear: alternative.startYear,
+            endYear: alternative.endYear,
+        });
+        expect(result.interpretationAmbiguity?.alternative.evidence.algorithmSources)
+            .not.toContain("shared_missing_partial_frontier_window");
     });
 
     it("confirms a nearby two-ring count only after both virtual corrections win independent reference votes", () => {

@@ -13,6 +13,7 @@ import {
 } from "./unitBreakpointRefinement";
 import type { RwlSiteData } from "@/features/rwl/types";
 import { getRangeForSeries, toNumericSeries } from "./series";
+import { locationEvidenceFor, withEvidenceLedger } from "./evidenceLedger";
 import type {
     DiagnosisEvent,
     DiagnosisLocalLagTransitionEvidence,
@@ -619,6 +620,105 @@ export const attachMissingPartialInterpretation = (
                 stale: primary.stale || alternative.stale ? true : undefined,
             },
             evidence: { ...evidence, countEvidence },
+        },
+    };
+};
+
+/**
+ * Restores the explicit shared-window contract after the final adjudicator moves the primary
+ * partial window. Independently localized missing alternatives never carry the preservation
+ * marker and therefore keep their own location.
+ */
+export const synchronizePreservedMissingPartialWindow = (
+    event: DiagnosisEvent,
+): DiagnosisEvent => {
+    const ambiguity = event.interpretationAmbiguity;
+    if (
+        event.eventType !== "partialMove"
+        || ambiguity?.kind !== "missingRingsOrPartialMove"
+        || ambiguity.alternative.eventType !== "missingRing"
+        || !ambiguity.alternative.evidence.notes.includes(
+            "interpretation_window=preserved_multi_event_consensus",
+        )
+        || (
+            ambiguity.alternative.startYear === event.startYear
+            && ambiguity.alternative.endYear === event.endYear
+        )
+    ) return event;
+
+    const alternative = ambiguity.alternative;
+    const width = event.endYear - event.startYear + 1;
+    const prior = new Map(alternative.rankedYears.map((row) => [row.year, row]));
+    const priorTop = rankedTopYear(alternative);
+    const primaryTop = rankedTopYear(event);
+    const preferredYear = priorTop >= event.startYear && priorTop <= event.endYear
+        ? priorTop
+        : Math.max(event.startYear, Math.min(event.endYear, primaryTop));
+    const maximumScore = Math.max(0, ...alternative.rankedYears.map(({ score }) => score));
+    const minimumScore = Math.min(0, ...alternative.rankedYears.map(({ score }) => score));
+    const rankedYears = Array.from(
+        { length: width },
+        (_, index) => event.startYear + index,
+    ).map((year) => {
+        const existing = prior.get(year);
+        return {
+            year,
+            rank: 0,
+            score: year === preferredYear
+                ? maximumScore + Math.max(1e-9, Math.abs(maximumScore) * 1e-12)
+                : existing?.score ?? minimumScore - 1,
+            evidenceTags: Array.from(new Set([
+                ...(existing?.evidenceTags ?? []),
+                "shared_missing_partial_frontier_window",
+            ])).sort(),
+        };
+    }).sort((left, right) => (
+        right.score - left.score || right.year - left.year
+    )).map((row, index) => ({ ...row, rank: index + 1 }));
+    const referenceCount = Math.max(
+        0,
+        ...locationEvidenceFor(alternative).map((entry) => entry.referenceCount),
+    );
+    const synchronizedAlternative = withEvidenceLedger({
+        ...alternative,
+        id: `${alternative.id}-shared-window-${event.startYear}-${event.endYear}`,
+        startYear: event.startYear,
+        endYear: event.endYear,
+        rankedYears,
+        reviewCoreRange: undefined,
+        evidence: {
+            ...alternative.evidence,
+            algorithmSources: Array.from(new Set([
+                ...alternative.evidence.algorithmSources,
+                "shared_missing_partial_frontier_window",
+            ])).sort(),
+            locationEvidence: [
+                ...(alternative.evidence.locationEvidence ?? []),
+                {
+                    source: "shared_missing_partial_frontier_window",
+                    startYear: event.startYear,
+                    endYear: event.endYear,
+                    topYear: preferredYear,
+                    referenceCount,
+                    concentration: null,
+                    remoteMargin: null,
+                    calibrated: false,
+                },
+            ],
+            notes: Array.from(new Set([
+                ...alternative.evidence.notes,
+                `shared_interpretation_previous_window=${
+                    alternative.startYear
+                }-${alternative.endYear}`,
+                `shared_interpretation_final_window=${event.startYear}-${event.endYear}`,
+            ])),
+        },
+    });
+    return {
+        ...event,
+        interpretationAmbiguity: {
+            ...ambiguity,
+            alternative: synchronizedAlternative,
         },
     };
 };

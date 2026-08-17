@@ -17,6 +17,7 @@ import {
     strongBoundedPathLocation,
 } from "./locationAuthority";
 import { addStablePartialRankEdgeGuard } from "./stablePartialLocationConsensus";
+import { synchronizePreservedMissingPartialWindow } from "./missingPartialInterpretation";
 import {
     isAllowedAutomaticDiagnosisEvent,
     wholeSeriesMoveShiftYears,
@@ -2156,11 +2157,14 @@ export const adjudicateJointEventHypotheses = (
     const evidenceLocatedEvent = endpointResolvedEvent
         ? projectUnsupportedLocationToStrongBoundedPath(endpointResolvedEvent)
         : endpointResolvedEvent;
-    const selectedEvent = evidenceLocatedEvent?.seriesRange
+    const locationGuardedEvent = evidenceLocatedEvent?.seriesRange
         ? addStablePartialRankEdgeGuard(evidenceLocatedEvent, {
             targetRange: evidenceLocatedEvent.seriesRange,
         })
         : evidenceLocatedEvent;
+    const selectedEvent = locationGuardedEvent
+        ? synchronizePreservedMissingPartialWindow(locationGuardedEvent)
+        : locationGuardedEvent;
     return {
         seriesId,
         status: selectedEvent ? "selected" : "refused",
