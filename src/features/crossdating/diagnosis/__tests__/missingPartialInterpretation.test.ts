@@ -723,6 +723,33 @@ describe("missing/partial interpretation tie", () => {
         ).toBeUndefined();
     });
 
+    it("keeps the same review window when switching a multi-event partial to missing", () => {
+        const partial = partialEvent();
+        partial.startYear = 1898;
+        partial.endYear = 1910;
+        partial.evidence.algorithmSources.push(
+            "multi_event_frontier_location_consensus",
+        );
+        const evidence = {
+            ...evaluateMissingPartialInterpretationTie(smallCompetition(), gate)!,
+            frontierYear: 1880,
+        };
+
+        expect(makeMissingRingInterpretation(
+            partial,
+            evidence,
+            partial.seriesRange!,
+        )).toMatchObject({
+            startYear: 1898,
+            endYear: 1910,
+            evidence: {
+                notes: expect.arrayContaining([
+                    "interpretation_window=preserved_multi_event_consensus",
+                ]),
+            },
+        });
+    });
+
     it("confirms a nearby two-ring count only after both virtual corrections win independent reference votes", () => {
         const { site, targetId } = buildDeterministicMissingSite([1934, 1940]);
         const diagnosis = diagnoseSeriesCore(

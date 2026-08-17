@@ -80,6 +80,7 @@ import {
     refineStablePartialMoveLocation,
 } from "./stablePartialLocationConsensus";
 import {
+    projectMultiEventLocationConsensus,
     projectUnitLocationFromIndependentConsensus,
     strongBoundedPathLocation,
 } from "./locationAuthority";
@@ -11175,6 +11176,16 @@ export const makeDiagnosisEvents = (
             );
         const terminalCompatibleParsimoniousPartialCheckpoint =
             stableTerminalSequentialUnit === null
+            || (
+                parsimoniousPartialOperationCheckpoint !== null
+                && candidateEvents.some((candidate) => (
+                    candidate.eventType === "partialMove"
+                    && candidate.shiftYears
+                        === parsimoniousPartialOperationCheckpoint.shiftYears
+                    && candidate.evidence.notes.includes("candidate_hard_gate_passed")
+                    && candidate.evidence.candidateIds.length > 0
+                ))
+            )
                 ? parsimoniousPartialOperationCheckpoint
                 : null;
         const recoveredStableBoundedPathFrontier = recoverStableBoundedLagPathFrontier(
@@ -11298,7 +11309,86 @@ export const makeDiagnosisEvents = (
                     diagnosis.targetRange,
                 )
             ));
-            const automaticSemanticsRejectedCount = independentlyLocatedEvents.filter(
+            const frontierConsensusEvents = independentlyLocatedEvents.map((event) => {
+                const terminalOwnsUncontestedLocation = stableTerminalSequentialUnit !== null
+                    && stableBoundedPathFrontier === null
+                    && localLagTransitionEvidence === null;
+                const supportedCandidateLocations = candidateEvents.filter((candidate) => (
+                    candidate.eventType === event.eventType
+                    && candidate.evidence.notes.includes("candidate_hard_gate_passed")
+                ));
+                const preliminaryLocations = terminalOwnsUncontestedLocation ? [] : [
+                    ...detectedBeforeFusion,
+                    ...detected,
+                    ...displayed,
+                ];
+                const stageEvents = [
+                    ...supportedCandidateLocations,
+                    ...preliminaryLocations,
+                    ...stableUnitPathLocationCheckpoints,
+                    ...(stableBoundedPathFrontier ? [stableBoundedPathFrontier] : []),
+                    ...(stableTerminalSequentialUnit ? [stableTerminalSequentialUnit] : []),
+                ];
+                const stageYears = [
+                    ...stageEvents.map(rankedEventYear),
+                    ...(localLagTransitionEvidence?.evidenceYears ?? []),
+                    ...(boundedUnitSelection
+                        ? [boundedUnitSelection.operation.bestYear]
+                        : []),
+                ].filter((year): year is number => Number.isInteger(year));
+                const hasStructuralMultiEventEvidence = (
+                    (localLagTransitionEvidence?.eventCount ?? 0) >= 2
+                    || stableTerminalSequentialUnit !== null
+                    || (stableMultiscaleBoundedFrontier?.transitionCount ?? 0) >= 2
+                );
+                const hasCumulativeStageEvidence = stageEvents.some((candidate) => (
+                    candidate.eventType === "partialMove"
+                    && Math.abs(candidate.shiftYears ?? 0) >= 2
+                ));
+                const hasMultipleUnitCandidates = candidateEvents.filter((candidate) => (
+                    candidate.eventType === event.eventType
+                    && (candidate.eventType === "missingRing"
+                        || candidate.eventType === "falseRing")
+                )).length >= 2;
+                const shouldUseMultiEventLocation = hasStructuralMultiEventEvidence
+                    || event.eventType === "partialMove"
+                    || hasCumulativeStageEvidence
+                    || hasMultipleUnitCandidates;
+                const hasDetachedCalibratedLocation = (
+                    event.evidence.locationEvidence ?? []
+                ).some((entry) => (
+                    entry.calibrated
+                    && (entry.startYear !== event.startYear
+                        || entry.endYear !== event.endYear)
+                ));
+                const shouldReconcileLocation = shouldUseMultiEventLocation
+                    || hasDetachedCalibratedLocation;
+                if (!shouldReconcileLocation) return event;
+                const currentWindowWidth = event.endYear - event.startYear + 1;
+                const preserveStrongSelectedUnit = (
+                    event.eventType === "missingRing" || event.eventType === "falseRing"
+                )
+                    && currentWindowWidth === 13
+                    && strongBoundedPathLocation(event) !== null
+                    && localLagTransitionEvidence === null
+                    && !hasMultipleUnitCandidates
+                    && !hasDetachedCalibratedLocation;
+                if (preserveStrongSelectedUnit) return event;
+                const preserveStrongSelectedPartial = event.eventType === "partialMove"
+                    && Math.abs(event.shiftYears ?? 0) >= 10
+                    && strongBoundedPathLocation(event) !== null
+                    && stableTerminalSequentialUnit === null
+                    && localLagTransitionEvidence === null;
+                if (preserveStrongSelectedPartial) return event;
+                return projectMultiEventLocationConsensus(
+                    event,
+                    stageYears,
+                    diagnosis.targetRange,
+                    hasStructuralMultiEventEvidence,
+                    stableBoundedPathFrontier ? 16 : 12,
+                );
+            });
+            const automaticSemanticsRejectedCount = frontierConsensusEvents.filter(
                 (event) => !isValidAutomaticEvent(event),
             ).length;
             const attachAndPrioritizeMissingWorkflow = (
@@ -11338,7 +11428,7 @@ export const makeDiagnosisEvents = (
                     hasIndependentUnitLocation,
                 );
             };
-            const finalEvents = validAutomaticEvents(independentlyLocatedEvents)
+            const finalEvents = validAutomaticEvents(frontierConsensusEvents)
                 .map(attachAndPrioritizeMissingWorkflow)
                 .map(withEvidenceLedger);
             const boundedFinalEvents = includeBoundedPathHypotheses

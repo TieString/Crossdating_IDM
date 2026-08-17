@@ -159,6 +159,33 @@ describe("stable near lag cluster", () => {
             [],
         )).toBeNull();
     });
+
+    it("selects the bark-side group when equally supported clusters overlap one mode", () => {
+        const stronger = path([
+            event(1900, -4, -3),
+            event(1905, -3, -2),
+            event(1910, -2, -1),
+            event(1915, -1, 0),
+        ]);
+        const weaker = path([
+            event(1901, -4, -3),
+            event(1906, -3, -2),
+            event(1911, -2, -1),
+            event(1916, -1, 0),
+        ]);
+
+        expect(selectStableNearLagCluster(
+            stronger,
+            weaker,
+            [event(1908, -2, -1)],
+            6,
+            2,
+            2,
+        )).toMatchObject({
+            evidenceYears: [1911, 1916],
+            representative: { rankedYears: [{ year: 1915 }] },
+        });
+    });
 });
 
 describe("stable terminal unit staircase frontier", () => {

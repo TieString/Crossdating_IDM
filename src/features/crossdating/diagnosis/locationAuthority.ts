@@ -114,6 +114,139 @@ const normalizeSelectedUnitWindow = (
     });
 };
 
+/**
+ * Reconciles one already-selected operation with a compact multi-event location mode. The
+ * operation contract is immutable here; only its single 13-year review window may change.
+ */
+export const projectMultiEventLocationConsensus = (
+    event: DiagnosisEvent,
+    evidenceYears: readonly number[],
+    targetRange: { startYear: number; endYear: number },
+    forceMultiEventWindow = false,
+    maximumModeSpanYears = 16,
+): DiagnosisEvent => {
+    if (event.eventType === "wholeSeriesMove") return event;
+    const currentYear = rankedYear(event);
+    if (currentYear === null) return event;
+    const currentCalibratedLocation = locationEvidenceFor(event).some((entry) => (
+        entry.calibrated
+        && entry.startYear === event.startYear
+        && entry.endYear === event.endYear
+    ));
+    if (currentCalibratedLocation) return event;
+    const years = [...new Set([currentYear, ...evidenceYears])]
+        .filter((year) => Number.isInteger(year)
+            && year >= targetRange.startYear
+            && year <= targetRange.endYear)
+        .sort((left, right) => left - right);
+    const clusters: number[][] = [];
+    for (let start = 0; start < years.length; start += 1) {
+        for (let end = start; end < years.length; end += 1) {
+            const selected = years.slice(start, end + 1);
+            if (selected[selected.length - 1] - selected[0] > maximumModeSpanYears) break;
+            if (selected.length >= 2 && selected.includes(currentYear)) clusters.push(selected);
+        }
+    }
+    const selectedYears = clusters.sort((left, right) => (
+        right[right.length - 1] - left[left.length - 1]
+        || right.length - left.length
+        || right[0] - left[0]
+    ))[0] ?? (
+        forceMultiEventWindow
+        && event.evidence.algorithmSources.includes(
+            "stable_terminal_unit_staircase_frontier",
+        )
+            ? [currentYear]
+            : null
+    );
+    if (!selectedYears) return event;
+    const centerYear = Math.round(selectedYears.reduce(
+        (sum, year) => sum + year,
+        0,
+    ) / selectedYears.length);
+    const window = clampWindowToRange(centerYear - 6, 13, targetRange);
+    if (event.startYear === window.startYear && event.endYear === window.endYear) return event;
+
+    const prior = new Map(event.rankedYears.map((row) => [row.year, row]));
+    const maximumScore = Math.max(0, ...event.rankedYears.map(({ score }) => score));
+    const minimumScore = Math.min(0, ...event.rankedYears.map(({ score }) => score));
+    const preferredYear = selectedYears
+        .filter((year) => year >= window.startYear && year <= window.endYear)
+        .sort((left, right) => (
+            Math.abs(left - centerYear) - Math.abs(right - centerYear)
+            || right - left
+        ))[0] ?? centerYear;
+    const rankedYears = Array.from(
+        { length: 13 },
+        (_, index) => window.startYear + index,
+    ).map((year) => {
+        const existing = prior.get(year);
+        return {
+            year,
+            rank: 0,
+            score: year === preferredYear
+                ? maximumScore + Math.max(1e-9, Math.abs(maximumScore) * 1e-12)
+                : existing?.score ?? minimumScore - 1,
+            evidenceTags: Array.from(new Set([
+                ...(existing?.evidenceTags ?? []),
+                "multi_event_frontier_location_consensus",
+            ])).sort(),
+        };
+    }).sort((left, right) => (
+        right.score - left.score || right.year - left.year
+    )).map((row, index) => ({ ...row, rank: index + 1 }));
+    const reviewCoreRange = event.reviewCoreRange ? {
+        startYear: Math.max(window.startYear, event.reviewCoreRange.startYear),
+        endYear: Math.min(window.endYear, event.reviewCoreRange.endYear),
+    } : null;
+    const referenceCount = Math.max(
+        0,
+        ...locationEvidenceFor(event).map((entry) => entry.referenceCount),
+    );
+    return withEvidenceLedger({
+        ...event,
+        id: `${event.id}-multi-frontier-${window.startYear}-${window.endYear}`,
+        ...window,
+        rankedYears,
+        reviewCoreRange: reviewCoreRange
+            && reviewCoreRange.startYear <= reviewCoreRange.endYear
+            ? reviewCoreRange
+            : undefined,
+        evidence: {
+            ...event.evidence,
+            algorithmSources: Array.from(new Set([
+                ...event.evidence.algorithmSources,
+                "multi_event_frontier_location_consensus",
+            ])).sort(),
+            locationEvidence: [
+                ...(event.evidence.locationEvidence ?? []),
+                {
+                    source: "multi_event_frontier_location_consensus",
+                    ...window,
+                    topYear: preferredYear,
+                    referenceCount,
+                    concentration: selectedYears.length <= 1
+                        ? null
+                        : Math.max(
+                            0,
+                            1 - (selectedYears[selectedYears.length - 1]
+                                - selectedYears[0]) / 17,
+                        ),
+                    remoteMargin: null,
+                    calibrated: false,
+                },
+            ],
+            notes: Array.from(new Set([
+                ...event.evidence.notes,
+                `multi_frontier_previous_window=${event.startYear}-${event.endYear}`,
+                `multi_frontier_evidence_years=${selectedYears.join(",")}`,
+                `multi_frontier_center_year=${centerYear}`,
+                `multi_frontier_consensus_window=${window.startYear}-${window.endYear}`,
+            ])),
+        },
+    });
+};
+
 const noteRange = (
     event: DiagnosisEvent,
     prefix: string,

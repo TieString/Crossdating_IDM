@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DiagnosisEvent } from "../types";
 import {
     preservesStrongBoundedPathMode,
+    projectMultiEventLocationConsensus,
     projectUnsupportedLocationToStrongBoundedPath,
     projectUnitLocationFromIndependentConsensus,
     strongBoundedPathLocation,
@@ -72,6 +73,89 @@ describe("strong bounded-path location authority", () => {
                 ]),
             },
         });
+    });
+});
+
+describe("multi-event frontier location consensus", () => {
+    it("does not rewrite an already calibrated current window", () => {
+        const input = event({ calibrated: true });
+        expect(projectMultiEventLocationConsensus(
+            input,
+            [1894, 1897],
+            { startYear: 1400, endYear: 2000 },
+            true,
+        )).toBe(input);
+    });
+
+    it("centers one window between a current mode and a compact older evidence group", () => {
+        const input = event();
+        input.startYear = 1630;
+        input.endYear = 1642;
+        input.rankedYears = [{ year: 1636, rank: 1, score: 4, evidenceTags: [] }];
+
+        expect(projectMultiEventLocationConsensus(
+            input,
+            [1616, 1620, 1621],
+            { startYear: 1400, endYear: 2000 },
+            true,
+        )).toMatchObject({
+            startYear: 1620,
+            endYear: 1632,
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "multi_event_frontier_location_consensus",
+                ]),
+            },
+        });
+    });
+
+    it("chooses the newer compact mode instead of joining a distant older peak", () => {
+        const input = event();
+        input.startYear = 1863;
+        input.endYear = 1875;
+        input.rankedYears = [{ year: 1869, rank: 1, score: 4, evidenceTags: [] }];
+
+        expect(projectMultiEventLocationConsensus(
+            input,
+            [1852, 1853, 1881],
+            { startYear: 1400, endYear: 2000 },
+            true,
+        )).toMatchObject({
+            startYear: 1869,
+            endYear: 1881,
+        });
+    });
+
+    it("uses a 13-year window without moving a single unsupported mode", () => {
+        const input = event();
+        input.startYear = 1887;
+        input.endYear = 1895;
+
+        expect(projectMultiEventLocationConsensus(
+            input,
+            [],
+            { startYear: 1400, endYear: 2000 },
+            true,
+        )).toBe(input);
+        const terminal = {
+            ...input,
+            evidence: {
+                ...input.evidence,
+                algorithmSources: ["stable_terminal_unit_staircase_frontier"],
+            },
+        };
+        expect(projectMultiEventLocationConsensus(
+            terminal,
+            [],
+            { startYear: 1400, endYear: 2000 },
+            true,
+        )).toMatchObject({ startYear: 1885, endYear: 1897 });
+        expect(projectMultiEventLocationConsensus(
+            input,
+            [],
+            { startYear: 1400, endYear: 2000 },
+            false,
+        )).toBe(input);
     });
 });
 

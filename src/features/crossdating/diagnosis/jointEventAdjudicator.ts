@@ -203,6 +203,9 @@ const isCandidateAnchoredDistantMissingEvent = (
 
 const eventHasIndependentLocationAuthority = (event: DiagnosisEvent): boolean => {
     const claims = evidenceClaimsFor(event);
+    const multiEventYears = event.evidence.notes.find((note) => (
+        note.startsWith("multi_frontier_evidence_years=")
+    ))?.split("=")[1]?.split(",").filter(Boolean) ?? [];
     if (claims.has("independent_reference_staircase")
         || claims.has("fixed_side_resolution")
         || claims.has("endpoint_unit_resolution")
@@ -216,6 +219,12 @@ const eventHasIndependentLocationAuthority = (event: DiagnosisEvent): boolean =>
             "sequential_missing_checkpoint_location",
         )
         || isCandidateAnchoredDistantMissingEvent(event)
+        || (
+            event.evidence.algorithmSources.includes(
+                "multi_event_frontier_location_consensus",
+            )
+            && new Set(multiEventYears).size >= 2
+        )
         || (
             claims.has("continuous_gap_consensus")
             && event.evidence.algorithmSources.includes(
@@ -393,7 +402,18 @@ const preferredAcceptedFinalLocation = (
                 acceptedStrongLocatorEvidence(event) !== null
                 || (
                     location?.calibrated === true
-                    && (location.remoteMargin ?? 0) >= 0.04
+                    && (
+                        (location.remoteMargin ?? 0) >= 0.04
+                        || (
+                            event.evidence.candidateIds.length > 0
+                            && event.evidence.algorithmSources.includes(
+                                "candidate_ranking",
+                            )
+                            && event.evidence.algorithmSources.includes(
+                                "local_edit_alignment",
+                            )
+                        )
+                    )
                 )
             );
     })
@@ -975,6 +995,26 @@ const preferredSelectedFinalLocation = (
     ))[0] ?? null;
 };
 
+const preferredSelectedMultiEventLocation = (
+    cluster: HypothesisCluster,
+): DiagnosisReviewEventCheckpoint | null => cluster.checkpoints
+    .filter((checkpoint) => {
+        if (checkpoint.stage !== "final" || checkpoint.authority === "supplemental") {
+            return false;
+        }
+        const evidenceYears = checkpoint.event.evidence.notes.find((note) => (
+            note.startsWith("multi_frontier_evidence_years=")
+        ))?.split("=")[1]?.split(",").filter(Boolean) ?? [];
+        return checkpoint.event.evidence.algorithmSources.includes(
+            "multi_event_frontier_location_consensus",
+        ) && new Set(evidenceYears).size >= 2;
+    })
+    .sort((left, right) => (
+        eventLocationQuality(right.event) - eventLocationQuality(left.event)
+        || (topYear(right.event) ?? Number.NEGATIVE_INFINITY)
+            - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
+    ))[0] ?? null;
+
 const representative = (
     cluster: HypothesisCluster,
 ): DiagnosisReviewEventCheckpoint => {
@@ -985,7 +1025,8 @@ const representative = (
         || (topYear(right.event) ?? Number.NEGATIVE_INFINITY)
             - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
     ))[0];
-    const selected = preferredValidatedFinalSequentialUnit(cluster)
+    const selected = preferredSelectedMultiEventLocation(cluster)
+        ?? preferredValidatedFinalSequentialUnit(cluster)
         ?? preferredSelectedCompletedComposition(cluster)
         ?? preferredHighConfidenceBarkSidePartialCandidate(cluster)
         ?? preferredAcceptedFinalLocation(cluster)

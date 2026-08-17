@@ -475,10 +475,19 @@ export const makeMissingRingInterpretation = (
         : evidence.interpretationBasis === "virtualSequentialFrontier"
             ? "virtual_sequential_missing_frontier"
         : "missing_partial_interpretation_tie";
-    const window = boundedWindow(
-        selectedYear,
-        partial.endYear - partial.startYear + 1,
-        range,
+    const preservePrimaryWindow = partial.evidence.algorithmSources.includes(
+        "multi_event_frontier_location_consensus",
+    );
+    const window = preservePrimaryWindow
+        ? { startYear: partial.startYear, endYear: partial.endYear }
+        : boundedWindow(
+            selectedYear,
+            partial.endYear - partial.startYear + 1,
+            range,
+        );
+    const rankedCenterYear = Math.max(
+        window.startYear,
+        Math.min(window.endYear, selectedYear),
     );
     const rankedYears = Array.from(
         { length: window.endYear - window.startYear + 1 },
@@ -486,7 +495,7 @@ export const makeMissingRingInterpretation = (
             const year = window.startYear + index;
             return {
                 year,
-                score: partial.evidence.score - Math.abs(year - selectedYear) * 0.01,
+                score: partial.evidence.score - Math.abs(year - rankedCenterYear) * 0.01,
                 evidenceTags: [interpretationSource],
             };
         },
@@ -521,6 +530,9 @@ export const makeMissingRingInterpretation = (
                 ...interpretationNotes(evidence),
                 ...(evidence.missingYears.length === 0
                     ? ["interpretation_missing_years=unresolved_frontier_sequence"]
+                    : []),
+                ...(preservePrimaryWindow
+                    ? ["interpretation_window=preserved_multi_event_consensus"]
                     : []),
                 "interpretation=discrete_missing_ring_frontier",
             ])),

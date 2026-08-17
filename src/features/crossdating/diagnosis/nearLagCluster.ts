@@ -308,7 +308,7 @@ export const selectStableNearLagCluster = (
             const rightEnd = right.stronger.transitions[
                 right.stronger.transitions.length - 1
             ].year;
-            if (leftOverlap && leftEnd !== rightEnd) return leftEnd - rightEnd;
+            if (leftOverlap && leftEnd !== rightEnd) return rightEnd - leftEnd;
             return rightEnd - leftEnd;
         });
     const selected = matches[0];

@@ -120,6 +120,30 @@ describe("joint event adjudicator", () => {
         expect(decision.event).not.toHaveProperty("nearEventCluster");
     });
 
+    it("keeps a selected multi-event consensus window ahead of supplemental locations", () => {
+        const selected = event("selected-consensus", "falseRing", 1829, 1841, 1834);
+        selected.evidence.algorithmSources = [
+            "multi_event_frontier_location_consensus",
+        ];
+        selected.evidence.notes = [
+            "multi_frontier_evidence_years=1833,1834,1837",
+        ];
+        const supplemental = event("supplemental", "falseRing", 1840, 1852, 1846, 99);
+        supplemental.evidence.algorithmSources = ["bounded_complete_lag_path"];
+
+        expect(adjudicateJointEventHypotheses("TARGET", [
+            { ...checkpoint("final", selected), authority: "selected" },
+            { ...checkpoint("final", supplemental), authority: "supplemental" },
+        ])).toMatchObject({
+            status: "selected",
+            event: {
+                id: "selected-consensus",
+                startYear: 1829,
+                endYear: 1841,
+            },
+        });
+    });
+
     it("uses cross-stage survival instead of incomparable raw event scores", () => {
         const stable = event("stable", "missingRing", 1899, 1905, 1902, 0.4);
         const remoteRawPeak = event("raw-peak", "missingRing", 1940, 1952, 1946, 99);
@@ -210,6 +234,42 @@ describe("joint event adjudicator", () => {
             id: "persisted",
             startYear: 1568,
             endYear: 1580,
+        });
+    });
+
+    it("keeps a candidate-backed calibrated locator when its remote margin is zero", () => {
+        const persisted = event("persisted", "falseRing", 1536, 1548, 1542);
+        const located = event("located", "falseRing", 1526, 1538, 1533);
+        located.evidence.algorithmSources = [
+            "candidate_ranking",
+            "full_interval_counterfactual_locator",
+            "local_edit_alignment",
+        ];
+        located.evidence.notes = ["locator_adjudication=accepted_overlapping_mode"];
+        located.evidence.locationEvidence = [{
+            source: "full_interval_counterfactual_locator",
+            startYear: 1526,
+            endYear: 1538,
+            topYear: 1533,
+            referenceCount: 16,
+            concentration: 0.48,
+            remoteMargin: 0,
+            calibrated: true,
+        }];
+
+        expect(adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("detected", persisted),
+            checkpoint("fused", persisted),
+            checkpoint("retained", persisted),
+            checkpoint("displayed", persisted),
+            { ...checkpoint("final", located), authority: "selected" },
+            { ...checkpoint("final", persisted), authority: "supplemental" },
+        ])).toMatchObject({
+            event: {
+                id: "located",
+                startYear: 1526,
+                endYear: 1538,
+            },
         });
     });
 
