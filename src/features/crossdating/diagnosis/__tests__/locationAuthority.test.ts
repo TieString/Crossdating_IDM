@@ -137,6 +137,41 @@ describe("multi-event frontier location consensus", () => {
         });
     });
 
+    it("keeps more older-side context for a stable terminal false-ring boundary", () => {
+        const input = event();
+        input.eventType = "falseRing";
+        input.startYear = 1863;
+        input.endYear = 1871;
+        input.rankedYears = [{ year: 1867, rank: 1, score: 4, evidenceTags: [] }];
+        input.evidence.algorithmSources.push(
+            "stable_terminal_unit_staircase_frontier",
+        );
+        input.evidence.notes.push(
+            "terminal_unit_staircase_boundary_year=1867",
+            "terminal_unit_staircase_transition_years=1854,1857,1865,1867",
+            "terminal_unit_staircase_max_adjacent_gap_years=8",
+        );
+
+        expect(projectMultiEventLocationConsensus(
+            input,
+            [1867],
+            { startYear: 1400, endYear: 2000 },
+            true,
+        )).toMatchObject({
+            startYear: 1859,
+            endYear: 1871,
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "terminal_false_ring_asymmetric_window",
+                ]),
+                notes: expect.arrayContaining([
+                    "terminal_false_ring_older_padding=8",
+                    "terminal_false_ring_newer_padding=4",
+                ]),
+            },
+        });
+    });
+
     it("chooses the newer compact mode instead of joining a distant older peak", () => {
         const input = event();
         input.startYear = 1863;

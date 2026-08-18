@@ -178,6 +178,32 @@ export const projectMultiEventLocationConsensus = (
             ? clampWindowToRange(terminalBoundaryYear, 13, targetRange)
             : clampWindowToRange(terminalBoundaryYear - 12, 13, targetRange);
     }
+    const terminalTransitionYears = event.evidence.notes
+        .find((note) => note.startsWith("terminal_unit_staircase_transition_years="))
+        ?.split("=")[1]
+        ?.split(",")
+        .map(Number)
+        .filter(Number.isInteger) ?? [];
+    const terminalMaximumGap = Number(event.evidence.notes
+        .find((note) => note.startsWith(
+            "terminal_unit_staircase_max_adjacent_gap_years=",
+        ))?.split("=")[1]);
+    const terminalFalseRingOlderPadding = event.eventType === "falseRing"
+        && event.evidence.algorithmSources.includes(
+            "stable_terminal_unit_staircase_frontier",
+        )
+        && Number.isInteger(terminalBoundaryYear)
+        && terminalTransitionYears.length >= 2
+        && Number.isFinite(terminalMaximumGap)
+        ? Math.min(10, Math.max(6, Math.round(terminalMaximumGap)))
+        : null;
+    if (terminalFalseRingOlderPadding !== null) {
+        window = clampWindowToRange(
+            terminalBoundaryYear - terminalFalseRingOlderPadding,
+            13,
+            targetRange,
+        );
+    }
     if (event.startYear === window.startYear && event.endYear === window.endYear) return event;
 
     const prior = new Map(event.rankedYears.map((row) => [row.year, row]));
@@ -230,6 +256,9 @@ export const projectMultiEventLocationConsensus = (
             algorithmSources: Array.from(new Set([
                 ...event.evidence.algorithmSources,
                 "multi_event_frontier_location_consensus",
+                ...(terminalFalseRingOlderPadding === null
+                    ? []
+                    : ["terminal_false_ring_asymmetric_window"]),
             ])).sort(),
             locationEvidence: [
                 ...(event.evidence.locationEvidence ?? []),
@@ -258,6 +287,14 @@ export const projectMultiEventLocationConsensus = (
                 ...(guardedByTerminalBoundary ? [
                     `multi_frontier_terminal_boundary_guard=${terminalBoundaryYear}`,
                 ] : []),
+                ...(terminalFalseRingOlderPadding === null ? [] : [
+                    `terminal_false_ring_older_padding=${
+                        terminalFalseRingOlderPadding
+                    }`,
+                    `terminal_false_ring_newer_padding=${
+                        12 - terminalFalseRingOlderPadding
+                    }`,
+                ]),
             ])),
         },
     });
