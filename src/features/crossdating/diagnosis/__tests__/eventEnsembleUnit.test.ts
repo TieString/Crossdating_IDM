@@ -212,6 +212,10 @@ describe("calibratedTerminalUnitStaircaseWindowWidth", () => {
             eventCount,
             aggregateShiftYears: eventCount,
             boundaryYear: 1884,
+            transitionYears: Array.from(
+                { length: eventCount },
+                (_, index) => 1884 - (eventCount - index - 1) * 8,
+            ),
             maximumAdjacentTransitionGapYears: 8,
             maximumYearDrift: 2,
             strongerTransitionGain: 20,

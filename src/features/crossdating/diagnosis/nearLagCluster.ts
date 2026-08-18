@@ -16,6 +16,7 @@ export type StableTerminalUnitStaircaseFrontier = {
     eventCount: number;
     aggregateShiftYears: number;
     boundaryYear: number;
+    transitionYears: number[];
     maximumAdjacentTransitionGapYears: number;
     maximumYearDrift: number;
     strongerTransitionGain: number;
@@ -163,6 +164,9 @@ const stableTerminalFrontier = (
         eventCount: Math.abs(aggregateShiftYears),
         aggregateShiftYears,
         boundaryYear: Math.round((stronger.boundaryYear + weaker.boundaryYear) / 2),
+        transitionYears: stronger.transitionYears.map((year, index) => (
+            Math.round((year + weaker.transitionYears[index]!) / 2)
+        )),
         maximumAdjacentTransitionGapYears: Math.max(
             stronger.maximumAdjacentTransitionGapYears,
             weaker.maximumAdjacentTransitionGapYears,
@@ -171,6 +175,45 @@ const stableTerminalFrontier = (
         strongerTransitionGain: strongerPenaltyPath.path.transitionGain,
         weakerTransitionGain: weakerPenaltyPath.path.transitionGain,
         olderContinuationAccepted: stronger.olderContinuation || weaker.olderContinuation,
+    };
+};
+
+export type TerminalUnitBoundaryCadenceCalibration = {
+    rawBoundaryYear: number;
+    boundaryYear: number;
+    expectedGapYears: number;
+    precedingGapYears: [number, number];
+    rule: "stable_cadence_extrapolation" | "extreme_terminal_gap_midpoint";
+};
+
+/** Corrects only a smeared terminal boundary after two stable, non-adjacent unit intervals. */
+export const calibrateTerminalUnitBoundaryFromCadence = (
+    frontier: StableTerminalUnitStaircaseFrontier,
+): TerminalUnitBoundaryCadenceCalibration | null => {
+    if (frontier.eventCount < 4 || frontier.transitionYears.length < 4) return null;
+    const [first, second, third] = frontier.transitionYears.slice(-4);
+    const firstGap = second! - first!;
+    const secondGap = third! - second!;
+    if (Math.min(firstGap, secondGap) < 6 || Math.abs(firstGap - secondGap) > 3) {
+        return null;
+    }
+    const expectedGapYears = Math.round((firstGap + secondGap) / 2);
+    const extrapolatedBoundaryYear = third! + expectedGapYears;
+    const rawBoundaryYear = frontier.boundaryYear;
+    if (Math.abs(rawBoundaryYear - extrapolatedBoundaryYear) < 2) return null;
+    const extremeTerminalGap = rawBoundaryYear - extrapolatedBoundaryYear
+        > expectedGapYears * 1.75;
+    const boundaryYear = extremeTerminalGap
+        ? Math.round((rawBoundaryYear + extrapolatedBoundaryYear) / 2)
+        : extrapolatedBoundaryYear;
+    return {
+        rawBoundaryYear,
+        boundaryYear,
+        expectedGapYears,
+        precedingGapYears: [firstGap, secondGap],
+        rule: extremeTerminalGap
+            ? "extreme_terminal_gap_midpoint"
+            : "stable_cadence_extrapolation",
     };
 };
 

@@ -145,6 +145,7 @@ import { refineEventWithCounterfactualLocator } from "./counterfactualEventLocat
 import { adjudicateLocatorProposal } from "./eventAdjudicator";
 import { evidenceClaimsFor, withEvidenceLedger } from "./evidenceLedger";
 import {
+    calibrateTerminalUnitBoundaryFromCadence,
     hasNearLagClusterCandidate,
     selectStableNearLagCluster,
     selectStablePositiveTerminalUnitOperationFrontier,
@@ -6294,7 +6295,8 @@ const projectStableTerminalSequentialUnit = (
     diagnosis: SeriesCoreDiagnosis,
     candidates: readonly DiagnosisCandidateOperation[],
 ): DiagnosisEvent => {
-    const presentationYear = frontier.boundaryYear;
+    const cadenceCalibration = calibrateTerminalUnitBoundaryFromCadence(frontier);
+    const presentationYear = cadenceCalibration?.boundaryYear ?? frontier.boundaryYear;
     const eventType = frontier.aggregateShiftYears > 0 ? "falseRing" : "missingRing";
     const directionSource = frontier.aggregateShiftYears > 0
         ? "positive_unit_staircase_direction"
@@ -6363,6 +6365,9 @@ const projectStableTerminalSequentialUnit = (
                 candidateSource,
                 directionSource,
                 "stable_terminal_unit_staircase_frontier",
+                ...(cadenceCalibration
+                    ? ["terminal_unit_staircase_cadence_calibration"]
+                    : []),
                 ...(olderContinuationSource ? [olderContinuationSource] : []),
                 ...(sequentialFalseSource ? [sequentialFalseSource] : []),
             ])).sort(),
@@ -6384,6 +6389,21 @@ const projectStableTerminalSequentialUnit = (
                     frontier.aggregateShiftYears
                 }`,
                 `terminal_unit_staircase_boundary_year=${presentationYear}`,
+                `terminal_unit_staircase_transition_years=${
+                    frontier.transitionYears.join(",")
+                }`,
+                ...(cadenceCalibration ? [
+                    `terminal_unit_staircase_raw_boundary_year=${
+                        cadenceCalibration.rawBoundaryYear
+                    }`,
+                    `terminal_unit_staircase_expected_gap_years=${
+                        cadenceCalibration.expectedGapYears
+                    }`,
+                    `terminal_unit_staircase_preceding_gap_years=${
+                        cadenceCalibration.precedingGapYears.join(",")
+                    }`,
+                    `terminal_unit_staircase_cadence_rule=${cadenceCalibration.rule}`,
+                ] : []),
                 `terminal_unit_staircase_max_adjacent_gap_years=${
                     frontier.maximumAdjacentTransitionGapYears
                 }`,

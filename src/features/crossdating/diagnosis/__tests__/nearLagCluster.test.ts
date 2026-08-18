@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+    calibrateTerminalUnitBoundaryFromCadence,
     selectStableNearLagCluster,
     selectStablePositiveTerminalUnitOperationFrontier,
     selectStableTerminalUnitStaircaseFrontier,
@@ -294,6 +295,76 @@ describe("stable terminal unit staircase frontier", () => {
             boundaryYear: 1901,
             maximumAdjacentTransitionGapYears: 30,
         });
+    });
+
+    it("extrapolates a smeared terminal boundary from two stable prior intervals", () => {
+        const frontier = selectStableTerminalUnitStaircaseFrontier(
+            pathWithRuns([
+                { lag: 4, startYear: 1600, endYear: 1808 },
+                { lag: 3, startYear: 1809, endYear: 1817 },
+                { lag: 2, startYear: 1818, endYear: 1826 },
+                { lag: 1, startYear: 1827, endYear: 1844 },
+                { lag: 0, startYear: 1845, endYear: 2000 },
+            ], [
+                event(1809, 4, 3),
+                event(1818, 3, 2),
+                event(1827, 2, 1),
+                event(1845, 1, 0),
+            ]),
+            pathWithRuns([
+                { lag: 4, startYear: 1600, endYear: 1808 },
+                { lag: 3, startYear: 1809, endYear: 1817 },
+                { lag: 2, startYear: 1818, endYear: 1826 },
+                { lag: 1, startYear: 1827, endYear: 1844 },
+                { lag: 0, startYear: 1845, endYear: 2000 },
+            ], [
+                event(1809, 4, 3),
+                event(1818, 3, 2),
+                event(1827, 2, 1),
+                event(1845, 1, 0),
+            ]),
+            4,
+        )!;
+
+        expect(calibrateTerminalUnitBoundaryFromCadence(frontier)).toEqual({
+            rawBoundaryYear: 1845,
+            boundaryYear: 1836,
+            expectedGapYears: 9,
+            precedingGapYears: [9, 9],
+            rule: "stable_cadence_extrapolation",
+        });
+    });
+
+    it("does not extrapolate a compact or irregular staircase", () => {
+        const frontier = selectStableTerminalUnitStaircaseFrontier(
+            pathWithRuns([
+                { lag: 4, startYear: 1600, endYear: 1805 },
+                { lag: 3, startYear: 1806, endYear: 1810 },
+                { lag: 2, startYear: 1811, endYear: 1814 },
+                { lag: 1, startYear: 1815, endYear: 1816 },
+                { lag: 0, startYear: 1817, endYear: 2000 },
+            ], [
+                event(1806, 4, 3),
+                event(1811, 3, 2),
+                event(1815, 2, 1),
+                event(1817, 1, 0),
+            ]),
+            pathWithRuns([
+                { lag: 4, startYear: 1600, endYear: 1805 },
+                { lag: 3, startYear: 1806, endYear: 1810 },
+                { lag: 2, startYear: 1811, endYear: 1814 },
+                { lag: 1, startYear: 1815, endYear: 1816 },
+                { lag: 0, startYear: 1817, endYear: 2000 },
+            ], [
+                event(1806, 4, 3),
+                event(1811, 3, 2),
+                event(1815, 2, 1),
+                event(1817, 1, 0),
+            ]),
+            4,
+        )!;
+
+        expect(calibrateTerminalUnitBoundaryFromCadence(frontier)).toBeNull();
     });
 
     it("keeps the positive operation family when one path includes an older +4 continuation", () => {
