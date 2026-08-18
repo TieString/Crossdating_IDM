@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { DiagnosisEvent } from "@/features/crossdating/diagnosis/types";
 import type { CapabilityTruth } from "../types";
 import {
+    countHumanAssistedFullEventSuggestions,
     countWorkflowSuggestionAttempts,
     matchWorkflowSuggestion,
+    selectHumanRescueTruth,
 } from "../workflowSuggestionMetric";
 
 const event = (
@@ -103,5 +105,45 @@ describe("frontier workflow suggestion metric", () => {
             { workflowSuggestionCorrect: false },
             { workflowSuggestionCorrect: false },
         ])).toEqual({ numerator: 1, denominator: 3 });
+    });
+
+    it("selects only the current blocking truth for a human rescue", () => {
+        const whole = truth("wholeSeriesMove", -20, null);
+        const local = { ...truth("missingRing", -1, 1902), truthId: "local" };
+
+        expect(selectHumanRescueTruth([whole, local], null, null)).toBe(whole);
+        expect(selectHumanRescueTruth([whole, local], local, null)).toBe(local);
+        expect(selectHumanRescueTruth([whole, local], null, local)).toBe(local);
+        expect(selectHumanRescueTruth([], null, null)).toBeNull();
+    });
+
+    it("counts every truth once after human rescue without washing out the failure", () => {
+        expect(countHumanAssistedFullEventSuggestions([
+            {
+                workflowSuggestionCorrect: true,
+                diagnosedTruthId: "event-1",
+                humanRescueApplied: false,
+            },
+            {
+                workflowSuggestionCorrect: true,
+                diagnosedTruthId: "event-2",
+                humanRescueApplied: false,
+            },
+            {
+                workflowSuggestionCorrect: false,
+                diagnosedTruthId: "event-3",
+                humanRescueApplied: true,
+            },
+            {
+                workflowSuggestionCorrect: true,
+                diagnosedTruthId: "event-4",
+                humanRescueApplied: false,
+            },
+        ], 4)).toEqual({
+            correctSuggestions: 3,
+            humanRescues: 1,
+            opportunities: 4,
+            totalTruthEvents: 4,
+        });
     });
 });

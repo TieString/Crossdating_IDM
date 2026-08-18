@@ -9,6 +9,12 @@ export type WorkflowSuggestionMatch = {
     truth: CapabilityTruth;
 };
 
+export type HumanRescueAttempt = {
+    workflowSuggestionCorrect: boolean;
+    diagnosedTruthId: string | null;
+    humanRescueApplied: boolean;
+};
+
 export const diagnosisShiftYears = (event: DiagnosisEvent): number => (
     event.eventType === "missingRing"
         ? -1
@@ -82,3 +88,32 @@ export const countWorkflowSuggestionAttempts = (
     numerator: attempts.filter((attempt) => attempt.workflowSuggestionCorrect).length,
     denominator: attempts.length,
 });
+
+/** Selects only the current blocked truth; hidden later truths are never consulted. */
+export const selectHumanRescueTruth = (
+    frontierTruths: readonly CapabilityTruth[],
+    primaryOperationTruth: CapabilityTruth | null,
+    alternativeOperationTruth: CapabilityTruth | null,
+): CapabilityTruth | null => primaryOperationTruth
+    ?? alternativeOperationTruth
+    ?? frontierTruths[0]
+    ?? null;
+
+export const countHumanAssistedFullEventSuggestions = (
+    attempts: readonly HumanRescueAttempt[],
+    totalTruthEvents: number,
+) => {
+    const opportunities = attempts.filter((attempt) => (
+        attempt.diagnosedTruthId !== null
+    ));
+    return {
+        correctSuggestions: opportunities.filter((attempt) => (
+            attempt.workflowSuggestionCorrect
+        )).length,
+        humanRescues: opportunities.filter((attempt) => (
+            attempt.humanRescueApplied
+        )).length,
+        opportunities: opportunities.length,
+        totalTruthEvents,
+    };
+};

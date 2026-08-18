@@ -25,9 +25,11 @@ import {
 import { buildCapabilityCases } from "./itrdb-operation-capability/scenarios";
 import { summarizeClusteredMetric } from "./itrdb-operation-capability/clusteredStatistics";
 import {
+    countHumanAssistedFullEventSuggestions,
     countWorkflowSuggestionAttempts,
     diagnosisShiftYears,
     matchWorkflowSuggestion,
+    selectHumanRescueTruth,
 } from "./itrdb-operation-capability/workflowSuggestionMetric";
 import type {
     CapabilityCase,
@@ -39,6 +41,7 @@ import type {
 } from "./itrdb-operation-capability/types";
 
 type Interpretation = "primary" | "alternative";
+type EventResolutionMode = "algorithm" | "human_rescue" | "none";
 type EventPreview = {
     eventType: CapabilityOperation;
     shiftYears: number;
@@ -62,7 +65,10 @@ type StepRow = {
     evaluationMode: CapabilityCase["evaluationMode"];
     acceptanceTier: CapabilityCase["acceptanceTier"];
     step: number;
+    unassistedPhase: boolean;
+    humanRescueCountBefore: number;
     remainingTruthsBefore: number;
+    remainingTruthsAfter: number;
     remainingTruthIds: string[];
     cofechaFlagged: boolean;
     referenceMode: string;
@@ -89,6 +95,13 @@ type StepRow = {
     acceptedTruthType: CapabilityOperation | null;
     acceptedTruthYear: number | null;
     acceptedTruthShiftYears: number | null;
+    diagnosedTruthId: string | null;
+    diagnosedTruthType: CapabilityOperation | null;
+    diagnosedTruthYear: number | null;
+    diagnosedTruthShiftYears: number | null;
+    resolutionMode: EventResolutionMode;
+    humanRescueApplied: boolean;
+    humanRescuedTruthId: string | null;
     top1Exact: boolean;
     windowWidth: number | null;
     allowedWindowWidth: boolean;
@@ -122,10 +135,16 @@ type CaseRow = {
     top1RecoveredLocalTruths: number;
     primaryRecoveries: number;
     alternativeRecoveries: number;
+    humanAssistedCorrectSuggestions: number;
+    humanAssistedTruthOpportunities: number;
+    humanRescueCount: number;
+    firstHumanRescueStep: number | null;
+    humanAssistedComplete: boolean;
     complete: boolean;
     cleanFalsePositive: boolean | null;
     stopReason: string;
     attemptedSteps: number;
+    humanAssistedAttemptedSteps: number;
     saveReopenStable: boolean;
     elapsedMs: number;
     error: string | null;
@@ -280,6 +299,9 @@ const runCase = async (input: {
     const remaining = [...input.spec.truths];
     const steps: StepRow[] = [];
     let stopReason = input.spec.truths.length === 0 ? "clean_unchecked" : "truths_remaining";
+    let unassistedStopReason: string | null = null;
+    let humanRescueCount = 0;
+    let firstHumanRescueStep: number | null = null;
     let primaryRecoveries = 0;
     let alternativeRecoveries = 0;
     const maximumSteps = input.maxSteps === null
@@ -287,6 +309,7 @@ const runCase = async (input: {
         : Math.max(1, Math.min(input.maxSteps, Math.max(1, input.spec.truths.length)));
     for (let step = 1; step <= maximumSteps; step += 1) {
         const stepStarted = Date.now();
+        const unassistedPhase = humanRescueCount === 0;
         const { loaded, site } = await buildScenarioSite(
             inputPath,
             input.spec.targetId,
@@ -377,8 +400,27 @@ const runCase = async (input: {
                     : "wrong_operation";
         } else {
             stopReason = "accepted";
-            if (acceptedInterpretation === "primary") primaryRecoveries += 1;
-            else alternativeRecoveries += 1;
+            if (unassistedPhase) {
+                if (acceptedInterpretation === "primary") primaryRecoveries += 1;
+                else alternativeRecoveries += 1;
+            }
+        }
+        const humanRescueTruth = !isClean && acceptedTruth === null
+            ? selectHumanRescueTruth(
+                frontierTruths,
+                primaryOperationTruth,
+                alternativeOperationTruth,
+            )
+            : null;
+        const diagnosedTruth = acceptedTruth ?? humanRescueTruth;
+        const humanRescueApplied = humanRescueTruth !== null;
+        const resolutionMode: EventResolutionMode = acceptedTruth
+            ? "algorithm"
+            : humanRescueApplied
+                ? "human_rescue"
+                : "none";
+        if (humanRescueApplied && unassistedStopReason === null) {
+            unassistedStopReason = stopReason;
         }
         steps.push({
             caseIndex: input.spec.index,
@@ -390,7 +432,10 @@ const runCase = async (input: {
             evaluationMode: input.spec.evaluationMode,
             acceptanceTier: input.spec.acceptanceTier,
             step,
+            unassistedPhase,
+            humanRescueCountBefore: humanRescueCount,
             remainingTruthsBefore: remaining.length,
+            remainingTruthsAfter: diagnosedTruth ? remaining.length - 1 : remaining.length,
             remainingTruthIds: remaining.map((truth) => truth.truthId),
             cofechaFlagged: context.flaggedIds.some((id) => (
                 id.toLowerCase() === input.spec.targetId.toLowerCase()
@@ -419,6 +464,13 @@ const runCase = async (input: {
             acceptedTruthType: acceptedTruth?.eventType ?? null,
             acceptedTruthYear: acceptedTruth?.year ?? null,
             acceptedTruthShiftYears: acceptedTruth?.shiftYears ?? null,
+            diagnosedTruthId: diagnosedTruth?.truthId ?? null,
+            diagnosedTruthType: diagnosedTruth?.eventType ?? null,
+            diagnosedTruthYear: diagnosedTruth?.year ?? null,
+            diagnosedTruthShiftYears: diagnosedTruth?.shiftYears ?? null,
+            resolutionMode,
+            humanRescueApplied,
+            humanRescuedTruthId: humanRescueTruth?.truthId ?? null,
             top1Exact: Boolean(acceptedTruth?.year !== null
                 && acceptedEvent?.rankedYears[0]?.year === acceptedTruth?.year),
             windowWidth: width,
@@ -435,14 +487,37 @@ const runCase = async (input: {
             "clean_pass",
         ].includes(stopReason);
         if (!preserve) rmSync(context.stateDir, { recursive: true, force: true });
-        if (isClean || !acceptedTruth) break;
-        const truthIndex = remaining.findIndex((truth) => truth.truthId === acceptedTruth.truthId);
+        if (isClean || !diagnosedTruth) break;
+        if (humanRescueApplied) {
+            humanRescueCount += 1;
+            firstHumanRescueStep ??= step;
+        }
+        const truthIndex = remaining.findIndex((truth) => (
+            truth.truthId === diagnosedTruth.truthId
+        ));
+        if (truthIndex < 0) throw new Error(`resolved truth missing: ${diagnosedTruth.truthId}`);
         remaining.splice(truthIndex, 1);
         if (remaining.length === 0) {
-            stopReason = "all_truths_recovered";
+            stopReason = humanRescueCount > 0
+                ? "all_truths_reviewed_with_human_rescue"
+                : "all_truths_recovered";
             break;
         }
         if (step === maximumSteps) stopReason = "step_limit";
+    }
+    const unassistedSteps = steps.filter((stepRow) => stepRow.unassistedPhase);
+    const humanAssistedCounts = countHumanAssistedFullEventSuggestions(
+        steps,
+        input.spec.truths.length,
+    );
+    if (humanAssistedCounts.correctSuggestions + humanRescueCount
+        !== humanAssistedCounts.opportunities) {
+        throw new Error(`human rescue accounting mismatch: ${input.spec.caseId}`);
+    }
+    if (input.spec.truths.length > 0
+        && maximumSteps >= input.spec.truths.length
+        && humanAssistedCounts.opportunities !== input.spec.truths.length) {
+        throw new Error(`not every truth received a diagnosis opportunity: ${input.spec.caseId}`);
     }
     return {
         row: {
@@ -467,33 +542,41 @@ const runCase = async (input: {
             wholeTruthCount: input.spec.truths.filter((truth) => (
                 truth.eventType === "wholeSeriesMove"
             )).length,
-            recoveredTruths: input.spec.truths.length - remaining.length,
-            recoveredLocalTruths: steps.filter((stepRow) => (
+            recoveredTruths: unassistedSteps.filter((stepRow) => (
+                stepRow.acceptedTruthId !== null
+            )).length,
+            recoveredLocalTruths: unassistedSteps.filter((stepRow) => (
                 stepRow.acceptedTruthType !== null
                 && stepRow.acceptedTruthType !== "wholeSeriesMove"
             )).length,
-            strictRecoveredLocalTruths: steps.filter((stepRow) => (
+            strictRecoveredLocalTruths: unassistedSteps.filter((stepRow) => (
                 stepRow.acceptedTruthType !== null
                 && stepRow.acceptedTruthType !== "wholeSeriesMove"
                 && stepRow.acceptedInterpretation === "primary"
                 && stepRow.primaryOperationCorrect
                 && stepRow.primaryWindowCovered
             )).length,
-            top1RecoveredLocalTruths: steps.filter((stepRow) => (
+            top1RecoveredLocalTruths: unassistedSteps.filter((stepRow) => (
                 stepRow.acceptedTruthType !== null
                 && stepRow.acceptedTruthType !== "wholeSeriesMove"
                 && stepRow.top1Exact
             )).length,
             primaryRecoveries,
             alternativeRecoveries,
+            humanAssistedCorrectSuggestions: humanAssistedCounts.correctSuggestions,
+            humanAssistedTruthOpportunities: humanAssistedCounts.opportunities,
+            humanRescueCount,
+            firstHumanRescueStep,
+            humanAssistedComplete: remaining.length === 0,
             complete: input.spec.truths.length === 0
                 ? stopReason === "clean_pass"
-                : remaining.length === 0,
+                : humanRescueCount === 0 && remaining.length === 0,
             cleanFalsePositive: input.spec.truths.length === 0
                 ? stopReason === "clean_false_positive"
                 : null,
-            stopReason,
-            attemptedSteps: steps.length,
+            stopReason: unassistedStopReason ?? stopReason,
+            attemptedSteps: unassistedSteps.length,
+            humanAssistedAttemptedSteps: steps.length,
             saveReopenStable: steps.every((stepRow) => stepRow.saveReopenStable),
             elapsedMs: Date.now() - started,
             error: steps.find((stepRow) => stepRow.error)?.error ?? null,
@@ -513,8 +596,11 @@ const rate = (count: number, total: number): number | null => total > 0
 const summarize = (cases: CaseRow[], steps: StepRow[]) => {
     const eventCases = cases.filter((row) => row.truthCount > 0);
     const cleanCases = cases.filter((row) => row.truthCount === 0);
-    const attemptedEventSteps = steps.filter((row) => (
-        row.remainingTruthsBefore > 0
+    const humanAssistedOpportunitySteps = steps.filter((row) => (
+        row.remainingTruthsBefore > 0 && row.diagnosedTruthId !== null
+    ));
+    const attemptedEventSteps = humanAssistedOpportunitySteps.filter((row) => (
+        row.unassistedPhase
     ));
     const respondedSteps = attemptedEventSteps.filter((row) => row.response);
     const localOperationSteps = attemptedEventSteps.filter((row) => (
@@ -549,6 +635,17 @@ const summarize = (cases: CaseRow[], steps: StepRow[]) => {
         (sum, row) => sum + row.top1RecoveredLocalTruths,
         0,
     );
+    const humanAssistedCounts = countHumanAssistedFullEventSuggestions(
+        humanAssistedOpportunitySteps,
+        truthCount,
+    );
+    const humanRescueCount = eventCases.reduce(
+        (sum, row) => sum + row.humanRescueCount,
+        0,
+    );
+    const humanAssistedCompleteCases = eventCases.filter((row) => (
+        row.humanAssistedComplete
+    )).length;
     return {
         cases: cases.length,
         eventCases: eventCases.length,
@@ -560,6 +657,36 @@ const summarize = (cases: CaseRow[], steps: StepRow[]) => {
         serialStrictMainWindowCoverage: rate(strictRecoveredLocal, localTruthCount),
         serialWorkflowEquivalentWindowCoverage: rate(recoveredLocal, localTruthCount),
         serialTop1: rate(top1RecoveredLocal, localTruthCount),
+        humanAssistedCorrectSuggestions: humanAssistedCounts.correctSuggestions,
+        humanAssistedTruthEvents: truthCount,
+        humanAssistedTruthOpportunities: humanAssistedCounts.opportunities,
+        humanAssistedFullEventSuggestionAccuracy: rate(
+            humanAssistedCounts.correctSuggestions,
+            truthCount,
+        ),
+        humanAssistedOpportunityCoverage: rate(
+            humanAssistedCounts.opportunities,
+            truthCount,
+        ),
+        humanAssistedResponseRate: rate(
+            humanAssistedOpportunitySteps.filter((row) => row.response).length,
+            humanAssistedOpportunitySteps.length,
+        ),
+        humanRescueCount,
+        humanRescueRate: rate(humanRescueCount, truthCount),
+        humanAssistedCompleteCases,
+        humanAssistedCompleteCaseRate: rate(
+            humanAssistedCompleteCases,
+            eventCases.length,
+        ),
+        medianHumanRescuesPerCase: percentile(
+            eventCases.map((row) => row.humanRescueCount),
+            0.5,
+        ),
+        p90HumanRescuesPerCase: percentile(
+            eventCases.map((row) => row.humanRescueCount),
+            0.9,
+        ),
         completeCases: eventCases.filter((row) => row.complete).length,
         completeCaseRate: rate(eventCases.filter((row) => row.complete).length, eventCases.length),
         responseRate: rate(respondedSteps.length, attemptedEventSteps.length),
@@ -675,6 +802,10 @@ type ClusterMetricName =
     | "serialStrictMainWindowCoverage"
     | "serialWorkflowEquivalentWindowCoverage"
     | "serialTop1"
+    | "humanAssistedFullEventSuggestionAccuracy"
+    | "humanAssistedOpportunityCoverage"
+    | "humanRescueRate"
+    | "humanAssistedCompleteCaseRate"
     | "promptedStrictLocalWindowCoverage"
     | "promptedWorkflowEquivalentLocalWindowCoverage"
     | "saveReopenStableRate"
@@ -686,7 +817,10 @@ const clusterMetricCounts = (
 ): Record<ClusterMetricName, ClusterMetricCount> => {
     const eventCases = cases.filter((row) => row.truthCount > 0);
     const cleanCases = cases.filter((row) => row.truthCount === 0);
-    const attempted = steps.filter((row) => row.remainingTruthsBefore > 0);
+    const humanAssistedOpportunities = steps.filter((row) => (
+        row.remainingTruthsBefore > 0 && row.diagnosedTruthId !== null
+    ));
+    const attempted = humanAssistedOpportunities.filter((row) => row.unassistedPhase);
     const truthCount = eventCases.reduce((sum, row) => sum + row.truthCount, 0);
     const localTruthCount = eventCases.reduce((sum, row) => sum + row.localTruthCount, 0);
     const promptedLocal = attempted.filter((row) => row.localWindowEvaluated);
@@ -729,6 +863,24 @@ const clusterMetricCounts = (
                 0,
             ),
             denominator: localTruthCount,
+        },
+        humanAssistedFullEventSuggestionAccuracy: {
+            numerator: humanAssistedOpportunities.filter((row) => (
+                row.workflowSuggestionCorrect
+            )).length,
+            denominator: truthCount,
+        },
+        humanAssistedOpportunityCoverage: {
+            numerator: humanAssistedOpportunities.length,
+            denominator: truthCount,
+        },
+        humanRescueRate: {
+            numerator: eventCases.reduce((sum, row) => sum + row.humanRescueCount, 0),
+            denominator: truthCount,
+        },
+        humanAssistedCompleteCaseRate: {
+            numerator: eventCases.filter((row) => row.humanAssistedComplete).length,
+            denominator: eventCases.length,
         },
         promptedStrictLocalWindowCoverage: {
             numerator: promptedLocal.filter((row) => row.primaryLocalWindowCovered).length,
@@ -773,6 +925,7 @@ const clusteredInference = (
     const metricNames = Object.keys(allCounts) as ClusterMetricName[];
     const targetMetrics = new Set<ClusterMetricName>([
         "workflowSuggestionAccuracy",
+        "humanAssistedFullEventSuggestionAccuracy",
     ]);
     const metrics = Object.fromEntries(metricNames.map((metricName) => {
         const inference = summarizeClusteredMetric(fileIds.map((fileId) => ({
@@ -898,10 +1051,16 @@ const runWorker = async (): Promise<void> => {
                 top1RecoveredLocalTruths: 0,
                 primaryRecoveries: 0,
                 alternativeRecoveries: 0,
+                humanAssistedCorrectSuggestions: 0,
+                humanAssistedTruthOpportunities: 0,
+                humanRescueCount: 0,
+                firstHumanRescueStep: null,
+                humanAssistedComplete: false,
                 complete: false,
                 cleanFalsePositive: spec.truths.length === 0 ? null : null,
                 stopReason: "error",
                 attemptedSteps: 0,
+                humanAssistedAttemptedSteps: 0,
                 saveReopenStable: false,
                 elapsedMs: 0,
                 error: message,
@@ -1095,6 +1254,18 @@ const runParent = async (): Promise<void> => {
         sourceMismatches,
         design: config.design ?? null,
         statistics: config.statistics ?? null,
+        evaluationProtocol: {
+            legacy: config.evaluationProtocol ?? null,
+            humanRescue: {
+                version: "human-rescue-full-event-v1",
+                failedEvent: "counted_as_failure_then_resolved_by_hidden_truth",
+                rescueScope: "current_blocking_truth_only",
+                rebuildAfterRescue: "rwl_master_cofecha_and_diagnosis",
+                laterTruths: "remain_hidden_until_their_own_frontier_opportunity",
+                mainMetric: "humanAssistedFullEventSuggestionAccuracy",
+                denominator: "all_truth_events",
+            },
+        },
         selectedFamilies: requestedFamilies,
         selectedCases: cases.length,
         errors: cases.filter((row) => row.error !== null).length,
