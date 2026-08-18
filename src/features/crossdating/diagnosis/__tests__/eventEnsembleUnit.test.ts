@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DiagnosisEvent, SeriesCoreDiagnosis } from "../types";
 import {
     allowStableBoundedPathFinalAuthority,
+    candidateDepthTerminalUnitPreemptsSeparatedPartial,
     hasIndependentStableFrontierOperationSupport,
     hasAcceptedStrongLocatorWindow,
     hasStrongMixedPathPartialAuthority,
@@ -231,6 +232,46 @@ describe("calibratedTerminalUnitStaircaseWindowWidth", () => {
         expect(calibratedTerminalUnitStaircaseWindowWidth(frontier(4, 0.96, 1.1))).toBe(13);
         expect(calibratedTerminalUnitStaircaseWindowWidth(frontier(4, 0.94, 1.1))).toBe(9);
         expect(calibratedTerminalUnitStaircaseWindowWidth(frontier(4, 0.96, 1.2))).toBe(9);
+    });
+});
+
+describe("candidate-depth terminal unit operation priority", () => {
+    it("lets a complete newer terminal unit chain preempt an unsupported older partial", () => {
+        const terminal = falseRingEvent(1900, false);
+        terminal.rankedYears = [{
+            year: 1900,
+            rank: 1,
+            score: 1,
+            evidenceTags: [],
+        }];
+        const partial = partialMoveEvent(-3);
+        partial.rankedYears = [{
+            year: 1873,
+            rank: 1,
+            score: 1,
+            evidenceTags: [],
+        }];
+
+        expect(candidateDepthTerminalUnitPreemptsSeparatedPartial(
+            terminal,
+            4,
+            partial,
+            [4],
+        )).toBe(true);
+        expect(candidateDepthTerminalUnitPreemptsSeparatedPartial(
+            terminal,
+            4,
+            partial,
+            [4],
+            true,
+        )).toBe(false);
+        partial.rankedYears[0].year = 1890;
+        expect(candidateDepthTerminalUnitPreemptsSeparatedPartial(
+            terminal,
+            4,
+            partial,
+            [4],
+        )).toBe(false);
     });
 });
 

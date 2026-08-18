@@ -6650,6 +6650,28 @@ export const hasStrongMixedPathPartialAuthority = (
     return concentration >= 0.8;
 };
 
+export const candidateDepthTerminalUnitPreemptsSeparatedPartial = (
+    terminal: DiagnosisEvent | null,
+    terminalAggregateShiftYears: number | null,
+    partial: DiagnosisEvent | null,
+    candidateDepths: readonly number[],
+    hasIndependentPartialSupport = false,
+    hasRepeatedPartialSupport = false,
+    minimumSeparationYears = 14,
+): boolean => {
+    if (!terminal
+        || !partial
+        || (terminal.eventType !== "missingRing" && terminal.eventType !== "falseRing")
+        || partial.eventType !== "partialMove"
+        || terminalAggregateShiftYears === null
+        || Math.abs(terminalAggregateShiftYears) < 2
+        || !candidateDepths.includes(terminalAggregateShiftYears)
+        || hasIndependentPartialSupport
+        || hasRepeatedPartialSupport) return false;
+    return rankedEventYear(terminal) - rankedEventYear(partial)
+        >= minimumSeparationYears;
+};
+
 export const recoverStableBoundedLagPathFrontier = (
     frontier: StableBoundedLagPathFrontier | null,
     displayed: readonly DiagnosisEvent[],
@@ -11559,16 +11581,44 @@ export const makeDiagnosisEvents = (
                 stableMultiscaleBoundedFrontier,
                 stableBoundedPathFrontier,
             );
-        const stablePartialPathOwnsOperation = stableBoundedPathFrontier?.eventType
-            === "partialMove"
+        const stableFrontierHasRepeatedOperationEvidence =
+            stableFrontierHasRepeatedOperationSupport(stableMultiscaleBoundedFrontier);
+        const separatedTerminalUnitOwnsOperation =
+            candidateDepthTerminalUnitPreemptsSeparatedPartial(
+                stableTerminalSequentialUnit,
+                stableTerminalSequentialUnitFrontier?.aggregateShiftYears ?? null,
+                stableBoundedPathFrontier,
+                cumulativeUnitCandidateDepths,
+                stableFrontierHasIndependentOperationSupport,
+                stableFrontierHasRepeatedOperationEvidence,
+            );
+        const prioritizedStableTerminalSequentialUnit =
+            stableTerminalSequentialUnit && separatedTerminalUnitOwnsOperation ? {
+                    ...stableTerminalSequentialUnit,
+                    evidence: {
+                        ...stableTerminalSequentialUnit.evidence,
+                        algorithmSources: Array.from(new Set([
+                            ...stableTerminalSequentialUnit.evidence.algorithmSources,
+                            "candidate_depth_terminal_frontier_priority",
+                        ])).sort(),
+                        notes: Array.from(new Set([
+                            ...stableTerminalSequentialUnit.evidence.notes,
+                            `terminal_frontier_competing_partial_year=${
+                                rankedEventYear(stableBoundedPathFrontier!)
+                            }`,
+                            "terminal_frontier_preempts_separated_partial=true",
+                        ])),
+                    },
+                }
+                : stableTerminalSequentialUnit;
+        const stablePartialPathOwnsOperation = !separatedTerminalUnitOwnsOperation
+            && stableBoundedPathFrontier?.eventType === "partialMove"
             && (
                 terminalCompatibleParsimoniousPartialCheckpoint !== null
                 || regularizedPartialConsensusCheckpoint !== null
                 || (
                     stableMultiscaleBoundedFrontier?.allTransitionsPartial === true
-                    && stableFrontierHasRepeatedOperationSupport(
-                        stableMultiscaleBoundedFrontier,
-                    )
+                    && stableFrontierHasRepeatedOperationEvidence
                 )
                 || stableFrontierHasIndependentOperationSupport
             );
@@ -12315,15 +12365,15 @@ export const makeDiagnosisEvents = (
                 false,
             );
         }
-        if (stableTerminalSequentialUnit && !stablePartialPathOwnsOperation) {
+        if (prioritizedStableTerminalSequentialUnit && !stablePartialPathOwnsOperation) {
             // The two regularizations and the independently estimated cumulative depth agree on
             // the complete signed unit suffix. Older path contamination cannot reverse this
             // newest operation or compress the staircase into one automatic range move.
             const wholeFramedHypothesis = wholeFramedTerminalHypothesis(
-                stableTerminalSequentialUnit,
+                prioritizedStableTerminalSequentialUnit,
             );
             return finalize(
-                [stableTerminalSequentialUnit],
+                [prioritizedStableTerminalSequentialUnit],
                 wholeFramedHypothesis ? [wholeFramedHypothesis] : [],
                 false,
             );
