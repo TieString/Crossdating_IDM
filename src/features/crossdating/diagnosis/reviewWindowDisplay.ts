@@ -619,6 +619,9 @@ const selectAdjudicatedReviewWindowDisplay = (
             || event.evidence.algorithmSources.includes(
                 "stronger_global_whole_candidate",
             )
+            || event.evidence.algorithmSources.includes(
+                "standalone_global_whole_frame",
+            )
             || (
                 event.evidence.algorithmSources.includes(
                     "durable_whole_frame_priority",

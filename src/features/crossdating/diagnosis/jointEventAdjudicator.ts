@@ -1579,6 +1579,9 @@ const selectStrongerGlobalWholeCandidate = (
     )).map((cluster) => ({ cluster, event: representative(cluster).event }))
         .filter(({ event }) => {
             const shiftYears = event.shiftYears;
+            const shiftDrift = shiftYears === undefined
+                ? Number.POSITIVE_INFINITY
+                : Math.abs(shiftYears - selectedShift);
             const observedLag = noteNumber(event, "whole_observed_dominant_lag=");
             const support = noteNumber(event, "whole_state_support_fraction=") ?? 0;
             const weightedSupport = noteNumber(
@@ -1592,10 +1595,11 @@ const selectStrongerGlobalWholeCandidate = (
             return event.eventType === "wholeSeriesMove"
                 && shiftYears !== undefined
                 && shiftYears < 0
-                && Math.abs(shiftYears - selectedShift) === 1
+                && shiftDrift >= 1
+                && shiftDrift <= 3
                 && observedLag === shiftYears
-                && support >= 0.55
-                && weightedSupport >= 0.55
+                && support >= (shiftDrift === 1 ? 0.55 : 0.7)
+                && weightedSupport >= (shiftDrift === 1 ? 0.55 : 0.7)
                 && newerEdgeSupport >= 0.5
                 && event.confidenceLevel === "high"
                 && event.evidence.notes.includes("candidate_hard_gate_passed")
@@ -1623,6 +1627,68 @@ const selectStrongerGlobalWholeCandidate = (
                         ...checkpoint.event.evidence.notes,
                         `replaced_path_fixed_whole_shift=${selectedShift}`,
                         `replaced_path_fixed_whole_gain=${selectedGain.toFixed(6)}`,
+                    ])),
+                },
+            }),
+        })),
+    };
+};
+
+const selectStandaloneGlobalWholeFrame = (
+    clusters: readonly HypothesisCluster[],
+    allFinalClusters: readonly HypothesisCluster[],
+): HypothesisCluster | null => {
+    const candidate = clusters.filter((cluster) => (
+        !hasFinalCheckpoint(cluster)
+        && cluster.checkpoints.some(({ stage }) => stage === "candidate")
+    )).map((cluster) => ({ cluster, event: representative(cluster).event }))
+        .filter(({ event }) => {
+            const shiftYears = event.shiftYears;
+            return event.eventType === "wholeSeriesMove"
+                && shiftYears !== undefined
+                && shiftYears <= -4
+                && event.confidenceLevel === "high"
+                && evidenceClaimsFor(event).has("whole_global_lag")
+                && event.evidence.notes.includes("candidate_hard_gate_passed")
+                && (noteNumber(event, "whole_state_support_fraction=") ?? 0) >= 0.6
+                && (noteNumber(
+                    event,
+                    "whole_state_weighted_support_fraction=",
+                ) ?? 0) >= 0.6
+                && (noteNumber(
+                    event,
+                    "whole_state_newer_edge_support_fraction=",
+                ) ?? 0) >= 0.5
+                && (event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY) >= 0.2;
+        }).sort((left, right) => (
+            (right.event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY)
+                - (left.event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY)
+        ))[0];
+    if (!candidate) return null;
+    const baselineLag = candidate.event.shiftYears!;
+    const exactLocalOnBaseline = allFinalClusters.some((cluster) => {
+        const event = representative(cluster).event;
+        return event.eventType !== "wholeSeriesMove"
+            && event.evidence.lagAfter === baselineLag
+            && evidenceClaimsFor(event).has("bounded_lag_state_path")
+            && strongBoundedPathLocation(event) !== null;
+    });
+    if (exactLocalOnBaseline) return null;
+
+    return {
+        checkpoints: candidate.cluster.checkpoints.map((checkpoint) => ({
+            ...checkpoint,
+            event: withEvidenceLedger({
+                ...checkpoint.event,
+                evidence: {
+                    ...checkpoint.event.evidence,
+                    algorithmSources: Array.from(new Set([
+                        ...checkpoint.event.evidence.algorithmSources,
+                        "standalone_global_whole_frame",
+                    ])).sort(),
+                    notes: Array.from(new Set([
+                        ...checkpoint.event.evidence.notes,
+                        "global_whole_frame_precedes_unresolved_local_events=true",
                     ])),
                 },
             }),
@@ -1998,6 +2064,11 @@ const finalFrontierClusters = (
         selectedFinalClusters,
     );
     if (strongerGlobalWholeCandidate) return [strongerGlobalWholeCandidate];
+    const standaloneGlobalWholeFrame = selectStandaloneGlobalWholeFrame(
+        clusters,
+        allFinalClusters,
+    );
+    if (standaloneGlobalWholeFrame) return [standaloneGlobalWholeFrame];
     const concentratedAggregatePartial = selectConcentratedAggregatePartial(
         allFinalClusters,
         selectedFinalClusters,

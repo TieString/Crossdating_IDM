@@ -1362,6 +1362,32 @@ describe("lower review-window display gate", () => {
         });
     });
 
+    it("displays a standalone global whole frame selected before local events", () => {
+        const selected = {
+            ...strictEvent(),
+            eventType: "wholeSeriesMove" as const,
+            shiftYears: -20,
+            startYear: 1600,
+            endYear: 2000,
+            evidence: {
+                ...strictEvent().evidence,
+                algorithmSources: ["standalone_global_whole_frame"],
+            },
+        };
+
+        expect(selectReviewWindowDisplay(
+            audit([], { finalReason: "emitted" }),
+            [],
+            [],
+            {},
+            jointDecision(selected, "candidate"),
+        )).toMatchObject({
+            status: "strict",
+            sourceStage: "candidate",
+            event: { eventType: "wholeSeriesMove", shiftYears: -20 },
+        });
+    });
+
     it("does not recover another checkpoint after the joint adjudicator refuses", () => {
         const result = selectReviewWindowDisplay(
             audit([snapshot("missingRing")]),
