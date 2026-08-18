@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "yarn dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "node scripts/clean-current-event-release-resources.mjs && yarn build && node scripts/validate-current-event-integration.mjs",
+    "beforeBuildCommand": "yarn build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -40,13 +40,7 @@
     "externalBin":[
       "bin/cofecha",
       "bin/cofecha12k",
-      "bin/cofechawin",
-      "bin/current-event-ranker-sidecar",
-      "bin/current-event-adaptive-range-sidecar",
-      "bin/current-event-rrf-sidecar"
-    ],
-    "resources": {
-      "resources/current_event_ranker": "current_event_ranker"
-    }
+      "bin/cofechawin"
+    ]
   }
 }

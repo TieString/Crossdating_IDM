@@ -45,13 +45,7 @@ import {
 } from "@/features/treeRingScans";
 import { runCofecha } from "@/services/cofecha/runner";
 import { readRwlFile, saveFile } from "@/services/fs/io";
-import {
-    RRF_CURRENT_EVENT_MODEL_ID,
-    shouldRunCurrentEventAfterSave,
-} from "@/services/currentEventRanker/types";
-import { rebuildCurrentEventRrfTree } from "@/services/currentEventRanker/rebuild";
 import { stopMarker } from "@/shared/constants";
-import { CURRENT_EVENT_PYTHON_MODELS_ENABLED } from "@/shared/featureFlags";
 import { useSettings } from "@/features/settings/SettingsContext";
 import { ALL_OPTION_VALUE, CofechaVersion, formatTitle } from "./homeShared";
 import type { DiagnosisWorkerRequest, DiagnosisWorkerResponse } from "./diagnosisWorker";
@@ -66,7 +60,6 @@ import {
     type BreadthScanPauseReason,
 } from "./breadthDiagnosis";
 import { createSerialTaskQueue } from "./serialTaskQueue";
-import { useCurrentEventRanker } from "./useCurrentEventRanker";
 import {
     deserializeCofechaResult,
     loadPersistedCofechaState,
@@ -306,20 +299,6 @@ export function useHomeWorkspace() {
     const [diagnosisBatchResult, setDiagnosisBatchResult] = useState<DiagnosisBatchApplyResult | null>(null);
 
     const [dynamicReferenceConfig, setDynamicReferenceConfig] = useState<ReferenceSeriesConfig | null>(null);
-    const {
-        session: currentEventRankerSession,
-        models: currentEventModels,
-        activeModelId: activeCurrentEventModelId,
-        modelCatalogError: currentEventModelCatalogError,
-        selectModel: selectCurrentEventModel,
-        start: startCurrentEventRanker,
-        confirmYear: confirmCurrentEventYear,
-        undoLastConfirmation: undoCurrentEventConfirmation,
-        retry: retryCurrentEventRanker,
-        cancel: cancelCurrentEventRanker,
-        markStale: markCurrentEventRankerStale,
-        reset: resetCurrentEventRanker,
-    } = useCurrentEventRanker({ enabled: CURRENT_EVENT_PYTHON_MODELS_ENABLED });
 
     useEffect(() => {
         void migrateLegacyWorkspaceStorage();
@@ -383,12 +362,11 @@ export function useHomeWorkspace() {
                     ? { ...previous, isStale: true }
                     : previous
             ));
-            markCurrentEventRankerStale("工作区数据已修改；旧模型结果不再对应当前 RWL。");
             if (filePathRef.current) {
                 scheduleHistorySnapshotPersist(filePathRef.current, editor);
             }
         });
-    }, [markCurrentEventRankerStale, scheduleHistorySnapshotPersist]);
+    }, [scheduleHistorySnapshotPersist]);
 
     useEffect(() => {
         syncEditor(rwlEditorRef.current);
@@ -654,7 +632,6 @@ export function useHomeWorkspace() {
             workspaceEpochRef.current += 1;
             cofechaRequestIdRef.current += 1;
             setIsCofechaRunning(false);
-            resetCurrentEventRanker();
 
             const rwlData = await readRwlFile(filePath);
             let nextEditor = new RwlEditor(rwlData.data, rwlData.readOptions, rwlData.format);
@@ -768,7 +745,7 @@ export function useHomeWorkspace() {
             isFileLoadingRef.current = false;
             setIsFileLoading(false);
         }
-    }, [replaceEditor, resetCurrentEventRanker, runCofechaAndApplyResult]);
+    }, [replaceEditor, runCofechaAndApplyResult]);
 
     const enqueueSave = useCallback(<T,>(operation: () => Promise<T>): Promise<T> => {
         return saveQueueRef.current.enqueue(async () => {
@@ -808,42 +785,8 @@ export function useHomeWorkspace() {
         originalDataRef.current = savedData;
         setSiteData(currentData);
         setIsModified(!matchesSavedSnapshot);
-        if (!matchesSavedSnapshot) {
-            markCurrentEventRankerStale(
-                "保存期间工作区又发生了修改；磁盘已保存旧快照，请再次保存后重新分析。",
-            );
-        }
         return matchesSavedSnapshot;
-    }, [markCurrentEventRankerStale]);
-
-    const runCurrentEventRankerForSavedFile = useCallback((
-        filePath: string,
-        seriesId: string,
-        sourceHash: string,
-        trigger: "after_save" | "manual",
-    ) => {
-        if (!CURRENT_EVENT_PYTHON_MODELS_ENABLED) return;
-        if (!seriesId || seriesId === ALL_OPTION_VALUE) {
-            resetCurrentEventRanker();
-            return;
-        }
-        if (
-            trigger === "after_save"
-            && !shouldRunCurrentEventAfterSave(activeCurrentEventModelId, currentEventModels)
-        ) {
-            return;
-        }
-        startCurrentEventRanker({
-            rwlPath: filePath,
-            targetSeriesId: seriesId,
-            sourceHash,
-        });
-    }, [
-        activeCurrentEventModelId,
-        currentEventModels,
-        resetCurrentEventRanker,
-        startCurrentEventRanker,
-    ]);
+    }, []);
 
     const getCurrentRwlText = useCallback((tree?: string) => (
         rwlEditorRef.current.exportAsRwlString(tree)
@@ -897,7 +840,6 @@ export function useHomeWorkspace() {
             const rwlString = editor.exportAsRwlString();
             const savedData = editor.getData();
             const sourceHash = hashRwlSiteData(savedData);
-            const targetSeriesId = selectedTreeRef.current;
             const workspaceEpoch = workspaceEpochRef.current;
             const matchesSavedSnapshot = await enqueueSave(async () => {
                 await saveFile(filePath, rwlString);
@@ -912,9 +854,6 @@ export function useHomeWorkspace() {
             });
             if (!matchesSavedSnapshot) {
                 return;
-            }
-            if (selectedTreeRef.current === targetSeriesId) {
-                runCurrentEventRankerForSavedFile(filePath, targetSeriesId, sourceHash, "after_save");
             }
 
             try {
@@ -932,7 +871,7 @@ export function useHomeWorkspace() {
         } catch (error) {
             console.error("写入文件时出错:", error);
         }
-    }, [enqueueSave, markDataSnapshotAsSaved, runCofechaAndApplyResult, runCurrentEventRankerForSavedFile]);
+    }, [enqueueSave, markDataSnapshotAsSaved, runCofechaAndApplyResult]);
 
     const handleRunCofechaValidation = useCallback(async () => {
         const filePath = filePathRef.current;
@@ -977,7 +916,6 @@ export function useHomeWorkspace() {
             const editor = rwlEditorRef.current;
             const savedData = editor.getData();
             const sourceHash = hashRwlSiteData(savedData);
-            const targetSeriesId = selectedTreeRef.current;
             const workspaceEpoch = workspaceEpochRef.current;
             const matchesSavedSnapshot = await enqueueSave(async () => {
                 await saveFile(filePath, rawText);
@@ -992,9 +930,6 @@ export function useHomeWorkspace() {
             });
             if (!matchesSavedSnapshot) {
                 return;
-            }
-            if (selectedTreeRef.current === targetSeriesId) {
-                runCurrentEventRankerForSavedFile(filePath, targetSeriesId, sourceHash, "after_save");
             }
 
             try {
@@ -1013,7 +948,7 @@ export function useHomeWorkspace() {
             console.error("写入文本编辑内容时出错:", error);
             throw error;
         }
-    }, [applyParsedRwlText, enqueueSave, markDataSnapshotAsSaved, runCofechaAndApplyResult, runCurrentEventRankerForSavedFile]);
+    }, [applyParsedRwlText, enqueueSave, markDataSnapshotAsSaved, runCofechaAndApplyResult]);
 
     const handleSaveAs = useCallback(async () => {
         if (isFileLoadingRef.current) {
@@ -1041,7 +976,6 @@ export function useHomeWorkspace() {
             const rwlString = editor.exportAsRwlString();
             const savedData = editor.getData();
             const sourceHash = hashRwlSiteData(savedData);
-            const targetSeriesId = selectedTreeRef.current;
             const workspaceEpoch = workspaceEpochRef.current;
             const matchesSavedSnapshot = await enqueueSave(async () => {
                 await saveFile(filePathToSave, rwlString);
@@ -1068,14 +1002,10 @@ export function useHomeWorkspace() {
                     ),
                     persistTreeRingScanState(filePathToSave, treeRingScanState),
                 ]);
-                resetCurrentEventRanker();
                 return markDataSnapshotAsSaved(savedData);
             });
             if (!matchesSavedSnapshot) {
                 return;
-            }
-            if (selectedTreeRef.current === targetSeriesId) {
-                runCurrentEventRankerForSavedFile(filePathToSave, targetSeriesId, sourceHash, "after_save");
             }
 
             try {
@@ -1093,7 +1023,7 @@ export function useHomeWorkspace() {
         } catch (error) {
             console.error("写入文件时出错:", error);
         }
-    }, [dynamicReferenceConfig, enqueueSave, markDataSnapshotAsSaved, referenceConfig, referenceOperationLog, resetCurrentEventRanker, runCofechaAndApplyResult, runCurrentEventRankerForSavedFile, treeRingScanState]);
+    }, [dynamicReferenceConfig, enqueueSave, markDataSnapshotAsSaved, referenceConfig, referenceOperationLog, runCofechaAndApplyResult, treeRingScanState]);
 
     const handleSaveRawTextAs = useCallback(async (rawText: string) => {
         if (isFileLoadingRef.current) {
@@ -1121,7 +1051,6 @@ export function useHomeWorkspace() {
             const editor = rwlEditorRef.current;
             const savedData = editor.getData();
             const sourceHash = hashRwlSiteData(savedData);
-            const targetSeriesId = selectedTreeRef.current;
             const workspaceEpoch = workspaceEpochRef.current;
             const matchesSavedSnapshot = await enqueueSave(async () => {
                 await saveFile(filePathToSave, rawText);
@@ -1148,14 +1077,10 @@ export function useHomeWorkspace() {
                     ),
                     persistTreeRingScanState(filePathToSave, treeRingScanState),
                 ]);
-                resetCurrentEventRanker();
                 return markDataSnapshotAsSaved(savedData);
             });
             if (!matchesSavedSnapshot) {
                 return;
-            }
-            if (selectedTreeRef.current === targetSeriesId) {
-                runCurrentEventRankerForSavedFile(filePathToSave, targetSeriesId, sourceHash, "after_save");
             }
 
             try {
@@ -1174,7 +1099,7 @@ export function useHomeWorkspace() {
             console.error("写入文本编辑内容时出错:", error);
             throw error;
         }
-    }, [applyParsedRwlText, dynamicReferenceConfig, enqueueSave, markDataSnapshotAsSaved, referenceConfig, referenceOperationLog, resetCurrentEventRanker, runCofechaAndApplyResult, runCurrentEventRankerForSavedFile, treeRingScanState]);
+    }, [applyParsedRwlText, dynamicReferenceConfig, enqueueSave, markDataSnapshotAsSaved, referenceConfig, referenceOperationLog, runCofechaAndApplyResult, treeRingScanState]);
 
     const handleUndo = useCallback(() => {
         triggerHistoryAnimation(rwlEditorRef.current.undo());
@@ -1646,141 +1571,10 @@ export function useHomeWorkspace() {
         triggerHistoryAnimation({ type: "delete-year", tree, year: nextYear, mode, shift, direction: "redo" });
     }, [triggerHistoryAnimation]);
 
-    const handleRunCurrentEventRanker = useCallback(() => {
-        if (
-            !filePathRef.current
-            || selectedTree === ALL_OPTION_VALUE
-            || isModified
-            || isFileLoadingRef.current
-        ) {
-            return;
-        }
-        runCurrentEventRankerForSavedFile(
-            filePathRef.current,
-            selectedTree,
-            hashRwlSiteData(rwlEditorRef.current.getData()),
-            "manual",
-        );
-    }, [isModified, runCurrentEventRankerForSavedFile, selectedTree]);
-
-    const handleApplyCurrentEventConfirmedYears = useCallback(() => {
-        const context = currentEventRankerSession.context;
-        if (
-            !context
-            || context.rwlPath !== filePathRef.current
-            || context.targetSeriesId !== selectedTree
-            || currentEventRankerSession.confirmedYears.length === 0
-            || currentEventRankerSession.status === "running"
-            || currentEventRankerSession.status === "stale"
-            || isFileLoadingRef.current
-        ) {
-            return;
-        }
-
-        const years = [...currentEventRankerSession.confirmedYears].sort((a, b) => b - a);
-        const batchId = `current-event-${currentEventRankerSession.requestId ?? Date.now()}`;
-        const isRrfRebuild = currentEventRankerSession.modelId === RRF_CURRENT_EVENT_MODEL_ID;
-        let appliedCount = 0;
-        let removedExistingZeroCount = 0;
-
-        if (isRrfRebuild) {
-            const currentTree = rwlEditorRef.current.getData().get(context.targetSeriesId);
-            if (!currentTree) {
-                return;
-            }
-            let rebuilt;
-            try {
-                rebuilt = rebuildCurrentEventRrfTree(currentTree, years);
-            } catch (error) {
-                console.warn("[current-event RRF] confirmed session cannot be rebuilt", error);
-                return;
-            }
-            rwlEditorRef.current.replaceTreeData(
-                context.targetSeriesId,
-                rebuilt.data,
-                {
-                    operationType: "APPLY_CURRENT_EVENT_RRF_SESSION",
-                    source: "auto-suggested",
-                    reason: "Diagnostic-only 缺轮 RRF 会话由专家确认；先移除既有 0，再从新到旧重建确认年份",
-                    batchId,
-                    metricsBefore: {
-                        existingZeroCount: rebuilt.removedExistingZeroYears.length,
-                        confirmedRoundCount: currentEventRankerSession.confirmedYears.length,
-                    },
-                    metricsAfter: {
-                        operation: "REBUILD_CONFIRMED_MISSING_RINGS",
-                        existingZeroPolicy: "remove",
-                        side: "right",
-                        automaticWriteback: "false",
-                    },
-                },
-            );
-            triggerHistoryAnimation({
-                type: "replace-tree-data",
-                tree: context.targetSeriesId,
-                direction: "redo",
-            });
-            removedExistingZeroCount = rebuilt.removedExistingZeroYears.length;
-            appliedCount = rebuilt.confirmedYears.length;
-        } else {
-            years.forEach((year, index) => {
-                const currentTree = rwlEditorRef.current.getData().get(context.targetSeriesId);
-                if (!currentTree?.has(year) || currentTree.get(year) === 0) {
-                    return;
-                }
-                rwlEditorRef.current.insertMissingYearAtSide(
-                    context.targetSeriesId,
-                    year,
-                    "right",
-                    {
-                        operationType: "APPLY_SUGGESTION",
-                        source: "auto-suggested",
-                        reason: `Current-event V1 diagnostic-only 模型 ${currentEventRankerSession.modelId} 会话中由用户人工确认`,
-                        batchId,
-                        targetIndex: index + 1,
-                        metricsBefore: {
-                            candidateYear: year,
-                            confirmedRoundCount: currentEventRankerSession.confirmedYears.length,
-                        },
-                        metricsAfter: {
-                            operation: "INSERT_MISSING_RING",
-                            side: "right",
-                            automaticWriteback: "false",
-                        },
-                    },
-                );
-                appliedCount += 1;
-                triggerHistoryAnimation({
-                    type: "insert-missing",
-                    tree: context.targetSeriesId,
-                    year,
-                    side: "right",
-                    direction: "redo",
-                });
-            });
-        }
-
-        if (appliedCount > 0) {
-            markCurrentEventRankerStale(
-                isRrfRebuild
-                    ? `已移除 ${removedExistingZeroCount} 个既有 0，并从新到旧重建 ${appliedCount} 个人工确认年份；请检查后保存。`
-                    : `已把 ${appliedCount} 个人工确认年份应用到工作区；请检查后保存，模型不会自动写盘。`,
-            );
-        }
-    }, [
-        currentEventRankerSession,
-        markCurrentEventRankerStale,
-        selectedTree,
-        triggerHistoryAnimation,
-    ]);
-
     const handleTreeSelectionChange = useCallback((nextTree: string) => {
-        if (nextTree !== selectedTree) {
-            resetCurrentEventRanker();
-        }
         selectedTreeRef.current = nextTree;
         setSelectedTree(nextTree);
-    }, [resetCurrentEventRanker, selectedTree]);
+    }, []);
 
     const selectedProblemText = getCofechaSeriesMapValue(possibleProblemsDetail, selectedTree);
     const workspaceOperationLog = useMemo(() => (
@@ -1800,7 +1594,7 @@ export function useHomeWorkspace() {
             ? selectedTree
             : null;
 
-        if (!targetTree) {
+        if (!settings.diagnosis.enabled || !targetTree) {
             diagnosisWorkerRef.current?.terminate();
             diagnosisWorkerRef.current = null;
             setIsEventDiagnosisRunning(false);
@@ -1928,7 +1722,7 @@ export function useHomeWorkspace() {
         };
         // outFileContent 加入依赖：COFECHA 重跑（保存后）更新 .OUT 时重新诊断，使 COFECHA 驱动候选与
         // 逐个（bark-to-pith）迭代工作流生效。
-    }, [diagnosisReferenceConfig, historyAnimation?.id, markCurrentDiagnosisStale, outFileContent, selectedTree, siteData, siteDataSignature]);
+    }, [diagnosisReferenceConfig, historyAnimation?.id, markCurrentDiagnosisStale, outFileContent, selectedTree, settings.diagnosis.enabled, siteData, siteDataSignature]);
 
     // Data or evidence changes invalidate the file-level view immediately. Only an explicit click
     // on the breadth navigator creates a new scan request.
@@ -2292,10 +2086,6 @@ export function useHomeWorkspace() {
         crossdatingValidationSummary,
         canResetToRawData,
         crossdatingDiagnosis,
-        currentEventRankerSession,
-        currentEventModels,
-        activeCurrentEventModelId,
-        currentEventModelCatalogError,
         deletionMarkers,
         diagnosisBatchResult,
         dynamicReferenceConfig,
@@ -2313,9 +2103,7 @@ export function useHomeWorkspace() {
         handleApplyDiagnosisCandidate,
         handleApplyDiagnosisCandidateBatch,
         handleApplyDiagnosisEvent,
-        handleApplyCurrentEventConfirmedYears,
         handleApplyLocalSimulation,
-        handleConfirmCurrentEventYear: confirmCurrentEventYear,
         handleReferenceConfigChange,
         handleRedo,
         handleReplaceTreeData,
@@ -2323,14 +2111,12 @@ export function useHomeWorkspace() {
         handleRestoreDeletion,
         handleRunCofechaValidation,
         handleRunBreadthDiagnosis,
-        handleRunCurrentEventRanker,
         handleSaveRawText,
         handleSaveRawTextAs,
         handleSave,
         handleSaveAs,
         handleTreeSelectionChange,
         handleTreeRingScanSeriesChange,
-        handleUndoCurrentEventConfirmation: undoCurrentEventConfirmation,
         handleUndo,
         handleUndoOperationLogEntry,
         applyRawRwlText,
@@ -2357,9 +2143,6 @@ export function useHomeWorkspace() {
         selectedTree,
         setCofechaVersion,
         setSelectedPart,
-        selectCurrentEventModel,
-        cancelCurrentEventRanker,
-        retryCurrentEventRanker,
         shouldShowProcessing,
         shouldShowWelcome,
         siteData,

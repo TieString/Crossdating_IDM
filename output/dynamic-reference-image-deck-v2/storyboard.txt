@@ -1,0 +1,57 @@
+Deck language rules
+- Scientific, compact, high information density.
+- Titles state the established method or capability directly.
+- No rhetorical questions, defensive disclaimers, repeated boundaries, or project-log narration.
+- Preserve only boundaries that change interpretation or execution.
+- The core contribution is a transparent, evidence-fused, human-reviewed and auditable dating-suggestion loop.
+
+01 从 working RWL 到可审计主复核窗口
+Core: current working data → reference → lag alarms → candidates → counterfactual gates → events → adjudication → one review window → user apply → re-diagnosis.
+Objects: candidate / event / review event.
+
+02 动态参考把 working RWL 转为可比较信号
+Gate: enabled + target + dynamic points → 40 ms → Worker.
+Reference: PART 3 when anchor_pass≥3; pairwise cluster when <3; target exclusion on pairwise.
+Transform: 32y/50% spline → index → AR≤5 → log → annual mean(rep≥3) → mean0/sd1.
+
+03 全局—分段联合扫描提取稳定 lag 结构
+z-score; global lag −100…+100, overlap≥25; 50y windows/25y overlap; local lag −100…+10.
+A-like/B-like/none; propagation requires ≥2 same-sign B-like windows.
+
+04 三条证据通道将报警翻译为编辑假设
+Global slide / propagation / isolated B-like → insert, delete, partial move, whole move.
+Unit events pre-scan up to 5 years; constrained local alignment gaps≤2, band=3, overlap≥20.
+
+05 候选必须在副本中试改并通过 before/after 硬门
+Copy siteData → edit target copy → rerun core diagnosis → compare.
+Seven gates, pass≥3; then weighted score; per-tree top5; softmax probabilityLike is within-pool weight.
+
+06 候选反事实与 piecewise lag path 融合为事件
+Candidate clusters seed 7/9-year windows.
+Path: stable integer lag states, min duration18, explicit transition costs.
+Evidence: counterfactual, path, global/endpoint, reference votes, locator.
+
+07 多视图定位将粗模式压缩为 5/7/9/13 年窗口
+Primary/alternate ensemble selection; unique 13-year mode → 9 → 7/5 under margins.
+Checkpoints candidate/detected/fused/retained/displayed/final; evidence ledger four dimensions.
+
+08 联合裁决先确定操作，再确定位置
+operation×shift×location.
+Operation margin<0.04 → conflict; remote location >13y and margin<0.04 → conflict.
+Display gate → strict / reviewOnly / refused; UI consumes reviewEvents.
+
+09 界面输出唯一主窗口并支持窗内复核
+Event card: type, window, confidence, year evidence, lag before→after, r before→after.
+All years selectable; default Rank1; chart preview current r → simulated r → Δr; no data mutation.
+
+10 用户选择被翻译为四类确定编辑语义
+Missing ring, false ring, partial older-side move, validated whole-series move.
+Use a 1952/1950 visual timeline to show exact moved/fixed/missing ranges.
+
+11 正式应用复用 RwlEditor 并进入统一审计链
+Plan safety → editor operation → undo/redo/deletion markers → operation log.
+Log distinguishes algorithm suggestion, user-selected year, executed operation.
+
+12 每次只处理当前 frontier，应用后完整复诊
+One review event → user inspection/apply → all old results stale → siteData update → 40ms Worker rerun → next frontier.
+Closing value: algorithm narrows the range, user decides, system preserves audit.

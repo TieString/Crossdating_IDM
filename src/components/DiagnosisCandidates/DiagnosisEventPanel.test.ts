@@ -74,6 +74,13 @@ describe("DiagnosisEventPanel", () => {
     };
 
     const html = renderToStaticMarkup(createElement(DiagnosisEventPanel, { events: [event] }));
+    const synchronizedHtml = renderToStaticMarkup(createElement(DiagnosisEventPanel, {
+      events: [event],
+      selectedEventId: event.id,
+      selectedReviewYear: 1886,
+      onApplyEvent: () => true,
+      onDismiss: () => undefined,
+    }));
 
     expect(html).toContain("aria-label=\"定年建议\"");
     expect(html).not.toContain("JS 事件级诊断");
@@ -91,6 +98,9 @@ describe("DiagnosisEventPanel", () => {
     expect(html).not.toContain("legacy-candidate-1");
     expect(html).not.toContain("查看并确认所选年份的编辑操作");
     expect(html).not.toContain("忽略");
+    expect(synchronizedHtml).toMatch(/aria-pressed="true" title="选择年份 1886 作为应用边界"/);
+    expect(synchronizedHtml).toContain("在 1886 年插入缺轮");
+    expect(synchronizedHtml).toContain('aria-label="暂时关闭本次定年建议"');
   });
 
   it("offers every year in the partial-move main window as a breakpoint", () => {

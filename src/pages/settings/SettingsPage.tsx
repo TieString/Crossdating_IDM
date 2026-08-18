@@ -8,10 +8,11 @@ import {
 } from "@/features/settings/settings";
 import styles from "./SettingsPage.module.css";
 
-type SectionId = "animation" | "cofecha" | "about";
+type SectionId = "animation" | "diagnosis" | "cofecha" | "about";
 
 const SECTIONS: { id: SectionId; label: string }[] = [
     { id: "animation", label: "动画" },
+    { id: "diagnosis", label: "定年建议" },
     { id: "cofecha", label: "COFECHA 引擎" },
     { id: "about", label: "关于" },
 ];
@@ -229,6 +230,32 @@ function CofechaSection() {
     );
 }
 
+function DiagnosisSection() {
+    const { settings, updateDiagnosisSettings } = useSettings();
+
+    return (
+        <div>
+            <h2 className={styles["section-title"]}>定年建议</h2>
+
+            <Row label="自动分析" align="top">
+                <label className={styles["check"]}>
+                    <input
+                        type="checkbox"
+                        checked={settings.diagnosis.enabled}
+                        onChange={(event) => updateDiagnosisSettings({
+                            enabled: event.currentTarget.checked,
+                        })}
+                    />
+                    <span>选择序列或编辑数据后自动生成定年建议</span>
+                </label>
+                <div className={styles["setting-note"]}>
+                    关闭后会停止当前自动分析并隐藏建议；COFECHA 验证与已有编辑记录不受影响。
+                </div>
+            </Row>
+        </div>
+    );
+}
+
 function AboutSection() {
     return (
         <div>
@@ -287,6 +314,7 @@ export default function SettingsPage() {
 
                 <FloatingScrollArea className={styles["content"]}>
                     {activeSection === "animation" && <AnimationSection />}
+                    {activeSection === "diagnosis" && <DiagnosisSection />}
                     {activeSection === "cofecha" && <CofechaSection />}
                     {activeSection === "about" && <AboutSection />}
                 </FloatingScrollArea>

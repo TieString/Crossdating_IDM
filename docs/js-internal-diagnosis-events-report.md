@@ -6,7 +6,7 @@
 
 ## 结论
 
-本轮只评估和修改 TypeScript/JavaScript 内部诊断。三个 Python 模型没有参与打分、排序或阈值选择，当前 UI 也不显示 Python 建议。
+本轮只评估和修改 TypeScript/JavaScript 内部诊断。旧 Python Current-event 模型的运行时、发布资源和 UI 已移除，不参与打分、排序或阈值选择。
 
 当前产品契约已经收紧为：
 

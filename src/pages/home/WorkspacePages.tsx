@@ -465,6 +465,7 @@ type ExpandedChartPageProps = {
     onLocateWidth: (tree: string, year: number) => void;
     onEditAsText: (tree: string) => void;
     onJumpToCofecha: (tree: string) => void;
+    onDiagnosisPreviewChange: (event: DiagnosisEvent, year: number) => void;
     cofechaPart6Trees: readonly string[];
     onClose: () => void;
 };
@@ -492,6 +493,7 @@ export function ExpandedChartPage({
     onLocateWidth,
     onEditAsText,
     onJumpToCofecha,
+    onDiagnosisPreviewChange,
     cofechaPart6Trees,
     onClose,
 }: ExpandedChartPageProps) {
@@ -553,6 +555,7 @@ export function ExpandedChartPage({
                         onLocateWidth={onLocateWidth}
                         onEditAsText={onEditAsText}
                         onJumpToCofecha={onJumpToCofecha}
+                        onDiagnosisPreviewChange={onDiagnosisPreviewChange}
                         cofechaPart6Trees={cofechaPart6Trees}
                     />
                 </Suspense>

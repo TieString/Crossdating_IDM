@@ -4,7 +4,6 @@ import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AnimatePresence } from "motion/react";
 import { TreeChartManager } from "@/components/Chart/TreeChartManager";
-import { CurrentEventSuggestionPanel } from "@/components/DiagnosisCandidates/CurrentEventSuggestionPanel";
 import { DiagnosisEventPanel } from "@/components/DiagnosisCandidates/DiagnosisEventPanel";
 import {
     getDisplayedDiagnosisEvents,
@@ -12,7 +11,6 @@ import {
     refreshActiveDiagnosisEventInterpretation,
     type DiagnosisEvent,
 } from "@/features/crossdating/diagnosis";
-import { hashRwlSiteData } from "@/features/crossdating/reference";
 import WidthContainer, { WidthGridSkeleton } from "@/components/WidthContainer/WidthContainer";
 import ContextMenu, { type ContextMenuItem } from "@/components/ContextMenu/ContextMenu";
 import { FloatingScrollArea } from "@/components/FloatingScrollArea/FloatingScrollArea";
@@ -20,7 +18,6 @@ import { FloatingScrollbar } from "@/components/FloatingScrollbar/FloatingScroll
 import { FindReplaceBar, type FindReplaceMode } from "@/components/FindReplace/FindReplaceBar";
 import { openSettingsWindow } from "@/pages/settings/openSettingsWindow";
 import { stopMarker } from "@/shared/constants";
-import { CURRENT_EVENT_PYTHON_MODELS_ENABLED } from "@/shared/featureFlags";
 import style from "./Home.module.css";
 import {
     ALL_OPTION_VALUE,
@@ -87,7 +84,6 @@ import {
 } from "./home/workspaceWindowBridge";
 import { useResizablePanels } from "./useResizablePanels";
 import { publishConsoleDataExport } from "./home/consoleDataExport";
-import type { CurrentEventSuggestion } from "@/services/currentEventRanker/types";
 import { hasCofechaSeriesMapValue } from "@/features/cofecha/seriesId";
 import type { ChartJumpTarget } from "@/components/Chart/chartNavigation";
 
@@ -342,8 +338,8 @@ export default function Home() {
     const [replaceValue, setReplaceValue] = useState("");
     const [findMatchIndex, setFindMatchIndex] = useState(0);
     const [problemTab, setProblemTab] = useState<"problems" | "candidates">("problems");
-    const [focusedCurrentEventSuggestion, setFocusedCurrentEventSuggestion] = useState<CurrentEventSuggestion | null>(null);
     const [activeDiagnosisEvent, setActiveDiagnosisEvent] = useState<DiagnosisEvent | null>(null);
+    const [dismissedDiagnosisTree, setDismissedDiagnosisTree] = useState<string | null>(null);
     const [chartSelectedTrees, setChartSelectedTrees] = useState<string[]>([]);
     const chartSelectionFileRef = useRef<string | null>(null);
     const {
@@ -356,11 +352,6 @@ export default function Home() {
         canRunBreadthDiagnosis,
         crossdatingValidationSummary,
         crossdatingDiagnosis,
-        currentEventRankerSession,
-        currentEventModels,
-        activeCurrentEventModelId,
-        currentEventModelCatalogError,
-        cancelCurrentEventRanker,
         deletionMarkers,
         diagnosisBatchResult,
         dynamicReferenceConfig,
@@ -378,9 +369,7 @@ export default function Home() {
         handleApplyDiagnosisCandidate,
         handleApplyDiagnosisCandidateBatch,
         handleApplyDiagnosisEvent,
-        handleApplyCurrentEventConfirmedYears,
         handleApplyLocalSimulation,
-        handleConfirmCurrentEventYear,
         handleReferenceConfigChange,
         handleRedo,
         handleReplaceTreeData,
@@ -388,12 +377,10 @@ export default function Home() {
         handleRestoreDeletion,
         handleRunBreadthDiagnosis,
         handleRunCofechaValidation,
-        handleRunCurrentEventRanker,
         handleSave: handleStructuredSave,
         handleSaveAs: handleStructuredSaveAs,
         handleTreeSelectionChange,
         handleTreeRingScanSeriesChange,
-        handleUndoCurrentEventConfirmation,
         handleUndo,
         handleUndoOperationLogEntry,
         hasChart,
@@ -403,7 +390,6 @@ export default function Home() {
         isCofechaRunning,
         isEventDiagnosisRunning,
         isFileLoading,
-        isModified,
         operationLog,
         rwlOperationLog,
         possibleProblemsDetail,
@@ -417,8 +403,6 @@ export default function Home() {
         selectedTree,
         setCofechaVersion,
         setSelectedPart,
-        selectCurrentEventModel,
-        retryCurrentEventRanker,
         shouldShowProcessing,
         shouldShowWelcome,
         siteData,
@@ -444,6 +428,11 @@ export default function Home() {
         });
     }, [fileName, siteData]);
 
+    // “关闭本次建议”只绑定当前数据版本；任何编辑都会产生新的 siteData 并恢复建议。
+    useEffect(() => {
+        setDismissedDiagnosisTree(null);
+    }, [siteData]);
+
     const handleChartSelectedTreesChange = useCallback((trees: string[]) => {
         const next = Array.from(new Set(trees.filter((tree) => siteData.has(tree))));
         setChartSelectedTrees(next);
@@ -453,9 +442,29 @@ export default function Home() {
         publishConsoleDataExport(fileName, siteData, cofechaResult);
     }, [cofechaResult, fileName, siteData]);
 
+    const presentedCrossdatingDiagnosis = useMemo(() => {
+        if (!dismissedDiagnosisTree) return crossdatingDiagnosis;
+        const events = crossdatingDiagnosis.events.filter((event) => (
+            event.seriesId !== dismissedDiagnosisTree
+        ));
+        const reviewEvents = crossdatingDiagnosis.reviewEvents?.filter((event) => (
+            event.seriesId !== dismissedDiagnosisTree
+        ));
+        const candidates = crossdatingDiagnosis.candidates.filter((candidate) => (
+            candidate.targetTree !== dismissedDiagnosisTree
+        ));
+        return {
+            ...crossdatingDiagnosis,
+            events,
+            ...(reviewEvents ? { reviewEvents } : {}),
+            candidates,
+            eventCount: events.length,
+            candidateCount: candidates.length,
+        };
+    }, [crossdatingDiagnosis, dismissedDiagnosisTree]);
     const displayedDiagnosisEvents = useMemo(
-        () => getDisplayedDiagnosisEvents(crossdatingDiagnosis),
-        [crossdatingDiagnosis],
+        () => getDisplayedDiagnosisEvents(presentedCrossdatingDiagnosis),
+        [presentedCrossdatingDiagnosis],
     );
     const selectedTreeEvents = useMemo(
         () => displayedDiagnosisEvents.filter((event) => (
@@ -479,68 +488,19 @@ export default function Home() {
         ),
         [activeDiagnosisEvent, displayedDiagnosisEvents],
     );
-    const currentSiteHash = useMemo(() => hashRwlSiteData(siteData), [siteData]);
-    const visibleCurrentEventSession = useMemo(() => {
-        const context = currentEventRankerSession.context;
-        if (!context || (
-            context.rwlPath === fileName
-            && context.targetSeriesId === selectedTree
-            && context.sourceHash === currentSiteHash
-        )) {
-            return currentEventRankerSession;
-        }
-        return {
-            ...currentEventRankerSession,
-            status: "stale" as const,
-            requestId: null,
-            context: null,
-            confirmedYears: [],
-            result: null,
-            error: null,
-            staleReason: "旧模型结果不属于当前文件、序列或数据版本，已停止显示。",
-        };
-    }, [currentEventRankerSession, currentSiteHash, fileName, selectedTree]);
-    useEffect(() => {
-        setFocusedCurrentEventSuggestion(null);
-    }, [visibleCurrentEventSession.requestId, selectedTree]);
     const suggestedRangeHighlights = useMemo(
-        () => [
-            ...projectedDiagnosisEvents.flatMap((event) => (
-                !event.stale && event.eventType !== "wholeSeriesMove"
-                    ? [{
-                        tree: event.seriesId,
-                        startYear: event.startYear,
-                        endYear: event.endYear,
-                    }]
-                    : []
-            )),
-            ...(CURRENT_EVENT_PYTHON_MODELS_ENABLED
-                && (visibleCurrentEventSession.status === "advice"
-                || visibleCurrentEventSession.status === "range_advice")
-                && visibleCurrentEventSession.result?.eventRange
-                && selectedTree !== ALL_OPTION_VALUE
+        () => projectedDiagnosisEvents.flatMap((event) => (
+            !event.stale && event.eventType !== "wholeSeriesMove"
                 ? [{
-                    tree: selectedTree,
-                    startYear: visibleCurrentEventSession.result.eventRange.startYear,
-                    endYear: visibleCurrentEventSession.result.eventRange.endYear,
+                    tree: event.seriesId,
+                    startYear: event.startYear,
+                    endYear: event.endYear,
                 }]
-                : []),
-            ...(CURRENT_EVENT_PYTHON_MODELS_ENABLED
-                && focusedCurrentEventSuggestion
-                && selectedTree !== ALL_OPTION_VALUE
-                ? [{
-                    tree: selectedTree,
-                    startYear: focusedCurrentEventSuggestion.rangeStart,
-                    endYear: focusedCurrentEventSuggestion.rangeEnd,
-                }]
-                : []),
-        ],
-        [focusedCurrentEventSuggestion, projectedDiagnosisEvents, selectedTree, visibleCurrentEventSession],
+                : []
+        )),
+        [projectedDiagnosisEvents],
     );
-    const currentEventTabAvailable = CURRENT_EVENT_PYTHON_MODELS_ENABLED
-        && Boolean(fileName && selectedTree !== ALL_OPTION_VALUE);
-    const candidateTabAvailable = currentEventTabAvailable
-        || selectedTreeEvents.length > 0
+    const candidateTabAvailable = selectedTreeEvents.length > 0
         || isEventDiagnosisRunning;
     const problemTabAvailable = Boolean(selectedProblemText);
     const activeProblemTab: "problems" | "candidates" | null = problemTab === "candidates" && candidateTabAvailable
@@ -616,7 +576,11 @@ export default function Home() {
         ];
     }, [panelContextMenu, externalWorkspaceWindows, handleOpenWorkspaceWindow]);
 
-    const handleJumpToChart = useCallback((tree: string, year: number) => {
+    const handleJumpToChart = useCallback((
+        tree: string,
+        year: number,
+        diagnosisPreviewEventId?: string,
+    ) => {
         const resolvedTree = resolveCofechaTreeCode(tree, siteData);
         if (!siteData.has(resolvedTree) || !Number.isFinite(year)) return;
 
@@ -627,7 +591,12 @@ export default function Home() {
         if (selectedTree !== resolvedTree) {
             handleTreeSelectionChange(resolvedTree);
         }
-        setChartJumpTarget({ id: chartJumpIdRef.current, tree: resolvedTree, year });
+        setChartJumpTarget({
+            id: chartJumpIdRef.current,
+            tree: resolvedTree,
+            year,
+            diagnosisPreviewEventId,
+        });
         if (externalWorkspaceWindows["line-chart"]) {
             handleOpenWorkspaceWindow("line-chart");
         }
@@ -732,9 +701,22 @@ export default function Home() {
         void getCurrentWindow().setFocus();
     }, [getCurrentRwlText, handleTreeSelectionChange, selectedTree, siteData]);
 
-    const handleFocusDiagnosisEvent = useCallback((event: DiagnosisEvent, selectedYear?: number) => {
+    const handleDiagnosisPreviewSelection = useCallback((event: DiagnosisEvent, year: number) => {
+        if (
+            event.stale
+            || event.eventType === "wholeSeriesMove"
+            || year < event.startYear
+            || year > event.endYear
+        ) return;
+
         setActiveDiagnosisEvent(event);
+        handleCofechaCellReferenceClick({ tree: event.seriesId, year });
+        handleJumpToChart(event.seriesId, year, event.id);
+    }, [handleCofechaCellReferenceClick, handleJumpToChart]);
+
+    const handleFocusDiagnosisEvent = useCallback((event: DiagnosisEvent, selectedYear?: number) => {
         if (event.eventType === "wholeSeriesMove") {
+            setActiveDiagnosisEvent(event);
             handleCofechaCellReferenceClick({ tree: event.seriesId });
             setChartSelectedTrees((previous) => (
                 previous.includes(event.seriesId) ? previous : [...previous, event.seriesId]
@@ -747,14 +729,51 @@ export default function Home() {
         const preferredYear = selectedYear
             ?? event.rankedYears[0]?.year
             ?? Math.round((event.startYear + event.endYear) / 2);
-        handleCofechaCellReferenceClick({ tree: event.seriesId, year: preferredYear });
-        handleJumpToChart(event.seriesId, preferredYear);
+        handleDiagnosisPreviewSelection(event, preferredYear);
     }, [
         externalWorkspaceWindows,
         handleCofechaCellReferenceClick,
-        handleJumpToChart,
+        handleDiagnosisPreviewSelection,
         handleOpenWorkspaceWindow,
     ]);
+
+    const handleDiagnosisPreviewSelectionById = useCallback((eventId: string, year: number) => {
+        const event = projectedDiagnosisEvents.find((candidate) => (
+            !candidate.stale
+            && candidate.id === eventId
+            && candidate.eventType !== "wholeSeriesMove"
+        ));
+        if (!event) return;
+        handleDiagnosisPreviewSelection(event, year);
+    }, [handleDiagnosisPreviewSelection, projectedDiagnosisEvents]);
+
+    const handleWidthDiagnosisPreviewSelection = useCallback((tree: string, year: number) => {
+        const resolvedTree = resolveCofechaTreeCode(tree, siteData);
+        const event = projectedDiagnosisEvents
+            .filter((candidate) => (
+                !candidate.stale
+                && candidate.seriesId === resolvedTree
+                && candidate.eventType !== "wholeSeriesMove"
+                && year >= candidate.startYear
+                && year <= candidate.endYear
+            ))
+            .sort((left, right) => {
+                const leftDistance = Math.abs((left.rankedYears[0]?.year ?? year) - year);
+                const rightDistance = Math.abs((right.rankedYears[0]?.year ?? year) - year);
+                return leftDistance - rightDistance || right.evidence.score - left.evidence.score;
+            })[0];
+        if (event) handleDiagnosisPreviewSelection(event, year);
+    }, [handleDiagnosisPreviewSelection, projectedDiagnosisEvents, siteData]);
+
+    const handleDismissCurrentDiagnosis = useCallback(() => {
+        if (selectedTree === ALL_OPTION_VALUE) return;
+        setDismissedDiagnosisTree(selectedTree);
+        setActiveDiagnosisEvent(null);
+        setChartJumpTarget((previous) => (
+            previous?.diagnosisPreviewEventId ? null : previous
+        ));
+        setCofechaCellJumpTarget(null);
+    }, [selectedTree]);
 
     const linkedReport = useMemo(() => (
         renderCofechaHtmlWithLinks(reportText, treeOptions, cofechaPart6JumpTarget?.tree ?? null)
@@ -866,11 +885,11 @@ export default function Home() {
             activeDiagnosisEvent,
             referenceConfig,
             dynamicReferenceConfig,
-            diagnosis: crossdatingDiagnosis,
+            diagnosis: presentedCrossdatingDiagnosis,
             diagnosisBatchResult,
             cofechaPart6Trees: cofechaPart6TreeList,
         },
-    }), [activeDiagnosisEvent, canResetToRawData, chartJumpTarget, chartSelectedTrees, cofechaPart6JumpTarget, cofechaPart6TreeList, cofechaResult, crossdatingDiagnosis, crossdatingValidationSummary, diagnosisBatchResult, dynamicReferenceConfig, fileName, isCofechaOutdated, isCofechaRunning, linkedReport, operationLog, referenceConfig, selectedPart, selectedTree, siteData]);
+    }), [activeDiagnosisEvent, canResetToRawData, chartJumpTarget, chartSelectedTrees, cofechaPart6JumpTarget, cofechaPart6TreeList, cofechaResult, crossdatingValidationSummary, diagnosisBatchResult, dynamicReferenceConfig, fileName, isCofechaOutdated, isCofechaRunning, linkedReport, operationLog, presentedCrossdatingDiagnosis, referenceConfig, selectedPart, selectedTree, siteData]);
 
     const handleCofechaTextClick = useCallback((event: MouseEvent<HTMLParagraphElement>) => {
         const target = event.target;
@@ -963,6 +982,8 @@ export default function Home() {
                     handleOpenRawEditorForTree(command.tree);
                 } else if (command.type === "locate-cofecha") {
                     handleJumpToCofechaPart6(command.tree);
+                } else if (command.type === "preview-diagnosis-event") {
+                    handleDiagnosisPreviewSelectionById(command.eventId, command.year);
                 } else if (command.type === "set-reference") {
                     handleReferenceConfigChange(command.config);
                 } else if (command.type === "apply-diagnosis-candidate") {
@@ -991,6 +1012,7 @@ export default function Home() {
         handleCofechaCellReferenceClick,
         handleChartLocateWidth,
         handleChartSelectedTreesChange,
+        handleDiagnosisPreviewSelectionById,
         handleJumpToCofechaPart6,
         handleOpenRawEditorForTree,
         handleDeleteSeriesFromChart,
@@ -1524,6 +1546,7 @@ export default function Home() {
                                                     rwlOperationLog={rwlOperationLog}
                                                     onLoadTreeRingScanFolder={handleLoadTreeRingScanFolder}
                                                     onTreeRingScanSeriesChange={handleTreeRingScanSeriesChange}
+                                                    onYearClick={handleWidthDiagnosisPreviewSelection}
                                                     scrollContainerRef={dataContainerRef}
                                                     onInsertMissingYearAtSide={handleInsertMissingYearAtSide}
                                                     onMoveSeriesTailByOffset={handleMoveSeriesTailByOffset}
@@ -1585,11 +1608,7 @@ export default function Home() {
                                                     onClick={() => setProblemTab("candidates")}
                                                 >
                                                     定年建议
-                                                    {(currentEventTabAvailable
-                                                        && visibleCurrentEventSession.status === "running")
-                                                        || isEventDiagnosisRunning
-                                                        ? " · 计算中"
-                                                        : ""}
+                                                    {isEventDiagnosisRunning ? " · 计算中" : ""}
                                                 </button>
                                             </div>
 
@@ -1600,29 +1619,14 @@ export default function Home() {
                                                     </div>
                                                 ) : activeProblemTab === "candidates" ? (
                                                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                                                        {currentEventTabAvailable ? (
-                                                            <CurrentEventSuggestionPanel
-                                                                session={visibleCurrentEventSession}
-                                                                models={currentEventModels}
-                                                                activeModelId={activeCurrentEventModelId}
-                                                                modelCatalogError={currentEventModelCatalogError}
-                                                                targetSeriesId={selectedTree}
-                                                                isFileModified={isModified}
-                                                                onAnalyze={handleRunCurrentEventRanker}
-                                                                onConfirmYear={handleConfirmCurrentEventYear}
-                                                                onUndoConfirmation={handleUndoCurrentEventConfirmation}
-                                                                onApplyConfirmedYears={handleApplyCurrentEventConfirmedYears}
-                                                                onCancel={cancelCurrentEventRanker}
-                                                                onRetry={retryCurrentEventRanker}
-                                                                onFocusSuggestion={setFocusedCurrentEventSuggestion}
-                                                                onSelectModel={selectCurrentEventModel}
-                                                            />
-                                                        ) : null}
                                                         {selectedTreeEvents.length > 0 ? (
                                                             <DiagnosisEventPanel
                                                                 events={selectedTreeEvents}
+                                                                selectedEventId={chartJumpTarget?.diagnosisPreviewEventId}
+                                                                selectedReviewYear={chartJumpTarget?.year}
                                                                 onFocusEvent={handleFocusDiagnosisEvent}
                                                                 onApplyEvent={handleApplyDiagnosisEvent}
+                                                                onDismiss={handleDismissCurrentDiagnosis}
                                                             />
                                                         ) : null}
                                                         {isEventDiagnosisRunning && selectedTreeEvents.length === 0 ? (
@@ -1821,7 +1825,7 @@ export default function Home() {
                                                     jumpTarget={chartJumpTarget}
                                                     referenceConfig={referenceConfig}
                                                     dynamicReferenceConfig={dynamicReferenceConfig}
-                                                    diagnosis={crossdatingDiagnosis}
+                                                    diagnosis={presentedCrossdatingDiagnosis}
                                                     activeDiagnosisEvent={activeDiagnosisEvent}
                                                     diagnosisBatchResult={diagnosisBatchResult}
                                                     onReferenceConfigChange={handleReferenceConfigChange}
@@ -1836,6 +1840,7 @@ export default function Home() {
                                                     onLocateWidth={handleChartLocateWidth}
                                                     onEditAsText={handleOpenRawEditorForTree}
                                                     onJumpToCofecha={handleJumpToCofechaPart6}
+                                                    onDiagnosisPreviewChange={handleDiagnosisPreviewSelection}
                                                     cofechaPart6Trees={cofechaPart6TreeList}
                                                 />
                                             )}

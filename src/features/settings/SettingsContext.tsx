@@ -1,5 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import type { AnimationSettings, AppSettings, CofechaSettings } from "./settings";
+import type {
+    AnimationSettings,
+    AppSettings,
+    CofechaSettings,
+    DiagnosisSettings,
+} from "./settings";
 import { loadSettings, saveSettings, STORAGE_KEY } from "./settings";
 
 /** Runtime settings context exposed to React components. */
@@ -10,6 +15,8 @@ export interface SettingsContextValue {
     updateAnimationSettings: (update: Partial<AnimationSettings>) => void;
     /** Merges COFECHA setting updates and persists the result. */
     updateCofechaSettings: (update: Partial<CofechaSettings>) => void;
+    /** Merges automatic diagnosis setting updates and persists the result. */
+    updateDiagnosisSettings: (update: Partial<DiagnosisSettings>) => void;
 }
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
@@ -40,6 +47,17 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         });
     }, []);
 
+    const updateDiagnosisSettings = useCallback((update: Partial<DiagnosisSettings>) => {
+        setSettings((prev) => {
+            const next: AppSettings = {
+                ...prev,
+                diagnosis: { ...prev.diagnosis, ...update },
+            };
+            saveSettings(next);
+            return next;
+        });
+    }, []);
+
     // 监听其他窗口（如设置窗口）对 localStorage 的修改，实时同步到本窗口
     useEffect(() => {
         const handleStorage = (e: StorageEvent) => {
@@ -56,8 +74,13 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     }, []);
 
     const value = useMemo(
-        () => ({ settings, updateAnimationSettings, updateCofechaSettings }),
-        [settings, updateAnimationSettings, updateCofechaSettings],
+        () => ({
+            settings,
+            updateAnimationSettings,
+            updateCofechaSettings,
+            updateDiagnosisSettings,
+        }),
+        [settings, updateAnimationSettings, updateCofechaSettings, updateDiagnosisSettings],
     );
 
     return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

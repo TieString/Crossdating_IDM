@@ -7,8 +7,12 @@ import style from "./DiagnosisEventPanel.module.css";
 
 type Props = {
   events: DiagnosisEvent[];
+  /** Shared chart/panel selection; also selects the matching constrained interpretation. */
+  selectedEventId?: string | null;
+  selectedReviewYear?: number | null;
   onFocusEvent?: (event: DiagnosisEvent, selectedYear?: number) => void;
   onApplyEvent?: (event: DiagnosisEvent, selectedYear: number) => boolean | void;
+  onDismiss?: () => void;
 };
 
 const eventTypeLabels: Record<DiagnosisEventType, string> = {
@@ -76,6 +80,8 @@ const formatAlgorithmSource = (sources: readonly string[]) => {
     dense_lag_profile: "dense lag",
     segmented_lag_path: "segmented lag",
     candidate_ranking: "ranking",
+    pairwise_mismatch: "双线错配",
+    counterfactual_operation_verification: "反事实编辑",
   };
   return sources.map((source) => labels[source] ?? source).join(" + ");
 };
@@ -147,7 +153,14 @@ const yearOptionLabel = (row: SelectableEventYear) => row.rank === null
   ? `${row.year}`
   : `#${row.rank} ${row.year}`;
 
-export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Props) {
+export function DiagnosisEventPanel({
+  events,
+  selectedEventId = null,
+  selectedReviewYear = null,
+  onFocusEvent,
+  onApplyEvent,
+  onDismiss,
+}: Props) {
   const [selectedYears, setSelectedYears] = useState<Record<string, number>>({});
   const [selectedInterpretations, setSelectedInterpretations] = useState<
     Record<string, InterpretationSelection>
@@ -182,8 +195,15 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
       aria-label="定年建议"
       className={style.panel}
     >
-      {events.map((event) => {
-        const interpretationSelection = selectedInterpretations[event.id] ?? "primary";
+      {events.map((event, eventIndex) => {
+        const controlledInterpretation = selectedEventId === event.id
+          ? "primary"
+          : selectedEventId === event.interpretationAmbiguity?.alternative.id
+            ? "alternative"
+            : null;
+        const interpretationSelection = controlledInterpretation
+          ?? selectedInterpretations[event.id]
+          ?? "primary";
         const selectedEvent = selectDiagnosisEventInterpretation(
           event,
           interpretationSelection,
@@ -196,7 +216,10 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
         const width = selectedEvent.endYear - selectedEvent.startYear + 1;
         const isWholeSeriesMove = selectedEvent.eventType === "wholeSeriesMove";
         const selectableYears = selectableEventYears(selectedEvent);
-        const savedYear = selectedYears[selectedEvent.id];
+        const controlledYear = selectedEvent.id === selectedEventId
+          ? selectedReviewYear
+          : null;
+        const savedYear = controlledYear ?? selectedYears[selectedEvent.id];
         const selectedYear = savedYear !== undefined
           && selectableYears.some((row) => row.year === savedYear)
           ? savedYear
@@ -418,6 +441,17 @@ export function DiagnosisEventPanel({ events, onFocusEvent, onApplyEvent }: Prop
                   className={`${style.button} ${style.primaryButton} ${selectedEvent.stale || event.stale ? style.disabledButton : ""}`}
                 >
                   应用
+                </button>
+              ) : null}
+              {eventIndex === 0 && onDismiss ? (
+                <button
+                  type="button"
+                  aria-label="暂时关闭本次定年建议"
+                  title="暂时关闭本次定年建议；下次编辑后自动恢复"
+                  onClick={onDismiss}
+                  className={style.closeButton}
+                >
+                  ×
                 </button>
               ) : null}
             </div>

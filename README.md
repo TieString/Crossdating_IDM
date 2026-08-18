@@ -55,7 +55,7 @@ npm run build-storybook
 2. `src/services/fs/io.ts` 读取文本并调用 RWL 解析入口。
 3. `src/features/rwl/index.ts` 自动识别格式，分派到 Tucson、Compact、CSV、Heidelberg 或 TRiDaS 解析器。
 4. `RwlEditor` 管理 raw baseline、working data、历史快照、删除标记和操作日志。
-5. `WidthContainer` 渲染可编辑宽度网格，并在每条序列标题中显示按实际宽度生成、以 1 cm 为基准且自动匹配容器比例的树轮径向窗口；树心到树皮始终完整、图像填满容器且不会变形，并支持不带动工作区的滚轮缩放和横向拖动。悬停年份显示在按钮上方，单击选择对应宽度格，双击打开唯一完整截面图；完整截面支持鼠标锚点缩放、图内平移、窗口移动和右下角尺寸调节。中间缺失年份和显式 0 宽缺轮也会保留标记。年轮区域右键还可索引一整个同名样本扫描影像文件夹；打开扫描图后先在总览上自由框选磨平的长方形样芯截面，可按 90° 旋转，TIFF 选区会按原始像素提取。随后依次标注至少两个十年锚点才进入标题预览，并会把编辑前的原年份映射到当前宽度格年份。`TreeChartManager` 渲染折线图和参考序列相关交互。
+5. `WidthContainer` 渲染可编辑宽度网格，并在每条序列标题中显示按实际宽度生成、以 1 cm 为基准且自动匹配容器比例的树轮径向窗口；树心到树皮始终完整、图像填满容器且不会变形，并支持不带动工作区的滚轮缩放和横向拖动。悬停年份显示在按钮上方，单击选择对应宽度格，双击打开唯一完整截面图；完整截面支持鼠标锚点缩放、图内平移、窗口移动和右下角尺寸调节。中间缺失年份和显式 0 宽缺轮也会保留标记。年轮区域右键还可索引一整个同名样本扫描影像文件夹；打开扫描图后先在总览上自由框选磨平的长方形样芯截面，可按 90° 旋转，TIFF 选区会按原始像素提取。随后依次标注至少两个十年锚点才进入标题预览，并会把编辑前的原年份映射到当前宽度格年份。`TreeChartManager` 渲染折线图和参考序列相关交互；恰好显示两条折线时可显式启动“双线分析”，定位稳定相对错配的开始年份，并复用现有定年建议窗口和编辑预览。
 6. `reference.ts` 支持两类 derived reference series：用户手动选择序列时按年份直接均值；COFECHA 运行后默认用 PART 6 无 A flag 样芯生成 COFECHA-pass 动态参考序列。
 7. 用户触发诊断后，JS 事件级管线只诊断当前序列，并输出缺轮、伪轮、局部移动或整体移动的窄复核窗口；同站其它序列仍参与参考序列。
 8. 每个独立事件只显示一个 5/7/9/11/13 年主窗口，不显示操作或位置备选。定位器先在高召回粗区间内选择唯一 13 年模式，再用逐参考芯反事实、lag 转移和局部边界证据决定是否收窄；不会用 17 年窗连接远峰。局部移动在内部联合搜索 `-2..-100`，UI 只显示最终 `firstFixedYear + shiftYears`；点击诊断窗口内折线会直接预览这一建议，不显示内部假设列表。应用复用 `RwlEditor` 的撤销栈和操作日志，随后旧建议失效并重新诊断。
@@ -82,7 +82,6 @@ npm run build-storybook
 - [核心组件文档](docs/components.md)
 - [COFECHA-pass 参考序列](docs/cofecha-reference.md)
 - [JS 内部诊断事件窗口基准](docs/js-internal-diagnosis-events-report.md) — 信号无关采样、开发/盲测、混合事件、已有零值与性能
-- [Current-event V1 多模型切换与桌面端接入](docs/current-event-ranker-integration.md)
 - [文档维护规则](docs/maintenance.md)
 - API 文档输出目录：`docs/api`，通过 `npm run docs:api` 生成。
 
@@ -94,14 +93,10 @@ npm run validate:samples
 npm run validate:workspace-windows
 npm run validate:auto-crossdating
 npm run validate:cofecha-reference
-npm run validate:current-event-ranker
-npm run smoke:current-event-ranker
-npm run test:current-event-ranker
 npm run export:tree-ring-scan-fixtures -- <input.rwl> <output-folder>
 npm run validate:tree-ring-scan-pair -- <input.rwl> <scan-image>
 ```
 
-`validate` 是样例解析、工作区窗口 smoke、自动交叉定年算法验证、COFECHA-pass reference
-和 Current-event V1 资源/协议验证的聚合入口。当前定年建议 UI 只显示最新 JS 事件级诊断；三个 Python
-模型的代码、发布资源和开发验证命令仍保留，但模型 UI、目录查询和 sidecar 调用由 feature flag 暂时关闭。
-`test:current-event-ranker` 仅用于维护被隐藏模块的协议、资源和 sidecar 回归，不代表它参与当前 JS 诊断。
+`validate` 是样例解析、工作区窗口 smoke、自动交叉定年算法验证和 COFECHA-pass reference
+验证的聚合入口。产品内的定年建议只使用 TypeScript/JavaScript 诊断；Python Current-event
+模型、模型 bundle 和 PyInstaller sidecar 不再随源码或安装包发布。

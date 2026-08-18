@@ -1,0 +1,83 @@
+.notice {
+  flex: 0 0 auto;
+  padding: 8px 10px 9px;
+  border-bottom: 1px solid #e2e8e4;
+  background: #fbfdfc;
+  color: #26342d;
+  font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-bottom: 7px;
+}
+
+.title {
+  color: #20372c;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.pair {
+  color: #506159;
+  font-variant-numeric: tabular-nums;
+}
+
+.meta {
+  color: #77827d;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.close {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #8a9690;
+  cursor: pointer;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.close:hover {
+  background: #edf2ef;
+  color: #405249;
+}
+
+.status {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
+}
+
+.summary {
+  color: #33483d;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.detail {
+  margin-top: 2px;
+  color: #69766f;
+}
+
+.metrics {
+  color: #77827d;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+

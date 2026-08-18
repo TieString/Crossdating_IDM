@@ -1,5 +1,14 @@
+import { useRef, useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import type { DiagnosisEvent } from "@/features/crossdating/diagnosis";
+import { TreeChartManager } from "@/components/Chart/TreeChartManager";
+import type { ChartJumpTarget } from "@/components/Chart/chartNavigation";
+import WidthContainer from "@/components/WidthContainer/WidthContainer";
+import type {
+  CrossdatingDiagnosis,
+  DiagnosisEvent,
+} from "@/features/crossdating/diagnosis";
+import type { RwlSiteData, RwlTreeData } from "@/features/rwl";
+import { SettingsProvider } from "@/features/settings/SettingsContext";
 import { DiagnosisEventPanel } from "./DiagnosisEventPanel";
 
 const partial: DiagnosisEvent = {
@@ -78,6 +87,107 @@ const partialPrimary: DiagnosisEvent = {
   interpretationAmbiguity: { ...ambiguity, alternative: missing },
 };
 
+const previewSiteData: RwlSiteData = new Map(
+  Array.from({ length: 7 }, (_, seriesIndex) => {
+    const tree: RwlTreeData = new Map();
+    for (let year = 1740; year <= 1810; year += 1) {
+      if (seriesIndex === 0 && year === 1780) continue;
+      const signal = 900
+        + Math.sin(year / 3.7) * 180
+        + Math.cos(year / 8.3) * 90
+        + seriesIndex * 4;
+      tree.set(year, Math.round(signal));
+    }
+    return [seriesIndex === 0 ? partial.seriesId : `REF${seriesIndex}`, tree];
+  }),
+);
+
+const previewDiagnosis: CrossdatingDiagnosis = {
+  createdAt: "2026-08-16T00:00:00.000Z",
+  seriesCount: previewSiteData.size,
+  problemSegmentCount: 1,
+  candidateCount: 0,
+  eventCount: 1,
+  segmentLength: 50,
+  overlap: 25,
+  lagRange: { min: -10, max: 10 },
+  lowCorrelationThreshold: 0.32,
+  summaries: [],
+  segments: [],
+  propagationPatterns: [],
+  globalSlidingMatches: [],
+  masterNarrowYears: [],
+  events: [partial],
+  reviewEvents: [partial],
+  candidates: [],
+};
+
+function ReviewYearChartPreviewStory() {
+  const requestIdRef = useRef(0);
+  const [jumpTarget, setJumpTarget] = useState<ChartJumpTarget | null>(null);
+  const [activeEvent, setActiveEvent] = useState<DiagnosisEvent | null>(null);
+  const selectPreview = (event: DiagnosisEvent, year: number) => {
+    requestIdRef.current += 1;
+    setActiveEvent(event);
+    setJumpTarget({
+      id: requestIdRef.current,
+      tree: event.seriesId,
+      year,
+      diagnosisPreviewEventId: event.id,
+    });
+  };
+
+  return (
+    <SettingsProvider>
+      <div style={{ display: "grid", gridTemplateRows: "auto 250px minmax(420px, 1fr)", gap: 14, minHeight: 820, padding: 14, background: "#fff" }}>
+        <DiagnosisEventPanel
+          events={[partial]}
+          selectedEventId={jumpTarget?.diagnosisPreviewEventId}
+          selectedReviewYear={jumpTarget?.year}
+          onFocusEvent={(event, selectedYear) => {
+            const year = selectedYear ?? event.rankedYears[0]?.year;
+            if (year === undefined) return;
+            selectPreview(event, year);
+          }}
+          onApplyEvent={() => undefined}
+          onDismiss={() => undefined}
+        />
+        <div style={{ minHeight: 0, overflow: "auto", borderBlock: "1px solid #edf0ee" }}>
+          <WidthContainer
+            siteData={previewSiteData}
+            selected={partial.seriesId}
+            suggestedRanges={[{
+              tree: partial.seriesId,
+              startYear: partial.startYear,
+              endYear: partial.endYear,
+            }]}
+            jumpTarget={jumpTarget}
+            onYearClick={(tree, year) => {
+              if (
+                tree === partial.seriesId
+                && year >= partial.startYear
+                && year <= partial.endYear
+              ) {
+                selectPreview(partial, year);
+              }
+            }}
+          />
+        </div>
+        <TreeChartManager
+          variant="expanded"
+          fullData={previewSiteData}
+          selectedTrees={[partial.seriesId]}
+          focusedTree={partial.seriesId}
+          jumpTarget={jumpTarget}
+          activeDiagnosisEvent={activeEvent}
+          diagnosis={previewDiagnosis}
+          onDiagnosisPreviewChange={selectPreview}
+        />
+      </div>
+    </SettingsProvider>
+  );
+}
+
 const meta = {
   title: "Diagnosis/Constrained interpretation switch",
   component: DiagnosisEventPanel,
@@ -97,4 +207,9 @@ export const MissingRingsPrimary: Story = {
 
 export const PartialGapPrimary: Story = {
   args: { events: [partialPrimary] },
+};
+
+export const ReviewYearChartPreview: Story = {
+  args: { events: [partial] },
+  render: () => <ReviewYearChartPreviewStory />,
 };

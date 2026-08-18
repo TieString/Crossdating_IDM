@@ -207,6 +207,13 @@
     cursor: pointer;
 }
 
+.setting-note {
+    max-width: 560px;
+    color: #777;
+    font-size: 12.5px;
+    line-height: 1.55;
+}
+
 /* ── COFECHA engine spec ─────────────────────────── */
 
 .engine-spec {

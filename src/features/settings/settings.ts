@@ -38,12 +38,19 @@ export interface CofechaSettings {
     engine: CofechaEngine;
 }
 
+export interface DiagnosisSettings {
+    /** Automatically diagnose the currently selected series after selection or data changes. */
+    enabled: boolean;
+}
+
 /** Persisted application settings shape. */
 export interface AppSettings {
     /** Animation-related preferences. */
     animation: AnimationSettings;
     /** COFECHA engine preferences. */
     cofecha: CofechaSettings;
+    /** Automatic dating-suggestion preferences. */
+    diagnosis: DiagnosisSettings;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -57,6 +64,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
     },
     cofecha: {
         engine: "cofecha",
+    },
+    diagnosis: {
+        enabled: true,
     },
 };
 
@@ -93,6 +103,10 @@ export function loadSettings(): AppSettings {
         const parsedCofecha = parsed.cofecha && typeof parsed.cofecha === "object"
             ? parsed.cofecha
             : {};
+        const parsedDiagnosis = parsed.diagnosis && typeof parsed.diagnosis === "object"
+            ? parsed.diagnosis
+            : {};
+        const parsedDiagnosisEnabled = (parsedDiagnosis as Partial<DiagnosisSettings>).enabled;
 
         return {
             animation: {
@@ -104,6 +118,11 @@ export function loadSettings(): AppSettings {
                 ...DEFAULT_SETTINGS.cofecha,
                 ...parsedCofecha,
                 engine: normalizeCofechaEngine((parsedCofecha as Partial<CofechaSettings>).engine),
+            },
+            diagnosis: {
+                enabled: typeof parsedDiagnosisEnabled === "boolean"
+                    ? parsedDiagnosisEnabled
+                    : DEFAULT_SETTINGS.diagnosis.enabled,
             },
         };
     } catch {

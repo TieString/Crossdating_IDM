@@ -74,7 +74,7 @@ describe("local chart simulation", () => {
         expect(deleted.get(1903)).toBe(50);
     });
 
-    it("previews only the final automatic partial move instead of exposing the search grid", () => {
+    it("previews the final partial move at either the primary or an explicit review year", () => {
         const site: RwlSiteData = new Map();
         for (let seriesIndex = 0; seriesIndex < 7; seriesIndex += 1) {
             const tree: RwlTreeData = new Map();

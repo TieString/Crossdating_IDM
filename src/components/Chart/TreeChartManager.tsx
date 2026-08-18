@@ -1,5 +1,10 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChartZoomWindow, MultiLineChart, colorPalette, type ChartDiagnosisEventRange } from './MultiLineChart.tsx'
+import { PairwiseMismatchNotice } from './PairwiseMismatchNotice'
+import {
+  resolvePairwiseChartAnalysis,
+  type PairwiseChartAnalysisContext,
+} from './pairwiseChartAnalysis'
 import { FloatingScrollArea } from '@/components/FloatingScrollArea/FloatingScrollArea'
 import {
   buildReferenceSeries,
@@ -24,6 +29,10 @@ import { RwlSiteData } from '@/features/rwl'
 import type { DeleteMode, DeleteShift, MissingInsertSide } from '@/features/rwl/edit'
 import { stopMarker } from '@/shared/constants'
 import { normalizeCofechaSeriesId } from '@/features/cofecha/seriesId'
+import {
+  analyzePairwiseMismatch,
+  type PairwiseMismatchAnalysis,
+} from '@/features/crossdating/pairwiseMismatch'
 import type { ChartJumpTarget } from './chartNavigation'
 import { buildStableSeriesColorMap } from './seriesColors'
 import {
@@ -79,6 +88,11 @@ const localOptionKey = (option: LocalSimulationOption | null) => (
     : ''
 )
 
+type PairwiseChartRun = {
+  analysis: PairwiseMismatchAnalysis
+  context: PairwiseChartAnalysisContext
+}
+
 type Props = {
   fullData: RwlSiteData
   variant?: 'panel' | 'expanded'
@@ -103,6 +117,7 @@ type Props = {
   onLocateWidth?: (tree: string, year: number) => void
   onEditAsText?: (tree: string) => void
   onJumpToCofecha?: (tree: string) => void
+  onDiagnosisPreviewChange?: (event: DiagnosisEvent, year: number) => void
   cofechaPart6Trees?: readonly string[]
 }
 
@@ -127,6 +142,7 @@ function TreeChartManagerBase({
   onLocateWidth,
   onEditAsText,
   onJumpToCofecha,
+  onDiagnosisPreviewChange,
   cofechaPart6Trees,
 }: Props) {
   const [localSelectedTrees, setLocalSelectedTrees] = useState<string[]>([])
@@ -141,12 +157,17 @@ function TreeChartManagerBase({
   const [localSimulation, setLocalSimulation] = useState<LocalCrossdatingSimulation | null>(null)
   const [selectedLocalOption, setSelectedLocalOption] = useState<LocalSimulationOption | null>(null)
   const [isConfirmingLocalApply, setIsConfirmingLocalApply] = useState(false)
+  const [pairwiseRun, setPairwiseRun] = useState<PairwiseChartRun | null>(null)
+  const [isPairwiseAnalyzing, setIsPairwiseAnalyzing] = useState(false)
+  const [pairwiseError, setPairwiseError] = useState<string | null>(null)
   const pickerHeightRef = useRef(pickerHeight)
+  const pairwiseRequestIdRef = useRef(0)
   const selectedTrees = controlledSelectedTrees === undefined
     ? localSelectedTrees
     : controlledSelectedTrees
   const selectedTreesRef = useRef(selectedTrees)
   const handledJumpIdRef = useRef<number | null>(null)
+  const handledDiagnosisPreviewJumpIdRef = useRef<number | null>(null)
   const diagnosisEvents = useMemo(() => getDisplayedDiagnosisEvents(diagnosis), [diagnosis])
   const resolvedActiveDiagnosisEvent = useMemo(() => (
     refreshActiveDiagnosisEventInterpretation(diagnosisEvents, activeDiagnosisEvent)
@@ -154,6 +175,11 @@ function TreeChartManagerBase({
   const projectedDiagnosisEvents = useMemo(() => (
     projectActiveDiagnosisEventInterpretation(diagnosisEvents, resolvedActiveDiagnosisEvent)
   ), [diagnosisEvents, resolvedActiveDiagnosisEvent])
+  const chartDiagnosisEvents = useMemo(() => (
+    pairwiseRun
+      ? pairwiseRun.analysis.event ? [pairwiseRun.analysis.event] : []
+      : projectedDiagnosisEvents
+  ), [pairwiseRun, projectedDiagnosisEvents])
 
   useEffect(() => {
     selectedTreesRef.current = selectedTrees
@@ -357,9 +383,45 @@ function TreeChartManagerBase({
     clearTreeOffset(tree)
   }, [clearTreeOffset, fullData, onMoveSeriesTailByOffset, treeOffsets])
 
+  const createDiagnosisEventSimulation = useCallback((
+    event: DiagnosisEvent,
+    previewYear: number,
+  ) => {
+    const pairwiseContext = pairwiseRun?.analysis.event?.id === event.id
+      ? pairwiseRun.context
+      : null
+    const simulation = simulateDiagnosisEventPreview(
+      pairwiseContext?.siteData ?? fullData,
+      event,
+      {
+      referenceConfig: pairwiseContext?.referenceConfig ?? referenceConfig,
+      previewYear,
+      },
+    )
+    return simulation ? {
+      ...simulation,
+      displayYear: simulation.year + (treeOffsets.get(event.seriesId) ?? 0),
+    } : null
+  }, [fullData, pairwiseRun, referenceConfig, treeOffsets])
+
+  const previewDiagnosisEvent = useCallback((
+    event: DiagnosisEvent,
+    previewYear: number,
+  ) => {
+    const simulation = createDiagnosisEventSimulation(event, previewYear)
+    if (!simulation) {
+      clearLocalSimulation()
+      return
+    }
+
+    setLocalSimulation(simulation)
+    setSelectedLocalOption(simulation.bestOption)
+    setIsConfirmingLocalApply(false)
+  }, [clearLocalSimulation, createDiagnosisEventSimulation])
+
   const handleLinePointClick = useCallback((target: { tree: string; year: number }) => {
     const sourceYear = target.year - (treeOffsets.get(target.tree) ?? 0)
-    const matchingEvent = projectedDiagnosisEvents
+    const matchingEvent = chartDiagnosisEvents
       .filter((event) => (
         !event.stale
         && event.seriesId === target.tree
@@ -376,21 +438,37 @@ function TreeChartManagerBase({
       clearLocalSimulation()
       return
     }
-    const simulation = simulateDiagnosisEventPreview(fullData, matchingEvent, {
-      referenceConfig,
-    })
-    if (!simulation) {
-      clearLocalSimulation()
+    previewDiagnosisEvent(matchingEvent, sourceYear)
+    if (pairwiseRun?.analysis.event?.id !== matchingEvent.id) {
+      onDiagnosisPreviewChange?.(matchingEvent, sourceYear)
+    }
+  }, [
+    chartDiagnosisEvents,
+    clearLocalSimulation,
+    onDiagnosisPreviewChange,
+    pairwiseRun,
+    previewDiagnosisEvent,
+    treeOffsets,
+  ])
+
+  useEffect(() => {
+    if (
+      !jumpTarget?.diagnosisPreviewEventId
+      || handledDiagnosisPreviewJumpIdRef.current === jumpTarget.id
+    ) {
       return
     }
+    const requestedEvent = projectedDiagnosisEvents.find((event) => (
+      !event.stale
+      && event.id === jumpTarget.diagnosisPreviewEventId
+      && event.seriesId === jumpTarget.tree
+      && event.eventType !== 'wholeSeriesMove'
+    ))
+    if (!requestedEvent) return
 
-    setLocalSimulation({
-      ...simulation,
-      displayYear: simulation.year + (treeOffsets.get(target.tree) ?? 0),
-    })
-    setSelectedLocalOption(simulation.bestOption)
-    setIsConfirmingLocalApply(false)
-  }, [clearLocalSimulation, fullData, projectedDiagnosisEvents, referenceConfig, treeOffsets])
+    handledDiagnosisPreviewJumpIdRef.current = jumpTarget.id
+    previewDiagnosisEvent(requestedEvent, jumpTarget.year)
+  }, [jumpTarget, previewDiagnosisEvent, projectedDiagnosisEvents])
 
   useEffect(() => {
     if (localSimulation && !visibleTrees.includes(localSimulation.targetTree)) {
@@ -402,11 +480,11 @@ function TreeChartManagerBase({
     const sourceEventId = localSimulation?.sourceEventId
     if (
       sourceEventId
-      && !projectedDiagnosisEvents.some((event) => event.id === sourceEventId)
+      && !chartDiagnosisEvents.some((event) => event.id === sourceEventId)
     ) {
       clearLocalSimulation()
     }
-  }, [clearLocalSimulation, localSimulation?.sourceEventId, projectedDiagnosisEvents])
+  }, [chartDiagnosisEvents, clearLocalSimulation, localSimulation?.sourceEventId])
 
   const localPreviewTreeData = useMemo(() => {
     if (
@@ -467,12 +545,12 @@ function TreeChartManagerBase({
 
   const diagnosisEventCountByTree = useMemo(() => {
     const counts = new Map<string, number>()
-    projectedDiagnosisEvents.forEach((event) => {
+    chartDiagnosisEvents.forEach((event) => {
       if (event.stale) return
       counts.set(event.seriesId, (counts.get(event.seriesId) ?? 0) + 1)
     })
     return counts
-  }, [projectedDiagnosisEvents])
+  }, [chartDiagnosisEvents])
 
   const activeDiagnosisEventCount = useMemo(() => (
     Array.from(diagnosisEventCountByTree.values()).reduce((sum, count) => sum + count, 0)
@@ -506,6 +584,105 @@ function TreeChartManagerBase({
     return nextData
   }, [fullData, localPreviewTreeData, treeOffsets, visibleTrees])
 
+  const pairwiseVisibleTreeIds = useMemo(() => visibleTrees.filter((treeCode) => {
+    const treeData = fullData.get(treeCode)
+    if (!treeData) return false
+    return Array.from(treeData.values()).some((value) => (
+      typeof value === 'number' && value > 0 && value !== stopMarker.value
+    ))
+  }), [fullData, visibleTrees])
+
+  const pairwiseAvailability = useMemo(() => resolvePairwiseChartAnalysis({
+    fullData,
+    visibleTreeIds: pairwiseVisibleTreeIds,
+    highlightedTreeId: highlightedTreeCode,
+    referenceSeries,
+    referenceConfig,
+  }), [
+    fullData,
+    highlightedTreeCode,
+    pairwiseVisibleTreeIds,
+    referenceConfig,
+    referenceSeries,
+  ])
+
+  useEffect(() => {
+    pairwiseRequestIdRef.current += 1
+    setPairwiseRun(null)
+    setIsPairwiseAnalyzing(false)
+    setPairwiseError(null)
+  }, [
+    fullData,
+    pairwiseAvailability.context?.comparatorId,
+    pairwiseAvailability.context?.targetTree,
+    pairwiseAvailability.lineCount,
+    referenceSeries,
+  ])
+
+  const runPairwiseAnalysis = useCallback(() => {
+    const context = pairwiseAvailability.context
+    if (!context || isPairwiseAnalyzing) return
+    const targetData = context.siteData.get(context.targetTree)
+    const comparatorData = context.siteData.get(context.comparatorId)
+    if (!targetData || !comparatorData) return
+
+    const requestId = ++pairwiseRequestIdRef.current
+    setIsPairwiseAnalyzing(true)
+    setPairwiseError(null)
+    setPairwiseRun(null)
+    window.setTimeout(() => {
+      if (requestId !== pairwiseRequestIdRef.current) return
+      try {
+        const analysis = analyzePairwiseMismatch({
+          targetTree: context.targetTree,
+          targetData,
+          comparatorId: context.comparatorId,
+          comparatorLabel: context.comparatorLabel,
+          comparatorData,
+          comparatorKind: context.comparatorKind,
+          comparatorDepth: context.comparatorDepth,
+        })
+        if (requestId !== pairwiseRequestIdRef.current) return
+        setPairwiseRun({ analysis, context })
+      } catch (error) {
+        if (requestId !== pairwiseRequestIdRef.current) return
+        const message = error instanceof Error ? error.message : String(error)
+        console.warn('双线错配分析失败:', error)
+        setPairwiseError(message)
+      } finally {
+        if (requestId === pairwiseRequestIdRef.current) {
+          setIsPairwiseAnalyzing(false)
+        }
+      }
+    }, 0)
+  }, [isPairwiseAnalyzing, pairwiseAvailability.context])
+
+  const dismissPairwiseAnalysis = useCallback(() => {
+    pairwiseRequestIdRef.current += 1
+    setPairwiseRun(null)
+    setIsPairwiseAnalyzing(false)
+    setPairwiseError(null)
+    if (localSimulation?.sourceEventId?.startsWith('pairwise-')) {
+      clearLocalSimulation()
+    }
+  }, [clearLocalSimulation, localSimulation?.sourceEventId])
+
+  const focusPairwiseEvent = useCallback((event: DiagnosisEvent, selectedYear?: number) => {
+    const year = selectedYear ?? event.rankedYears[0]?.year
+    if (year === undefined) return
+    previewDiagnosisEvent(event, year)
+  }, [previewDiagnosisEvent])
+
+  const applyPairwiseEvent = useCallback((event: DiagnosisEvent, selectedYear: number) => {
+    if (!onApplyLocalSimulation) return false
+    const simulation = createDiagnosisEventSimulation(event, selectedYear)
+    if (!simulation || simulation.bestOption.operationType === 'NO_ACTION') return false
+    onApplyLocalSimulation({ simulation, option: simulation.bestOption })
+    setPairwiseRun(null)
+    clearLocalSimulation()
+    return true
+  }, [clearLocalSimulation, createDiagnosisEventSimulation, onApplyLocalSimulation])
+
   // 收集每条折线中插入的缺失年轮（0 值）所在年份。这些 0 值被 filteredData 过滤掉，
   // 在折线上表现为断点，交给图表用绿色竖线标记。
   const missingRingYears = useMemo(() => {
@@ -530,7 +707,7 @@ function TreeChartManagerBase({
   }, [fullData, localPreviewTreeData, treeOffsets, visibleTrees])
 
   const diagnosisEventRanges = useMemo<ChartDiagnosisEventRange[]>(() => (
-    projectedDiagnosisEvents.flatMap((event) => {
+    chartDiagnosisEvents.flatMap((event) => {
       if (
         event.stale
         || event.eventType === 'wholeSeriesMove'
@@ -547,7 +724,7 @@ function TreeChartManagerBase({
         endYear: event.endYear + yearOffset,
       }]
     })
-  ), [projectedDiagnosisEvents, treeOffsets, visibleTrees])
+  ), [chartDiagnosisEvents, treeOffsets, visibleTrees])
 
   const filteredTreeCodes = useMemo(() =>
     search.trim() === '' ? allTreeCodes : allTreeCodes.filter(c => c.toLowerCase().includes(search.toLowerCase())),
@@ -665,9 +842,17 @@ function TreeChartManagerBase({
   const btnDisabled: React.CSSProperties = {
     ...btnBase, background: '#f4f4f4', color: '#c0c0c0', cursor: 'default', border: '1px solid #e4e4e4',
   }
+  const pairwiseButtonDisabled = isReferenceMode
+    || isPairwiseAnalyzing
+    || pairwiseAvailability.context === null
+  const pairwiseButtonTitle = isReferenceMode
+    ? '请先完成或取消参考序列选择'
+    : pairwiseAvailability.context
+      ? `比较 ${pairwiseAvailability.context.targetTree} 与 ${pairwiseAvailability.context.comparatorLabel}，定位持续错配的起点`
+      : pairwiseAvailability.reason
 
   const matchingLocalEvent = localSimulation
-    ? projectedDiagnosisEvents.find((event) => (
+    ? chartDiagnosisEvents.find((event) => (
       !event.stale
       && event.seriesId === localSimulation.targetTree
       && (localSimulation.sourceEventId
@@ -676,16 +861,15 @@ function TreeChartManagerBase({
           && localSimulation.year <= event.endYear)
     ))
     : undefined
-  const activeReviewLabel = resolvedActiveDiagnosisEvent
-    ? resolvedActiveDiagnosisEvent.eventType === 'wholeSeriesMove'
-      ? `${resolvedActiveDiagnosisEvent.seriesId} · 整体移动 ${resolvedActiveDiagnosisEvent.shiftYears ?? 0} 年`
-      : `${resolvedActiveDiagnosisEvent.seriesId} · 复核窗口 ${resolvedActiveDiagnosisEvent.startYear}-${resolvedActiveDiagnosisEvent.endYear}`
+  const displayedReviewEvent = pairwiseRun ? pairwiseRun.analysis.event : resolvedActiveDiagnosisEvent
+  const activeReviewLabel = displayedReviewEvent
+    ? displayedReviewEvent.eventType === 'wholeSeriesMove'
+      ? `${displayedReviewEvent.seriesId} · 整体移动 ${displayedReviewEvent.shiftYears ?? 0} 年`
+      : `${displayedReviewEvent.seriesId} · 复核窗口 ${displayedReviewEvent.startYear}-${displayedReviewEvent.endYear}`
     : null
   const localYearStatus = !matchingLocalEvent
     ? '诊断事件'
-    : matchingLocalEvent.rankedYears[0]?.year === localSimulation?.year
-      ? matchingLocalEvent.eventType === 'partialMove' ? '首选断点' : '首选年份'
-      : '位于诊断窗口'
+    : matchingLocalEvent.eventType === 'partialMove' ? '已选断点' : '已选复核年份'
   const selectedOptionIsRecommended = !!selectedLocalOption
     && localSimulation?.bestOption.operationType !== 'NO_ACTION'
     && localOptionKey(selectedLocalOption) === localOptionKey(localSimulation?.bestOption ?? null)
@@ -867,6 +1051,26 @@ function TreeChartManagerBase({
           </>
         )}
       </div>
+      {pairwiseRun ? (
+        <PairwiseMismatchNotice
+          analysis={pairwiseRun.analysis}
+          onFocusEvent={focusPairwiseEvent}
+          onApplyEvent={onApplyLocalSimulation ? applyPairwiseEvent : undefined}
+          onDismiss={dismissPairwiseAnalysis}
+        />
+      ) : pairwiseError ? (
+        <div style={{
+          flex: '0 0 auto',
+          padding: '8px 10px',
+          borderBottom: '1px solid #ead9d4',
+          background: '#fff9f7',
+          color: '#8a3b2f',
+          fontFamily: 'Segoe UI, Microsoft YaHei, system-ui, sans-serif',
+          fontSize: 12,
+        }}>
+          双线分析失败：{pairwiseError}
+        </div>
+      ) : null}
       <div style={{ flex: '1 1 auto', minHeight: 0 }}>
         <MultiLineChart
           data={filteredData}
@@ -990,6 +1194,22 @@ function TreeChartManagerBase({
         {referenceSeries ? (
           <button onClick={clearReferenceSelection} style={btnBase}>清除参考</button>
         ) : null}
+        <button
+          type="button"
+          onClick={runPairwiseAnalysis}
+          disabled={pairwiseButtonDisabled}
+          title={pairwiseError ? `上次分析失败：${pairwiseError}` : pairwiseButtonTitle}
+          aria-pressed={pairwiseRun !== null}
+          style={pairwiseButtonDisabled ? btnDisabled : pairwiseRun ? {
+            ...btnBase,
+            border: '1px solid #8fa397',
+            background: '#eaf3ed',
+            color: '#244d37',
+            fontWeight: 650,
+          } : btnBase}
+        >
+          {isPairwiseAnalyzing ? '分析中…' : '双线分析'}
+        </button>
         <span style={{
           fontSize: 11, color: '#fff', background: '#2e6da4',
           borderRadius: 10, padding: '1px 8px', fontWeight: 600, whiteSpace: 'nowrap',

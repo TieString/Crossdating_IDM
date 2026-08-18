@@ -2212,8 +2212,8 @@ function WidthContainer({
             ? selection!
             : normalizeSelection(tree, year, year);
 
+        // Keep right-click local: parent year sync may issue a grid jump that closes the menu.
         setSelection(nextSelection);
-        onYearClick?.(tree, year);
 
         const cellRect = cell.getBoundingClientRect();
         setContextMenu({
@@ -2224,7 +2224,7 @@ function WidthContainer({
             x: cellRect.right,
             y: cellRect.bottom,
         });
-    }, [onYearClick, selection]);
+    }, [selection]);
 
     const handleContextMenuClose = useCallback(() => {
         setContextMenu(null);
@@ -2681,8 +2681,7 @@ function WidthContainer({
             return;
         }
 
-        // Interrupt-pad cells do not emit WidthGrid's editable click callback, so focus the
-        // tree-ring marker at pointer-down for both measured and missing years.
+        // Pointer-down keeps the tree-ring marker aligned for both measured and missing years.
         setTreeRingFocus({ tree, year });
 
         setDragPreview(null);
@@ -3146,7 +3145,14 @@ function WidthContainer({
                                             data-width-grid-cell="true"
                                             data-tree={series.treeCode}
                                             data-year={cell.year}
-                                            onPointerDown={(event) => handleGridPointerDown(event, series.treeCode, cell.year)}
+                                            onPointerDown={(event) => {
+                                                handleGridPointerDown(event, series.treeCode, cell.year);
+                                                // Structural missing-year pads are not editable, so WidthGrid has no
+                                                // click callback for them; emit their year here for diagnosis sync.
+                                                if (event.button === 0) {
+                                                    handleYearClick(series.treeCode, cell.year);
+                                                }
+                                            }}
                                             onYearClick={handleYearClick}
                                             onDeletionMarkHoverChange={handleDeletionMarkHoverChange}
                                             onDeletionMarkDoubleClick={handleRedLineDoubleClick}

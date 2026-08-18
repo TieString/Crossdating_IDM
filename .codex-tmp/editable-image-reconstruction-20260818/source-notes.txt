@@ -1,0 +1,23 @@
+Source slide images
+
+- docs/conference-dating-recommendation-imagegen-v1/slide-01.png
+- docs/conference-dating-recommendation-imagegen-v1/slide-02.png
+- docs/conference-dating-recommendation-imagegen-v1/slide-03.png
+- docs/conference-dating-recommendation-imagegen-v1/slide-04.png
+- docs/conference-dating-recommendation-imagegen-v1/slide-05.png
+- docs/conference-dating-recommendation-imagegen-v1/slide-06.png
+- docs/conference-dating-recommendation-imagegen-v1/slide-07.png
+- docs/conference-dating-recommendation-imagegen-v1/slide-08.png
+
+Scientific content sources
+
+- docs/index.md
+- docs/定年建议输出流程.md
+
+Reconstruction policy
+
+- No source slide is inserted as a full-page image or background.
+- Titles, labels, numbers, annotations, axes, plots, connectors, cards, and flow elements are rebuilt as editable PowerPoint objects.
+- Source PNG crops are used only for complex tree-core texture and watercolor background decoration.
+- All cropped-image objects remain independent and selectable.
+

@@ -509,10 +509,15 @@ export function applyLocalCrossdatingOption(
     return new Map(treeData);
 }
 
+type DiagnosisEventPreviewOptions = DiagnosisOptions & {
+    /** User-selected year inside the event review window; defaults to ranked Top 1. */
+    previewYear?: number;
+};
+
 export function simulateDiagnosisEventPreview(
     siteData: RwlSiteData,
     event: DiagnosisEvent,
-    options: DiagnosisOptions & { previewYear?: number } = {},
+    options: DiagnosisEventPreviewOptions = {},
 ): LocalCrossdatingSimulation | null {
     if (event.stale || event.eventType === "wholeSeriesMove") return null;
     const config = getConfig(options);

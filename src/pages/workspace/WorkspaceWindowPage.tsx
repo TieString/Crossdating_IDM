@@ -245,6 +245,14 @@ export default function WorkspaceWindowPage() {
             onJumpToCofecha={(tree) => {
                 void sendCommand({ kind: "line-chart", type: "locate-cofecha", tree });
             }}
+            onDiagnosisPreviewChange={(event, year) => {
+                void sendCommand({
+                    kind: "line-chart",
+                    type: "preview-diagnosis-event",
+                    eventId: event.id,
+                    year,
+                });
+            }}
             cofechaPart6Trees={state.cofechaPart6Trees}
             onClose={closeWindow}
         />
