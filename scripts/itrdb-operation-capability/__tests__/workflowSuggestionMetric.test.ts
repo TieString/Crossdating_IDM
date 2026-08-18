@@ -76,6 +76,38 @@ describe("frontier workflow suggestion metric", () => {
         expect(match?.truth.eventType).toBe("missingRing");
     });
 
+    it("follows whole to partial to missing only when the final window covers", () => {
+        const whole = event("wholeSeriesMove", -20, 1700, 2000);
+        const partial = {
+            ...event("partialMove", -3, 1898, 1906),
+            shiftSide: "older" as const,
+        };
+        const match = matchWorkflowSuggestion(
+            whole,
+            partial,
+            [truth("missingRing", -1, 1902)],
+        );
+
+        expect(match).toMatchObject({
+            interpretation: "alternative",
+            event: { eventType: "missingRing" },
+            reviewPath: ["wholeSeriesMove", "partialMove", "missingRing"],
+            transitiveReview: true,
+            truth: { eventType: "missingRing", year: 1902 },
+        });
+        expect(matchWorkflowSuggestion(
+            whole,
+            { ...partial, startYear: 1880, endYear: 1888 },
+            [truth("missingRing", -1, 1902)],
+        )).toBeNull();
+        expect(matchWorkflowSuggestion(
+            whole,
+            { ...partial, startYear: 1880, endYear: 1888 },
+            [truth("missingRing", -1, 1902)],
+            { requireWindow: false },
+        )?.truth.eventType).toBe("missingRing");
+    });
+
     it("counts only an exact negative primary whole-series move", () => {
         expect(matchWorkflowSuggestion(
             event("wholeSeriesMove", -20, 1700, 2000),
@@ -114,6 +146,7 @@ describe("frontier workflow suggestion metric", () => {
         expect(selectHumanRescueTruth([whole, local], null, null)).toBe(whole);
         expect(selectHumanRescueTruth([whole, local], local, null)).toBe(local);
         expect(selectHumanRescueTruth([whole, local], null, local)).toBe(local);
+        expect(selectHumanRescueTruth([whole, local], null, null, local)).toBe(local);
         expect(selectHumanRescueTruth([], null, null)).toBeNull();
     });
 

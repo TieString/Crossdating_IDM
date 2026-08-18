@@ -95,6 +95,9 @@ type StepRow = {
     acceptedTruthType: CapabilityOperation | null;
     acceptedTruthYear: number | null;
     acceptedTruthShiftYears: number | null;
+    acceptedReviewPath: CapabilityOperation[];
+    acceptedReviewDepth: number | null;
+    transitiveWorkflowEquivalent: boolean;
     diagnosedTruthId: string | null;
     diagnosedTruthType: CapabilityOperation | null;
     diagnosedTruthYear: number | null;
@@ -135,6 +138,7 @@ type CaseRow = {
     top1RecoveredLocalTruths: number;
     primaryRecoveries: number;
     alternativeRecoveries: number;
+    transitiveAlternativeRecoveries: number;
     humanAssistedCorrectSuggestions: number;
     humanAssistedTruthOpportunities: number;
     humanRescueCount: number;
@@ -304,6 +308,7 @@ const runCase = async (input: {
     let firstHumanRescueStep: number | null = null;
     let primaryRecoveries = 0;
     let alternativeRecoveries = 0;
+    let transitiveAlternativeRecoveries = 0;
     const maximumSteps = input.maxSteps === null
         ? Math.max(1, input.spec.truths.length)
         : Math.max(1, Math.min(input.maxSteps, Math.max(1, input.spec.truths.length)));
@@ -358,6 +363,12 @@ const runCase = async (input: {
             alternative,
             frontierTruths,
         );
+        const workflowOperationSuggestion = matchWorkflowSuggestion(
+            primary,
+            alternative,
+            frontierTruths,
+            { requireWindow: false },
+        );
         const acceptedTruth = workflowSuggestion?.truth ?? null;
         const acceptedInterpretation: Interpretation | null =
             workflowSuggestion?.interpretation ?? null;
@@ -366,10 +377,12 @@ const runCase = async (input: {
             ? acceptedEvent.endYear - acceptedEvent.startYear + 1
             : null;
         const isClean = input.spec.truths.length === 0;
-        const matchesAnyRemaining = matchingTruth(primary, remaining, true) !== null
-            || matchingTruth(alternative, remaining, true) !== null;
-        const workflowEquivalentOperationCorrect = primaryOperationTruth !== null
-            || alternativeOperationTruth !== null;
+        const matchesAnyRemaining = matchWorkflowSuggestion(
+            primary,
+            alternative,
+            remaining,
+        ) !== null;
+        const workflowEquivalentOperationCorrect = workflowOperationSuggestion !== null;
         const workflowEquivalentWindowCovered = acceptedTruth !== null;
         const localFrontierTruthPresent = frontierTruths.some((truth) => (
             truth.eventType !== "wholeSeriesMove"
@@ -395,7 +408,7 @@ const runCase = async (input: {
         } else if (!acceptedTruth) {
             stopReason = matchesAnyRemaining
                 ? "out_of_order_frontier"
-                : primaryOperationTruth || alternativeOperationTruth
+                : workflowEquivalentOperationCorrect
                     ? "window_miss"
                     : "wrong_operation";
         } else {
@@ -403,6 +416,9 @@ const runCase = async (input: {
             if (unassistedPhase) {
                 if (acceptedInterpretation === "primary") primaryRecoveries += 1;
                 else alternativeRecoveries += 1;
+                if (workflowSuggestion?.transitiveReview) {
+                    transitiveAlternativeRecoveries += 1;
+                }
             }
         }
         const humanRescueTruth = !isClean && acceptedTruth === null
@@ -410,6 +426,7 @@ const runCase = async (input: {
                 frontierTruths,
                 primaryOperationTruth,
                 alternativeOperationTruth,
+                workflowOperationSuggestion?.truth ?? null,
             )
             : null;
         const diagnosedTruth = acceptedTruth ?? humanRescueTruth;
@@ -464,6 +481,11 @@ const runCase = async (input: {
             acceptedTruthType: acceptedTruth?.eventType ?? null,
             acceptedTruthYear: acceptedTruth?.year ?? null,
             acceptedTruthShiftYears: acceptedTruth?.shiftYears ?? null,
+            acceptedReviewPath: workflowSuggestion?.reviewPath ?? [],
+            acceptedReviewDepth: workflowSuggestion
+                ? workflowSuggestion.reviewPath.length - 1
+                : null,
+            transitiveWorkflowEquivalent: workflowSuggestion?.transitiveReview ?? false,
             diagnosedTruthId: diagnosedTruth?.truthId ?? null,
             diagnosedTruthType: diagnosedTruth?.eventType ?? null,
             diagnosedTruthYear: diagnosedTruth?.year ?? null,
@@ -563,6 +585,7 @@ const runCase = async (input: {
             )).length,
             primaryRecoveries,
             alternativeRecoveries,
+            transitiveAlternativeRecoveries,
             humanAssistedCorrectSuggestions: humanAssistedCounts.correctSuggestions,
             humanAssistedTruthOpportunities: humanAssistedCounts.opportunities,
             humanRescueCount,
@@ -657,6 +680,13 @@ const summarize = (cases: CaseRow[], steps: StepRow[]) => {
         serialStrictMainWindowCoverage: rate(strictRecoveredLocal, localTruthCount),
         serialWorkflowEquivalentWindowCoverage: rate(recoveredLocal, localTruthCount),
         serialTop1: rate(top1RecoveredLocal, localTruthCount),
+        transitiveAlternativeRecoveries: eventCases.reduce(
+            (sum, row) => sum + row.transitiveAlternativeRecoveries,
+            0,
+        ),
+        humanAssistedTransitiveWorkflowSuggestions: humanAssistedOpportunitySteps.filter(
+            (row) => row.transitiveWorkflowEquivalent,
+        ).length,
         humanAssistedCorrectSuggestions: humanAssistedCounts.correctSuggestions,
         humanAssistedTruthEvents: truthCount,
         humanAssistedTruthOpportunities: humanAssistedCounts.opportunities,
@@ -1051,6 +1081,7 @@ const runWorker = async (): Promise<void> => {
                 top1RecoveredLocalTruths: 0,
                 primaryRecoveries: 0,
                 alternativeRecoveries: 0,
+                transitiveAlternativeRecoveries: 0,
                 humanAssistedCorrectSuggestions: 0,
                 humanAssistedTruthOpportunities: 0,
                 humanRescueCount: 0,
@@ -1257,11 +1288,14 @@ const runParent = async (): Promise<void> => {
         evaluationProtocol: {
             legacy: config.evaluationProtocol ?? null,
             humanRescue: {
-                version: "human-rescue-full-event-v1",
+                version: "human-rescue-full-event-v2",
                 failedEvent: "counted_as_failure_then_resolved_by_hidden_truth",
                 rescueScope: "current_blocking_truth_only",
                 rebuildAfterRescue: "rwl_master_cofecha_and_diagnosis",
                 laterTruths: "remain_hidden_until_their_own_frontier_opportunity",
+                operationEquivalence: "transitive_review_chain_v1",
+                supportedReviewChain: "whole_to_local_and_partial_to_missing",
+                successContract: "final_operation_shift_and_unique_window_cover_truth",
                 mainMetric: "humanAssistedFullEventSuggestionAccuracy",
                 denominator: "all_truth_events",
             },

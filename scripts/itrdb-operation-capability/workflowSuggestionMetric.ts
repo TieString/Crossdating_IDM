@@ -7,6 +7,8 @@ export type WorkflowSuggestionMatch = {
     interpretation: WorkflowSuggestionInterpretation;
     event: DiagnosisEvent;
     truth: CapabilityTruth;
+    reviewPath: CapabilityTruth["eventType"][];
+    transitiveReview: boolean;
 };
 
 export type HumanRescueAttempt = {
@@ -33,10 +35,11 @@ const coversLocalTruth = (
 const matchesLocalTruth = (
     event: DiagnosisEvent,
     truth: CapabilityTruth,
+    requireWindow: boolean,
 ): boolean => truth.eventType !== "wholeSeriesMove"
     && event.eventType === truth.eventType
     && diagnosisShiftYears(event) === truth.shiftYears
-    && coversLocalTruth(event, truth);
+    && (!requireWindow || coversLocalTruth(event, truth));
 
 const matchesWholeTruth = (
     event: DiagnosisEvent,
@@ -45,6 +48,21 @@ const matchesWholeTruth = (
     && truth.shiftYears < 0
     && event.eventType === "wholeSeriesMove"
     && diagnosisShiftYears(event) === truth.shiftYears;
+
+const missingReviewFromPartial = (event: DiagnosisEvent): DiagnosisEvent | null => (
+    event.eventType === "partialMove"
+    && event.shiftSide === "older"
+    && diagnosisShiftYears(event) <= -2
+        ? {
+                ...event,
+                id: `${event.id}-evaluated-missing-review`,
+                eventType: "missingRing",
+                shiftYears: undefined,
+                shiftSide: undefined,
+                interpretationAmbiguity: undefined,
+            }
+        : null
+);
 
 /**
  * Scores the complete user-facing suggestion at the current diagnostic frontier.
@@ -56,28 +74,52 @@ export const matchWorkflowSuggestion = (
     primary: DiagnosisEvent | null,
     alternative: DiagnosisEvent | null,
     frontierTruths: readonly CapabilityTruth[],
+    options: { requireWindow?: boolean } = {},
 ): WorkflowSuggestionMatch | null => {
-    if (primary) {
-        const wholeTruth = frontierTruths.find((truth) => (
-            matchesWholeTruth(primary, truth)
+    const requireWindow = options.requireWindow ?? true;
+    const reviewedPrimary = primary ? missingReviewFromPartial(primary) : null;
+    const reviewedAlternative = alternative ? missingReviewFromPartial(alternative) : null;
+    const candidates: Array<{
+        interpretation: WorkflowSuggestionInterpretation;
+        event: DiagnosisEvent;
+        reviewPath: CapabilityTruth["eventType"][];
+        transitiveReview: boolean;
+    }> = [
+        ...(primary ? [{
+            interpretation: "primary" as const,
+            event: primary,
+            reviewPath: [primary.eventType],
+            transitiveReview: false,
+        }] : []),
+        ...(alternative && alternative.eventType !== "wholeSeriesMove" ? [{
+            interpretation: "alternative" as const,
+            event: alternative,
+            reviewPath: primary
+                ? [primary.eventType, alternative.eventType]
+                : [alternative.eventType],
+            transitiveReview: false,
+        }] : []),
+        ...(reviewedPrimary ? [{
+            interpretation: "alternative" as const,
+            event: reviewedPrimary,
+            reviewPath: [primary!.eventType, "missingRing" as const],
+            transitiveReview: true,
+        }] : []),
+        ...(reviewedAlternative ? [{
+            interpretation: "alternative" as const,
+            event: reviewedAlternative,
+            reviewPath: primary
+                ? [primary.eventType, alternative!.eventType, "missingRing" as const]
+                : [alternative!.eventType, "missingRing" as const],
+            transitiveReview: true,
+        }] : []),
+    ];
+    for (const candidate of candidates) {
+        const truth = frontierTruths.find((frontierTruth) => (
+            matchesWholeTruth(candidate.event, frontierTruth)
+            || matchesLocalTruth(candidate.event, frontierTruth, requireWindow)
         ));
-        if (wholeTruth) {
-            return { interpretation: "primary", event: primary, truth: wholeTruth };
-        }
-        const localTruth = frontierTruths.find((truth) => (
-            matchesLocalTruth(primary, truth)
-        ));
-        if (localTruth) {
-            return { interpretation: "primary", event: primary, truth: localTruth };
-        }
-    }
-    if (alternative && alternative.eventType !== "wholeSeriesMove") {
-        const localTruth = frontierTruths.find((truth) => (
-            matchesLocalTruth(alternative, truth)
-        ));
-        if (localTruth) {
-            return { interpretation: "alternative", event: alternative, truth: localTruth };
-        }
+        if (truth) return { ...candidate, truth };
     }
     return null;
 };
@@ -94,8 +136,10 @@ export const selectHumanRescueTruth = (
     frontierTruths: readonly CapabilityTruth[],
     primaryOperationTruth: CapabilityTruth | null,
     alternativeOperationTruth: CapabilityTruth | null,
+    workflowOperationTruth: CapabilityTruth | null = null,
 ): CapabilityTruth | null => primaryOperationTruth
     ?? alternativeOperationTruth
+    ?? workflowOperationTruth
     ?? frontierTruths[0]
     ?? null;
 
