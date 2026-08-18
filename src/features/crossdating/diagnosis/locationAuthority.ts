@@ -114,6 +114,28 @@ const normalizeSelectedUnitWindow = (
     });
 };
 
+export const terminalFalseRingOlderPadding = (
+    event: DiagnosisEvent,
+): number | null => {
+    if (event.eventType !== "falseRing"
+        || !event.evidence.algorithmSources.includes(
+            "stable_terminal_unit_staircase_frontier",
+        )) return null;
+    const transitionYears = event.evidence.notes
+        .find((note) => note.startsWith("terminal_unit_staircase_transition_years="))
+        ?.split("=")[1]
+        ?.split(",")
+        .map(Number)
+        .filter(Number.isInteger) ?? [];
+    const maximumGap = Number(event.evidence.notes
+        .find((note) => note.startsWith(
+            "terminal_unit_staircase_max_adjacent_gap_years=",
+        ))?.split("=")[1]);
+    return transitionYears.length >= 2 && Number.isFinite(maximumGap)
+        ? Math.min(10, Math.max(6, Math.round(maximumGap)))
+        : null;
+};
+
 /**
  * Reconciles one already-selected operation with a compact multi-event location mode. The
  * operation contract is immutable here; only its single 13-year review window may change.
@@ -178,28 +200,12 @@ export const projectMultiEventLocationConsensus = (
             ? clampWindowToRange(terminalBoundaryYear, 13, targetRange)
             : clampWindowToRange(terminalBoundaryYear - 12, 13, targetRange);
     }
-    const terminalTransitionYears = event.evidence.notes
-        .find((note) => note.startsWith("terminal_unit_staircase_transition_years="))
-        ?.split("=")[1]
-        ?.split(",")
-        .map(Number)
-        .filter(Number.isInteger) ?? [];
-    const terminalMaximumGap = Number(event.evidence.notes
-        .find((note) => note.startsWith(
-            "terminal_unit_staircase_max_adjacent_gap_years=",
-        ))?.split("=")[1]);
-    const terminalFalseRingOlderPadding = event.eventType === "falseRing"
-        && event.evidence.algorithmSources.includes(
-            "stable_terminal_unit_staircase_frontier",
-        )
-        && Number.isInteger(terminalBoundaryYear)
-        && terminalTransitionYears.length >= 2
-        && Number.isFinite(terminalMaximumGap)
-        ? Math.min(10, Math.max(6, Math.round(terminalMaximumGap)))
+    const falseRingOlderPadding = Number.isInteger(terminalBoundaryYear)
+        ? terminalFalseRingOlderPadding(event)
         : null;
-    if (terminalFalseRingOlderPadding !== null) {
+    if (falseRingOlderPadding !== null) {
         window = clampWindowToRange(
-            terminalBoundaryYear - terminalFalseRingOlderPadding,
+            terminalBoundaryYear - falseRingOlderPadding,
             13,
             targetRange,
         );
@@ -256,7 +262,7 @@ export const projectMultiEventLocationConsensus = (
             algorithmSources: Array.from(new Set([
                 ...event.evidence.algorithmSources,
                 "multi_event_frontier_location_consensus",
-                ...(terminalFalseRingOlderPadding === null
+                ...(falseRingOlderPadding === null
                     ? []
                     : ["terminal_false_ring_asymmetric_window"]),
             ])).sort(),
@@ -287,12 +293,12 @@ export const projectMultiEventLocationConsensus = (
                 ...(guardedByTerminalBoundary ? [
                     `multi_frontier_terminal_boundary_guard=${terminalBoundaryYear}`,
                 ] : []),
-                ...(terminalFalseRingOlderPadding === null ? [] : [
+                ...(falseRingOlderPadding === null ? [] : [
                     `terminal_false_ring_older_padding=${
-                        terminalFalseRingOlderPadding
+                        falseRingOlderPadding
                     }`,
                     `terminal_false_ring_newer_padding=${
-                        12 - terminalFalseRingOlderPadding
+                        12 - falseRingOlderPadding
                     }`,
                 ]),
             ])),

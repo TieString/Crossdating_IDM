@@ -6,6 +6,7 @@ import {
     projectUnsupportedLocationToStrongBoundedPath,
     projectUnitLocationFromIndependentConsensus,
     strongBoundedPathLocation,
+    terminalFalseRingOlderPadding,
 } from "../locationAuthority";
 
 const event = (overrides: Partial<NonNullable<DiagnosisEvent["evidence"]["locationEvidence"]>[number]> = {}): DiagnosisEvent => ({
@@ -151,6 +152,7 @@ describe("multi-event frontier location consensus", () => {
             "terminal_unit_staircase_transition_years=1854,1857,1865,1867",
             "terminal_unit_staircase_max_adjacent_gap_years=8",
         );
+        expect(terminalFalseRingOlderPadding(input)).toBe(8);
 
         expect(projectMultiEventLocationConsensus(
             input,
