@@ -1251,6 +1251,7 @@ const eventShiftYears = (event: DiagnosisEvent): number | null => {
 const exactBoundedComponentFrontier = (
     allFinalClusters: readonly HypothesisCluster[],
     completedCompositionClusters: readonly HypothesisCluster[],
+    selectedFinalClusters: readonly HypothesisCluster[],
     minimumSeparationYears: number,
 ): HypothesisCluster | null => {
     const bounded = allFinalClusters.filter((cluster) => (
@@ -1265,16 +1266,33 @@ const exactBoundedComponentFrontier = (
     ));
     if (bounded.length < 2) return null;
 
-    for (const compositionCluster of completedCompositionClusters) {
-        const composition = representative(compositionCluster).event;
-        if (!composition.evidence.notes.includes(
-            "completed_mixed_source_segment_anchored=false",
-        )) continue;
-        const aggregateShiftYears = noteYear(
-            composition,
-            "completed_mixed_cumulative_shift=",
-        );
-        const baselineLag = composition.evidence.lagAfter;
+    const aggregateHypotheses = [
+        ...completedCompositionClusters.flatMap((cluster) => {
+            const event = representative(cluster).event;
+            const shiftYears = event.evidence.notes.includes(
+                "completed_mixed_source_segment_anchored=false",
+            )
+                ? noteYear(event, "completed_mixed_cumulative_shift=")
+                : null;
+            return shiftYears === null ? [] : [{ event, shiftYears }];
+        }),
+        ...selectedFinalClusters.flatMap((cluster) => {
+            const event = representative(cluster).event;
+            const shiftYears = eventShiftYears(event);
+            const boundedAggregate = evidenceClaimsFor(event).has(
+                "bounded_lag_state_path",
+            );
+            return event.eventType === "partialMove"
+                && shiftYears !== null
+                && !boundedAggregate
+                ? [{ event, shiftYears }]
+                : [];
+        }),
+    ];
+
+    for (const aggregate of aggregateHypotheses) {
+        const aggregateShiftYears = aggregate.shiftYears;
+        const baselineLag = aggregate.event.evidence.lagAfter;
         if (aggregateShiftYears === null || baselineLag === null) continue;
         for (let start = 0; start < bounded.length - 1; start += 1) {
             let shiftSum = 0;
@@ -1300,7 +1318,34 @@ const exactBoundedComponentFrontier = (
                     && shiftSum === aggregateShiftYears
                     && oldest.evidence.lagBefore === baselineLag + aggregateShiftYears
                     && current.evidence.lagAfter === baselineLag) {
-                    return bounded[end]!;
+                    const frontier = bounded[end]!;
+                    return {
+                        checkpoints: frontier.checkpoints.map((checkpoint) => ({
+                            ...checkpoint,
+                            event: withEvidenceLedger({
+                                ...checkpoint.event,
+                                evidence: {
+                                    ...checkpoint.event.evidence,
+                                    algorithmSources: Array.from(new Set([
+                                        ...checkpoint.event.evidence.algorithmSources,
+                                        "exact_bounded_component_decomposition",
+                                    ])).sort(),
+                                    notes: Array.from(new Set([
+                                        ...checkpoint.event.evidence.notes,
+                                        `aggregate_partial_decomposed_shift=${
+                                            aggregateShiftYears
+                                        }`,
+                                        `aggregate_partial_decomposed_component_count=${
+                                            transitionCount
+                                        }`,
+                                        `aggregate_partial_decomposed_frontier_shift=${
+                                            currentShift
+                                        }`,
+                                    ])),
+                                },
+                            }),
+                        })),
+                    };
                 }
             }
         }
@@ -1746,6 +1791,7 @@ const finalFrontierClusters = (
     const boundedComponentFrontier = exactBoundedComponentFrontier(
         allFinalClusters,
         completedCompositionClusters,
+        selectedFinalClusters,
         config.remoteModeDistanceYears + 1,
     );
     if (boundedComponentFrontier) return [boundedComponentFrontier];

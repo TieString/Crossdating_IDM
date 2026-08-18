@@ -380,6 +380,50 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("uses the bark-side bounded component instead of a selected cumulative partial", () => {
+        const aggregate = event("joint-aggregate", "partialMove", 1695, 1707, 1701);
+        aggregate.shiftYears = -26;
+        aggregate.evidence.lagBefore = -26;
+        aggregate.evidence.lagAfter = 0;
+        aggregate.evidence.algorithmSources = [
+            "decisive_joint_operation_fusion",
+            "joint_year_operation_evidence",
+        ];
+        const older = event("older-partial", "partialMove", 1669, 1681, 1675);
+        older.shiftYears = -20;
+        older.evidence.lagBefore = -26;
+        older.evidence.lagAfter = -6;
+        older.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        older.evidence.notes = ["bounded_path_complete_hypothesis=true"];
+        const newer = event("newer-partial", "partialMove", 1699, 1711, 1705);
+        newer.shiftYears = -6;
+        newer.evidence.lagBefore = -6;
+        newer.evidence.lagAfter = 0;
+        newer.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        newer.evidence.notes = ["bounded_path_complete_hypothesis=true"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: aggregate },
+            { stage: "final", authority: "supplemental", event: older },
+            { stage: "final", authority: "supplemental", event: newer },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            event: {
+                id: "newer-partial",
+                eventType: "partialMove",
+                shiftYears: -6,
+            },
+        });
+        expect(decision.event?.evidence.algorithmSources).toContain(
+            "exact_bounded_component_decomposition",
+        );
+        expect(decision.event?.evidence.notes).toContain(
+            "aggregate_partial_decomposed_component_count=2",
+        );
+    });
+
     it("keeps a strongly located terminal bounded partial over an unanchored composition", () => {
         const composition = event("unanchored-composition", "falseRing", 1893, 1905, 1899);
         composition.evidence.algorithmSources = [
