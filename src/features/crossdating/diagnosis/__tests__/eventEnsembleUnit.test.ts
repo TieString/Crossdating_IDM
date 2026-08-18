@@ -3,6 +3,7 @@ import type { DiagnosisEvent, SeriesCoreDiagnosis } from "../types";
 import {
     allowStableBoundedPathFinalAuthority,
     hasIndependentStableFrontierOperationSupport,
+    hasStrongMixedPathPartialAuthority,
     maySequentialMissingPreemptStableJointFrontier,
     calibratedTerminalUnitStaircaseWindowWidth,
     hasIndependentPartialBoundaryAnchor,
@@ -28,6 +29,7 @@ import {
     recoverAggregatePartialUnitFrontier,
     recoverStableBoundedLagPathFrontier,
     selectDirectTerminalUnitBeforeDerivedStablePartial,
+    selectCandidateBackedStableTerminalUnit,
     selectCandidateAnchoredDistantMissingFrontier,
     selectDistantSequentialMissingFrontier,
     selectEndpointAggregatePartialFrontier,
@@ -3284,6 +3286,71 @@ describe("selectCumulativePartialFrontier", () => {
             },
         });
         expect(selected?.event.rankedYears[0]?.year).toBe(1780);
+    });
+
+    it("keeps a strong newest partial ahead of a synthetic missing staircase", () => {
+        const olderMissing = pathEvent(-1, -7, -6, 1829);
+        olderMissing.eventType = "missingRing";
+        olderMissing.shiftYears = undefined;
+        const newestPartial = pathEvent(-6, -6, 0, 1859, 185);
+        newestPartial.evidence.scoreMargin = 0.2;
+        newestPartial.evidence.correlationGain = 0.53;
+        newestPartial.evidence.samplePairs = 348;
+        newestPartial.evidence.notes.push(
+            "bounded_path_location_concentration=0.87",
+        );
+        const path = selectStableBoundedLagPathFrontier(
+            boundedPath([olderMissing, newestPartial]),
+            boundedPath([olderMissing, newestPartial]),
+        );
+
+        expect(hasStrongMixedPathPartialAuthority(path, path?.event ?? null))
+            .toBe(true);
+
+        const weak = path ? {
+            ...path.event,
+            evidence: {
+                ...path.event.evidence,
+                correlationGain: 0.1,
+            },
+        } : null;
+        expect(hasStrongMixedPathPartialAuthority(path, weak)).toBe(false);
+    });
+
+    it("keeps a candidate-backed terminal unit ahead of its aggregate partial", () => {
+        const oldestMissing = pathEvent(-1, -20, -19, 1801);
+        oldestMissing.eventType = "missingRing";
+        oldestMissing.shiftYears = undefined;
+        const middlePartial = pathEvent(-20, -19, 1, 1825);
+        const newestFalse = pathEvent(1, 1, 0, 1858, 80);
+        newestFalse.eventType = "falseRing";
+        newestFalse.shiftYears = undefined;
+        newestFalse.evidence.scoreMargin = 2.5;
+        newestFalse.evidence.correlationGain = 0.34;
+        newestFalse.evidence.samplePairs = 233;
+        const path = selectStableBoundedLagPathFrontier(
+            boundedPath([oldestMissing, middlePartial, newestFalse]),
+            boundedPath([oldestMissing, middlePartial, newestFalse]),
+        );
+        const aggregate = candidate("aggregate", -20, -20, 0, 1811);
+        const falseCandidate = falseRingEvent(1856, true);
+        falseCandidate.rankedYears = [{
+            year: 1859,
+            rank: 1,
+            score: 1,
+            evidenceTags: [],
+        }];
+        falseCandidate.evidence.notes.push("candidate_hard_gate_passed");
+
+        expect(selectCandidateBackedStableTerminalUnit(
+            path,
+            aggregate,
+            [falseCandidate],
+        )).toMatchObject({
+            eventType: "falseRing",
+            startYear: 1856,
+            endYear: 1862,
+        });
     });
 
     it("admits an extended path when its newest transition has an independent candidate anchor", () => {

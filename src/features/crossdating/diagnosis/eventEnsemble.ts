@@ -6592,6 +6592,36 @@ export const hasIndependentStableFrontierOperationSupport = (
         && (location?.concentration ?? 0) >= 0.75;
 };
 
+/**
+ * A mixed path cannot be explained by one same-direction missing staircase. When both path
+ * penalties retain the same strong newest partial, keep that physical/equivalent explanation
+ * ahead of a synthetic cumulative missing head; the missing workflow remains available in UI.
+ */
+export const hasStrongMixedPathPartialAuthority = (
+    pathFrontier: StableBoundedLagPathFrontier | null,
+    recoveredFrontier: DiagnosisEvent | null,
+): boolean => {
+    if (!pathFrontier
+        || pathFrontier.allTransitionsPartial
+        || pathFrontier.transitionCount < 2
+        || recoveredFrontier?.eventType !== "partialMove"
+        || recoveredFrontier.shiftYears === undefined
+        || recoveredFrontier.shiftYears > -2
+        || pathFrontier.newestEvent.eventType !== "partialMove"
+        || pathFrontier.newestEvent.shiftYears !== recoveredFrontier.shiftYears
+        || recoveredFrontier.evidence.lagBefore !== recoveredFrontier.shiftYears
+        || recoveredFrontier.evidence.lagAfter !== 0
+        || recoveredFrontier.evidence.score < 20
+        || recoveredFrontier.evidence.scoreMargin < 0.15
+        || (recoveredFrontier.evidence.correlationGain ?? 0) < 0.25
+        || recoveredFrontier.evidence.samplePairs < 30) return false;
+    const concentration = latestEventNoteNumber(
+        recoveredFrontier,
+        "bounded_path_location_concentration=",
+    ) ?? 0;
+    return concentration >= 0.8;
+};
+
 export const recoverStableBoundedLagPathFrontier = (
     frontier: StableBoundedLagPathFrontier | null,
     displayed: readonly DiagnosisEvent[],
@@ -7055,6 +7085,76 @@ export const selectDirectTerminalUnitBeforeDerivedStablePartial = (
                 `derived_stable_partial_transition_count=${frontier.transitionCount}`,
             ])),
         },
+    };
+};
+
+/** A candidate-backed newest unit transition outranks an aggregate partial from the same path. */
+export const selectCandidateBackedStableTerminalUnit = (
+    frontier: StableBoundedLagPathFrontier | null,
+    stableEvent: DiagnosisEvent | null,
+    candidateEvents: readonly DiagnosisEvent[],
+    maximumYearDrift = 3,
+): DiagnosisEvent | null => {
+    if (!frontier
+        || frontier.transitionCount < 2
+        || stableEvent?.eventType !== "partialMove"
+        || stableEvent.shiftYears !== frontier.aggregateShiftYears
+        || (
+            frontier.newestEvent.eventType !== "missingRing"
+            && frontier.newestEvent.eventType !== "falseRing"
+        )
+        || frontier.newestEvent.evidence.lagAfter !== frontier.baselineLag
+        || frontier.newestEvent.evidence.score < 8
+        || frontier.newestEvent.evidence.scoreMargin < 0.1
+        || (frontier.newestEvent.evidence.correlationGain ?? 0) < 0.1
+        || frontier.newestEvent.evidence.samplePairs < 30) return null;
+    const pathYear = rankedEventYear(frontier.newestEvent);
+    const candidate = candidateEvents.filter((event) => (
+        event.eventType === frontier.newestEvent.eventType
+        && event.evidence.notes.includes("candidate_hard_gate_passed")
+        && Math.abs(rankedEventYear(event) - pathYear) <= maximumYearDrift
+    )).sort((left, right) => (
+        Math.abs(rankedEventYear(left) - pathYear)
+            - Math.abs(rankedEventYear(right) - pathYear)
+        || right.evidence.score - left.evidence.score
+    ))[0];
+    if (!candidate) return null;
+    return {
+        ...frontier.newestEvent,
+        id: `${frontier.newestEvent.id}-candidate-backed-terminal-unit`,
+        startYear: candidate.startYear,
+        endYear: candidate.endYear,
+        rankedYears: candidate.rankedYears.map((row) => ({
+            ...row,
+            evidenceTags: Array.from(new Set([
+                ...row.evidenceTags,
+                "candidate_backed_stable_terminal_unit",
+            ])).sort(),
+        })),
+        evidence: {
+            ...frontier.newestEvent.evidence,
+            algorithmSources: Array.from(new Set([
+                ...frontier.newestEvent.evidence.algorithmSources,
+                ...candidate.evidence.algorithmSources,
+                "candidate_backed_stable_terminal_unit",
+            ])).sort(),
+            candidateIds: Array.from(new Set([
+                ...frontier.newestEvent.evidence.candidateIds,
+                ...candidate.evidence.candidateIds,
+            ])),
+            notes: Array.from(new Set([
+                ...frontier.newestEvent.evidence.notes,
+                ...candidate.evidence.notes,
+                `candidate_backed_terminal_path_year=${pathYear}`,
+                `candidate_backed_terminal_candidate_year=${rankedEventYear(candidate)}`,
+                `candidate_backed_terminal_deferred_aggregate=${
+                    frontier.aggregateShiftYears
+                }`,
+            ])),
+        },
+        alternativeTypes: [],
+        locationAlternatives: undefined,
+        operationAlternatives: undefined,
     };
 };
 
@@ -11427,6 +11527,9 @@ export const makeDiagnosisEvents = (
                 stableBoundedPathFrontier,
                 boundedHypotheses,
                 cumulativeUnitCandidateDepths,
+            ) || hasStrongMixedPathPartialAuthority(
+                stableMultiscaleBoundedFrontier,
+                stableBoundedPathFrontier,
             );
         const stablePartialPathOwnsOperation = stableBoundedPathFrontier?.eventType
             === "partialMove"
@@ -11440,6 +11543,12 @@ export const makeDiagnosisEvents = (
                     )
                 )
                 || stableFrontierHasIndependentOperationSupport
+            );
+        const candidateBackedStableTerminalUnit =
+            selectCandidateBackedStableTerminalUnit(
+                stableMultiscaleBoundedFrontier,
+                stableBoundedPathFrontier,
+                candidateEvents,
             );
         const decisiveExactPartialHypotheses = [
             ...boundedPathEvents,
@@ -12044,6 +12153,9 @@ export const makeDiagnosisEvents = (
         );
         if (endpointAggregatePartialFrontier) {
             return finalize([endpointAggregatePartialFrontier], [], false);
+        }
+        if (candidateBackedStableTerminalUnit) {
+            return finalize([candidateBackedStableTerminalUnit], [], false);
         }
         const detectedDistantMissingFrontier = targetHasExplicitZero
             ? selectDistantSequentialMissingFrontier(
