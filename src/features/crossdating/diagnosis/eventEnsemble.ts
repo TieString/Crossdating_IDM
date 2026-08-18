@@ -12093,8 +12093,9 @@ export const makeDiagnosisEvents = (
             );
         }
         if (stableBoundedPathFrontier && stablePathHasFinalAuthority) {
-            // The complete path has already resolved the serial frontier. Aggregate move
-            // hypotheses are intentionally excluded so later review cannot recombine it.
+            // The complete path has resolved the serial frontier. Only independently decisive
+            // exact partials remain as supplemental hypotheses; the joint adjudicator may use
+            // one when the path has over-decomposed that same operation without repeated parts.
             const locatedStableFrontier = stableBoundedPathFrontier.eventType === "partialMove"
                 ? addStablePartialRankEdgeGuard(
                         refineStablePartialMoveLocation(
@@ -12110,7 +12111,11 @@ export const makeDiagnosisEvents = (
                         diagnosis,
                         siteData,
                     );
-            return finalize([locatedStableFrontier], [], false);
+            return finalize(
+                [locatedStableFrontier],
+                decisiveExactPartialHypotheses,
+                false,
+            );
         }
         const aggregatePartialUnitFrontier = recoverAggregatePartialUnitFrontier(
             displayed,

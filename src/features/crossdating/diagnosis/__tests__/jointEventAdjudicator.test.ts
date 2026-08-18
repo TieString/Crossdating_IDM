@@ -607,6 +607,81 @@ describe("joint event adjudicator", () => {
         );
     });
 
+    it("restores a concentrated exact partial after an unsupported path decomposition", () => {
+        const decomposed = event("decomposed-minus-15", "partialMove", 1749, 1761, 1755);
+        decomposed.shiftYears = -15;
+        decomposed.evidence.lagBefore = -15;
+        decomposed.evidence.algorithmSources = [
+            "bounded_complete_lag_path",
+            "stable_multiscale_bounded_path_frontier",
+        ];
+        decomposed.evidence.notes = [
+            "bounded_path_complete_hypothesis=true",
+            "stable_bounded_path_aggregate_shift=-20",
+            "stable_bounded_path_suffix_shifts=-15,-20",
+        ];
+        const exact = event("exact-minus-20", "partialMove", 1731, 1743, 1737);
+        exact.shiftYears = -20;
+        exact.evidence.lagBefore = -20;
+        exact.evidence.correlationGain = 0.54;
+        exact.evidence.algorithmSources = [
+            "candidate_grid_reference_partial_consensus",
+            "per_reference_counterfactual_evidence",
+        ];
+        exact.evidence.notes = [
+            "candidate_hard_gate_passed",
+            "candidate_grid_partial_shift=-20",
+            "candidate_grid_partial_family_margin=0.46",
+            "candidate_grid_partial_shift_margin=0.37",
+            "candidate_grid_partial_reference_count=12",
+            "candidate_grid_partial_reference_peak_kernel5=0.62",
+        ];
+
+        expect(adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: decomposed },
+            { stage: "final", authority: "supplemental", event: exact },
+        ])).toMatchObject({
+            status: "selected",
+            event: { id: "exact-minus-20", shiftYears: -20 },
+        });
+    });
+
+    it("does not recombine a path whose selected component repeats", () => {
+        const frontier = event("repeated-minus-20", "partialMove", 1799, 1811, 1805);
+        frontier.shiftYears = -20;
+        frontier.evidence.lagBefore = -20;
+        frontier.evidence.algorithmSources = [
+            "bounded_complete_lag_path",
+            "stable_multiscale_bounded_path_frontier",
+        ];
+        frontier.evidence.notes = [
+            "bounded_path_complete_hypothesis=true",
+            "stable_bounded_path_aggregate_shift=-46",
+            "stable_bounded_path_suffix_shifts=-20,-26,-46",
+        ];
+        const aggregate = event("aggregate-minus-46", "partialMove", 1799, 1807, 1803);
+        aggregate.shiftYears = -46;
+        aggregate.evidence.lagBefore = -46;
+        aggregate.evidence.correlationGain = 0.8;
+        aggregate.evidence.algorithmSources = [
+            "candidate_grid_reference_partial_consensus",
+            "per_reference_counterfactual_evidence",
+        ];
+        aggregate.evidence.notes = [
+            "candidate_hard_gate_passed",
+            "candidate_grid_partial_shift=-46",
+            "candidate_grid_partial_family_margin=0.5",
+            "candidate_grid_partial_shift_margin=0.4",
+            "candidate_grid_partial_reference_count=12",
+            "candidate_grid_partial_reference_peak_kernel5=0.8",
+        ];
+
+        expect(adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: frontier },
+            { stage: "final", authority: "supplemental", event: aggregate },
+        ]).event).toMatchObject({ id: "repeated-minus-20", shiftYears: -20 });
+    });
+
     it("keeps a strongly located terminal bounded partial over an unanchored composition", () => {
         const composition = event("unanchored-composition", "falseRing", 1893, 1905, 1899);
         composition.evidence.algorithmSources = [

@@ -1385,6 +1385,88 @@ const exactTerminalBoundedPartialFrontier = (
     ))[0] ?? null;
 };
 
+const stablePathComponentShifts = (event: DiagnosisEvent): number[] => {
+    const prefix = "stable_bounded_path_suffix_shifts=";
+    const suffix = event.evidence.notes.find((note) => note.startsWith(prefix))
+        ?.slice(prefix.length).split(",").map(Number).filter(Number.isFinite) ?? [];
+    return suffix.map((shift, index) => (
+        index === 0 ? shift : shift - suffix[index - 1]!
+    ));
+};
+
+/** A concentrated exact operation may undo an unsupported over-decomposition, never a repeat. */
+const selectConcentratedAggregatePartial = (
+    allFinalClusters: readonly HypothesisCluster[],
+    selectedFinalClusters: readonly HypothesisCluster[],
+): HypothesisCluster | null => {
+    const selectedPath = selectedFinalClusters.filter((cluster) => {
+        const event = representative(cluster).event;
+        return event.eventType === "partialMove"
+            && evidenceClaimsFor(event).has("bounded_lag_state_path")
+            && event.evidence.algorithmSources.includes(
+                "stable_multiscale_bounded_path_frontier",
+            );
+    })[0];
+    if (!selectedPath) return null;
+    const selectedEvent = representative(selectedPath).event;
+    const aggregateShift = noteNumber(
+        selectedEvent,
+        "stable_bounded_path_aggregate_shift=",
+    );
+    const selectedShift = selectedEvent.shiftYears;
+    const components = stablePathComponentShifts(selectedEvent);
+    if (aggregateShift === null
+        || selectedShift === undefined
+        || aggregateShift === selectedShift
+        || components.filter((shift) => shift === selectedShift).length > 1) return null;
+
+    return allFinalClusters.filter((cluster) => {
+        const representativeEvent = representative(cluster).event;
+        const supportEvents = cluster.checkpoints.map(({ event }) => event);
+        const event: DiagnosisEvent = {
+            ...representativeEvent,
+            evidence: {
+                ...representativeEvent.evidence,
+                algorithmSources: Array.from(new Set(supportEvents.flatMap(
+                    (candidate) => candidate.evidence.algorithmSources,
+                ))),
+                notes: Array.from(new Set(supportEvents.flatMap(
+                    (candidate) => candidate.evidence.notes,
+                ))),
+                correlationGain: Math.max(...supportEvents.map((candidate) => (
+                    candidate.evidence.correlationGain ?? Number.NEGATIVE_INFINITY
+                ))),
+            },
+        };
+        return hasFinalCheckpoint(cluster)
+            && event.eventType === "partialMove"
+            && event.shiftYears === aggregateShift
+            && event.evidence.notes.includes("candidate_hard_gate_passed")
+            && event.evidence.algorithmSources.includes(
+                "candidate_grid_reference_partial_consensus",
+            )
+            && event.evidence.algorithmSources.includes(
+                "per_reference_counterfactual_evidence",
+            )
+            && noteNumber(event, "candidate_grid_partial_shift=") === aggregateShift
+            && (noteNumber(event, "candidate_grid_partial_family_margin=") ?? 0) >= 0.1
+            && (noteNumber(event, "candidate_grid_partial_shift_margin=") ?? 0) >= 0.05
+            && (noteNumber(event, "candidate_grid_partial_reference_count=") ?? 0) >= 8
+            && (noteNumber(
+                event,
+                "candidate_grid_partial_reference_peak_kernel5=",
+            ) ?? 0) >= 0.5
+            && (event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY) >= 0.1;
+    }).sort((left, right) => (
+        confidenceScore(representative(right).event)
+            - confidenceScore(representative(left).event)
+        || (representative(right).event.evidence.correlationGain
+            ?? Number.NEGATIVE_INFINITY)
+            - (representative(left).event.evidence.correlationGain
+                ?? Number.NEGATIVE_INFINITY)
+    ))[0] ?? null;
+};
+
 const WHOLE_FRAME_STAGES = new Set<DiagnosisReviewSourceStage>([
     "detected",
     "fused",
@@ -1916,6 +1998,11 @@ const finalFrontierClusters = (
         selectedFinalClusters,
     );
     if (strongerGlobalWholeCandidate) return [strongerGlobalWholeCandidate];
+    const concentratedAggregatePartial = selectConcentratedAggregatePartial(
+        allFinalClusters,
+        selectedFinalClusters,
+    );
+    if (concentratedAggregatePartial) return [concentratedAggregatePartial];
     const persistedWholeBaseline = clusters.filter((cluster) => {
         const event = representative(cluster).event;
         const stages = new Set(cluster.checkpoints.map(({ stage }) => stage));
