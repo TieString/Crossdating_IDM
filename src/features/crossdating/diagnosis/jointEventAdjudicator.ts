@@ -2243,6 +2243,92 @@ const productionExactMatch = (
         && topYear(selected) === topYear(production);
 };
 
+const noteYears = (event: DiagnosisEvent, key: string): number[] => {
+    const prefix = `${key}=`;
+    return event.evidence.notes.filter((note) => note.startsWith(prefix))
+        .flatMap((note) => note.slice(prefix.length).split(","))
+        .map(Number)
+        .filter(Number.isInteger);
+};
+
+const recenterSequentialMissingHeadWindow = (
+    event: DiagnosisEvent,
+): DiagnosisEvent => {
+    if (event.eventType !== "missingRing"
+        || !event.evidence.algorithmSources.includes(
+            "sequential_missing_staircase_head",
+        )) return event;
+    const headYear = noteYears(event, "sequential_missing_head_year")[0];
+    const width = eventWidth(event);
+    if (headYear === undefined || ![5, 7, 9, 13].includes(width)) return event;
+
+    const range = event.seriesRange ?? {
+        startYear: Math.min(event.startYear, headYear),
+        endYear: Math.max(event.endYear, headYear),
+    };
+    let startYear = headYear - Math.floor((width - 1) / 2);
+    startYear = Math.max(range.startYear, Math.min(
+        startYear,
+        range.endYear - width + 1,
+    ));
+    const endYear = startYear + width - 1;
+    if (startYear === event.startYear && endYear === event.endYear) return event;
+
+    const competingAnchors = [
+        ...noteYears(event, "multi_frontier_evidence_years"),
+        ...noteYears(event, "direct_transition_year"),
+        ...noteYears(event, "paired_core_selected_year"),
+    ];
+    const nearbyCompetingAnchorWouldBeLost = competingAnchors.some((year) => (
+        year >= event.startYear - 2
+        && year <= event.endYear + 2
+        && (year < startYear || year > endYear)
+    ));
+    if (nearbyCompetingAnchorWouldBeLost) return event;
+
+    const prior = new Map(event.rankedYears.map((row) => [row.year, row]));
+    const minimumScore = Math.min(0, ...event.rankedYears.map(({ score }) => score));
+    const rankedYears = Array.from({ length: width }, (_, index) => (
+        startYear + index
+    )).map((year) => {
+        const existing = prior.get(year);
+        return existing ?? {
+            year,
+            rank: 0,
+            score: minimumScore - 1,
+            evidenceTags: ["sequential_missing_head_window"],
+        };
+    }).sort((left, right) => (
+        right.score - left.score || right.year - left.year
+    )).map((row, index) => ({
+        ...row,
+        rank: index + 1,
+        evidenceTags: Array.from(new Set([
+            ...row.evidenceTags,
+            "sequential_missing_head_window",
+        ])).sort(),
+    }));
+    return withEvidenceLedger({
+        ...event,
+        id: `${event.id}-head-window-${startYear}-${endYear}`,
+        startYear,
+        endYear,
+        rankedYears,
+        evidence: {
+            ...event.evidence,
+            algorithmSources: Array.from(new Set([
+                ...event.evidence.algorithmSources,
+                "sequential_missing_head_window",
+            ])).sort(),
+            notes: Array.from(new Set([
+                ...event.evidence.notes,
+                `sequential_head_previous_window=${event.startYear}-${event.endYear}`,
+                `sequential_head_final_window=${startYear}-${endYear}`,
+            ])),
+        },
+    });
+};
+
 export const adjudicateJointEventHypotheses = (
     seriesId: string,
     checkpoints: readonly DiagnosisReviewEventCheckpoint[],
@@ -2383,7 +2469,9 @@ export const adjudicateJointEventHypotheses = (
         })
         : evidenceLocatedEvent;
     const selectedEvent = locationGuardedEvent
-        ? synchronizePreservedMissingPartialWindow(locationGuardedEvent)
+        ? recenterSequentialMissingHeadWindow(
+            synchronizePreservedMissingPartialWindow(locationGuardedEvent),
+        )
         : locationGuardedEvent;
     return {
         seriesId,

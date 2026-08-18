@@ -259,6 +259,50 @@ describe("joint event adjudicator", () => {
         expect(decision.event).not.toHaveProperty("nearEventCluster");
     });
 
+    it("restores a displaced sequential missing window around its validated head", () => {
+        const frontier = event("displaced-head", "missingRing", 1798, 1810, 1804);
+        frontier.seriesRange = { startYear: 1700, endYear: 2000 };
+        frontier.evidence.algorithmSources = [
+            "multi_event_frontier_location_consensus",
+            "sequential_missing_staircase_head",
+        ];
+        frontier.evidence.notes = ["sequential_missing_head_year=1899"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { ...checkpoint("final", frontier), authority: "selected" },
+        ]);
+
+        expect(decision.event).toMatchObject({
+            eventType: "missingRing",
+            startYear: 1893,
+            endYear: 1905,
+        });
+        expect(decision.event?.evidence.algorithmSources).toContain(
+            "sequential_missing_head_window",
+        );
+    });
+
+    it("keeps a nearby competing location anchor inside a sequential missing window", () => {
+        const frontier = event("anchored-head", "missingRing", 1628, 1640, 1635);
+        frontier.seriesRange = { startYear: 1500, endYear: 2000 };
+        frontier.evidence.algorithmSources = [
+            "multi_event_frontier_location_consensus",
+            "sequential_missing_staircase_head",
+        ];
+        frontier.evidence.notes = [
+            "sequential_missing_head_year=1625",
+            "direct_transition_year=1635",
+        ];
+
+        expect(adjudicateJointEventHypotheses("TARGET", [
+            { ...checkpoint("final", frontier), authority: "selected" },
+        ]).event).toMatchObject({
+            id: "anchored-head",
+            startYear: 1628,
+            endYear: 1640,
+        });
+    });
+
     it("keeps a selected multi-event consensus window ahead of supplemental locations", () => {
         const selected = event("selected-consensus", "falseRing", 1829, 1841, 1834);
         selected.evidence.algorithmSources = [

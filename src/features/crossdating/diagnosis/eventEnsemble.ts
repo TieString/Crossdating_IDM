@@ -11958,19 +11958,6 @@ export const makeDiagnosisEvents = (
                 },
             } : null;
         };
-        if (stableTerminalSequentialUnit && !stablePartialPathOwnsOperation) {
-            // The two regularizations and the independently estimated cumulative depth agree on
-            // the complete signed unit suffix. Older path contamination cannot reverse this
-            // newest operation or compress the staircase into one automatic range move.
-            const wholeFramedHypothesis = wholeFramedTerminalHypothesis(
-                stableTerminalSequentialUnit,
-            );
-            return finalize(
-                [stableTerminalSequentialUnit],
-                wholeFramedHypothesis ? [wholeFramedHypothesis] : [],
-                false,
-            );
-        }
         const candidateAnchoredSequentialFalse = cumulativeUnitCandidateDepths.some(
             (depth) => depth > 1,
         )
@@ -11988,6 +11975,19 @@ export const makeDiagnosisEvents = (
             );
             return finalize(
                 [candidateAnchoredSequentialFalse],
+                wholeFramedHypothesis ? [wholeFramedHypothesis] : [],
+                false,
+            );
+        }
+        if (stableTerminalSequentialUnit && !stablePartialPathOwnsOperation) {
+            // The two regularizations and the independently estimated cumulative depth agree on
+            // the complete signed unit suffix. Older path contamination cannot reverse this
+            // newest operation or compress the staircase into one automatic range move.
+            const wholeFramedHypothesis = wholeFramedTerminalHypothesis(
+                stableTerminalSequentialUnit,
+            );
+            return finalize(
+                [stableTerminalSequentialUnit],
                 wholeFramedHypothesis ? [wholeFramedHypothesis] : [],
                 false,
             );
