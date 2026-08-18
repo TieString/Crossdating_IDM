@@ -52,6 +52,7 @@ import {
     selectRepeatedPartialComponentCheckpoint,
     selectCrossPenaltyExactPartialCheckpoint,
     selectCrossPenaltyFalseRingFrontier,
+    selectSplitRepeatedPartialComponentCheckpoint,
     stableFrontierHasRepeatedOperationSupport,
     selectLatentEndpointWholeFrame,
     selectUnobservedFixedSideWholeLag,
@@ -3745,6 +3746,30 @@ describe("selectCumulativePartialFrontier", () => {
         expect(selectRepeatedPartialComponentCheckpoint([
             boundedPath([pathEvent(-40, -40, 0, 1702)]),
         ])).toBeNull();
+    });
+
+    it("recovers a repeated component when one copy is split into two nearby shifts", () => {
+        const path = boundedPath([
+            pathEvent(-9, -40, -31, 1820),
+            pathEvent(-11, -31, -20, 1830),
+            pathEvent(-20, -20, 0, 1846),
+        ]);
+        path.path.transitionGain = 47.09;
+        path.path.runnerUpMargin = 0.15;
+
+        expect(selectSplitRepeatedPartialComponentCheckpoint([path])).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -20,
+            rankedYears: [{ year: 1846 }],
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "split_repeated_partial_component_frontier",
+                ]),
+                notes: expect.arrayContaining([
+                    "split_repeated_component_shifts=-9,-11",
+                ]),
+            },
+        });
     });
 
     it("keeps an exact terminal partial reproduced by two path penalties", () => {

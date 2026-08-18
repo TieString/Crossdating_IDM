@@ -6839,6 +6839,82 @@ export const selectCrossPenaltyExactPartialCheckpoint = (
     });
 };
 
+export const selectSplitRepeatedPartialComponentCheckpoint = (
+    paths: readonly (BoundedLagStateEventSet | null)[],
+    maximumSplitSpanYears = 13,
+    minimumEventSeparationYears = 14,
+): DiagnosisEvent | null => {
+    const candidates = paths.flatMap((path) => {
+        if (!path
+            || path.path.transitionGain < 20
+            || path.path.runnerUpMargin < 0.12) return [];
+        const transitions = path.events.flatMap((event) => {
+            const shiftYears = lagPathTransitionShift(event);
+            const topYear = event.rankedYears[0]?.year;
+            return event.eventType === "partialMove"
+                && shiftYears !== null
+                && shiftYears <= -2
+                && topYear !== undefined
+                ? [{ event, shiftYears, topYear }]
+                : [];
+        });
+        return transitions.flatMap((direct) => transitions.flatMap((left, leftIndex) => (
+            transitions.slice(leftIndex + 1).flatMap((right) => {
+                if (left === direct
+                    || right === direct
+                    || left.shiftYears + right.shiftYears !== direct.shiftYears
+                    || Math.abs(left.topYear - right.topYear) > maximumSplitSpanYears) {
+                    return [];
+                }
+                const splitStart = Math.min(left.topYear, right.topYear);
+                const splitEnd = Math.max(left.topYear, right.topYear);
+                const separation = direct.topYear < splitStart
+                    ? splitStart - direct.topYear
+                    : direct.topYear > splitEnd ? direct.topYear - splitEnd : 0;
+                if (separation < minimumEventSeparationYears) return [];
+                const splitCenter = Math.round((left.topYear + right.topYear) / 2);
+                const locationSource = direct.topYear > splitEnd
+                    ? direct
+                    : left.topYear >= right.topYear ? left : right;
+                const fixedLag = locationSource.event.evidence.lagAfter ?? 0;
+                const event = withEvidenceLedger({
+                    ...locationSource.event,
+                    id: `${locationSource.event.id}-split-repeated-${direct.shiftYears}`,
+                    shiftYears: direct.shiftYears,
+                    shiftSide: "older" as const,
+                    evidence: {
+                        ...locationSource.event.evidence,
+                        algorithmSources: Array.from(new Set([
+                            ...locationSource.event.evidence.algorithmSources,
+                            "split_repeated_partial_component_frontier",
+                        ])).sort(),
+                        score: path.path.transitionGain,
+                        scoreMargin: path.path.runnerUpMargin,
+                        lagBefore: fixedLag + direct.shiftYears,
+                        lagAfter: fixedLag,
+                        notes: Array.from(new Set([
+                            ...locationSource.event.evidence.notes,
+                            `split_repeated_component_shift=${direct.shiftYears}`,
+                            `split_repeated_direct_year=${direct.topYear}`,
+                            `split_repeated_component_shifts=${
+                                left.shiftYears},${right.shiftYears
+                            }`,
+                            `split_repeated_component_years=${left.topYear},${right.topYear}`,
+                            `split_repeated_component_center=${splitCenter}`,
+                            `split_repeated_event_separation=${separation}`,
+                        ])),
+                    },
+                });
+                return [{ event, topYear: rankedEventYear(event), separation }];
+            })
+        )));
+    }).sort((left, right) => (
+        right.topYear - left.topYear
+        || right.separation - left.separation
+    ));
+    return candidates[0]?.event ?? null;
+};
+
 export const hasHighConcentrationCrossPenaltyLocationAuthority = (
     event: DiagnosisEvent,
 ): boolean => event.evidence.algorithmSources.includes(
@@ -11783,6 +11859,11 @@ export const makeDiagnosisEvents = (
             )
                 ? null
                 : rawCrossPenaltyExactPartialCheckpoint;
+        const splitRepeatedPartialComponentCheckpoint =
+            selectSplitRepeatedPartialComponentCheckpoint([
+                rawPenaltyTwoConservativePath,
+                rawPenaltyOneStablePath,
+            ]);
         const stableStrongFrontier = strongMultiscaleBoundedFrontier
             ?? conservativeStrongMultiscaleBoundedFrontier;
         const zeroTerminalPenaltyOneStablePath = needsStableMultiscaleBoundedPath
@@ -11953,6 +12034,7 @@ export const makeDiagnosisEvents = (
             candidateEvents,
         );
         const stableBoundedPathFrontier = repeatedPartialComponentCheckpoint
+            ?? splitRepeatedPartialComponentCheckpoint
             ?? crossPenaltyExactPartialCheckpoint
             ?? regularizedPartialConsensusCheckpoint
             ?? terminalCompatibleParsimoniousPartialCheckpoint
@@ -12006,6 +12088,9 @@ export const makeDiagnosisEvents = (
                 )
                 || stableBoundedPathFrontier.evidence.algorithmSources.includes(
                     "cross_penalty_exact_partial_frontier",
+                )
+                || stableBoundedPathFrontier.evidence.algorithmSources.includes(
+                    "split_repeated_partial_component_frontier",
                 )
                 ||
                 terminalCompatibleParsimoniousPartialCheckpoint !== null
