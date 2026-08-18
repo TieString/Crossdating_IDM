@@ -6101,11 +6101,18 @@ export const selectParsimoniousPartialOperationCheckpoint = (
     const competingShift = competingFrontier
         ? lagPathTransitionShift(competingFrontier.event)
         : null;
+    const irregularAggregateDecomposition = competingFrontier !== null
+        && competingFrontier.event.eventType === "partialMove"
+        && competingFrontier.transitionCount === 2
+        && competingFrontier.allTransitionsPartial
+        && competingFrontier.aggregateShiftYears === operation.shiftYears
+        && !stableFrontierHasRepeatedOperationSupport(competingFrontier);
     if ((!competingFrontier && Math.abs(operation.shiftYears) <= 4)
         || (
             competingFrontier?.event.eventType === "partialMove"
             && competingShift !== null
             && competingShift !== operation.shiftYears
+            && !irregularAggregateDecomposition
         )
         || (
             competingFrontier !== null
@@ -6198,6 +6205,9 @@ export const selectParsimoniousPartialOperationCheckpoint = (
                 `parsimonious_partial_operation_year=${operation.bestYear}`,
                 `parsimonious_partial_center_year=${centerYear}`,
                 `parsimonious_partial_local_support=${localOperationSupport}`,
+                ...(irregularAggregateDecomposition
+                    ? ["parsimonious_partial_replaces_irregular_aggregate=true"]
+                    : []),
                 "parsimonious_partial_preserves_repeated_components=true",
             ])),
         },

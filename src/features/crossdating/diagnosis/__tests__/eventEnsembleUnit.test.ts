@@ -3649,6 +3649,38 @@ describe("selectCumulativePartialFrontier", () => {
         expect(selected?.endYear).toBeGreaterThanOrEqual(1823);
     });
 
+    it("keeps a direct operation over a two-component irregular decomposition", () => {
+        const strongerSingle = boundedPath([pathEvent(-20, -20, 0, 1730)]);
+        const regularizedSingle = boundedPath([pathEvent(-20, -20, 0, 1731)]);
+        const decomposed = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                pathEvent(-5, -20, -15, 1727),
+                pathEvent(-15, -15, 0, 1749),
+            ]),
+            boundedPath([
+                pathEvent(-5, -20, -15, 1728),
+                pathEvent(-15, -15, 0, 1750),
+            ]),
+        );
+
+        expect(selectParsimoniousPartialOperationCheckpoint(
+            strongerSingle,
+            regularizedSingle,
+            operation(-20, 1731),
+            [],
+            decomposed,
+            { startYear: 1500, endYear: 2000 },
+        )).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -20,
+            evidence: {
+                notes: expect.arrayContaining([
+                    "parsimonious_partial_replaces_irregular_aggregate=true",
+                ]),
+            },
+        });
+    });
+
     it("does not collapse a repeated stable partial sequence into its cumulative shift", () => {
         const repeated = selectStableBoundedLagPathFrontier(
             boundedPath([
