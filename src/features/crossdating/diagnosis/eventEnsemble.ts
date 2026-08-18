@@ -6919,6 +6919,212 @@ export const selectCrossPenaltyExactPartialCheckpoint = (
     });
 };
 
+export const selectTerminalOperationAnchoredPartialCheckpoint = (
+    strongerPath: BoundedLagStateEventSet | null,
+    regularizedPath: BoundedLagStateEventSet | null,
+    operations: readonly JointCounterfactualOperationScore[],
+    targetRange: { startYear: number; endYear: number },
+    maximumYearDistance = 3,
+): DiagnosisEvent | null => {
+    const frontier = selectStableBoundedLagPathFrontier(
+        strongerPath,
+        regularizedPath,
+    );
+    const newest = frontier?.transitions[frontier.transitions.length - 1];
+    const previous = frontier?.transitions[frontier.transitions.length - 2];
+    if (!frontier
+        || !newest
+        || !previous
+        || newest.topYear - previous.topYear < 14) return null;
+    const operation = operations.filter((candidate) => (
+        candidate.eventType === "partialMove"
+        && candidate.shiftYears <= -2
+        && Math.abs(candidate.shiftYears) < Math.abs(frontier.aggregateShiftYears)
+        && Math.abs(candidate.bestYear - newest.topYear) <= maximumYearDistance
+        && frontier.transitions.slice(0, -1).some((transition) => (
+            transition.event.eventType === "partialMove"
+            && transition.shiftYears === candidate.shiftYears
+            && newest.topYear - transition.topYear >= 14
+        ))
+        && scoreDynamicJointOperation(candidate, operations) >= 0.02
+        && candidate.bestDifferenceGain >= 0.03
+        && candidate.bestCombinedGain >= 0.015
+        && candidate.topThreeDifferenceGain >= 0.03
+    )).sort((left, right) => (
+        scoreDynamicJointOperation(right, operations)
+            - scoreDynamicJointOperation(left, operations)
+        || right.bestDifferenceGain - left.bestDifferenceGain
+    ))[0];
+    if (!operation) return null;
+    const centerYear = Math.round((operation.bestYear + newest.topYear) / 2);
+    const window = boundedSequentialWindow(centerYear, 13, targetRange);
+    const prior = new Map(newest.event.rankedYears.map((row) => [row.year, row]));
+    const minimumScore = Math.min(0, ...newest.event.rankedYears.map((row) => row.score));
+    const rankedYears = Array.from(
+        { length: window.endYear - window.startYear + 1 },
+        (_, index) => {
+            const year = window.startYear + index;
+            const existing = prior.get(year);
+            return existing ? { ...existing, rank: 0 } : {
+                year,
+                rank: 0,
+                score: minimumScore - Math.abs(year - centerYear) * 0.01,
+                evidenceTags: ["terminal_operation_anchored_partial_checkpoint"],
+            };
+        },
+    ).sort((left, right) => (
+        Number(right.year === operation.bestYear) - Number(left.year === operation.bestYear)
+        || right.score - left.score
+        || right.year - left.year
+    )).map((row, index) => ({ ...row, rank: index + 1 }));
+    return withEvidenceLedger({
+        ...newest.event,
+        id: `${newest.event.id}-terminal-operation-${operation.shiftYears}`,
+        eventType: "partialMove",
+        ...window,
+        rankedYears,
+        shiftYears: operation.shiftYears,
+        shiftSide: "older",
+        evidence: {
+            ...newest.event.evidence,
+            algorithmSources: Array.from(new Set([
+                ...newest.event.evidence.algorithmSources,
+                "terminal_operation_anchored_partial_checkpoint",
+            ])).sort(),
+            score: Math.min(
+                strongerPath!.path.transitionGain,
+                regularizedPath!.path.transitionGain,
+            ),
+            scoreMargin: scoreDynamicJointOperation(operation, operations),
+            correlationGain: Math.max(
+                newest.event.evidence.correlationGain ?? 0,
+                operation.bestCombinedGain,
+            ),
+            lagBefore: operation.shiftYears,
+            lagAfter: 0,
+            notes: Array.from(new Set([
+                ...newest.event.evidence.notes,
+                `terminal_operation_shift=${operation.shiftYears}`,
+                `terminal_operation_year=${operation.bestYear}`,
+                `terminal_path_year=${newest.topYear}`,
+                `terminal_previous_transition_year=${previous.topYear}`,
+                `terminal_path_aggregate_shift=${frontier.aggregateShiftYears}`,
+            ])),
+        },
+    });
+};
+
+export const selectCollapsedMissingFalsePartialCheckpoint = (
+    strongerPath: BoundedLagStateEventSet | null,
+    regularizedPath: BoundedLagStateEventSet | null,
+    operations: readonly JointCounterfactualOperationScore[],
+    targetRange: { startYear: number; endYear: number },
+    maximumComponentSpanYears = 25,
+): DiagnosisEvent | null => {
+    const frontier = selectStableBoundedLagPathFrontier(
+        strongerPath,
+        regularizedPath,
+    );
+    if (!frontier || frontier.transitions.length < 3) return null;
+    const [unit, olderPartial, newerPartial] = frontier.transitions.slice(-3);
+    if (!unit
+        || !olderPartial
+        || !newerPartial
+        || unit.event.eventType !== "missingRing"
+        || unit.shiftYears !== -1
+        || olderPartial.event.eventType !== "partialMove"
+        || newerPartial.event.eventType !== "partialMove"
+        || olderPartial.shiftYears > -2
+        || newerPartial.shiftYears > -2
+        || newerPartial.topYear - olderPartial.topYear > maximumComponentSpanYears) return null;
+    const collapsedShift = olderPartial.shiftYears + newerPartial.shiftYears;
+    const operationShift = unit.event.evidence.lagBefore;
+    if (operationShift === null
+        || unit.event.evidence.lagAfter !== collapsedShift
+        || operationShift !== collapsedShift - 1) return null;
+    const score = (operation: JointCounterfactualOperationScore): number => (
+        scoreDynamicJointOperation(operation, operations)
+    );
+    const partialOperation = operations.find((operation) => (
+        operation.eventType === "partialMove"
+        && operation.shiftYears === operationShift
+        && score(operation) >= 0.2
+        && operation.bestDifferenceGain >= 0.15
+        && operation.bestCombinedGain >= 0.15
+    ));
+    const missingOperation = operations.find((operation) => (
+        operation.eventType === "missingRing"
+        && operation.shiftYears === -1
+        && score(operation) >= 0.1
+        && operation.bestDifferenceGain >= 0.1
+    ));
+    const falseOperation = operations.find((operation) => (
+        operation.eventType === "falseRing"
+        && operation.shiftYears === 1
+        && score(operation) >= 0.1
+        && operation.bestDifferenceGain >= 0.1
+    ));
+    if (!partialOperation || !missingOperation || !falseOperation) return null;
+    const centerYear = newerPartial.topYear + 2;
+    const window = boundedSequentialWindow(centerYear, 13, targetRange);
+    const prior = new Map(newerPartial.event.rankedYears.map((row) => [row.year, row]));
+    const minimumScore = Math.min(0, ...newerPartial.event.rankedYears.map((row) => row.score));
+    const rankedYears = Array.from(
+        { length: window.endYear - window.startYear + 1 },
+        (_, index) => {
+            const year = window.startYear + index;
+            const existing = prior.get(year);
+            return existing ? { ...existing, rank: 0 } : {
+                year,
+                rank: 0,
+                score: minimumScore - Math.abs(year - centerYear) * 0.01,
+                evidenceTags: ["collapsed_missing_false_partial_checkpoint"],
+            };
+        },
+    ).sort((left, right) => (
+        right.score - left.score || right.year - left.year
+    )).map((row, index) => ({ ...row, rank: index + 1 }));
+    return withEvidenceLedger({
+        ...newerPartial.event,
+        id: `${newerPartial.event.id}-collapsed-missing-false-partial`,
+        eventType: "partialMove",
+        ...window,
+        rankedYears,
+        shiftYears: operationShift,
+        shiftSide: "older",
+        evidence: {
+            ...newerPartial.event.evidence,
+            algorithmSources: Array.from(new Set([
+                ...newerPartial.event.evidence.algorithmSources,
+                "collapsed_missing_false_partial_checkpoint",
+            ])).sort(),
+            score: Math.min(
+                strongerPath!.path.transitionGain,
+                regularizedPath!.path.transitionGain,
+            ),
+            scoreMargin: score(partialOperation),
+            correlationGain: Math.max(
+                newerPartial.event.evidence.correlationGain ?? 0,
+                partialOperation.bestCombinedGain,
+            ),
+            lagBefore: operationShift,
+            lagAfter: 0,
+            notes: Array.from(new Set([
+                ...newerPartial.event.evidence.notes,
+                `collapsed_partial_component_shifts=${
+                    olderPartial.shiftYears},${newerPartial.shiftYears
+                }`,
+                `collapsed_partial_component_years=${
+                    olderPartial.topYear},${newerPartial.topYear
+                }`,
+                `collapsed_partial_net_shift=${collapsedShift}`,
+                `collapsed_partial_recovered_shift=${operationShift}`,
+                `collapsed_partial_missing_year=${unit.topYear}`,
+            ])),
+        },
+    });
+};
+
 export const selectSplitRepeatedPartialComponentCheckpoint = (
     paths: readonly (BoundedLagStateEventSet | null)[],
     maximumSplitSpanYears = 13,
@@ -7102,6 +7308,94 @@ export const selectCrossPenaltyFalseRingFrontier = (
                 `cross_penalty_false_ring_regularized_margin=${
                     regularizedPath.path.runnerUpMargin.toFixed(6)
                 }`,
+            ])),
+        },
+    });
+};
+
+type SelfContainedPositiveUnitChain = {
+    event: DiagnosisEvent;
+    depth: number;
+    year: number;
+};
+
+const selfContainedPositiveUnitChain = (
+    path: BoundedLagStateEventSet | null,
+    minimumDepth: number,
+    minimumRunnerUpMargin: number,
+): SelfContainedPositiveUnitChain | null => {
+    if (!path
+        || path.path.transitionGain < 20
+        || path.path.runnerUpMargin < minimumRunnerUpMargin) return null;
+    const localEvents = path.events.filter((event) => event.eventType !== "wholeSeriesMove");
+    if (localEvents.length < minimumDepth || localEvents.some((event) => (
+        event.eventType !== "falseRing"
+        || event.evidence.lagBefore === null
+        || event.evidence.lagAfter === null
+        || event.evidence.lagBefore !== event.evidence.lagAfter + 1
+        || event.evidence.lagAfter < 0
+    ))) return null;
+    const maximumDepth = Math.max(...localEvents.map((event) => event.evidence.lagBefore!));
+    if (maximumDepth < minimumDepth
+        || localEvents.length !== maximumDepth
+        || !Array.from({ length: maximumDepth }, (_, index) => index + 1).every(
+            (before) => localEvents.some((event) => (
+                event.evidence.lagBefore === before
+                && event.evidence.lagAfter === before - 1
+            )),
+        )) return null;
+    const terminal = localEvents.find((event) => (
+        event.evidence.lagBefore === 1 && event.evidence.lagAfter === 0
+    ));
+    const location = terminal?.evidence.locationEvidence?.find(
+        (entry) => entry.source === "bounded_complete_lag_path",
+    );
+    return terminal
+        && (location?.concentration ?? 0) >= 0.5
+        && (location?.remoteMargin ?? 0) >= 0.9
+        ? { event: terminal, depth: maximumDepth, year: rankedEventYear(terminal) }
+        : null;
+};
+
+export const hasSelfContainedPositiveUnitChainAuthority = (
+    strongerPath: BoundedLagStateEventSet | null,
+    regularizedPath: BoundedLagStateEventSet | null,
+    minimumDepth = 4,
+): boolean => {
+    const stronger = selfContainedPositiveUnitChain(strongerPath, minimumDepth, 0.3);
+    const regularized = selfContainedPositiveUnitChain(regularizedPath, minimumDepth, 0.3);
+    return stronger !== null
+        && regularized !== null
+        && stronger.depth === regularized.depth
+        && Math.abs(stronger.year - regularized.year) <= 2;
+};
+
+export const selectSelfContainedPositiveUnitChainFrontier = (
+    path: BoundedLagStateEventSet | null,
+    minimumDepth = 4,
+    minimumRunnerUpMargin = 2,
+): DiagnosisEvent | null => {
+    const chain = selfContainedPositiveUnitChain(
+        path,
+        minimumDepth,
+        minimumRunnerUpMargin,
+    );
+    if (!chain || !path) return null;
+    return withEvidenceLedger({
+        ...chain.event,
+        id: `${chain.event.id}-self-contained-positive-chain`,
+        evidence: {
+            ...chain.event.evidence,
+            algorithmSources: Array.from(new Set([
+                ...chain.event.evidence.algorithmSources,
+                "self_contained_positive_unit_chain_frontier",
+            ])).sort(),
+            score: path.path.transitionGain,
+            scoreMargin: path.path.runnerUpMargin,
+            notes: Array.from(new Set([
+                ...chain.event.evidence.notes,
+                `self_contained_positive_chain_depth=${chain.depth}`,
+                `self_contained_positive_chain_year=${chain.year}`,
             ])),
         },
     });
@@ -11492,6 +11786,11 @@ export const makeDiagnosisEvents = (
             ...detected,
             ...displayed,
         ];
+        const needsUnanchoredUnitDirectionAudit = cofechaFlagged
+            && boundedHypotheses.some((event) => (
+                (event.eventType === "missingRing" || event.eventType === "falseRing")
+                && event.evidence.candidateIds.length === 0
+            ));
         const needsStableMultiscaleBoundedPath = shouldFitBoundedPath && (
             boundedHypotheses.some((event) => (
                 event.eventType === "wholeSeriesMove"
@@ -11504,6 +11803,7 @@ export const makeDiagnosisEvents = (
             || (rawBoundedResult?.events.filter((event) => (
                 event.eventType !== "wholeSeriesMove"
             )).length ?? 0) >= 2
+            || needsUnanchoredUnitDirectionAudit
         );
         const terminalBaselineLag = boundedTerminalLags.length === 1
             ? boundedTerminalLags[0]
@@ -11784,13 +12084,64 @@ export const makeDiagnosisEvents = (
             rawPenaltyHalfStablePath,
             diagnosis.targetRange,
         );
-        const crossPenaltyFalseRingFrontier = selectCrossPenaltyFalseRingFrontier(
-            rawNearPenaltyTwoPath,
-            rawNearPenaltyOnePath,
-        ) ?? selectCrossPenaltyFalseRingFrontier(
+        const regularizedPositiveUnitChainAuthority =
+            hasSelfContainedPositiveUnitChainAuthority(
+                rawPenaltyOneStablePath,
+                rawPenaltyHalfStablePath,
+                3,
+            );
+        const recoveryNearPenaltyTwoPath = rawNearPenaltyTwoPath
+            ?? (regularizedPositiveUnitChainAuthority
+                ? locateBoundedEvents(
+                    false,
+                    nearClusterLags,
+                    stableTerminalLags,
+                    2,
+                    2,
+                    false,
+                    6,
+                    2,
+                )
+                : null);
+        const recoveryNearPenaltyOnePath = rawNearPenaltyOnePath
+            ?? (recoveryNearPenaltyTwoPath && regularizedPositiveUnitChainAuthority
+                ? locateBoundedEvents(
+                    false,
+                    nearClusterLags,
+                    stableTerminalLags,
+                    1,
+                    2,
+                    false,
+                    6,
+                    2,
+                )
+                : null);
+        const nearCrossPenaltyFalseRingFrontier = selectCrossPenaltyFalseRingFrontier(
+            recoveryNearPenaltyTwoPath,
+            recoveryNearPenaltyOnePath,
+        );
+        const regularizedCrossPenaltyFalseRingFrontier = selectCrossPenaltyFalseRingFrontier(
             rawPenaltyOneStablePath,
             rawPenaltyHalfStablePath,
         );
+        const crossPenaltyFalseRingFrontier = nearCrossPenaltyFalseRingFrontier
+            ?? regularizedCrossPenaltyFalseRingFrontier;
+        const selfContainedCrossPenaltyFalseAuthority =
+            hasSelfContainedPositiveUnitChainAuthority(
+                recoveryNearPenaltyTwoPath,
+                recoveryNearPenaltyOnePath,
+                3,
+            ) || regularizedPositiveUnitChainAuthority;
+        const singlePathPositiveUnitFrontier = nearCrossPenaltyFalseRingFrontier
+            ? selectSelfContainedPositiveUnitChainFrontier(
+                recoveryNearPenaltyTwoPath,
+                3,
+                0.5,
+            )
+            : selectSelfContainedPositiveUnitChainFrontier(
+                rawPenaltyOneStablePath,
+                3,
+            );
         const candidateWholeLags = new Set(ownCandidates.flatMap((candidate) => (
             candidate.operationType === "SHIFT_RANGE"
             && candidate.mode === "wholeSeriesMove"
@@ -11925,13 +12276,41 @@ export const makeDiagnosisEvents = (
             ...detected,
             ...displayed,
         ]);
+        const standardPathsContainMixedUnitComposition = [
+            rawPenaltyOneStablePath,
+            rawPenaltyHalfStablePath,
+        ].every((path) => path?.events.some((event) => (
+            event.eventType === "missingRing" || event.eventType === "falseRing"
+        )) === true);
+        const nearCrossPenaltyExactPartialCheckpoint =
+            standardPathsContainMixedUnitComposition
+                ? selectCrossPenaltyExactPartialCheckpoint(
+                    rawNearPenaltyTwoPath,
+                    rawNearPenaltyOnePath,
+                )
+                : null;
+        const terminalOperationAnchoredPartialCheckpoint =
+            selectTerminalOperationAnchoredPartialCheckpoint(
+                rawNearPenaltyTwoPath,
+                rawNearPenaltyOnePath,
+                boundedOperations,
+                diagnosis.targetRange,
+            );
+        const collapsedMissingFalsePartialCheckpoint =
+            selectCollapsedMissingFalsePartialCheckpoint(
+                rawPenaltyOneStablePath,
+                rawPenaltyHalfStablePath,
+                boundedOperations,
+                diagnosis.targetRange,
+            );
         const rawCrossPenaltyExactPartialCheckpoint =
             completedMixedCompositionAlreadyLocated
                 ? null
-                : selectCrossPenaltyExactPartialCheckpoint(
-                    rawPenaltyTwoConservativePath,
-                    rawPenaltyOneStablePath,
-                );
+                : nearCrossPenaltyExactPartialCheckpoint
+                    ?? selectCrossPenaltyExactPartialCheckpoint(
+                        rawPenaltyTwoConservativePath,
+                        rawPenaltyOneStablePath,
+                    );
         const crossPenaltyExactPartialCheckpoint =
             hasNearbyLargerPartialCompositionSeed(
                 [...detectedBeforeFusion, ...detected, ...displayed],
@@ -12170,7 +12549,9 @@ export const makeDiagnosisEvents = (
         );
         const stableBoundedPathFrontier = repeatedPartialComponentCheckpoint
             ?? splitRepeatedPartialComponentCheckpoint
+            ?? collapsedMissingFalsePartialCheckpoint
             ?? crossPenaltyExactPartialCheckpoint
+            ?? terminalOperationAnchoredPartialCheckpoint
             ?? regularizedPartialConsensusCheckpoint
             ?? terminalCompatibleParsimoniousPartialCheckpoint
             ?? zeroTerminalUnitWholeAliasEvent
@@ -12231,6 +12612,12 @@ export const makeDiagnosisEvents = (
                 )
                 || stableBoundedPathFrontier.evidence.algorithmSources.includes(
                     "compressed_cumulative_missing_alias_frontier",
+                )
+                || stableBoundedPathFrontier.evidence.algorithmSources.includes(
+                    "terminal_operation_anchored_partial_checkpoint",
+                )
+                || stableBoundedPathFrontier.evidence.algorithmSources.includes(
+                    "collapsed_missing_false_partial_checkpoint",
                 )
                 ||
                 terminalCompatibleParsimoniousPartialCheckpoint !== null
@@ -12576,6 +12963,29 @@ export const makeDiagnosisEvents = (
                             stableFrontierHasRepeatedOperationSupport(
                                 stableMultiscaleBoundedFrontier,
                             ),
+                        nearExactPartialCheckpoint: nearCrossPenaltyExactPartialCheckpoint
+                            ? auditEvent(nearCrossPenaltyExactPartialCheckpoint)
+                            : null,
+                        terminalOperationAnchoredPartialCheckpoint:
+                            terminalOperationAnchoredPartialCheckpoint
+                                ? auditEvent(terminalOperationAnchoredPartialCheckpoint)
+                                : null,
+                        collapsedMissingFalsePartialCheckpoint:
+                            collapsedMissingFalsePartialCheckpoint
+                                ? auditEvent(collapsedMissingFalsePartialCheckpoint)
+                                : null,
+                        nearPathProbes: {
+                            stronger: rawNearPenaltyTwoPath ? {
+                                transitionGain: rawNearPenaltyTwoPath.path.transitionGain,
+                                runnerUpMargin: rawNearPenaltyTwoPath.path.runnerUpMargin,
+                                events: rawNearPenaltyTwoPath.events.map(auditEvent),
+                            } : null,
+                            regularized: rawNearPenaltyOnePath ? {
+                                transitionGain: rawNearPenaltyOnePath.path.transitionGain,
+                                runnerUpMargin: rawNearPenaltyOnePath.path.runnerUpMargin,
+                                events: rawNearPenaltyOnePath.events.map(auditEvent),
+                            } : null,
+                        },
                         parsimoniousPartialCheckpoint:
                             parsimoniousPartialOperationCheckpoint
                                 ? auditEvent(parsimoniousPartialOperationCheckpoint)
@@ -12610,6 +13020,24 @@ export const makeDiagnosisEvents = (
                             runnerUpMargin: rawPenaltyOneStablePath.path.runnerUpMargin,
                             events: rawPenaltyOneStablePath.events.map(auditEvent),
                         } : null,
+                    },
+                    positiveUnitChainEvidence: {
+                        nearCrossPenaltyFrontier: nearCrossPenaltyFalseRingFrontier
+                            ? auditEvent(nearCrossPenaltyFalseRingFrontier)
+                            : null,
+                        regularizedCrossPenaltyFrontier:
+                            regularizedCrossPenaltyFalseRingFrontier
+                                ? auditEvent(regularizedCrossPenaltyFalseRingFrontier)
+                                : null,
+                        nearAuthority: hasSelfContainedPositiveUnitChainAuthority(
+                            recoveryNearPenaltyTwoPath,
+                            recoveryNearPenaltyOnePath,
+                            3,
+                        ),
+                        regularizedAuthority: regularizedPositiveUnitChainAuthority,
+                        singlePathFrontier: singlePathPositiveUnitFrontier
+                            ? auditEvent(singlePathPositiveUnitFrontier)
+                            : null,
                     },
                     locatorDecisions: locatorDecisionAudits.map((decision) => ({
                         ...decision,
@@ -12870,6 +13298,7 @@ export const makeDiagnosisEvents = (
             && (
                 nearbyFalseOperationSupport
                 || unitDirectionSupportsFalse
+                || selfContainedCrossPenaltyFalseAuthority
             ) ? crossPenaltyFalseRingFrontier : null;
         const candidateAnchoredDistantMissingFrontier =
             selectCandidateAnchoredDistantMissingFrontier(
@@ -12933,10 +13362,12 @@ export const makeDiagnosisEvents = (
         if (stableTerminalAgreesWithCrossPenaltyFalse) {
             return finalize([stableTerminalSequentialUnit!], [], false);
         }
-        if (admissibleCrossPenaltyFalse
+        const authoritativePositiveUnitFrontier = admissibleCrossPenaltyFalse
+            ?? singlePathPositiveUnitFrontier;
+        if (authoritativePositiveUnitFrontier
             && stableTerminalSequentialUnit === null
             && !protectedPartialBlocksCrossPenaltyFalse) {
-            return finalize([admissibleCrossPenaltyFalse], [], false);
+            return finalize([authoritativePositiveUnitFrontier], [], false);
         }
         const detectedDistantMissingFrontier = targetHasExplicitZero
             ? selectDistantSequentialMissingFrontier(

@@ -51,7 +51,11 @@ import {
     selectRegularizedPartialConsensusCheckpoint,
     selectRepeatedPartialComponentCheckpoint,
     selectCrossPenaltyExactPartialCheckpoint,
+    selectTerminalOperationAnchoredPartialCheckpoint,
+    selectCollapsedMissingFalsePartialCheckpoint,
     selectCrossPenaltyFalseRingFrontier,
+    hasSelfContainedPositiveUnitChainAuthority,
+    selectSelfContainedPositiveUnitChainFrontier,
     selectCumulativeMissingWholeAliasFrontier,
     selectSplitRepeatedPartialComponentCheckpoint,
     stableFrontierHasRepeatedOperationSupport,
@@ -3846,6 +3850,96 @@ describe("selectCumulativePartialFrontier", () => {
         })).toBe(true);
     });
 
+    it("uses an independently scored terminal operation to unmerge a later component", () => {
+        const missingAt = (year: number): DiagnosisEvent => {
+            const item = pathEvent(-1, -1, 0, year, 40);
+            item.eventType = "missingRing";
+            delete item.shiftYears;
+            delete item.shiftSide;
+            return item;
+        };
+        const stronger = boundedPath([
+            pathEvent(-20, -46, -26, 1778, 40),
+            pathEvent(-25, -26, -1, 1816, 40),
+            missingAt(1835),
+        ]);
+        const regularized = boundedPath([
+            pathEvent(-20, -46, -26, 1779, 40),
+            pathEvent(-25, -26, -1, 1817, 40),
+            missingAt(1836),
+        ]);
+
+        expect(selectTerminalOperationAnchoredPartialCheckpoint(
+            stronger,
+            regularized,
+            [operation(-20, 1836)],
+            { startYear: 1500, endYear: 2000 },
+        )).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -20,
+            startYear: 1830,
+            endYear: 1842,
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "terminal_operation_anchored_partial_checkpoint",
+                ]),
+            },
+        });
+    });
+
+    it("recovers a partial amplitude collapsed with a missing-false unit pair", () => {
+        const missingAt = (year: number): DiagnosisEvent => {
+            const item = pathEvent(-1, -20, -19, year, 80);
+            item.eventType = "missingRing";
+            delete item.shiftYears;
+            delete item.shiftSide;
+            return item;
+        };
+        const stronger = boundedPath([
+            missingAt(1842),
+            pathEvent(-8, -19, -11, 1877, 80),
+            pathEvent(-11, -11, 0, 1896, 80),
+        ]);
+        const regularized = boundedPath([
+            missingAt(1843),
+            pathEvent(-8, -19, -11, 1878, 80),
+            pathEvent(-11, -11, 0, 1897, 80),
+        ]);
+        const strongOperation = (
+            eventType: "missingRing" | "falseRing" | "partialMove",
+            shiftYears: number,
+        ): JointCounterfactualOperationScore => ({
+            ...operation(shiftYears, 1854),
+            eventType,
+            shiftYears,
+            bestRawGain: 0.2,
+            bestDifferenceGain: 0.3,
+            bestCombinedGain: 0.25,
+            topThreeDifferenceGain: 0.25,
+        });
+
+        expect(selectCollapsedMissingFalsePartialCheckpoint(
+            stronger,
+            regularized,
+            [
+                strongOperation("partialMove", -20),
+                strongOperation("missingRing", -1),
+                strongOperation("falseRing", 1),
+            ],
+            { startYear: 1500, endYear: 2000 },
+        )).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -20,
+            startYear: 1892,
+            endYear: 1904,
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "collapsed_missing_false_partial_checkpoint",
+                ]),
+            },
+        });
+    });
+
     it("keeps a false-ring return to zero reproduced by two penalties", () => {
         const falseAt = (year: number): DiagnosisEvent => {
             const event = falseRingEvent(year, false);
@@ -3886,6 +3980,49 @@ describe("selectCumulativePartialFrontier", () => {
             stronger,
             regularized,
         )).toBeNull();
+
+        const completeChain = (yearDrift: number): BoundedLagStateEventSet => {
+            const events = Array.from({ length: 4 }, (_, index) => {
+                const before = index + 1;
+                const item = falseAt(1856 - index * 20 + yearDrift);
+                item.evidence.lagBefore = before;
+                item.evidence.lagAfter = before - 1;
+                return item;
+            });
+            events[0].evidence.locationEvidence = [{
+                source: "bounded_complete_lag_path",
+                startYear: 1850 + yearDrift,
+                endYear: 1862 + yearDrift,
+                topYear: 1856 + yearDrift,
+                referenceCount: 12,
+                concentration: 0.7,
+                remoteMargin: 1.1,
+                calibrated: false,
+            }];
+            return boundedPath(events);
+        };
+        const completeStronger = completeChain(0);
+        const completeRegularized = completeChain(1);
+        expect(hasSelfContainedPositiveUnitChainAuthority(
+            completeStronger,
+            completeRegularized,
+        )).toBe(true);
+        completeStronger.path.runnerUpMargin = 3;
+        expect(selectSelfContainedPositiveUnitChainFrontier(
+            completeStronger,
+        )).toMatchObject({
+            eventType: "falseRing",
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "self_contained_positive_unit_chain_frontier",
+                ]),
+            },
+        });
+        completeRegularized.events.push(pathEvent(-2, -2, 0, 1700));
+        expect(hasSelfContainedPositiveUnitChainAuthority(
+            completeStronger,
+            completeRegularized,
+        )).toBe(false);
     });
 
     it("decomposes a compressed cumulative missing path before its whole-series alias", () => {

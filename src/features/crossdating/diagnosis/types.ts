@@ -357,6 +357,21 @@ export type DiagnosisEventDecisionAudit = {
         finalAuthority: boolean;
         independentOperationSupport: boolean;
         repeatedOperationSupport: boolean;
+        nearExactPartialCheckpoint: DiagnosisEventAuditSnapshot | null;
+        terminalOperationAnchoredPartialCheckpoint: DiagnosisEventAuditSnapshot | null;
+        collapsedMissingFalsePartialCheckpoint: DiagnosisEventAuditSnapshot | null;
+        nearPathProbes: {
+            stronger: {
+                transitionGain: number;
+                runnerUpMargin: number;
+                events: DiagnosisEventAuditSnapshot[];
+            } | null;
+            regularized: {
+                transitionGain: number;
+                runnerUpMargin: number;
+                events: DiagnosisEventAuditSnapshot[];
+            } | null;
+        };
         parsimoniousPartialCheckpoint: DiagnosisEventAuditSnapshot | null;
         parsimoniousOperationSelection: {
             shiftYears: number;
@@ -379,6 +394,13 @@ export type DiagnosisEventDecisionAudit = {
             runnerUpMargin: number;
             events: DiagnosisEventAuditSnapshot[];
         } | null;
+    };
+    positiveUnitChainEvidence?: {
+        nearCrossPenaltyFrontier: DiagnosisEventAuditSnapshot | null;
+        regularizedCrossPenaltyFrontier: DiagnosisEventAuditSnapshot | null;
+        nearAuthority: boolean;
+        regularizedAuthority: boolean;
+        singlePathFrontier: DiagnosisEventAuditSnapshot | null;
     };
     locatorDecisions?: DiagnosisLocatorDecisionAudit[];
     automaticSemanticsRejectedCount: number;
