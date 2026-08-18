@@ -2444,7 +2444,13 @@ const recenterSequentialMissingHeadWindow = (
         && year <= event.endYear + 2
         && (year < startYear || year > endYear)
     ));
-    if (nearbyCompetingAnchorWouldBeLost) return event;
+    const headIsBeyondCurrentNewerEdge = headYear > event.endYear;
+    const newerCompetingAnchorWouldBeLost = competingAnchors.some((year) => (
+        year > headYear && year > endYear
+    ));
+    if (headIsBeyondCurrentNewerEdge
+        ? newerCompetingAnchorWouldBeLost
+        : nearbyCompetingAnchorWouldBeLost) return event;
 
     const prior = new Map(event.rankedYears.map((row) => [row.year, row]));
     const minimumScore = Math.min(0, ...event.rankedYears.map(({ score }) => score));

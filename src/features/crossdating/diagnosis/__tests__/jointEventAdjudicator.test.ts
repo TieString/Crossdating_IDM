@@ -376,6 +376,47 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("uses a validated sequential head beyond the current newer edge", () => {
+        const frontier = event("older-mode", "missingRing", 1556, 1568, 1565);
+        frontier.seriesRange = { startYear: 1400, endYear: 2000 };
+        frontier.evidence.algorithmSources = [
+            "multi_event_frontier_location_consensus",
+            "sequential_missing_staircase_head",
+        ];
+        frontier.evidence.notes = [
+            "sequential_missing_head_year=1571",
+            "multi_frontier_evidence_years=1558,1565",
+        ];
+
+        expect(adjudicateJointEventHypotheses("TARGET", [
+            { ...checkpoint("final", frontier), authority: "selected" },
+        ]).event).toMatchObject({
+            startYear: 1565,
+            endYear: 1577,
+        });
+    });
+
+    it("does not discard a still newer competing anchor", () => {
+        const frontier = event("newer-anchor", "missingRing", 1556, 1568, 1565);
+        frontier.seriesRange = { startYear: 1400, endYear: 2000 };
+        frontier.evidence.algorithmSources = [
+            "multi_event_frontier_location_consensus",
+            "sequential_missing_staircase_head",
+        ];
+        frontier.evidence.notes = [
+            "sequential_missing_head_year=1571",
+            "multi_frontier_evidence_years=1580",
+        ];
+
+        expect(adjudicateJointEventHypotheses("TARGET", [
+            { ...checkpoint("final", frontier), authority: "selected" },
+        ]).event).toMatchObject({
+            id: "newer-anchor",
+            startYear: 1556,
+            endYear: 1568,
+        });
+    });
+
     it("keeps a selected multi-event consensus window ahead of supplemental locations", () => {
         const selected = event("selected-consensus", "falseRing", 1829, 1841, 1834);
         selected.evidence.algorithmSources = [
