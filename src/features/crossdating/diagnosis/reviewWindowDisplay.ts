@@ -612,8 +612,23 @@ const selectAdjudicatedReviewWindowDisplay = (
     if (!audit.cofechaFlagged && !hasUnflaggedReviewAuthority(event)) {
         return refused(audit, "cofecha_target_unflagged");
     }
+    const wholeClaims = evidenceClaimsFor(event);
     const independentlyStrictWhole = event.eventType === "wholeSeriesMove"
-        && evidenceClaimsFor(event).has("whole_terminal_baseline");
+        && (
+            wholeClaims.has("whole_terminal_baseline")
+            || event.evidence.algorithmSources.includes(
+                "stronger_global_whole_candidate",
+            )
+            || (
+                event.evidence.algorithmSources.includes(
+                    "durable_whole_frame_priority",
+                )
+                && (
+                    wholeClaims.has("whole_path_fixed_baseline")
+                    || wholeClaims.has("whole_global_lag")
+                )
+            )
+        );
     if (decision.sourceStage === "final" || independentlyStrictWhole) {
         if (event.eventType === "partialMove"
             && !hasReviewablePartialMoveEvidence(event, config)

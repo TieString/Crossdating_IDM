@@ -1271,6 +1271,97 @@ describe("lower review-window display gate", () => {
         expect(result.event).toBe(selected);
     });
 
+    it("displays a durable path-fixed whole frame selected from an earlier stage", () => {
+        const selected = {
+            ...strictEvent(),
+            eventType: "wholeSeriesMove" as const,
+            shiftYears: -11,
+            startYear: 1600,
+            endYear: 2000,
+            evidence: {
+                ...strictEvent().evidence,
+                algorithmSources: ["durable_whole_frame_priority"],
+                notes: [
+                    "candidate_hard_gate_passed",
+                    "whole_baseline_source=path_fixed_side_lag",
+                    "path_fixed_side_lag=-11",
+                    "path_fixed_side_newer_context_years=158",
+                ],
+            },
+        };
+        const result = selectReviewWindowDisplay(
+            audit([], { finalReason: "emitted" }),
+            [],
+            [],
+            {},
+            jointDecision(selected, "displayed"),
+        );
+
+        expect(result).toMatchObject({
+            status: "strict",
+            reason: "strict_event",
+            sourceStage: "displayed",
+            event: { eventType: "wholeSeriesMove", shiftYears: -11 },
+        });
+        expect(result.event).toBe(selected);
+    });
+
+    it("displays a durable global-lag whole frame selected from an earlier stage", () => {
+        const selected = {
+            ...strictEvent(),
+            eventType: "wholeSeriesMove" as const,
+            shiftYears: -50,
+            startYear: 1600,
+            endYear: 2000,
+            evidence: {
+                ...strictEvent().evidence,
+                algorithmSources: ["durable_whole_frame_priority"],
+                notes: [
+                    "whole_state_global_lag_matches_shift=true",
+                    "whole_state_newer_edge_support_fraction=1.000000",
+                ],
+            },
+        };
+
+        expect(selectReviewWindowDisplay(
+            audit([], { finalReason: "emitted" }),
+            [],
+            [],
+            {},
+            jointDecision(selected, "displayed"),
+        )).toMatchObject({
+            status: "strict",
+            sourceStage: "displayed",
+            event: { eventType: "wholeSeriesMove", shiftYears: -50 },
+        });
+    });
+
+    it("displays a stronger globally supported whole candidate", () => {
+        const selected = {
+            ...strictEvent(),
+            eventType: "wholeSeriesMove" as const,
+            shiftYears: -11,
+            startYear: 1600,
+            endYear: 2000,
+            evidence: {
+                ...strictEvent().evidence,
+                algorithmSources: ["stronger_global_whole_candidate"],
+            },
+        };
+
+        expect(selectReviewWindowDisplay(
+            audit([], { finalReason: "emitted" }),
+            [],
+            [],
+            {},
+            jointDecision(selected, "candidate"),
+        )).toMatchObject({
+            status: "strict",
+            sourceStage: "candidate",
+            event: { eventType: "wholeSeriesMove", shiftYears: -11 },
+        });
+    });
+
     it("does not recover another checkpoint after the joint adjudicator refuses", () => {
         const result = selectReviewWindowDisplay(
             audit([snapshot("missingRing")]),

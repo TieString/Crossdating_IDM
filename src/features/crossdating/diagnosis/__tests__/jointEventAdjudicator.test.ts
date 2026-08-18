@@ -98,6 +98,145 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("establishes a durable path-fixed whole frame before an unresolved local aggregate", () => {
+        const whole = {
+            ...event("path-fixed-whole", "wholeSeriesMove", 1600, 2000, 2000),
+            shiftYears: -11,
+        };
+        whole.evidence.notes = [
+            "candidate_hard_gate_passed",
+            "whole_baseline_source=path_fixed_side_lag",
+            "path_fixed_side_lag=-11",
+            "path_fixed_side_event_type=falseRing",
+            "path_fixed_side_transition=-10->-11",
+            "path_fixed_side_newer_context_years=158",
+        ];
+        const aggregate = event("aggregate-alias", "partialMove", 1819, 1831, 1828);
+        aggregate.shiftYears = -10;
+        aggregate.evidence.lagBefore = -10;
+        aggregate.evidence.lagAfter = 0;
+        aggregate.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        aggregate.evidence.notes = ["bounded_path_complete_hypothesis=true"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("detected", whole),
+            checkpoint("fused", whole),
+            checkpoint("retained", whole),
+            checkpoint("displayed", whole),
+            { stage: "final", authority: "selected", event: aggregate },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            event: {
+                id: "path-fixed-whole",
+                eventType: "wholeSeriesMove",
+                shiftYears: -11,
+            },
+        });
+        expect(decision.event?.evidence.algorithmSources).toContain(
+            "durable_whole_frame_priority",
+        );
+    });
+
+    it("keeps an exact local transition that lands on a durable whole frame", () => {
+        const whole = {
+            ...event("path-fixed-whole", "wholeSeriesMove", 1600, 2000, 2000),
+            shiftYears: -11,
+        };
+        whole.evidence.notes = [
+            "candidate_hard_gate_passed",
+            "whole_baseline_source=path_fixed_side_lag",
+            "path_fixed_side_lag=-11",
+            "path_fixed_side_event_type=falseRing",
+            "path_fixed_side_transition=-10->-11",
+            "path_fixed_side_newer_context_years=158",
+        ];
+        const local = event("bounded-false", "falseRing", 1819, 1831, 1825);
+        local.evidence.lagBefore = -10;
+        local.evidence.lagAfter = -11;
+        local.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        local.evidence.notes = [
+            "bounded_path_complete_hypothesis=true",
+            "bounded_path_location_concentration=0.8",
+            "bounded_path_runner_up_margin=0.4",
+        ];
+        local.evidence.locationEvidence = [{
+            source: "bounded_complete_lag_path",
+            startYear: 1819,
+            endYear: 1831,
+            topYear: 1825,
+            referenceCount: 8,
+            concentration: 0.8,
+            remoteMargin: 0.4,
+            calibrated: false,
+        }];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("detected", whole),
+            checkpoint("fused", whole),
+            checkpoint("retained", whole),
+            checkpoint("displayed", whole),
+            { stage: "final", authority: "supplemental", event: local },
+            { stage: "final", authority: "selected", event: local },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            event: {
+                id: "bounded-false",
+                eventType: "falseRing",
+            },
+        });
+    });
+
+    it("uses a stronger global whole candidate over an unsupported off-by-one frame", () => {
+        const pathFixed = {
+            ...event("path-fixed-minus-10", "wholeSeriesMove", 1600, 2000, 2000),
+            shiftYears: -10,
+        };
+        pathFixed.confidenceLevel = "medium";
+        pathFixed.evidence.correlationGain = 0.07;
+        pathFixed.evidence.notes = [
+            "candidate_hard_gate_passed",
+            "whole_baseline_source=path_fixed_side_lag",
+            "path_fixed_side_lag=-10",
+            "path_fixed_side_newer_context_years=83",
+            "whole_state_support_fraction=0.000000",
+        ];
+        const global = {
+            ...event("global-minus-11", "wholeSeriesMove", 1600, 2000, 2000),
+            shiftYears: -11,
+        };
+        global.confidenceLevel = "high";
+        global.evidence.correlationGain = 0.34;
+        global.evidence.notes = [
+            "candidate_hard_gate_passed",
+            "whole_observed_dominant_lag=-11",
+            "whole_state_support_fraction=0.583333",
+            "whole_state_weighted_support_fraction=0.598883",
+            "whole_state_newer_edge_support_fraction=1.000000",
+        ];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", global),
+            { stage: "final", authority: "selected", event: pathFixed },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "candidate",
+            event: {
+                id: "global-minus-11",
+                eventType: "wholeSeriesMove",
+                shiftYears: -11,
+            },
+        });
+        expect(decision.event?.evidence.algorithmSources).toContain(
+            "stronger_global_whole_candidate",
+        );
+    });
+
     it("keeps a multi-transition path projected as one ordinary frontier event", () => {
         const frontier = event("frontier", "missingRing", 1898, 1906, 1904);
         frontier.seriesRange = { startYear: 1700, endYear: 2000 };
