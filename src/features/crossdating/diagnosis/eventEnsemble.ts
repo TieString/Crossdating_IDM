@@ -84,6 +84,7 @@ import {
     projectUnitLocationFromIndependentConsensus,
     strongBoundedPathLocation,
     terminalFalseRingOlderPadding,
+    terminalMissingRingNewerPadding,
 } from "./locationAuthority";
 import { refineUnitEventWithIndependentBreakpoints } from "./pairedCoreBreakpoint";
 import { diagnoseSeriesCore } from "./segments";
@@ -11823,6 +11824,7 @@ export const makeDiagnosisEvents = (
                     && currentWindowWidth === 13
                     && strongBoundedPathLocation(event) !== null
                     && terminalFalseRingOlderPadding(event) === null
+                    && terminalMissingRingNewerPadding(event) === null
                     && localLagTransitionEvidence === null
                     && !hasMultipleUnitCandidates
                     && !hasDetachedCalibratedLocation;

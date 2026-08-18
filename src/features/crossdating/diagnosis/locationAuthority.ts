@@ -136,6 +136,28 @@ export const terminalFalseRingOlderPadding = (
         : null;
 };
 
+export const terminalMissingRingNewerPadding = (
+    event: DiagnosisEvent,
+): number | null => {
+    if (event.eventType !== "missingRing"
+        || !event.evidence.algorithmSources.includes(
+            "stable_terminal_unit_staircase_frontier",
+        )) return null;
+    const transitionYears = event.evidence.notes
+        .find((note) => note.startsWith("terminal_unit_staircase_transition_years="))
+        ?.split("=")[1]
+        ?.split(",")
+        .map(Number)
+        .filter(Number.isInteger) ?? [];
+    const maximumGap = Number(event.evidence.notes
+        .find((note) => note.startsWith(
+            "terminal_unit_staircase_max_adjacent_gap_years=",
+        ))?.split("=")[1]);
+    return transitionYears.length >= 3 && Number.isFinite(maximumGap)
+        ? Math.min(10, Math.max(6, Math.round(maximumGap)))
+        : null;
+};
+
 /**
  * Reconciles one already-selected operation with a compact multi-event location mode. The
  * operation contract is immutable here; only its single 13-year review window may change.
@@ -203,9 +225,18 @@ export const projectMultiEventLocationConsensus = (
     const falseRingOlderPadding = Number.isInteger(terminalBoundaryYear)
         ? terminalFalseRingOlderPadding(event)
         : null;
+    const missingRingNewerPadding = Number.isInteger(terminalBoundaryYear)
+        ? terminalMissingRingNewerPadding(event)
+        : null;
     if (falseRingOlderPadding !== null) {
         window = clampWindowToRange(
             terminalBoundaryYear - falseRingOlderPadding,
+            13,
+            targetRange,
+        );
+    } else if (missingRingNewerPadding !== null) {
+        window = clampWindowToRange(
+            terminalBoundaryYear - (12 - missingRingNewerPadding),
             13,
             targetRange,
         );
@@ -265,6 +296,9 @@ export const projectMultiEventLocationConsensus = (
                 ...(falseRingOlderPadding === null
                     ? []
                     : ["terminal_false_ring_asymmetric_window"]),
+                ...(missingRingNewerPadding === null
+                    ? []
+                    : ["terminal_missing_ring_asymmetric_window"]),
             ])).sort(),
             locationEvidence: [
                 ...(event.evidence.locationEvidence ?? []),
@@ -299,6 +333,14 @@ export const projectMultiEventLocationConsensus = (
                     }`,
                     `terminal_false_ring_newer_padding=${
                         12 - falseRingOlderPadding
+                    }`,
+                ]),
+                ...(missingRingNewerPadding === null ? [] : [
+                    `terminal_missing_ring_older_padding=${
+                        12 - missingRingNewerPadding
+                    }`,
+                    `terminal_missing_ring_newer_padding=${
+                        missingRingNewerPadding
                     }`,
                 ]),
             ])),

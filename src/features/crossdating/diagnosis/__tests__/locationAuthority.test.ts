@@ -7,6 +7,7 @@ import {
     projectUnitLocationFromIndependentConsensus,
     strongBoundedPathLocation,
     terminalFalseRingOlderPadding,
+    terminalMissingRingNewerPadding,
 } from "../locationAuthority";
 
 const event = (overrides: Partial<NonNullable<DiagnosisEvent["evidence"]["locationEvidence"]>[number]> = {}): DiagnosisEvent => ({
@@ -169,6 +170,41 @@ describe("multi-event frontier location consensus", () => {
                 notes: expect.arrayContaining([
                     "terminal_false_ring_older_padding=8",
                     "terminal_false_ring_newer_padding=4",
+                ]),
+            },
+        });
+    });
+
+    it("keeps more newer-side context for a deep terminal missing-ring boundary", () => {
+        const input = event();
+        input.startYear = 1779;
+        input.endYear = 1791;
+        input.rankedYears = [{ year: 1786, rank: 1, score: 4, evidenceTags: [] }];
+        input.evidence.algorithmSources.push(
+            "stable_terminal_unit_staircase_frontier",
+        );
+        input.evidence.notes.push(
+            "terminal_unit_staircase_boundary_year=1786",
+            "terminal_unit_staircase_transition_years=1734,1765,1786",
+            "terminal_unit_staircase_max_adjacent_gap_years=31",
+        );
+        expect(terminalMissingRingNewerPadding(input)).toBe(10);
+
+        expect(projectMultiEventLocationConsensus(
+            input,
+            [1784, 1785, 1786],
+            { startYear: 1400, endYear: 2000 },
+            true,
+        )).toMatchObject({
+            startYear: 1784,
+            endYear: 1796,
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "terminal_missing_ring_asymmetric_window",
+                ]),
+                notes: expect.arrayContaining([
+                    "terminal_missing_ring_older_padding=2",
+                    "terminal_missing_ring_newer_padding=10",
                 ]),
             },
         });
