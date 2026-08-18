@@ -6755,6 +6755,136 @@ export const selectRepeatedPartialComponentCheckpoint = (
     return candidates[0]?.event ?? null;
 };
 
+export const selectCrossPenaltyExactPartialCheckpoint = (
+    strongerPath: BoundedLagStateEventSet | null,
+    regularizedPath: BoundedLagStateEventSet | null,
+    maximumYearDrift = 2,
+): DiagnosisEvent | null => {
+    if (!strongerPath
+        || !regularizedPath
+        || strongerPath.path.transitionGain < 20
+        || regularizedPath.path.transitionGain < 20
+        || strongerPath.path.runnerUpMargin < 0.1
+        || regularizedPath.path.runnerUpMargin < 0.1) return null;
+    const terminalPartials = (path: BoundedLagStateEventSet) => path.events
+        .flatMap((event) => {
+            const shiftYears = lagPathTransitionShift(event);
+            const topYear = event.rankedYears[0]?.year;
+            return event.eventType === "partialMove"
+                && shiftYears !== null
+                && shiftYears <= -2
+                && event.evidence.lagAfter === 0
+                && topYear !== undefined
+                ? [{ event, shiftYears, topYear }]
+                : [];
+        });
+    const matches = terminalPartials(strongerPath).flatMap((stronger) => (
+        terminalPartials(regularizedPath)
+            .filter((regularized) => (
+                regularized.shiftYears === stronger.shiftYears
+                && Math.abs(regularized.topYear - stronger.topYear) <= maximumYearDrift
+            ))
+            .map((regularized) => ({ stronger, regularized }))
+    )).sort((left, right) => (
+        right.stronger.topYear - left.stronger.topYear
+        || Math.abs(left.stronger.topYear - left.regularized.topYear)
+            - Math.abs(right.stronger.topYear - right.regularized.topYear)
+    ));
+    const selected = matches[0];
+    if (!selected) return null;
+    const event = selected.stronger.event;
+    const locationConcentration = latestEventNoteNumber(
+        event,
+        "bounded_path_location_concentration=",
+    ) ?? 0;
+    const minimumMargin = Math.min(
+        strongerPath.path.runnerUpMargin,
+        regularizedPath.path.runnerUpMargin,
+    );
+    if (minimumMargin < 0.2 && locationConcentration < 0.7) return null;
+    return withEvidenceLedger({
+        ...event,
+        id: `${event.id}-cross-penalty-exact-partial`,
+        shiftYears: selected.stronger.shiftYears,
+        shiftSide: "older",
+        evidence: {
+            ...event.evidence,
+            algorithmSources: Array.from(new Set([
+                ...event.evidence.algorithmSources,
+                "cross_penalty_exact_partial_frontier",
+            ])).sort(),
+            score: Math.min(
+                strongerPath.path.transitionGain,
+                regularizedPath.path.transitionGain,
+            ),
+            scoreMargin: Math.min(
+                strongerPath.path.runnerUpMargin,
+                regularizedPath.path.runnerUpMargin,
+            ),
+            notes: Array.from(new Set([
+                ...event.evidence.notes,
+                `cross_penalty_exact_partial_shift=${selected.stronger.shiftYears}`,
+                `cross_penalty_exact_partial_stronger_year=${selected.stronger.topYear}`,
+                `cross_penalty_exact_partial_regularized_year=${
+                    selected.regularized.topYear
+                }`,
+                `cross_penalty_exact_partial_stronger_margin=${
+                    strongerPath.path.runnerUpMargin.toFixed(6)
+                }`,
+                `cross_penalty_exact_partial_regularized_margin=${
+                    regularizedPath.path.runnerUpMargin.toFixed(6)
+                }`,
+            ])),
+        },
+    });
+};
+
+export const hasHighConcentrationCrossPenaltyLocationAuthority = (
+    event: DiagnosisEvent,
+): boolean => event.evidence.algorithmSources.includes(
+    "cross_penalty_exact_partial_frontier",
+) && (latestEventNoteNumber(
+    event,
+    "bounded_path_location_concentration=",
+) ?? 0) >= 0.9;
+
+export const localLagAdvancesCrossPenaltyFrontier = (
+    event: DiagnosisEvent,
+    evidence: DiagnosisLocalLagTransitionEvidence | null,
+    minimumAdvanceYears = 3,
+): boolean => {
+    if (event.eventType !== "partialMove"
+        || event.shiftYears === undefined
+        || !evidence
+        || evidence.eventCount < 2
+        || evidence.aggregateShiftYears !== event.shiftYears) return false;
+    const newestEvidenceYear = Math.max(...evidence.evidenceYears);
+    return newestEvidenceYear - rankedEventYear(event) >= minimumAdvanceYears;
+};
+
+export const hasCompletedMixedCompositionLocation = (
+    events: readonly DiagnosisEvent[],
+): boolean => events.some((event) => event.evidence.algorithmSources.some((source) => (
+    source === "completed_partial_missing_composition"
+    || source === "completed_partial_false_composition"
+)));
+
+export const hasNearbyLargerPartialCompositionSeed = (
+    events: readonly DiagnosisEvent[],
+    exactPartial: DiagnosisEvent | null,
+    maximumDistanceYears = 8,
+): boolean => {
+    if (exactPartial?.eventType !== "partialMove"
+        || exactPartial.shiftYears === undefined) return false;
+    const exactYear = rankedEventYear(exactPartial);
+    const exactShiftYears = exactPartial.shiftYears;
+    return events.some((event) => (
+        event.eventType === "partialMove"
+        && event.shiftYears === exactShiftYears - 1
+        && Math.abs(rankedEventYear(event) - exactYear) <= maximumDistanceYears
+    ));
+};
+
 /**
  * A mixed path cannot be explained by one same-direction missing staircase. When both path
  * penalties retain the same strong newest partial, keep that physical/equivalent explanation
@@ -11538,6 +11668,25 @@ export const makeDiagnosisEvents = (
                 rawPenaltyTwoConservativePath,
                 rawPenaltyOneStablePath,
             ]);
+        const completedMixedCompositionAlreadyLocated = hasCompletedMixedCompositionLocation([
+            ...detectedBeforeFusion,
+            ...detected,
+            ...displayed,
+        ]);
+        const rawCrossPenaltyExactPartialCheckpoint =
+            completedMixedCompositionAlreadyLocated
+                ? null
+                : selectCrossPenaltyExactPartialCheckpoint(
+                    rawPenaltyTwoConservativePath,
+                    rawPenaltyOneStablePath,
+                );
+        const crossPenaltyExactPartialCheckpoint =
+            hasNearbyLargerPartialCompositionSeed(
+                [...detectedBeforeFusion, ...detected, ...displayed],
+                rawCrossPenaltyExactPartialCheckpoint,
+            )
+                ? null
+                : rawCrossPenaltyExactPartialCheckpoint;
         const stableStrongFrontier = strongMultiscaleBoundedFrontier
             ?? conservativeStrongMultiscaleBoundedFrontier;
         const zeroTerminalPenaltyOneStablePath = needsStableMultiscaleBoundedPath
@@ -11708,6 +11857,7 @@ export const makeDiagnosisEvents = (
             candidateEvents,
         );
         const stableBoundedPathFrontier = repeatedPartialComponentCheckpoint
+            ?? crossPenaltyExactPartialCheckpoint
             ?? regularizedPartialConsensusCheckpoint
             ?? terminalCompatibleParsimoniousPartialCheckpoint
             ?? recoveredStableBoundedPathFrontier
@@ -11757,6 +11907,9 @@ export const makeDiagnosisEvents = (
             && (
                 stableBoundedPathFrontier.evidence.algorithmSources.includes(
                     "repeated_partial_component_frontier",
+                )
+                || stableBoundedPathFrontier.evidence.algorithmSources.includes(
+                    "cross_penalty_exact_partial_frontier",
                 )
                 ||
                 terminalCompatibleParsimoniousPartialCheckpoint !== null
@@ -11849,11 +12002,19 @@ export const makeDiagnosisEvents = (
             supplementalFinalHypotheses: DiagnosisEvent[] = [],
             includeBoundedPathHypotheses = true,
         ): DiagnosisEvent[] => {
+            const keepsCrossPenaltyLocation = (event: DiagnosisEvent): boolean => (
+                hasHighConcentrationCrossPenaltyLocationAuthority(event)
+                && !localLagAdvancesCrossPenaltyFrontier(
+                    event,
+                    localLagTransitionEvidence,
+                )
+            );
             const independentlyLocatedEvents = sourceEvents.map((event) => (
                 preservesSequentialFalseAsymmetricFrontierWindow(
                     event,
                     stableTerminalSequentialUnit !== null,
-                ) ? event : projectUnitLocationFromIndependentConsensus(
+                ) || keepsCrossPenaltyLocation(event)
+                    ? event : projectUnitLocationFromIndependentConsensus(
                     event,
                     candidateEvents,
                     passRawPathEvents.events,
@@ -11868,6 +12029,7 @@ export const makeDiagnosisEvents = (
             ));
             const frontierConsensusEvents = independentlyLocatedEvents.map((event) => {
                 if (hasAcceptedStrongLocatorWindow(event)) return event;
+                if (keepsCrossPenaltyLocation(event)) return event;
                 if (preservesSequentialFalseAsymmetricFrontierWindow(
                     event,
                     stableTerminalSequentialUnit !== null,

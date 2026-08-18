@@ -4,6 +4,10 @@ import {
     allowStableBoundedPathFinalAuthority,
     candidateDepthTerminalUnitPreemptsSeparatedPartial,
     hasIndependentStableFrontierOperationSupport,
+    hasCompletedMixedCompositionLocation,
+    hasNearbyLargerPartialCompositionSeed,
+    hasHighConcentrationCrossPenaltyLocationAuthority,
+    localLagAdvancesCrossPenaltyFrontier,
     hasAcceptedStrongLocatorWindow,
     hasStrongMixedPathPartialAuthority,
     maySequentialMissingPreemptStableJointFrontier,
@@ -46,6 +50,7 @@ import {
     selectRegularizedPartialOperationConsensus,
     selectRegularizedPartialConsensusCheckpoint,
     selectRepeatedPartialComponentCheckpoint,
+    selectCrossPenaltyExactPartialCheckpoint,
     stableFrontierHasRepeatedOperationSupport,
     selectLatentEndpointWholeFrame,
     selectUnobservedFixedSideWholeLag,
@@ -3739,6 +3744,79 @@ describe("selectCumulativePartialFrontier", () => {
         expect(selectRepeatedPartialComponentCheckpoint([
             boundedPath([pathEvent(-40, -40, 0, 1702)]),
         ])).toBeNull();
+    });
+
+    it("keeps an exact terminal partial reproduced by two path penalties", () => {
+        const stronger = boundedPath([
+            pathEvent(-20, -20, 0, 1732),
+            pathEvent(1, -19, -20, 1705),
+        ]);
+        stronger.path.transitionGain = 174.94;
+        stronger.path.runnerUpMargin = 2.14;
+        const regularized = boundedPath([
+            pathEvent(-20, -20, 0, 1733),
+            pathEvent(1, -19, -20, 1706),
+        ]);
+        regularized.path.transitionGain = 176.94;
+        regularized.path.runnerUpMargin = 0.62;
+
+        expect(selectCrossPenaltyExactPartialCheckpoint(
+            stronger,
+            regularized,
+        )).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -20,
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "cross_penalty_exact_partial_frontier",
+                ]),
+            },
+        });
+        regularized.events[0].shiftYears = -19;
+        regularized.events[0].evidence.lagBefore = -19;
+        expect(selectCrossPenaltyExactPartialCheckpoint(
+            stronger,
+            regularized,
+        )).toBeNull();
+
+        const completed = partialMoveEvent(-2);
+        completed.evidence.algorithmSources.push(
+            "completed_partial_missing_composition",
+        );
+        expect(hasCompletedMixedCompositionLocation([completed])).toBe(true);
+        expect(hasCompletedMixedCompositionLocation([partialMoveEvent(-2)]))
+            .toBe(false);
+
+        const exact = partialMoveEvent(-2);
+        exact.rankedYears = [{ year: 1788, rank: 1, score: 1, evidenceTags: [] }];
+        const nearbyAggregate = partialMoveEvent(-3);
+        nearbyAggregate.rankedYears = [{
+            year: 1784,
+            rank: 1,
+            score: 1,
+            evidenceTags: [],
+        }];
+        expect(hasNearbyLargerPartialCompositionSeed([nearbyAggregate], exact))
+            .toBe(true);
+        nearbyAggregate.rankedYears[0].year = 1819;
+        expect(hasNearbyLargerPartialCompositionSeed([nearbyAggregate], exact))
+            .toBe(false);
+
+        const located = partialMoveEvent(-20);
+        located.rankedYears = [{ year: 1529, rank: 1, score: 1, evidenceTags: [] }];
+        located.evidence.algorithmSources.push(
+            "cross_penalty_exact_partial_frontier",
+        );
+        located.evidence.notes.push("bounded_path_location_concentration=0.94");
+        expect(hasHighConcentrationCrossPenaltyLocationAuthority(located)).toBe(true);
+        expect(localLagAdvancesCrossPenaltyFrontier(located, {
+            eventCount: 3,
+            evidenceYears: [1528, 1532, 1536],
+            operationTypes: ["missingRing"],
+            aggregateShiftYears: -20,
+            locallyComplete: true,
+            maximumYearDrift: 2,
+        })).toBe(true);
     });
 
     it("leaves compact unit aggregates and adjacent partial-plus-unit amplitudes to serial recovery", () => {
