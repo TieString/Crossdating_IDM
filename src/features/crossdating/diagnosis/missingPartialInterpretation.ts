@@ -478,6 +478,15 @@ export const makeMissingRingInterpretation = (
         : "missing_partial_interpretation_tie";
     const preservePrimaryWindow = partial.evidence.algorithmSources.includes(
         "multi_event_frontier_location_consensus",
+    ) || (
+        evidence.interpretationBasis === "virtualSequentialFrontier"
+        && evidence.missingYears.length === 0
+        && partial.evidence.algorithmSources.includes(
+            "full_interval_counterfactual_locator",
+        )
+        && partial.evidence.notes.includes(
+            "locator_adjudication=accepted_detached_strong_mode",
+        )
     );
     const window = preservePrimaryWindow
         ? { startYear: partial.startYear, endYear: partial.endYear }

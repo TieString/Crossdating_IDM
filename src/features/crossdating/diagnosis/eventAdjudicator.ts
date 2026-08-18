@@ -19,6 +19,7 @@ export type LocatorAdjudicationEvidence = {
     operationLocationGain: number;
     structuredCheckpoint: boolean;
     structuredProposal: boolean;
+    checkpointReferenceCoreVoting: boolean;
     checkpointTopYear: number | null;
     proposedTopYear: number | null;
     checkpointWidth: number;
@@ -262,6 +263,9 @@ const locatorEvidence = (
         ),
         structuredCheckpoint,
         structuredProposal,
+        checkpointReferenceCoreVoting:
+            checkpoint.evidence.algorithmSources.length === 1
+            && checkpoint.evidence.algorithmSources[0] === "reference_core_voting",
         checkpointTopYear,
         proposedTopYear,
         checkpointWidth,
@@ -332,6 +336,14 @@ export const hasStrongDetachedLocatorEvidence = (
         && evidence.coarseOverlapConsensus >= 0.5
         && evidence.operationLocationGain >= 0.12
         && evidence.proposedWidth <= 13;
+    const isolatedCounterfactualModeReplacesUnstructuredCheckpoint =
+        evidence.operationType === "partialMove"
+        && evidence.structuredProposal
+        && !evidence.structuredCheckpoint
+        && evidence.checkpointReferenceCoreVoting
+        && evidence.concentration >= 0.5
+        && evidence.remoteMargin >= 0.3
+        && evidence.proposedWidth <= 13;
     const candidateTransitionConsensus = evidence.proposedTopYear !== null
         && evidence.candidateTopYear !== null
         && evidence.directTransitionYear !== null
@@ -346,6 +358,7 @@ export const hasStrongDetachedLocatorEvidence = (
         || independentlyLocatedOperation
         || replacesUnstructuredCheckpoint
         || deepReferenceTransitionReplacesUnstructuredCheckpoint
+        || isolatedCounterfactualModeReplacesUnstructuredCheckpoint
         || candidateTransitionConsensus;
 };
 

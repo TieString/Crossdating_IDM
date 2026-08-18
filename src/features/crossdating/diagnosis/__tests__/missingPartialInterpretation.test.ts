@@ -751,6 +751,48 @@ describe("missing/partial interpretation tie", () => {
         });
     });
 
+    it("keeps an accepted strong locator window when switching to missing", () => {
+        const partial = partialEvent();
+        partial.startYear = 988;
+        partial.endYear = 1000;
+        partial.shiftYears = -4;
+        partial.evidence.lagBefore = -4;
+        partial.evidence.algorithmSources.push(
+            "full_interval_counterfactual_locator",
+        );
+        partial.evidence.notes.push(
+            "locator_adjudication=accepted_detached_strong_mode",
+        );
+        const evidence = {
+            interpretationBasis: "virtualSequentialFrontier" as const,
+            missingRingCount: 4,
+            cumulativeShiftYears: -4,
+            missingYears: [],
+            partialFirstFixedYear: 1000,
+            normalizedCounterfactualGainDifference: 0,
+            masterMargin: 0,
+            referenceMedianMargin: 0,
+            referenceCount: 2,
+            missingReferenceSupport: 0,
+            partialReferenceSupport: 0,
+            frontierYear: 999,
+        };
+
+        expect(makeMissingRingInterpretation(
+            partial,
+            evidence,
+            partial.seriesRange!,
+        )).toMatchObject({
+            startYear: 988,
+            endYear: 1000,
+            evidence: {
+                notes: expect.arrayContaining([
+                    "interpretation_window=preserved_multi_event_consensus",
+                ]),
+            },
+        });
+    });
+
     it("resynchronizes a preserved missing interpretation after final partial recentering", () => {
         const partial = partialEvent();
         partial.startYear = 1898;

@@ -645,6 +645,8 @@ export const selectPartialMoveLocalConsensusRecenter = (input: {
     correctionYears: number;
     proposedWindow: { startYear: number; endYear: number };
     calibrationRule: string | undefined;
+    proposedModeConcentration?: number;
+    proposedModeRemoteMargin?: number;
 }): PartialMoveLocalConsensusRecenter | null => {
     const { event, correctionYears, proposedWindow } = input;
     if (
@@ -668,6 +670,9 @@ export const selectPartialMoveLocalConsensusRecenter = (input: {
         .slice()
         .sort((left, right) => left.rank - right.rank)[0]?.year;
     if (currentPrimaryYear === undefined) return null;
+    const strongDetachedProposedMode =
+        (input.proposedModeConcentration ?? 0) >= 0.5
+        && (input.proposedModeRemoteMargin ?? 0) >= 0.3;
 
     const finish = (
         evidenceAnchors: Array<{ family: string; year: number }>,
@@ -731,6 +736,7 @@ export const selectPartialMoveLocalConsensusRecenter = (input: {
     );
     if (
         sources.has("reference_core_voting")
+        && !strongDetachedProposedMode
         && referenceCoreYear === currentPrimaryYear
         && referencePartialYear === currentPrimaryYear
         && referenceCoreGain >= 0.05
@@ -1860,6 +1866,12 @@ export const refineEventWithCounterfactualLocator = (
                 correctionYears,
                 proposedWindow: finalWindow,
                 calibrationRule: preliminaryCalibrationRule,
+                proposedModeConcentration:
+                    learnedUnitWindow?.nineYearSafety
+                    ?? calibratedWindow?.concentration,
+                proposedModeRemoteMargin:
+                    learnedUnitWindow?.remoteMargin
+                    ?? calibratedWindow?.remoteMargin,
             })
         : null;
     if (partialLocalConsensusRecenter) {

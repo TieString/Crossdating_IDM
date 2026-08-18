@@ -477,6 +477,49 @@ describe("lower review-window display gate", () => {
         });
     });
 
+    it("shows the missing-ring workflow for a strong detached cumulative locator", () => {
+        const partial = reviewablePartial(-4, {
+            algorithmSources: ["full_interval_counterfactual_locator"],
+            notes: [
+                "counterfactual_correction_years=-4",
+                "counterfactual_window_concentration=0.527489",
+                "counterfactual_window_remote_margin=0.554390",
+                "locator_adjudication=accepted_detached_strong_mode",
+            ],
+        });
+        partial.startYear = 988;
+        partial.endYear = 1000;
+        const alternative = {
+            ...strictEvent(),
+            id: "counterfactual-missing-alternative",
+            startYear: 988,
+            endYear: 1000,
+        };
+        partial.interpretationAmbiguity = {
+            kind: "missingRingsOrPartialMove",
+            alternative,
+            evidence: {
+                interpretationBasis: "virtualSequentialFrontier",
+                missingRingCount: 4,
+                cumulativeShiftYears: -4,
+                missingYears: [],
+                partialFirstFixedYear: 1000,
+                normalizedCounterfactualGainDifference: 0,
+                masterMargin: 0,
+                referenceMedianMargin: 0,
+                referenceCount: 2,
+                missingReferenceSupport: 0,
+                partialReferenceSupport: 0,
+            },
+        };
+
+        expect(selectReviewWindowDisplay(audit([]), [partial])).toMatchObject({
+            status: "strict",
+            reason: "strict_event",
+            event: partial,
+        });
+    });
+
     it("keeps a bounded partial transition measured relative to a whole baseline", () => {
         const partial = reviewablePartial(-20, {
             lagBefore: -24,

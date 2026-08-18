@@ -3,6 +3,7 @@ import type { DiagnosisEvent, SeriesCoreDiagnosis } from "../types";
 import {
     allowStableBoundedPathFinalAuthority,
     hasIndependentStableFrontierOperationSupport,
+    hasAcceptedStrongLocatorWindow,
     hasStrongMixedPathPartialAuthority,
     maySequentialMissingPreemptStableJointFrontier,
     calibratedTerminalUnitStaircaseWindowWidth,
@@ -5593,5 +5594,18 @@ describe("pruneUnanchoredUnitAlternativesToCandidatePartial", () => {
             missing,
             partial,
         ])).toEqual([missing, partial]);
+    });
+});
+
+describe("accepted locator location authority", () => {
+    it("marks a strong accepted locator window as immutable downstream", () => {
+        const located = partialMoveEvent(-4);
+        located.evidence.algorithmSources.push("full_interval_counterfactual_locator");
+        located.evidence.notes.push(
+            "locator_adjudication=accepted_detached_strong_mode",
+        );
+
+        expect(hasAcceptedStrongLocatorWindow(located)).toBe(true);
+        expect(hasAcceptedStrongLocatorWindow(partialMoveEvent(-4))).toBe(false);
     });
 });

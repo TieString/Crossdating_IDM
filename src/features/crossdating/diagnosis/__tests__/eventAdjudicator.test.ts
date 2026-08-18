@@ -193,6 +193,34 @@ describe("event hypothesis locator adjudication", () => {
         expect(result.event.startYear).toBe(1805);
     });
 
+    it("accepts an isolated high-margin counterfactual mode over an unstructured reference peak", () => {
+        const checkpoint = event(949, 957, [], 953, false);
+        checkpoint.evidence.algorithmSources = ["reference_core_voting"];
+        const proposal = event(988, 1000, [
+            "counterfactual_window_concentration=0.527489",
+            "counterfactual_window_remote_margin=0.554390",
+            "counterfactual_coarse_overlap_consensus=0.25",
+            "counterfactual_pair_reference_count=0",
+        ], 1000, true);
+        proposal.evidence.locationEvidence = [{
+            source: "full_interval_counterfactual_locator",
+            startYear: 988,
+            endYear: 1000,
+            topYear: 1000,
+            referenceCount: 0,
+            concentration: 0.527489,
+            remoteMargin: 0.554390,
+            calibrated: false,
+        }];
+
+        expect(adjudicateLocatorProposal(checkpoint, proposal)).toMatchObject({
+            accepted: true,
+            reason: "accepted_detached_strong_mode",
+            detachedEvidenceStrong: true,
+            event: { startYear: 988, endYear: 1000 },
+        });
+    });
+
     it("lets a concentrated structured locator replace an unstructured remote checkpoint", () => {
         const checkpoint = event(1609, 1617, [], 1613, false);
         const proposal = event(1582, 1594, [

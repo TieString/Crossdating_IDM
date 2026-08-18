@@ -448,4 +448,43 @@ describe("counterfactual coarse-mode selection", () => {
         })).toBeNull();
     });
 
+    it("does not let a remote reference-core peak overwrite a strong counterfactual mode", () => {
+        const referenceBase = localPartialEvent([
+            "reference_vote_year=953",
+            "reference_vote_gain=0.102950",
+            "reference_vote_remote_margin=0.011424",
+            "reference_missingRing_peak_gain=0.036261",
+            "reference_falseRing_peak_gain=0.010376",
+            "reference_partialMove_peak_year=953",
+            "reference_partialMove_peak_gain=0.102950",
+        ]);
+        const referenceEvent: DiagnosisEvent = {
+            ...referenceBase,
+            startYear: 949,
+            endYear: 957,
+            shiftYears: -4,
+            rankedYears: [{
+                year: 953,
+                rank: 1,
+                score: 1,
+                evidenceTags: [],
+            }],
+            evidence: {
+                ...referenceBase.evidence,
+                algorithmSources: ["reference_core_voting"],
+                correlationGain: 0.102950,
+                lagBefore: -4,
+            },
+        };
+
+        expect(selectPartialMoveLocalConsensusRecenter({
+            event: referenceEvent,
+            correctionYears: -4,
+            proposedWindow: { startYear: 988, endYear: 1000 },
+            calibrationRule: "calibrated_default_13",
+            proposedModeConcentration: 0.527489,
+            proposedModeRemoteMargin: 0.554390,
+        })).toBeNull();
+    });
+
 });

@@ -2339,6 +2339,14 @@ const rankedEventYear = (event: DiagnosisEvent): number => (
     ))[0]?.year ?? Math.round((event.startYear + event.endYear) / 2)
 );
 
+export const hasAcceptedStrongLocatorWindow = (event: DiagnosisEvent): boolean => (
+    event.evidence.algorithmSources.includes("full_interval_counterfactual_locator")
+    && event.evidence.notes.some((note) => (
+        note === "locator_adjudication=accepted_detached_strong_mode"
+        || note === "locator_adjudication=accepted_overlapping_strong_mode"
+    ))
+);
+
 /** A lag-path head cannot relocate an independently evaluated unit event to a remote mode. */
 export const shouldPreserveCandidateBackedUnitFromRemoteSequentialHead = (
     detected: readonly DiagnosisEvent[],
@@ -11641,6 +11649,7 @@ export const makeDiagnosisEvents = (
                 )
             ));
             const frontierConsensusEvents = independentlyLocatedEvents.map((event) => {
+                if (hasAcceptedStrongLocatorWindow(event)) return event;
                 const terminalOwnsUncontestedLocation = stableTerminalSequentialUnit !== null
                     && stableBoundedPathFrontier === null
                     && localLagTransitionEvidence === null;

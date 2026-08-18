@@ -532,15 +532,26 @@ const hasReviewableMissingPartialInterpretation = (
     config: ReviewWindowDisplayConfig,
 ): boolean => {
     const ambiguity = event.interpretationAmbiguity;
+    const structuredStrongLocatorAlternative = event.evidence.algorithmSources.includes(
+        "full_interval_counterfactual_locator",
+    )
+        && event.evidence.notes.includes(
+            "locator_adjudication=accepted_detached_strong_mode",
+        )
+        && (numericNote(event, "counterfactual_window_concentration") ?? 0) >= 0.5
+        && (numericNote(event, "counterfactual_window_remote_margin") ?? 0) >= 0.3;
     if (!ambiguity
         || ambiguity.kind !== "missingRingsOrPartialMove"
         || event.eventType !== "partialMove"
         || ambiguity.alternative.eventType !== "missingRing"
-        || ![
+        || (![
             "exactSequentialStaircaseAlternative",
             "localizedTwoStepStaircaseAlternative",
             "structuredLocatorCumulativeLagAlternative",
         ].includes(ambiguity.evidence.interpretationBasis ?? "")
+            && !(structuredStrongLocatorAlternative
+                && ambiguity.evidence.interpretationBasis
+                    === "virtualSequentialFrontier"))
         || ambiguity.evidence.cumulativeShiftYears !== event.shiftYears
         || ambiguity.evidence.missingRingCount !== Math.abs(event.shiftYears ?? 0)) {
         return false;
