@@ -12138,10 +12138,16 @@ export const makeDiagnosisEvents = (
                 3,
                 0.5,
             )
-            : selectSelfContainedPositiveUnitChainFrontier(
-                rawPenaltyOneStablePath,
-                3,
-            );
+            : regularizedCrossPenaltyFalseRingFrontier
+                ? selectSelfContainedPositiveUnitChainFrontier(
+                    rawPenaltyOneStablePath,
+                    3,
+                    0.45,
+                )
+                : selectSelfContainedPositiveUnitChainFrontier(
+                    rawPenaltyOneStablePath,
+                    3,
+                );
         const candidateWholeLags = new Set(ownCandidates.flatMap((candidate) => (
             candidate.operationType === "SHIFT_RANGE"
             && candidate.mode === "wholeSeriesMove"
