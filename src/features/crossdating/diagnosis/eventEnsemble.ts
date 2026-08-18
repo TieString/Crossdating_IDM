@@ -5895,6 +5895,86 @@ export const selectStableBoundedLagPathFrontier = (
     };
 };
 
+/**
+ * A cumulative missing-ring staircase can look like one constant whole-series lag when several
+ * nearby unit transitions are compressed into a terminal partial transition. Two regularizations
+ * must agree on the complete, one-direction path before the newest local component may replace
+ * that whole-series alias.
+ */
+export const selectCumulativeMissingWholeAliasFrontier = (
+    frontier: StableBoundedLagPathFrontier | null,
+    wholeShiftYears: readonly number[],
+    targetEndYear: number,
+    minimumBarkDistanceYears = 14,
+): StableBoundedLagPathFrontier | null => {
+    if (!frontier
+        || frontier.baselineLag !== 0
+        || frontier.transitionCount < 2
+        || frontier.aggregateShiftYears > -2
+        || !wholeShiftYears.includes(frontier.aggregateShiftYears)) return null;
+    const transitionsAreCumulativeMissing = frontier.transitions.every(({ event, shiftYears }) => (
+        shiftYears < 0
+        && (event.eventType === "missingRing" || event.eventType === "partialMove")
+    ));
+    const hasResolvedUnitStep = frontier.transitions.some(({ event, shiftYears }) => (
+        event.eventType === "missingRing" && shiftYears === -1
+    ));
+    const newest = frontier.transitions[frontier.transitions.length - 1];
+    const newestLocation = newest?.event.evidence.locationEvidence?.find(
+        (entry) => entry.source === "bounded_complete_lag_path",
+    );
+    if (!transitionsAreCumulativeMissing
+        || !hasResolvedUnitStep
+        || !newest
+        || (newest.event.eventType !== "partialMove"
+            && newest.event.eventType !== "missingRing")
+        || (newest.event.eventType === "partialMove" && newest.shiftYears > -2)
+        || (newest.event.eventType === "missingRing" && newest.shiftYears !== -1)
+        || newest.event.evidence.lagAfter !== 0
+        || Math.abs(newest.shiftYears) >= Math.abs(frontier.aggregateShiftYears)
+        || newest.topYear > targetEndYear - minimumBarkDistanceYears
+        || newest.event.evidence.score < 20
+        || newest.event.evidence.scoreMargin < 0.2
+        || (newestLocation?.concentration ?? 0) < 0.5
+        || (newestLocation?.remoteMargin ?? 0) < 0.7) return null;
+    const event = withEvidenceLedger({
+        ...newest.event,
+        id: `${newest.event.id}-compressed-cumulative-missing-alias`,
+        ...(newest.event.eventType === "partialMove" ? {
+            shiftYears: newest.shiftYears,
+            shiftSide: "older" as const,
+        } : {
+            shiftYears: undefined,
+            shiftSide: undefined,
+        }),
+        evidence: {
+            ...newest.event.evidence,
+            algorithmSources: Array.from(new Set([
+                ...newest.event.evidence.algorithmSources,
+                "cumulative_missing_whole_alias_frontier",
+                ...(newest.event.eventType === "partialMove"
+                    ? ["compressed_cumulative_missing_alias_frontier"]
+                    : []),
+                "stable_multiscale_bounded_path_frontier",
+            ])).sort(),
+            notes: Array.from(new Set([
+                ...newest.event.evidence.notes,
+                `compressed_missing_alias_aggregate_shift=${frontier.aggregateShiftYears}`,
+                `compressed_missing_alias_frontier_shift=${newest.shiftYears}`,
+                `compressed_missing_alias_frontier_operation=${newest.event.eventType}`,
+                `compressed_missing_alias_transition_count=${frontier.transitionCount}`,
+                `compressed_missing_alias_frontier_year=${newest.topYear}`,
+                "compressed_missing_alias_replaces_whole=true",
+            ])),
+        },
+    });
+    return {
+        ...frontier,
+        event,
+        newestEvent: event,
+    };
+};
+
 /** Two regularizations agreeing on the same component is direct multi-event operation evidence. */
 export const stableFrontierHasRepeatedOperationSupport = (
     frontier: StableBoundedLagPathFrontier | null,
@@ -11879,6 +11959,60 @@ export const makeDiagnosisEvents = (
             zeroTerminalPenaltyHalfStablePath,
             0,
         );
+        const compactZeroTerminalWholeAliasFrontier = zeroTerminalWholeAliasFrontier
+            ?? selectStableBoundedLagPathFrontier(
+                zeroTerminalPenaltyOneStablePath,
+                zeroTerminalPenaltyHalfStablePath,
+                0,
+                5,
+            );
+        const zeroTerminalUnitWholeAliasFrontier = cumulativeUnitCandidateDepths
+            .filter((depth) => depth <= -2)
+            .map((depth) => selectStableTerminalUnitStaircaseFrontier(
+                zeroTerminalPenaltyOneStablePath,
+                zeroTerminalPenaltyHalfStablePath,
+                depth,
+                0,
+            ))
+            .find((frontier): frontier is StableTerminalUnitStaircaseFrontier => (
+                frontier !== null
+            )) ?? null;
+        const zeroTerminalUnitWholeAliasEvent = zeroTerminalUnitWholeAliasFrontier
+            ? (() => {
+                    const event = projectStableTerminalSequentialUnit(
+                        zeroTerminalUnitWholeAliasFrontier,
+                        diagnosis,
+                        ownCandidates,
+                    );
+                    return withEvidenceLedger({
+                        ...event,
+                        id: `${event.id}-whole-alias`,
+                        evidence: {
+                            ...event.evidence,
+                            algorithmSources: Array.from(new Set([
+                                ...event.evidence.algorithmSources,
+                                "cumulative_missing_whole_alias_frontier",
+                            ])).sort(),
+                            notes: Array.from(new Set([
+                                ...event.evidence.notes,
+                                `compressed_missing_alias_aggregate_shift=${
+                                    zeroTerminalUnitWholeAliasFrontier.aggregateShiftYears
+                                }`,
+                                "cumulative_missing_unit_chain_replaces_whole=true",
+                            ])),
+                        },
+                    });
+                })()
+            : null;
+        const cumulativeMissingWholeAliasFrontier =
+            selectCumulativeMissingWholeAliasFrontier(
+                compactZeroTerminalWholeAliasFrontier,
+                wholeBaselineHypotheses.flatMap((event) => {
+                    const shiftYears = wholeSeriesMoveShiftYears(event);
+                    return shiftYears === null ? [] : [shiftYears];
+                }),
+                diagnosis.targetRange.endYear,
+            );
         const decomposedWholeAliasFrontier = zeroTerminalWholeAliasFrontier
             ?.allTransitionsPartial
             && zeroTerminalWholeAliasFrontier.transitionCount >= 2
@@ -11955,6 +12089,7 @@ export const makeDiagnosisEvents = (
                 )
             : [];
         const stableMultiscaleBoundedFrontier = decomposedWholeAliasFrontier
+            ?? cumulativeMissingWholeAliasFrontier
             ?? zeroTerminalLocalPartialFrontier
             ?? stableStrongFrontier
             ?? operationAnchoredRegularizedAggregate
@@ -12038,6 +12173,8 @@ export const makeDiagnosisEvents = (
             ?? crossPenaltyExactPartialCheckpoint
             ?? regularizedPartialConsensusCheckpoint
             ?? terminalCompatibleParsimoniousPartialCheckpoint
+            ?? zeroTerminalUnitWholeAliasEvent
+            ?? cumulativeMissingWholeAliasFrontier?.event
             ?? recoveredStableBoundedPathFrontier
             ?? regularizedPartialOperationConsensus;
         const stableFrontierHasIndependentOperationSupport =
@@ -12092,6 +12229,9 @@ export const makeDiagnosisEvents = (
                 || stableBoundedPathFrontier.evidence.algorithmSources.includes(
                     "split_repeated_partial_component_frontier",
                 )
+                || stableBoundedPathFrontier.evidence.algorithmSources.includes(
+                    "compressed_cumulative_missing_alias_frontier",
+                )
                 ||
                 terminalCompatibleParsimoniousPartialCheckpoint !== null
                 || regularizedPartialConsensusCheckpoint !== null
@@ -12107,6 +12247,10 @@ export const makeDiagnosisEvents = (
                 stableBoundedPathFrontier,
                 candidateEvents,
             );
+        const cumulativeMissingAliasOwnsOperation = stableBoundedPathFrontier
+            ?.evidence.algorithmSources.includes(
+                "cumulative_missing_whole_alias_frontier",
+            ) ?? false;
         const decisiveExactPartialHypotheses = [
             ...boundedPathEvents,
             ...displayed,
@@ -12853,7 +12997,9 @@ export const makeDiagnosisEvents = (
             || stableTerminalSequentialUnit
         )
             && !terminalCompatibleParsimoniousPartialCheckpoint
-            && !stableFrontierHasIndependentOperationSupport) {
+            && !stableFrontierHasIndependentOperationSupport
+            && !stablePartialPathOwnsOperation
+            && !cumulativeMissingAliasOwnsOperation) {
             // Establish the global coordinate frame before interpreting a cumulative terminal
             // staircase. The next diagnosis can localize the local step on that fixed baseline.
             return finalize([dominantWholeSeriesBaseline], [], false);

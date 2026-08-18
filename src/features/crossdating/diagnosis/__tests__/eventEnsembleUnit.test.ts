@@ -52,6 +52,7 @@ import {
     selectRepeatedPartialComponentCheckpoint,
     selectCrossPenaltyExactPartialCheckpoint,
     selectCrossPenaltyFalseRingFrontier,
+    selectCumulativeMissingWholeAliasFrontier,
     selectSplitRepeatedPartialComponentCheckpoint,
     stableFrontierHasRepeatedOperationSupport,
     selectLatentEndpointWholeFrame,
@@ -3885,6 +3886,98 @@ describe("selectCumulativePartialFrontier", () => {
             stronger,
             regularized,
         )).toBeNull();
+    });
+
+    it("decomposes a compressed cumulative missing path before its whole-series alias", () => {
+        const missingAt = (year: number): DiagnosisEvent => {
+            const event = pathEvent(-1, -4, -3, year, 60);
+            event.eventType = "missingRing";
+            delete event.shiftYears;
+            delete event.shiftSide;
+            return event;
+        };
+        const compressedAt = (year: number): DiagnosisEvent => {
+            const event = pathEvent(-3, -3, 0, year, 60);
+            event.evidence.scoreMargin = 0.4;
+            event.evidence.locationEvidence = [{
+                source: "bounded_complete_lag_path",
+                startYear: year - 6,
+                endYear: year + 6,
+                topYear: year,
+                referenceCount: 20,
+                concentration: 0.58,
+                remoteMargin: 1.1,
+                calibrated: false,
+            }];
+            return event;
+        };
+        const frontier = selectStableBoundedLagPathFrontier(
+            boundedPath([missingAt(1607), compressedAt(1636)]),
+            boundedPath([missingAt(1608), compressedAt(1637)]),
+        );
+
+        expect(selectCumulativeMissingWholeAliasFrontier(
+            frontier,
+            [-4],
+            1751,
+        )).toMatchObject({
+            aggregateShiftYears: -4,
+            event: {
+                eventType: "partialMove",
+                shiftYears: -3,
+                rankedYears: [{ year: 1636 }],
+                evidence: {
+                    algorithmSources: expect.arrayContaining([
+                        "compressed_cumulative_missing_alias_frontier",
+                    ]),
+                },
+            },
+        });
+        expect(selectCumulativeMissingWholeAliasFrontier(
+            frontier,
+            [-11],
+            1751,
+        )).toBeNull();
+
+        const unitAt = (lagBefore: number, year: number): DiagnosisEvent => {
+            const event = pathEvent(-1, lagBefore, lagBefore + 1, year, 55);
+            event.eventType = "missingRing";
+            delete event.shiftYears;
+            delete event.shiftSide;
+            event.evidence.scoreMargin = 0.35;
+            event.evidence.locationEvidence = [{
+                source: "bounded_complete_lag_path",
+                startYear: year - 6,
+                endYear: year + 6,
+                topYear: year,
+                referenceCount: 20,
+                concentration: 0.72,
+                remoteMargin: 1.4,
+                calibrated: false,
+            }];
+            return event;
+        };
+        const unitFrontier = selectStableBoundedLagPathFrontier(
+            boundedPath([unitAt(-2, 1607), unitAt(-1, 1616)]),
+            boundedPath([unitAt(-2, 1608), unitAt(-1, 1617)]),
+            0,
+            5,
+        );
+        expect(selectCumulativeMissingWholeAliasFrontier(
+            unitFrontier,
+            [-2],
+            1751,
+        )).toMatchObject({
+            event: {
+                eventType: "missingRing",
+                rankedYears: [{ year: 1616 }],
+                evidence: {
+                    algorithmSources: expect.arrayContaining([
+                        "cumulative_missing_whole_alias_frontier",
+                    ]),
+                },
+            },
+        });
     });
 
     it("leaves compact unit aggregates and adjacent partial-plus-unit amplitudes to serial recovery", () => {

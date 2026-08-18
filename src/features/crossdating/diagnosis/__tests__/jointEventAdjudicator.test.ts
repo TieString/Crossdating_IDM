@@ -139,6 +139,57 @@ describe("joint event adjudicator", () => {
         );
     });
 
+    it("keeps a verified compressed missing frontier over its matching whole alias", () => {
+        const whole = {
+            ...event("path-fixed-whole", "wholeSeriesMove", 1415, 1751, 1751),
+            shiftYears: -4,
+        };
+        whole.evidence.notes = [
+            "candidate_hard_gate_passed",
+            "whole_baseline_source=path_fixed_side_lag",
+            "path_fixed_side_lag=-4",
+        ];
+        const compressed = event("compressed-missing", "partialMove", 1630, 1642, 1636, 60);
+        compressed.shiftYears = -3;
+        compressed.evidence.lagBefore = -3;
+        compressed.evidence.lagAfter = 0;
+        compressed.evidence.algorithmSources = [
+            "bounded_complete_lag_path",
+            "compressed_cumulative_missing_alias_frontier",
+        ];
+        compressed.evidence.notes = [
+            "bounded_path_complete_hypothesis=true",
+            "compressed_missing_alias_aggregate_shift=-4",
+        ];
+        compressed.evidence.locationEvidence = [{
+            source: "bounded_complete_lag_path",
+            startYear: 1630,
+            endYear: 1642,
+            topYear: 1636,
+            referenceCount: 20,
+            concentration: 0.58,
+            remoteMargin: 1.1,
+            calibrated: false,
+        }];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("detected", whole),
+            checkpoint("fused", whole),
+            checkpoint("retained", whole),
+            checkpoint("displayed", whole),
+            { stage: "final", authority: "selected", event: compressed },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            event: {
+                id: "compressed-missing",
+                eventType: "partialMove",
+                shiftYears: -3,
+            },
+        });
+    });
+
     it("keeps an exact local transition that lands on a durable whole frame", () => {
         const whole = {
             ...event("path-fixed-whole", "wholeSeriesMove", 1600, 2000, 2000),
@@ -189,6 +240,59 @@ describe("joint event adjudicator", () => {
             },
         });
     });
+
+    it.each(["falseRing", "partialMove"] as const)(
+        "offers a diagnosed %s after the user excludes a durable whole frame",
+        (eventType) => {
+            const whole = {
+                ...event("path-fixed-whole", "wholeSeriesMove", 1600, 2000, 2000),
+                shiftYears: -11,
+            };
+            whole.evidence.notes = [
+                "candidate_hard_gate_passed",
+                "whole_baseline_source=path_fixed_side_lag",
+                "path_fixed_side_lag=-11",
+                "path_fixed_side_event_type=falseRing",
+                "path_fixed_side_transition=-10->-11",
+                "path_fixed_side_newer_context_years=158",
+            ];
+            const local = event(`local-${eventType}`, eventType, 1819, 1825, 1822, 10);
+            local.evidence.lagBefore = eventType === "falseRing" ? 1 : -6;
+            local.evidence.lagAfter = 0;
+            local.evidence.algorithmSources = ["bounded_complete_lag_path"];
+            local.evidence.notes = [
+                "bounded_path_complete_hypothesis=true",
+                "bounded_path_location_concentration=0.8",
+            ];
+            local.evidence.locationEvidence = [{
+                source: "bounded_complete_lag_path",
+                startYear: 1819,
+                endYear: 1825,
+                topYear: 1822,
+                referenceCount: 12,
+                concentration: 0.8,
+                remoteMargin: 0.6,
+                calibrated: false,
+            }];
+
+            const decision = adjudicateJointEventHypotheses("TARGET", [
+                checkpoint("detected", whole),
+                checkpoint("fused", whole),
+                checkpoint("retained", whole),
+                checkpoint("displayed", whole),
+                { stage: "final", authority: "selected", event: local },
+            ]);
+
+            expect(decision.event).toMatchObject({
+                eventType: "wholeSeriesMove",
+                shiftYears: -11,
+                interpretationAmbiguity: {
+                    kind: "wholeSeriesMoveOrLocalEvent",
+                    alternative: { eventType },
+                },
+            });
+        },
+    );
 
     it("uses a stronger global whole candidate over an unsupported off-by-one frame", () => {
         const pathFixed = {
@@ -3182,7 +3286,7 @@ describe("joint event adjudicator", () => {
         ).toMatchObject({ year: 1990, rank: 1 });
     });
 
-    it.each([-2, -3] as const)(
+    it.each([-2, -3, -4, -11, -50] as const)(
         "exposes one reviewed missing-ring step for a terminal %i-year whole shift",
         (shiftYears) => {
             const whole = event(`terminal-${Math.abs(shiftYears)}`, "wholeSeriesMove", 1732, 1994, 0);
@@ -3253,7 +3357,7 @@ describe("joint event adjudicator", () => {
         expect(alternative?.rankedYears[0]).toMatchObject({ year: 1864, rank: 1 });
     });
 
-    it("does not expose the missing-ring shortcut for a four-year whole shift", () => {
+    it("exposes the missing-ring review for a four-year whole shift", () => {
         const whole = event("terminal-4", "wholeSeriesMove", 1732, 1994, 0);
         whole.shiftYears = -4;
         whole.evidence.lagBefore = -4;
@@ -3272,8 +3376,14 @@ describe("joint event adjudicator", () => {
         expect(decision.event).toMatchObject({
             eventType: "wholeSeriesMove",
             shiftYears: -4,
+            interpretationAmbiguity: {
+                kind: "wholeSeriesMoveOrMissingRing",
+                alternative: {
+                    id: "endpoint-4",
+                    eventType: "missingRing",
+                },
+            },
         });
-        expect(decision.event?.interpretationAmbiguity).toBeUndefined();
     });
 
     it("ignores a remote candidate but retains a constrained bark-end missing review", () => {

@@ -9,6 +9,7 @@ import {
 } from "./evidenceLedger";
 import {
     attachEndpointWholeMissingInterpretation,
+    attachWholeLocalEventInterpretation,
     makeEndpointMissingReviewFromWhole,
 } from "./endpointWholeMissingInterpretation";
 import {
@@ -1520,6 +1521,22 @@ const selectDurableWholeFrame = (
     if (!frame) return null;
     const frameEvent = representative(frame).event;
     const frameLag = frameEvent.shiftYears!;
+    const compressedMissingAlias = selectedFinalClusters.filter((cluster) => {
+        const event = representative(cluster).event;
+        return (event.eventType === "partialMove" || event.eventType === "missingRing")
+            && event.evidence.algorithmSources.includes(
+                "cumulative_missing_whole_alias_frontier",
+            )
+            && event.evidence.lagAfter === 0
+            && noteNumber(event, "compressed_missing_alias_aggregate_shift=") === frameLag
+            && strongBoundedPathLocation(event) !== null;
+    }).sort((left, right) => (
+        eventLocationQuality(representative(right).event)
+            - eventLocationQuality(representative(left).event)
+        || confidenceScore(representative(right).event)
+            - confidenceScore(representative(left).event)
+    ))[0];
+    if (compressedMissingAlias) return compressedMissingAlias;
     const compatibleLocal = allFinalClusters.filter((cluster) => {
         const event = representative(cluster).event;
         return event.eventType !== "wholeSeriesMove"
@@ -1802,13 +1819,11 @@ const ENDPOINT_MISSING_CLAIMS = new Set<DiagnosisEvidenceClaim>([
     "whole_baseline_exhausted_by_missing_staircase",
 ]);
 
-type ReviewableWholeMissingShift = -1 | -2 | -3;
-
 const reviewableWholeMissingShift = (
     event: DiagnosisEvent,
-): ReviewableWholeMissingShift | null => {
+): number | null => {
     const shift = wholeSeriesMoveShiftYears(event);
-    return shift === -1 || shift === -2 || shift === -3 ? shift : null;
+    return shift !== null && Number.isInteger(shift) && shift < 0 ? shift : null;
 };
 
 const endpointMissingAuthority = (event: DiagnosisEvent): number => {
@@ -1866,6 +1881,45 @@ const selectEndpointMissingInterpretation = (
         .map(({ event }) => event)
         [0] ?? null;
 };
+
+const localInterpretationAuthority = (
+    checkpoint: DiagnosisReviewEventCheckpoint,
+): number => {
+    const { event } = checkpoint;
+    if (checkpoint.stage === "final") {
+        return checkpoint.authority === "selected" ? 7 : 6;
+    }
+    if (strongBoundedPathLocation(event) !== null) return 5;
+    if (checkpoint.stage === "displayed" || checkpoint.stage === "retained") return 2;
+    return 0;
+};
+
+/** Selects one already diagnosed local hypothesis after the user excludes the whole frame. */
+const selectWholeLocalInterpretation = (
+    clusters: readonly HypothesisCluster[],
+): DiagnosisEvent | null => clusters.flatMap((cluster) => cluster.checkpoints)
+    .filter((checkpoint) => {
+        const { event } = checkpoint;
+        const width = event.endYear - event.startYear + 1;
+        return event.eventType !== "wholeSeriesMove"
+            && ENDPOINT_REVIEW_WIDTHS.has(width)
+            && (event.eventType !== "missingRing"
+                || endpointMissingAuthority(event) >= 0
+                || strongBoundedPathLocation(event) !== null)
+            && localInterpretationAuthority(checkpoint) > 0;
+    })
+    .sort((left, right) => (
+        localInterpretationAuthority(right) - localInterpretationAuthority(left)
+        || (right.event.eventType === "missingRing"
+            ? endpointMissingAuthority(right.event) : 0)
+            - (left.event.eventType === "missingRing"
+                ? endpointMissingAuthority(left.event) : 0)
+        || eventLocationQuality(right.event) - eventLocationQuality(left.event)
+        || confidenceScore(right.event) - confidenceScore(left.event)
+        || (topYear(right.event) ?? Number.NEGATIVE_INFINITY)
+            - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
+    ))
+    .map(({ event }) => event)[0] ?? null;
 
 const isProtectedCandidateFrontier = (cluster: HypothesisCluster): boolean => (
     cluster.checkpoints.some(({ event }) => (
@@ -2603,32 +2657,59 @@ export const adjudicateJointEventHypotheses = (
     const endpointWholeShift = baseSelectedEvent
         ? reviewableWholeMissingShift(baseSelectedEvent)
         : null;
-    const endpointMissing = baseSelectedEvent
+    const diagnosedLocalEvent = endpointWholeShift !== null
+        ? selectWholeLocalInterpretation(clusters)
+        : null;
+    const endpointMissingInterpretation = baseSelectedEvent
         ? selectEndpointMissingInterpretation(clusters, baseSelectedEvent)
+        : null;
+    const endpointLocalEvent = baseSelectedEvent
+        ? endpointMissingInterpretation
+            ?? diagnosedLocalEvent
             ?? makeEndpointMissingReviewFromWhole(baseSelectedEvent)
         : null;
-    const endpointDistance = baseSelectedEvent && endpointMissing
-        ? baseSelectedEvent.endYear - endpointMissing.endYear
+    const endpointDistance = baseSelectedEvent && endpointLocalEvent
+        ? baseSelectedEvent.endYear - endpointLocalEvent.endYear
         : null;
-    const endpointResolvedEvent = baseSelectedEvent && endpointMissing && endpointWholeShift
-        ? endpointDistance !== null
+    const endpointResolvedEvent = baseSelectedEvent && endpointLocalEvent && endpointWholeShift
+        ? endpointLocalEvent.eventType === "missingRing"
+            && endpointMissingInterpretation === endpointLocalEvent
+            && endpointDistance !== null
             && endpointDistance > MAX_WHOLE_MISSING_AMBIGUITY_DISTANCE_YEARS
-            ? endpointMissing
-            : attachEndpointWholeMissingInterpretation(
-                baseSelectedEvent,
-                endpointMissing,
-                {
-                    wholeShiftYears: endpointWholeShift,
-                    endpointDistanceYears: endpointDistance ?? 0,
-                    missingWindowWidth: (
-                        endpointMissing.endYear - endpointMissing.startYear + 1
-                    ) as 5 | 7 | 9 | 13,
-                    operationScoreMargin: operationMargin,
-                    finalEvidenceClaims: [...evidenceClaimsFor(endpointMissing)]
-                        .filter((claim) => ENDPOINT_MISSING_CLAIMS.has(claim))
-                        .sort(),
-                },
-            )
+                ? endpointLocalEvent
+                : endpointLocalEvent.eventType === "missingRing"
+                    ? attachEndpointWholeMissingInterpretation(
+                        baseSelectedEvent,
+                        endpointLocalEvent,
+                        {
+                            wholeShiftYears: endpointWholeShift,
+                            endpointDistanceYears: endpointDistance ?? 0,
+                            missingWindowWidth: (
+                                endpointLocalEvent.endYear - endpointLocalEvent.startYear + 1
+                            ) as 5 | 7 | 9 | 13,
+                            operationScoreMargin: operationMargin,
+                            finalEvidenceClaims: [...evidenceClaimsFor(endpointLocalEvent)]
+                                .filter((claim) => ENDPOINT_MISSING_CLAIMS.has(claim))
+                                .sort(),
+                        },
+                    )
+                    : attachWholeLocalEventInterpretation(
+                        baseSelectedEvent,
+                        endpointLocalEvent,
+                        {
+                            wholeShiftYears: endpointWholeShift,
+                            localEventType: endpointLocalEvent.eventType as Exclude<
+                                DiagnosisEvent["eventType"],
+                                "wholeSeriesMove"
+                            >,
+                            localWindowWidth: (
+                                endpointLocalEvent.endYear - endpointLocalEvent.startYear + 1
+                            ) as 5 | 7 | 9 | 13,
+                            localEvidenceSource: "diagnosed",
+                            operationScoreMargin: operationMargin,
+                            finalEvidenceClaims: [...evidenceClaimsFor(endpointLocalEvent)].sort(),
+                        },
+                    )
         : baseSelectedEvent;
     const evidenceLocatedEvent = endpointResolvedEvent
         ? projectUnsupportedLocationToStrongBoundedPath(endpointResolvedEvent)

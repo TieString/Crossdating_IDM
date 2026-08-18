@@ -172,9 +172,18 @@ export type DiagnosisMissingPartialInterpretationEvidence = {
 };
 
 export type DiagnosisWholeMissingInterpretationEvidence = {
-    wholeShiftYears: -1 | -2 | -3;
+    wholeShiftYears: number;
     endpointDistanceYears: number;
     missingWindowWidth: 5 | 7 | 9 | 13;
+    operationScoreMargin: number | null;
+    finalEvidenceClaims: DiagnosisEvidenceClaim[];
+};
+
+export type DiagnosisWholeLocalInterpretationEvidence = {
+    wholeShiftYears: number;
+    localEventType: Exclude<DiagnosisEventType, "wholeSeriesMove">;
+    localWindowWidth: 5 | 7 | 9 | 13;
+    localEvidenceSource: "diagnosed" | "syntheticEndpointReview";
     operationScoreMargin: number | null;
     finalEvidenceClaims: DiagnosisEvidenceClaim[];
 };
@@ -189,6 +198,11 @@ export type DiagnosisEventInterpretationAmbiguity =
         kind: "wholeSeriesMoveOrMissingRing";
         alternative: DiagnosisEvent;
         evidence: DiagnosisWholeMissingInterpretationEvidence;
+    }
+    | {
+        kind: "wholeSeriesMoveOrLocalEvent";
+        alternative: DiagnosisEvent;
+        evidence: DiagnosisWholeLocalInterpretationEvidence;
     };
 
 /** Internal path evidence only. It must never become a user-facing event or review window. */

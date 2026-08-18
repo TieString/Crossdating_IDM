@@ -464,17 +464,23 @@ describe("DiagnosisEventPanel", () => {
       events: [whole],
     }));
 
-    expect(html).toContain("也可能是缺轮");
-    expect(html).toContain("按可能缺轮复核");
+    expect(html).toContain("若树皮年或采样年已确认，可排除整条序列移动");
+    expect(html).toContain("排除整体移动，复核局部事件");
     expect(html).not.toContain("按连续缺段处理");
     expect(html).toContain("整条序列向老年份移动 1 年");
     expect(html).not.toContain("1768-2002");
     expect(html).not.toContain("#1");
     expect(html).not.toContain("复核年份");
     expect(selectDiagnosisEventInterpretation(whole, "alternative")).toBe(missing);
+
+    const alternativeHtml = renderToStaticMarkup(createElement(DiagnosisEventPanel, {
+      events: [whole],
+      selectedEventId: missing.id,
+    }));
+    expect(alternativeHtml).toContain("恢复整体移动解释");
   });
 
-  it.each([-2, -3] as const)(
+  it.each([-2, -3, -4, -11, -50] as const)(
     "labels a %i-year whole shift as an iterative missing-ring review",
     (shiftYears) => {
       const missing: DiagnosisEvent = {
@@ -526,9 +532,9 @@ describe("DiagnosisEventPanel", () => {
       }));
       const count = Math.abs(shiftYears);
 
-      expect(html).toContain("按可能缺轮复核");
+      expect(html).toContain("排除整体移动，复核局部事件");
       expect(html).not.toContain(`（1/${count}）`);
-      expect(html).toContain(`整体移动 ${count} 年也可能由多个缺轮逐步累积`);
+      expect(html).toContain("重新检查局部缺轮、伪轮或连续缺段");
       expect(html).toContain(`整条序列向老年份移动 ${count} 年`);
     },
   );

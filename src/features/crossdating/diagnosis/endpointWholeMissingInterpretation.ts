@@ -1,10 +1,10 @@
-/** Review-only ambiguity between a terminal whole-series -1..-3 lag and one next missing-ring step. */
+/** Review-only ambiguity between a negative whole-series lag and one next missing-ring step. */
 import type {
     DiagnosisEvent,
+    DiagnosisWholeLocalInterpretationEvidence,
     DiagnosisWholeMissingInterpretationEvidence,
 } from "./types";
 
-const REVIEWABLE_WHOLE_SHIFTS = new Set([-1, -2, -3]);
 const SYNTHETIC_ENDPOINT_WINDOW_WIDTH = 13;
 const ALLOWED_REVIEW_WINDOW_WIDTHS = [5, 7, 9, 13] as const;
 
@@ -101,7 +101,8 @@ export const makeEndpointMissingReviewFromWhole = (
     const shiftYears = whole.shiftYears ?? null;
     if (whole.eventType !== "wholeSeriesMove"
         || shiftYears === null
-        || !REVIEWABLE_WHOLE_SHIFTS.has(shiftYears)) return null;
+        || !Number.isInteger(shiftYears)
+        || shiftYears >= 0) return null;
     const range = endpointReviewRange(whole, SYNTHETIC_ENDPOINT_WINDOW_WIDTH);
     return {
         ...whole,
@@ -179,3 +180,32 @@ export const attachEndpointWholeMissingInterpretation = (
         },
     };
 };
+
+export const attachWholeLocalEventInterpretation = (
+    whole: DiagnosisEvent,
+    local: DiagnosisEvent,
+    evidence: DiagnosisWholeLocalInterpretationEvidence,
+): DiagnosisEvent => ({
+    ...whole,
+    interpretationAmbiguity: {
+        kind: "wholeSeriesMoveOrLocalEvent",
+        alternative: {
+            ...local,
+            interpretationAmbiguity: undefined,
+            stale: whole.stale || local.stale ? true : undefined,
+            evidence: {
+                ...local.evidence,
+                algorithmSources: Array.from(new Set([
+                    ...local.evidence.algorithmSources,
+                    "whole_local_event_interpretation",
+                ])).sort(),
+                notes: Array.from(new Set([
+                    ...local.evidence.notes,
+                    `whole_local_interpretation_type=${local.eventType}`,
+                    `whole_local_interpretation_shift=${evidence.wholeShiftYears}`,
+                ])),
+            },
+        },
+        evidence,
+    },
+});
