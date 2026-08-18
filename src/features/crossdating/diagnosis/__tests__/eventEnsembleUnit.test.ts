@@ -42,6 +42,7 @@ import {
     selectRegularizedPartialOperationConsensus,
     selectRegularizedPartialConsensusCheckpoint,
     stableFrontierHasRepeatedOperationSupport,
+    selectLatentEndpointWholeFrame,
     selectUnobservedFixedSideWholeLag,
     selectCandidateBackedCumulativeUnitFrontier,
     reconcileCumulativeUnitOperationWithCompletedLocation,
@@ -3129,6 +3130,130 @@ describe("selectCumulativePartialFrontier", () => {
             makePath(2006),
             makePath(2007),
             new Set([-57]),
+        )).toBeNull();
+    });
+
+    it("projects a stable bark-end partial alias into a latent whole frame", () => {
+        const makePath = (drift: number): BoundedLagStateEventSet => {
+            const endpoint = pathEvent(-50, -50, 0, 2048 + drift);
+            endpoint.startYear = 2039 + drift;
+            endpoint.endYear = 2051;
+            endpoint.evidence.algorithmSources = ["bounded_complete_lag_path"];
+            const local = pathEvent(-6, -56, -50, 1840 + drift);
+            local.evidence.algorithmSources = ["bounded_complete_lag_path"];
+            return boundedPath([endpoint, local]);
+        };
+
+        const selected = selectLatentEndpointWholeFrame(
+            makePath(0),
+            makePath(1),
+            { startYear: 1584, endYear: 2051 },
+        );
+
+        expect(selected).toMatchObject({
+            eventType: "wholeSeriesMove",
+            shiftYears: -50,
+            startYear: 1584,
+            endYear: 2051,
+            rankedYears: [],
+            evidence: {
+                lagBefore: -50,
+                lagAfter: -50,
+            },
+        });
+        expect(selected?.evidence.algorithmSources).toContain(
+            "latent_whole_fixed_side_frame",
+        );
+        expect(selected?.evidence.notes).toContain(
+            "latent_whole_support_type=partialMove",
+        );
+        expect(selected?.evidence.notes).toContain(
+            "latent_whole_frame_source=endpoint_transition_alias",
+        );
+    });
+
+    it("removes a bark-end unit alias before accepting an explicit whole state", () => {
+        const makePath = (drift: number): BoundedLagStateEventSet => {
+            const whole = wholeSeriesEvent(-21);
+            whole.shiftYears = -21;
+            whole.evidence.lagBefore = -21;
+            whole.evidence.lagAfter = -21;
+            const endpointFalse = falseRingEvent(2010, false);
+            endpointFalse.endYear = 2022;
+            endpointFalse.rankedYears = [{
+                year: 2019 + drift,
+                rank: 1,
+                score: 1,
+                evidenceTags: [],
+            }];
+            endpointFalse.evidence.lagBefore = -20;
+            endpointFalse.evidence.lagAfter = -21;
+            const localMissing = pathEvent(-1, -21, -20, 1839 + drift);
+            return boundedPath([whole, endpointFalse, localMissing]);
+        };
+
+        expect(selectLatentEndpointWholeFrame(
+            makePath(0),
+            makePath(1),
+            { startYear: 1580, endYear: 2022 },
+        )).toMatchObject({
+            eventType: "wholeSeriesMove",
+            shiftYears: -20,
+            evidence: {
+                lagBefore: -20,
+                lagAfter: -20,
+            },
+        });
+    });
+
+    it("keeps an explicit bounded whole frame ahead of its local transition", () => {
+        const makePath = (drift: number): BoundedLagStateEventSet => {
+            const whole = wholeSeriesEvent(-4);
+            whole.shiftYears = -4;
+            whole.evidence.lagBefore = -4;
+            whole.evidence.lagAfter = -4;
+            whole.evidence.algorithmSources = ["bounded_complete_lag_path"];
+            const local = pathEvent(-20, -24, -4, 1730 + drift);
+            local.evidence.algorithmSources = ["bounded_complete_lag_path"];
+            return boundedPath([whole, local]);
+        };
+
+        expect(selectLatentEndpointWholeFrame(
+            makePath(0),
+            makePath(1),
+            { startYear: 1474, endYear: 2004 },
+        )).toMatchObject({
+            eventType: "wholeSeriesMove",
+            shiftYears: -4,
+            startYear: 1474,
+            endYear: 2004,
+        });
+    });
+
+    it("does not invent a latent whole frame without a separated return transition", () => {
+        const endpoint = pathEvent(-50, -50, 0, 2048);
+        endpoint.startYear = 2039;
+        endpoint.endYear = 2051;
+        endpoint.evidence.algorithmSources = ["bounded_complete_lag_path"];
+
+        expect(selectLatentEndpointWholeFrame(
+            boundedPath([endpoint]),
+            boundedPath([endpoint]),
+            { startYear: 1584, endYear: 2051 },
+        )).toBeNull();
+    });
+
+    it("does not reinterpret an interior physical partial as a whole frame", () => {
+        const endpoint = pathEvent(-50, -50, 0, 1950);
+        endpoint.startYear = 1944;
+        endpoint.endYear = 1956;
+        endpoint.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        const local = pathEvent(-6, -56, -50, 1840);
+
+        expect(selectLatentEndpointWholeFrame(
+            boundedPath([endpoint, local]),
+            boundedPath([endpoint, local]),
+            { startYear: 1584, endYear: 2051 },
         )).toBeNull();
     });
 

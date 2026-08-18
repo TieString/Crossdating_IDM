@@ -163,6 +163,35 @@ describe("diagnosis evidence ledger", () => {
         expect(evidenceClaimsFor(whole)).not.toContain("whole_path_fixed_baseline");
     });
 
+    it("records a whole baseline resolved by a stable recent tail", () => {
+        const whole = event();
+        whole.eventType = "wholeSeriesMove";
+        whole.shiftYears = -4;
+        whole.evidence.notes.push(
+            "candidate_hard_gate_passed",
+            "whole_baseline_source=recent_tail_lag",
+            "recent_tail_lag=-4",
+            "recent_tail_path_lag=-4",
+            "recent_tail_support_count=4",
+            "recent_tail_total_count=4",
+            "recent_tail_median_r=0.82",
+            "recent_tail_path_margin=9.4",
+            "whole_state_newer_edge_support_fraction=1.0",
+            "whole_state_support_fraction=0.57",
+        );
+
+        expect(evidenceClaimsFor(whole)).toContain("whole_recent_tail_baseline");
+
+        whole.evidence.notes = whole.evidence.notes.map((note) => (
+            note === "recent_tail_support_count=4"
+                ? "recent_tail_support_count=2"
+                : note
+        ));
+        expect(evidenceClaimsFor(whole)).not.toContain(
+            "whole_recent_tail_baseline",
+        );
+    });
+
     it("is append-only and idempotent across repeated normalization", () => {
         const once = withEvidenceLedger(event());
         const twice = withEvidenceLedger(once);

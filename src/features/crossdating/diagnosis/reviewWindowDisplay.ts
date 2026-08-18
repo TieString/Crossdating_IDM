@@ -629,6 +629,7 @@ const selectAdjudicatedReviewWindowDisplay = (
                 && (
                     wholeClaims.has("whole_path_fixed_baseline")
                     || wholeClaims.has("whole_global_lag")
+                    || wholeClaims.has("whole_recent_tail_baseline")
                 )
             )
         );

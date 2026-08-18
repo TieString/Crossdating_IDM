@@ -130,6 +130,28 @@ const operationClaims = (event: DiagnosisEvent): DiagnosisEvidenceClaim[] => {
         && (event.shiftYears ?? 0) !== 0) {
         claims.push("whole_path_fixed_baseline");
     }
+    const recentTailLag = numberFromNotes(event, ["recent_tail_lag="]);
+    const recentTailPathLag = numberFromNotes(event, ["recent_tail_path_lag="]);
+    const recentTailSupport = numberFromNotes(event, ["recent_tail_support_count="]) ?? 0;
+    const recentTailTotal = numberFromNotes(event, ["recent_tail_total_count="]) ?? 0;
+    if (event.eventType === "wholeSeriesMove"
+        && tokens.has("whole_baseline_source=recent_tail_lag")
+        && tokens.has("candidate_hard_gate_passed")
+        && recentTailLag === event.shiftYears
+        && recentTailPathLag === event.shiftYears
+        && recentTailSupport >= 3
+        && recentTailTotal > 0
+        && recentTailSupport / recentTailTotal >= 0.9
+        && (numberFromNotes(event, ["recent_tail_median_r="])
+            ?? Number.NEGATIVE_INFINITY) >= 0.5
+        && (numberFromNotes(event, ["recent_tail_path_margin="])
+            ?? Number.NEGATIVE_INFINITY) >= 0.1
+        && (numberFromNotes(event, ["whole_state_newer_edge_support_fraction="])
+            ?? 0) >= 0.9
+        && (numberFromNotes(event, ["whole_state_support_fraction="])
+            ?? 0) >= 0.3) {
+        claims.push("whole_recent_tail_baseline");
+    }
     return claims;
 };
 

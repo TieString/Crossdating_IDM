@@ -277,6 +277,7 @@ const claimWeight: Record<DiagnosisEvidenceClaim, number> = {
     whole_global_lag: 0.6,
     whole_terminal_baseline: 0.9,
     whole_path_fixed_baseline: 0.9,
+    whole_recent_tail_baseline: 0.9,
     bounded_lag_state_path: 1.2,
 };
 
@@ -1476,6 +1477,7 @@ const WHOLE_FRAME_STAGES = new Set<DiagnosisReviewSourceStage>([
 
 const wholeFrameAuthority = (event: DiagnosisEvent): number => {
     const claims = evidenceClaimsFor(event);
+    if (claims.has("whole_recent_tail_baseline")) return 4;
     if (claims.has("whole_path_fixed_baseline")) return 3;
     if (claims.has("whole_terminal_baseline")) return 2;
     if (claims.has("whole_global_lag")) return 1;

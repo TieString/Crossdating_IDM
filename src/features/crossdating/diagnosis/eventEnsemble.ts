@@ -184,6 +184,7 @@ import type {
     NumericSeries,
     SeriesCoreDiagnosis,
     SharedZeroMarkerMode,
+    YearRange,
 } from "./types";
 
 export const INTERNAL_EVENT_PATH_CONFIG: Partial<EventPathConfig> = {
@@ -5570,6 +5571,189 @@ export const selectUnobservedFixedSideWholeLag = (
         : null;
 };
 
+type LatentEndpointWholeFrame = {
+    baselineLag: number;
+    frameEvent: DiagnosisEvent;
+    supportEvent: DiagnosisEvent;
+    frameYear: number | null;
+    source: "bounded_whole" | "endpoint_transition_alias";
+};
+
+const latentEndpointWholeFrameForPath = (
+    path: BoundedLagStateEventSet,
+    range: YearRange,
+    minimumBaselineMagnitude: number,
+    maximumEndpointTopDistanceYears: number,
+    minimumLocalSeparationYears: number,
+): LatentEndpointWholeFrame | null => {
+    const localSupportFor = (
+        baselineLag: number,
+        frameYear: number | null,
+    ): DiagnosisEvent | null => path.events.filter((event) => {
+        if (event.eventType === "wholeSeriesMove"
+            || event.evidence.lagAfter !== baselineLag) return false;
+        const year = rankedEventYear(event);
+        return frameYear === null
+            || frameYear - year >= minimumLocalSeparationYears;
+    }).sort((left, right) => (
+        rankedEventYear(right) - rankedEventYear(left)
+        || right.evidence.score - left.evidence.score
+    ))[0] ?? null;
+
+    const endpointAlias = path.events.filter((event) => {
+        const topYear = rankedEventYear(event);
+        const baselineLag = event.evidence.lagBefore;
+        return event.eventType !== "wholeSeriesMove"
+            && baselineLag !== null
+            && baselineLag <= -minimumBaselineMagnitude
+            && event.evidence.lagAfter !== baselineLag
+            && event.endYear >= range.endYear - 1
+            && range.endYear - topYear <= maximumEndpointTopDistanceYears;
+    }).sort((left, right) => (
+        rankedEventYear(right) - rankedEventYear(left)
+        || Math.abs(right.evidence.lagBefore ?? 0)
+            - Math.abs(left.evidence.lagBefore ?? 0)
+    ))[0];
+    const endpointBaseline = endpointAlias?.evidence.lagBefore ?? null;
+    if (endpointAlias && endpointBaseline !== null) {
+        const frameYear = rankedEventYear(endpointAlias);
+        const supportEvent = localSupportFor(endpointBaseline, frameYear);
+        if (supportEvent) return {
+            baselineLag: endpointBaseline,
+            frameEvent: endpointAlias,
+            supportEvent,
+            frameYear,
+            source: "endpoint_transition_alias",
+        };
+    }
+
+    const explicitWhole = path.events.filter((event) => (
+        event.eventType === "wholeSeriesMove"
+        && (event.shiftYears ?? 0) <= -minimumBaselineMagnitude
+    )).sort((left, right) => (
+        Math.abs(right.shiftYears ?? 0) - Math.abs(left.shiftYears ?? 0)
+    ))[0];
+    if (explicitWhole?.shiftYears !== undefined) {
+        const supportEvent = localSupportFor(explicitWhole.shiftYears, range.endYear);
+        if (supportEvent) return {
+            baselineLag: explicitWhole.shiftYears,
+            frameEvent: explicitWhole,
+            supportEvent,
+            frameYear: null,
+            source: "bounded_whole",
+        };
+    }
+    return null;
+};
+
+/**
+ * Converts a stable bark-end baseline-to-zero alias into a whole-series coordinate frame.
+ * Both regularizations must agree on the baseline, endpoint and a separated local transition
+ * whose untouched side returns to that same non-zero frame.
+ */
+export const selectLatentEndpointWholeFrame = (
+    regularizedPath: BoundedLagStateEventSet | null,
+    permissivePath: BoundedLagStateEventSet | null,
+    range: YearRange,
+    minimumBaselineMagnitude = 4,
+    maximumEndpointTopDistanceYears = 4,
+    minimumLocalSeparationYears = 14,
+    maximumYearDrift = 2,
+): DiagnosisEvent | null => {
+    if (!regularizedPath || !permissivePath
+        || regularizedPath.path.transitionGain < 8
+        || permissivePath.path.transitionGain < 8
+        || regularizedPath.path.runnerUpMargin < 0.25
+        || permissivePath.path.runnerUpMargin < 0.25) return null;
+    const regularized = latentEndpointWholeFrameForPath(
+        regularizedPath,
+        range,
+        minimumBaselineMagnitude,
+        maximumEndpointTopDistanceYears,
+        minimumLocalSeparationYears,
+    );
+    const permissive = latentEndpointWholeFrameForPath(
+        permissivePath,
+        range,
+        minimumBaselineMagnitude,
+        maximumEndpointTopDistanceYears,
+        minimumLocalSeparationYears,
+    );
+    if (!regularized || !permissive
+        || regularized.baselineLag !== permissive.baselineLag
+        || regularized.source !== permissive.source
+        || (
+            regularized.frameYear !== null
+            && permissive.frameYear !== null
+            && Math.abs(regularized.frameYear - permissive.frameYear) > maximumYearDrift
+        )
+        || regularized.supportEvent.eventType !== permissive.supportEvent.eventType
+        || regularized.supportEvent.evidence.lagBefore
+            !== permissive.supportEvent.evidence.lagBefore
+        || regularized.supportEvent.evidence.lagAfter
+            !== permissive.supportEvent.evidence.lagAfter
+        || Math.abs(
+            rankedEventYear(regularized.supportEvent)
+            - rankedEventYear(permissive.supportEvent)
+        ) > maximumYearDrift) return null;
+
+    const source = regularized.frameEvent;
+    const baselineLag = regularized.baselineLag;
+    const event: DiagnosisEvent = {
+        ...source,
+        id: `${source.seriesId}-latent-whole-${baselineLag}`,
+        eventType: "wholeSeriesMove",
+        startYear: range.startYear,
+        endYear: range.endYear,
+        rankedYears: [],
+        shiftYears: baselineLag,
+        confidenceLevel: Math.min(
+            regularizedPath.path.transitionGain,
+            permissivePath.path.transitionGain,
+        ) >= 12 ? "high" : "medium",
+        evidence: {
+            ...source.evidence,
+            algorithmSources: Array.from(new Set([
+                ...source.evidence.algorithmSources,
+                "latent_whole_fixed_side_frame",
+                "stable_multiscale_bounded_path_frontier",
+            ])).sort(),
+            score: Math.min(
+                regularizedPath.path.transitionGain,
+                permissivePath.path.transitionGain,
+            ),
+            scoreMargin: Math.min(
+                regularizedPath.path.runnerUpMargin,
+                permissivePath.path.runnerUpMargin,
+            ),
+            lagBefore: baselineLag,
+            lagAfter: baselineLag,
+            notes: Array.from(new Set([
+                ...source.evidence.notes,
+                "whole_baseline_source=latent_bark_endpoint_frame",
+                `latent_whole_baseline_lag=${baselineLag}`,
+                `latent_whole_frame_source=${regularized.source}`,
+                `latent_whole_endpoint_year=${regularized.frameYear ?? "whole"}`,
+                `latent_whole_support_type=${regularized.supportEvent.eventType}`,
+                `latent_whole_support_year=${rankedEventYear(
+                    regularized.supportEvent,
+                )}`,
+                `latent_whole_regularized_gain=${
+                    regularizedPath.path.transitionGain.toFixed(6)
+                }`,
+                `latent_whole_permissive_gain=${
+                    permissivePath.path.transitionGain.toFixed(6)
+                }`,
+            ])),
+        },
+        alternativeTypes: [],
+        seriesRange: { ...range },
+    };
+    delete event.shiftSide;
+    delete event.interpretationAmbiguity;
+    return event;
+};
+
 /**
  * A distant multi-event decomposition is authoritative only when two independently regularized
  * complete paths agree on every operation and changepoint. This prevents a long corrected older
@@ -10935,6 +11119,11 @@ export const makeDiagnosisEvents = (
                     parsimoniousStablePathMaxSegments,
                 )
             : null;
+        const latentEndpointWholeFrame = selectLatentEndpointWholeFrame(
+            rawPenaltyOneStablePath,
+            rawPenaltyHalfStablePath,
+            diagnosis.targetRange,
+        );
         const candidateWholeLags = new Set(ownCandidates.flatMap((candidate) => (
             candidate.operationType === "SHIFT_RANGE"
             && candidate.mode === "wholeSeriesMove"
@@ -11706,6 +11895,12 @@ export const makeDiagnosisEvents = (
             }
             return cachedSequentialMissing;
         };
+        if (latentEndpointWholeFrame) {
+            // Establish the shared non-zero coordinate frame before any local component.
+            // The two path penalties have already agreed on both the endpoint alias and a
+            // separated transition returning to this baseline.
+            return finalize([latentEndpointWholeFrame], [], false);
+        }
         if (unobservedFixedSideWholeBaseline
             && !completeUnitTransitionChainExplainsWholeShift(
                 passRawPathEvents.events,

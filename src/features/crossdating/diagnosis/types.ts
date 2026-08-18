@@ -51,6 +51,7 @@ export type DiagnosisEvidenceClaim =
     | "whole_global_lag"
     | "whole_terminal_baseline"
     | "whole_path_fixed_baseline"
+    | "whole_recent_tail_baseline"
     | "bounded_lag_state_path";
 
 export type DiagnosisPresenceEvidenceEntry = {
