@@ -1739,6 +1739,42 @@ describe("joint event adjudicator", () => {
         expect(decision.event).not.toHaveProperty("shiftYears");
     });
 
+    it("does not rewrite an already direction-calibrated terminal window", () => {
+        const terminal = event("terminal-missing", "missingRing", 1784, 1796, 1785);
+        terminal.evidence.algorithmSources = [
+            "candidate_anchored_negative_staircase",
+            "stable_terminal_unit_staircase_frontier",
+            "terminal_missing_ring_asymmetric_window",
+        ];
+        terminal.evidence.notes = [
+            "terminal_unit_staircase_depth=3",
+            "terminal_unit_staircase_aggregate_shift=-3",
+            "terminal_unit_staircase_boundary_year=1786",
+        ];
+        const partial = event("equivalent-partial", "partialMove", 1781, 1789, 1784);
+        partial.shiftYears = -3;
+        partial.shiftSide = "older";
+        partial.confidenceLevel = "high";
+        partial.evidence.lagBefore = -3;
+        partial.evidence.lagAfter = 0;
+        partial.evidence.correlationGain = 0.42;
+        partial.evidence.scoreMargin = 0.46;
+        partial.evidence.algorithmSources = [
+            "decisive_joint_operation_fusion",
+            "full_interval_counterfactual_scan",
+            "joint_year_operation_evidence",
+        ];
+
+        expect(adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("displayed", partial),
+            { ...checkpoint("final", terminal), authority: "selected" },
+        ]).event).toMatchObject({
+            eventType: "missingRing",
+            startYear: 1784,
+            endYear: 1796,
+        });
+    });
+
     it("does not use a weak partial hypothesis as terminal unit location", () => {
         const terminal = event("terminal-missing", "missingRing", 1814, 1822, 1818);
         terminal.evidence.algorithmSources = [

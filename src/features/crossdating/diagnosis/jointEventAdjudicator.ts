@@ -759,6 +759,10 @@ const projectTerminalUnitCompatibleLocation = (
         "stable_terminal_unit_staircase_frontier",
     ) || terminal.evidence.algorithmSources.includes(
         "terminal_unit_independent_location_projection",
+    ) || terminal.evidence.algorithmSources.includes(
+        "terminal_false_ring_asymmetric_window",
+    ) || terminal.evidence.algorithmSources.includes(
+        "terminal_missing_ring_asymmetric_window",
     )) return terminal;
     const aggregateShiftYears = noteNumber(
         terminal,
