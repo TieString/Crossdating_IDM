@@ -6656,6 +6656,95 @@ export const hasIndependentStableFrontierOperationSupport = (
         && (location?.concentration ?? 0) >= 0.75;
 };
 
+export const selectRepeatedPartialComponentCheckpoint = (
+    paths: readonly (BoundedLagStateEventSet | null)[],
+    minimumSeparationYears = 14,
+): DiagnosisEvent | null => {
+    const candidates = paths.flatMap((path) => {
+        if (!path
+            || path.path.transitionGain < 20
+            || path.path.runnerUpMargin < 0.12) return [];
+        const partialTransitions = path.events.flatMap((event) => {
+            const shiftYears = lagPathTransitionShift(event);
+            const topYear = event.rankedYears[0]?.year;
+            return event.eventType === "partialMove"
+                && shiftYears !== null
+                && shiftYears <= -2
+                && topYear !== undefined
+                ? [{ event, shiftYears, topYear }]
+                : [];
+        });
+        const groups = new Map<number, typeof partialTransitions>();
+        partialTransitions.forEach((transition) => {
+            const rows = groups.get(transition.shiftYears) ?? [];
+            rows.push(transition);
+            groups.set(transition.shiftYears, rows);
+        });
+        return [...groups.entries()].flatMap(([componentShift, rows]) => {
+            const ordered = [...rows].sort((left, right) => left.topYear - right.topYear);
+            if (ordered.length < 2 || ordered.some((row, index) => (
+                index > 0
+                && row.topYear - ordered[index - 1]!.topYear < minimumSeparationYears
+            ))) return [];
+            const newestComponent = ordered[ordered.length - 1]!;
+            const newestPartial = [...partialTransitions].sort((left, right) => (
+                right.topYear - left.topYear
+            ))[0]!;
+            const multiple = newestPartial.shiftYears / componentShift;
+            const locationSource = newestPartial.topYear >= newestComponent.topYear
+                && Number.isInteger(multiple)
+                && multiple >= 1
+                && multiple <= 2
+                ? newestPartial
+                : newestComponent;
+            const fixedLag = locationSource.event.evidence.lagAfter ?? 0;
+            const event = withEvidenceLedger({
+                ...locationSource.event,
+                id: `${locationSource.event.id}-repeated-component-${componentShift}`,
+                shiftYears: componentShift,
+                shiftSide: "older" as const,
+                evidence: {
+                    ...locationSource.event.evidence,
+                    algorithmSources: Array.from(new Set([
+                        ...locationSource.event.evidence.algorithmSources,
+                        "repeated_partial_component_frontier",
+                    ])).sort(),
+                    score: path.path.transitionGain,
+                    scoreMargin: path.path.runnerUpMargin,
+                    lagBefore: fixedLag + componentShift,
+                    lagAfter: fixedLag,
+                    notes: Array.from(new Set([
+                        ...locationSource.event.evidence.notes,
+                        `repeated_partial_component_shift=${componentShift}`,
+                        `repeated_partial_component_count=${ordered.length}`,
+                        `repeated_partial_component_years=${ordered.map(
+                            ({ topYear }) => topYear,
+                        ).join(",")}`,
+                        `repeated_partial_location_source_shift=${
+                            locationSource.shiftYears
+                        }`,
+                        `repeated_partial_path_gain=${path.path.transitionGain.toFixed(6)}`,
+                        `repeated_partial_path_margin=${path.path.runnerUpMargin.toFixed(6)}`,
+                    ])),
+                },
+            });
+            return [{
+                event,
+                count: ordered.length,
+                topYear: locationSource.topYear,
+                margin: path.path.runnerUpMargin,
+                gain: path.path.transitionGain,
+            }];
+        });
+    }).sort((left, right) => (
+        right.count - left.count
+        || right.topYear - left.topYear
+        || right.margin - left.margin
+        || right.gain - left.gain
+    ));
+    return candidates[0]?.event ?? null;
+};
+
 /**
  * A mixed path cannot be explained by one same-direction missing staircase. When both path
  * penalties retain the same strong newest partial, keep that physical/equivalent explanation
@@ -11434,6 +11523,11 @@ export const makeDiagnosisEvents = (
                 candidateEvents,
                 terminalBaselineIsUnsupportedAlias ? 0 : terminalBaselineLag,
             );
+        const repeatedPartialComponentCheckpoint =
+            selectRepeatedPartialComponentCheckpoint([
+                rawPenaltyTwoConservativePath,
+                rawPenaltyOneStablePath,
+            ]);
         const stableStrongFrontier = strongMultiscaleBoundedFrontier
             ?? conservativeStrongMultiscaleBoundedFrontier;
         const zeroTerminalPenaltyOneStablePath = needsStableMultiscaleBoundedPath
@@ -11603,7 +11697,8 @@ export const makeDiagnosisEvents = (
             diagnosis.targetRange,
             candidateEvents,
         );
-        const stableBoundedPathFrontier = regularizedPartialConsensusCheckpoint
+        const stableBoundedPathFrontier = repeatedPartialComponentCheckpoint
+            ?? regularizedPartialConsensusCheckpoint
             ?? terminalCompatibleParsimoniousPartialCheckpoint
             ?? recoveredStableBoundedPathFrontier
             ?? regularizedPartialOperationConsensus;
@@ -11650,6 +11745,10 @@ export const makeDiagnosisEvents = (
         const stablePartialPathOwnsOperation = !separatedTerminalUnitOwnsOperation
             && stableBoundedPathFrontier?.eventType === "partialMove"
             && (
+                stableBoundedPathFrontier.evidence.algorithmSources.includes(
+                    "repeated_partial_component_frontier",
+                )
+                ||
                 terminalCompatibleParsimoniousPartialCheckpoint !== null
                 || regularizedPartialConsensusCheckpoint !== null
                 || (

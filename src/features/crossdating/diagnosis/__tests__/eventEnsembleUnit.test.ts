@@ -45,6 +45,7 @@ import {
     selectParsimoniousPartialOperationCheckpoint,
     selectRegularizedPartialOperationConsensus,
     selectRegularizedPartialConsensusCheckpoint,
+    selectRepeatedPartialComponentCheckpoint,
     stableFrontierHasRepeatedOperationSupport,
     selectLatentEndpointWholeFrame,
     selectUnobservedFixedSideWholeLag,
@@ -3675,6 +3676,37 @@ describe("selectCumulativePartialFrontier", () => {
             [],
             { startYear: 1600, endYear: 2000 },
         )).toMatchObject({ eventType: "partialMove", shiftYears: -6 });
+    });
+
+    it("projects the newest member of a repeated partial component from one conservative path", () => {
+        const repeated = boundedPath([
+            pathEvent(-6, -24, -18, 1617),
+            pathEvent(-6, -18, -12, 1644),
+            pathEvent(-12, -12, 0, 1702),
+        ]);
+        repeated.path.transitionGain = 41.59;
+        repeated.path.runnerUpMargin = 0.57;
+
+        expect(selectRepeatedPartialComponentCheckpoint([null, repeated])).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -6,
+            rankedYears: [{ year: 1702 }],
+            evidence: {
+                lagBefore: -6,
+                lagAfter: 0,
+                algorithmSources: expect.arrayContaining([
+                    "repeated_partial_component_frontier",
+                ]),
+                notes: expect.arrayContaining([
+                    "repeated_partial_component_shift=-6",
+                    "repeated_partial_component_count=2",
+                    "repeated_partial_component_years=1617,1644",
+                ]),
+            },
+        });
+        expect(selectRepeatedPartialComponentCheckpoint([
+            boundedPath([pathEvent(-40, -40, 0, 1702)]),
+        ])).toBeNull();
     });
 
     it("leaves compact unit aggregates and adjacent partial-plus-unit amplitudes to serial recovery", () => {
