@@ -51,6 +51,7 @@ import {
     selectRegularizedPartialConsensusCheckpoint,
     selectRepeatedPartialComponentCheckpoint,
     selectCrossPenaltyExactPartialCheckpoint,
+    selectCrossPenaltyFalseRingFrontier,
     stableFrontierHasRepeatedOperationSupport,
     selectLatentEndpointWholeFrame,
     selectUnobservedFixedSideWholeLag,
@@ -3817,6 +3818,48 @@ describe("selectCumulativePartialFrontier", () => {
             locallyComplete: true,
             maximumYearDrift: 2,
         })).toBe(true);
+    });
+
+    it("keeps a false-ring return to zero reproduced by two penalties", () => {
+        const falseAt = (year: number): DiagnosisEvent => {
+            const event = falseRingEvent(year, false);
+            event.rankedYears = [{ year, rank: 1, score: 1, evidenceTags: [] }];
+            event.evidence.algorithmSources = ["bounded_complete_lag_path"];
+            event.evidence.lagBefore = 1;
+            event.evidence.lagAfter = 0;
+            return event;
+        };
+        const stronger = boundedPath([falseAt(1856)]);
+        const strongerOlder = falseAt(1825);
+        strongerOlder.evidence.lagBefore = 2;
+        strongerOlder.evidence.lagAfter = 1;
+        stronger.events.push(strongerOlder);
+        stronger.path.transitionGain = 76;
+        stronger.path.runnerUpMargin = 0.02;
+        const regularized = boundedPath([falseAt(1857)]);
+        const regularizedOlder = falseAt(1826);
+        regularizedOlder.evidence.lagBefore = 2;
+        regularizedOlder.evidence.lagAfter = 1;
+        regularized.events.push(regularizedOlder);
+        regularized.path.transitionGain = 80;
+        regularized.path.runnerUpMargin = 0.75;
+
+        expect(selectCrossPenaltyFalseRingFrontier(
+            stronger,
+            regularized,
+        )).toMatchObject({
+            eventType: "falseRing",
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "cross_penalty_false_ring_frontier",
+                ]),
+            },
+        });
+        regularized.events[0].evidence.lagBefore = -1;
+        expect(selectCrossPenaltyFalseRingFrontier(
+            stronger,
+            regularized,
+        )).toBeNull();
     });
 
     it("leaves compact unit aggregates and adjacent partial-plus-unit amplitudes to serial recovery", () => {

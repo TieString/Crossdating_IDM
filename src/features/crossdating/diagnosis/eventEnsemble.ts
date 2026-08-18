@@ -6862,6 +6862,95 @@ export const localLagAdvancesCrossPenaltyFrontier = (
     return newestEvidenceYear - rankedEventYear(event) >= minimumAdvanceYears;
 };
 
+export const selectCrossPenaltyFalseRingFrontier = (
+    strongerPath: BoundedLagStateEventSet | null,
+    regularizedPath: BoundedLagStateEventSet | null,
+    maximumYearDrift = 2,
+): DiagnosisEvent | null => {
+    if (!strongerPath
+        || !regularizedPath
+        || strongerPath.path.transitionGain < 20
+        || regularizedPath.path.transitionGain < 20
+        || Math.max(
+            strongerPath.path.runnerUpMargin,
+            regularizedPath.path.runnerUpMargin,
+        ) < 0.3) return null;
+    const returningFalseRings = (path: BoundedLagStateEventSet) => path.events
+        .filter((event) => (
+            event.eventType === "falseRing"
+            && event.evidence.lagBefore === 1
+            && event.evidence.lagAfter === 0
+            && event.rankedYears[0]?.year !== undefined
+        ));
+    const hasPositiveUnitChain = (path: BoundedLagStateEventSet): boolean => {
+        const transitions = path.events.filter((event) => (
+            event.eventType === "falseRing"
+            && event.evidence.lagBefore !== null
+            && event.evidence.lagAfter !== null
+            && event.evidence.lagBefore === event.evidence.lagAfter + 1
+            && event.evidence.lagAfter >= 0
+        ));
+        const maximumDepth = Math.max(
+            0,
+            ...transitions.map((event) => event.evidence.lagBefore!),
+        );
+        return maximumDepth >= 2 && Array.from(
+            { length: maximumDepth },
+            (_, index) => index + 1,
+        ).every((before) => transitions.some((event) => (
+            event.evidence.lagBefore === before
+            && event.evidence.lagAfter === before - 1
+        )));
+    };
+    if (!hasPositiveUnitChain(strongerPath)
+        || !hasPositiveUnitChain(regularizedPath)) return null;
+    const matches = returningFalseRings(strongerPath).flatMap((stronger) => (
+        returningFalseRings(regularizedPath).filter((regularized) => (
+            Math.abs(rankedEventYear(stronger) - rankedEventYear(regularized))
+                <= maximumYearDrift
+        )).map((regularized) => ({ stronger, regularized }))
+    )).sort((left, right) => (
+        rankedEventYear(right.stronger) - rankedEventYear(left.stronger)
+    ));
+    const selected = matches[0];
+    if (!selected) return null;
+    const event = selected.stronger;
+    return withEvidenceLedger({
+        ...event,
+        id: `${event.id}-cross-penalty-false-ring`,
+        evidence: {
+            ...event.evidence,
+            algorithmSources: Array.from(new Set([
+                ...event.evidence.algorithmSources,
+                "cross_penalty_false_ring_frontier",
+            ])).sort(),
+            score: Math.min(
+                strongerPath.path.transitionGain,
+                regularizedPath.path.transitionGain,
+            ),
+            scoreMargin: Math.min(
+                strongerPath.path.runnerUpMargin,
+                regularizedPath.path.runnerUpMargin,
+            ),
+            notes: Array.from(new Set([
+                ...event.evidence.notes,
+                `cross_penalty_false_ring_stronger_year=${rankedEventYear(
+                    selected.stronger,
+                )}`,
+                `cross_penalty_false_ring_regularized_year=${rankedEventYear(
+                    selected.regularized,
+                )}`,
+                `cross_penalty_false_ring_stronger_margin=${
+                    strongerPath.path.runnerUpMargin.toFixed(6)
+                }`,
+                `cross_penalty_false_ring_regularized_margin=${
+                    regularizedPath.path.runnerUpMargin.toFixed(6)
+                }`,
+            ])),
+        },
+    });
+};
+
 export const hasCompletedMixedCompositionLocation = (
     events: readonly DiagnosisEvent[],
 ): boolean => events.some((event) => event.evidence.algorithmSources.some((source) => (
@@ -11539,6 +11628,13 @@ export const makeDiagnosisEvents = (
             rawPenaltyHalfStablePath,
             diagnosis.targetRange,
         );
+        const crossPenaltyFalseRingFrontier = selectCrossPenaltyFalseRingFrontier(
+            rawNearPenaltyTwoPath,
+            rawNearPenaltyOnePath,
+        ) ?? selectCrossPenaltyFalseRingFrontier(
+            rawPenaltyOneStablePath,
+            rawPenaltyHalfStablePath,
+        );
         const candidateWholeLags = new Set(ownCandidates.flatMap((candidate) => (
             candidate.operationType === "SHIFT_RANGE"
             && candidate.mode === "wholeSeriesMove"
@@ -12524,6 +12620,28 @@ export const makeDiagnosisEvents = (
         const competingWhole = dominantWholeSeriesBaseline
             ?? displayed.find((event) => event.eventType === "wholeSeriesMove")
             ?? null;
+        const crossPenaltyFalseYear = crossPenaltyFalseRingFrontier
+            ? rankedEventYear(crossPenaltyFalseRingFrontier)
+            : null;
+        const nearbyFalseOperationSupport = crossPenaltyFalseYear !== null
+            && [...candidateEvents, ...detectedBeforeFusion, ...displayed].some((event) => (
+                event.eventType === "falseRing"
+                && Math.abs(rankedEventYear(event) - crossPenaltyFalseYear) <= 13
+            ));
+        const unitDirectionSupportsFalse = boundedUnitSelection?.operation.eventType
+            === "falseRing" && boundedUnitSelection.score > 0;
+        const nearbyCompetingPartial = crossPenaltyFalseYear !== null
+            && [...candidateEvents, ...detectedBeforeFusion, ...displayed].some((event) => (
+                event.eventType === "partialMove"
+                && Math.abs(event.shiftYears ?? Number.POSITIVE_INFINITY) <= 20
+                && Math.abs(rankedEventYear(event) - crossPenaltyFalseYear) <= 13
+            ));
+        const admissibleCrossPenaltyFalse = crossPenaltyFalseRingFrontier
+            && !nearbyCompetingPartial
+            && (
+                nearbyFalseOperationSupport
+                || unitDirectionSupportsFalse
+            ) ? crossPenaltyFalseRingFrontier : null;
         const candidateAnchoredDistantMissingFrontier =
             selectCandidateAnchoredDistantMissingFrontier(
                 candidateEvents,
@@ -12551,6 +12669,45 @@ export const makeDiagnosisEvents = (
         }
         if (candidateBackedStableTerminalUnit) {
             return finalize([candidateBackedStableTerminalUnit], [], false);
+        }
+        const protectedPartialBlocksCrossPenaltyFalse =
+            stableBoundedPathFrontier?.eventType === "partialMove"
+            && (
+                stableFrontierHasIndependentOperationSupport
+                || stableBoundedPathFrontier.evidence.algorithmSources.includes(
+                    "repeated_partial_component_frontier",
+                )
+                || stableBoundedPathFrontier.evidence.algorithmSources.includes(
+                    "cross_penalty_exact_partial_frontier",
+                )
+            );
+        const crossPenaltySequentialFalse = crossPenaltyFalseRingFrontier
+            ? getSequentialFalse()
+            : null;
+        if (crossPenaltySequentialFalse?.evidence.algorithmSources.includes(
+            "candidate_anchored_positive_staircase",
+        )) {
+            return finalize([crossPenaltySequentialFalse], [], false);
+        }
+        const stableTerminalAgreesWithCrossPenaltyFalse =
+            crossPenaltyFalseRingFrontier
+            && !nearbyCompetingPartial
+            && stableTerminalSequentialUnit?.eventType === "falseRing"
+            && (latestEventNoteNumber(
+                stableTerminalSequentialUnit,
+                "terminal_unit_staircase_max_adjacent_gap_years=",
+            ) ?? 0) >= 6
+            && Math.abs(
+                rankedEventYear(stableTerminalSequentialUnit)
+                    - rankedEventYear(crossPenaltyFalseRingFrontier)
+            ) <= 13;
+        if (stableTerminalAgreesWithCrossPenaltyFalse) {
+            return finalize([stableTerminalSequentialUnit!], [], false);
+        }
+        if (admissibleCrossPenaltyFalse
+            && stableTerminalSequentialUnit === null
+            && !protectedPartialBlocksCrossPenaltyFalse) {
+            return finalize([admissibleCrossPenaltyFalse], [], false);
         }
         const detectedDistantMissingFrontier = targetHasExplicitZero
             ? selectDistantSequentialMissingFrontier(
