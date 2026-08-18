@@ -54,6 +54,7 @@ import {
     selectWholeBaselineLagPathFrontier,
     resolveSequentialMissingPresentation,
     selectResidualSequentialMissingPathYear,
+    sequentialFalseFrontierWindow,
     selectCumulativePartialFrontier,
     selectCompletedPartialFalseSeed,
     selectCompletedPartialMissingSeed,
@@ -73,6 +74,7 @@ import {
     supportsSequentialMissingDirectionOverride,
     supportsSequentialMissingReplacementOfPartial,
     pruneWholeSeriesPartialAliases,
+    preservesSequentialFalseAsymmetricFrontierWindow,
     pruneUnsupportedFalseRingPathSupplements,
     preserveNewestCandidateUnitCheckpoint,
     retainDisplayedMissingHypothesesDuringSequentialRecovery,
@@ -272,6 +274,40 @@ describe("candidate-depth terminal unit operation priority", () => {
             partial,
             [4],
         )).toBe(false);
+    });
+});
+
+describe("sequential false-ring frontier window", () => {
+    it("allocates exact depth-four uncertainty toward the older side", () => {
+        expect(sequentialFalseFrontierWindow(
+            1843,
+            4,
+            4,
+            { startYear: 1600, endYear: 2000 },
+        )).toEqual({
+            startYear: 1833,
+            endYear: 1845,
+            asymmetric: true,
+        });
+        expect(sequentialFalseFrontierWindow(
+            1843,
+            3,
+            3,
+            { startYear: 1600, endYear: 2000 },
+        )).toEqual({
+            startYear: 1840,
+            endYear: 1846,
+            asymmetric: false,
+        });
+
+        const event = falseRingEvent(1840, false);
+        event.evidence.algorithmSources.push(
+            "sequential_false_asymmetric_frontier_window",
+        );
+        expect(preservesSequentialFalseAsymmetricFrontierWindow(event, false))
+            .toBe(true);
+        expect(preservesSequentialFalseAsymmetricFrontierWindow(event, true))
+            .toBe(false);
     });
 });
 

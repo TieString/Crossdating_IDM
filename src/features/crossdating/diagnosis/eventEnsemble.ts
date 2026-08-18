@@ -1975,6 +1975,28 @@ const boundedSequentialWindow = (
     return { startYear, endYear: startYear + actualWidth - 1 };
 };
 
+export const sequentialFalseFrontierWindow = (
+    presentationYear: number,
+    pathStartLag: number,
+    transitionCount: number,
+    range: { startYear: number; endYear: number },
+): { startYear: number; endYear: number; asymmetric: boolean } => {
+    const asymmetric = pathStartLag >= 4 && transitionCount === pathStartLag;
+    const window = boundedSequentialWindow(
+        asymmetric ? presentationYear - 4 : presentationYear,
+        asymmetric ? 13 : 7,
+        range,
+    );
+    return { ...window, asymmetric };
+};
+
+export const preservesSequentialFalseAsymmetricFrontierWindow = (
+    event: DiagnosisEvent,
+    hasStableTerminalUnit: boolean,
+): boolean => !hasStableTerminalUnit && event.evidence.algorithmSources.includes(
+    "sequential_false_asymmetric_frontier_window",
+);
+
 /**
  * Recovers an adjacent two-step frontier when a weak fused locator jumps away from both the raw
  * breakpoint profile and an independently generated candidate region. The operation remains a
@@ -3001,7 +3023,12 @@ const recoverSequentialFalseHeadEvent = (
         !direction
         || direction.masterMargin <= 0
     ) return null;
-    const window = boundedSequentialWindow(presentationYear, 7, diagnosis.targetRange);
+    const window = sequentialFalseFrontierWindow(
+        presentationYear,
+        head.pathStartLag,
+        head.transitionCount,
+        diagnosis.targetRange,
+    );
     const rankedYears = Array.from(
         { length: window.endYear - window.startYear + 1 },
         (_, index) => {
@@ -3034,6 +3061,9 @@ const recoverSequentialFalseHeadEvent = (
                 "per_reference_two_step_direction_competition",
                 "positive_unit_staircase_direction",
                 "sequential_false_staircase_head",
+                ...(window.asymmetric
+                    ? ["sequential_false_asymmetric_frontier_window"]
+                    : []),
             ],
             score: direction.masterMargin,
             scoreMargin: Math.max(0, direction.referenceMedianMargin),
@@ -3083,6 +3113,10 @@ const recoverSequentialFalseHeadEvent = (
                 `sequential_false_direction_reference_q25=${
                     direction.referenceLowerQuartileMargin.toFixed(6)
                 }`,
+                ...(window.asymmetric ? [
+                    "sequential_false_window_older_padding=10",
+                    "sequential_false_window_newer_padding=2",
+                ] : []),
                 "sequential_false_score_is_relative_not_probability",
             ],
         },
@@ -11705,7 +11739,10 @@ export const makeDiagnosisEvents = (
             includeBoundedPathHypotheses = true,
         ): DiagnosisEvent[] => {
             const independentlyLocatedEvents = sourceEvents.map((event) => (
-                projectUnitLocationFromIndependentConsensus(
+                preservesSequentialFalseAsymmetricFrontierWindow(
+                    event,
+                    stableTerminalSequentialUnit !== null,
+                ) ? event : projectUnitLocationFromIndependentConsensus(
                     event,
                     candidateEvents,
                     passRawPathEvents.events,
@@ -11720,6 +11757,10 @@ export const makeDiagnosisEvents = (
             ));
             const frontierConsensusEvents = independentlyLocatedEvents.map((event) => {
                 if (hasAcceptedStrongLocatorWindow(event)) return event;
+                if (preservesSequentialFalseAsymmetricFrontierWindow(
+                    event,
+                    stableTerminalSequentialUnit !== null,
+                )) return event;
                 const terminalOwnsUncontestedLocation = stableTerminalSequentialUnit !== null
                     && stableBoundedPathFrontier === null
                     && localLagTransitionEvidence === null;
