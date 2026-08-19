@@ -1,7 +1,6 @@
 import { Command } from "@tauri-apps/plugin-shell";
 import { readTextFile, exists, remove } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
-import { invoke } from "@tauri-apps/api/core";
 import { clearWorkDir, getCofechaWorkDir } from "@/services/fs";
 import { saveFile } from "../fs/io";
 
@@ -28,7 +27,6 @@ const SIDECAR_NAME_BY_VERSION: Record<CofechaVersion, string> = {
 export async function runCofecha(
   rwlText: string,
   inputFileName?: string,
-  sourceRwlPath?: string,
   version: CofechaVersion = "cofecha"
 ): Promise<string> {
   const cleanResult = await clearWorkDir();
@@ -73,17 +71,6 @@ export async function runCofecha(
             runtimeInputName !== requestedName
               ? outRawText.split(runtimeInputName).join(requestedName)
               : outRawText;
-
-          if (sourceRwlPath && sourceRwlPath.trim().length > 0) {
-            try {
-              await invoke<string>("write_out_next_to_rwl", {
-                sourceRwlPath,
-                outText,
-              });
-            } catch (copyErr) {
-              console.warn("failed to copy OUT file to rwl directory:", copyErr);
-            }
-          }
 
           try {
             if (runtimeInputName !== defaultInputName && (await exists(inputPath))) {

@@ -82,6 +82,8 @@ import {
 } from "./home/workspaceWindowBridge";
 import { useResizablePanels } from "./useResizablePanels";
 import { publishConsoleDataExport } from "./home/consoleDataExport";
+import { enhanceCofechaPart2View } from "./home/cofechaPart2View";
+import { CofechaOutExportButton } from "./home/CofechaOutExportButton";
 import { hasCofechaSeriesMapValue } from "@/features/cofecha/seriesId";
 import type { ChartJumpTarget } from "@/components/Chart/chartNavigation";
 
@@ -95,6 +97,14 @@ const makeCofechaCellLinkHtml = (tree: string, rawYear: string, label = rawYear)
 
 const makeCofechaSeriesLinkHtml = (tree: string) => (
     `<span class="${style["cofecha-year-link"]}" data-cofecha-link="true" data-tree="${escapeHtml(tree)}" role="button" tabindex="0" title="跳转到 ${escapeHtml(tree)}" style="color:#0f5f9e;background-color:rgba(47,95,147,0.08);font-weight:700;text-decoration:underline;text-underline-offset:2px;cursor:pointer;border-radius:3px;padding:0 2px;">${escapeHtml(tree)}</span>`
+);
+
+const makeCofechaPart2SortLinkHtml = (sorted: boolean) => (
+    `<span class="${style["cofecha-year-link"]}" data-cofecha-part2-action="toggle-age-sort" role="button" tabindex="0" title="${sorted ? "恢复 PART 2 原始顺序" : "按完整年龄从大到小排序"}" style="color:#0f5f9e;background-color:rgba(47,95,147,0.08);font-family:'Microsoft YaHei','微软雅黑',sans-serif;font-size:14px;line-height:inherit;font-weight:700;text-decoration:underline;text-underline-offset:2px;cursor:pointer;border-radius:3px;padding:0 2px;">${sorted ? "恢复原顺序" : "按年龄排序"}</span>`
+);
+
+const makeCofechaPart2CheckboxHtml = (tree: string, checked: boolean) => (
+    `<span style="display:inline-block;width:4ch;text-align:center;"><input type="checkbox" data-cofecha-part2-action="toggle-series" data-tree="${escapeHtml(tree)}" ${checked ? "checked " : ""}aria-label="${escapeHtml(tree)} 在图表中显示" title="${checked ? "从图表隐藏" : "在图表显示"} ${escapeHtml(tree)}" style="width:12px;height:12px;margin:0;vertical-align:-2px;accent-color:#2e6da4;cursor:pointer;box-shadow:none;" /></span>`
 );
 
 // PART 6 序列标题里的序列名：除了普通的跳转链接，还带上锚点属性，便于从年轮网格右键
@@ -283,14 +293,17 @@ const renderCofechaHtmlWithLinks = (
     text: string | undefined,
     trees: readonly string[],
     highlightTree: string | null = null,
+    selectedTrees: readonly string[] = [],
+    part2SortByAge = false,
 ) => {
-    const lines = (text ?? "").split(/\r\n|\n|\r/);
+    const part2View = enhanceCofechaPart2View(text, trees, selectedTrees, part2SortByAge);
+    const lines = part2View.text.split(/\r\n|\n|\r/);
     const knownTrees = [...trees].sort((a, b) => b.length - a.length);
     let currentSeriesTree: string | null = null;
     let absentRingTree: string | null = null;
     let count = 0;
 
-    const html = lines.map((line, index) => {
+    let html = lines.map((line, index) => {
         const lineBreak = index < lines.length - 1 ? "\n" : "";
         const result = renderCofechaLineWithLinks(line, lineBreak, knownTrees, currentSeriesTree, absentRingTree, highlightTree);
 
@@ -299,6 +312,13 @@ const renderCofechaHtmlWithLinks = (
         count += result.count;
         return result.html;
     }).join("");
+
+    part2View.sortControls.forEach((control) => {
+        html = html.replace(control.token, makeCofechaPart2SortLinkHtml(control.sorted));
+    });
+    part2View.checkboxes.forEach((control) => {
+        html = html.replace(control.token, makeCofechaPart2CheckboxHtml(control.tree, control.checked));
+    });
 
     return { html, count };
 };
@@ -339,12 +359,14 @@ export default function Home() {
     const [activeDiagnosisEvent, setActiveDiagnosisEvent] = useState<DiagnosisEvent | null>(null);
     const [dismissedDiagnosisTree, setDismissedDiagnosisTree] = useState<string | null>(null);
     const [chartSelectedTrees, setChartSelectedTrees] = useState<string[]>([]);
+    const [cofechaPart2SortByAge, setCofechaPart2SortByAge] = useState(false);
     const [chartTreeOffsets, setChartTreeOffsets] = useState<Map<string, number>>(new Map());
     const chartSelectionFileRef = useRef<string | null>(null);
     const {
         applyRawRwlText,
         applyRawRwlTextForTree,
         canResetToRawData,
+        canExportCofechaOut,
         cofechaResult,
         cofechaVersion,
         breadthDiagnosisNavigator,
@@ -375,6 +397,7 @@ export default function Home() {
         handleResetToRawData,
         handleRemoveDeletionMarker,
         handleRestoreDeletion,
+        handleExportCofechaOut,
         handleRunBreadthDiagnosis,
         handleRunCofechaValidation,
         handleSave: handleStructuredSave,
@@ -441,6 +464,18 @@ export default function Home() {
     const handleChartSelectedTreesChange = useCallback((trees: string[]) => {
         const next = Array.from(new Set(trees.filter((tree) => siteData.has(tree))));
         setChartSelectedTrees(next);
+    }, [siteData]);
+
+    const handleChartSeriesVisibilityChange = useCallback((tree: string, visible: boolean) => {
+        const resolvedTree = resolveCofechaTreeCode(tree, siteData);
+        if (!siteData.has(resolvedTree)) return;
+        setChartSelectedTrees((previous) => {
+            const alreadyVisible = previous.includes(resolvedTree);
+            if (visible === alreadyVisible) return previous;
+            return visible
+                ? [...previous, resolvedTree]
+                : previous.filter((candidate) => candidate !== resolvedTree);
+        });
     }, [siteData]);
 
     const handleChartTreeOffsetsChange = useCallback((offsets: Map<string, number>) => {
@@ -810,8 +845,14 @@ export default function Home() {
     }, [selectedTree]);
 
     const linkedReport = useMemo(() => (
-        renderCofechaHtmlWithLinks(reportText, treeOptions, cofechaPart6JumpTarget?.tree ?? null)
-    ), [reportText, treeOptions, cofechaPart6JumpTarget]);
+        renderCofechaHtmlWithLinks(
+            reportText,
+            treeOptions,
+            cofechaPart6JumpTarget?.tree ?? null,
+            chartSelectedTrees,
+            cofechaPart2SortByAge,
+        )
+    ), [chartSelectedTrees, cofechaPart2SortByAge, cofechaPart6JumpTarget, reportText, treeOptions]);
 
     // 拥有 PART 6 潜在问题块的序列集合（小写），用于决定右键菜单是否显示
     // “在 COFECHA 中定位”。可用 possibleProblemsDetail 不够：它只收录带 [A] Segment
@@ -897,6 +938,7 @@ export default function Home() {
             isCofechaOutdated,
             isCofechaRunning,
             canRunValidation: Boolean(fileName),
+            canExportOut: canExportCofechaOut,
             validationSummary: crossdatingValidationSummary,
             cofechaResult: cofechaResult ? {
                 possibleProblemsCount: cofechaResult.possibleProblemsCount,
@@ -924,11 +966,28 @@ export default function Home() {
             diagnosisBatchResult,
             cofechaPart6Trees: cofechaPart6TreeList,
         },
-    }), [activeDiagnosisEvent, canResetToRawData, chartJumpTarget, chartSelectedTrees, chartTreeOffsets, cofechaPart6JumpTarget, cofechaPart6TreeList, cofechaResult, crossdatingValidationSummary, diagnosisBatchResult, dynamicReferenceConfig, fileName, isCofechaOutdated, isCofechaRunning, linkedReport, operationLog, presentedCrossdatingDiagnosis, referenceConfig, selectedPart, selectedTree, siteData]);
+    }), [activeDiagnosisEvent, canExportCofechaOut, canResetToRawData, chartJumpTarget, chartSelectedTrees, chartTreeOffsets, cofechaPart6JumpTarget, cofechaPart6TreeList, cofechaResult, crossdatingValidationSummary, diagnosisBatchResult, dynamicReferenceConfig, fileName, isCofechaOutdated, isCofechaRunning, linkedReport, operationLog, presentedCrossdatingDiagnosis, referenceConfig, selectedPart, selectedTree, siteData]);
 
     const handleCofechaTextClick = useCallback((event: MouseEvent<HTMLParagraphElement>) => {
         const target = event.target;
         if (!(target instanceof Element)) {
+            return;
+        }
+
+        const part2Control = target.closest<HTMLElement>("[data-cofecha-part2-action]");
+        if (part2Control) {
+            const action = part2Control.dataset.cofechaPart2Action;
+            if (action === "toggle-age-sort") {
+                setCofechaPart2SortByAge((previous) => !previous);
+            } else if (action === "toggle-series") {
+                const tree = part2Control.dataset.tree;
+                if (tree) {
+                    const visible = part2Control instanceof HTMLInputElement
+                        ? part2Control.checked
+                        : !chartSelectedTrees.includes(resolveCofechaTreeCode(tree, siteData));
+                    handleChartSeriesVisibilityChange(tree, visible);
+                }
+            }
             return;
         }
 
@@ -945,7 +1004,7 @@ export default function Home() {
         }
 
         handleCofechaCellReferenceClick({ tree, year });
-    }, [handleCofechaCellReferenceClick]);
+    }, [chartSelectedTrees, handleChartSeriesVisibilityChange, handleCofechaCellReferenceClick, siteData]);
 
     const handleCofechaTextKeyDown = useCallback((event: KeyboardEvent<HTMLParagraphElement>) => {
         if (event.key !== "Enter" && event.key !== " ") {
@@ -954,6 +1013,16 @@ export default function Home() {
 
         const target = event.target;
         if (!(target instanceof Element)) {
+            return;
+        }
+
+        const part2Control = target.closest<HTMLElement>("[data-cofecha-part2-action]");
+        if (part2Control) {
+            if (part2Control instanceof HTMLInputElement) return;
+            event.preventDefault();
+            if (part2Control.dataset.cofechaPart2Action === "toggle-age-sort") {
+                setCofechaPart2SortByAge((previous) => !previous);
+            }
             return;
         }
 
@@ -1004,6 +1073,12 @@ export default function Home() {
                     setSelectedPart(command.part);
                 } else if (command.type === "run-validation") {
                     void handleRunCofechaValidation();
+                } else if (command.type === "export-out") {
+                    void handleExportCofechaOut();
+                } else if (command.type === "toggle-part2-age-sort") {
+                    setCofechaPart2SortByAge((previous) => !previous);
+                } else if (command.type === "set-chart-series-visible") {
+                    handleChartSeriesVisibilityChange(command.tree, command.visible);
                 } else {
                     handleCofechaCellReferenceClick({ tree: command.tree, year: command.year });
                 }
@@ -1048,8 +1123,10 @@ export default function Home() {
     }, [
         handleCofechaCellReferenceClick,
         handleChartLocateWidth,
+        handleChartSeriesVisibilityChange,
         handleChartSelectedTreesChange,
         handleChartTreeOffsetsChange,
+        handleExportCofechaOut,
         handleDiagnosisPreviewSelectionById,
         handleJumpToCofechaPart6,
         handleOpenRawEditorForTree,
@@ -1797,6 +1874,10 @@ export default function Home() {
                                                     COFECHA 待验证
                                                 </span>
                                             ) : null}
+                                            <CofechaOutExportButton
+                                                disabled={!canExportCofechaOut}
+                                                onExport={handleExportCofechaOut}
+                                            />
                                         </div>
                                     ) : (
                                         <CofechaToolbarSkeleton />

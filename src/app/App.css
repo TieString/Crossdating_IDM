@@ -75,6 +75,11 @@ button {
   box-shadow: none !important;
 }
 
+/* Pause only header image painting while split panels are being dragged. */
+body[data-crossdating-panel-resizing="true"] [data-panel-resize-heavy-preview="true"] {
+  visibility: hidden !important;
+}
+
 button:hover {
   border-color: #396cd8;
 }

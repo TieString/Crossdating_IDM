@@ -72,7 +72,7 @@ Tucson 读写的格式透明性由 `RwlReadResult.readOptions` 和 formatter 共
 - 读取 `VERYCOF.OUT`。
 - 把 OUT 文本交给前端解析和展示。
 
-`features/cofecha/formatter.ts` 解析 COFECHA 输出摘要。`useHomeWorkspace.ts` 按文件路径持久化最近一次 OUT/result 与 `RUN_COFECHA` 日志。Rust 命令 `write_out_next_to_rwl` 会在可行时把 OUT 文件镜像保存到源 `.rwl` 文件旁。
+`features/cofecha/formatter.ts` 解析 COFECHA 输出摘要。`useHomeWorkspace.ts` 按文件路径持久化最近一次 OUT/result 与 `RUN_COFECHA` 日志。程序不再自动把 OUT 写到源 `.rwl` 文件旁；用户通过 COFECHA 模块的导出图标显式选择位置并导出完整原始 OUT。
 
 COFECHA PART 6 的 `[A] Segment` 判断同时用于动态 reference 分类：无 A flag 的序列进入 `anchor_pass`，有 A flag 的序列进入 `candidate_flagged`。`anchor_pass` 生成 reference，`candidate_flagged` 作为后续 offset check target set。
 

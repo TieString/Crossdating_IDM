@@ -116,6 +116,24 @@ export default function WorkspaceWindowPage() {
         if (!kind || kind !== "cofecha") return;
         const target = event.target;
         if (!(target instanceof Element)) return;
+        const part2Control = target.closest<HTMLElement>("[data-cofecha-part2-action]");
+        if (part2Control) {
+            const action = part2Control.dataset.cofechaPart2Action;
+            if (action === "toggle-age-sort") {
+                void sendCommand({ kind: "cofecha", type: "toggle-part2-age-sort" });
+            } else if (action === "toggle-series") {
+                const tree = part2Control.dataset.tree;
+                if (tree) {
+                    void sendCommand({
+                        kind: "cofecha",
+                        type: "set-chart-series-visible",
+                        tree,
+                        visible: part2Control instanceof HTMLInputElement ? part2Control.checked : true,
+                    });
+                }
+            }
+            return;
+        }
         const link = target.closest<HTMLElement>("[data-cofecha-link='true']");
         if (!link) return;
 
@@ -131,6 +149,15 @@ export default function WorkspaceWindowPage() {
         if (event.key !== "Enter" && event.key !== " ") return;
         const target = event.target;
         if (!(target instanceof Element)) return;
+        const part2Control = target.closest<HTMLElement>("[data-cofecha-part2-action]");
+        if (part2Control) {
+            if (part2Control instanceof HTMLInputElement) return;
+            event.preventDefault();
+            if (part2Control.dataset.cofechaPart2Action === "toggle-age-sort") {
+                void sendCommand({ kind: "cofecha", type: "toggle-part2-age-sort" });
+            }
+            return;
+        }
         const link = target.closest<HTMLElement>("[data-cofecha-link='true']");
         if (!link) return;
 
@@ -176,6 +203,7 @@ export default function WorkspaceWindowPage() {
                 isCofechaOutdated={state.isCofechaOutdated}
                 isCofechaRunning={state.isCofechaRunning}
                 canRunValidation={state.canRunValidation}
+                canExportOut={state.canExportOut}
                 validationSummary={state.validationSummary}
                 linkedReport={state.linkedReport}
                 partOptions={state.partOptions}
@@ -183,6 +211,7 @@ export default function WorkspaceWindowPage() {
                 jumpTarget={state.jumpTarget}
                 onSelectedPartChange={(part) => sendCommand({ kind: "cofecha", type: "select-part", part })}
                 onRunValidation={() => sendCommand({ kind: "cofecha", type: "run-validation" })}
+                onExportOut={() => sendCommand({ kind: "cofecha", type: "export-out" })}
                 onTextClick={handleCofechaTextClick}
                 onTextKeyDown={handleCofechaTextKeyDown}
                 onClose={closeWindow}

@@ -18,6 +18,7 @@ import {
     zoomTreeRingViewport,
 } from "./treeRingViewport";
 import styles from "./TreeRingPreview.module.css";
+import { isPanelResizeActive, PANEL_RESIZE_END_EVENT } from "@/shared/panelResize";
 
 export interface TreeRingViewerAnchor {
     left: number;
@@ -139,8 +140,13 @@ function TreeRingPreviewComponent({
     useEffect(() => {
         const svg = svgRef.current;
         if (!svg) return;
+        let deferred = false;
 
         const measure = () => {
+            if (isPanelResizeActive()) {
+                deferred = true;
+                return;
+            }
             const rect = svg.getBoundingClientRect();
             setPreviewSize((current) => (
                 current.width === rect.width && current.height === rect.height
@@ -148,14 +154,26 @@ function TreeRingPreviewComponent({
                     : { width: rect.width, height: rect.height }
             ));
         };
+        const measureAfterPanelResize = () => {
+            if (!deferred) return;
+            deferred = false;
+            measure();
+        };
         measure();
+        window.addEventListener(PANEL_RESIZE_END_EVENT, measureAfterPanelResize);
         if (typeof ResizeObserver === "undefined") {
             window.addEventListener("resize", measure);
-            return () => window.removeEventListener("resize", measure);
+            return () => {
+                window.removeEventListener("resize", measure);
+                window.removeEventListener(PANEL_RESIZE_END_EVENT, measureAfterPanelResize);
+            };
         }
         const observer = new ResizeObserver(measure);
         observer.observe(svg);
-        return () => observer.disconnect();
+        return () => {
+            observer.disconnect();
+            window.removeEventListener(PANEL_RESIZE_END_EVENT, measureAfterPanelResize);
+        };
     }, [artwork?.cacheKey]);
 
     if (!artwork) {
@@ -311,6 +329,7 @@ function TreeRingPreviewComponent({
                 <svg
                     ref={svgRef}
                     className={styles.previewSvg}
+                    data-panel-resize-heavy-preview="true"
                     viewBox={`${viewport.startX} ${viewTop} ${viewWidth} ${viewHeight}`}
                     preserveAspectRatio="xMidYMid meet"
                     overflow="hidden"

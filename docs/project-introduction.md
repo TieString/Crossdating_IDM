@@ -19,7 +19,7 @@ Crossdating IDM 是一款面向树轮交叉定年工作的桌面应用。它把 
 | COFECHA-pass 动态参考 | 运行 COFECHA 后，用通过 PART 6 检查的样芯生成供算法使用的残差参考序列。 | 从 `VERYCOF.OUT` 的 PART 6 `[A] Segment` 分类无 A flag 样芯为 `anchor_pass`；依次进行 cubic smoothing spline 去趋势、ring-width index、AR 预白化、log 变换和逐年平均，最后标准化为均值 0、标准差 1。详见 [COFECHA-pass 参考序列](cofecha-reference.md)。 |
 | 内部交叉定年诊断 | 生成漏轮、伪轮、整段或局部年份移动候选，并给出前后指标与相对置信度。 | `src/features/crossdating/diagnosis` 组合全局滑动匹配、分段相关与 lag 分析、局部编辑对齐和候选排序；可利用 COFECHA 的段级 lag 提示强化候选。诊断在 Web Worker 中执行，且不会自行改写数据。 |
 | 候选确认与重新诊断 | 用户逐条接受候选；每次修改后旧候选失效，并基于当前数据重新计算。 | 可执行操作仅映射为 `insertMissingYear`、`deleteFalseYear`、`batchMoveYears` 三类 `RwlEditor` 编辑；`useHomeWorkspace.ts` 负责将旧候选标为 stale 并发起新的诊断请求。 |
-| COFECHA 集成 | 对当前工作数据运行 COFECHA，查看解析后的结果，并把 OUT 文件保存到源文件旁。 | `src/services/cofecha/runner.ts` 在应用数据目录的 `cofecha-work` 写入输入、启动 sidecar、读取 `VERYCOF.OUT`；`src/features/cofecha/formatter.ts` 解析结果；Rust 命令 `write_out_next_to_rwl` 镜像保存 `.OUT`。 |
+| COFECHA 集成 | 对当前工作数据运行 COFECHA，查看解析后的结果，并按需显式导出 OUT。 | `src/services/cofecha/runner.ts` 在应用数据目录的 `cofecha-work` 写入输入、启动 sidecar、读取 `VERYCOF.OUT`；`src/features/cofecha/formatter.ts` 解析结果；COFECHA 模块的导出图标负责选择位置并写出完整原始 `.OUT`。 |
 | 工作区与独立窗口 | 按文件恢复最近工作状态，并在独立的操作日志/COFECHA 窗口中继续查看信息。 | `src/pages/home/useHomeWorkspace.ts` 按文件路径持久化工作区状态；`workspaceWindowBridge.ts` 同步窗口状态，并以窗口 label 防止陈旧事件误更新主窗口。 |
 
 ## 核心数据流
@@ -59,7 +59,7 @@ flowchart LR
 | 界面组件 | 宽度网格、图表、编辑器、候选面板、菜单和独立窗口。 | `src/components` |
 | 领域功能 | RWL 格式、编辑历史、参考序列、交叉定年诊断、COFECHA 文本格式化。 | `src/features` |
 | 服务层 | 文件 I/O、应用数据工作目录、COFECHA sidecar 调度。 | `src/services` |
-| 桌面后端 | Tauri 命令注册、目录遍历与 OUT 镜像写入。 | `src-tauri/src` |
+| 桌面后端 | Tauri 命令注册、目录遍历、扫描图处理与 sidecar 支持。 | `src-tauri/src` |
 
 这种划分让界面组件只表达交互意图，而文件读写、外部进程调用和数据修改集中在工作区与领域层处理。
 
@@ -69,7 +69,7 @@ flowchart LR
 - 内部诊断不自动落地修改；候选必须由用户确认，并复用既有编辑路径。
 - `anchor_pass` 样芯用于构建 COFECHA-pass 参考，带 A flag 的 `candidate_flagged` 样芯保留为后续检查目标，不进入该参考。
 - RWL 修改后，依赖旧 COFECHA 结果的动态参考和诊断结论不再代表当前数据，应重新运行 COFECHA/诊断。
-- COFECHA 工作文件保存在应用数据目录的 `cofecha-work` 中；关键输出 `VERYCOF.OUT` 会在可行时额外保存到源 `.rwl` 文件同目录。
+- COFECHA 工作文件保存在应用数据目录的 `cofecha-work` 中；关键输出 `VERYCOF.OUT` 不会自动写到源 `.rwl` 同目录，只能由用户通过导出图标显式保存。
 
 ## 开发与验证
 

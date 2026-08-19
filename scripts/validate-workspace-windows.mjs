@@ -246,6 +246,7 @@ PART 7:
     isCofechaOutdated: true,
     isCofechaRunning: false,
     canRunValidation: true,
+    canExportOut: true,
     validationSummary: {
       severity: "warning",
       title: "需要重新验证",
@@ -264,6 +265,7 @@ PART 7:
     jumpTarget: { id: 1, tree: "EBD011" },
     onSelectedPartChange() {},
     onRunValidation() {},
+    onExportOut() {},
     onTextClick() {},
     onTextKeyDown() {},
     onClose() {},
@@ -271,8 +273,9 @@ PART 7:
 
   assertIncludes(cofechaHtml, "待验证");
   assertIncludes(cofechaHtml, "重新验证");
-  assertIncludes(cofechaHtml, "需要重新验证");
-  assertIncludes(cofechaHtml, "最近批次");
+  assertIncludes(cofechaHtml, "aria-label=\"导出 COFECHA OUT\"");
+  assertNotIncludes(cofechaHtml, "需要重新验证");
+  assertNotIncludes(cofechaHtml, "最近批次");
   assertIncludes(cofechaHtml, "EBD011");
 
   const initialHistoryData = buildHistorySmokeData();

@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+    PANEL_RESIZE_ACTIVE_ATTRIBUTE,
+    PANEL_RESIZE_END_EVENT,
+} from "@/shared/panelResize";
 
 const LAYOUT_STORAGE_KEY = "crossdating.homeLayout.v1";
 
@@ -114,14 +118,6 @@ export function useResizablePanels() {
     const layoutRef = useRef<StoredLayout>(layout);
 
     useEffect(() => {
-        try {
-            window.localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(layout));
-        } catch (error) {
-            console.warn("保存主界面布局失败:", error);
-        }
-    }, [layout]);
-
-    useEffect(() => {
         layoutRef.current = layout;
     }, [layout]);
 
@@ -153,40 +149,59 @@ export function useResizablePanels() {
             const cursor = axis === "x" ? "col-resize" : "row-resize";
             const originalUserSelect = document.body.style.userSelect;
             const originalCursor = document.body.style.cursor;
+            let frameId: number | null = null;
+            let pendingPointer: { clientX: number; clientY: number } | null = null;
 
             const applyRatio = (clientX: number, clientY: number) => {
                 const delta = (axis === "x" ? clientX : clientY) - pointerStart;
                 const nextRatio = clamp(startRatio + delta / size, minRatio, maxRatio);
-
-                setLayout((previous) => {
-                    if (Math.abs(previous[key] - nextRatio) < 0.0001) {
-                        return previous;
-                    }
-
-                    return {
-                        ...previous,
-                        [key]: nextRatio,
-                    };
-                });
+                const previous = layoutRef.current;
+                if (Math.abs(previous[key] - nextRatio) < 0.0001) return;
+                const next = { ...previous, [key]: nextRatio };
+                layoutRef.current = next;
+                setLayout(next);
             };
 
             const finishResize = () => {
+                if (frameId !== null) {
+                    window.cancelAnimationFrame(frameId);
+                    frameId = null;
+                }
+                if (pendingPointer) {
+                    applyRatio(pendingPointer.clientX, pendingPointer.clientY);
+                    pendingPointer = null;
+                }
                 window.removeEventListener("pointermove", handlePointerMove);
                 window.removeEventListener("pointerup", finishResize);
                 window.removeEventListener("pointercancel", finishResize);
                 document.body.style.userSelect = originalUserSelect;
                 document.body.style.cursor = originalCursor;
+                document.body.removeAttribute(PANEL_RESIZE_ACTIVE_ATTRIBUTE);
+                window.dispatchEvent(new Event(PANEL_RESIZE_END_EVENT));
+                try {
+                    window.localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(layoutRef.current));
+                } catch (error) {
+                    console.warn("保存主界面布局失败:", error);
+                }
                 setDraggingKey(null);
                 cleanupRef.current = null;
             };
 
             const handlePointerMove = (moveEvent: PointerEvent) => {
-                applyRatio(moveEvent.clientX, moveEvent.clientY);
+                pendingPointer = { clientX: moveEvent.clientX, clientY: moveEvent.clientY };
+                if (frameId !== null) return;
+                frameId = window.requestAnimationFrame(() => {
+                    frameId = null;
+                    const pointer = pendingPointer;
+                    pendingPointer = null;
+                    if (pointer) applyRatio(pointer.clientX, pointer.clientY);
+                });
             };
 
             cleanupRef.current?.();
             cleanupRef.current = finishResize;
             setDraggingKey(key);
+            document.body.setAttribute(PANEL_RESIZE_ACTIVE_ATTRIBUTE, "true");
             document.body.style.userSelect = "none";
             document.body.style.cursor = cursor;
 

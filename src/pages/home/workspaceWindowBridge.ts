@@ -136,6 +136,7 @@ export type CofechaWindowState = {
     isCofechaOutdated: boolean;
     isCofechaRunning: boolean;
     canRunValidation: boolean;
+    canExportOut: boolean;
     validationSummary: CrossdatingValidationSummary;
     cofechaResult?: CofechaWindowResult;
     linkedReport: { html: string; count: number };
@@ -186,7 +187,10 @@ export type WorkspaceWindowCommand =
     | { kind: "operation-log"; type: "jump"; tree: string; year?: number }
     | { kind: "cofecha"; type: "select-part"; part: string }
     | { kind: "cofecha"; type: "run-validation" }
+    | { kind: "cofecha"; type: "export-out" }
     | { kind: "cofecha"; type: "jump"; tree: string; year?: number }
+    | { kind: "cofecha"; type: "toggle-part2-age-sort" }
+    | { kind: "cofecha"; type: "set-chart-series-visible"; tree: string; visible: boolean }
     | { kind: "line-chart"; type: "set-selection"; trees: string[] }
     | { kind: "line-chart"; type: "set-tree-offsets"; offsets: Array<[string, number]> }
     | { kind: "line-chart"; type: "locate-width"; tree: string; year: number }

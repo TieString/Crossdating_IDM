@@ -7,7 +7,7 @@
 - 维护人：项目维护者
 - 适用版本：1.0.0
 
-Crossdating IDM 是一个 Tauri + React + TypeScript 桌面应用，用于读取、编辑和辅助诊断树轮 RWL 数据。前端负责文件工作区、宽度网格、折线图、参考序列、内部诊断和 COFECHA 结果展示；Tauri 后端提供文件系统、sidecar 执行和 OUT 文件镜像保存能力。
+Crossdating IDM 是一个 Tauri + React + TypeScript 桌面应用，用于读取、编辑和辅助诊断树轮 RWL 数据。前端负责文件工作区、宽度网格、折线图、参考序列、内部诊断和 COFECHA 结果展示；Tauri 后端提供文件系统和 sidecar 执行能力，OUT 由用户在 COFECHA 模块中显式导出。
 
 ## 快速开始
 

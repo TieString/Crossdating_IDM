@@ -553,24 +553,3 @@ pub fn list_files_and_directories(dir_path: &str) -> Result<FileOrDir, String> {
 pub fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
-
-#[command]
-/// Write OUT content next to the source RWL file and return the saved path.
-pub fn write_out_next_to_rwl(source_rwl_path: &str, out_text: &str) -> Result<String, String> {
-    let src = Path::new(source_rwl_path);
-    let parent = src
-        .parent()
-        .ok_or_else(|| format!("invalid source path, no parent: {}", source_rwl_path))?;
-
-    let stem = src
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| format!("invalid source path, no file stem: {}", source_rwl_path))?;
-
-    let out_path = parent.join(format!("{}.OUT", stem));
-    fs::write(&out_path, out_text)
-        .map_err(|e| format!("failed to write OUT file {}: {}", out_path.display(), e))?;
-
-    Ok(out_path.to_string_lossy().into_owned())
-}

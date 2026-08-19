@@ -15,7 +15,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             commands::list_files_and_directories,
-            commands::write_out_next_to_rwl,
             commands::prepare_tree_ring_scan_image,
             bayesian_dating_mcmc::bayesian_date_series_mcmc,
         ])

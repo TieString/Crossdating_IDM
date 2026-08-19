@@ -23,6 +23,7 @@ import {
 } from "./scanDetailRendering";
 import { useTreeRingScanImage } from "./useTreeRingScanImage";
 import styles from "./TreeRingScanPreview.module.css";
+import { isPanelResizeActive, PANEL_RESIZE_END_EVENT } from "@/shared/panelResize";
 
 interface TreeRingScanPreviewProps {
     seriesId: string;
@@ -129,18 +130,39 @@ function TreeRingScanPreviewComponent({
     useEffect(() => {
         const target = canvasRef.current ?? buttonRef.current;
         if (!target) return;
+        let deferred = false;
         const measure = () => {
+            if (isPanelResizeActive()) {
+                deferred = true;
+                return;
+            }
             const rect = target.getBoundingClientRect();
-            setPreviewSize({ width: rect.width, height: rect.height });
+            setPreviewSize((current) => (
+                current.width === rect.width && current.height === rect.height
+                    ? current
+                    : { width: rect.width, height: rect.height }
+            ));
+        };
+        const measureAfterPanelResize = () => {
+            if (!deferred) return;
+            deferred = false;
+            measure();
         };
         measure();
+        window.addEventListener(PANEL_RESIZE_END_EVENT, measureAfterPanelResize);
         if (typeof ResizeObserver === "undefined") {
             window.addEventListener("resize", measure);
-            return () => window.removeEventListener("resize", measure);
+            return () => {
+                window.removeEventListener("resize", measure);
+                window.removeEventListener(PANEL_RESIZE_END_EVENT, measureAfterPanelResize);
+            };
         }
         const observer = new ResizeObserver(measure);
         observer.observe(target);
-        return () => observer.disconnect();
+        return () => {
+            observer.disconnect();
+            window.removeEventListener(PANEL_RESIZE_END_EVENT, measureAfterPanelResize);
+        };
     }, [image.url]);
 
     useEffect(() => {
@@ -414,6 +436,7 @@ function TreeRingScanPreviewComponent({
                 <canvas
                     ref={canvasRef}
                     className={styles.previewCanvas}
+                    data-panel-resize-heavy-preview="true"
                     role="img"
                     aria-label={`${seriesId} 的扫描影像 1 cm 窗口`}
                 />

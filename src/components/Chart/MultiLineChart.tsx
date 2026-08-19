@@ -1,4 +1,5 @@
 import { Line } from 'react-chartjs-2'
+import { buildSampleDepthSeries } from './sampleDepth'
 import crosshairPlugin from 'chartjs-plugin-crosshair'
 import zoomPlugin from 'chartjs-plugin-zoom'
 import {
@@ -942,26 +943,8 @@ export function MultiLineChart({
   }, [allYears, onZoomWindowChange])
 
   const sampleSize = useMemo(() => {
-    let max = 0
     const coverageData = sampleSizeData ?? data
-    const counts = allYears.map((year) => {
-      let count = 0
-      coverageData.forEach((yearMap) => {
-        const value = yearMap.get(year)
-        if (
-          typeof value === 'number'
-          && Number.isFinite(value)
-          && value >= 0
-          && value !== stopMarker.value
-        ) {
-          count += 1
-        }
-      })
-      if (count > max) max = count
-      return count
-    })
-
-    return { counts, max }
+    return buildSampleDepthSeries(allYears, coverageData, stopMarker.value)
   }, [allYears, data, sampleSizeData])
 
   const referenceDisplayData = useMemo(() => (

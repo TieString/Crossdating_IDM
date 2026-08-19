@@ -16,6 +16,7 @@ import type { ICofechaResult } from "@/features/cofecha/types";
 import type { DeleteMode, DeleteShift, MissingInsertSide, RwlOperationLogEntry } from "@/features/rwl/edit";
 import type { RwlSiteData } from "@/features/rwl/types";
 import type { ChartJumpTarget } from "@/components/Chart/chartNavigation";
+import { CofechaOutExportButton } from "./CofechaOutExportButton";
 import styles from "./WorkspacePages.module.css";
 
 const LazyTreeChartManager = lazy(async () => {
@@ -320,6 +321,7 @@ type CofechaReportPageProps = {
     isCofechaOutdated: boolean;
     isCofechaRunning: boolean;
     canRunValidation: boolean;
+    canExportOut: boolean;
     validationSummary: CrossdatingValidationSummary;
     linkedReport: { html: string; count: number };
     partOptions: CofechaPartOption[];
@@ -327,6 +329,7 @@ type CofechaReportPageProps = {
     jumpTarget?: { id: number; tree: string };
     onSelectedPartChange: (part: string) => void;
     onRunValidation: () => void | Promise<void>;
+    onExportOut: () => void | Promise<unknown>;
     onTextClick: (event: MouseEvent<HTMLParagraphElement>) => void;
     onTextKeyDown: (event: KeyboardEvent<HTMLParagraphElement>) => void;
     onClose: () => void;
@@ -337,13 +340,14 @@ export function CofechaReportPage({
     isCofechaOutdated,
     isCofechaRunning,
     canRunValidation,
-    validationSummary,
+    canExportOut,
     linkedReport,
     partOptions,
     selectedPart,
     jumpTarget,
     onSelectedPartChange,
     onRunValidation,
+    onExportOut,
     onTextClick,
     onTextKeyDown,
     onClose,
@@ -384,20 +388,6 @@ export function CofechaReportPage({
                     <span><small>Sensitivity</small><strong><RollingNumber value={cofechaResult?.averageMeanSensitivity} /></strong></span>
                     <span><small>Length</small><strong><RollingNumber value={cofechaResult?.meanLength} /></strong></span>
                 </div>
-                <div className={`${styles["validation-summary"]} ${styles[`validation-${validationSummary.severity}`]}`}>
-                    <div>
-                        <strong>{validationSummary.title}</strong>
-                        <span>{validationSummary.detail}</span>
-                    </div>
-                    {validationSummary.items.length > 0 ? (
-                        <ul>
-                            {validationSummary.items.slice(0, 4).map((item) => (
-                                <li key={item}>{item}</li>
-                            ))}
-                        </ul>
-                    ) : null}
-                </div>
-
                 <div className={styles["report-toolbar"]}>
                     <select
                         value={selectedPart}
@@ -427,6 +417,10 @@ export function CofechaReportPage({
                     >
                         {isCofechaRunning ? "验证中" : "重新验证"}
                     </button>
+                    <CofechaOutExportButton
+                        disabled={!canExportOut}
+                        onExport={onExportOut}
+                    />
                 </div>
 
                 <FloatingScrollArea ref={reportScrollRef} className={styles["report-scroll"]}>

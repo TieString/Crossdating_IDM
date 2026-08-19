@@ -544,7 +544,7 @@ export function useHomeWorkspace() {
                 if (requestId !== cofechaRequestIdRef.current) {
                     return null;
                 }
-                return runCofecha(input, baseName, sourcePath, version);
+                return runCofecha(input, baseName, version);
             });
             if (nextOutText === null) {
                 return;
@@ -933,6 +933,26 @@ export function useHomeWorkspace() {
             console.error("cofecha 执行失败", error);
         }
     }, [cofechaVersion, isCofechaRunning, runCofechaAndApplyResult]);
+
+    const handleExportCofechaOut = useCallback(async (): Promise<string | null> => {
+        if (!outFileContent) return null;
+        const sourceName = filePathRef.current?.split(/[\\/]/).pop() ?? "VERYCOF.OUT";
+        const sourceStem = sourceName.replace(/\.[^.]+$/, "") || "VERYCOF";
+        try {
+            const exportPath = await save({
+                title: "导出 COFECHA OUT",
+                defaultPath: `${sourceStem}.OUT`,
+                filters: [{ name: "COFECHA OUT", extensions: ["out"] }],
+            });
+            if (!exportPath) return null;
+            await saveFile(exportPath, outFileContent);
+            return exportPath;
+        } catch (error) {
+            console.error("导出 COFECHA OUT 失败:", error);
+            window.alert(`导出 COFECHA OUT 失败：${error instanceof Error ? error.message : String(error)}`);
+            return null;
+        }
+    }, [outFileContent]);
 
     const handleSaveRawText = useCallback(async (rawText: string) => {
         if (isFileLoadingRef.current) {
@@ -2161,6 +2181,7 @@ export function useHomeWorkspace() {
         handleResetToRawData,
         handleRemoveDeletionMarker,
         handleRestoreDeletion,
+        handleExportCofechaOut,
         handleRunCofechaValidation,
         handleRunBreadthDiagnosis,
         handleSaveRawText,
@@ -2178,6 +2199,7 @@ export function useHomeWorkspace() {
         hasProblems,
         historyAnimation,
         isCofechaOutdated,
+        canExportCofechaOut: Boolean(outFileContent),
         isCofechaRunning,
         isEventDiagnosisRunning,
         isFileLoading,

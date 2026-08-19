@@ -588,69 +588,6 @@
     line-height: 1.1;
 }
 
-.validation-summary {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(180px, 0.7fr);
-    gap: 10px;
-    align-items: start;
-    min-width: 0;
-    padding: 9px 11px;
-    border: 1px solid #d8e0e8;
-    border-radius: 6px;
-    background: #ffffff;
-    font-family: "Segoe UI", system-ui, sans-serif;
-    box-sizing: border-box;
-}
-
-.validation-summary > div {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    min-width: 0;
-}
-
-.validation-summary strong {
-    color: #172033;
-    font-size: 14px;
-    line-height: 1.25;
-}
-
-.validation-summary span,
-.validation-summary li {
-    color: #58687c;
-    font-size: 12px;
-    line-height: 1.35;
-}
-
-.validation-summary ul {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-    margin: 0;
-    padding-left: 18px;
-}
-
-.validation-success {
-    border-color: #b7dec7;
-    background: #f3faf6;
-}
-
-.validation-warning {
-    border-color: #ead0a8;
-    background: #fffaf0;
-}
-
-.validation-danger {
-    border-color: #e7b7aa;
-    background: #fff6f3;
-}
-
-.validation-neutral {
-    border-color: #d8e0e8;
-    background: #fbfcfe;
-}
-
 .report-toolbar {
     display: flex;
     align-items: center;
