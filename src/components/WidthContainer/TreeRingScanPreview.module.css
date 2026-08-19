@@ -56,29 +56,6 @@
     pointer-events: none;
 }
 
-.zoomBadge,
-.scanBadge {
-    position: absolute;
-    padding: 0 3px;
-    border-radius: 3px;
-    color: #ffffff;
-    font-size: 9px;
-    line-height: 14px;
-    pointer-events: none;
-}
-
-.zoomBadge {
-    right: 4px;
-    bottom: 2px;
-    background: rgba(26, 38, 53, 0.72);
-}
-
-.scanBadge {
-    left: 4px;
-    bottom: 2px;
-    background: rgba(42, 91, 122, 0.74);
-}
-
 .hoverYear {
     position: absolute;
     bottom: calc(100% + 2px);

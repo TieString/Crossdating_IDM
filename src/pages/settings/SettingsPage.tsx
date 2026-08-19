@@ -8,10 +8,11 @@ import {
 } from "@/features/settings/settings";
 import styles from "./SettingsPage.module.css";
 
-type SectionId = "animation" | "diagnosis" | "cofecha" | "about";
+type SectionId = "animation" | "tree-ring-image" | "diagnosis" | "cofecha" | "about";
 
 const SECTIONS: { id: SectionId; label: string }[] = [
     { id: "animation", label: "动画" },
+    { id: "tree-ring-image", label: "年轮图像" },
     { id: "diagnosis", label: "定年建议" },
     { id: "cofecha", label: "COFECHA 引擎" },
     { id: "about", label: "关于" },
@@ -256,6 +257,32 @@ function DiagnosisSection() {
     );
 }
 
+function TreeRingImageSection() {
+    const { settings, updateTreeRingImageSettings } = useSettings();
+
+    return (
+        <div>
+            <h2 className={styles["section-title"]}>年轮图像</h2>
+
+            <Row label="绘制图片" align="top">
+                <label className={styles["check"]}>
+                    <input
+                        type="checkbox"
+                        checked={settings.treeRingImage.showGeneratedPreview}
+                        onChange={(event) => updateTreeRingImageSettings({
+                            showGeneratedPreview: event.currentTarget.checked,
+                        })}
+                    />
+                    <span>在序列 header 中显示绘制年轮图</span>
+                </label>
+                <div className={styles["setting-note"]}>
+                    关闭后不生成或显示 header 绘制图，但保留原按钮、右键菜单和双击打开功能；扫描影像不受影响。
+                </div>
+            </Row>
+        </div>
+    );
+}
+
 function AboutSection() {
     return (
         <div>
@@ -314,6 +341,7 @@ export default function SettingsPage() {
 
                 <FloatingScrollArea className={styles["content"]}>
                     {activeSection === "animation" && <AnimationSection />}
+                    {activeSection === "tree-ring-image" && <TreeRingImageSection />}
                     {activeSection === "diagnosis" && <DiagnosisSection />}
                     {activeSection === "cofecha" && <CofechaSection />}
                     {activeSection === "about" && <AboutSection />}

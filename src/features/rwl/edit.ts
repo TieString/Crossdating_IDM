@@ -44,6 +44,11 @@ export type RwlHistoryAnimation = RwlEditOperation & {
     direction: "undo" | "redo";
 };
 
+export interface RwlReplaceAllDataOptions {
+    preserveDeletionMarkers?: boolean;
+    treeKeyMap?: ReadonlyMap<string, string>;
+}
+
 export type RwlOperationLogAction = "apply";
 export type RwlOperationSource =
     | "manual"
@@ -1767,7 +1772,12 @@ export class RwlEditor {
         this.notifyChange();
     }
 
-    replaceAllData(data: RwlSiteData, options?: RwlReadResult['readOptions'], format?: RwlFormat): void {
+    replaceAllData(
+        data: RwlSiteData,
+        options?: RwlReadResult['readOptions'],
+        format?: RwlFormat,
+        replaceOptions?: RwlReplaceAllDataOptions,
+    ): void {
         const operation: RwlEditOperation = { type: "replace-all-data", treeCount: data.size, format };
         const previousData = cloneSiteData(this.rwlData);
         const previousMarkers = cloneDeletionMarkers(this.deletionMarkers);
@@ -1776,7 +1786,23 @@ export class RwlEditor {
         this.rwlData = cloneSiteData(data);
         this.readOptions = cloneReadOptions(options);
         this.format = format || this.format;
-        this.deletionMarkers = new Map();
+        if (replaceOptions?.preserveDeletionMarkers) {
+            const remappedMarkers: RwlDeletionMarkers = new Map();
+            previousMarkers.forEach((treeMarkers, tree) => {
+                const nextTree = replaceOptions.treeKeyMap?.get(tree) ?? tree;
+                if (this.rwlData.has(nextTree)) {
+                    remappedMarkers.set(nextTree, new Map(
+                        Array.from(treeMarkers, ([year, markerStack]) => [
+                            year,
+                            markerStack.map((marker) => ({ ...marker })),
+                        ]),
+                    ));
+                }
+            });
+            this.deletionMarkers = remappedMarkers;
+        } else {
+            this.deletionMarkers = new Map();
+        }
 
         const changedTrees = new Set([...previousData.keys(), ...this.rwlData.keys()]);
         changedTrees.forEach((tree) => {

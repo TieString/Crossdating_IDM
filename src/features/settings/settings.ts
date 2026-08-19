@@ -43,6 +43,11 @@ export interface DiagnosisSettings {
     enabled: boolean;
 }
 
+export interface TreeRingImageSettings {
+    /** Show generated tree-ring artwork inside the series header button. */
+    showGeneratedPreview: boolean;
+}
+
 /** Persisted application settings shape. */
 export interface AppSettings {
     /** Animation-related preferences. */
@@ -51,6 +56,8 @@ export interface AppSettings {
     cofecha: CofechaSettings;
     /** Automatic dating-suggestion preferences. */
     diagnosis: DiagnosisSettings;
+    /** Generated tree-ring image preferences. */
+    treeRingImage: TreeRingImageSettings;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -67,6 +74,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
     },
     diagnosis: {
         enabled: true,
+    },
+    treeRingImage: {
+        showGeneratedPreview: true,
     },
 };
 
@@ -106,7 +116,11 @@ export function loadSettings(): AppSettings {
         const parsedDiagnosis = parsed.diagnosis && typeof parsed.diagnosis === "object"
             ? parsed.diagnosis
             : {};
+        const parsedTreeRingImage = parsed.treeRingImage && typeof parsed.treeRingImage === "object"
+            ? parsed.treeRingImage
+            : {};
         const parsedDiagnosisEnabled = (parsedDiagnosis as Partial<DiagnosisSettings>).enabled;
+        const parsedGeneratedPreview = (parsedTreeRingImage as Partial<TreeRingImageSettings>).showGeneratedPreview;
 
         return {
             animation: {
@@ -123,6 +137,11 @@ export function loadSettings(): AppSettings {
                 enabled: typeof parsedDiagnosisEnabled === "boolean"
                     ? parsedDiagnosisEnabled
                     : DEFAULT_SETTINGS.diagnosis.enabled,
+            },
+            treeRingImage: {
+                showGeneratedPreview: typeof parsedGeneratedPreview === "boolean"
+                    ? parsedGeneratedPreview
+                    : DEFAULT_SETTINGS.treeRingImage.showGeneratedPreview,
             },
         };
     } catch {

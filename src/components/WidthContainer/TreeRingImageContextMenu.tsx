@@ -133,7 +133,7 @@ export function TreeRingImageContextMenu({
                         <path d="M3 10h18" />
                     </svg>
                 </span>
-                <span className={menuStyles["menu-row-label"]}>加载扫描影像文件夹…</span>
+                <span className={menuStyles["menu-row-label"]}>加载扫描影像文件夹</span>
             </button>
             <div className={menuStyles["menu-separator"]} role="separator" />
             <button
@@ -149,7 +149,7 @@ export function TreeRingImageContextMenu({
                 <span className={`${menuStyles["menu-row-icon"]} ${styles.radioIcon}`} aria-hidden="true">
                     <span className={mode === "generated" ? styles.radioSelected : styles.radioEmpty} />
                 </span>
-                <span className={menuStyles["menu-row-label"]}>绘制版影像</span>
+                <span className={menuStyles["menu-row-label"]}>年轮模拟图</span>
             </button>
             <button
                 type="button"
@@ -187,7 +187,7 @@ export function TreeRingImageContextMenu({
                 </span>
                 <span className={menuStyles["menu-row-label"]}>
                     {calibrated
-                        ? "查看或调整截面与年份锚点…"
+                        ? "查看影像"
                         : (scanState?.crop ? "打开并标注年份锚点…" : "打开并框选样芯截面…")}
                 </span>
             </button>

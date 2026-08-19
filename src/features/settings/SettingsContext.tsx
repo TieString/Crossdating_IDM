@@ -4,6 +4,7 @@ import type {
     AppSettings,
     CofechaSettings,
     DiagnosisSettings,
+    TreeRingImageSettings,
 } from "./settings";
 import { loadSettings, saveSettings, STORAGE_KEY } from "./settings";
 
@@ -17,6 +18,8 @@ export interface SettingsContextValue {
     updateCofechaSettings: (update: Partial<CofechaSettings>) => void;
     /** Merges automatic diagnosis setting updates and persists the result. */
     updateDiagnosisSettings: (update: Partial<DiagnosisSettings>) => void;
+    /** Merges generated tree-ring image setting updates and persists the result. */
+    updateTreeRingImageSettings: (update: Partial<TreeRingImageSettings>) => void;
 }
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
@@ -58,6 +61,17 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         });
     }, []);
 
+    const updateTreeRingImageSettings = useCallback((update: Partial<TreeRingImageSettings>) => {
+        setSettings((prev) => {
+            const next: AppSettings = {
+                ...prev,
+                treeRingImage: { ...prev.treeRingImage, ...update },
+            };
+            saveSettings(next);
+            return next;
+        });
+    }, []);
+
     // 监听其他窗口（如设置窗口）对 localStorage 的修改，实时同步到本窗口
     useEffect(() => {
         const handleStorage = (e: StorageEvent) => {
@@ -79,8 +93,9 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
             updateAnimationSettings,
             updateCofechaSettings,
             updateDiagnosisSettings,
+            updateTreeRingImageSettings,
         }),
-        [settings, updateAnimationSettings, updateCofechaSettings, updateDiagnosisSettings],
+        [settings, updateAnimationSettings, updateCofechaSettings, updateDiagnosisSettings, updateTreeRingImageSettings],
     );
 
     return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

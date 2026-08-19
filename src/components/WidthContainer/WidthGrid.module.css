@@ -9,6 +9,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     cursor: text;
+    outline: 1px solid transparent;
     transition: background-color 120ms ease, box-shadow 120ms ease, outline-color 120ms ease, transform 120ms ease;
 }
 

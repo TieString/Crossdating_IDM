@@ -167,4 +167,25 @@ describe("deleteYearRange", () => {
         expect(Array.from(editor.getData().get("TREE")!.entries())).toEqual(deletedData);
         expect(editor.getDeletionMarkers().get("TREE")?.get(2003)).toHaveLength(3);
     });
+
+    it("整站替换可在序列改名时保留并重映射删除标记", () => {
+        const editor = new RwlEditor(new Map([["TREE", createSeries()]]));
+        editor.deleteYearWithMode("TREE", 2000, "direct", "right");
+        const renamedData = new Map([["RENAMED", editor.getData().get("TREE")!]]);
+
+        editor.replaceAllData(
+            renamedData,
+            editor.getReadOptions(),
+            editor.getFormat() as "tucson",
+            {
+                preserveDeletionMarkers: true,
+                treeKeyMap: new Map([["TREE", "RENAMED"]]),
+            },
+        );
+
+        expect(editor.getDeletionMarkers().has("TREE")).toBe(false);
+        expect(editor.getDeletionMarkers().get("RENAMED")?.get(2001)).toHaveLength(1);
+        editor.undo();
+        expect(editor.getDeletionMarkers().get("TREE")?.get(2001)).toHaveLength(1);
+    });
 });

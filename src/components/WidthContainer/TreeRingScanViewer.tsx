@@ -558,9 +558,6 @@ export function TreeRingScanViewer({
             ref={frameRef}
             className={`${styles.frame} ${styles[`${tool}Tool`]}`}
             style={{ width: `${size}px`, height: `${size}px` }}
-            title={tool === "crop"
-                ? "拖动框选磨平后的长方形样芯截面"
-                : (tool === "point" ? `点击标注 ${nextAnchorYear} 年锚点；拖动可平移` : "滚轮缩放；拖动平移；单击定位宽度格")}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={finishPointer}
@@ -677,8 +674,8 @@ export function TreeRingScanViewer({
                 >
                     平移
                 </button>
-                <button type="button" title="向左旋转 90°" onClick={() => rotateImage(-90)}>↶</button>
-                <button type="button" title="向右旋转 90°" onClick={() => rotateImage(90)}>↷</button>
+                <button type="button" aria-label="向左旋转 90°" onClick={() => rotateImage(-90)}>↶</button>
+                <button type="button" aria-label="向右旋转 90°" onClick={() => rotateImage(90)}>↷</button>
                 {scanState.crop ? (
                     <span className={styles.nextAnchor}>
                         下一点 {nextAnchorYear} · {"•".repeat(nextMarkerCount)}

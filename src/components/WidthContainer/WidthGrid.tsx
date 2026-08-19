@@ -3,6 +3,7 @@ import { motion, useReducedMotion, type TargetAndTransition, type Transition } f
 import { callChangeYearWidth } from "@/features/rwl/edit";
 import { RollingNumber } from "@/components/RollingNumber/RollingNumber";
 import style from "./WidthGrid.module.css";
+import { resolveWidthGridHoverSide } from "./widthGridHover";
 
 type PlusSide = "left" | "right";
 type GridAnimationKind =
@@ -355,12 +356,13 @@ export default function WidthGrid({
     style: customStyle = {},
     ...rest
 }: WidthGridProps) {
-    const { title, onMouseMove, onMouseLeave, ...restWithoutTitle } = rest;
+    const { title, onMouseEnter, onMouseMove, onMouseLeave, ...restWithoutTitle } = rest;
     const [isEditing, setIsEditing] = useState(false);
     const [editText, setEditText] = useState("");
     const [hoverPlusSide, setHoverPlusSide] = useState<PlusSide | null>(null);
     const spanRef = useRef<HTMLSpanElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
+    const hoverRectRef = useRef<{ left: number; width: number } | null>(null);
     const isInsertedZero = gridValue === 0;
     const shouldReduceMotion = useReducedMotion();
 
@@ -456,20 +458,38 @@ export default function WidthGrid({
         return masterSeriesValue !== undefined && masterSeriesValue < -1 ? "red" : "black";
     };
 
+    const canShowInsertAffordance = () => (
+        isEditable && !isEditing && tree !== undefined && year !== undefined && !isDragging
+    );
+
+    const updateHoverSide = (clientX: number, rect: { left: number; width: number }) => {
+        const nextSide = resolveWidthGridHoverSide(clientX, rect.left, rect.width);
+        setHoverPlusSide((previous) => previous === nextSide ? previous : nextSide);
+    };
+
+    const handleMouseEnter = (event: React.MouseEvent<HTMLSpanElement>) => {
+        onMouseEnter?.(event);
+        if (!canShowInsertAffordance()) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        hoverRectRef.current = { left: rect.left, width: rect.width };
+        updateHoverSide(event.clientX, hoverRectRef.current);
+    };
+
     const handleMouseMove = (event: React.MouseEvent<HTMLSpanElement>) => {
         onMouseMove?.(event);
-
         if (!isEditable || isEditing || tree === undefined || year === undefined || isDragging) {
             return;
         }
-
-        const rect = event.currentTarget.getBoundingClientRect();
-        const nextSide = event.clientX - rect.left < rect.width / 2 ? "left" : "right";
-        setHoverPlusSide((previous) => previous === nextSide ? previous : nextSide);
+        if (!hoverRectRef.current) {
+            const rect = event.currentTarget.getBoundingClientRect();
+            hoverRectRef.current = { left: rect.left, width: rect.width };
+        }
+        updateHoverSide(event.clientX, hoverRectRef.current);
     };
 
     const handleMouseLeave = (event: React.MouseEvent<HTMLSpanElement>) => {
         onMouseLeave?.(event);
+        hoverRectRef.current = null;
         setHoverPlusSide(null);
     };
 
@@ -562,6 +582,7 @@ export default function WidthGrid({
             data-drag-year-offset={dragYearOffset || undefined}
             onClick={isEditable && !isEditing ? handleClick : undefined}
             onDoubleClick={isEditable && !isEditing ? handleDoubleClick : undefined}
+            onMouseEnter={handleMouseEnter}
             onMouseMove={handleMouseMove}
             onMouseLeave={handleMouseLeave}
             className={`${style["width-grid"]} ${className} ${isMissing ? style["missing"] : ""} ${isInsertedZero ? style["inserted-zero"] : ""} ${isSelected ? style["selected"] : ""} ${isJumpHighlighted ? style["cofecha-jump-target"] : ""} ${inSuggestedRange ? style["suggested-range"] : ""} ${inSuggestedRange && isSuggestedRangeStart ? style["suggested-range-start"] : ""} ${inSuggestedRange && isSuggestedRangeEnd ? style["suggested-range-end"] : ""} ${isDragging ? style["dragging"] : ""} ${hasLeftDeletionMark ? style["has-left-deletion-mark"] : ""} ${hasRightDeletionMark ? style["has-right-deletion-mark"] : ""} ${animationKind ? style["motion-animated"] : ""} ${isEditable ? "" : style["disabled"]}`}

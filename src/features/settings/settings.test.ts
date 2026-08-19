@@ -40,6 +40,7 @@ describe("settings", () => {
         }));
 
         expect(loadSettings().diagnosis.enabled).toBe(true);
+        expect(loadSettings().treeRingImage.showGeneratedPreview).toBe(true);
     });
 
     it("persists a disabled automatic dating-suggestion setting", () => {
@@ -49,5 +50,14 @@ describe("settings", () => {
         });
 
         expect(loadSettings().diagnosis.enabled).toBe(false);
+    });
+
+    it("persists a hidden generated tree-ring preview setting", () => {
+        saveSettings({
+            ...DEFAULT_SETTINGS,
+            treeRingImage: { showGeneratedPreview: false },
+        });
+
+        expect(loadSettings().treeRingImage.showGeneratedPreview).toBe(false);
     });
 });

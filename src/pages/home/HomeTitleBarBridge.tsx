@@ -41,6 +41,11 @@ const EMPTY_MENU_ELEMENTS: MenuElements = {
     runContainer: null,
 };
 
+const isTextEditingTarget = (target: EventTarget | null) => (
+    target instanceof Element
+    && Boolean(target.closest("input, textarea, [contenteditable='true'], [contenteditable='plaintext-only'], [role='textbox'], .cm-editor"))
+);
+
 export function HomeTitleBarBridge({
     title,
     cofechaVersion,
@@ -140,6 +145,10 @@ export function HomeTitleBarBridge({
                 return;
             }
 
+            if (event.defaultPrevented) {
+                return;
+            }
+
             // 忽略按住快捷键时操作系统产生的自动重复事件，
             // 否则按住 Ctrl+S 会不停触发保存与 COFECHA 验证。
             if (event.repeat) {
@@ -153,12 +162,14 @@ export function HomeTitleBarBridge({
             }
 
             if (key === "z") {
+                if (isTextEditingTarget(event.target)) return;
                 event.preventDefault();
                 void onUndo();
                 return;
             }
 
             if (key === "y") {
+                if (isTextEditingTarget(event.target)) return;
                 event.preventDefault();
                 void onRedo();
                 return;

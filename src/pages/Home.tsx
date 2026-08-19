@@ -41,6 +41,12 @@ import {
     type ExternalWorkspaceWindows,
 } from "./home/homeShared";
 import {
+    findGridMatches,
+    replaceGridMatches,
+    type GridFindMatch,
+    type GridReplacementResult,
+} from "./home/gridFindReplace";
+import {
     CofechaEmptySkeleton,
     CofechaStatValue,
     CofechaToolbarSkeleton,
@@ -393,6 +399,7 @@ export default function Home() {
         handleApplyLocalSimulation,
         handleReferenceConfigChange,
         handleRedo,
+        handleReplaceSiteData,
         handleReplaceTreeData,
         handleResetToRawData,
         handleRemoveDeletionMarker,
@@ -1211,40 +1218,30 @@ export default function Home() {
         jumpToCellRef.current = handleCofechaCellReferenceClick;
     }, [handleCofechaCellReferenceClick]);
 
-    // 左侧宽度模块：把查找词解析为宽度值，命中所有等于该值的年轮单元格。
-    const widthMatches = useMemo(() => {
-        const queryValue = Number(findQuery.trim());
-        if (findQuery.trim() === "" || !Number.isFinite(queryValue) || queryValue === stopMarker.value) {
-            return [] as { tree: string; year: number }[];
-        }
+    // 左侧宽度模块同时匹配序列名、数值格、missing 与格式终止分隔符。
+    const gridMatches = useMemo(
+        () => findGridMatches(siteData, findQuery, stopMarker.value),
+        [findQuery, siteData],
+    );
 
-        const matches: { tree: string; year: number }[] = [];
-        siteData.forEach((treeData, tree) => {
-            treeData.forEach((width, year) => {
-                if (width === queryValue) {
-                    matches.push({ tree, year });
-                }
-            });
-        });
-        return matches;
-    }, [findQuery, siteData]);
-
-    const matchCount = widthMatches.length;
+    const matchCount = gridMatches.length;
     const effectiveMatchIndex = matchCount > 0 ? ((findMatchIndex % matchCount) + matchCount) % matchCount : 0;
 
-    const currentWidthMatch = findReplaceOpen && matchCount > 0
-        ? widthMatches[effectiveMatchIndex]
+    const currentGridMatch = findReplaceOpen && matchCount > 0
+        ? gridMatches[effectiveMatchIndex]
         : undefined;
-    const currentWidthMatchTree = currentWidthMatch?.tree;
-    const currentWidthMatchYear = currentWidthMatch?.year;
+    const currentGridMatchTree = currentGridMatch?.tree;
+    const currentGridMatchYear = currentGridMatch?.kind === "cell"
+        ? currentGridMatch.year
+        : undefined;
 
-    // 查找：当前命中变化时滚动并高亮对应单元格（复用 COFECHA 跳转逻辑）。
+    // 当前命中变化时滚动并高亮单元格；序列名命中则定位整条序列。
     useEffect(() => {
-        if (currentWidthMatchTree === undefined || currentWidthMatchYear === undefined) {
+        if (currentGridMatchTree === undefined) {
             return;
         }
-        jumpToCellRef.current({ tree: currentWidthMatchTree, year: currentWidthMatchYear });
-    }, [currentWidthMatchTree, currentWidthMatchYear]);
+        jumpToCellRef.current({ tree: currentGridMatchTree, year: currentGridMatchYear });
+    }, [currentGridMatchTree, currentGridMatchYear]);
 
     const handleOpenFind = useCallback(() => {
         setFindReplaceMode("find");
@@ -1277,49 +1274,57 @@ export default function Home() {
         setFindMatchIndex((previous) => matchCount > 0 ? (previous - 1 + matchCount) % matchCount : 0);
     }, [matchCount]);
 
+    const commitGridReplacement = useCallback((
+        matches: readonly GridFindMatch[],
+        result: GridReplacementResult,
+    ) => {
+        if (!result.changed) return;
+        const beforeKeys = Array.from(siteData.keys());
+        const afterKeys = Array.from(result.data.keys());
+        const seriesNamesChanged = beforeKeys.length !== afterKeys.length
+            || beforeKeys.some((tree, index) => tree !== afterKeys[index]);
+        if (seriesNamesChanged || result.nextStopMarkerValue !== undefined) {
+            handleReplaceSiteData(result.data, result.nextStopMarkerValue);
+            return;
+        }
+
+        const changedTrees = new Set(
+            matches
+                .filter((match): match is Extract<GridFindMatch, { kind: "cell" }> => (
+                    match.kind === "cell" && !match.isStopMarker
+                ))
+                .map((match) => match.tree),
+        );
+        changedTrees.forEach((tree) => {
+            const nextTreeData = result.data.get(tree);
+            if (nextTreeData) handleReplaceTreeData(tree, nextTreeData);
+        });
+    }, [handleReplaceSiteData, handleReplaceTreeData, siteData]);
+
     const handleReplaceOne = useCallback(() => {
-        const replaceNumber = Number(replaceValue.trim());
-        if (replaceValue.trim() === "" || !Number.isFinite(replaceNumber) || replaceNumber === Number(findQuery.trim())) {
-            return;
-        }
-        const match = widthMatches[effectiveMatchIndex];
-        const treeData = match ? siteData.get(match.tree) : undefined;
-        if (!match || !treeData) {
-            return;
-        }
-        const nextData = new Map(treeData);
-        nextData.set(match.year, replaceNumber);
-        handleReplaceTreeData(match.tree, nextData);
-    }, [findQuery, replaceValue, widthMatches, effectiveMatchIndex, siteData, handleReplaceTreeData]);
+        const match = gridMatches[effectiveMatchIndex];
+        if (!match) return;
+        const result = replaceGridMatches(
+            siteData,
+            [match],
+            findQuery,
+            replaceValue,
+            stopMarker.value,
+        );
+        commitGridReplacement([match], result);
+    }, [commitGridReplacement, effectiveMatchIndex, findQuery, gridMatches, replaceValue, siteData]);
 
     const handleReplaceAll = useCallback(() => {
-        if (widthMatches.length === 0) {
-            return;
-        }
-        const replaceNumber = Number(replaceValue.trim());
-        if (replaceValue.trim() === "" || !Number.isFinite(replaceNumber) || replaceNumber === Number(findQuery.trim())) {
-            return;
-        }
-
-        const yearsByTree = new Map<string, number[]>();
-        widthMatches.forEach(({ tree, year }) => {
-            const years = yearsByTree.get(tree) ?? [];
-            years.push(year);
-            yearsByTree.set(tree, years);
-        });
-
-        yearsByTree.forEach((years, tree) => {
-            const treeData = siteData.get(tree);
-            if (!treeData) {
-                return;
-            }
-            const nextData = new Map(treeData);
-            years.forEach((year) => nextData.set(year, replaceNumber));
-            handleReplaceTreeData(tree, nextData);
-        });
-
+        const result = replaceGridMatches(
+            siteData,
+            gridMatches,
+            findQuery,
+            replaceValue,
+            stopMarker.value,
+        );
+        commitGridReplacement(gridMatches, result);
         setFindMatchIndex(0);
-    }, [findQuery, replaceValue, widthMatches, siteData, handleReplaceTreeData]);
+    }, [commitGridReplacement, findQuery, gridMatches, replaceValue, siteData]);
 
     const getRawEditorText = useCallback(() => (
         rawEditorRef.current?.innerText ?? rawEditorInitialText
@@ -1329,6 +1334,24 @@ export default function Home() {
         setIsRawEditing(false);
         setRawEditorError("");
     }, []);
+
+    const handleContextualUndo = useCallback(() => {
+        if (isRawEditing && rawEditorRef.current) {
+            rawEditorRef.current.focus();
+            document.execCommand("undo");
+            return;
+        }
+        handleUndo();
+    }, [handleUndo, isRawEditing]);
+
+    const handleContextualRedo = useCallback(() => {
+        if (isRawEditing && rawEditorRef.current) {
+            rawEditorRef.current.focus();
+            document.execCommand("redo");
+            return;
+        }
+        handleRedo();
+    }, [handleRedo, isRawEditing]);
 
     const applyRawEditor = useCallback(async (refocusOnError = false) => {
         try {
@@ -1491,10 +1514,10 @@ export default function Home() {
                 onLoad={handleLoad}
                 onSave={handleSave}
                 onSaveAs={handleSaveAs}
-                onUndo={handleUndo}
-                onRedo={handleRedo}
-                canUndo={historyStatus.undoCount > 0}
-                canRedo={historyStatus.redoCount > 0}
+                onUndo={handleContextualUndo}
+                onRedo={handleContextualRedo}
+                canUndo={isRawEditing || historyStatus.undoCount > 0}
+                canRedo={isRawEditing || historyStatus.redoCount > 0}
                 onCofechaVersionChange={setCofechaVersion}
                 onActiveMenuChange={setActiveMenu}
                 onOpenOperationLog={() => handleOpenWorkspaceWindow("operation-log")}
@@ -1509,6 +1532,7 @@ export default function Home() {
                         <FindReplaceBar
                             key="find-replace"
                             mode={findReplaceMode}
+                            textMode
                             query={findQuery}
                             replaceValue={replaceValue}
                             matchIndex={effectiveMatchIndex}

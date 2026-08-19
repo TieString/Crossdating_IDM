@@ -73,9 +73,9 @@ import {
     type TreeRingViewerDisplayMode,
     type TreeRingViewerRequest,
 } from "./TreeRingPreview";
-import { prewarmTreeRingArtworkCache } from "./treeRingArtwork";
 import { TreeRingScanPreview } from "./TreeRingScanPreview";
 import { TreeRingImageContextMenu } from "./TreeRingImageContextMenu";
+import { getVisibleSeriesRange, sameVisibleSeriesRange } from "./widthGridVirtualization";
 
 interface YearCell {
     year: number;
@@ -683,42 +683,6 @@ const buildSeriesRows = (treeCode: string, timeline: YearCell[]): VirtualRow[] =
     return rows;
 };
 
-const findVisibleStartIndex = (series: VirtualSeries[], start: number) => {
-    let low = 0;
-    let high = series.length - 1;
-    let answer = series.length;
-
-    while (low <= high) {
-        const mid = Math.floor((low + high) / 2);
-        if (series[mid].bottom >= start) {
-            answer = mid;
-            high = mid - 1;
-        } else {
-            low = mid + 1;
-        }
-    }
-
-    return Math.max(0, answer);
-};
-
-const findVisibleEndIndex = (series: VirtualSeries[], end: number) => {
-    let low = 0;
-    let high = series.length - 1;
-    let answer = -1;
-
-    while (low <= high) {
-        const mid = Math.floor((low + high) / 2);
-        if (series[mid].top <= end) {
-            answer = mid;
-            low = mid + 1;
-        } else {
-            high = mid - 1;
-        }
-    }
-
-    return answer;
-};
-
 /** Props for the editable tree-ring width grid. */
 export type WidthContainerProps = {
     /** Parsed RWL site data keyed by series code and year. */
@@ -1052,6 +1016,7 @@ function WidthContainer({
     const shouldAnimateInsertYear = animationsEnabled && insertYearAnim !== "none";
     const shouldAnimateDeleteYear = animationsEnabled && deleteYearAnim !== "none";
     const shouldAnimateDeleteSeries = animationsEnabled && deleteSeriesAnim !== "none";
+    const showGeneratedTreeRingPreview = settings.treeRingImage.showGeneratedPreview;
 
     const treeRingYearMappings = useMemo(() => {
         const mappings = new Map<string, ReturnType<typeof buildTreeRingYearMapping>>();
@@ -1064,8 +1029,6 @@ function WidthContainer({
         return mappings;
     }, [rwlOperationLog, site, treeRingScanState]);
 
-    useEffect(() => prewarmTreeRingArtworkCache(site, stopMarker.value), [site]);
-
     useEffect(() => {
         if (treeRingViewer && !site.has(treeRingViewer.seriesId)) {
             setTreeRingViewer(null);
@@ -1075,7 +1038,7 @@ function WidthContainer({
     const handleOpenTreeRingViewer = useCallback((
         seriesId: string,
         anchor: TreeRingViewerAnchor,
-        initialView: TreeRingViewerDisplayMode = "full",
+        initialView: TreeRingViewerDisplayMode = "strip",
     ) => {
         treeRingViewerIdRef.current += 1;
         setTreeRingViewer({ id: treeRingViewerIdRef.current, seriesId, anchor, initialView });
@@ -2145,18 +2108,18 @@ function WidthContainer({
             pendingInsertFlipRef.current = { tree, side, cells: plan.ghostCells };
         }
 
-        flushSync(() => {
-            onInsertMissingYearAtSide?.(tree, year, side);
-            showAnimationPlan({
-                tree,
-                insertSide: side,
-                insertedYears: [year],
-                shiftedYears,
-                shiftedCells,
-                movedYears: [],
-                gapYears: [],
-                overwrittenYears: [],
-            });
+        // React 18 batches the editor update and animation plan from this click into one commit.
+        // Avoid forcing the complete Home/Width tree to synchronously render inside the handler.
+        onInsertMissingYearAtSide?.(tree, year, side);
+        showAnimationPlan({
+            tree,
+            insertSide: side,
+            insertedYears: [year],
+            shiftedYears,
+            shiftedCells,
+            movedYears: [],
+            gapYears: [],
+            overwrittenYears: [],
         });
     }, [onInsertMissingYearAtSide, showAnimationPlan, visibleSite, shouldAnimateInsertYear, shouldUseFlightShift]);
 
@@ -2478,20 +2441,20 @@ function WidthContainer({
             ? (mode === "right" || mode === "both" ? [year] : [])
             : (mode === "left" || mode === "both" ? [year] : []);
 
-        flushSync(() => {
-            onDeleteYearWithMode?.(tree, year, mode, shift);
-            showAnimationPlan({
-                tree,
-                insertSide: animationInsertSide,
-                insertedYears: [],
-                shiftedYears,
-                shiftedCells,
-                movedYears: [],
-                gapYears: [],
-                overwrittenYears: [],
-                rollingCells,
-                elevatedYears,
-            });
+        // Keep the data update and animation plan in React's normal event batch. A forced commit
+        // here also renders unrelated report/chart state before the first width-animation frame.
+        onDeleteYearWithMode?.(tree, year, mode, shift);
+        showAnimationPlan({
+            tree,
+            insertSide: animationInsertSide,
+            insertedYears: [],
+            shiftedYears,
+            shiftedCells,
+            movedYears: [],
+            gapYears: [],
+            overwrittenYears: [],
+            rollingCells,
+            elevatedYears,
         });
     }, [animationSpeed, clearDeleteBurstAnimations, onDeleteYearWithMode, showAnimationPlan, visibleSite, shouldAnimateDeleteYear, shouldUseFlightShift]);
 
@@ -2925,10 +2888,19 @@ function WidthContainer({
                         scrollTop: scrollContainer.scrollTop,
                         height: scrollContainer.clientHeight,
                     };
-
-                    return previous.scrollTop === next.scrollTop && previous.height === next.height
-                        ? previous
-                        : next;
+                    const previousRange = getVisibleSeriesRange(
+                        virtualSeries.series,
+                        previous.scrollTop,
+                        previous.height,
+                        OVERSCAN_PX,
+                    );
+                    const nextRange = getVisibleSeriesRange(
+                        virtualSeries.series,
+                        next.scrollTop,
+                        next.height,
+                        OVERSCAN_PX,
+                    );
+                    return sameVisibleSeriesRange(previousRange, nextRange) ? previous : next;
                 });
             });
         };
@@ -2953,11 +2925,12 @@ function WidthContainer({
             return [];
         }
 
-        const start = Math.max(0, viewport.scrollTop - OVERSCAN_PX);
-        const effectiveHeight = viewport.height || 800;
-        const end = viewport.scrollTop + effectiveHeight + OVERSCAN_PX;
-        const startIndex = findVisibleStartIndex(virtualSeries.series, start);
-        const endIndex = findVisibleEndIndex(virtualSeries.series, end);
+        const { startIndex, endIndex } = getVisibleSeriesRange(
+            virtualSeries.series,
+            viewport.scrollTop,
+            viewport.height,
+            OVERSCAN_PX,
+        );
 
         if (endIndex < startIndex) {
             return [];
@@ -3072,6 +3045,7 @@ function WidthContainer({
                                         seriesId={series.treeCode}
                                         series={seriesData}
                                         stopMarkerValue={stopMarker.value}
+                                        showArtwork={showGeneratedTreeRingPreview}
                                         highlightedYear={treeRingFocus?.tree === series.treeCode ? treeRingFocus.year : undefined}
                                         focusRequestId={treeRingFocus?.tree === series.treeCode ? treeRingFocus.focusRequestId : undefined}
                                         onYearSelect={handleTreeRingYearSelect}

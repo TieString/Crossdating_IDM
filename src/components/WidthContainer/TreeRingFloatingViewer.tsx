@@ -15,14 +15,6 @@ import type {
 } from "@/features/treeRingScans";
 import type { TreeRingViewerAnchor, TreeRingViewerDisplayMode } from "./TreeRingPreview";
 import {
-    focusTreeRingFullViewport,
-    getTreeRingFullViewSize,
-    panTreeRingFullViewport,
-    TREE_RING_FULL_MIN_ZOOM,
-    type TreeRingFullViewport,
-    zoomTreeRingFullViewport,
-} from "./treeRingFullViewport";
-import {
     focusTreeRingViewport,
     getTreeRingOneCentimetreZoom,
     getTreeRingPreviewViewHeight,
@@ -32,12 +24,9 @@ import {
     type TreeRingViewport,
     zoomTreeRingViewport,
 } from "./treeRingViewport";
-import { getTreeRingArtwork, getTreeRingFeature } from "./treeRingArtwork";
-import {
-    resolveFullTreeRingViewerFeature,
-    resolveStripTreeRingViewerFeature,
-} from "./treeRingViewerLink";
-import { TreeRingSvgOverlay } from "./TreeRingSvgOverlay";
+import { buildTreeRingGeometry, getTreeRingFeature } from "./treeRingArtwork";
+import { drawTreeRingHeaderCanvas } from "./treeRingHeaderCanvas";
+import { resolveStripTreeRingViewerFeature } from "./treeRingViewerLink";
 import { TreeRingScanViewer } from "./TreeRingScanViewer";
 import styles from "./TreeRingFloatingViewer.module.css";
 
@@ -52,28 +41,13 @@ interface WindowDragState {
     offsetY: number;
 }
 
-interface FullImagePanState {
-    kind: "full";
-    pointerId: number;
-    startClientX: number;
-    startClientY: number;
-    viewportPixels: number;
-    startViewport: TreeRingFullViewport;
-    moved: boolean;
-}
-
-interface StripImagePanState {
-    kind: "strip";
+interface ImagePanState {
     pointerId: number;
     startClientX: number;
     viewportPixels: number;
     startViewport: TreeRingViewport;
     moved: boolean;
 }
-
-type ImagePanState = FullImagePanState | StripImagePanState;
-
-type GeneratedViewerMode = "full" | "strip";
 
 interface HoveredGeneratedYear {
     label: string;
@@ -178,7 +152,7 @@ export function TreeRingFloatingViewer({
     highlightedYear,
     focusRequestId,
     anchor,
-    initialView = "full",
+    initialView = "strip",
     scanFile,
     scanState,
     operationLog = [],
@@ -188,10 +162,15 @@ export function TreeRingFloatingViewer({
     onContextMenu,
     onClose,
 }: TreeRingFloatingViewerProps) {
-    const artwork = useMemo(
-        () => getTreeRingArtwork(series, stopMarkerValue, true),
-        [series, stopMarkerValue],
-    );
+    const artwork = useMemo(() => {
+        const geometry = buildTreeRingGeometry(series, stopMarkerValue);
+        return geometry ? {
+            cacheKey: geometry.cacheKey,
+            ringCount: geometry.rings.length,
+            radiusMm: geometry.radiusMm,
+            geometry,
+        } : null;
+    }, [series, stopMarkerValue]);
     const initialImageSize = calculateImageSize(anchor, initialView === "scan" ? 360 : 120);
     const initialStripSurfaceWidth = Math.max(1, initialImageSize - 24);
     const initialStripSurfaceHeight = Math.round(clamp(initialImageSize * 0.24, 64, 140));
@@ -205,16 +184,8 @@ export function TreeRingFloatingViewer({
         : TREE_RING_MIN_ZOOM;
     const [imageSize, setImageSize] = useState(initialImageSize);
     const [position, setPosition] = useState(() => getInitialPosition(anchor, initialImageSize));
-    const [imageViewport, setImageViewport] = useState<TreeRingFullViewport>({
-        zoom: TREE_RING_FULL_MIN_ZOOM,
-        startX: 0,
-        startY: 0,
-    });
     const [viewerMode, setViewerMode] = useState<TreeRingImageMode>(
         initialView === "scan" && scanFile ? "scan" : "generated",
-    );
-    const [generatedViewerMode, setGeneratedViewerMode] = useState<GeneratedViewerMode>(
-        initialView === "strip" ? "strip" : "full",
     );
     const [stripViewport, setStripViewport] = useState<TreeRingViewport>({
         zoom: initialStripZoom,
@@ -229,6 +200,7 @@ export function TreeRingFloatingViewer({
     const imageSizeRef = useRef(imageSize);
     const imageFrameRef = useRef<HTMLDivElement | null>(null);
     const generatedSurfaceRef = useRef<HTMLDivElement | null>(null);
+    const generatedCanvasRef = useRef<HTMLCanvasElement | null>(null);
     const windowDragRef = useRef<WindowDragState | null>(null);
     const imagePanRef = useRef<ImagePanState | null>(null);
     const suppressGeneratedClickRef = useRef(false);
@@ -329,9 +301,8 @@ export function TreeRingFloatingViewer({
         };
     }, []);
 
-    // Reset only for new artwork; resizing the viewer must preserve both zoom states.
+    // Reset only for new geometry; resizing the viewer must preserve zoom.
     useEffect(() => {
-        setImageViewport({ zoom: TREE_RING_FULL_MIN_ZOOM, startX: 0, startY: 0 });
         setStripViewport({
             zoom: stripBaseZoom,
             startX: artwork?.radiusMm ?? 1,
@@ -350,17 +321,12 @@ export function TreeRingFloatingViewer({
         const feature = getTreeRingFeature(artwork.geometry, highlightedYear);
         if (!feature) return;
         handledFocusRequestIdRef.current = focusRequestId;
-        setImageViewport((current) => focusTreeRingFullViewport(
-            current,
-            artwork.geometry.diameterMm,
-            feature.centreRadiusMm,
-        ));
         setStripViewport((current) => focusTreeRingViewport(
             current,
             artwork.geometry.radiusMm,
             feature.centreRadiusMm,
         ));
-    }, [artwork, focusRequestId, generatedViewerMode, highlightedYear, viewerMode]);
+    }, [artwork, focusRequestId, highlightedYear, viewerMode]);
 
     useEffect(() => {
         const handleResize = () => {
@@ -389,34 +355,45 @@ export function TreeRingFloatingViewer({
             setHoveredGeneratedYear(null);
             const rect = surface.getBoundingClientRect();
             const cursorXRatio = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0.5;
-            if (generatedViewerMode === "strip") {
-                setStripViewport((current) => zoomTreeRingViewport(
-                    current,
-                    artwork.geometry.radiusMm,
-                    cursorXRatio,
-                    event.deltaY,
-                ));
-            } else {
-                const cursorYRatio = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5;
-                setImageViewport((current) => zoomTreeRingFullViewport(
-                    current,
-                    artwork.geometry.diameterMm,
-                    cursorXRatio,
-                    cursorYRatio,
-                    event.deltaY,
-                ));
-            }
+            setStripViewport((current) => zoomTreeRingViewport(
+                current,
+                artwork.geometry.radiusMm,
+                cursorXRatio,
+                event.deltaY,
+            ));
         };
         surface.addEventListener("wheel", handleWheel, { passive: false, capture: true });
         return () => surface.removeEventListener("wheel", handleWheel, { capture: true });
-    }, [artwork, generatedViewerMode, viewerMode]);
+    }, [artwork, viewerMode]);
 
-    if (!artwork?.fullUrl || typeof document === "undefined") {
+    useEffect(() => {
+        const canvas = generatedCanvasRef.current;
+        if (!canvas || !artwork || viewerMode !== "generated") return;
+        drawTreeRingHeaderCanvas(canvas, artwork.geometry, {
+            cssWidth: stripSurfaceWidth,
+            cssHeight: stripSurfaceHeight,
+            pixelRatio: typeof window === "undefined" ? 1 : window.devicePixelRatio || 1,
+            startX: stripViewport.startX,
+            viewTop: stripViewTop,
+            viewWidth: stripViewWidth,
+            viewHeight: stripViewHeight,
+            highlightedYear,
+        });
+    }, [
+        artwork,
+        highlightedYear,
+        stripSurfaceHeight,
+        stripSurfaceWidth,
+        stripViewHeight,
+        stripViewTop,
+        stripViewWidth,
+        stripViewport.startX,
+        viewerMode,
+    ]);
+
+    if (!artwork || typeof document === "undefined") {
         return null;
     }
-
-    const diameterMm = artwork.geometry.diameterMm;
-    const viewSizeMm = getTreeRingFullViewSize(diameterMm, imageViewport.zoom);
 
     const updateImageSize = (nextSize: number) => {
         const clampedSize = clampTreeRingViewerImageSize(nextSize, position);
@@ -467,21 +444,12 @@ export function TreeRingFloatingViewer({
         const rect = element.getBoundingClientRect();
         const localX = clientX - rect.left;
         const localY = clientY - rect.top;
-        const feature = generatedViewerMode === "strip"
-            ? resolveStripTreeRingViewerFeature(
-                artwork.geometry,
-                stripViewport,
-                localX,
-                rect.width,
-            )
-            : resolveFullTreeRingViewerFeature(
-                artwork.geometry,
-                imageViewport,
-                localX,
-                localY,
-                rect.width,
-                rect.height,
-            );
+        const feature = resolveStripTreeRingViewerFeature(
+            artwork.geometry,
+            stripViewport,
+            localX,
+            rect.width,
+        );
         return feature ? {
             feature,
             left: clamp(localX, 30, Math.max(30, rect.width - 30)),
@@ -508,31 +476,17 @@ export function TreeRingFloatingViewer({
     const handleImagePanStart = (event: ReactPointerEvent<HTMLDivElement>) => {
         event.stopPropagation();
         if (event.button !== 0) return;
-        const canPan = generatedViewerMode === "strip"
-            ? stripViewport.zoom > TREE_RING_MIN_ZOOM
-            : imageViewport.zoom > TREE_RING_FULL_MIN_ZOOM;
-        if (!canPan) return;
+        if (stripViewport.zoom <= TREE_RING_MIN_ZOOM) return;
         event.preventDefault();
         setHoveredGeneratedYear(null);
         const rect = event.currentTarget.getBoundingClientRect();
-        imagePanRef.current = generatedViewerMode === "strip"
-            ? {
-                kind: "strip",
-                pointerId: event.pointerId,
-                startClientX: event.clientX,
-                viewportPixels: rect.width,
-                startViewport: stripViewport,
-                moved: false,
-            }
-            : {
-                kind: "full",
-                pointerId: event.pointerId,
-                startClientX: event.clientX,
-                startClientY: event.clientY,
-                viewportPixels: Math.min(rect.width, rect.height),
-                startViewport: imageViewport,
-                moved: false,
-            };
+        imagePanRef.current = {
+            pointerId: event.pointerId,
+            startClientX: event.clientX,
+            viewportPixels: rect.width,
+            startViewport: stripViewport,
+            moved: false,
+        };
         event.currentTarget.setPointerCapture(event.pointerId);
         setIsImagePanning(true);
     };
@@ -546,25 +500,14 @@ export function TreeRingFloatingViewer({
         if (pan.pointerId !== event.pointerId) return;
         event.stopPropagation();
         const deltaX = event.clientX - pan.startClientX;
-        const deltaY = pan.kind === "full" ? event.clientY - pan.startClientY : 0;
-        if (!pan.moved && Math.hypot(deltaX, deltaY) >= 3) pan.moved = true;
+        if (!pan.moved && Math.abs(deltaX) >= 3) pan.moved = true;
         if (!pan.moved) return;
-        if (pan.kind === "strip") {
-            setStripViewport(panTreeRingViewport(
-                pan.startViewport,
-                artwork.geometry.radiusMm,
-                deltaX,
-                pan.viewportPixels,
-            ));
-        } else {
-            setImageViewport(panTreeRingFullViewport(
-                pan.startViewport,
-                diameterMm,
-                deltaX,
-                deltaY,
-                pan.viewportPixels,
-            ));
-        }
+        setStripViewport(panTreeRingViewport(
+            pan.startViewport,
+            artwork.geometry.radiusMm,
+            deltaX,
+            pan.viewportPixels,
+        ));
     };
 
     const finishImagePan = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -590,11 +533,7 @@ export function TreeRingFloatingViewer({
     };
 
     const resetGeneratedViewport = () => {
-        if (generatedViewerMode === "strip") {
-            setStripViewport({ zoom: stripBaseZoom, startX: artwork.geometry.radiusMm });
-        } else {
-            setImageViewport({ zoom: TREE_RING_FULL_MIN_ZOOM, startX: 0, startY: 0 });
-        }
+        setStripViewport({ zoom: stripBaseZoom, startX: artwork.geometry.radiusMm });
         setHoveredGeneratedYear(null);
     };
 
@@ -662,19 +601,17 @@ export function TreeRingFloatingViewer({
                 <span className={styles.title}>
                     {seriesId} · {viewerMode === "scan"
                         ? "扫描影像"
-                        : generatedViewerMode === "strip" ? "1 cm 窗口" : "完整截面"}
+                        : "1 cm 窗口"}
                 </span>
                 <span className={styles.modeSwitch}>
                     <button
                         type="button"
-                        className={viewerMode === "generated" && generatedViewerMode === "strip" ? styles.modeActive : undefined}
-                        aria-pressed={viewerMode === "generated" && generatedViewerMode === "strip"}
-                        title="查看与宽度模块横条一致的 1 cm 绘制窗口"
+                        className={viewerMode === "generated" ? styles.modeActive : undefined}
+                        aria-pressed={viewerMode === "generated"}
                         onPointerDown={(event) => event.stopPropagation()}
                         onClick={(event) => {
                             event.stopPropagation();
                             setViewerMode("generated");
-                            setGeneratedViewerMode("strip");
                             setHoveredGeneratedYear(null);
                         }}
                     >
@@ -684,8 +621,8 @@ export function TreeRingFloatingViewer({
                         type="button"
                         className={viewerMode === "scan" ? styles.modeActive : undefined}
                         aria-pressed={viewerMode === "scan"}
+                        aria-label={scanFile ? "切换到扫描影像" : "扫描影像不可用"}
                         disabled={!scanFile}
-                        title={scanFile ? "切换到同名扫描影像" : "未加载当前序列的同名扫描影像"}
                         onPointerDown={(event) => event.stopPropagation()}
                         onClick={(event) => {
                             event.stopPropagation();
@@ -694,34 +631,16 @@ export function TreeRingFloatingViewer({
                     >
                         扫描
                     </button>
-                    <button
-                        type="button"
-                        className={viewerMode === "generated" && generatedViewerMode === "full" ? styles.modeActive : undefined}
-                        aria-pressed={viewerMode === "generated" && generatedViewerMode === "full"}
-                        title="查看完整圆形绘制截面"
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onClick={(event) => {
-                            event.stopPropagation();
-                            setViewerMode("generated");
-                            setGeneratedViewerMode("full");
-                            setHoveredGeneratedYear(null);
-                        }}
-                    >
-                        完整
-                    </button>
                 </span>
                 <span className={styles.meta}>
                     {viewerMode === "scan"
                         ? (scanFile?.name ?? "无同名影像")
-                        : generatedViewerMode === "strip"
-                            ? `${artwork.ringCount} 年 · ×${stripViewport.zoom.toFixed(1)}`
-                            : `${artwork.ringCount} 年 · 半径 ${artwork.radiusMm.toFixed(3)} mm · ×${imageViewport.zoom.toFixed(1)}`}
+                        : `${artwork.ringCount} 年 · ×${stripViewport.zoom.toFixed(1)}`}
                 </span>
                 <button
                     type="button"
                     className={styles.closeButton}
                     aria-label="关闭树轮影像查看器"
-                    title="关闭"
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => {
                         event.stopPropagation();
@@ -733,7 +652,7 @@ export function TreeRingFloatingViewer({
             </div>
             <div
                 ref={imageFrameRef}
-                className={`${styles.imageFrame}${viewerMode === "scan" ? ` ${styles.scanImageFrame}` : ""}${viewerMode === "generated" && (generatedViewerMode === "strip" ? stripViewport.zoom > TREE_RING_MIN_ZOOM : imageViewport.zoom > TREE_RING_FULL_MIN_ZOOM) ? ` ${styles.imageFrameZoomed}` : ""}${isImagePanning ? ` ${styles.imageFramePanning}` : ""}`}
+                className={`${styles.imageFrame}${viewerMode === "scan" ? ` ${styles.scanImageFrame}` : ""}${viewerMode === "generated" && stripViewport.zoom > TREE_RING_MIN_ZOOM ? ` ${styles.imageFrameZoomed}` : ""}${isImagePanning ? ` ${styles.imageFramePanning}` : ""}`}
                 style={{ height: `${imageSize}px` }}
             >
                 {viewerMode === "scan" && scanFile && scanState && onScanStateChange ? (
@@ -754,12 +673,11 @@ export function TreeRingFloatingViewer({
                 ) : (
                     <div
                         ref={generatedSurfaceRef}
-                        className={`${styles.generatedSurface}${generatedViewerMode === "strip" ? ` ${styles.stripSurface}` : ` ${styles.fullSurface}`}`}
-                        style={generatedViewerMode === "strip" ? {
+                        className={`${styles.generatedSurface} ${styles.stripSurface}`}
+                        style={{
                             width: `${stripSurfaceWidth}px`,
                             height: `${stripSurfaceHeight}px`,
-                        } : undefined}
-                        title="滚轮缩放；放大后拖动平移；单击定位宽度格；双击重置视图"
+                        }}
                         onPointerDown={handleImagePanStart}
                         onPointerMove={handleImagePanMove}
                         onPointerUp={finishImagePan}
@@ -777,28 +695,12 @@ export function TreeRingFloatingViewer({
                             resetGeneratedViewport();
                         }}
                     >
-                        <svg
-                            className={styles.fullViewport}
-                            viewBox={generatedViewerMode === "strip"
-                                ? `${stripViewport.startX} ${stripViewTop} ${stripViewWidth} ${stripViewHeight}`
-                                : `${imageViewport.startX} ${imageViewport.startY} ${viewSizeMm} ${viewSizeMm}`}
-                            preserveAspectRatio="xMidYMid meet"
+                        <canvas
+                            ref={generatedCanvasRef}
+                            className={styles.generatedCanvas}
                             role="img"
-                            aria-label={`${seriesId} 的${generatedViewerMode === "strip" ? " 1 cm 树轮窗口" : "完整树轮截面图"}`}
-                        >
-                            <image
-                                href={artwork.fullUrl}
-                                x={0}
-                                y={0}
-                                width={diameterMm}
-                                height={diameterMm}
-                                preserveAspectRatio="xMidYMid meet"
-                            />
-                            <TreeRingSvgOverlay
-                                geometry={artwork.geometry}
-                                highlightedYear={highlightedYear}
-                            />
-                        </svg>
+                            aria-label={`${seriesId} 的 1 cm 树轮窗口`}
+                        />
                         {hoveredGeneratedYear ? (
                             <span
                                 className={styles.yearTooltip}
@@ -818,7 +720,6 @@ export function TreeRingFloatingViewer({
                 type="button"
                 className={styles.resizeHandle}
                 aria-label="调节树轮影像窗口大小"
-                title="拖动调节窗口大小；方向键微调"
                 onPointerDown={handleResizeStart}
                 onPointerUp={finishResize}
                 onPointerCancel={finishResize}

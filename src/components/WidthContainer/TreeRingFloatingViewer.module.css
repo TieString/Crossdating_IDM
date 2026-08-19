@@ -140,7 +140,7 @@
     background: #eef1f4;
 }
 
-.fullViewport {
+.generatedCanvas {
     display: block;
     width: 100%;
     height: 100%;
@@ -157,11 +157,6 @@
     cursor: crosshair;
     touch-action: none;
     overscroll-behavior: contain;
-}
-
-.fullSurface {
-    width: 100%;
-    height: 100%;
 }
 
 .stripSurface {

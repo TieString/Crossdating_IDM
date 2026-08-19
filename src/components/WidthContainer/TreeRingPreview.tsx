@@ -2,12 +2,12 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { RwlTreeData } from "@/features/rwl";
 import {
-    getTreeRingArtwork,
+    buildTreeRingGeometry,
     getTreeRingFeature,
     getTreeRingFeatureAtRadius,
     type TreeRingFeature,
 } from "./treeRingArtwork";
-import { TreeRingSvgOverlay } from "./TreeRingSvgOverlay";
+import { drawTreeRingHeaderCanvas } from "./treeRingHeaderCanvas";
 import {
     focusTreeRingViewport,
     getTreeRingPreviewViewHeight,
@@ -36,7 +36,7 @@ export interface TreeRingViewerRequest {
     initialView: TreeRingViewerDisplayMode;
 }
 
-export type TreeRingViewerDisplayMode = "full" | "strip" | "scan";
+export type TreeRingViewerDisplayMode = "strip" | "scan";
 
 interface TreeRingPreviewProps {
     seriesId: string;
@@ -44,6 +44,7 @@ interface TreeRingPreviewProps {
     stopMarkerValue: number;
     highlightedYear?: number;
     focusRequestId?: number;
+    showArtwork?: boolean;
     onYearSelect: (seriesId: string, year: number) => void;
     onOpen: (seriesId: string, anchor: TreeRingViewerAnchor) => void;
     onContextMenu?: (event: ReactMouseEvent<HTMLButtonElement>) => void;
@@ -62,20 +63,33 @@ interface HoveredTreeRingYear {
     left: number;
 }
 
+interface TreeRingPreviewModel {
+    cacheKey: string;
+    ringCount: number;
+    radiusMm: number;
+    geometry: NonNullable<ReturnType<typeof buildTreeRingGeometry>>;
+}
+
 function TreeRingPreviewComponent({
     seriesId,
     series,
     stopMarkerValue,
     highlightedYear,
     focusRequestId,
+    showArtwork = true,
     onYearSelect,
     onOpen,
     onContextMenu,
 }: TreeRingPreviewProps) {
-    const artwork = useMemo(
-        () => getTreeRingArtwork(series, stopMarkerValue, false),
-        [series, stopMarkerValue],
-    );
+    const artwork = useMemo<TreeRingPreviewModel | null>(() => {
+        const geometry = buildTreeRingGeometry(series, stopMarkerValue);
+        return geometry ? {
+            cacheKey: geometry.cacheKey,
+            ringCount: geometry.rings.length,
+            radiusMm: geometry.radiusMm,
+            geometry,
+        } : null;
+    }, [series, stopMarkerValue]);
     const radiusMm = artwork?.radiusMm ?? 1;
     const [viewport, setViewport] = useState<TreeRingViewport>({
         zoom: TREE_RING_MIN_ZOOM,
@@ -85,7 +99,7 @@ function TreeRingPreviewComponent({
     const [hoveredYear, setHoveredYear] = useState<HoveredTreeRingYear | null>(null);
     const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
     const buttonRef = useRef<HTMLButtonElement | null>(null);
-    const svgRef = useRef<SVGSVGElement | null>(null);
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const panGestureRef = useRef<PreviewPanGesture | null>(null);
     const suppressClickRef = useRef(false);
     const handledFocusRequestIdRef = useRef<number | undefined>(undefined);
@@ -115,7 +129,7 @@ function TreeRingPreviewComponent({
     // non-passive capture listener guarantees that zooming never scrolls the workspace.
     useEffect(() => {
         const button = buttonRef.current;
-        if (!button || !artwork) return;
+        if (!button || !artwork || !showArtwork) return;
 
         const handleWheel = (event: WheelEvent) => {
             event.preventDefault();
@@ -135,11 +149,11 @@ function TreeRingPreviewComponent({
 
         button.addEventListener("wheel", handleWheel, { passive: false, capture: true });
         return () => button.removeEventListener("wheel", handleWheel, { capture: true });
-    }, [artwork]);
+    }, [artwork, showArtwork]);
 
     useEffect(() => {
-        const svg = svgRef.current;
-        if (!svg) return;
+        const canvas = canvasRef.current;
+        if (!canvas) return;
         let deferred = false;
 
         const measure = () => {
@@ -147,7 +161,7 @@ function TreeRingPreviewComponent({
                 deferred = true;
                 return;
             }
-            const rect = svg.getBoundingClientRect();
+            const rect = canvas.getBoundingClientRect();
             setPreviewSize((current) => (
                 current.width === rect.width && current.height === rect.height
                     ? current
@@ -169,31 +183,50 @@ function TreeRingPreviewComponent({
             };
         }
         const observer = new ResizeObserver(measure);
-        observer.observe(svg);
+        observer.observe(canvas);
         return () => {
             observer.disconnect();
             window.removeEventListener(PANEL_RESIZE_END_EVENT, measureAfterPanelResize);
         };
     }, [artwork?.cacheKey]);
 
-    if (!artwork) {
-        return <span className={styles.unavailable} title="该序列没有可绘制的正宽度年轮">无截面</span>;
-    }
-
-    const geometry = artwork.geometry;
-    const viewWidth = getTreeRingViewportWidth(geometry.radiusMm, viewport.zoom);
+    const geometry = artwork?.geometry;
+    const viewWidth = geometry
+        ? getTreeRingViewportWidth(geometry.radiusMm, viewport.zoom)
+        : 1;
     const viewHeight = getTreeRingPreviewViewHeight(
         viewWidth,
-        geometry.diameterMm,
+        geometry?.diameterMm ?? 1,
         previewSize.width,
         previewSize.height,
-        geometry.windowHeightMm,
+        geometry?.windowHeightMm ?? 1,
     );
-    const viewTop = geometry.radiusMm - viewHeight / 2;
+    const viewTop = (geometry?.radiusMm ?? 1) - viewHeight / 2;
+
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas || !geometry || !showArtwork) return;
+        drawTreeRingHeaderCanvas(canvas, geometry, {
+            cssWidth: previewSize.width,
+            cssHeight: previewSize.height,
+            pixelRatio: typeof window === "undefined" ? 1 : window.devicePixelRatio || 1,
+            startX: viewport.startX,
+            viewTop,
+            viewWidth,
+            viewHeight,
+            highlightedYear,
+        });
+    }, [geometry, highlightedYear, previewSize.height, previewSize.width, showArtwork, viewHeight, viewTop, viewWidth, viewport.startX]);
+
+    if (!artwork || !geometry) {
+        return <span className={styles.unavailable} title="该序列没有可绘制的正宽度年轮">无截面</span>;
+    }
     const gapYearCount = geometry.gaps.reduce((sum, gap) => sum + gap.yearCount, 0);
-    const title = `1 cm 树轮窗口 · ${artwork.ringCount} 个年轮 · 半径 ${artwork.radiusMm.toFixed(3)} mm`
-        + `${gapYearCount > 0 ? ` · 中间缺少 ${gapYearCount} 年记录` : ""}`
-        + "（滚轮缩放，放大后左右拖动，单击选择年份，双击打开 1 cm 视图）";
+    const title = showArtwork
+        ? `1 cm 树轮窗口 · ${artwork.ringCount} 个年轮 · 半径 ${artwork.radiusMm.toFixed(3)} mm`
+            + `${gapYearCount > 0 ? ` · 中间缺少 ${gapYearCount} 年记录` : ""}`
+            + "（滚轮缩放，放大后左右拖动，单击选择年份，双击打开 1 cm 视图）"
+        : "绘制图片已在设置中隐藏；双击打开 1 cm 视图，右键管理影像";
 
     const resolveFeatureAtClientX = (
         clientX: number,
@@ -216,6 +249,10 @@ function TreeRingPreviewComponent({
     };
 
     const showHoveredYear = (clientX: number, element: HTMLButtonElement) => {
+        if (!showArtwork) {
+            setHoveredYear(null);
+            return;
+        }
         const resolved = resolveFeatureAtClientX(clientX, element);
         if (!resolved) {
             setHoveredYear(null);
@@ -232,7 +269,7 @@ function TreeRingPreviewComponent({
 
     const handlePointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
         event.stopPropagation();
-        if (event.button !== 0) return;
+        if (event.button !== 0 || !showArtwork) return;
         const rect = event.currentTarget.getBoundingClientRect();
         panGestureRef.current = {
             pointerId: event.pointerId,
@@ -245,6 +282,7 @@ function TreeRingPreviewComponent({
     };
 
     const handlePointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+        if (!showArtwork) return;
         const gesture = panGestureRef.current;
         if (!gesture) {
             showHoveredYear(event.clientX, event.currentTarget);
@@ -293,7 +331,9 @@ function TreeRingPreviewComponent({
                 type="button"
                 className={`${styles.previewButton}${viewport.zoom > TREE_RING_MIN_ZOOM ? ` ${styles.zoomed}` : ""}${isPanning ? ` ${styles.panning}` : ""}`}
                 title={title}
-                aria-label={`${seriesId} 的 1 cm 树轮窗口；可滚轮缩放和左右拖动，单击选择年份，双击打开 1 cm 视图`}
+                aria-label={showArtwork
+                    ? `${seriesId} 的 1 cm 树轮窗口；可滚轮缩放和左右拖动，单击选择年份，双击打开 1 cm 视图`
+                    : `${seriesId} 的绘制图片按钮；图片已隐藏，双击打开 1 cm 视图`}
                 onContextMenu={onContextMenu}
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}
@@ -302,6 +342,7 @@ function TreeRingPreviewComponent({
                 onPointerLeave={() => setHoveredYear(null)}
                 onClick={(event) => {
                     event.stopPropagation();
+                    if (!showArtwork) return;
                     if (event.detail > 1) return;
                     if (suppressClickRef.current) {
                         event.preventDefault();
@@ -326,31 +367,19 @@ function TreeRingPreviewComponent({
                     });
                 }}
             >
-                <svg
-                    ref={svgRef}
-                    className={styles.previewSvg}
+                <canvas
+                    ref={canvasRef}
+                    className={styles.previewCanvas}
+                    style={showArtwork ? undefined : { visibility: "hidden" }}
                     data-panel-resize-heavy-preview="true"
-                    viewBox={`${viewport.startX} ${viewTop} ${viewWidth} ${viewHeight}`}
-                    preserveAspectRatio="xMidYMid meet"
-                    overflow="hidden"
                     role="img"
                     aria-label={`${seriesId} 从树心到三点钟方向的树轮窗口`}
-                >
-                    <image
-                        href={artwork.previewUrl}
-                        x={0}
-                        y={0}
-                        width={geometry.diameterMm}
-                        height={geometry.diameterMm}
-                        preserveAspectRatio="xMidYMid meet"
-                    />
-                    <TreeRingSvgOverlay geometry={geometry} highlightedYear={highlightedYear} />
-                </svg>
-                {viewport.zoom > TREE_RING_MIN_ZOOM ? (
+                />
+                {showArtwork && viewport.zoom > TREE_RING_MIN_ZOOM ? (
                     <span className={styles.zoomBadge} aria-hidden="true">×{viewport.zoom.toFixed(1)}</span>
                 ) : null}
             </button>
-            {hoveredYear ? (
+            {showArtwork && hoveredYear ? (
                 <span
                     className={styles.hoverYear}
                     style={{ left: `${hoveredYear.left}px` }}

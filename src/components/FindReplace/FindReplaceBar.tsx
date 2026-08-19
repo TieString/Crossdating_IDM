@@ -137,7 +137,7 @@ export function FindReplaceBar({
                             className={styles["text-input"]}
                             type="text"
                             value={query}
-                            placeholder={textMode ? "查找文本" : "查找宽度值"}
+                            placeholder={textMode ? "查找宽度、分隔符或序列名" : "查找宽度值"}
                             spellCheck={false}
                             onChange={(event) => onQueryChange(event.target.value)}
                             onKeyDown={handleQueryKeyDown}
@@ -189,7 +189,7 @@ export function FindReplaceBar({
                                 className={styles["text-input"]}
                                 type="text"
                                 value={replaceValue}
-                                placeholder={textMode ? "替换文本" : "替换为宽度值"}
+                                placeholder={textMode ? "替换内容" : "替换为宽度值"}
                                 spellCheck={false}
                                 onChange={(event) => onReplaceValueChange(event.target.value)}
                                 onKeyDown={handleReplaceKeyDown}

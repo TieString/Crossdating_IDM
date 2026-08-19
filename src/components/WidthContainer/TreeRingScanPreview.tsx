@@ -405,7 +405,6 @@ function TreeRingScanPreviewComponent({
                 ref={buttonRef}
                 type="button"
                 className={`${styles.previewButton}${zoom > TREE_RING_SCAN_MIN_ZOOM ? ` ${styles.zoomed}` : ""}${isPanning ? ` ${styles.panning}` : ""}`}
-                title="扫描样芯截面 · 滚轮缩放，拖动平移，单击跳转，双击打开扫描视图"
                 onContextMenu={onContextMenu}
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}
@@ -443,8 +442,6 @@ function TreeRingScanPreviewComponent({
                 {selectedScreenX !== null && selectedScreenX >= 0 && selectedScreenX <= previewSize.width ? (
                     <span className={styles.selectedLine} style={{ left: `${selectedScreenX}px` }} />
                 ) : null}
-                {zoom > TREE_RING_SCAN_MIN_ZOOM ? <span className={styles.zoomBadge}>×{zoom.toFixed(1)}</span> : null}
-                <span className={styles.scanBadge}>扫描</span>
             </button>
             {hoveredYear ? (
                 <span className={styles.hoverYear} style={{ left: `${hoveredYear.left}px` }}>

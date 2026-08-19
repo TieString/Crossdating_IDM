@@ -2,15 +2,15 @@ import type { RwlSiteData, RwlTreeData } from "@/features/rwl";
 
 const DEFAULT_WIDTH_VALUE_TO_MM = 1 / 1000;
 const HUNDREDTH_MM_WIDTH_VALUE_TO_MM = 1 / 100;
-const LATEWOOD_RATIO = 0.5;
-const DOT_SPACING_SCALE = 0.5;
-const RING_BOUNDARY_WIDTH_MM = 0.18;
+export const TREE_RING_LATEWOOD_RATIO = 0.5;
+export const TREE_RING_DOT_SPACING_SCALE = 0.5;
+export const TREE_RING_BOUNDARY_WIDTH_MM = 0.18;
 const WINDOW_HEIGHT_MM = 10;
 const CACHE_VERSION = "tree-ring-artwork-v3";
 const MAX_CACHE_ENTRIES = 256;
 const MAX_CACHE_SVG_BYTES = 32 * 1024 * 1024;
 
-const DOT_PATTERN_SPECS = [
+export const TREE_RING_DOT_PATTERN_SPECS = [
     ["latewood_dots_1", 1.25, [[0.24, 0.36, 0.055], [0.86, 0.94, 0.055]]],
     ["latewood_dots_2", 1.10, [[0.19, 0.81, 0.060], [0.76, 0.27, 0.060]]],
     ["latewood_dots_3", 0.96, [[0.18, 0.24, 0.065], [0.69, 0.73, 0.065]]],
@@ -215,10 +215,10 @@ export function getTreeRingFeatureAtRadius(
 }
 
 function renderPatternDefinitions(): string {
-    return DOT_PATTERN_SPECS.map(([patternId, tileSize, dots]) => {
-        const scaledTileSize = tileSize * DOT_SPACING_SCALE;
+    return TREE_RING_DOT_PATTERN_SPECS.map(([patternId, tileSize, dots]) => {
+        const scaledTileSize = tileSize * TREE_RING_DOT_SPACING_SCALE;
         const circles = dots.map(([x, y, radius]) => (
-            `<circle cx="${fixed(x * DOT_SPACING_SCALE, 3)}" cy="${fixed(y * DOT_SPACING_SCALE, 3)}" `
+            `<circle cx="${fixed(x * TREE_RING_DOT_SPACING_SCALE, 3)}" cy="${fixed(y * TREE_RING_DOT_SPACING_SCALE, 3)}" `
             + `r="${fixed(radius, 3)}" fill="#000000" />`
         )).join("");
         return `<pattern id="${patternId}" patternUnits="userSpaceOnUse" patternContentUnits="userSpaceOnUse" `
@@ -229,11 +229,11 @@ function renderPatternDefinitions(): string {
 function renderRingShapes(geometry: TreeRingGeometry): string {
     const centre = geometry.radiusMm;
     return geometry.rings.flatMap(({ outerRadiusMm, widthMm }) => {
-        const latewoodWidth = widthMm * LATEWOOD_RATIO;
+        const latewoodWidth = widthMm * TREE_RING_LATEWOOD_RATIO;
         const latewoodStartRadius = outerRadiusMm - latewoodWidth;
-        const latewoodBands = DOT_PATTERN_SPECS.map(([patternId], level) => {
+        const latewoodBands = TREE_RING_DOT_PATTERN_SPECS.map(([patternId], level) => {
             const bandInnerRadius = latewoodStartRadius
-                + latewoodWidth * (level / DOT_PATTERN_SPECS.length);
+                + latewoodWidth * (level / TREE_RING_DOT_PATTERN_SPECS.length);
             const bandWidth = outerRadiusMm - bandInnerRadius;
             const bandCentreRadius = bandInnerRadius + bandWidth / 2;
             return `<circle cx="${fixed(centre)}" cy="${fixed(centre)}" r="${fixed(bandCentreRadius)}" `
@@ -242,7 +242,7 @@ function renderRingShapes(geometry: TreeRingGeometry): string {
         return [
             ...latewoodBands,
             `<circle cx="${fixed(centre)}" cy="${fixed(centre)}" r="${fixed(outerRadiusMm)}" `
-                + `fill="none" stroke="#000000" stroke-width="${fixed(RING_BOUNDARY_WIDTH_MM)}" />`,
+                + `fill="none" stroke="#000000" stroke-width="${fixed(TREE_RING_BOUNDARY_WIDTH_MM)}" />`,
         ];
     }).join("\n");
 }

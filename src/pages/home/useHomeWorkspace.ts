@@ -35,7 +35,7 @@ import {
     registerChangeYearWidth,
 } from "@/features/rwl/edit";
 import type { DeleteMode, DeleteRangeFill, DeleteShift, RwlDeletionMarkers, RwlHistoryAnimation, RwlHistoryStatus, RwlMoveConflictPolicy, RwlOperationLogEntry } from "@/features/rwl/edit";
-import type { RwlSiteData } from "@/features/rwl/types";
+import type { RwlFormat, RwlSiteData } from "@/features/rwl/types";
 import {
     createEmptyTreeRingScanState,
     clearTreeRingScanImageCache,
@@ -81,6 +81,18 @@ import {
     rwlDataEquals,
     stringArraysEqual,
 } from "./workspaceState";
+
+function syncStopMarkerFromSiteData(data: RwlSiteData): void {
+    const trailingValues = Array.from(data.values()).flatMap((treeData) => {
+        const lastEntry = Array.from(treeData.entries()).sort(([left], [right]) => right - left)[0];
+        return lastEntry ? [lastEntry[1]] : [];
+    });
+    if (trailingValues.includes(-9999)) {
+        stopMarker.value = -9999;
+    } else if (trailingValues.includes(999)) {
+        stopMarker.value = 999;
+    }
+}
 
 export type WidthHistoryAnimation = RwlHistoryAnimation & { id: number };
 
@@ -1160,18 +1172,22 @@ export function useHomeWorkspace() {
 
     const handleUndo = useCallback(() => {
         triggerHistoryAnimation(rwlEditorRef.current.undo());
+        syncStopMarkerFromSiteData(rwlEditorRef.current.getData());
     }, [triggerHistoryAnimation]);
 
     const handleRedo = useCallback(() => {
         triggerHistoryAnimation(rwlEditorRef.current.redo());
+        syncStopMarkerFromSiteData(rwlEditorRef.current.getData());
     }, [triggerHistoryAnimation]);
 
     const handleUndoOperationLogEntry = useCallback((entryId: string) => {
         triggerHistoryAnimation(rwlEditorRef.current.undoOperationLogEntry(entryId));
+        syncStopMarkerFromSiteData(rwlEditorRef.current.getData());
     }, [triggerHistoryAnimation]);
 
     const handleResetToRawData = useCallback(() => {
         triggerHistoryAnimation(rwlEditorRef.current.resetToRawData());
+        syncStopMarkerFromSiteData(rwlEditorRef.current.getData());
     }, [triggerHistoryAnimation]);
 
     const handleInsertMissingYearAtSide = useCallback((tree: string, nextYear: number, side: "left" | "right") => {
@@ -1620,6 +1636,33 @@ export function useHomeWorkspace() {
 
     const handleReplaceTreeData = useCallback((tree: string, data: Map<number, number | null>) => {
         rwlEditorRef.current.replaceTreeData(tree, data);
+    }, []);
+
+    const handleReplaceSiteData = useCallback((data: RwlSiteData, nextStopMarkerValue?: number) => {
+        const editor = rwlEditorRef.current;
+        const previousTrees = Array.from(editor.getData().keys());
+        const nextTrees = Array.from(data.keys());
+        const treeKeyMap = new Map<string, string>();
+        previousTrees.forEach((tree, index) => {
+            const nextTree = nextTrees[index];
+            if (nextTree) treeKeyMap.set(tree, nextTree);
+        });
+        if (nextStopMarkerValue === 999 || nextStopMarkerValue === -9999) {
+            stopMarker.value = nextStopMarkerValue;
+        }
+        editor.replaceAllData(
+            data,
+            editor.getReadOptions(),
+            editor.getFormat() as RwlFormat,
+            { preserveDeletionMarkers: true, treeKeyMap },
+        );
+        setSelectedTree((previous) => {
+            const nextSelectedTree = previous !== ALL_OPTION_VALUE && !data.has(previous)
+                ? ALL_OPTION_VALUE
+                : previous;
+            selectedTreeRef.current = nextSelectedTree;
+            return nextSelectedTree;
+        });
     }, []);
 
     const handleInsertMissingYearAtSideFromChart = useCallback((tree: string, nextYear: number, side: "left" | "right") => {
@@ -2177,6 +2220,7 @@ export function useHomeWorkspace() {
         handleApplyLocalSimulation,
         handleReferenceConfigChange,
         handleRedo,
+        handleReplaceSiteData,
         handleReplaceTreeData,
         handleResetToRawData,
         handleRemoveDeletionMarker,
