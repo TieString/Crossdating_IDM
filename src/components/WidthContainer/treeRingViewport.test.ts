@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
     clampTreeRingViewport,
     focusTreeRingViewport,
+    getTreeRingOneCentimetreZoom,
     getTreeRingPreviewViewHeight,
     getTreeRingViewportWidth,
     panTreeRingViewport,
@@ -22,6 +23,12 @@ describe("tree-ring preview viewport", () => {
             startX: 100,
         });
         expect(getTreeRingViewportWidth(100, 1)).toBe(100);
+    });
+
+    it("derives an enlarged viewport that remains one centimetre high", () => {
+        const zoom = getTreeRingOneCentimetreZoom(360, 10, 600, 100);
+        expect(zoom).toBe(6);
+        expect(getTreeRingViewportWidth(360, zoom)).toBe(60);
     });
 
     it("keeps the coordinate below the mouse stable while zooming", () => {

@@ -14,6 +14,13 @@ import {
     type TreeRingYearMapping,
 } from "@/features/treeRingScans";
 import type { TreeRingViewerAnchor } from "./TreeRingPreview";
+import {
+    getTreeRingScanHeaderPixelRatio,
+    getTreeRingScanMaximumZoom,
+    getTreeRingScanPreviewViewSize,
+    shouldSmoothTreeRingScanImage,
+    TREE_RING_SCAN_MIN_ZOOM,
+} from "./scanDetailRendering";
 import { useTreeRingScanImage } from "./useTreeRingScanImage";
 import styles from "./TreeRingScanPreview.module.css";
 
@@ -23,6 +30,7 @@ interface TreeRingScanPreviewProps {
     scanState: TreeRingScanSeriesState;
     yearMapping: TreeRingYearMapping;
     highlightedYear?: number;
+    focusRequestId?: number;
     onYearSelect: (seriesId: string, year: number) => void;
     onOpen: (seriesId: string, anchor: TreeRingViewerAnchor) => void;
     onContextMenu: (event: ReactMouseEvent<HTMLButtonElement>) => void;
@@ -42,9 +50,6 @@ interface HoveredYear {
     left: number;
 }
 
-const MIN_ZOOM = 1;
-const MAX_ZOOM = 32;
-
 const clamp = (value: number, minimum: number, maximum: number) => (
     Math.min(maximum, Math.max(minimum, value))
 );
@@ -55,6 +60,7 @@ function TreeRingScanPreviewComponent({
     scanState,
     yearMapping,
     highlightedYear,
+    focusRequestId,
     onYearSelect,
     onOpen,
     onContextMenu,
@@ -62,14 +68,16 @@ function TreeRingScanPreviewComponent({
     const image = useTreeRingScanImage(file, scanState.crop);
     const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
     const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
-    const [zoom, setZoom] = useState(MIN_ZOOM);
+    const [zoom, setZoom] = useState(TREE_RING_SCAN_MIN_ZOOM);
     const [startX, setStartX] = useState(0);
     const [hoveredYear, setHoveredYear] = useState<HoveredYear | null>(null);
     const [isPanning, setIsPanning] = useState(false);
     const buttonRef = useRef<HTMLButtonElement | null>(null);
-    const svgRef = useRef<SVGSVGElement | null>(null);
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const sourceImageRef = useRef<HTMLImageElement | null>(null);
     const panGestureRef = useRef<PreviewPanGesture | null>(null);
     const suppressClickRef = useRef(false);
+    const handledFocusRequestIdRef = useRef<number | undefined>(undefined);
     const positions = useMemo(() => buildTreeRingScanYearPositions(scanState), [scanState]);
     const rotation = scanState.rotation ?? 0;
     const unrotatedDisplaySize = useMemo(() => {
@@ -84,15 +92,25 @@ function TreeRingScanPreviewComponent({
         unrotatedDisplaySize.height,
         rotation,
     ), [rotation, unrotatedDisplaySize]);
+    const pixelRatio = getTreeRingScanHeaderPixelRatio(
+        typeof window === "undefined" ? 1 : window.devicePixelRatio || 1,
+    );
+    const maximumZoom = getTreeRingScanMaximumZoom(
+        displaySize.width,
+        displaySize.height,
+        Math.max(1, previewSize.width),
+        Math.max(1, previewSize.height),
+        pixelRatio,
+    );
 
-    const aspect = previewSize.width > 0 && previewSize.height > 0
-        ? previewSize.width / previewSize.height
-        : 18;
-    const requestedViewWidth = displaySize.width > 0 ? displaySize.width / zoom : 1;
-    const viewWidth = displaySize.height > 0
-        ? Math.min(requestedViewWidth, displaySize.height * aspect)
-        : requestedViewWidth;
-    const viewHeight = Math.max(1, viewWidth / aspect);
+    const previewView = getTreeRingScanPreviewViewSize(
+        displaySize.width,
+        displaySize.height,
+        zoom,
+        previewSize.width,
+        previewSize.height,
+    );
+    const { aspect, width: viewWidth, height: viewHeight } = previewView;
     const centreY = getTreeRingScanBandCenterYRatio(scanState) * displaySize.height;
     const viewTop = clamp(
         centreY - viewHeight / 2,
@@ -103,16 +121,16 @@ function TreeRingScanPreviewComponent({
     const clampedStartX = clamp(startX, 0, maximumStartX);
 
     useEffect(() => {
-        setZoom(MIN_ZOOM);
+        setZoom(TREE_RING_SCAN_MIN_ZOOM);
         setStartX(0);
         setHoveredYear(null);
     }, [file.path]);
 
     useEffect(() => {
-        const svg = svgRef.current;
-        if (!svg) return;
+        const target = canvasRef.current ?? buttonRef.current;
+        if (!target) return;
         const measure = () => {
-            const rect = svg.getBoundingClientRect();
+            const rect = target.getBoundingClientRect();
             setPreviewSize({ width: rect.width, height: rect.height });
         };
         measure();
@@ -121,19 +139,144 @@ function TreeRingScanPreviewComponent({
             return () => window.removeEventListener("resize", measure);
         }
         const observer = new ResizeObserver(measure);
-        observer.observe(svg);
+        observer.observe(target);
         return () => observer.disconnect();
     }, [image.url]);
 
     useEffect(() => {
-        if (highlightedYear === undefined || !yearMapping.valid || displaySize.width <= 0) return;
+        setNaturalSize({ width: 0, height: 0 });
+        sourceImageRef.current = null;
+        if (!image.url) return () => undefined;
+        let active = true;
+        const source = new Image();
+        source.decoding = "async";
+        source.onload = () => {
+            if (!active) return;
+            sourceImageRef.current = source;
+            setNaturalSize({ width: source.naturalWidth, height: source.naturalHeight });
+        };
+        source.src = image.url;
+        return () => {
+            active = false;
+            if (sourceImageRef.current === source) sourceImageRef.current = null;
+        };
+    }, [image.url]);
+
+    useEffect(() => {
+        setZoom((current) => clamp(current, TREE_RING_SCAN_MIN_ZOOM, maximumZoom));
+    }, [maximumZoom]);
+
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        const source = sourceImageRef.current;
+        if (
+            !canvas
+            || !source
+            || !(naturalSize.width > 0)
+            || !(naturalSize.height > 0)
+            || !(previewSize.width > 0)
+            || !(previewSize.height > 0)
+            || !(viewWidth > 0)
+            || !(viewHeight > 0)
+        ) return;
+
+        const pixelWidth = Math.max(1, Math.round(previewSize.width * pixelRatio));
+        const pixelHeight = Math.max(1, Math.round(previewSize.height * pixelRatio));
+        if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+        if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
+        const context = canvas.getContext("2d", { alpha: false });
+        if (!context) return;
+
+        const sourceX = scanState.crop && !image.cropApplied
+            ? scanState.crop.xRatio * naturalSize.width
+            : 0;
+        const sourceY = scanState.crop && !image.cropApplied
+            ? scanState.crop.yRatio * naturalSize.height
+            : 0;
+        const sourceWidth = scanState.crop && !image.cropApplied
+            ? scanState.crop.widthRatio * naturalSize.width
+            : naturalSize.width;
+        const sourceHeight = scanState.crop && !image.cropApplied
+            ? scanState.crop.heightRatio * naturalSize.height
+            : naturalSize.height;
+        const uniformScale = previewSize.width / viewWidth;
+
+        context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, previewSize.width, previewSize.height);
+        context.imageSmoothingEnabled = shouldSmoothTreeRingScanImage(
+            sourceWidth,
+            sourceHeight,
+            unrotatedDisplaySize.width * uniformScale,
+            unrotatedDisplaySize.height * uniformScale,
+            pixelRatio,
+        );
+        if (context.imageSmoothingEnabled) context.imageSmoothingQuality = "high";
+
+        context.save();
+        context.beginPath();
+        context.rect(0, 0, previewSize.width, previewSize.height);
+        context.clip();
+        context.scale(uniformScale, uniformScale);
+        context.translate(-clampedStartX, -viewTop);
+        if (rotation === 90) {
+            context.translate(displaySize.width, 0);
+            context.rotate(Math.PI / 2);
+        } else if (rotation === 180) {
+            context.translate(displaySize.width, displaySize.height);
+            context.rotate(Math.PI);
+        } else if (rotation === 270) {
+            context.translate(0, displaySize.height);
+            context.rotate(-Math.PI / 2);
+        }
+        context.drawImage(
+            source,
+            sourceX,
+            sourceY,
+            sourceWidth,
+            sourceHeight,
+            0,
+            0,
+            unrotatedDisplaySize.width,
+            unrotatedDisplaySize.height,
+        );
+        context.restore();
+    }, [
+        clampedStartX,
+        displaySize.height,
+        displaySize.width,
+        image.cropApplied,
+        image.url,
+        naturalSize.height,
+        naturalSize.width,
+        pixelRatio,
+        previewSize.height,
+        previewSize.width,
+        rotation,
+        scanState.crop,
+        unrotatedDisplaySize.height,
+        unrotatedDisplaySize.width,
+        viewHeight,
+        viewTop,
+        viewWidth,
+    ]);
+
+    useEffect(() => {
+        if (
+            focusRequestId === undefined
+            || handledFocusRequestIdRef.current === focusRequestId
+            || highlightedYear === undefined
+            || !yearMapping.valid
+            || displaySize.width <= 0
+        ) return;
         const originalYear = yearMapping.originalByCurrent.get(highlightedYear);
         if (originalYear === undefined) return;
         const xRatio = getTreeRingScanXRatioForOriginalYear(scanState, originalYear);
         if (xRatio === null) return;
+        handledFocusRequestIdRef.current = focusRequestId;
         const targetX = xRatio * displaySize.width;
         setStartX(clamp(targetX - viewWidth / 2, 0, maximumStartX));
-    }, [displaySize.width, highlightedYear, maximumStartX, scanState, viewWidth, yearMapping]);
+    }, [displaySize.width, focusRequestId, highlightedYear, maximumStartX, scanState, viewWidth, yearMapping]);
 
     useEffect(() => {
         const button = buttonRef.current;
@@ -144,7 +287,11 @@ function TreeRingScanPreviewComponent({
             setHoveredYear(null);
             const rect = button.getBoundingClientRect();
             const cursorRatio = rect.width > 0 ? clamp((event.clientX - rect.left) / rect.width, 0, 1) : 0.5;
-            const nextZoom = clamp(zoom * Math.exp(-event.deltaY * 0.0022), MIN_ZOOM, MAX_ZOOM);
+            const nextZoom = clamp(
+                zoom * Math.exp(-event.deltaY * 0.0022),
+                TREE_RING_SCAN_MIN_ZOOM,
+                maximumZoom,
+            );
             const nextRequestedWidth = displaySize.width / nextZoom;
             const nextViewWidth = Math.min(nextRequestedWidth, displaySize.height * aspect);
             const imageX = clampedStartX + cursorRatio * viewWidth;
@@ -153,7 +300,7 @@ function TreeRingScanPreviewComponent({
         };
         button.addEventListener("wheel", handleWheel, { passive: false, capture: true });
         return () => button.removeEventListener("wheel", handleWheel, { capture: true });
-    }, [aspect, clampedStartX, displaySize.height, displaySize.width, viewWidth, zoom]);
+    }, [aspect, clampedStartX, displaySize.height, displaySize.width, maximumZoom, viewWidth, zoom]);
 
     const resolveAtClientX = (clientX: number, element: HTMLButtonElement) => {
         const rect = element.getBoundingClientRect();
@@ -189,7 +336,7 @@ function TreeRingScanPreviewComponent({
             setHoveredYear(resolveAtClientX(event.clientX, event.currentTarget));
             return;
         }
-        if (gesture.pointerId !== event.pointerId || zoom <= MIN_ZOOM) return;
+        if (gesture.pointerId !== event.pointerId || zoom <= TREE_RING_SCAN_MIN_ZOOM) return;
         const delta = event.clientX - gesture.startClientX;
         if (!gesture.moved && Math.abs(delta) >= 3) {
             gesture.moved = true;
@@ -226,22 +373,17 @@ function TreeRingScanPreviewComponent({
     const selectedXRatio = selectedOriginalYear === undefined
         ? null
         : getTreeRingScanXRatioForOriginalYear(scanState, selectedOriginalYear);
-    const sourceViewBox = scanState.crop && !image.cropApplied
-        ? `${scanState.crop.xRatio * naturalSize.width} ${scanState.crop.yRatio * naturalSize.height} ${scanState.crop.widthRatio * naturalSize.width} ${scanState.crop.heightRatio * naturalSize.height}`
-        : `0 0 ${naturalSize.width || 1} ${naturalSize.height || 1}`;
-    const rotationTransform = rotation === 90
-        ? `translate(${displaySize.width} 0) rotate(90)`
-        : (rotation === 180
-            ? `translate(${displaySize.width} ${displaySize.height}) rotate(180)`
-            : (rotation === 270 ? `translate(0 ${displaySize.height}) rotate(-90)` : undefined));
+    const selectedScreenX = selectedXRatio === null || !(previewSize.width > 0)
+        ? null
+        : (selectedXRatio * displaySize.width - clampedStartX) / viewWidth * previewSize.width;
 
     return (
         <div className={styles.previewShell}>
             <button
                 ref={buttonRef}
                 type="button"
-                className={`${styles.previewButton}${zoom > MIN_ZOOM ? ` ${styles.zoomed}` : ""}${isPanning ? ` ${styles.panning}` : ""}`}
-                title="扫描样芯截面 · 滚轮缩放，拖动平移，单击跳转，双击查看完整影像"
+                className={`${styles.previewButton}${zoom > TREE_RING_SCAN_MIN_ZOOM ? ` ${styles.zoomed}` : ""}${isPanning ? ` ${styles.panning}` : ""}`}
+                title="扫描样芯截面 · 滚轮缩放，拖动平移，单击跳转，双击打开扫描视图"
                 onContextMenu={onContextMenu}
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}
@@ -269,51 +411,16 @@ function TreeRingScanPreviewComponent({
                     });
                 }}
             >
-                <svg
-                    ref={svgRef}
-                    className={styles.previewSvg}
-                    viewBox={`${clampedStartX} ${viewTop} ${viewWidth} ${viewHeight}`}
-                    preserveAspectRatio="xMidYMid meet"
+                <canvas
+                    ref={canvasRef}
+                    className={styles.previewCanvas}
                     role="img"
                     aria-label={`${seriesId} 的扫描影像 1 cm 窗口`}
-                >
-                    <g transform={rotationTransform}>
-                        <svg
-                            x={0}
-                            y={0}
-                            width={unrotatedDisplaySize.width || 1}
-                            height={unrotatedDisplaySize.height || 1}
-                            viewBox={sourceViewBox}
-                            preserveAspectRatio="none"
-                        >
-                            <image
-                                href={image.url}
-                                x={0}
-                                y={0}
-                                width={naturalSize.width || 1}
-                                height={naturalSize.height || 1}
-                                preserveAspectRatio="none"
-                                onLoad={(event) => {
-                                    const element = event.currentTarget as SVGImageElement;
-                                    const htmlImage = new Image();
-                                    htmlImage.onload = () => setNaturalSize({ width: htmlImage.naturalWidth, height: htmlImage.naturalHeight });
-                                    htmlImage.src = element.href.baseVal;
-                                }}
-                            />
-                        </svg>
-                    </g>
-                    {selectedXRatio !== null ? (
-                        <line
-                            x1={selectedXRatio * displaySize.width}
-                            x2={selectedXRatio * displaySize.width}
-                            y1={viewTop}
-                            y2={viewTop + viewHeight}
-                            className={styles.selectedLine}
-                            vectorEffect="non-scaling-stroke"
-                        />
-                    ) : null}
-                </svg>
-                {zoom > MIN_ZOOM ? <span className={styles.zoomBadge}>×{zoom.toFixed(1)}</span> : null}
+                />
+                {selectedScreenX !== null && selectedScreenX >= 0 && selectedScreenX <= previewSize.width ? (
+                    <span className={styles.selectedLine} style={{ left: `${selectedScreenX}px` }} />
+                ) : null}
+                {zoom > TREE_RING_SCAN_MIN_ZOOM ? <span className={styles.zoomBadge}>×{zoom.toFixed(1)}</span> : null}
                 <span className={styles.scanBadge}>扫描</span>
             </button>
             {hoveredYear ? (

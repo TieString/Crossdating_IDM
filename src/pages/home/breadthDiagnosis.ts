@@ -63,8 +63,8 @@ export const createEmptyBreadthDiagnosisNavigator = (): BreadthDiagnosisNavigato
 const normalizeSeriesId = (seriesId: string) => seriesId.trim().toUpperCase();
 
 /**
- * Previously observed high-value frontiers are rechecked first after a save. New targets then
- * follow COFECHA flags, while order within each group stays stable.
+ * Only COFECHA PART 6 A-flagged series are eligible. Previously observed frontiers among that
+ * target set are rechecked first after a save; all other A targets retain file order.
  */
 export const orderBreadthScanTargets = (
     seriesIds: readonly string[],
@@ -77,11 +77,14 @@ export const orderBreadthScanTargets = (
         const normalized = normalizeSeriesId(seriesId);
         if (!previousPriority.has(normalized)) previousPriority.set(normalized, index);
     });
-    const stableOrder = new Map(seriesIds.map((seriesId, index) => (
+    const eligibleSeriesIds = seriesIds.filter((seriesId) => (
+        flagged.has(normalizeSeriesId(seriesId))
+    ));
+    const stableOrder = new Map(eligibleSeriesIds.map((seriesId, index) => (
         [normalizeSeriesId(seriesId), index]
     )));
 
-    return [...seriesIds].sort((left, right) => {
+    return [...eligibleSeriesIds].sort((left, right) => {
         const normalizedLeft = normalizeSeriesId(left);
         const normalizedRight = normalizeSeriesId(right);
         const leftPrevious = previousPriority.get(normalizedLeft);
@@ -92,8 +95,7 @@ export const orderBreadthScanTargets = (
             return leftPrevious - rightPrevious;
         }
 
-        return Number(flagged.has(normalizedRight)) - Number(flagged.has(normalizedLeft))
-            || (stableOrder.get(normalizedLeft) ?? 0) - (stableOrder.get(normalizedRight) ?? 0);
+        return (stableOrder.get(normalizedLeft) ?? 0) - (stableOrder.get(normalizedRight) ?? 0);
     });
 };
 

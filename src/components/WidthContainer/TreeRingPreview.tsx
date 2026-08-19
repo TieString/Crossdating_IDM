@@ -1,7 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { RwlTreeData } from "@/features/rwl";
-import type { TreeRingImageMode } from "@/features/treeRingScans";
 import {
     getTreeRingArtwork,
     getTreeRingFeature,
@@ -33,14 +32,17 @@ export interface TreeRingViewerRequest {
     id: number;
     seriesId: string;
     anchor: TreeRingViewerAnchor;
-    initialMode: TreeRingImageMode;
+    initialView: TreeRingViewerDisplayMode;
 }
+
+export type TreeRingViewerDisplayMode = "full" | "strip" | "scan";
 
 interface TreeRingPreviewProps {
     seriesId: string;
     series: RwlTreeData;
     stopMarkerValue: number;
     highlightedYear?: number;
+    focusRequestId?: number;
     onYearSelect: (seriesId: string, year: number) => void;
     onOpen: (seriesId: string, anchor: TreeRingViewerAnchor) => void;
     onContextMenu?: (event: ReactMouseEvent<HTMLButtonElement>) => void;
@@ -64,6 +66,7 @@ function TreeRingPreviewComponent({
     series,
     stopMarkerValue,
     highlightedYear,
+    focusRequestId,
     onYearSelect,
     onOpen,
     onContextMenu,
@@ -84,21 +87,28 @@ function TreeRingPreviewComponent({
     const svgRef = useRef<SVGSVGElement | null>(null);
     const panGestureRef = useRef<PreviewPanGesture | null>(null);
     const suppressClickRef = useRef(false);
+    const handledFocusRequestIdRef = useRef<number | undefined>(undefined);
 
     useEffect(() => {
         setViewport({ zoom: TREE_RING_MIN_ZOOM, startX: radiusMm });
     }, [artwork?.cacheKey, radiusMm]);
 
     useEffect(() => {
-        if (!artwork || highlightedYear === undefined) return;
+        if (
+            focusRequestId === undefined
+            || handledFocusRequestIdRef.current === focusRequestId
+            || !artwork
+            || highlightedYear === undefined
+        ) return;
         const feature = getTreeRingFeature(artwork.geometry, highlightedYear);
         if (!feature) return;
+        handledFocusRequestIdRef.current = focusRequestId;
         setViewport((current) => focusTreeRingViewport(
             current,
             artwork.radiusMm,
             feature.centreRadiusMm,
         ));
-    }, [artwork, highlightedYear]);
+    }, [artwork, focusRequestId, highlightedYear]);
 
     // React can delegate wheel events through a passive listener. A native,
     // non-passive capture listener guarantees that zooming never scrolls the workspace.
@@ -165,7 +175,7 @@ function TreeRingPreviewComponent({
     const gapYearCount = geometry.gaps.reduce((sum, gap) => sum + gap.yearCount, 0);
     const title = `1 cm 树轮窗口 · ${artwork.ringCount} 个年轮 · 半径 ${artwork.radiusMm.toFixed(3)} mm`
         + `${gapYearCount > 0 ? ` · 中间缺少 ${gapYearCount} 年记录` : ""}`
-        + "（滚轮缩放，放大后左右拖动，单击选择年份，双击查看完整截面）";
+        + "（滚轮缩放，放大后左右拖动，单击选择年份，双击打开 1 cm 视图）";
 
     const resolveFeatureAtClientX = (
         clientX: number,
@@ -265,7 +275,7 @@ function TreeRingPreviewComponent({
                 type="button"
                 className={`${styles.previewButton}${viewport.zoom > TREE_RING_MIN_ZOOM ? ` ${styles.zoomed}` : ""}${isPanning ? ` ${styles.panning}` : ""}`}
                 title={title}
-                aria-label={`${seriesId} 的 1 cm 树轮窗口；可滚轮缩放和左右拖动，单击选择年份，双击查看完整截面`}
+                aria-label={`${seriesId} 的 1 cm 树轮窗口；可滚轮缩放和左右拖动，单击选择年份，双击打开 1 cm 视图`}
                 onContextMenu={onContextMenu}
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}

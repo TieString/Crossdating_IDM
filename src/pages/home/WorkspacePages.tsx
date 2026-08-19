@@ -445,6 +445,7 @@ export function CofechaReportPage({
 type ExpandedChartPageProps = {
     siteData: RwlSiteData;
     selectedTrees: readonly string[];
+    treeOffsets?: ReadonlyMap<string, number>;
     focusedTree: string | null;
     jumpTarget?: ChartJumpTarget;
     activeDiagnosisEvent?: DiagnosisEvent | null;
@@ -462,6 +463,7 @@ type ExpandedChartPageProps = {
     onMoveSeriesTailByOffset: (tree: string, selectedStartYear: number, selectedEndYear: number, yearOffset: number) => void;
     onDeleteSeries: (tree: string) => void;
     onSelectedTreesChange: (trees: string[]) => void;
+    onTreeOffsetsChange?: (offsets: Map<string, number>) => void;
     onLocateWidth: (tree: string, year: number) => void;
     onEditAsText: (tree: string) => void;
     onJumpToCofecha: (tree: string) => void;
@@ -473,6 +475,7 @@ type ExpandedChartPageProps = {
 export function ExpandedChartPage({
     siteData,
     selectedTrees,
+    treeOffsets,
     focusedTree,
     jumpTarget,
     activeDiagnosisEvent = null,
@@ -490,6 +493,7 @@ export function ExpandedChartPage({
     onMoveSeriesTailByOffset,
     onDeleteSeries,
     onSelectedTreesChange,
+    onTreeOffsetsChange,
     onLocateWidth,
     onEditAsText,
     onJumpToCofecha,
@@ -536,6 +540,7 @@ export function ExpandedChartPage({
                         showPersistentTooltip={showPersistentTooltip}
                         fullData={siteData}
                         selectedTrees={selectedTrees}
+                        treeOffsets={treeOffsets}
                         focusedTree={focusedTree}
                         jumpTarget={jumpTarget}
                         activeDiagnosisEvent={activeDiagnosisEvent}
@@ -552,6 +557,7 @@ export function ExpandedChartPage({
                         onMoveSeriesTailByOffset={onMoveSeriesTailByOffset}
                         onDeleteSeries={onDeleteSeries}
                         onSelectedTreesChange={onSelectedTreesChange}
+                        onTreeOffsetsChange={onTreeOffsetsChange}
                         onLocateWidth={onLocateWidth}
                         onEditAsText={onEditAsText}
                         onJumpToCofecha={onJumpToCofecha}

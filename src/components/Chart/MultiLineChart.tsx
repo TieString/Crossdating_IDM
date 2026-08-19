@@ -24,7 +24,17 @@ import { REFERENCE_SERIES_LABEL } from '@/features/crossdating/reference'
 import type { DeleteMode, DeleteShift, MissingInsertSide } from '@/features/rwl/edit'
 import { normalizeCofechaSeriesId } from '@/features/cofecha/seriesId'
 import { stopMarker } from '@/shared/constants'
-import { centerChartViewportOnYear, type ChartJumpTarget } from './chartNavigation'
+import {
+  calendarViewportToCategoryViewport,
+  categoryViewportToCalendarViewport,
+  centerChartViewportOnYear,
+  type CalendarChartViewport,
+  type ChartJumpTarget,
+} from './chartNavigation'
+import {
+  DEFAULT_SERIES_COLOR_PALETTE,
+  buildStableSeriesColorMap,
+} from './seriesColors'
 
 ChartJS.register(
   LineElement,
@@ -818,8 +828,8 @@ type Props = {
   onJumpToCofecha?: (tree: string) => void
   cofechaPart6Trees?: readonly string[]
   jumpTarget?: ChartJumpTarget | null
-  zoomWindow?: { min: number; max: number } | null
-  onZoomWindowChange?: (zoomWindow: { min: number; max: number } | null) => void
+  zoomWindow?: CalendarChartViewport | null
+  onZoomWindowChange?: (zoomWindow: CalendarChartViewport | null) => void
   onShiftHighlightedTree?: (treeCode: string, direction: -1 | 1) => void
   onInsertMissingYearAtSide?: (tree: string, year: number, side: MissingInsertSide) => void
   onDeleteYearWithMode?: (tree: string, year: number, mode: DeleteMode, shift?: DeleteShift) => void
@@ -828,17 +838,9 @@ type Props = {
   onDeleteSeries?: (tree: string) => void
 }
 
-export type ChartZoomWindow = {
-  min: number
-  max: number
-} | null
+export type ChartZoomWindow = CalendarChartViewport | null
 
-export const colorPalette = [
-  '#2563eb', '#2e6da4', '#27825a', '#7d3c98', '#b9621e',
-  '#1a7a7a', '#7a4a1e', '#4a3a8a', '#6a7a2a', '#0088a9',
-  '#2a5a7a', '#7a2a5a', '#3a6a2a', '#5b5bd6', '#2a4a8a',
-  '#6a5a1e', '#3a2a6a', '#5a7a3a', '#39796b', '#2a6a5a',
-]
+export const colorPalette = DEFAULT_SERIES_COLOR_PALETTE
 
 const CHART_FONT_FAMILY = "'Arial', 'Helvetica', sans-serif"
 
@@ -884,27 +886,14 @@ export function MultiLineChart({
   const [showSampleSize, setShowSampleSize] = useState(true)
   const [lineHoverable, setLineHoverable] = useState(false)
   const treeCodes = useMemo(() => Array.from(data.keys()), [data])
+  const fallbackSeriesColorMap = useMemo(
+    () => seriesColors ? null : buildStableSeriesColorMap(treeCodes, colorPalette),
+    [seriesColors, treeCodes],
+  )
   const cofechaPart6TreeSet = useMemo(() => new Set(
     cofechaPart6Trees.map(normalizeCofechaSeriesId),
   ), [cofechaPart6Trees])
   const highlightedIndex = highlightedTreeCode ? treeCodes.indexOf(highlightedTreeCode) : -1
-
-  const emitZoomWindow = useCallback((chart: ChartJSInstance<'line'> | ChartJS | null = chartRef.current) => {
-    if (!chart || !onZoomWindowChange) return
-    const scale = chart.scales['x']
-    const min = Number(scale.min)
-    const max = Number(scale.max)
-
-    // 图表已处于目标缩放状态，标记跳过回传引起的二次套用。
-    skipZoomRestoreRef.current = true
-
-    if (!Number.isFinite(min) || !Number.isFinite(max)) {
-      onZoomWindowChange(null)
-      return
-    }
-
-    onZoomWindowChange({ min, max })
-  }, [onZoomWindowChange])
 
   // 汇总所有年份，用作图表横轴。
   const allYears = useMemo(() => {
@@ -934,6 +923,23 @@ export function MultiLineChart({
     for (let y = minYear - pad; y <= maxYear + pad; y++) years.push(y)
     return years
   }, [data, jumpTarget, referenceSeries])
+
+  const emitZoomWindow = useCallback((chart: ChartJSInstance<'line'> | ChartJS | null = chartRef.current) => {
+    if (!chart || !onZoomWindowChange) return
+    const scale = chart.scales['x']
+    const min = Number(scale.min)
+    const max = Number(scale.max)
+
+    // 图表已处于目标缩放状态，标记跳过回传引起的二次套用。
+    skipZoomRestoreRef.current = true
+
+    if (!Number.isFinite(min) || !Number.isFinite(max)) {
+      onZoomWindowChange(null)
+      return
+    }
+
+    onZoomWindowChange(categoryViewportToCalendarViewport({ min, max }, allYears))
+  }, [allYears, onZoomWindowChange])
 
   const sampleSize = useMemo(() => {
     let max = 0
@@ -969,7 +975,7 @@ export function MultiLineChart({
 
     data.forEach((yearMap, treeCode) => {
       const yData = allYears.map(year => yearMap.get(year) ?? null)
-      const color = seriesColors?.get(treeCode) ?? colorPalette[colorIndex % colorPalette.length]
+      const color = seriesColors?.get(treeCode) ?? fallbackSeriesColorMap?.get(treeCode) ?? colorPalette[0]
       const isHighlighted = colorIndex === highlightedIndex
       const transparentColor = color + '99'
       nextDatasets.push({
@@ -1002,7 +1008,8 @@ export function MultiLineChart({
         pointRadius: 0,
         pointHoverRadius: 0,
         pointHitRadius: 0,
-        order: -20,
+        // Chart.js 按 order 降序绘制；较大的值先画，因此参考线位于目标序列下层。
+        order: 20,
         referenceDepth: allYears.map(year => referenceSeries.sampleDepth.get(year) ?? null),
         referenceSd: allYears.map(year => referenceSeries.sdByYear?.get(year) ?? null),
         referenceSe: allYears.map(year => referenceSeries.seByYear?.get(year) ?? null),
@@ -1040,7 +1047,7 @@ export function MultiLineChart({
     }
 
     return nextDatasets
-  }, [allYears, data, highlightedIndex, referenceDisplayData, referenceSeries, sampleSize, seriesColors, showSampleSize])
+  }, [allYears, data, fallbackSeriesColorMap, highlightedIndex, referenceDisplayData, referenceSeries, sampleSize, seriesColors, showSampleSize])
 
   // 记忆化 chartData，避免每次渲染（含鼠标移动）都生成新引用导致 react-chartjs-2 重复 update 卡顿。
   const chartData: ChartData<'line'> = useMemo(() => ({
@@ -1090,8 +1097,9 @@ export function MultiLineChart({
 
     const scale = chart.scales['x']
     const win = zoomWindowRef.current
-    scale.options.min = win?.min
-    scale.options.max = win?.max
+    const categoryWindow = win ? calendarViewportToCategoryViewport(win, allYears) : null
+    scale.options.min = categoryWindow?.min
+    scale.options.max = categoryWindow?.max
     chart.update('none')
   }, [datasets, allYears])
 
@@ -1105,10 +1113,13 @@ export function MultiLineChart({
     if (!chart) return
 
     const scale = chart.scales['x']
-    scale.options.min = zoomWindow?.min
-    scale.options.max = zoomWindow?.max
+    const categoryWindow = zoomWindow
+      ? calendarViewportToCategoryViewport(zoomWindow, allYears)
+      : null
+    scale.options.min = categoryWindow?.min
+    scale.options.max = categoryWindow?.max
     chart.update('none')
-  }, [zoomWindow])
+  }, [allYears, zoomWindow])
 
   // 外部跳转给出的是日历年份；在拥有完整标签列表的图表层换算为 CategoryScale 索引窗口。
   useEffect(() => {
@@ -1120,23 +1131,25 @@ export function MultiLineChart({
       return
     }
 
-    const nextWindow = centerChartViewportOnYear(
+    const nextCategoryWindow = centerChartViewportOnYear(
       jumpTarget.year,
       allYears,
     )
-    if (!nextWindow) return
+    if (!nextCategoryWindow) return
+    const nextCalendarWindow = categoryViewportToCalendarViewport(nextCategoryWindow, allYears)
+    if (!nextCalendarWindow) return
 
     handledJumpIdRef.current = jumpTarget.id
     markerLinesPlugin.markerYear = jumpTarget.year
-    zoomWindowRef.current = nextWindow
+    zoomWindowRef.current = nextCalendarWindow
     skipZoomRestoreRef.current = false
-    onZoomWindowChange(nextWindow)
+    onZoomWindowChange(nextCalendarWindow)
 
     const chart = chartRef.current
     const scale = chart?.scales['x']
     if (chart && scale) {
-      scale.options.min = nextWindow.min
-      scale.options.max = nextWindow.max
+      scale.options.min = nextCategoryWindow.min
+      scale.options.max = nextCategoryWindow.max
       chart.update('none')
     }
   }, [allYears, jumpTarget, markerLinesPlugin, onZoomWindowChange])

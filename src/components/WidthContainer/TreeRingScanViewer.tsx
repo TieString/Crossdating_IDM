@@ -3,6 +3,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import type { RwlTreeData } from "@/features/rwl";
 import type { RwlOperationLogEntry } from "@/features/rwl/edit";
 import {
+    buildTreeRingScanYearPositions,
     getFirstTreeRingScanAnchorYear,
     getTreeRingScanXRatioForOriginalYear,
     getLatestSeriesOperationSequence,
@@ -12,11 +13,18 @@ import {
     originalTreeRingScanCropToDisplay,
     rotatedTreeRingScanSize,
     rotateTreeRingScanAnchors,
+    resolveTreeRingScanOriginalYearAtX,
     type TreeRingScanCrop,
     type TreeRingScanFile,
     type TreeRingScanSeriesState,
     type TreeRingYearMapping,
 } from "@/features/treeRingScans";
+import {
+    getTreeRingScanMaximumZoom,
+    projectTreeRingScanAnchorToViewport,
+    shouldSmoothTreeRingScanImage,
+    TREE_RING_SCAN_MIN_ZOOM,
+} from "./scanDetailRendering";
 import { useTreeRingScanImage } from "./useTreeRingScanImage";
 import styles from "./TreeRingScanViewer.module.css";
 
@@ -28,9 +36,11 @@ interface TreeRingScanViewerProps {
     scanState: TreeRingScanSeriesState;
     operationLog: readonly RwlOperationLogEntry[];
     highlightedYear?: number;
+    focusRequestId?: number;
     yearMapping?: TreeRingYearMapping;
     size: number;
     onChange: (state: TreeRingScanSeriesState) => void;
+    onYearSelect?: (seriesId: string, year: number) => void;
 }
 
 type ViewerTool = "pan" | "crop" | "point";
@@ -54,8 +64,11 @@ interface CropGesture {
 
 type ViewerGesture = PanGesture | CropGesture;
 
-const MIN_ZOOM = 1;
-const MAX_ZOOM = 32;
+interface HoveredMappedYear {
+    label: string;
+    left: number;
+    top: number;
+}
 
 const clamp = (value: number, minimum: number, maximum: number) => (
     Math.min(maximum, Math.max(minimum, value))
@@ -79,9 +92,11 @@ export function TreeRingScanViewer({
     scanState,
     operationLog,
     highlightedYear,
+    focusRequestId,
     yearMapping,
     size,
     onChange,
+    onYearSelect,
 }: TreeRingScanViewerProps) {
     const rotation = scanState.rotation ?? 0;
     const [tool, setTool] = useState<ViewerTool>(() => (
@@ -90,13 +105,15 @@ export function TreeRingScanViewer({
     const displayedCrop = tool === "crop" ? undefined : scanState.crop;
     const image = useTreeRingScanImage(file, displayedCrop);
     const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
-    const [zoom, setZoom] = useState(MIN_ZOOM);
+    const [zoom, setZoom] = useState(TREE_RING_SCAN_MIN_ZOOM);
     const [pan, setPan] = useState({ x: 0, y: 0 });
     const [draftCrop, setDraftCrop] = useState<TreeRingScanCrop | null>(null);
+    const [hoveredMappedYear, setHoveredMappedYear] = useState<HoveredMappedYear | null>(null);
     const frameRef = useRef<HTMLDivElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const sourceImageRef = useRef<HTMLImageElement | null>(null);
     const gestureRef = useRef<ViewerGesture | null>(null);
+    const handledFocusRequestIdRef = useRef<number | undefined>(undefined);
     const editableEntries = useMemo(() => Array.from(series.entries())
         .filter((entry): entry is [number, number] => (
             typeof entry[1] === "number"
@@ -104,6 +121,7 @@ export function TreeRingScanViewer({
             && entry[1] !== stopMarkerValue
         ))
         .sort(([left], [right]) => left - right), [series, stopMarkerValue]);
+    const yearPositions = useMemo(() => buildTreeRingScanYearPositions(scanState), [scanState]);
 
     const unrotatedDisplayNaturalSize = useMemo(() => {
         if (!displayedCrop || image.cropApplied) return naturalSize;
@@ -133,6 +151,14 @@ export function TreeRingScanViewer({
         fittedSize.height,
         normalizeTreeRingScanRotation(360 - rotation),
     ), [fittedSize.height, fittedSize.width, rotation]);
+    const pixelRatio = typeof window === "undefined" ? 1 : Math.max(1, window.devicePixelRatio || 1);
+    const maximumZoom = getTreeRingScanMaximumZoom(
+        displayNaturalSize.width,
+        displayNaturalSize.height,
+        fittedSize.width,
+        fittedSize.height,
+        pixelRatio,
+    );
 
     const clampPan = (candidate: { x: number; y: number }, candidateZoom = zoom) => {
         const maximumX = Math.max(0, (fittedSize.width * candidateZoom - size) / 2);
@@ -145,7 +171,7 @@ export function TreeRingScanViewer({
 
     useEffect(() => {
         setNaturalSize({ width: 0, height: 0 });
-        setZoom(MIN_ZOOM);
+        setZoom(TREE_RING_SCAN_MIN_ZOOM);
         setPan({ x: 0, y: 0 });
         sourceImageRef.current = null;
         if (!image.url) return () => undefined;
@@ -168,7 +194,6 @@ export function TreeRingScanViewer({
         const canvas = canvasRef.current;
         const source = sourceImageRef.current;
         if (!canvas || !source || !(naturalSize.width > 0) || !(naturalSize.height > 0)) return;
-        const pixelRatio = Math.max(1, window.devicePixelRatio || 1);
         const pixelWidth = Math.max(1, Math.round(size * pixelRatio));
         const pixelHeight = Math.max(1, Math.round(size * pixelRatio));
         if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
@@ -178,9 +203,6 @@ export function TreeRingScanViewer({
         context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
         context.fillStyle = "#eef1f4";
         context.fillRect(0, 0, size, size);
-        context.imageSmoothingEnabled = true;
-        context.imageSmoothingQuality = "high";
-
         const sourceX = displayedCrop && !image.cropApplied
             ? displayedCrop.xRatio * naturalSize.width
             : 0;
@@ -193,6 +215,14 @@ export function TreeRingScanViewer({
         const sourceHeight = displayedCrop && !image.cropApplied
             ? displayedCrop.heightRatio * naturalSize.height
             : naturalSize.height;
+        context.imageSmoothingEnabled = shouldSmoothTreeRingScanImage(
+            sourceWidth,
+            sourceHeight,
+            sourceLayerSize.width * zoom,
+            sourceLayerSize.height * zoom,
+            pixelRatio,
+        );
+        if (context.imageSmoothingEnabled) context.imageSmoothingQuality = "high";
 
         context.save();
         context.beginPath();
@@ -224,6 +254,7 @@ export function TreeRingScanViewer({
         naturalSize.width,
         pan.x,
         pan.y,
+        pixelRatio,
         rotation,
         size,
         sourceLayerSize.height,
@@ -235,6 +266,10 @@ export function TreeRingScanViewer({
         setDraftCrop(null);
         setTool(!scanState.crop ? "crop" : (scanState.anchors.length < 2 ? "point" : "pan"));
     }, [file.path]);
+
+    useEffect(() => {
+        setZoom((current) => clamp(current, TREE_RING_SCAN_MIN_ZOOM, maximumZoom));
+    }, [maximumZoom]);
 
     useEffect(() => {
         setPan((current) => clampPan(current));
@@ -249,13 +284,19 @@ export function TreeRingScanViewer({
         : getTreeRingScanXRatioForOriginalYear(scanState, highlightedOriginalYear);
 
     useEffect(() => {
-        if (highlightedXRatio === null || zoom <= MIN_ZOOM) return;
+        if (
+            focusRequestId === undefined
+            || handledFocusRequestIdRef.current === focusRequestId
+            || highlightedXRatio === null
+        ) return;
+        handledFocusRequestIdRef.current = focusRequestId;
+        if (zoom <= TREE_RING_SCAN_MIN_ZOOM) return;
         setPan((current) => clampPan({
             ...current,
             x: -(highlightedXRatio - 0.5) * fittedSize.width * zoom,
         }));
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [highlightedXRatio, fittedSize.width, zoom]);
+    }, [focusRequestId, highlightedXRatio, fittedSize.width, zoom]);
 
     useEffect(() => {
         const frame = frameRef.current;
@@ -267,7 +308,11 @@ export function TreeRingScanViewer({
             const rect = frame.getBoundingClientRect();
             const cursorX = event.clientX - rect.left - rect.width / 2;
             const cursorY = event.clientY - rect.top - rect.height / 2;
-            const nextZoom = clamp(zoom * Math.exp(-event.deltaY * 0.0022), MIN_ZOOM, MAX_ZOOM);
+            const nextZoom = clamp(
+                zoom * Math.exp(-event.deltaY * 0.0022),
+                TREE_RING_SCAN_MIN_ZOOM,
+                maximumZoom,
+            );
             const ratio = nextZoom / zoom;
             const nextPan = clampPan({
                 x: cursorX - (cursorX - pan.x) * ratio,
@@ -278,7 +323,7 @@ export function TreeRingScanViewer({
         };
         frame.addEventListener("wheel", handleWheel, { passive: false, capture: true });
         return () => frame.removeEventListener("wheel", handleWheel, { capture: true });
-    }, [fittedSize.height, fittedSize.width, pan.x, pan.y, size, tool, zoom]);
+    }, [fittedSize.height, fittedSize.width, maximumZoom, pan.x, pan.y, size, tool, zoom]);
 
     const nextAnchorYear = scanState.anchors.length > 0
         ? scanState.anchors[scanState.anchors.length - 1].originalYear - 10
@@ -301,6 +346,37 @@ export function TreeRingScanViewer({
         const yRatio = (untransformedY - imageTop) / fittedSize.height;
         if (xRatio < 0 || xRatio > 1 || yRatio < 0 || yRatio > 1) return null;
         return { xRatio, yRatio };
+    };
+
+    const resolveMappedYear = (clientX: number, clientY: number) => {
+        const point = resolveImageRatios(clientX, clientY);
+        const frame = frameRef.current;
+        if (!point || !frame || !yearMapping?.valid) return null;
+        const originalYear = resolveTreeRingScanOriginalYearAtX(yearPositions, point.xRatio);
+        if (originalYear === null) return null;
+        const currentYear = yearMapping.currentByOriginal.get(originalYear) ?? null;
+        const rect = frame.getBoundingClientRect();
+        return {
+            originalYear,
+            currentYear,
+            left: clamp(clientX - rect.left, 28, Math.max(28, rect.width - 28)),
+            top: clamp(clientY - rect.top, 42, Math.max(42, rect.height - 24)),
+        };
+    };
+
+    const updateHoveredMappedYear = (clientX: number, clientY: number) => {
+        const resolved = resolveMappedYear(clientX, clientY);
+        if (!resolved) {
+            setHoveredMappedYear(null);
+            return;
+        }
+        setHoveredMappedYear({
+            left: resolved.left,
+            top: resolved.top,
+            label: resolved.currentYear === resolved.originalYear
+                ? `${resolved.originalYear} 年`
+                : `原 ${resolved.originalYear} 年 · ${resolved.currentYear === null ? "已删除" : `现 ${resolved.currentYear} 年`}`,
+        });
     };
 
     const addAnchor = (clientX: number, clientY: number) => {
@@ -335,7 +411,7 @@ export function TreeRingScanViewer({
         if (nextTool === "point" && !scanState.crop) return;
         setTool(nextTool);
         setDraftCrop(null);
-        setZoom(MIN_ZOOM);
+        setZoom(TREE_RING_SCAN_MIN_ZOOM);
         setPan({ x: 0, y: 0 });
     };
 
@@ -347,7 +423,7 @@ export function TreeRingScanViewer({
             anchors: rotateTreeRingScanAnchors(scanState.anchors, rotation, nextRotation),
         });
         setDraftCrop(null);
-        setZoom(MIN_ZOOM);
+        setZoom(TREE_RING_SCAN_MIN_ZOOM);
         setPan({ x: 0, y: 0 });
     };
 
@@ -355,6 +431,7 @@ export function TreeRingScanViewer({
         if (event.button !== 0) return;
         event.preventDefault();
         event.stopPropagation();
+        setHoveredMappedYear(null);
         if (tool === "crop") {
             const point = resolveImageRatios(event.clientX, event.clientY);
             if (!point) return;
@@ -381,7 +458,11 @@ export function TreeRingScanViewer({
 
     const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
         const gesture = gestureRef.current;
-        if (!gesture || gesture.pointerId !== event.pointerId) return;
+        if (!gesture) {
+            if (tool === "pan") updateHoveredMappedYear(event.clientX, event.clientY);
+            return;
+        }
+        if (gesture.pointerId !== event.pointerId) return;
         if (gesture.kind === "crop") {
             const point = resolveImageRatios(event.clientX, event.clientY);
             if (!point) return;
@@ -430,7 +511,16 @@ export function TreeRingScanViewer({
             setTool("point");
             return;
         }
-        if (!gesture.moved) addAnchor(event.clientX, event.clientY);
+        if (!gesture.moved) {
+            if (tool === "point") {
+                addAnchor(event.clientX, event.clientY);
+            } else if (tool === "pan") {
+                const resolved = resolveMappedYear(event.clientX, event.clientY);
+                if (resolved?.currentYear !== null && resolved?.currentYear !== undefined) {
+                    onYearSelect?.(seriesId, resolved.currentYear);
+                }
+            }
+        }
     };
 
     const removeLastAnchor = () => {
@@ -470,15 +560,16 @@ export function TreeRingScanViewer({
             style={{ width: `${size}px`, height: `${size}px` }}
             title={tool === "crop"
                 ? "拖动框选磨平后的长方形样芯截面"
-                : (tool === "point" ? `点击标注 ${nextAnchorYear} 年锚点；拖动可平移` : "滚轮缩放；拖动平移")}
+                : (tool === "point" ? `点击标注 ${nextAnchorYear} 年锚点；拖动可平移` : "滚轮缩放；拖动平移；单击定位宽度格")}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={finishPointer}
             onPointerCancel={finishPointer}
+            onPointerLeave={() => setHoveredMappedYear(null)}
             onDoubleClick={(event) => {
                 if (tool === "crop") return;
                 event.stopPropagation();
-                setZoom(MIN_ZOOM);
+                setZoom(TREE_RING_SCAN_MIN_ZOOM);
                 setPan({ x: 0, y: 0 });
             }}
         >
@@ -519,14 +610,24 @@ export function TreeRingScanViewer({
                         aria-hidden="true"
                     />
                 ) : null}
-                {displayedCrop ? scanState.anchors.map((anchor, anchorIndex) => (
+            </div>
+            {displayedCrop ? scanState.anchors.map((anchor, anchorIndex) => {
+                const position = projectTreeRingScanAnchorToViewport(
+                    anchor.xRatio,
+                    anchor.yRatio,
+                    fittedSize.width,
+                    fittedSize.height,
+                    size,
+                    zoom,
+                    pan,
+                );
+                return (
                     <span
                         key={`${anchor.originalYear}-${anchor.xRatio}-${anchor.yRatio}`}
                         className={styles.anchor}
                         style={{
-                            left: `${anchor.xRatio * 100}%`,
-                            top: `${anchor.yRatio * 100}%`,
-                            transform: `translate(-50%, -50%) scale(${1 / zoom})`,
+                            left: `${Math.round(position.left)}px`,
+                            top: `${Math.round(position.top)}px`,
                         }}
                     >
                         <span className={styles.anchorDots} aria-hidden="true">
@@ -534,13 +635,21 @@ export function TreeRingScanViewer({
                         </span>
                         <span
                             className={styles.anchorYear}
-                            style={{ transform: `translateY(${(anchorIndex % 3 - 1) * 17}px)` }}
+                            style={{ top: `${(anchorIndex % 3 - 1) * 18}px` }}
                         >
                             {anchor.originalYear}
                         </span>
                     </span>
-                )) : null}
-            </div>
+                );
+            }) : null}
+            {hoveredMappedYear ? (
+                <span
+                    className={styles.hoverYear}
+                    style={{ left: `${hoveredMappedYear.left}px`, top: `${hoveredMappedYear.top}px` }}
+                >
+                    {hoveredMappedYear.label}
+                </span>
+            ) : null}
             <div className={styles.toolbar} onPointerDown={(event) => event.stopPropagation()}>
                 <button
                     type="button"
@@ -593,6 +702,9 @@ export function TreeRingScanViewer({
                 </button>
                 <span className={styles.zoom}>×{zoom.toFixed(1)}</span>
             </div>
+            {tool === "pan" && yearMapping?.valid ? (
+                <span className={styles.linkHint}>单击定位宽度格</span>
+            ) : null}
             {displayedCrop && image.cropApplied ? (
                 <span className={styles.fullResolution}>
                     原图截面 {naturalSize.width}×{naturalSize.height} px

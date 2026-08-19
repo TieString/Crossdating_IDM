@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
     buildTreeRingGeometry,
     clearTreeRingArtworkCache,
+    getRwlWidthUnitMillimetres,
     getTreeRingFeature,
     getTreeRingFeatureAtRadius,
     renderTreeRingSvg,
@@ -11,9 +12,25 @@ import {
 describe("tree-ring artwork geometry", () => {
     afterEach(() => clearTreeRingArtworkCache());
 
-    it("uses the Python source conversion of one RWL unit to 0.001 mm", () => {
-        expect(rwlWidthToMillimetres(2572)).toBeCloseTo(2.572, 12);
-        expect(rwlWidthToMillimetres(3113)).toBeCloseTo(3.113, 12);
+    it("uses the Tucson stop marker to resolve the physical RWL width unit", () => {
+        expect(getRwlWidthUnitMillimetres(-9999)).toBe(0.001);
+        expect(getRwlWidthUnitMillimetres(999)).toBe(0.01);
+        expect(rwlWidthToMillimetres(2572, -9999)).toBeCloseTo(2.572, 12);
+        expect(rwlWidthToMillimetres(257, 999)).toBeCloseTo(2.57, 12);
+    });
+
+    it("scales generated rings and cache identities with the detected precision", () => {
+        const series = new Map([[1900, 100], [1901, 250]]);
+        const thousandthGeometry = buildTreeRingGeometry(series, -9999);
+        const hundredthGeometry = buildTreeRingGeometry(series, 999);
+
+        expect(thousandthGeometry?.radiusMm).toBeCloseTo(0.35, 12);
+        expect(hundredthGeometry?.radiusMm).toBeCloseTo(3.5, 12);
+        expect(hundredthGeometry?.radiusMm).toBeCloseTo(
+            (thousandthGeometry?.radiusMm ?? 0) * 10,
+            12,
+        );
+        expect(hundredthGeometry?.cacheKey).not.toBe(thousandthGeometry?.cacheKey);
     });
 
     it("sorts years, skips null/stop values, and keeps zero-width missing rings", () => {

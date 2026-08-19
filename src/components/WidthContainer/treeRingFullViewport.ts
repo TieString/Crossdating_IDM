@@ -73,3 +73,19 @@ export function panTreeRingFullViewport(
     }, diameterMm);
 }
 
+/** Centre the selected ring's three-o'clock point while preserving the current zoom. */
+export function focusTreeRingFullViewport(
+    viewport: TreeRingFullViewport,
+    diameterMm: number,
+    featureRadiusMm: number,
+): TreeRingFullViewport {
+    const current = clampTreeRingFullViewport(viewport, diameterMm);
+    if (current.zoom <= TREE_RING_FULL_MIN_ZOOM) return current;
+    const size = getTreeRingFullViewSize(diameterMm, current.zoom);
+    const radiusMm = diameterMm / 2;
+    return clampTreeRingFullViewport({
+        ...current,
+        startX: radiusMm + featureRadiusMm - size / 2,
+        startY: radiusMm - size / 2,
+    }, diameterMm);
+}

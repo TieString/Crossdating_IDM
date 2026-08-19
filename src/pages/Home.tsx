@@ -42,11 +42,9 @@ import {
 } from "./home/homeShared";
 import {
     CofechaEmptySkeleton,
-    CofechaEmptyState,
     CofechaStatValue,
     CofechaToolbarSkeleton,
     LineChartEmptySkeleton,
-    LineChartEmptyState,
     WorkspaceWindowPlaceholder,
 } from "./home/HomePanelComponents";
 import { HomeTitleBarBridge } from "./home/HomeTitleBarBridge";
@@ -341,6 +339,7 @@ export default function Home() {
     const [activeDiagnosisEvent, setActiveDiagnosisEvent] = useState<DiagnosisEvent | null>(null);
     const [dismissedDiagnosisTree, setDismissedDiagnosisTree] = useState<string | null>(null);
     const [chartSelectedTrees, setChartSelectedTrees] = useState<string[]>([]);
+    const [chartTreeOffsets, setChartTreeOffsets] = useState<Map<string, number>>(new Map());
     const chartSelectionFileRef = useRef<string | null>(null);
     const {
         applyRawRwlText,
@@ -374,6 +373,7 @@ export default function Home() {
         handleRedo,
         handleReplaceTreeData,
         handleResetToRawData,
+        handleRemoveDeletionMarker,
         handleRestoreDeletion,
         handleRunBreadthDiagnosis,
         handleRunCofechaValidation,
@@ -426,6 +426,11 @@ export default function Home() {
                 ? previous
                 : next;
         });
+        setChartTreeOffsets((previous) => {
+            if (fileChanged) return new Map();
+            const next = new Map(Array.from(previous.entries()).filter(([tree]) => siteData.has(tree)));
+            return next.size === previous.size ? previous : next;
+        });
     }, [fileName, siteData]);
 
     // “关闭本次建议”只绑定当前数据版本；任何编辑都会产生新的 siteData 并恢复建议。
@@ -437,6 +442,31 @@ export default function Home() {
         const next = Array.from(new Set(trees.filter((tree) => siteData.has(tree))));
         setChartSelectedTrees(next);
     }, [siteData]);
+
+    const handleChartTreeOffsetsChange = useCallback((offsets: Map<string, number>) => {
+        const filteredOffsets = new Map(Array.from(offsets.entries()).filter(([tree, offset]) => (
+            siteData.has(tree) && Number.isInteger(offset) && offset !== 0
+        )));
+        setChartTreeOffsets((previous) => {
+            if (
+                filteredOffsets.size === previous.size
+                && Array.from(filteredOffsets.entries()).every(([tree, offset]) => previous.get(tree) === offset)
+            ) {
+                return previous;
+            }
+            return filteredOffsets;
+        });
+    }, [siteData]);
+
+    const handleChartOffsetsCommitted = useCallback((committed: ReadonlyMap<string, number>) => {
+        setChartTreeOffsets((previous) => {
+            const next = new Map(previous);
+            committed.forEach((offset, tree) => {
+                if (next.get(tree) === offset) next.delete(tree);
+            });
+            return next;
+        });
+    }, []);
 
     useEffect(() => {
         publishConsoleDataExport(fileName, siteData, cofechaResult);
@@ -522,11 +552,15 @@ export default function Home() {
         flex: `0 0 ${layout.mainSplitRatio * 100}%`,
         ...(!mainDividerCollapsed ? { maxWidth: `calc(100% - ${PANEL_DIVIDER_GUTTER_SIZE}px)` } : {}),
     };
-    // 问题面板保持挂载，避免问题/建议状态变化时宽度网格区域突然伸缩。
-    const dataContainerStyle = {
-        flex: `0 0 ${layout.leftBottomRatio * 100}%`,
-        ...(!leftBottomDividerCollapsed ? { maxHeight: `calc(100% - ${PANEL_DIVIDER_GUTTER_SIZE}px)` } : {}),
-    };
+    const shouldShowSelectedTreePanel = !isFileLoading
+        && selectedTree !== ALL_OPTION_VALUE
+        && siteData.has(selectedTree);
+    const dataContainerStyle = shouldShowSelectedTreePanel
+        ? {
+            flex: `0 0 ${layout.leftBottomRatio * 100}%`,
+            ...(!leftBottomDividerCollapsed ? { maxHeight: `calc(100% - ${PANEL_DIVIDER_GUTTER_SIZE}px)` } : {}),
+        }
+        : { flex: "1 1 auto" };
     const shouldShowRightSkeleton = isFileLoading;
     const shouldShowWidthSkeleton = shouldShowWelcome || isFileLoading || (!hasChart && shouldShowProcessing);
     const shouldShowRightBottomPane = hasChart || shouldShowWelcome || shouldShowRightSkeleton;
@@ -880,6 +914,7 @@ export default function Home() {
             kind: "line-chart",
             siteData: serializeRwlSiteData(siteData),
             selectedTrees: chartSelectedTrees,
+            treeOffsets: Array.from(chartTreeOffsets.entries()),
             focusedTree: selectedTree === ALL_OPTION_VALUE ? null : selectedTree,
             jumpTarget: chartJumpTarget ?? undefined,
             activeDiagnosisEvent,
@@ -889,7 +924,7 @@ export default function Home() {
             diagnosisBatchResult,
             cofechaPart6Trees: cofechaPart6TreeList,
         },
-    }), [activeDiagnosisEvent, canResetToRawData, chartJumpTarget, chartSelectedTrees, cofechaPart6JumpTarget, cofechaPart6TreeList, cofechaResult, crossdatingValidationSummary, diagnosisBatchResult, dynamicReferenceConfig, fileName, isCofechaOutdated, isCofechaRunning, linkedReport, operationLog, presentedCrossdatingDiagnosis, referenceConfig, selectedPart, selectedTree, siteData]);
+    }), [activeDiagnosisEvent, canResetToRawData, chartJumpTarget, chartSelectedTrees, chartTreeOffsets, cofechaPart6JumpTarget, cofechaPart6TreeList, cofechaResult, crossdatingValidationSummary, diagnosisBatchResult, dynamicReferenceConfig, fileName, isCofechaOutdated, isCofechaRunning, linkedReport, operationLog, presentedCrossdatingDiagnosis, referenceConfig, selectedPart, selectedTree, siteData]);
 
     const handleCofechaTextClick = useCallback((event: MouseEvent<HTMLParagraphElement>) => {
         const target = event.target;
@@ -976,6 +1011,8 @@ export default function Home() {
             case "line-chart":
                 if (command.type === "set-selection") {
                     handleChartSelectedTreesChange(command.trees);
+                } else if (command.type === "set-tree-offsets") {
+                    handleChartTreeOffsetsChange(new Map(command.offsets));
                 } else if (command.type === "locate-width") {
                     handleChartLocateWidth(command.tree, command.year);
                 } else if (command.type === "edit-as-text") {
@@ -1012,6 +1049,7 @@ export default function Home() {
         handleCofechaCellReferenceClick,
         handleChartLocateWidth,
         handleChartSelectedTreesChange,
+        handleChartTreeOffsetsChange,
         handleDiagnosisPreviewSelectionById,
         handleJumpToCofechaPart6,
         handleOpenRawEditorForTree,
@@ -1293,23 +1331,23 @@ export default function Home() {
         if (isRawEditing) {
             const applied = await applyRawEditor();
             if (applied) {
-                await handleStructuredSave();
+                await handleStructuredSave(chartTreeOffsets, handleChartOffsetsCommitted);
             }
             return;
         }
-        await handleStructuredSave();
-    }, [applyRawEditor, handleStructuredSave, isRawEditing]);
+        await handleStructuredSave(chartTreeOffsets, handleChartOffsetsCommitted);
+    }, [applyRawEditor, chartTreeOffsets, handleChartOffsetsCommitted, handleStructuredSave, isRawEditing]);
 
     const handleSaveAs = useCallback(async () => {
         if (isRawEditing) {
             const applied = await applyRawEditor();
             if (applied) {
-                await handleStructuredSaveAs();
+                await handleStructuredSaveAs(chartTreeOffsets, handleChartOffsetsCommitted);
             }
             return;
         }
-        await handleStructuredSaveAs();
-    }, [applyRawEditor, handleStructuredSaveAs, isRawEditing]);
+        await handleStructuredSaveAs(chartTreeOffsets, handleChartOffsetsCommitted);
+    }, [applyRawEditor, chartTreeOffsets, handleChartOffsetsCommitted, handleStructuredSaveAs, isRawEditing]);
 
     const handleRawEditorInput = useCallback(() => {
         if (rawEditorError) {
@@ -1371,7 +1409,7 @@ export default function Home() {
     return (
         <>
             <HomeTitleBarBridge
-                title={windowTitle}
+                title={chartTreeOffsets.size > 0 && !windowTitle.endsWith(" *") ? `${windowTitle} *` : windowTitle}
                 cofechaVersion={cofechaVersion}
                 onLoad={handleLoad}
                 onSave={handleSave}
@@ -1553,6 +1591,7 @@ export default function Home() {
                                                     onDeleteYearWithMode={handleDeleteYearWithMode}
                                                     onDeleteYearRange={handleDeleteYearRange}
                                                     onRestoreDeletion={handleRestoreDeletion}
+                                                    onRemoveDeletionMarker={handleRemoveDeletionMarker}
                                                     onDeleteSeries={handleDeleteSeries}
                                                     onEditAsText={handleOpenRawEditorForTree}
                                                     onDeleteSeriesRequestHandled={handleDeleteSeriesRequestHandled}
@@ -1572,7 +1611,8 @@ export default function Home() {
                                     )}
                                 </FloatingScrollArea>
 
-                                <>
+                                {shouldShowSelectedTreePanel ? (
+                                    <>
                                         <div
                                             role="separator"
                                             aria-orientation="horizontal"
@@ -1642,7 +1682,8 @@ export default function Home() {
                                                 )}
                                             </FloatingScrollArea>
                                         </div>
-                                </>
+                                    </>
+                                ) : null}
                             </div>
                         </div>
                     )}
@@ -1769,7 +1810,7 @@ export default function Home() {
                                             {shouldShowRightSkeleton ? (
                                                 <CofechaEmptySkeleton />
                                             ) : !hasChart ? (
-                                                <CofechaEmptyState />
+                                                null
                                             ) : (
                                                 <p
                                                     id={style["cofecha-text"]}
@@ -1815,12 +1856,11 @@ export default function Home() {
                                         <div className={`${style["cofecha-panel-content"]} ${style["line-chart-content"]}`}>
                                             {shouldShowRightSkeleton ? (
                                                 <LineChartEmptySkeleton />
-                                            ) : !hasChart ? (
-                                                <LineChartEmptyState />
                                             ) : (
                                                 <TreeChartManager
                                                     fullData={siteData}
                                                     selectedTrees={chartSelectedTrees}
+                                                    treeOffsets={chartTreeOffsets}
                                                     focusedTree={selectedTree === ALL_OPTION_VALUE ? null : selectedTree}
                                                     jumpTarget={chartJumpTarget}
                                                     referenceConfig={referenceConfig}
@@ -1837,6 +1877,7 @@ export default function Home() {
                                                     onMoveSeriesTailByOffset={handleMoveSeriesTailByOffset}
                                                     onDeleteSeries={handleDeleteSeriesFromChart}
                                                     onSelectedTreesChange={handleChartSelectedTreesChange}
+                                                    onTreeOffsetsChange={handleChartTreeOffsetsChange}
                                                     onLocateWidth={handleChartLocateWidth}
                                                     onEditAsText={handleOpenRawEditorForTree}
                                                     onJumpToCofecha={handleJumpToCofechaPart6}

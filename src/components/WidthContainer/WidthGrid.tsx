@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { motion, useReducedMotion, type TargetAndTransition, type Transition } from "motion/react";
 import { callChangeYearWidth } from "@/features/rwl/edit";
 import { RollingNumber } from "@/components/RollingNumber/RollingNumber";
@@ -316,6 +316,7 @@ export type WidthGridProps = Omit<React.HTMLAttributes<HTMLSpanElement>, MotionR
     onInsertMissingYearAtSide?: (tree: string, year: number, side: PlusSide) => void;
     onDeletionMarkHoverChange?: (tree: string, year: number, hovered: boolean, element: HTMLElement | null, side?: "left" | "right") => void;
     onDeletionMarkDoubleClick?: (tree: string, year: number) => void;
+    onDeletionMarkContextMenu?: (event: ReactMouseEvent<HTMLElement>, tree: string, year: number) => void;
 };
 
 export default function WidthGrid({
@@ -349,6 +350,7 @@ export default function WidthGrid({
     onInsertMissingYearAtSide,
     onDeletionMarkHoverChange,
     onDeletionMarkDoubleClick,
+    onDeletionMarkContextMenu,
     className = "",
     style: customStyle = {},
     ...rest
@@ -579,6 +581,11 @@ export default function WidthGrid({
                     onMouseLeave={(event) => handleDeletionMarkLeave(event, year, "left")}
                     onMouseMove={handleDeletionMarkMove}
                     onDoubleClick={(event) => handleDeletionMarkDoubleClick(event, year)}
+                    onContextMenu={(event) => {
+                        if (tree !== undefined && year !== undefined) {
+                            onDeletionMarkContextMenu?.(event, tree, year);
+                        }
+                    }}
                 />
             ) : null}
             {!isEditing && hasRightDeletionMark ? (
@@ -589,6 +596,11 @@ export default function WidthGrid({
                     onMouseLeave={(event) => handleDeletionMarkLeave(event, rightDeletionMarkerYear, "right")}
                     onMouseMove={handleDeletionMarkMove}
                     onDoubleClick={(event) => handleDeletionMarkDoubleClick(event, rightDeletionMarkerYear)}
+                    onContextMenu={(event) => {
+                        if (tree !== undefined && rightDeletionMarkerYear !== undefined) {
+                            onDeletionMarkContextMenu?.(event, tree, rightDeletionMarkerYear);
+                        }
+                    }}
                 />
             ) : null}
             {!isEditing && isEditable && hoverPlusSide ? (

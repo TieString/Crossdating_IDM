@@ -509,6 +509,23 @@ export function applyLocalCrossdatingOption(
     return new Map(treeData);
 }
 
+/** Preview-only wrapper: stale simulations must disappear instead of crashing React render. */
+export function tryApplyLocalCrossdatingOption(
+    treeData: RwlTreeData,
+    simulation: Pick<
+        LocalCrossdatingSimulation,
+        "year" | "selectedStartYear" | "selectedEndYear"
+    >,
+    option: LocalSimulationOption,
+): RwlTreeData | null {
+    try {
+        return applyLocalCrossdatingOption(treeData, simulation, option);
+    } catch (error) {
+        if (error instanceof RwlMoveConflictError) return null;
+        throw error;
+    }
+}
+
 type DiagnosisEventPreviewOptions = DiagnosisOptions & {
     /** User-selected year inside the event review window; defaults to ranked Top 1. */
     previewYear?: number;

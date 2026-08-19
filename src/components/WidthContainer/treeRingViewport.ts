@@ -28,6 +28,20 @@ export const getTreeRingViewportWidth = (radiusMm: number, zoom: number): number
     radiusMm / clamp(zoom, TREE_RING_MIN_ZOOM, TREE_RING_MAX_ZOOM)
 );
 
+/** Zoom needed for a rendered strip to represent a one-centimetre-high physical window. */
+export function getTreeRingOneCentimetreZoom(
+    radiusMm: number,
+    windowHeightMm: number,
+    viewportWidth: number,
+    viewportHeight: number,
+): number {
+    if (!(radiusMm > 0) || !(windowHeightMm > 0) || !(viewportWidth > 0) || !(viewportHeight > 0)) {
+        return TREE_RING_MIN_ZOOM;
+    }
+    const physicalWidthMm = windowHeightMm * viewportWidth / viewportHeight;
+    return clamp(radiusMm / physicalWidthMm, TREE_RING_MIN_ZOOM, TREE_RING_MAX_ZOOM);
+}
+
 export function clampTreeRingViewport(
     viewport: TreeRingViewport,
     radiusMm: number,

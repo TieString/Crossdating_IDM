@@ -1,7 +1,11 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { readRwlString } from "@/features/rwl";
-import { buildTreeRingGeometry, renderTreeRingSvg } from "@/components/WidthContainer/treeRingArtwork";
+import { detectPrecision, readRwlString } from "@/features/rwl";
+import {
+    buildTreeRingGeometry,
+    getRwlWidthUnitMillimetres,
+    renderTreeRingSvg,
+} from "@/components/WidthContainer/treeRingArtwork";
 
 const [, , inputArgument, outputArgument] = process.argv;
 
@@ -13,7 +17,10 @@ if (!inputArgument || !outputArgument) {
 
 const inputPath = resolve(inputArgument);
 const outputFolder = resolve(outputArgument);
-const parsed = await readRwlString(await readFile(inputPath, "utf8"));
+const inputText = await readFile(inputPath, "utf8");
+const stopMarkerValue = await detectPrecision(inputText);
+const widthUnitMm = getRwlWidthUnitMillimetres(stopMarkerValue);
+const parsed = await readRwlString(inputText, { stopMarker: stopMarkerValue });
 await mkdir(outputFolder, { recursive: true });
 
 const exported: Array<{ seriesId: string; fileName: string; ringCount: number }> = [];
@@ -22,7 +29,7 @@ for (const [seriesId, series] of parsed.data.entries()) {
         console.warn(`跳过无法作为 Windows 文件名的序列：${seriesId}`);
         continue;
     }
-    const geometry = buildTreeRingGeometry(series);
+    const geometry = buildTreeRingGeometry(series, stopMarkerValue);
     if (!geometry) continue;
     const fileName = `${seriesId}.svg`;
     await writeFile(resolve(outputFolder, fileName), renderTreeRingSvg(geometry, "full"), "utf8");
@@ -31,7 +38,14 @@ for (const [seriesId, series] of parsed.data.entries()) {
 
 await writeFile(
     resolve(outputFolder, "tree-ring-scan-fixtures.json"),
-    JSON.stringify({ inputPath, outputFolder, generatedAt: new Date().toISOString(), exported }, null, 2),
+    JSON.stringify({
+        inputPath,
+        outputFolder,
+        generatedAt: new Date().toISOString(),
+        stopMarkerValue,
+        widthUnitMm,
+        exported,
+    }, null, 2),
     "utf8",
 );
 

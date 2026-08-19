@@ -44,19 +44,19 @@ const makeSiteData = (): RwlSiteData => new Map([
 ]);
 
 describe("breadth diagnosis priority", () => {
-    it("scans COFECHA-flagged series first without disturbing stable group order", () => {
+    it("only scans COFECHA A-flagged series in stable file order", () => {
         expect(orderBreadthScanTargets(
             ["mon011", "mon052", "mtr841", "mon142"],
             ["MTR841", "mon052"],
-        )).toEqual(["mon052", "mtr841", "mon011", "mon142"]);
+        )).toEqual(["mon052", "mtr841"]);
     });
 
-    it("rechecks previously ranked frontiers before newly flagged targets", () => {
+    it("rechecks only previously ranked frontiers that are still A-flagged", () => {
         expect(orderBreadthScanTargets(
             ["mon011", "mon052", "mtr841", "mon142"],
             ["MTR841", "mon052"],
-            ["mon142"],
-        )).toEqual(["mon142", "mon052", "mtr841", "mon011"]);
+            ["mtr841", "mon142"],
+        )).toEqual(["mtr841", "mon052"]);
     });
 
     it("preserves queue age for the same frontier but queues a distant next event last", () => {

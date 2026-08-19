@@ -5,6 +5,7 @@ interface DeletedYearToken {
     originalYear: number | null;
     order: number;
     shift: "left" | "right";
+    operationGroupId?: string;
 }
 
 type DeletedYearStacks = Map<number, DeletedYearToken[]>;
@@ -86,6 +87,7 @@ const deleteOneYear = (
     year: number,
     shift: "left" | "right",
     order: number,
+    operationGroupId?: string,
 ): DeletedYearStacks => {
     let removedOriginalYear: number | null = null;
     currentByOriginal.forEach((currentYear, originalYear) => {
@@ -112,7 +114,12 @@ const deleteOneYear = (
         }
     });
     addStack(next, markerYear, stacks.get(year) ?? []);
-    addStack(next, markerYear, [{ originalYear: removedOriginalYear, order, shift }]);
+    addStack(next, markerYear, [{
+        originalYear: removedOriginalYear,
+        order,
+        shift,
+        ...(operationGroupId ? { operationGroupId } : {}),
+    }]);
     addStack(next, markerYear, stacks.get(year + 1) ?? []);
     return next;
 };
@@ -121,14 +128,21 @@ const restoreOneYear = (
     currentByOriginal: Map<number, number | null>,
     stacks: DeletedYearStacks,
     markerYear: number,
+    requestedIndex?: number,
 ): { stacks: DeletedYearStacks; restored: boolean } => {
     const stack = stacks.get(markerYear);
     if (!stack || stack.length === 0) {
         return { stacks, restored: false };
     }
-    let topIndex = 0;
-    for (let index = 1; index < stack.length; index += 1) {
-        if (stack[index].order > stack[topIndex].order) topIndex = index;
+    let topIndex = requestedIndex !== undefined
+        && requestedIndex >= 0
+        && requestedIndex < stack.length
+        ? requestedIndex
+        : 0;
+    if (requestedIndex === undefined) {
+        for (let index = 1; index < stack.length; index += 1) {
+            if (stack[index].order > stack[topIndex].order) topIndex = index;
+        }
     }
     const token = stack[topIndex];
     const restoredYear = token.shift === "left" ? markerYear : markerYear - 1;
@@ -162,6 +176,50 @@ const restoreOneYear = (
         }
     });
     return { stacks: next, restored: true };
+};
+
+const removeDeletionMarkerToken = (
+    stacks: DeletedYearStacks,
+    markerYear: number,
+    operationGroupId?: string,
+): DeletedYearStacks => {
+    if (operationGroupId) {
+        const next: DeletedYearStacks = new Map();
+        stacks.forEach((stack, year) => {
+            addStack(next, year, stack.filter((token) => token.operationGroupId !== operationGroupId));
+        });
+        return next;
+    }
+    const stack = stacks.get(markerYear);
+    if (!stack || stack.length === 0) return stacks;
+    let topIndex = 0;
+    for (let index = 1; index < stack.length; index += 1) {
+        if (stack[index].order > stack[topIndex].order) topIndex = index;
+    }
+    const next = new Map<number, DeletedYearToken[]>(Array.from(
+        stacks.entries(),
+        ([year, markerStack]): [number, DeletedYearToken[]] => [year, [...markerStack]],
+    ));
+    const nextStack = next.get(markerYear)!;
+    nextStack.splice(topIndex, 1);
+    if (nextStack.length === 0) next.delete(markerYear);
+    return next;
+};
+
+const findLatestDeletedTokenInGroup = (
+    stacks: DeletedYearStacks,
+    operationGroupId: string,
+): { markerYear: number; index: number; token: DeletedYearToken } | null => {
+    let latest: { markerYear: number; index: number; token: DeletedYearToken } | null = null;
+    stacks.forEach((stack, markerYear) => {
+        stack.forEach((token, index) => {
+            if (token.operationGroupId !== operationGroupId) return;
+            if (token.order > (latest?.token.order ?? -Infinity)) {
+                latest = { markerYear, index, token };
+            }
+        });
+    });
+    return latest;
 };
 
 function applyOperation(
@@ -218,6 +276,9 @@ function applyOperation(
                 ),
             };
         }
+        case "move-series-batch":
+            // Batch history operations are logged per series as move-selection entries.
+            return { stacks };
         case "delete-year":
             return {
                 stacks: deleteOneYear(
@@ -248,6 +309,7 @@ function applyOperation(
                     deletionYear,
                     shift,
                     operationOrder * 1000 + index,
+                    `delete-range-${operationOrder}`,
                 );
             }
             return { stacks: nextStacks };
@@ -261,11 +323,39 @@ function applyOperation(
             return { stacks };
         }
         case "restore-deletion": {
+            if (operation.markerGroupId) {
+                let nextStacks = stacks;
+                let restoredAny = false;
+                while (true) {
+                    const layer = findLatestDeletedTokenInGroup(nextStacks, operation.markerGroupId);
+                    if (!layer) break;
+                    const restored = restoreOneYear(
+                        currentByOriginal,
+                        nextStacks,
+                        layer.markerYear,
+                        layer.index,
+                    );
+                    if (!restored.restored) break;
+                    restoredAny = true;
+                    nextStacks = restored.stacks;
+                }
+                return restoredAny
+                    ? { stacks: nextStacks }
+                    : { stacks, invalidReason: "恢复了校准前已删除的年份，请重新标注扫描影像锚点" };
+            }
             const restored = restoreOneYear(currentByOriginal, stacks, operation.markerYear);
             return restored.restored
                 ? { stacks: restored.stacks }
                 : { stacks, invalidReason: "恢复了校准前已删除的年份，请重新标注扫描影像锚点" };
         }
+        case "remove-deletion-marker":
+            return {
+                stacks: removeDeletionMarkerToken(
+                    stacks,
+                    operation.markerYear,
+                    operation.markerGroupId,
+                ),
+            };
         case "delete-series":
         case "replace-tree-data":
         case "replace-all-data":

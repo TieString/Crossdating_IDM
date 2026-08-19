@@ -60,18 +60,19 @@
 .anchor {
     position: absolute;
     z-index: 2;
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 5px;
-    transform-origin: center;
+    width: 0;
+    height: 0;
     pointer-events: none;
 }
 
 .anchorDots {
+    position: absolute;
+    left: 0;
+    top: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 5px;
+    transform: translate(-50%, -50%);
     padding: 2px;
     border-radius: 5px;
     background: rgba(255, 255, 255, 0.74);
@@ -87,11 +88,34 @@
 }
 
 .anchorYear {
+    position: absolute;
+    left: 11px;
+    transform: translateY(-50%);
     padding: 1px 4px;
     border-radius: 3px;
     color: #ffffff;
     background: rgba(31, 41, 55, 0.76);
     font: 10px/14px "Segoe UI", sans-serif;
+    white-space: nowrap;
+}
+
+.hoverYear {
+    position: absolute;
+    z-index: 6;
+    transform: translate(-50%, calc(-100% - 8px));
+    max-width: calc(100% - 24px);
+    padding: 3px 7px;
+    border: 1px solid rgba(148, 163, 184, 0.48);
+    border-radius: 5px;
+    color: #1f2937;
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.14);
+    font: 11px/16px "Inter", "Segoe UI", sans-serif;
+    font-variant-numeric: tabular-nums;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    pointer-events: none;
 }
 
 .toolbar {
@@ -105,28 +129,29 @@
     align-items: center;
     gap: 5px;
     padding: 3px 5px;
-    border: 1px solid rgba(117, 130, 146, 0.4);
+    border: 1px solid rgb(186, 186, 186);
     border-radius: 6px;
-    background: rgba(250, 252, 255, 0.9);
-    box-shadow: 0 2px 8px rgba(24, 36, 53, 0.12);
+    background: rgba(255, 255, 255, 0.94);
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.1);
     backdrop-filter: blur(4px);
-    font: 10px "Segoe UI", sans-serif;
+    font: 10px "Inter", "Segoe UI", sans-serif;
 }
 
 .toolbar button {
     min-height: 22px;
     padding: 2px 6px;
-    border: 1px solid #c8d1dd;
+    border: 1px solid #cbd5e1;
     border-radius: 4px;
     color: #364252;
     background: #ffffff;
     font: inherit;
     cursor: pointer;
+    box-shadow: none;
 }
 
-.toolbar button:hover:not(:disabled) { border-color: #7699c5; }
+.toolbar button:hover:not(:disabled) { color: #1d4ed8; border-color: #a5b4fc; background: #eef2ff; }
 .toolbar button:disabled { color: #a0a8b3; cursor: not-allowed; }
-.toolbar .activeTool { color: #1f5d9c; border-color: #6f9ed2; background: #e9f2fc; }
+.toolbar .activeTool { color: #1d4ed8; border-color: #a5b4fc; background: #eef2ff; }
 
 .nextAnchor {
     min-width: 0;
@@ -154,6 +179,20 @@
     box-shadow: 0 1px 3px rgba(32, 71, 42, 0.14);
     font: 10px/16px "Segoe UI", sans-serif;
     white-space: nowrap;
+    pointer-events: none;
+}
+
+.linkHint {
+    position: absolute;
+    right: 30px;
+    bottom: 8px;
+    z-index: 4;
+    padding: 2px 6px;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    border-radius: 4px;
+    color: #64748b;
+    background: rgba(255, 255, 255, 0.9);
+    font: 10px/15px "Inter", "Segoe UI", sans-serif;
     pointer-events: none;
 }
 

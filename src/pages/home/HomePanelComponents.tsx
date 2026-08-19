@@ -42,23 +42,6 @@ export function CofechaEmptySkeleton() {
     );
 }
 
-export function CofechaEmptyState() {
-    return (
-        <div className={style["cofecha-empty-state"]} aria-hidden="true">
-            <div className={style["cofecha-empty-state-rule"]} />
-            <div className={style["cofecha-empty-state-lines"]}>
-                {COFECHA_SKELETON_LINE_WIDTHS.slice(0, 7).map((width, index) => (
-                    <span
-                        key={`${width}-${index}`}
-                        className={style["cofecha-empty-state-line"]}
-                        style={{ width: `${width}%` }}
-                    />
-                ))}
-            </div>
-        </div>
-    );
-}
-
 export function LineChartEmptySkeleton() {
     return (
         <div className={style["chart-empty-skeleton"]} aria-hidden="true">
@@ -74,31 +57,8 @@ export function LineChartEmptySkeleton() {
                 </div>
             </div>
             <div className={style["chart-skeleton-plot"]}>
-                <svg className={style["chart-skeleton-svg"]} viewBox="0 0 100 100" preserveAspectRatio="none">
-                    <polyline points="0,72 10,64 19,70 30,46 42,54 53,30 65,42 76,24 88,36 100,18" />
-                    <polyline points="0,58 12,50 24,57 36,42 48,47 60,36 74,44 86,32 100,39" />
-                </svg>
                 <div className={style["chart-skeleton-axis-x"]} />
                 <div className={style["chart-skeleton-axis-y"]} />
-            </div>
-        </div>
-    );
-}
-
-export function LineChartEmptyState() {
-    return (
-        <div className={style["chart-empty-state"]} aria-hidden="true">
-            <div className={style["chart-empty-state-toolbar"]}>
-                <span />
-                <span />
-            </div>
-            <div className={style["chart-empty-state-plot"]}>
-                <svg className={style["chart-empty-state-svg"]} viewBox="0 0 100 100" preserveAspectRatio="none">
-                    <polyline points="0,70 12,62 23,68 36,50 49,56 61,40 74,48 86,34 100,42" />
-                    <polyline points="0,78 14,73 27,76 41,64 54,68 68,55 82,60 100,48" />
-                </svg>
-                <div className={style["chart-empty-state-axis-x"]} />
-                <div className={style["chart-empty-state-axis-y"]} />
             </div>
         </div>
     );

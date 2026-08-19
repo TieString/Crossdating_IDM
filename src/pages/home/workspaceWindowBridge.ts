@@ -149,6 +149,7 @@ export type LineChartWindowState = {
     kind: "line-chart";
     siteData: SerializedRwlSiteData;
     selectedTrees: string[];
+    treeOffsets: Array<[string, number]>;
     focusedTree: string | null;
     jumpTarget?: ChartJumpTarget;
     activeDiagnosisEvent?: DiagnosisEvent | null;
@@ -187,6 +188,7 @@ export type WorkspaceWindowCommand =
     | { kind: "cofecha"; type: "run-validation" }
     | { kind: "cofecha"; type: "jump"; tree: string; year?: number }
     | { kind: "line-chart"; type: "set-selection"; trees: string[] }
+    | { kind: "line-chart"; type: "set-tree-offsets"; offsets: Array<[string, number]> }
     | { kind: "line-chart"; type: "locate-width"; tree: string; year: number }
     | { kind: "line-chart"; type: "edit-as-text"; tree: string }
     | { kind: "line-chart"; type: "locate-cofecha"; tree: string }

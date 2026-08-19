@@ -72,6 +72,7 @@ button {
 
 button {
   cursor: pointer;
+  box-shadow: none !important;
 }
 
 button:hover {

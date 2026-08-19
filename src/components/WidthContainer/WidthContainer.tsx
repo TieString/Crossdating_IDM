@@ -17,6 +17,7 @@ import {
     type TreeRingScanSeriesState,
 } from "@/features/treeRingScans";
 import { RollingNumber } from '@/components/RollingNumber/RollingNumber';
+import ContextMenu from '@/components/ContextMenu/ContextMenu';
 import WidthGrid from './WidthGrid';
 import WidthGridContextMenu from './WidthGridContextMenu';
 import { WidthGridSkeletonView } from './WidthGridSkeleton';
@@ -69,6 +70,7 @@ import { TreeRingFloatingViewer } from "./TreeRingFloatingViewer";
 import {
     TreeRingPreview,
     type TreeRingViewerAnchor,
+    type TreeRingViewerDisplayMode,
     type TreeRingViewerRequest,
 } from "./TreeRingPreview";
 import { prewarmTreeRingArtworkCache } from "./treeRingArtwork";
@@ -767,6 +769,8 @@ export type WidthContainerProps = {
     onDeleteYearRange?: (tree: string, startYear: number, endYear: number, fill: DeleteRangeFill) => void,
     /** Restores one deletion marker stack entry. */
     onRestoreDeletion?: (tree: string, markerYear: number, index: number) => void,
+    /** Removes the latest deletion marker without restoring deleted data. */
+    onRemoveDeletionMarker?: (tree: string, markerYear: number) => void,
     /** Deletes an entire series. */
     onDeleteSeries?: (tree: string) => void,
     /** Opens text-edit mode for the active series. */
@@ -801,6 +805,19 @@ interface TreeRingContextMenuState {
     x: number;
     y: number;
     anchor: TreeRingViewerAnchor;
+}
+
+interface TreeRingFocusState {
+    tree: string;
+    year: number;
+    focusRequestId?: number;
+}
+
+interface DeletionMarkerContextMenuState {
+    tree: string;
+    markerYear: number;
+    x: number;
+    y: number;
 }
 
 function WidthGridHeader(): ReactNode {
@@ -966,6 +983,7 @@ function WidthContainer({
     onDeleteYearWithMode,
     onDeleteYearRange,
     onRestoreDeletion,
+    onRemoveDeletionMarker,
     onDeleteSeries,
     onEditAsText,
     onJumpToChart,
@@ -992,11 +1010,12 @@ function WidthContainer({
     const [animationPlan, setAnimationPlan] = useState<GridAnimationPlan | null>(null);
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
     const [treeRingContextMenu, setTreeRingContextMenu] = useState<TreeRingContextMenuState | null>(null);
+    const [deletionMarkerContextMenu, setDeletionMarkerContextMenu] = useState<DeletionMarkerContextMenuState | null>(null);
     const [hoveredMarker, setHoveredMarker] = useState<DeletionHoverState | null>(null);
     const [deletingTree, setDeletingTree] = useState<string | null>(null);
     const [textEditTree, setTextEditTree] = useState<string | null>(null);
     const [treeRingViewer, setTreeRingViewer] = useState<TreeRingViewerRequest | null>(null);
-    const [treeRingFocus, setTreeRingFocus] = useState<{ tree: string; year: number } | null>(null);
+    const [treeRingFocus, setTreeRingFocus] = useState<TreeRingFocusState | null>(null);
     const [jumpHighlight, setJumpHighlight] = useState<GridJumpTarget | null>(null);
     const [editHighlight, setEditHighlight] = useState<{ id: number; keys: Set<string> } | null>(null);
     const seriesBlockRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -1010,6 +1029,7 @@ function WidthContainer({
     const lastInteractedTreeRef = useRef<string | null>(null);
     const animationPlanIdRef = useRef(0);
     const treeRingViewerIdRef = useRef(0);
+    const treeRingFocusRequestIdRef = useRef(0);
     const handledHistoryAnimationIdRef = useRef<number | null>(null);
     const pendingInsertFlipRef = useRef<PendingInsertFlip | null>(null);
     const insertAnimationCleanupRef = useRef<Array<() => void>>([]);
@@ -1055,10 +1075,10 @@ function WidthContainer({
     const handleOpenTreeRingViewer = useCallback((
         seriesId: string,
         anchor: TreeRingViewerAnchor,
-        initialMode: TreeRingImageMode = "generated",
+        initialView: TreeRingViewerDisplayMode = "full",
     ) => {
         treeRingViewerIdRef.current += 1;
-        setTreeRingViewer({ id: treeRingViewerIdRef.current, seriesId, anchor, initialMode });
+        setTreeRingViewer({ id: treeRingViewerIdRef.current, seriesId, anchor, initialView });
     }, []);
 
     const handleCloseTreeRingViewer = useCallback(() => {
@@ -1070,7 +1090,7 @@ function WidthContainer({
     }, []);
 
     const handleTreeRingContextMenu = useCallback((
-        event: React.MouseEvent<HTMLButtonElement>,
+        event: React.MouseEvent<HTMLElement>,
         tree: string,
     ) => {
         event.preventDefault();
@@ -1588,8 +1608,8 @@ function WidthContainer({
         }
 
         if (!shouldAnimateHistory) return;
-        // replace-all-data（整库替换）没有单序列位移动画，这里不处理。
-        if (historyAnimation.type === "replace-all-data") return;
+        // 整库替换和保存时批量偏移没有单序列动画，这里不处理。
+        if (historyAnimation.type === "replace-all-data" || historyAnimation.type === "move-series-batch") return;
 
         // 撤回/重做时数据已改、DOM 已是「操作后」状态。用 prev/current 数据算首年，
         // 把每个 target 年份反推出 source 年份（sourceYear = targetYear - 位移方向），
@@ -1825,7 +1845,8 @@ function WidthContainer({
     }, [clearDeleteBurstAnimations, clearInsertAnimations]);
 
     const handleYearClick = useCallback((tree: string, year: number) => {
-        setTreeRingFocus({ tree, year });
+        treeRingFocusRequestIdRef.current += 1;
+        setTreeRingFocus({ tree, year, focusRequestId: treeRingFocusRequestIdRef.current });
         if (onYearClick) {
             onYearClick(tree, year);
         }
@@ -1833,7 +1854,8 @@ function WidthContainer({
 
     const handleTreeRingYearSelect = useCallback((tree: string, year: number) => {
         setSelection(normalizeSelection(tree, year, year));
-        handleYearClick(tree, year);
+        setTreeRingFocus({ tree, year });
+        onYearClick?.(tree, year);
         const targetSeries = virtualSeries.series.find((series) => series.treeCode === tree);
         const rowIndex = targetSeries?.rows.findIndex((row) => row.cells.some((cell) => cell?.year === year)) ?? -1;
         const scrollContainer = scrollElement ?? scrollContainerRef?.current;
@@ -1845,7 +1867,7 @@ function WidthContainer({
             top: Math.min(maximum, Math.max(0, rowTop - viewportLead)),
             behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
         });
-    }, [handleYearClick, scrollElement, scrollContainerRef, virtualSeries.series]);
+    }, [onYearClick, scrollElement, scrollContainerRef, virtualSeries.series]);
 
     // 红线和 ghost 是兄弟元素而非父子，鼠标在它们之间移动时会先触发红线 mouseLeave，
     // 用一个小延迟保证 ghost mouseEnter 能在 hovered 被清掉之前把它取消。
@@ -2040,7 +2062,9 @@ function WidthContainer({
         const shiftSide: DeleteShift = topInfo?.shiftSide ?? "right";
         setHoveredMarker(null);
 
-        if (!shouldAnimateHistory) {
+        // A grouped range restore changes several marker coordinates at once; avoid playing the
+        // single-layer flight animation against that multi-layer state change.
+        if (!shouldAnimateHistory || topInfo.operationGroupId) {
             onRestoreDeletion?.(tree, markerYear, topIndex);
             return;
         }
@@ -2061,6 +2085,25 @@ function WidthContainer({
             triggerRestoreAnimation(tree, input.restoredYear, input.side, plan.shiftedYears, plan.shiftedCells, rollingCells);
         });
     }, [onRestoreDeletion, deletionMarkers, shouldAnimateHistory, getRestoreShiftPlanInput, shouldUseFlightShift, buildRestoreRollingCells, triggerRestoreAnimation]);
+
+    const handleDeletionMarkerContextMenu = useCallback((
+        event: React.MouseEvent<HTMLElement>,
+        tree: string,
+        markerYear: number,
+    ) => {
+        event.preventDefault();
+        event.stopPropagation();
+        cancelHoverClear();
+        setContextMenu(null);
+        setTreeRingContextMenu(null);
+        setHoveredMarker(null);
+        setDeletionMarkerContextMenu({
+            tree,
+            markerYear,
+            x: event.clientX,
+            y: event.clientY,
+        });
+    }, [cancelHoverClear]);
 
     // 纯 opt-in：只有被 handler 明确标记过的格子才使用 RollingNumber。
     // 不再基于 marker 邻接自动启用，避免拖动预览时不相关的格子跟着跳动。
@@ -2682,7 +2725,8 @@ function WidthContainer({
         }
 
         // Pointer-down keeps the tree-ring marker aligned for both measured and missing years.
-        setTreeRingFocus({ tree, year });
+        treeRingFocusRequestIdRef.current += 1;
+        setTreeRingFocus({ tree, year, focusRequestId: treeRingFocusRequestIdRef.current });
 
         setDragPreview(null);
         setDragYearOffset(0);
@@ -3018,6 +3062,7 @@ function WidthContainer({
                                         scanState={scanSeriesState}
                                         yearMapping={scanYearMapping}
                                         highlightedYear={treeRingFocus?.tree === series.treeCode ? treeRingFocus.year : undefined}
+                                        focusRequestId={treeRingFocus?.tree === series.treeCode ? treeRingFocus.focusRequestId : undefined}
                                         onYearSelect={handleTreeRingYearSelect}
                                         onOpen={(tree, anchor) => handleOpenTreeRingViewer(tree, anchor, "scan")}
                                         onContextMenu={(event) => handleTreeRingContextMenu(event, series.treeCode)}
@@ -3028,8 +3073,9 @@ function WidthContainer({
                                         series={seriesData}
                                         stopMarkerValue={stopMarker.value}
                                         highlightedYear={treeRingFocus?.tree === series.treeCode ? treeRingFocus.year : undefined}
+                                        focusRequestId={treeRingFocus?.tree === series.treeCode ? treeRingFocus.focusRequestId : undefined}
                                         onYearSelect={handleTreeRingYearSelect}
-                                        onOpen={handleOpenTreeRingViewer}
+                                        onOpen={(tree, anchor) => handleOpenTreeRingViewer(tree, anchor, "strip")}
                                         onContextMenu={(event) => handleTreeRingContextMenu(event, series.treeCode)}
                                     />
                                 )}
@@ -3156,6 +3202,7 @@ function WidthContainer({
                                             onYearClick={handleYearClick}
                                             onDeletionMarkHoverChange={handleDeletionMarkHoverChange}
                                             onDeletionMarkDoubleClick={handleRedLineDoubleClick}
+                                            onDeletionMarkContextMenu={handleDeletionMarkerContextMenu}
                                         />
                                     );
                                 }
@@ -3226,6 +3273,7 @@ function WidthContainer({
                                         onYearClick={handleYearClick}
                                         onDeletionMarkHoverChange={handleDeletionMarkHoverChange}
                                         onDeletionMarkDoubleClick={handleRedLineDoubleClick}
+                                        onDeletionMarkContextMenu={handleDeletionMarkerContextMenu}
                                     />
                                 );
                             })}
@@ -3271,7 +3319,11 @@ function WidthContainer({
                                 width: `${item.cellWidth}px`,
                                 height: `${item.anchorHeight}px`,
                             }}
-                            title={stackSize > 1 ? `双击恢复最近一次删除（此处共 ${stackSize} 层）` : "双击恢复"}
+                            title={info.operationGroupId
+                                ? "双击恢复本次删除的全部标记"
+                                : stackSize > 1
+                                    ? `双击恢复最近一次删除（此处共 ${stackSize} 层）`
+                                    : "双击恢复"}
                             onMouseEnter={cancelHoverClear}
                             onMouseLeave={scheduleHoverClear}
                             onDoubleClick={(event) => {
@@ -3279,6 +3331,15 @@ function WidthContainer({
                                 event.preventDefault();
                                 if (hoveredMarker) {
                                     handleRedLineDoubleClick(hoveredMarker.tree, item.year);
+                                }
+                            }}
+                            onContextMenu={(event) => {
+                                if (hoveredMarker) {
+                                    handleDeletionMarkerContextMenu(
+                                        event,
+                                        hoveredMarker.tree,
+                                        item.year,
+                                    );
                                 }
                             }}
                         >
@@ -3301,7 +3362,7 @@ function WidthContainer({
                     series={floatingTreeRingSeries}
                     stopMarkerValue={stopMarker.value}
                     anchor={treeRingViewer.anchor}
-                    initialMode={treeRingViewer.initialMode}
+                    initialView={treeRingViewer.initialView}
                     scanFile={floatingTreeRingScanFile}
                     scanState={floatingTreeRingScanState}
                     operationLog={rwlOperationLog}
@@ -3310,6 +3371,9 @@ function WidthContainer({
                         ? (nextState) => onTreeRingScanSeriesChange(treeRingViewer.seriesId, nextState)
                         : undefined}
                     highlightedYear={treeRingFocus?.tree === treeRingViewer.seriesId ? treeRingFocus.year : undefined}
+                    focusRequestId={treeRingFocus?.tree === treeRingViewer.seriesId ? treeRingFocus.focusRequestId : undefined}
+                    onYearSelect={handleTreeRingYearSelect}
+                    onContextMenu={(event) => handleTreeRingContextMenu(event, treeRingViewer.seriesId)}
                     onClose={handleCloseTreeRingViewer}
                 />
             ) : null}
@@ -3332,6 +3396,27 @@ function WidthContainer({
                 }}
                 onOpenScan={handleOpenTreeRingScanFromMenu}
                 onClose={handleCloseTreeRingContextMenu}
+            />
+
+            <ContextMenu
+                open={deletionMarkerContextMenu !== null}
+                x={deletionMarkerContextMenu?.x ?? 0}
+                y={deletionMarkerContextMenu?.y ?? 0}
+                items={[{
+                    key: "remove-deletion-marker",
+                    label: "删除该标记",
+                    danger: true,
+                    disabled: !onRemoveDeletionMarker,
+                    onSelect: () => {
+                        if (deletionMarkerContextMenu) {
+                            onRemoveDeletionMarker?.(
+                                deletionMarkerContextMenu.tree,
+                                deletionMarkerContextMenu.markerYear,
+                            );
+                        }
+                    },
+                }]}
+                onClose={() => setDeletionMarkerContextMenu(null)}
             />
 
 

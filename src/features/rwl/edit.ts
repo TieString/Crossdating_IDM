@@ -19,13 +19,22 @@ export type DeleteRangeFill = "missing" | "left" | "right";
 // - "left"：右侧格子整体向左靠，最早（最左）年份不变。
 export type DeleteShift = "left" | "right";
 
+export type RwlSeriesOffsetMove = {
+    tree: string;
+    selectedStartYear: number;
+    selectedEndYear: number;
+    yearOffset: number;
+};
+
 export type RwlEditOperation =
     | { type: "insert-missing"; tree: string; year: number; side: MissingInsertSide }
     | { type: "move-selection"; tree: string; selectedStartYear: number; selectedEndYear: number; yearOffset: number }
+    | { type: "move-series-batch"; moves: RwlSeriesOffsetMove[] }
     | { type: "delete-year"; tree: string; year: number; mode: DeleteMode; shift?: DeleteShift }
     | { type: "delete-year-range"; tree: string; startYear: number; endYear: number; fill: DeleteRangeFill }
     | { type: "mark-missing-range"; tree: string; startYear: number; endYear: number }
-    | { type: "restore-deletion"; tree: string; markerYear: number; index: number }
+    | { type: "restore-deletion"; tree: string; markerYear: number; index: number; markerGroupId?: string; markerCount?: number }
+    | { type: "remove-deletion-marker"; tree: string; markerYear: number; index: number; markerGroupId?: string; markerCount?: number }
     | { type: "delete-series"; tree: string }
     | { type: "change-width"; tree: string; year: number; width: number | null }
     | { type: "replace-tree-data"; tree: string }
@@ -137,6 +146,8 @@ export type DeletionMarkerInfo = {
     shiftSide?: DeleteShift;
     // 删除顺序：同一缝隙的栈内决定哪一层是「最近一次」（最大者）。
     deleteOrder?: number;
+    // 同一次范围删除共享批次 ID；单年删除与旧快照没有该字段，按单层操作。
+    operationGroupId?: string;
     // 删除时实际注入到左/右邻的宽度（邻居不存在或为缺测时为 0）；恢复时原样减回。
     leftContribution?: number;
     rightContribution?: number;
@@ -187,6 +198,7 @@ const BASIC_OPERATION_LOG_TYPES = new Set<RwlEditOperation["type"]>([
     "delete-year-range",
     "mark-missing-range",
     "restore-deletion",
+    "remove-deletion-marker",
     "change-width",
 ]);
 
@@ -200,9 +212,12 @@ const cloneSiteData = (siteData: RwlSiteData): RwlSiteData => {
     return result;
 };
 
-const cloneOperation = (operation: RwlEditOperation | undefined): RwlEditOperation | undefined => (
-    operation ? { ...operation } : undefined
-);
+const cloneOperation = (operation: RwlEditOperation | undefined): RwlEditOperation | undefined => {
+    if (!operation) return undefined;
+    return operation.type === "move-series-batch"
+        ? { ...operation, moves: operation.moves.map((move) => ({ ...move })) }
+        : { ...operation };
+};
 
 const cloneSerializedTreeData = (
     treeData: SerializedRwlTreeData | null | undefined
@@ -426,10 +441,12 @@ const getOperationType = (operation: RwlEditOperation | undefined): string | und
     switch (operation?.type) {
         case "insert-missing": return "INSERT_MISSING_RING";
         case "move-selection": return "SHIFT_RANGE";
+        case "move-series-batch": return "SHIFT_SERIES_BATCH";
         case "delete-year": return "DELETE_FALSE_RING";
         case "delete-year-range": return "DELETE_YEAR_RANGE";
         case "mark-missing-range": return "MARK_SUSPICIOUS";
         case "restore-deletion": return "REVERT_OPERATION";
+        case "remove-deletion-marker": return "REMOVE_DELETION_MARKER";
         case "delete-series": return "DELETE_SERIES";
         case "change-width": return "UPDATE_WIDTH_VALUE";
         case "replace-tree-data": return "REPLACE_TREE_DATA";
@@ -444,7 +461,9 @@ const getOperationTargetYear = (operation: RwlEditOperation | undefined): number
     if (operation.type === "move-selection") return operation.selectedStartYear;
     if (operation.type === "delete-year-range") return operation.startYear;
     if (operation.type === "mark-missing-range") return operation.startYear;
-    if (operation.type === "restore-deletion") return operation.markerYear;
+    if (operation.type === "restore-deletion" || operation.type === "remove-deletion-marker") {
+        return operation.markerYear;
+    }
     return undefined;
 };
 
@@ -454,7 +473,9 @@ const getOperationNewYear = (operation: RwlEditOperation | undefined): number | 
     if ("year" in operation) return operation.year;
     if (operation.type === "delete-year-range") return operation.startYear;
     if (operation.type === "mark-missing-range") return operation.startYear;
-    if (operation.type === "restore-deletion") return operation.markerYear;
+    if (operation.type === "restore-deletion" || operation.type === "remove-deletion-marker") {
+        return operation.markerYear;
+    }
     return undefined;
 };
 
@@ -483,7 +504,7 @@ const getOperationAffectedRange = (
     if ("year" in operation) {
         return { startYear: operation.year, endYear: operation.year };
     }
-    if (operation.type === "restore-deletion") {
+    if (operation.type === "restore-deletion" || operation.type === "remove-deletion-marker") {
         return { startYear: operation.markerYear, endYear: operation.markerYear };
     }
     return undefined;
@@ -513,6 +534,13 @@ export function describeRwlEditOperation(operation: RwlEditOperation | undefined
                 detail: `${operation.tree} · ${operation.year} · ${getDeleteModeLabel(operation.mode)} · ${getDeleteShiftLabel(operation.shift)}`,
                 tree: operation.tree,
             };
+        case "move-series-batch":
+            return {
+                summary: "批量移动序列",
+                detail: operation.moves.map((move) => (
+                    `${move.tree} ${move.yearOffset > 0 ? "+" : ""}${move.yearOffset}`
+                )).join(" · "),
+            };
         case "delete-year-range":
             return {
                 summary: "删除年份范围",
@@ -528,7 +556,13 @@ export function describeRwlEditOperation(operation: RwlEditOperation | undefined
         case "restore-deletion":
             return {
                 summary: "恢复删除标记",
-                detail: `${operation.tree} · 标记 ${operation.markerYear} · #${operation.index + 1}`,
+                detail: `${operation.tree} · 标记 ${operation.markerYear} · #${operation.index + 1}${(operation.markerCount ?? 1) > 1 ? ` · ${operation.markerCount} 个` : ""}`,
+                tree: operation.tree,
+            };
+        case "remove-deletion-marker":
+            return {
+                summary: "删除标记",
+                detail: `${operation.tree} · 标记 ${operation.markerYear} · #${operation.index + 1}${(operation.markerCount ?? 1) > 1 ? ` · ${operation.markerCount} 个` : ""}`,
                 tree: operation.tree,
             };
         case "delete-series":
@@ -622,6 +656,16 @@ export class RwlMoveConflictError extends Error {
         super(`移动目标年份已有数据：${conflictYears.join("、")}`);
         this.name = "RwlMoveConflictError";
         this.conflictYears = [...conflictYears];
+    }
+}
+
+export class RwlBatchMoveConflictError extends Error {
+    readonly conflicts: Array<{ tree: string; years: number[] }>;
+
+    constructor(conflicts: Array<{ tree: string; years: number[] }>) {
+        super(conflicts.map(({ tree, years }) => `${tree}：${years.join("、")}`).join("\n"));
+        this.name = "RwlBatchMoveConflictError";
+        this.conflicts = conflicts.map(({ tree, years }) => ({ tree, years: [...years] }));
     }
 }
 
@@ -1337,6 +1381,84 @@ export class RwlEditor {
         this.notifyChange();
     }
 
+    /** Commit all chart-preview offsets as one undoable editor transaction. */
+    applyWholeSeriesOffsets(offsets: ReadonlyMap<string, number>): number {
+        const moves: RwlSeriesOffsetMove[] = [];
+        const conflicts: Array<{ tree: string; years: number[] }> = [];
+
+        offsets.forEach((yearOffset, tree) => {
+            if (!Number.isInteger(yearOffset)) {
+                throw new Error(`${tree} 的图表偏移不是整数：${yearOffset}`);
+            }
+            if (yearOffset === 0) return;
+            const treeData = this.rwlData.get(tree);
+            if (!treeData) return;
+            const years = editableEntries(treeData).map(([year]) => year);
+            if (years.length === 0) return;
+            const selectedStartYear = Math.min(...years);
+            const selectedEndYear = Math.max(...years);
+            const conflictYears = getSeriesMoveConflicts(
+                treeData,
+                selectedStartYear,
+                selectedEndYear,
+                yearOffset,
+            );
+            if (conflictYears.length > 0) {
+                conflicts.push({ tree, years: conflictYears });
+                return;
+            }
+            moves.push({ tree, selectedStartYear, selectedEndYear, yearOffset });
+        });
+
+        if (conflicts.length > 0) throw new RwlBatchMoveConflictError(conflicts);
+        if (moves.length === 0) return 0;
+
+        const operation: RwlEditOperation = { type: "move-series-batch", moves };
+        const beforeStates = new Map(moves.map((move) => [
+            move.tree,
+            this.captureTreeLogState(move.tree),
+        ]));
+        this.saveToUndoStack(operation);
+        this.redoStack = [];
+        const batchId = `chart-offset-save-${Date.now()}-${this.operationLogCounter + 1}`;
+
+        moves.forEach((move, index) => {
+            const treeData = this.rwlData.get(move.tree)!;
+            this.shiftDeletionMarkersForMove(
+                move.tree,
+                move.selectedStartYear,
+                move.selectedEndYear,
+                move.yearOffset,
+            );
+            this.rwlData.set(move.tree, moveSeriesTailByOffset(
+                treeData,
+                move.selectedStartYear,
+                move.selectedEndYear,
+                move.yearOffset,
+            ));
+            this.appendOperationLog(
+                {
+                    type: "move-selection",
+                    tree: move.tree,
+                    selectedStartYear: move.selectedStartYear,
+                    selectedEndYear: move.selectedEndYear,
+                    yearOffset: move.yearOffset,
+                },
+                move.tree,
+                beforeStates.get(move.tree)!,
+                {
+                    operationType: "SHIFT_RANGE",
+                    source: "manual",
+                    batchId,
+                    targetIndex: index + 1,
+                    reason: "保存时应用图表临时偏移",
+                },
+            );
+        });
+        this.notifyChange();
+        return moves.length;
+    }
+
     deleteYearRange(
         tree: string,
         selectedStartYear: number,
@@ -1364,10 +1486,17 @@ export class RwlEditor {
             const rangeLength = endYear - startYear + 1;
             const shift: DeleteShift = fill === "left" ? "right" : "left";
             const deletionYear = fill === "left" ? endYear : startYear;
+            const operationGroupId = `delete-range-${this.operationLogCounter + 1}`;
             let markerWorking = new Map(treeData);
 
             for (let index = 0; index < rangeLength; index += 1) {
-                const info = this.captureDeletionInfo(markerWorking, deletionYear, "direct", shift);
+                const info = this.captureDeletionInfo(
+                    markerWorking,
+                    deletionYear,
+                    "direct",
+                    shift,
+                    operationGroupId,
+                );
                 this.recordDeletionMarkerForDelete(tree, deletionYear, info, shift);
                 markerWorking = deleteYearWithMode(markerWorking, deletionYear, "direct", shift);
             }
@@ -1403,35 +1532,53 @@ export class RwlEditor {
         this.notifyChange();
     }
 
-    // 恢复某条红线最近一次删除（双击红线 / ghost 时调用）。
-    // 严格后进先出：无视传入 index，永远恢复该缝隙 deleteOrder 最大的那一层，
-    // 用该层自己记录的配置（原值 + 填补方向 + 实际注入量）做精确逆操作 —— 不做任何跨层累积计算，
-    // 因此连续恢复也绝不会把数据算乱。多次删除沿来时的路一层层退回，直至回到最初。
-    restoreDeletion(tree: string, markerYear: number, _index: number = -1): void {
-        if (!this.rwlData.has(tree)) return;
-        const treeMarkers = this.deletionMarkers.get(tree);
-        const stack = treeMarkers?.get(markerYear);
-        if (!treeMarkers || !stack || stack.length === 0) return;
-
-        const topIndex = stack.reduce((bestIndex, item, itemIndex) => {
+    private getTopDeletionMarker(tree: string, markerYear: number) {
+        const stack = this.deletionMarkers.get(tree)?.get(markerYear);
+        if (!stack || stack.length === 0) return null;
+        const index = stack.reduce((bestIndex, item, itemIndex) => {
             const bestOrder = stack[bestIndex]?.deleteOrder ?? bestIndex;
             const order = item.deleteOrder ?? itemIndex;
             return order > bestOrder ? itemIndex : bestIndex;
         }, 0);
-        const info = stack[topIndex];
+        return { markerYear, index, info: stack[index] };
+    }
 
-        const operation: RwlEditOperation = { type: "restore-deletion", tree, markerYear, index: topIndex };
-        const beforeState = this.captureTreeLogState(tree);
-        this.saveToUndoStack(operation);
-        this.redoStack = [];
+    private findLatestDeletionMarkerInGroup(
+        tree: string,
+        operationGroupId: string,
+    ): { markerYear: number; index: number; info: DeletionMarkerInfo } | null {
+        let latest: { markerYear: number; index: number; info: DeletionMarkerInfo } | null = null;
+        this.deletionMarkers.get(tree)?.forEach((stack, markerYear) => {
+            stack.forEach((info, index) => {
+                if (info.operationGroupId !== operationGroupId) return;
+                if ((info.deleteOrder ?? index) > (latest?.info.deleteOrder ?? -Infinity)) {
+                    latest = { markerYear, index, info };
+                }
+            });
+        });
+        return latest;
+    }
 
-        // 镜像删除时的填补方向，重新顶开缺口：
-        // - shift="right"（默认）：插回到 markerYear-1，并把 key < markerYear 的年份整体 -1。
-        // - shift="left"：插回到 markerYear，并把 key >= markerYear 的年份整体 +1。
+    private countDeletionMarkersInGroup(tree: string, operationGroupId: string): number {
+        let count = 0;
+        this.deletionMarkers.get(tree)?.forEach((stack) => {
+            stack.forEach((info) => {
+                if (info.operationGroupId === operationGroupId) count += 1;
+            });
+        });
+        return count;
+    }
+
+    private restoreDeletionLayer(tree: string, markerYear: number, markerIndex: number): boolean {
+        if (!this.rwlData.has(tree)) return false;
+        const treeMarkers = this.deletionMarkers.get(tree);
+        const stack = treeMarkers?.get(markerYear);
+        const info = stack?.[markerIndex];
+        if (!treeMarkers || !stack || !info) return false;
+
         const shiftSide: DeleteShift = info.shiftSide ?? "right";
         const treeData = this.rwlData.get(tree)!;
         const restoredYear = shiftSide === "left" ? markerYear : markerYear - 1;
-
         const newTreeData: RwlTreeData = new Map();
         treeData.forEach((value, key) => {
             if (shiftSide === "left") {
@@ -1441,8 +1588,6 @@ export class RwlEditor {
             }
         });
 
-        // 把删除时注入到邻居的固定宽度精确减回（在当前数据上做，保留后续在别处的改动）。
-        // 恢复后左右邻所在坐标随填补方向不同。
         const subtractFromNeighbor = (neighborYear: number, amount: number) => {
             if (!amount) return;
             const value = newTreeData.get(neighborYear);
@@ -1452,32 +1597,27 @@ export class RwlEditor {
         const leftInjected = info.leftContribution ?? 0;
         const rightInjected = info.rightContribution ?? 0;
         if (shiftSide === "left") {
-            subtractFromNeighbor(markerYear - 1, leftInjected);  // 左邻位置不变
-            subtractFromNeighbor(markerYear + 1, rightInjected); // 右邻被 +1 顶到 markerYear+1
+            subtractFromNeighbor(markerYear - 1, leftInjected);
+            subtractFromNeighbor(markerYear + 1, rightInjected);
         } else {
-            subtractFromNeighbor(markerYear - 2, leftInjected);  // 左邻被 -1 顶到 markerYear-2
-            subtractFromNeighbor(markerYear, rightInjected);     // 右邻位置不变
+            subtractFromNeighbor(markerYear - 2, leftInjected);
+            subtractFromNeighbor(markerYear, rightInjected);
         }
-
-        // 放回被删格的原值（null 表示原本是 gap/stopMarker，不写入即可保留缺口）。
         if (info.deletedWidth !== null && info.deletedWidth !== undefined) {
             newTreeData.set(restoredYear, info.deletedWidth);
         }
-        this.rwlData.set(tree, newTreeData);
+        this.rwlData.set(tree, sortedTreeData(Array.from(newTreeData.entries())));
 
-        // 更新标记：移除顶层；同一 stack 中空间上位于它左/右侧的剩余层，
-        // 分别回到恢复格左右两条缝。别处的标记随缺口重新顶开而平移。
-        const leftRemainingStack = stack.slice(0, topIndex);
-        const rightRemainingStack = stack.slice(topIndex + 1);
+        const leftRemainingStack = stack.slice(0, markerIndex);
+        const rightRemainingStack = stack.slice(markerIndex + 1);
         const newMarkers = new Map<number, DeletionMarkerInfo[]>();
         const addMarkerStack = (nextMarkerYear: number, markerStack: DeletionMarkerInfo[]) => {
             if (markerStack.length === 0) return;
             const existing = newMarkers.get(nextMarkerYear);
             newMarkers.set(nextMarkerYear, existing ? [...existing, ...markerStack] : markerStack);
         };
-
-        Array.from(treeMarkers.entries()).sort(([yearA], [yearB]) => yearA - yearB).forEach(([m, markerStack]) => {
-            if (m === markerYear) {
+        Array.from(treeMarkers.entries()).sort(([yearA], [yearB]) => yearA - yearB).forEach(([year, markerStack]) => {
+            if (year === markerYear) {
                 if (shiftSide === "left") {
                     addMarkerStack(markerYear, leftRemainingStack);
                     addMarkerStack(markerYear + 1, rightRemainingStack);
@@ -1488,16 +1628,83 @@ export class RwlEditor {
                 return;
             }
             if (shiftSide === "left") {
-                addMarkerStack(m > markerYear ? m + 1 : m, markerStack);
+                addMarkerStack(year > markerYear ? year + 1 : year, markerStack);
             } else {
-                addMarkerStack(m < markerYear ? m - 1 : m, markerStack);
+                addMarkerStack(year < markerYear ? year - 1 : year, markerStack);
             }
         });
-        if (newMarkers.size === 0) {
-            this.deletionMarkers.delete(tree);
+        if (newMarkers.size === 0) this.deletionMarkers.delete(tree);
+        else this.deletionMarkers.set(tree, newMarkers);
+        return true;
+    }
+
+    // 双击范围删除的任一顶层标记会逆序恢复该次操作的全部层；单年/旧标记仍只恢复一层。
+    restoreDeletion(tree: string, markerYear: number, _index: number = -1): void {
+        const selected = this.getTopDeletionMarker(tree, markerYear);
+        if (!selected) return;
+        const markerGroupId = selected.info.operationGroupId;
+        const markerCount = markerGroupId
+            ? this.countDeletionMarkersInGroup(tree, markerGroupId)
+            : 1;
+        const operation: RwlEditOperation = {
+            type: "restore-deletion",
+            tree,
+            markerYear,
+            index: selected.index,
+            ...(markerGroupId ? { markerGroupId, markerCount } : {}),
+        };
+        const beforeState = this.captureTreeLogState(tree);
+        this.saveToUndoStack(operation);
+        this.redoStack = [];
+
+        if (markerGroupId) {
+            while (true) {
+                const layer = this.findLatestDeletionMarkerInGroup(tree, markerGroupId);
+                if (!layer || !this.restoreDeletionLayer(tree, layer.markerYear, layer.index)) break;
+            }
         } else {
-            this.deletionMarkers.set(tree, newMarkers);
+            this.restoreDeletionLayer(tree, markerYear, selected.index);
         }
+        this.appendOperationLog(operation, tree, beforeState);
+        this.notifyChange();
+    }
+
+    // 右键范围删除的任一顶层标记会移除该次操作的全部标记；单年/旧标记仍只移除一层。
+    removeDeletionMarker(tree: string, markerYear: number): void {
+        const selected = this.getTopDeletionMarker(tree, markerYear);
+        if (!selected) return;
+        const markerGroupId = selected.info.operationGroupId;
+        const markerCount = markerGroupId
+            ? this.countDeletionMarkersInGroup(tree, markerGroupId)
+            : 1;
+        const operation: RwlEditOperation = {
+            type: "remove-deletion-marker",
+            tree,
+            markerYear,
+            index: selected.index,
+            ...(markerGroupId ? { markerGroupId, markerCount } : {}),
+        };
+        const beforeState = this.captureTreeLogState(tree);
+        this.saveToUndoStack(operation);
+        this.redoStack = [];
+
+        const nextMarkers = cloneDeletionMarkers(this.deletionMarkers);
+        const nextTreeMarkers = nextMarkers.get(tree);
+        if (!nextTreeMarkers) return;
+        if (markerGroupId) {
+            Array.from(nextTreeMarkers.entries()).forEach(([year, stack]) => {
+                const remaining = stack.filter((info) => info.operationGroupId !== markerGroupId);
+                if (remaining.length === 0) nextTreeMarkers.delete(year);
+                else nextTreeMarkers.set(year, remaining);
+            });
+        } else {
+            const nextStack = nextTreeMarkers.get(markerYear);
+            if (!nextStack) return;
+            nextStack.splice(selected.index, 1);
+            if (nextStack.length === 0) nextTreeMarkers.delete(markerYear);
+        }
+        if (nextTreeMarkers.size === 0) nextMarkers.delete(tree);
+        this.deletionMarkers = nextMarkers;
 
         this.appendOperationLog(operation, tree, beforeState);
         this.notifyChange();
@@ -1505,7 +1712,13 @@ export class RwlEditor {
 
     // 删除前快照出一条「自包含的逆操作」：被删格原值 + 分配/填补配置 + 实际注入到邻居的固定宽度。
     // 恢复时只看这条记录即可精确还原，不依赖其它层。
-    private captureDeletionInfo(treeData: RwlTreeData, year: number, mode: DeleteMode, shift: DeleteShift = "right"): DeletionMarkerInfo {
+    private captureDeletionInfo(
+        treeData: RwlTreeData,
+        year: number,
+        mode: DeleteMode,
+        shift: DeleteShift = "right",
+        operationGroupId?: string,
+    ): DeletionMarkerInfo {
         const deletedRaw = treeData.get(year);
         const leftRaw = treeData.get(year - 1);
         const rightRaw = treeData.get(year + 1);
@@ -1528,6 +1741,7 @@ export class RwlEditor {
             mode,
             shiftSide: shift,
             deleteOrder: this.deletionOrderCounter++,
+            ...(operationGroupId ? { operationGroupId } : {}),
             leftContribution: injectedInto("left"),
             rightContribution: injectedInto("right"),
         };

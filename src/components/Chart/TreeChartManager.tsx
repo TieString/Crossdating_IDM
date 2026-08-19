@@ -12,11 +12,11 @@ import {
   type ReferenceSeriesConfig,
 } from '@/features/crossdating/reference'
 import {
-    applyLocalCrossdatingOption,
     getDisplayedDiagnosisEvents,
     projectActiveDiagnosisEventInterpretation,
     refreshActiveDiagnosisEventInterpretation,
     simulateDiagnosisEventPreview,
+    tryApplyLocalCrossdatingOption,
   type CrossdatingDiagnosis,
   type DiagnosisBatchApplyResult,
   type DiagnosisCandidateOperation,
@@ -98,6 +98,7 @@ type Props = {
   variant?: 'panel' | 'expanded'
   showPersistentTooltip?: boolean
   selectedTrees?: readonly string[]
+  treeOffsets?: ReadonlyMap<string, number>
   focusedTree?: string | null
   jumpTarget?: ChartJumpTarget | null
   referenceConfig?: ReferenceSeriesConfig | null
@@ -114,6 +115,7 @@ type Props = {
   onMoveSeriesTailByOffset?: (tree: string, selectedStartYear: number, selectedEndYear: number, yearOffset: number) => void
   onDeleteSeries?: (tree: string) => void
   onSelectedTreesChange?: (trees: string[]) => void
+  onTreeOffsetsChange?: (offsets: Map<string, number>) => void
   onLocateWidth?: (tree: string, year: number) => void
   onEditAsText?: (tree: string) => void
   onJumpToCofecha?: (tree: string) => void
@@ -126,6 +128,7 @@ function TreeChartManagerBase({
   variant = 'panel',
   showPersistentTooltip = false,
   selectedTrees: controlledSelectedTrees,
+  treeOffsets: controlledTreeOffsets,
   focusedTree: controlledFocusedTree,
   jumpTarget = null,
   referenceConfig = null,
@@ -139,6 +142,7 @@ function TreeChartManagerBase({
   onMoveSeriesTailByOffset,
   onDeleteSeries,
   onSelectedTreesChange,
+  onTreeOffsetsChange,
   onLocateWidth,
   onEditAsText,
   onJumpToCofecha,
@@ -149,7 +153,7 @@ function TreeChartManagerBase({
   const [isReferenceMode, setIsReferenceMode] = useState(false)
   const [referenceDraftTrees, setReferenceDraftTrees] = useState<string[]>([])
   const [highlightedTreeCode, setHighlightedTreeCode] = useState<string | null>(controlledFocusedTree ?? null)
-  const [treeOffsets, setTreeOffsets] = useState<Map<string, number>>(new Map())
+  const [localTreeOffsets, setLocalTreeOffsets] = useState<Map<string, number>>(new Map())
   const [zoomWindow, setZoomWindow] = useState<ChartZoomWindow>(null)
   const [search, setSearch] = useState('')
   const [pickerHeight, setPickerHeight] = useState<number>(readStoredPickerHeight)
@@ -165,7 +169,11 @@ function TreeChartManagerBase({
   const selectedTrees = controlledSelectedTrees === undefined
     ? localSelectedTrees
     : controlledSelectedTrees
+  const treeOffsets = controlledTreeOffsets ?? localTreeOffsets
   const selectedTreesRef = useRef(selectedTrees)
+  const treeOffsetsRef = useRef(treeOffsets)
+  const controlledTreeOffsetsRef = useRef(controlledTreeOffsets)
+  const onTreeOffsetsChangeRef = useRef(onTreeOffsetsChange)
   const handledJumpIdRef = useRef<number | null>(null)
   const handledDiagnosisPreviewJumpIdRef = useRef<number | null>(null)
   const diagnosisEvents = useMemo(() => getDisplayedDiagnosisEvents(diagnosis), [diagnosis])
@@ -184,6 +192,29 @@ function TreeChartManagerBase({
   useEffect(() => {
     selectedTreesRef.current = selectedTrees
   }, [selectedTrees])
+
+  useEffect(() => {
+    treeOffsetsRef.current = treeOffsets
+    controlledTreeOffsetsRef.current = controlledTreeOffsets
+    onTreeOffsetsChangeRef.current = onTreeOffsetsChange
+  }, [controlledTreeOffsets, onTreeOffsetsChange, treeOffsets])
+
+  const setTreeOffsets = useCallback((
+    update: Map<string, number> | ((previous: Map<string, number>) => Map<string, number>),
+  ) => {
+    const previous = new Map(treeOffsetsRef.current)
+    const next = typeof update === 'function' ? update(previous) : update
+    if (
+      next === previous
+      || (
+        next.size === previous.size
+        && Array.from(next.entries()).every(([tree, offset]) => previous.get(tree) === offset)
+      )
+    ) return
+    treeOffsetsRef.current = next
+    if (controlledTreeOffsetsRef.current === undefined) setLocalTreeOffsets(next)
+    onTreeOffsetsChangeRef.current?.(new Map(next))
+  }, [])
 
   const updateSelectedTrees = useCallback((nextTrees: string[]) => {
     const uniqueTrees = Array.from(new Set(nextTrees))
@@ -296,15 +327,11 @@ function TreeChartManagerBase({
 
       return previous
     })
-  }, [fullData])
+  }, [fullData, setTreeOffsets])
 
   useEffect(() => {
     if (highlightedTreeCode && !selectedTrees.includes(highlightedTreeCode)) {
       setHighlightedTreeCode(null)
-    }
-
-    if (selectedTrees.length === 0) {
-      setZoomWindow(null)
     }
   }, [highlightedTreeCode, selectedTrees])
 
@@ -328,10 +355,15 @@ function TreeChartManagerBase({
   const shiftHighlightedTree = useCallback((treeCode: string, direction: -1 | 1) => {
     setTreeOffsets((previous) => {
       const next = new Map(previous)
-      next.set(treeCode, (next.get(treeCode) ?? 0) + direction)
+      const offset = (next.get(treeCode) ?? 0) + direction
+      if (offset === 0) {
+        next.delete(treeCode)
+      } else {
+        next.set(treeCode, offset)
+      }
       return next
     })
-  }, [])
+  }, [setTreeOffsets])
 
   const visibleTrees = useMemo(() => (
     isReferenceMode
@@ -353,7 +385,7 @@ function TreeChartManagerBase({
       next.delete(treeCode)
       return next
     })
-  }, [])
+  }, [setTreeOffsets])
 
   const handleMoveWholeSeries = useCallback((
     tree: string,
@@ -496,11 +528,29 @@ function TreeChartManagerBase({
     }
     const treeData = fullData.get(localSimulation.targetTree)
     if (!treeData) return null
+    const previewData = tryApplyLocalCrossdatingOption(
+      treeData,
+      localSimulation,
+      selectedLocalOption,
+    )
+    if (!previewData) return null
     return {
       tree: localSimulation.targetTree,
-      data: applyLocalCrossdatingOption(treeData, localSimulation, selectedLocalOption),
+      data: previewData,
     }
   }, [fullData, localSimulation, selectedLocalOption])
+
+  useEffect(() => {
+    if (
+      localSimulation
+      && selectedLocalOption
+      && selectedLocalOption.operationType !== 'NO_ACTION'
+      && fullData.has(localSimulation.targetTree)
+      && !localPreviewTreeData
+    ) {
+      clearLocalSimulation()
+    }
+  }, [clearLocalSimulation, fullData, localPreviewTreeData, localSimulation, selectedLocalOption])
 
   const referenceSeries = useMemo(() => (
     referenceConfig?.mode === 'dynamic' ? null : buildReferenceSeries(fullData, referenceConfig)
@@ -537,11 +587,8 @@ function TreeChartManagerBase({
         : ''
       return `COFECHA 无 A 参考组 ${anchorCount} / ${total} · 待检查 ${candidateCount}${range}${replication}${stale}${invalid}`
     }
-    if (referenceSeries) {
-      return `手动参考 ${referenceSeries.selectedTrees.length} 条 · 点 ${referenceSeries.pointCount}`
-    }
     return null
-  }, [allTreeCodes.length, referenceConfig, referenceSeries, referenceSummary])
+  }, [allTreeCodes.length, referenceConfig, referenceSummary])
 
   const diagnosisEventCountByTree = useMemo(() => {
     const counts = new Map<string, number>()
@@ -551,10 +598,6 @@ function TreeChartManagerBase({
     })
     return counts
   }, [chartDiagnosisEvents])
-
-  const activeDiagnosisEventCount = useMemo(() => (
-    Array.from(diagnosisEventCountByTree.values()).reduce((sum, count) => sum + count, 0)
-  ), [diagnosisEventCountByTree])
 
   const filteredData = useMemo(() => {
     const nextData = new Map<string, Map<number, number>>()
@@ -798,8 +841,7 @@ function TreeChartManagerBase({
 
   const resetChartView = useCallback(() => {
     setTreeOffsets(new Map())
-    setZoomWindow(null)
-  }, [])
+  }, [setTreeOffsets])
 
   const beginReferenceSelection = useCallback(() => {
     setReferenceDraftTrees(referenceConfig?.selectedTrees.length ? referenceConfig.selectedTrees : Array.from(selectedTrees))
@@ -895,11 +937,13 @@ function TreeChartManagerBase({
     ) {
       return
     }
-    onApplyLocalSimulation({
+    const request = {
       simulation: localSimulation,
       option: selectedLocalOption,
-    })
+    }
+    // Remove the preview before the editor synchronously publishes changed working data.
     clearLocalSimulation()
+    onApplyLocalSimulation(request)
   }
 
   const chartNode = filteredData.size > 0 || referenceSeries ? (
@@ -1102,7 +1146,7 @@ function TreeChartManagerBase({
         />
       </div>
     </div>
-  ) : (
+  ) : allTreeCodes.length === 0 ? null : (
     <div style={{
       height: '100%',
       display: 'flex',
@@ -1188,12 +1232,15 @@ function TreeChartManagerBase({
             <button onClick={cancelReferenceSelection} style={btnBase}>取消</button>
           </>
         ) : (
-          <button onClick={beginReferenceSelection} disabled={allTreeCodes.length === 0}
-            style={allTreeCodes.length === 0 ? btnDisabled : referenceSeries ? { ...btnBase, borderColor: '#111827', color: '#111827', fontWeight: 650 } : btnBase}>参考</button>
+          <button
+            onClick={referenceSeries ? clearReferenceSelection : beginReferenceSelection}
+            disabled={allTreeCodes.length === 0}
+            title={referenceSeries ? "清除当前手动参考" : "选择多个可靠序列生成手动参考"}
+            style={allTreeCodes.length === 0 ? btnDisabled : referenceSeries ? { ...btnBase, borderColor: '#111827', color: '#111827', fontWeight: 650 } : btnBase}
+          >
+            {referenceSeries ? `清除参考(${referenceSeries.selectedTrees.length})` : '参考'}
+          </button>
         )}
-        {referenceSeries ? (
-          <button onClick={clearReferenceSelection} style={btnBase}>清除参考</button>
-        ) : null}
         <button
           type="button"
           onClick={runPairwiseAnalysis}
@@ -1210,27 +1257,33 @@ function TreeChartManagerBase({
         >
           {isPairwiseAnalyzing ? '分析中…' : '双线分析'}
         </button>
+        <button
+          type="button"
+          onClick={resetChartView}
+          disabled={treeOffsets.size === 0}
+          title="清除所有折线的手动年份偏移"
+          style={treeOffsets.size === 0 ? btnDisabled : btnBase}
+        >
+          重置
+        </button>
         <span style={{
           fontSize: 11, color: '#fff', background: '#2e6da4',
           borderRadius: 10, padding: '1px 8px', fontWeight: 600, whiteSpace: 'nowrap',
         }}>
           {isReferenceMode ? `${referenceDraftTrees.length} 参考` : `${selectedTrees.length} / ${allTreeCodes.length}`}
         </span>
-        {diagnosis ? (
-          <span
-            title="最新 JS 事件级诊断的有效复核窗口数"
-            style={{
-              fontSize: 11,
-              color: activeDiagnosisEventCount > 0 ? '#7a2e0e' : '#236344',
-              background: activeDiagnosisEventCount > 0 ? '#fff3e4' : '#e9f6ef',
-              border: `1px solid ${activeDiagnosisEventCount > 0 ? '#f2c79a' : '#b7dec7'}`,
-              borderRadius: 10,
-              padding: '1px 8px',
-              fontWeight: 600,
-              whiteSpace: 'nowrap',
-            }}
-          >
-            事件 {activeDiagnosisEventCount}
+        {treeOffsets.size > 0 ? (
+          <span style={{
+            fontSize: 11,
+            color: '#7a4b0f',
+            background: '#fff3e4',
+            border: '1px solid #f2c79a',
+            borderRadius: 10,
+            padding: '1px 8px',
+            fontWeight: 600,
+            whiteSpace: 'nowrap',
+          }}>
+            保存时应用 {treeOffsets.size}
           </span>
         ) : null}
       </div>
@@ -1299,19 +1352,24 @@ function TreeChartManagerBase({
         gap: 4,
       }}>
         {filteredTreeCodes.length === 0
-          ? <span style={{ fontSize: 12, color: '#bbb', padding: '4px 6px', fontStyle: 'italic' }}>无匹配结果</span>
+          ? allTreeCodes.length === 0
+            ? null
+            : <span style={{ fontSize: 12, color: '#bbb', padding: '4px 6px', fontStyle: 'italic' }}>无匹配结果</span>
           : filteredTreeCodes.map(treeCode => {
             const checked = selectedTrees.includes(treeCode)
             const referenceChecked = referenceDraftTrees.includes(treeCode)
             const activeChecked = isReferenceMode ? referenceChecked : checked
             const isReferenceSource = referenceSourceSet.has(treeCode)
             const isCofechaFlagged = cofechaFlaggedSourceSet.has(normalizeCofechaSeriesId(treeCode))
-            const diagnosisEventCount = diagnosisEventCountByTree.get(treeCode) ?? 0
+            const yearOffset = treeOffsets.get(treeCode) ?? 0
             const seriesColor = seriesColorMap.get(treeCode)
             return (
               <button
                 key={treeCode}
                 onClick={() => toggleTree(treeCode)}
+                title={yearOffset === 0
+                  ? treeCode
+                  : `${treeCode} 当前手动偏移 ${yearOffset > 0 ? '+' : ''}${yearOffset} 年`}
                 style={{
                   fontSize: 11, padding: '2px 9px', borderRadius: 6,
                   border: activeChecked ? `1px solid ${isReferenceMode ? '#111827' : '#2e6da4'}` : isReferenceSource ? '1px dashed #111827' : '1px solid #d8d8d8',
@@ -1324,7 +1382,13 @@ function TreeChartManagerBase({
                   position: 'relative',
                 }}
               >
-                {treeCode}
+                {yearOffset < 0 ? (
+                  <span style={{ marginRight: 4, color: '#8a3b12', fontWeight: 750 }}>{yearOffset}</span>
+                ) : null}
+                <span>{treeCode}</span>
+                {yearOffset > 0 ? (
+                  <span style={{ marginLeft: 4, color: '#236344', fontWeight: 750 }}>+{yearOffset}</span>
+                ) : null}
                 {isCofechaFlagged ? (
                   <span
                     title="COFECHA PART 6 [A] flagged"
@@ -1345,28 +1409,6 @@ function TreeChartManagerBase({
                     }}
                   >
                     A
-                  </span>
-                ) : null}
-                {diagnosisEventCount > 0 ? (
-                  <span
-                    title={`${diagnosisEventCount} 个事件级诊断窗口`}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      minWidth: 15,
-                      height: 15,
-                      marginLeft: 5,
-                      padding: '0 3px',
-                      borderRadius: 8,
-                      background: '#ffe8d5',
-                      color: '#8a3b12',
-                      fontSize: 9,
-                      fontWeight: 700,
-                      lineHeight: 1,
-                    }}
-                  >
-                    E{diagnosisEventCount}
                   </span>
                 ) : null}
                 {activeChecked && (
@@ -1463,7 +1505,13 @@ function TreeChartManagerBase({
                 disabled={!highlightedTreeCode} style={!highlightedTreeCode ? btnDisabled : btnBase}>←</button>
               <button onClick={() => highlightedTreeCode && shiftHighlightedTree(highlightedTreeCode, 1)}
                 disabled={!highlightedTreeCode} style={!highlightedTreeCode ? btnDisabled : btnBase}>→</button>
-              <button onClick={resetChartView} style={btnBase}>重置视图</button>
+              <button
+                onClick={resetChartView}
+                disabled={treeOffsets.size === 0}
+                style={treeOffsets.size === 0 ? btnDisabled : btnBase}
+              >
+                重置
+              </button>
             </div>
           </div>
           <div style={{ flex: '1 1 auto', minHeight: 0, padding: 10, boxSizing: 'border-box' }}>

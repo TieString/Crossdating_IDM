@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
     clampTreeRingFullViewport,
+    focusTreeRingFullViewport,
     getTreeRingFullViewSize,
     panTreeRingFullViewport,
     zoomTreeRingFullViewport,
@@ -45,5 +46,17 @@ describe("full tree-ring viewport", () => {
             200,
         )).toEqual({ zoom: 2, startX: 0, startY: 100 });
     });
-});
 
+    it("centres a selected ring at the three-o'clock inspection point", () => {
+        expect(focusTreeRingFullViewport(
+            { zoom: 4, startX: 0, startY: 0 },
+            200,
+            60,
+        )).toEqual({ zoom: 4, startX: 135, startY: 75 });
+        expect(focusTreeRingFullViewport(
+            { zoom: 1, startX: 0, startY: 0 },
+            200,
+            60,
+        )).toEqual({ zoom: 1, startX: 0, startY: 0 });
+    });
+});

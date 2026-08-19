@@ -2,7 +2,7 @@
     position: relative;
     justify-self: center;
     width: calc(100% - 8px);
-    height: 28px;
+    height: 32px;
     min-width: 0;
     overflow: visible;
 }
@@ -14,17 +14,18 @@
     box-sizing: border-box;
     display: flex;
     overflow: hidden;
-    padding: 1px;
-    border: 1px solid #c9d4df;
+    padding: 0;
+    border: 1px solid #cbd5e1;
     border-radius: 4px;
-    background: #f9fbfd;
+    background: #ffffff;
     cursor: zoom-in;
     touch-action: none;
     overscroll-behavior: contain;
 }
 
 .previewButton:hover {
-    border-color: #6e91bd;
+    border-color: #a5b4fc;
+    background: #f8fafc;
 }
 
 .previewButton:focus-visible {
@@ -32,7 +33,7 @@
     outline-offset: 1px;
 }
 
-.previewSvg {
+.previewCanvas {
     display: block;
     width: 100%;
     height: 100%;
@@ -44,9 +45,15 @@
 .panning { cursor: grabbing; }
 
 .selectedLine {
-    stroke: #397fd1;
-    stroke-width: 1.5px;
+    position: absolute;
+    top: 1px;
+    bottom: 1px;
+    width: 2px;
+    transform: translateX(-50%);
+    background: #397fd1;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.58);
     opacity: 0.9;
+    pointer-events: none;
 }
 
 .zoomBadge,

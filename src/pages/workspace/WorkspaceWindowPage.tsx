@@ -194,6 +194,7 @@ export default function WorkspaceWindowPage() {
         <ExpandedChartPage
             siteData={chartData}
             selectedTrees={state.selectedTrees}
+            treeOffsets={new Map(state.treeOffsets ?? [])}
             focusedTree={state.focusedTree}
             jumpTarget={state.jumpTarget}
             activeDiagnosisEvent={state.activeDiagnosisEvent}
@@ -235,6 +236,13 @@ export default function WorkspaceWindowPage() {
             }}
             onSelectedTreesChange={(trees) => {
                 void sendCommand({ kind: "line-chart", type: "set-selection", trees });
+            }}
+            onTreeOffsetsChange={(offsets) => {
+                void sendCommand({
+                    kind: "line-chart",
+                    type: "set-tree-offsets",
+                    offsets: Array.from(offsets.entries()),
+                });
             }}
             onLocateWidth={(tree, year) => {
                 void sendCommand({ kind: "line-chart", type: "locate-width", tree, year });

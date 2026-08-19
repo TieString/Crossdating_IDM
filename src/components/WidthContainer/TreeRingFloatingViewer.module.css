@@ -3,10 +3,11 @@
     z-index: 2147483000;
     box-sizing: border-box;
     overflow: hidden;
-    border: 1px solid #afbac9;
-    border-radius: 8px;
+    border: 1px solid rgb(186, 186, 186);
+    border-radius: 6px;
     background: #ffffff;
-    box-shadow: 0 12px 36px rgba(24, 36, 53, 0.28);
+    box-shadow: 0 16px 36px rgba(15, 23, 42, 0.18), 0 2px 8px rgba(15, 23, 42, 0.08);
+    font-family: "Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
     touch-action: none;
     user-select: none;
 }
@@ -24,11 +25,10 @@
     box-sizing: border-box;
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 0 7px 0 11px;
-    border-bottom: 1px solid #d9e0e9;
-    background: #f4f7fb;
-    font-family: "Segoe UI", system-ui, sans-serif;
+    gap: 7px;
+    padding: 0 6px 0 10px;
+    border-bottom: 1px solid #dfe4eb;
+    background: #f8fafc;
     cursor: move;
 }
 
@@ -57,9 +57,9 @@
     flex: 0 0 auto;
     display: inline-flex;
     padding: 1px;
-    border: 1px solid #ccd5e0;
-    border-radius: 5px;
-    background: #e9eef5;
+    border: 1px solid #cfd6df;
+    border-radius: 6px;
+    background: #f1f5f9;
 }
 
 .modeSwitch button {
@@ -68,9 +68,9 @@
     padding: 0 5px;
     border: 0;
     border-radius: 3px;
-    color: #687585;
+    color: #64748b;
     background: transparent;
-    font: 10px "Segoe UI", system-ui, sans-serif;
+    font: 10px "Inter", "Segoe UI", sans-serif;
     cursor: pointer;
 }
 
@@ -80,9 +80,9 @@
 }
 
 .modeSwitch .modeActive {
-    color: #245d99;
-    background: #ffffff;
-    box-shadow: 0 1px 2px rgba(32, 43, 56, 0.14);
+    color: #1d4ed8;
+    background: #eef2ff;
+    box-shadow: none;
 }
 
 .closeButton {
@@ -120,7 +120,7 @@
     align-items: center;
     justify-content: center;
     overflow: hidden;
-    background: #ffffff;
+    background: #f8fafc;
     cursor: zoom-in;
     touch-action: none;
     overscroll-behavior: contain;
@@ -148,6 +148,68 @@
     user-select: none;
 }
 
+.generatedSurface {
+    position: relative;
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    overflow: hidden;
+    background: #ffffff;
+    cursor: crosshair;
+    touch-action: none;
+    overscroll-behavior: contain;
+}
+
+.fullSurface {
+    width: 100%;
+    height: 100%;
+}
+
+.stripSurface {
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.imageFrameZoomed .generatedSurface {
+    cursor: grab;
+}
+
+.imageFramePanning .generatedSurface {
+    cursor: grabbing;
+}
+
+.yearTooltip {
+    position: absolute;
+    z-index: 3;
+    transform: translate(-50%, calc(-100% - 8px));
+    padding: 3px 7px;
+    border: 1px solid rgba(148, 163, 184, 0.48);
+    border-radius: 5px;
+    color: #1f2937;
+    background: rgba(255, 255, 255, 0.97);
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.14);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    line-height: 16px;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+.linkHint {
+    position: absolute;
+    right: 28px;
+    bottom: 6px;
+    z-index: 2;
+    padding: 2px 6px;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    border-radius: 4px;
+    color: #64748b;
+    background: rgba(255, 255, 255, 0.88);
+    font-size: 10px;
+    line-height: 15px;
+    pointer-events: none;
+}
+
 .resizeHandle {
     position: absolute;
     right: 0;
@@ -157,7 +219,7 @@
     height: 20px;
     padding: 0;
     border: 0;
-    border-radius: 8px 0 7px;
+    border-radius: 6px 0 5px;
     background:
         linear-gradient(135deg, transparent 46%, rgba(75, 88, 104, 0.72) 47%, rgba(75, 88, 104, 0.72) 53%, transparent 54%) 7px 7px / 9px 9px no-repeat,
         linear-gradient(135deg, transparent 46%, rgba(75, 88, 104, 0.42) 47%, rgba(75, 88, 104, 0.42) 53%, transparent 54%) 3px 3px / 13px 13px no-repeat,

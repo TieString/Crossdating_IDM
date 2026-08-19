@@ -29,6 +29,7 @@ import {
 import type { ICofechaResult } from "@/features/cofecha/types";
 import { detectPrecision, readRwlString } from "@/features/rwl";
 import {
+    RwlBatchMoveConflictError,
     RwlEditor,
     RwlMoveConflictError,
     registerChangeYearWidth,
@@ -101,6 +102,7 @@ type BreadthScanContext = {
     referenceConfig: ReferenceSeriesConfig | null;
     cofechaText: string | undefined;
     pending: string[];
+    targets: Set<string>;
     scanned: Set<string>;
     suggestions: Map<string, BreadthDiagnosisSuggestion>;
     attempts: Map<string, number>;
@@ -772,6 +774,11 @@ export function useHomeWorkspace() {
             || currentData.size === 0
             || isFileLoadingRef.current
             || !automaticReference) return;
+        const flaggedTargets = orderBreadthScanTargets(
+            Array.from(currentData.keys()),
+            automaticReference.classification?.candidateFlaggedIds ?? [],
+        );
+        if (flaggedTargets.length === 0) return;
         setBreadthScanRequest({
             id: ++breadthScanRequestCounterRef.current,
             filePath,
@@ -825,7 +832,32 @@ export function useHomeWorkspace() {
         return rwlEditorRef.current.getData();
     }, []);
 
-    const handleSave = useCallback(async () => {
+    const commitChartOffsetsForSave = useCallback((
+        editor: RwlEditor,
+        pendingOffsets: ReadonlyMap<string, number>,
+        onCommitted?: (offsets: ReadonlyMap<string, number>) => void,
+    ): boolean => {
+        if (pendingOffsets.size === 0) return true;
+        try {
+            editor.applyWholeSeriesOffsets(pendingOffsets);
+            markCurrentDiagnosisStale();
+            onCommitted?.(new Map(pendingOffsets));
+            return true;
+        } catch (error) {
+            const detail = error instanceof RwlBatchMoveConflictError
+                ? error.message
+                : error instanceof Error
+                    ? error.message
+                    : String(error);
+            window.alert(`无法应用图表偏移，保存已取消：\n${detail}`);
+            return false;
+        }
+    }, [markCurrentDiagnosisStale]);
+
+    const handleSave = useCallback(async (
+        pendingOffsets: ReadonlyMap<string, number> = new Map(),
+        onOffsetsCommitted?: (offsets: ReadonlyMap<string, number>) => void,
+    ) => {
         if (isFileLoadingRef.current) {
             return;
         }
@@ -837,6 +869,7 @@ export function useHomeWorkspace() {
 
         try {
             const editor = rwlEditorRef.current;
+            if (!commitChartOffsetsForSave(editor, pendingOffsets, onOffsetsCommitted)) return;
             const rwlString = editor.exportAsRwlString();
             const savedData = editor.getData();
             const sourceHash = hashRwlSiteData(savedData);
@@ -871,7 +904,7 @@ export function useHomeWorkspace() {
         } catch (error) {
             console.error("写入文件时出错:", error);
         }
-    }, [enqueueSave, markDataSnapshotAsSaved, runCofechaAndApplyResult]);
+    }, [commitChartOffsetsForSave, enqueueSave, markDataSnapshotAsSaved, runCofechaAndApplyResult]);
 
     const handleRunCofechaValidation = useCallback(async () => {
         const filePath = filePathRef.current;
@@ -950,7 +983,10 @@ export function useHomeWorkspace() {
         }
     }, [applyParsedRwlText, enqueueSave, markDataSnapshotAsSaved, runCofechaAndApplyResult]);
 
-    const handleSaveAs = useCallback(async () => {
+    const handleSaveAs = useCallback(async (
+        pendingOffsets: ReadonlyMap<string, number> = new Map(),
+        onOffsetsCommitted?: (offsets: ReadonlyMap<string, number>) => void,
+    ) => {
         if (isFileLoadingRef.current) {
             return;
         }
@@ -973,6 +1009,7 @@ export function useHomeWorkspace() {
 
             const sourcePath = filePathRef.current;
             const editor = rwlEditorRef.current;
+            if (!commitChartOffsetsForSave(editor, pendingOffsets, onOffsetsCommitted)) return;
             const rwlString = editor.exportAsRwlString();
             const savedData = editor.getData();
             const sourceHash = hashRwlSiteData(savedData);
@@ -1023,7 +1060,7 @@ export function useHomeWorkspace() {
         } catch (error) {
             console.error("写入文件时出错:", error);
         }
-    }, [dynamicReferenceConfig, enqueueSave, markDataSnapshotAsSaved, referenceConfig, referenceOperationLog, runCofechaAndApplyResult, treeRingScanState]);
+    }, [commitChartOffsetsForSave, dynamicReferenceConfig, enqueueSave, markDataSnapshotAsSaved, referenceConfig, referenceOperationLog, runCofechaAndApplyResult, treeRingScanState]);
 
     const handleSaveRawTextAs = useCallback(async (rawText: string) => {
         if (isFileLoadingRef.current) {
@@ -1542,6 +1579,10 @@ export function useHomeWorkspace() {
         rwlEditorRef.current.restoreDeletion(tree, markerYear, index);
     }, []);
 
+    const handleRemoveDeletionMarker = useCallback((tree: string, markerYear: number) => {
+        rwlEditorRef.current.removeDeletionMarker(tree, markerYear);
+    }, []);
+
     const handleDeleteSeries = useCallback((tree: string) => {
         rwlEditorRef.current.deleteSeries(tree);
     }, []);
@@ -1724,8 +1765,13 @@ export function useHomeWorkspace() {
         // 逐个（bark-to-pith）迭代工作流生效。
     }, [diagnosisReferenceConfig, historyAnimation?.id, markCurrentDiagnosisStale, outFileContent, selectedTree, settings.diagnosis.enabled, siteData, siteDataSignature]);
 
-    // Data or evidence changes invalidate the file-level view immediately. Only an explicit click
-    // on the breadth navigator creates a new scan request.
+    const breadthScanTargets = useMemo(() => orderBreadthScanTargets(
+        Array.from(siteData.keys()),
+        diagnosisReferenceConfig?.classification?.candidateFlaggedIds ?? [],
+    ), [diagnosisReferenceConfig, siteData]);
+
+    // Data or evidence changes invalidate the A-flag-only view immediately. Only an explicit
+    // click on the breadth navigator creates a new scan request.
     useEffect(() => {
         breadthDiagnosisWorkerRef.current?.terminate();
         breadthDiagnosisWorkerRef.current = null;
@@ -1741,13 +1787,15 @@ export function useHomeWorkspace() {
         setBreadthScanGeneration(generation);
         setBreadthDiagnosisNavigator(siteData.size > 0
             ? {
-                status: "stale",
+                status: diagnosisReferenceConfig && breadthScanTargets.length === 0
+                    ? "complete"
+                    : "stale",
                 scannedCount: 0,
-                totalCount: siteData.size,
+                totalCount: breadthScanTargets.length,
                 suggestions: [],
             }
             : createEmptyBreadthDiagnosisNavigator());
-    }, [diagnosisReferenceConfig, fileName, outFileContent, possibleProblemsDetail, siteData, siteDataSignature]);
+    }, [breadthScanTargets, diagnosisReferenceConfig, fileName, outFileContent, possibleProblemsDetail, siteData, siteDataSignature]);
 
     useEffect(() => {
         if (!breadthScanRequest
@@ -1767,17 +1815,14 @@ export function useHomeWorkspace() {
             && lastValidation !== null
             && lastValidation.inputSignature === siteDataSignature;
         const diagnosisCofechaText = cofechaFresh ? outFileContent : undefined;
-        const priorityTrees = [
-            ...(diagnosisReferenceConfig?.classification?.candidateFlaggedIds ?? []),
-            ...possibleProblemsDetail.keys(),
-        ];
+        const flaggedTrees = diagnosisReferenceConfig?.classification?.candidateFlaggedIds ?? [];
         const previousPriorityTrees = sortBreadthDiagnosisSuggestions(
             breadthLastSuggestionBySeriesRef.current.values(),
         ).map((suggestion) => suggestion.seriesId);
         const generation = ++breadthGenerationCounterRef.current;
         const pending = orderBreadthScanTargets(
             Array.from(siteData.keys()),
-            priorityTrees,
+            flaggedTrees,
             previousPriorityTrees,
         );
 
@@ -1787,16 +1832,17 @@ export function useHomeWorkspace() {
             referenceConfig: diagnosisReferenceConfig,
             cofechaText: diagnosisCofechaText,
             pending,
+            targets: new Set(pending),
             scanned: new Set(),
             suggestions: new Map(),
             attempts: new Map(),
-            totalCount: siteData.size,
+            totalCount: pending.length,
         };
         setBreadthDiagnosisNavigator(siteData.size > 0
             ? {
-                status: "stale",
+                status: pending.length > 0 ? "stale" : "complete",
                 scannedCount: 0,
-                totalCount: siteData.size,
+                totalCount: pending.length,
                 suggestions: [],
             }
             : createEmptyBreadthDiagnosisNavigator());
@@ -1805,7 +1851,6 @@ export function useHomeWorkspace() {
         breadthScanRequest,
         diagnosisReferenceConfig,
         outFileContent,
-        possibleProblemsDetail,
         siteData,
         siteDataSignature,
     ]);
@@ -1832,7 +1877,7 @@ export function useHomeWorkspace() {
         );
         const scannedCount = () => {
             const selectedDelegated = selectedTree !== ALL_OPTION_VALUE
-                && context.siteData.has(selectedTree)
+                && context.targets.has(selectedTree)
                 && !context.scanned.has(selectedTree)
                 ? 1
                 : 0;
@@ -1850,6 +1895,12 @@ export function useHomeWorkspace() {
                 suggestions: visibleSuggestions(),
             });
         };
+
+        const hasRunnableTarget = context.pending.some((tree) => tree !== selectedTree);
+        if (!hasRunnableTarget) {
+            publish("complete");
+            return undefined;
+        }
 
         if (pauseReason) {
             publish("paused", pauseReason);
@@ -1899,7 +1950,7 @@ export function useHomeWorkspace() {
             if (targetIndex < 0) {
                 publish("complete");
                 console.info(
-                    `[JS 广度诊断] 完成 ${context.scanned.size}/${context.totalCount} · 待复核 ${visibleSuggestions().length}`,
+                    `[JS A 标记诊断] 完成 ${scannedCount()}/${context.totalCount} · 待复核 ${visibleSuggestions().length}`,
                 );
                 return;
             }
@@ -2108,6 +2159,7 @@ export function useHomeWorkspace() {
         handleRedo,
         handleReplaceTreeData,
         handleResetToRawData,
+        handleRemoveDeletionMarker,
         handleRestoreDeletion,
         handleRunCofechaValidation,
         handleRunBreadthDiagnosis,

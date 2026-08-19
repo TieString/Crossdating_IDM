@@ -1,4 +1,5 @@
 import type { MouseEventHandler } from "react";
+import { FloatingScrollArea } from "@/components/FloatingScrollArea/FloatingScrollArea";
 import {
     getBreadthOperationLabel,
     getBreadthPriorityLabel,
@@ -34,19 +35,20 @@ const getStatusText = (
     scanAvailable: boolean,
 ) => {
     if (!scanAvailable) return "等待 COFECHA 自动参考";
+    if (navigator.totalCount === 0) return "当前没有待扫描序列";
     switch (navigator.status) {
         case "idle":
-            return "点击扫描分析全文件";
+            return "点击扫描待复核序列";
         case "stale":
-            return "结果已过期，点击重新扫描";
+            return "扫描结果已过期，点击重新扫描";
         case "paused":
             return getPauseText(navigator);
         case "scanning":
-            return `全文件后台扫描 ${navigator.scannedCount} / ${navigator.totalCount}`;
+            return `后台扫描 ${navigator.scannedCount} / ${navigator.totalCount}`;
         case "complete":
             return navigator.suggestions.length > 0
                 ? `另有 ${navigator.suggestions.length} 条序列需要复核`
-                : "暂未发现其他复核窗口";
+                : "暂未发现复核窗口";
     }
 };
 
@@ -66,11 +68,11 @@ export function BreadthDiagnosisNavigator({
     onRunScan,
     onSelectSuggestion,
 }: Props) {
-    const visibleSuggestions = navigator.suggestions.slice(0, 3);
-    const remainingCount = Math.max(0, navigator.suggestions.length - visibleSuggestions.length);
     const scanIsRunning = navigator.status === "scanning" || navigator.status === "paused";
-    const scanButtonLabel = scanIsRunning
-        ? "扫描中"
+    const scanButtonLabel = navigator.status === "paused"
+        ? "已暂停"
+        : navigator.status === "scanning"
+            ? "扫描中"
         : navigator.status === "complete"
             ? "重新扫描"
             : "扫描";
@@ -81,7 +83,7 @@ export function BreadthDiagnosisNavigator({
     return (
         <section
             className={`${styles["validation-summary"]} ${styles["breadth-navigator"]} ${getSeverityClass(navigator)}`}
-            aria-label="全文件广度优先复核提示器"
+            aria-label="待复核序列提示器"
         >
             <div className={styles["breadth-summary"]}>
                 <strong>
@@ -91,7 +93,11 @@ export function BreadthDiagnosisNavigator({
                         type="button"
                         className={styles["breadth-scan-button"]}
                         disabled={!scanAvailable || scanIsRunning || navigator.totalCount === 0}
-                        title={scanAvailable ? "扫描全文件复核窗口" : "等待 COFECHA 自动参考生成完成"}
+                        title={!scanAvailable
+                            ? "等待 COFECHA 自动参考生成完成"
+                            : navigator.totalCount === 0
+                                ? "当前没有待扫描序列"
+                                : "扫描待复核序列"}
                         onClick={onRunScan}
                     >
                         {scanButtonLabel}
@@ -103,7 +109,7 @@ export function BreadthDiagnosisNavigator({
                     <span
                         className={styles["breadth-progress-track"]}
                         role="progressbar"
-                        aria-label="全文件诊断扫描进度"
+                        aria-label="诊断扫描进度"
                         aria-valuemin={0}
                         aria-valuemax={navigator.totalCount}
                         aria-valuenow={navigator.scannedCount}
@@ -116,9 +122,17 @@ export function BreadthDiagnosisNavigator({
                 ) : null}
             </div>
 
-            {visibleSuggestions.length > 0 ? (
-                <div className={styles["breadth-suggestion-list"]}>
-                    {visibleSuggestions.map((suggestion) => (
+            <FloatingScrollArea
+                viewportClassName={styles["breadth-suggestion-viewport"]}
+                className={styles["breadth-suggestion-list"]}
+                viewportStyle={{ flex: "0 0 55px", height: 55, maxHeight: 55 }}
+                aria-label="待复核序列滚动列表"
+                data-visible-rows="2"
+                tabIndex={navigator.suggestions.length > 2 ? 0 : -1}
+                scrollbarRevision={navigator.suggestions.length}
+                edgeInset={1}
+            >
+                    {navigator.suggestions.map((suggestion) => (
                         <button
                             key={`${suggestion.seriesId}:${suggestion.firstSeenOrder}`}
                             type="button"
@@ -146,11 +160,7 @@ export function BreadthDiagnosisNavigator({
                             </span>
                         </button>
                     ))}
-                    {remainingCount > 0 ? (
-                        <span className={styles["breadth-more"]}>还有 {remainingCount} 条</span>
-                    ) : null}
-                </div>
-            ) : null}
+            </FloatingScrollArea>
         </section>
     );
 }

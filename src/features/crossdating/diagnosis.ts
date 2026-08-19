@@ -37,4 +37,5 @@ export {
     rankDiagnosisCandidates,
     selectSafeDiagnosisCandidateBatch,
     simulateDiagnosisEventPreview,
+    tryApplyLocalCrossdatingOption,
 } from "./diagnosis/engine";

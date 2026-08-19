@@ -1,16 +1,7 @@
-.menu {
-    position: fixed;
+.menuOverlay {
     z-index: 2147483200;
-    width: 276px;
+    width: 250px;
     box-sizing: border-box;
-    padding: 6px;
-    border: 1px solid #b9c3d1;
-    border-radius: 7px;
-    color: #263241;
-    background: rgba(255, 255, 255, 0.985);
-    box-shadow: 0 10px 28px rgba(24, 36, 53, 0.22);
-    font-family: "Segoe UI", system-ui, sans-serif;
-    font-size: 12px;
 }
 
 .heading {
@@ -18,67 +9,69 @@
     align-items: baseline;
     justify-content: space-between;
     gap: 8px;
-    padding: 3px 7px 6px;
+    padding: 4px 6px 5px;
+    color: #334155;
+    font-size: 12px;
     font-weight: 700;
 }
 
 .headingHint {
-    color: #8a94a3;
+    color: #94a3b8;
     font-size: 10px;
     font-weight: 500;
 }
 
-.action,
-.modeItem {
+.menuButton {
     width: 100%;
-    min-height: 28px;
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 4px 8px;
     border: 0;
-    border-radius: 4px;
     color: inherit;
     background: transparent;
     font: inherit;
     text-align: left;
-    cursor: pointer;
+    box-shadow: none;
 }
 
-.action:hover:not(:disabled),
-.modeItem:hover:not(:disabled),
-.selected {
-    background: #edf3fb;
+.menuButton:disabled {
+    color: #9aa3b2;
+    cursor: default;
+    background: transparent;
 }
 
-.action:disabled,
-.modeItem:disabled {
-    color: #9aa4b1;
-    cursor: not-allowed;
-}
-
-.radio {
+.radioIcon {
     width: 13px;
-    color: #356fb5;
-    font-size: 10px;
-    text-align: center;
+    justify-content: center;
 }
 
-.separator {
-    height: 1px;
-    margin: 5px 2px;
-    background: #e1e6ed;
+.radioSelected,
+.radioEmpty {
+    display: block;
+    box-sizing: border-box;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+}
+
+.radioSelected {
+    border: 2px solid #4c8eda;
+    background: #4c8eda;
+    box-shadow: 0 0 0 2px rgba(76, 142, 218, 0.18);
+}
+
+.radioEmpty {
+    border: 1px solid #94a3b8;
+    background: #ffffff;
 }
 
 .footer {
     display: flex;
     flex-direction: column;
     gap: 2px;
-    margin-top: 5px;
-    padding: 5px 7px 2px;
-    border-top: 1px solid #e7ebf0;
-    color: #778291;
+    margin: 4px 2px 1px;
+    padding: 5px 6px 3px;
+    border-top: 1px solid rgba(15, 23, 42, 0.1);
+    color: #64748b;
     font-size: 10px;
+    line-height: 14px;
     overflow-wrap: anywhere;
 }
 
@@ -87,5 +80,5 @@
 }
 
 .status {
-    color: #356b50;
+    color: #26724b;
 }

@@ -54,6 +54,61 @@ describe("tree-ring scan original/current year mapping", () => {
         expect(mapping.currentByOriginal.get(1950)).toBe(1950);
     });
 
+    it("removes marker provenance without restoring the deleted physical year", () => {
+        const mapping = buildTreeRingYearMapping("sample", baseline, [
+            entry(1, { type: "delete-year", tree: "sample", year: 1960, mode: "direct", shift: "right" }),
+            entry(2, { type: "remove-deletion-marker", tree: "sample", markerYear: 1961, index: 0 }),
+        ]);
+
+        expect(mapping.valid).toBe(true);
+        expect(mapping.currentByOriginal.get(1960)).toBeNull();
+        expect(mapping.currentByOriginal.get(1950)).toBe(1951);
+    });
+
+    it("replays grouped range-marker removal and restore as one operation", () => {
+        const removed = buildTreeRingYearMapping("sample", baseline, [
+            entry(1, {
+                type: "delete-year-range",
+                tree: "sample",
+                startYear: 1960,
+                endYear: 1962,
+                fill: "left",
+            }),
+            entry(2, {
+                type: "remove-deletion-marker",
+                tree: "sample",
+                markerYear: 1963,
+                index: 0,
+                markerGroupId: "delete-range-1",
+                markerCount: 3,
+            }),
+        ]);
+        expect(removed.currentByOriginal.get(1960)).toBeNull();
+        expect(removed.currentByOriginal.get(1962)).toBeNull();
+
+        const restored = buildTreeRingYearMapping("sample", baseline, [
+            entry(1, {
+                type: "delete-year-range",
+                tree: "sample",
+                startYear: 1960,
+                endYear: 1962,
+                fill: "left",
+            }),
+            entry(2, {
+                type: "restore-deletion",
+                tree: "sample",
+                markerYear: 1963,
+                index: 0,
+                markerGroupId: "delete-range-1",
+                markerCount: 3,
+            }),
+        ]);
+        expect(restored.valid).toBe(true);
+        expect(restored.currentByOriginal.get(1960)).toBe(1960);
+        expect(restored.currentByOriginal.get(1961)).toBe(1961);
+        expect(restored.currentByOriginal.get(1962)).toBe(1962);
+    });
+
     it("moves only identities inside a local move and drops overwritten identities", () => {
         const mapping = buildTreeRingYearMapping("sample", baseline, [
             entry(1, {

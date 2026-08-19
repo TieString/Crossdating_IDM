@@ -3,6 +3,7 @@ import type { RwlSiteData, RwlTreeData } from "@/features/rwl";
 import {
     applyLocalCrossdatingOption,
     simulateDiagnosisEventPreview,
+    tryApplyLocalCrossdatingOption,
 } from "../engine";
 import type { DiagnosisEvent, LocalSimulationOption } from "../types";
 
@@ -72,6 +73,18 @@ describe("local chart simulation", () => {
         );
         expect(deleted.get(1902)).toBe(30);
         expect(deleted.get(1903)).toBe(50);
+    });
+
+    it("drops a stale range preview after the same move has already changed working data", () => {
+        const simulation = {
+            year: 1903,
+            selectedStartYear: 1899,
+            selectedEndYear: 1902,
+        };
+        const shiftOption = option("SHIFT_RANGE", { shift: -1 });
+        const moved = applyLocalCrossdatingOption(shortSeries, simulation, shiftOption);
+
+        expect(tryApplyLocalCrossdatingOption(moved, simulation, shiftOption)).toBeNull();
     });
 
     it("previews the final partial move at either the primary or an explicit review year", () => {

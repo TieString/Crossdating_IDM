@@ -1,11 +1,12 @@
 import type { RwlSiteData, RwlTreeData } from "@/features/rwl";
 
-const WIDTH_VALUE_TO_MM = 1 / 1000;
+const DEFAULT_WIDTH_VALUE_TO_MM = 1 / 1000;
+const HUNDREDTH_MM_WIDTH_VALUE_TO_MM = 1 / 100;
 const LATEWOOD_RATIO = 0.5;
 const DOT_SPACING_SCALE = 0.5;
 const RING_BOUNDARY_WIDTH_MM = 0.18;
 const WINDOW_HEIGHT_MM = 10;
-const CACHE_VERSION = "tree-ring-artwork-v2";
+const CACHE_VERSION = "tree-ring-artwork-v3";
 const MAX_CACHE_ENTRIES = 256;
 const MAX_CACHE_SVG_BYTES = 32 * 1024 * 1024;
 
@@ -75,14 +76,25 @@ let cachedSvgBytes = 0;
 
 const fixed = (value: number, digits = 6): string => value.toFixed(digits);
 
+/** Resolve Tucson integer precision from its stop marker. */
+export const getRwlWidthUnitMillimetres = (stopMarkerValue = -9999): number => (
+    stopMarkerValue === 999
+        ? HUNDREDTH_MM_WIDTH_VALUE_TO_MM
+        : DEFAULT_WIDTH_VALUE_TO_MM
+);
+
 /** Convert the RWL integer width unit used by the width grid into millimetres. */
-export const rwlWidthToMillimetres = (value: number): number => value * WIDTH_VALUE_TO_MM;
+export const rwlWidthToMillimetres = (
+    value: number,
+    stopMarkerValue = -9999,
+): number => value * getRwlWidthUnitMillimetres(stopMarkerValue);
 
 /** Build physical ring radii from the same width values shown in the grid. */
 export function buildTreeRingGeometry(
     series: RwlTreeData,
     stopMarkerValue = -9999,
 ): TreeRingGeometry | null {
+    const widthUnitMm = getRwlWidthUnitMillimetres(stopMarkerValue);
     const measurements = Array.from(series.entries())
         .filter((entry): entry is [number, number] => (
             typeof entry[1] === "number"
@@ -98,7 +110,7 @@ export function buildTreeRingGeometry(
 
     let radiusMm = 0;
     const rings = measurements.map(([year, value]) => {
-        const widthMm = rwlWidthToMillimetres(value);
+        const widthMm = rwlWidthToMillimetres(value, stopMarkerValue);
         radiusMm += widthMm;
         return { year, widthMm, outerRadiusMm: radiusMm };
     });
@@ -134,7 +146,7 @@ export function buildTreeRingGeometry(
         windowTopMm,
         windowWidthMm: radiusMm,
         windowHeightMm: windowBottomMm - windowTopMm,
-        cacheKey: `${CACHE_VERSION}|${widthSignature}`,
+        cacheKey: `${CACHE_VERSION}|unit:${widthUnitMm}|${widthSignature}`,
     };
 }
 
