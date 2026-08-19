@@ -11,6 +11,8 @@ v2 保留 v1 的人工解阻流程，并把用户在界面中实际可执行的�
 
 - `workflowSuggestionAccuracy`：首次人工介入前，正确完整建议数 / 实际前沿诊断次数。
 - `serialRecoveryRate`：首次人工介入前，算法正确恢复事件数 / 全部真值事件数。
+- `blockedInclusiveFullEventAccuracy`：受阻计失败全事件准确率。其分子、分母与
+  `serialRecoveryRate` 相同，但名称明确表示当前失败及所有未到达后期事件均计为错误。
 - 原有响应率、操作准确率、窗口覆盖率、Top1、误判率、保存稳定率和窗口宽度继续报告。
 
 新增人工解阻指标：
