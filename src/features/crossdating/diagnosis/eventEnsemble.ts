@@ -64,6 +64,7 @@ import {
 import {
     evaluatePathFixedSideWholeCandidate,
     measureRecentTailLagConsensus,
+    resolveFixedSideLag,
     wholeBaselineCandidatePriority,
 } from "./pathFixedSideWholeBaseline";
 import {
@@ -10116,6 +10117,7 @@ const eventsForSeriesPass = (
         },
     );
     const recentTailLag = measureRecentTailLagConsensus(diagnosis, effectiveConfig);
+    const fixedSideLag = resolveFixedSideLag(diagnosis, effectiveConfig);
     const directShift = directFixedSideWholeCandidate?.deltaYears
         ?? directFixedSideWholeCandidate?.suggestedLag;
     const cofechaShift = cofechaFixedSideWholeCandidate?.deltaYears
@@ -10151,10 +10153,16 @@ const eventsForSeriesPass = (
             },
         }
         : directFixedSideWholeCandidate;
-    const pathWholeCandidate = [
+    const fixedSideCompatibleCandidates = [
         cofechaFixedSideWholeCandidate,
         crossViewTailCandidate,
     ].filter((candidate): candidate is DiagnosisCandidateOperation => candidate !== null)
+        .filter((candidate) => fixedSideLag === null || (
+            (candidate.deltaYears ?? candidate.suggestedLag) === fixedSideLag.lag
+        ));
+    const pathWholeCandidate = fixedSideLag?.lag === 0
+        ? null
+        : fixedSideCompatibleCandidates
         .sort((left, right) => (
             wholeBaselineCandidatePriority(right) - wholeBaselineCandidatePriority(left)
             || right.score - left.score
@@ -10193,6 +10201,20 @@ const eventsForSeriesPass = (
             ? [...pool.filter((row) => !sameHypothesis(row)), candidate]
             : pool;
     };
+    const authoritativeFixedSideLag = fixedSideLag && fixedSideLag.lag <= 0
+        ? fixedSideLag.lag
+        : null;
+    const constrainWholeCandidatesToFixedSide = (
+        pool: DiagnosisCandidateOperation[],
+    ): DiagnosisCandidateOperation[] => authoritativeFixedSideLag === null
+        ? pool
+        : pool.filter((candidate) => (
+            candidate.targetTree !== diagnosis.targetTree
+            || candidate.operationType !== "SHIFT_RANGE"
+            || candidate.mode !== "wholeSeriesMove"
+            || (candidate.deltaYears ?? candidate.suggestedLag)
+                === authoritativeFixedSideLag
+        ));
     if (fixedSideCandidateCanOverride(pathWholeCandidate)) {
         ownCandidates = upsertWholeBaselineCandidate(ownCandidates, pathWholeCandidate);
         if (options.supplementalCandidates) {
@@ -10204,6 +10226,23 @@ const eventsForSeriesPass = (
                 0,
                 options.supplementalCandidates.length,
                 ...supplemented,
+            );
+        }
+        candidateEvents = makeDiagnosisEventsFromCandidates(
+            [diagnosis],
+            ownCandidates,
+        );
+    }
+    if (authoritativeFixedSideLag !== null) {
+        ownCandidates = constrainWholeCandidatesToFixedSide(ownCandidates);
+        if (options.supplementalCandidates) {
+            const constrained = constrainWholeCandidatesToFixedSide(
+                options.supplementalCandidates,
+            );
+            options.supplementalCandidates.splice(
+                0,
+                options.supplementalCandidates.length,
+                ...constrained,
             );
         }
         candidateEvents = makeDiagnosisEventsFromCandidates(

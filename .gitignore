@@ -37,3 +37,7 @@ target-codex-check/
 notes
 
 *.tmp*
+.codex
+.storybook
+.vscode
+docs

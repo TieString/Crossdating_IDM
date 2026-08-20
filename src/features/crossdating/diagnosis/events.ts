@@ -264,6 +264,8 @@ export const wholeEventFromCandidate = (
                     ...(candidate.evidence.recallSourceTags
                         .filter((tag) => (
                             tag.startsWith("recent_tail_lag:")
+                            || tag.startsWith("recent_tail_resolution_source:")
+                            || tag.startsWith("recent_tail_newest_segment_lag:")
                             || tag.startsWith("recent_tail_support:")
                             || tag.startsWith("recent_tail_support_count:")
                             || tag.startsWith("recent_tail_total_count:")

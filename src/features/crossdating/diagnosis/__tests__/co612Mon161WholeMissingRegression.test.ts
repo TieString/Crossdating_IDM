@@ -19,6 +19,13 @@ import {
     diagnoseCrossdating,
     getDisplayedDiagnosisEvents,
 } from "@/features/crossdating/diagnosis";
+import { getConfig } from "@/features/crossdating/diagnosis/config";
+import { evaluateDraft } from "@/features/crossdating/diagnosis/evaluation";
+import {
+    makeRecentTailWholeDraft,
+    measureRecentTailLagConsensus,
+} from "@/features/crossdating/diagnosis/pathFixedSideWholeBaseline";
+import { diagnoseSeriesCore } from "@/features/crossdating/diagnosis/segments";
 import { createCofechaMasterReferenceConfig } from "@/features/crossdating/reference";
 import {
     deleteYearWithMode,
@@ -28,6 +35,7 @@ import {
 import { formatTucson } from "@/features/rwl/parsers/tucson";
 import type { RwlSiteData } from "@/features/rwl/types";
 import {
+    buildMultiMissingCorrupted,
     createWholeSeriesMoveCase,
     parseRwl,
 } from "./rdmFixture";
@@ -61,6 +69,259 @@ const runBundledCofecha = (siteData: RwlSiteData): string => {
 };
 
 fixtureDescribe("co612 mon161 whole baseline plus missing-ring regression", () => {
+    it.each([1977, 1967])(
+        "keeps the -2 bark-side whole baseline ahead of one missing ring at displayed year %i",
+        (deletedDisplayedYear) => {
+            const parsed = parseRwl(readFileSync(RWL_PATH, "utf8"));
+            const target = parsed.get(TARGET_ID)!;
+            const site: RwlSiteData = new Map(
+                Array.from(parsed, ([seriesId, series]) => [
+                    seriesId,
+                    new Map(series.valuesByYear),
+                ]),
+            );
+            const wholeMoved = createWholeSeriesMoveCase(target, 2).corrupted;
+            site.set(
+                TARGET_ID,
+                deleteYearWithMode(
+                    wholeMoved,
+                    deletedDisplayedYear,
+                    "direct",
+                    "right",
+                ),
+            );
+
+            const outText = runBundledCofecha(site);
+            const parts = splitReportByParts(outText);
+            const referenceConfig = createCofechaMasterReferenceConfig({
+                siteData: site,
+                flaggedAIds: extractPart6FlaggedASeriesIds(parts.get("PART 6") ?? ""),
+                cofechaRunId: `co612-mon161-whole-one-missing-${deletedDisplayedYear}`,
+                rwlHash: `co612-mon161-whole-one-missing-${deletedDisplayedYear}`,
+                masterDatingSeries: parseCofechaResult(outText).masterDatingSeries,
+            });
+            const diagnosis = diagnoseCrossdating(site, {
+                referenceConfig,
+                targetTrees: [TARGET_ID],
+                cofechaText: outText,
+                reviewWindowDisplayMode: "review",
+                includeEventDecisionAudits: true,
+            });
+            const core = diagnoseSeriesCore(
+                site,
+                TARGET_ID,
+                getConfig({ referenceConfig }),
+            );
+            const tail = core
+                ? measureRecentTailLagConsensus(core, getConfig({ referenceConfig }))
+                : null;
+            const tailDraft = core
+                ? makeRecentTailWholeDraft(core, getConfig({ referenceConfig }))
+                : null;
+            const tailCandidate = core && tailDraft
+                ? evaluateDraft(
+                    site,
+                    core,
+                    tailDraft,
+                    getConfig({ referenceConfig }),
+                    null,
+                )
+                : null;
+            const displayed = getDisplayedDiagnosisEvents(diagnosis)
+                .filter((event) => event.seriesId === TARGET_ID);
+            const audit = diagnosis.eventDecisionAudits?.find(
+                (row) => row.seriesId === TARGET_ID,
+            );
+            const summarizeStage = (
+                events: NonNullable<typeof audit>["finalEvents"],
+            ) => events.map(
+                (event) => ({
+                    type: event.eventType,
+                    shiftYears: event.shiftYears,
+                    range: [event.startYear, event.endYear],
+                    topYear: event.topYear,
+                    lagBefore: event.lagBefore,
+                    lagAfter: event.lagAfter,
+                    sources: event.algorithmSources,
+                    notes: event.notes.filter((note) => (
+                        note.startsWith("whole_state_")
+                        || note.startsWith("whole_baseline_")
+                        || note.startsWith("bounded_path_transition=")
+                    )),
+                }),
+            );
+            const details = JSON.stringify({
+                displayed: displayed.map((event) => ({
+                    type: event.eventType,
+                    shiftYears: event.shiftYears,
+                    range: [event.startYear, event.endYear],
+                    topYear: event.rankedYears[0]?.year,
+                    sources: event.evidence.algorithmSources,
+                    notes: event.evidence.notes.filter((note) => (
+                        note.startsWith("whole_state_")
+                        || note.startsWith("whole_baseline_")
+                    )),
+                    alternative: event.interpretationAmbiguity ? {
+                        type: event.interpretationAmbiguity.alternative.eventType,
+                        shiftYears: event.interpretationAmbiguity.alternative.shiftYears,
+                        range: [
+                            event.interpretationAmbiguity.alternative.startYear,
+                            event.interpretationAmbiguity.alternative.endYear,
+                        ],
+                    } : null,
+                })),
+                stages: audit ? {
+                    candidate: summarizeStage(audit.candidateProjectedEvents),
+                    detected: summarizeStage(audit.detectedBeforeFusion),
+                    fused: summarizeStage(audit.detectedAfterFusion),
+                    final: summarizeStage(audit.finalEvents),
+                } : null,
+                tail,
+                tailCandidate: tailCandidate ? {
+                    shiftYears: tailCandidate.deltaYears,
+                    strength: tailCandidate.candidateStrength,
+                    score: tailCandidate.score,
+                    gain: tailCandidate.evidence.evaluationDelta?.correlationGain,
+                    hard: tailCandidate.evidence.evaluationDelta?.hardGatePassed,
+                    joint: tailCandidate.evidence.evaluationDelta
+                        ?.jointCompositionGatePassed,
+                    tags: tailCandidate.evidence.recallSourceTags,
+                } : null,
+                joint: diagnosis.jointEventDecisions?.map((decision) => ({
+                    status: decision.status,
+                    reason: decision.reason,
+                    operationMargin: decision.operationMargin,
+                    sourceStage: decision.sourceStage,
+                    event: decision.event ? {
+                        type: decision.event.eventType,
+                        shiftYears: decision.event.shiftYears,
+                    } : null,
+                })),
+                review: diagnosis.reviewWindowDecisions?.map((decision) => ({
+                    status: decision.status,
+                    reason: decision.reason,
+                    strictReason: decision.strictReason,
+                    sourceStage: decision.sourceStage,
+                })),
+            }, null, 2);
+
+            expect(displayed, details).toHaveLength(1);
+            expect(displayed[0]?.eventType, details).toBe("wholeSeriesMove");
+            expect(displayed[0]?.shiftYears, details).toBe(-2);
+        },
+        120_000,
+    );
+
+    it("keeps the newest of two distant mon032 missing rings as the primary frontier", () => {
+        const parsed = parseRwl(readFileSync(RWL_PATH, "utf8"));
+        const targetId = "mon032";
+        const target = parsed.get(targetId)!;
+        const site: RwlSiteData = new Map(
+            Array.from(parsed, ([seriesId, series]) => [
+                seriesId,
+                new Map(series.valuesByYear),
+            ]),
+        );
+        site.set(
+            targetId,
+            buildMultiMissingCorrupted(target.valuesByYear, [1977, 1902]),
+        );
+
+        const outText = runBundledCofecha(site);
+        const parts = splitReportByParts(outText);
+        const referenceConfig = createCofechaMasterReferenceConfig({
+            siteData: site,
+            flaggedAIds: extractPart6FlaggedASeriesIds(parts.get("PART 6") ?? ""),
+            cofechaRunId: "co612-mon032-two-distant-missing",
+            rwlHash: "co612-mon032-two-distant-missing",
+            masterDatingSeries: parseCofechaResult(outText).masterDatingSeries,
+        });
+        const diagnosis = diagnoseCrossdating(site, {
+            referenceConfig,
+            targetTrees: [targetId],
+            cofechaText: outText,
+            reviewWindowDisplayMode: "review",
+            includeEventDecisionAudits: true,
+        });
+        const core = diagnoseSeriesCore(
+            site,
+            targetId,
+            getConfig({ referenceConfig }),
+        );
+        const tail = core
+            ? measureRecentTailLagConsensus(core, getConfig({ referenceConfig }))
+            : null;
+        const displayed = getDisplayedDiagnosisEvents(diagnosis)
+            .filter((event) => event.seriesId === targetId);
+        const audit = diagnosis.eventDecisionAudits?.find(
+            (row) => row.seriesId === targetId,
+        );
+        const summarizeStage = (
+            events: NonNullable<typeof audit>["finalEvents"],
+        ) => events.map(
+            (event) => ({
+                type: event.eventType,
+                shiftYears: event.shiftYears,
+                range: [event.startYear, event.endYear],
+                topYear: event.topYear,
+                lagBefore: event.lagBefore,
+                lagAfter: event.lagAfter,
+                sources: event.algorithmSources,
+                notes: event.notes.filter((note) => (
+                    note.startsWith("whole_state_")
+                    || note.startsWith("whole_baseline_")
+                    || note.startsWith("bounded_path_transition=")
+                )),
+            }),
+        );
+        const details = JSON.stringify({
+            displayed: displayed.map((event) => ({
+                type: event.eventType,
+                shiftYears: event.shiftYears,
+                range: [event.startYear, event.endYear],
+                topYear: event.rankedYears[0]?.year,
+                sources: event.evidence.algorithmSources,
+                notes: event.evidence.notes.filter((note) => (
+                    note.startsWith("whole_state_")
+                    || note.startsWith("whole_baseline_")
+                )),
+                alternative: event.interpretationAmbiguity ? {
+                    type: event.interpretationAmbiguity.alternative.eventType,
+                    range: [
+                        event.interpretationAmbiguity.alternative.startYear,
+                        event.interpretationAmbiguity.alternative.endYear,
+                    ],
+                    topYear: event.interpretationAmbiguity.alternative.rankedYears[0]?.year,
+                    sources: event.interpretationAmbiguity.alternative.evidence.algorithmSources,
+                    notes: event.interpretationAmbiguity.alternative.evidence.notes.filter(
+                        (note) => note.startsWith("bounded_path_transition="),
+                    ),
+                } : null,
+            })),
+            candidates: diagnosis.candidates
+                .filter((candidate) => candidate.targetTree === targetId)
+                .map((candidate) => ({
+                    mode: candidate.mode,
+                    shiftYears: candidate.deltaYears,
+                    year: candidate.targetYear,
+                    score: candidate.score,
+                    tags: candidate.evidence.recallSourceTags,
+                })),
+            stages: audit ? {
+                candidate: summarizeStage(audit.candidateProjectedEvents),
+                detected: summarizeStage(audit.detectedBeforeFusion),
+                fused: summarizeStage(audit.detectedAfterFusion),
+                final: summarizeStage(audit.finalEvents),
+            } : null,
+            tail,
+        }, null, 2);
+
+        expect(displayed, details).toHaveLength(1);
+        expect(displayed[0]?.eventType, details).toBe("missingRing");
+        expect(displayed[0]?.startYear, details).toBeLessThanOrEqual(1977);
+        expect(displayed[0]?.endYear, details).toBeGreaterThanOrEqual(1977);
+    }, 120_000);
+
     it("keeps the uncontaminated -2 whole-series baseline as a whole move", () => {
         const parsed = parseRwl(readFileSync(RWL_PATH, "utf8"));
         const target = parsed.get(TARGET_ID)!;

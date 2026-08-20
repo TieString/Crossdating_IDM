@@ -1489,6 +1489,45 @@ const wholeFrameAuthority = (event: DiagnosisEvent): number => {
     return 0;
 };
 
+/** The bark-side coordinate frame outranks a full-series majority created by older events. */
+const selectFixedSideWholeFrame = (
+    clusters: readonly HypothesisCluster[],
+): HypothesisCluster | null => {
+    const frame = clusters.filter((cluster) => {
+        const event = representative(cluster).event;
+        const stages = new Set(cluster.checkpoints.map(({ stage }) => stage));
+        return event.eventType === "wholeSeriesMove"
+            && (event.shiftYears ?? 0) < 0
+            && evidenceClaimsFor(event).has("whole_recent_tail_baseline")
+            && [...WHOLE_FRAME_STAGES].every((stage) => stages.has(stage));
+    }).sort((left, right) => (
+        confidenceScore(representative(right).event)
+            - confidenceScore(representative(left).event)
+        || new Set(right.checkpoints.map(({ stage }) => stage)).size
+            - new Set(left.checkpoints.map(({ stage }) => stage)).size
+    ))[0] ?? null;
+    if (!frame) return null;
+    return {
+        checkpoints: frame.checkpoints.map((checkpoint) => ({
+            ...checkpoint,
+            event: withEvidenceLedger({
+                ...checkpoint.event,
+                evidence: {
+                    ...checkpoint.event.evidence,
+                    algorithmSources: Array.from(new Set([
+                        ...checkpoint.event.evidence.algorithmSources,
+                        "fixed_side_whole_frame_priority",
+                    ])).sort(),
+                    notes: Array.from(new Set([
+                        ...checkpoint.event.evidence.notes,
+                        "fixed_side_frame_preempts_full_series_majority=true",
+                    ])),
+                },
+            }),
+        })),
+    };
+};
+
 /**
  * A durable negative whole hypothesis defines the coordinate frame for later local edits.
  * A local event may precede it only when its untouched side lands exactly on that frame.
@@ -2113,6 +2152,8 @@ const finalFrontierClusters = (
             && checkpoint.authority !== "supplemental"
         ))
     ));
+    const fixedSideWholeFrame = selectFixedSideWholeFrame(clusters);
+    if (fixedSideWholeFrame) return [fixedSideWholeFrame];
     const durableWholeFrame = selectDurableWholeFrame(
         clusters,
         allFinalClusters,

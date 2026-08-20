@@ -37,6 +37,17 @@ export type RecentTailLagConsensus = {
     }>;
 };
 
+export type FixedSideLagResolution = {
+    lag: number;
+    source: "unanimous_recent_tail" | "recent_tail_newest_segment";
+    supportCount: number;
+    totalCount: number;
+    competingSupportCount: number;
+    medianCorrelation: number;
+    newestSegmentLag: number | null;
+    rows: RecentTailLagConsensus["rows"];
+};
+
 export type PathTerminalLagEvidence = {
     lag: number;
     margin: number;
@@ -137,6 +148,90 @@ export const measureRecentTailLagConsensus = (
 };
 
 /**
+ * Resolve the untouched bark-side coordinate frame without using the full-series majority lag.
+ * A short tail can have an accidental best match, so a split vote only becomes authoritative
+ * when the same lag is independently present in the newest ordinary diagnosis segment.
+ */
+export const resolveFixedSideLag = (
+    diagnosis: SeriesCoreDiagnosis,
+    effectiveConfig: EffectiveDiagnosisConfig,
+): FixedSideLagResolution | null => {
+    const measured = measureRecentTailLagConsensus(diagnosis, effectiveConfig);
+    if (!measured || measured.rows.length < 3) return null;
+
+    const newestSegment = diagnosis.segments
+        .filter((segment) => segment.bestR !== null && segment.samplePairs >= 8)
+        .slice()
+        .sort((left, right) => (
+            right.endYear - left.endYear
+            || right.startYear - left.startYear
+        ))[0] ?? null;
+    const grouped = Array.from(measured.rows.reduce((groups, row) => {
+        const current = groups.get(row.bestLag) ?? [];
+        current.push(row);
+        groups.set(row.bestLag, current);
+        return groups;
+    }, new Map<number, RecentTailLagConsensus["rows"]>()));
+    const rowQuality = (rows: RecentTailLagConsensus["rows"]): {
+        median: number;
+        maximum: number;
+    } => {
+        const correlations = rows
+            .map((row) => row.bestR)
+            .filter((value): value is number => value !== null)
+            .sort((left, right) => left - right);
+        return {
+            median: correlations[Math.floor(correlations.length / 2)]
+                ?? Number.NEGATIVE_INFINITY,
+            maximum: Math.max(...correlations, Number.NEGATIVE_INFINITY),
+        };
+    };
+    const maximumObservedCorrelation = Math.max(
+        ...measured.rows.map((row) => row.bestR ?? Number.NEGATIVE_INFINITY),
+    );
+    const ordered = grouped.map(([lag, rows]) => {
+        const quality = rowQuality(rows);
+        return { lag, rows, ...quality };
+    }).sort((left, right) => (
+        right.rows.length - left.rows.length
+        || right.median - left.median
+        || Math.abs(left.lag) - Math.abs(right.lag)
+    ));
+    const unanimous = ordered.find((entry) => (
+        entry.rows.length === measured.rows.length
+        && entry.median >= 0.45
+    ));
+    const segmentBacked = newestSegment
+        ? ordered.find((entry) => (
+            entry.lag === newestSegment.bestLag
+            && entry.rows.length >= 2
+            && entry.median >= 0.4
+            && maximumObservedCorrelation - entry.maximum <= 0.08
+        ))
+        : null;
+    const selected = unanimous ?? segmentBacked;
+    if (!selected) return null;
+    const competingSupportCount = Math.max(
+        0,
+        ...ordered
+            .filter((entry) => entry.lag !== selected.lag)
+            .map((entry) => entry.rows.length),
+    );
+    return {
+        lag: selected.lag,
+        source: unanimous
+            ? "unanimous_recent_tail"
+            : "recent_tail_newest_segment",
+        supportCount: selected.rows.length,
+        totalCount: measured.rows.length,
+        competingSupportCount,
+        medianCorrelation: selected.median,
+        newestSegmentLag: newestSegment?.bestLag ?? null,
+        rows: measured.rows,
+    };
+};
+
+/**
  * Recover a short-range terminal state that mixed local events can hide from the full-series
  * optimum. This only proposes a draft; full-series counterfactual evaluation remains mandatory.
  */
@@ -144,23 +239,12 @@ export const makeRecentTailWholeDraft = (
     diagnosis: SeriesCoreDiagnosis,
     effectiveConfig: EffectiveDiagnosisConfig,
 ): CandidateDraft | null => {
-    const consensus = measureRecentTailLagConsensus(diagnosis, effectiveConfig);
-    if (!consensus
-        || consensus.lag === 0
-        || consensus.supportCount < 3
-        || consensus.supportCount <= consensus.competingSupportCount) return null;
-    const supportingRows = consensus.rows.filter((row) => row.bestLag === consensus.lag);
-    const supportingCorrelations = supportingRows
-        .map((row) => row.bestR)
-        .filter((value): value is number => value !== null)
-        .sort((left, right) => left - right);
-    const medianCorrelation = supportingCorrelations[
-        Math.floor(supportingCorrelations.length / 2)
-    ] ?? -1;
-    if (Math.max(...supportingCorrelations, -1) < 0.45 || medianCorrelation < 0.3) {
-        return null;
-    }
-    const sourceSegment = getRepresentativeSegmentForLag(diagnosis, consensus.lag);
+    const resolution = resolveFixedSideLag(diagnosis, effectiveConfig);
+    if (!resolution || resolution.lag === 0) return null;
+    const supportingRows = resolution.rows.filter((row) => (
+        row.bestLag === resolution.lag
+    ));
+    const sourceSegment = getRepresentativeSegmentForLag(diagnosis, resolution.lag);
     if (!sourceSegment) return null;
     return {
         targetTree: diagnosis.targetTree,
@@ -169,18 +253,20 @@ export const makeRecentTailWholeDraft = (
         mode: "wholeSeriesMove",
         anchorYear: diagnosis.targetRange.endYear,
         selectedRange: { ...diagnosis.targetRange },
-        deltaYears: consensus.lag,
+        deltaYears: resolution.lag,
         sourceSegment,
         algorithmSource: ["global_sliding_match", "segmented_diagnosis"],
         recallSourceTags: [
             "recent_tail_whole_baseline",
-            `recent_tail_lag:${consensus.lag}`,
-            `recent_tail_support:${consensus.supportCount}/${consensus.rows.length}`,
-            `recent_tail_support_count:${consensus.supportCount}`,
-            `recent_tail_total_count:${consensus.rows.length}`,
-            `recent_tail_competing_support:${consensus.competingSupportCount}`,
+            `recent_tail_lag:${resolution.lag}`,
+            `recent_tail_resolution_source:${resolution.source}`,
+            `recent_tail_newest_segment_lag:${resolution.newestSegmentLag ?? "none"}`,
+            `recent_tail_support:${resolution.supportCount}/${resolution.totalCount}`,
+            `recent_tail_support_count:${resolution.supportCount}`,
+            `recent_tail_total_count:${resolution.totalCount}`,
+            `recent_tail_competing_support:${resolution.competingSupportCount}`,
             `recent_tail_context_years:${Math.min(...supportingRows.map((row) => row.width))}`,
-            `recent_tail_median_r:${medianCorrelation.toFixed(6)}`,
+            `recent_tail_median_r:${resolution.medianCorrelation.toFixed(6)}`,
         ],
     };
 };
