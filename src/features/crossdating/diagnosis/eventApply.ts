@@ -35,9 +35,10 @@ export const planDiagnosisEventEdit = (
     selectedYear: number,
     seriesStartYear: number,
     seriesEndYear: number,
+    options: { manualReviewConfirmed?: boolean } = {},
 ): DiagnosisEventEditPlan | null => {
     if (event.stale
-        || event.reviewOnly
+        || (event.reviewOnly && !options.manualReviewConfirmed)
         || selectedYear < event.startYear
         || selectedYear > event.endYear
         || seriesStartYear > seriesEndYear) {
@@ -82,3 +83,17 @@ export const planDiagnosisEventEdit = (
         missingRange: breakpoint.missingRange,
     };
 };
+
+/** Manual Apply is the user's explicit confirmation; automatic callers keep the strict default. */
+export const planManuallyConfirmedDiagnosisEventEdit = (
+    event: DiagnosisEvent,
+    selectedYear: number,
+    seriesStartYear: number,
+    seriesEndYear: number,
+): DiagnosisEventEditPlan | null => planDiagnosisEventEdit(
+    event,
+    selectedYear,
+    seriesStartYear,
+    seriesEndYear,
+    { manualReviewConfirmed: true },
+);

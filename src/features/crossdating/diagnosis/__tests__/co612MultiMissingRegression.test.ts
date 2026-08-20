@@ -32,6 +32,7 @@ import {
     locateSequentialMissingHead,
 } from "@/features/crossdating/diagnosis/eventPath";
 import { diagnoseSeriesCore } from "@/features/crossdating/diagnosis/segments";
+import { planManuallyConfirmedDiagnosisEventEdit } from "@/features/crossdating/diagnosis/eventApply";
 import { scoreJointCounterfactualOperations } from "@/features/crossdating/diagnosis/jointCounterfactualOperation";
 import { compareTwoStepUnitDirections } from "@/features/crossdating/diagnosis/discreteMissingStaircaseCompetition";
 import { cofechaStyleStandardize } from "@/features/crossdating/reference";
@@ -1079,6 +1080,63 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
                 hypotheses: diagnosis.jointEventDecisions[0].hypotheses,
             } : null,
         }))).toEqual([]);
+    }, 300_000);
+
+    naturalCofechaIt("keeps the reviewed mon071 all-zero frontier manually applicable", () => {
+        const seriesId = "mon071";
+        const natural = parseRwl(readFileSync(NATURAL_FIXTURE_PATH, "utf8"));
+        const targetSeries = natural.get(seriesId)!;
+        const truthYears = Array.from(targetSeries.valuesByYear)
+            .filter(([, value]) => value === 0)
+            .map(([year]) => year)
+            .sort((left, right) => right - left);
+        const site: RwlSiteData = new Map(
+            Array.from(natural, ([id, series]) => [id, new Map(series.valuesByYear)]),
+        );
+        site.set(seriesId, buildMultiMissingCorrupted(
+            targetSeries.valuesByYear,
+            truthYears,
+        ));
+        const cofechaText = runBundledCofecha(site);
+        const parts = splitReportByParts(cofechaText);
+        const reference = createCofechaMasterReferenceConfig({
+            siteData: site,
+            flaggedAIds: extractPart6FlaggedASeriesIds(parts.get("PART 6") ?? ""),
+            cofechaRunId: "co612-mon071-all-zero-apply",
+            rwlHash: "co612-mon071-all-zero-apply",
+            masterDatingSeries: parseCofechaResult(cofechaText).masterDatingSeries,
+        });
+        const displayed = getDisplayedDiagnosisEvents(diagnoseCrossdating(site, {
+            referenceConfig: reference,
+            targetTrees: [seriesId],
+            cofechaText,
+            reviewWindowDisplayMode: "review",
+        })).filter((event) => event.seriesId === seriesId);
+        const primary = displayed[0];
+        const reviewedMissing = primary?.eventType === "missingRing"
+            ? primary
+            : primary?.interpretationAmbiguity?.alternative.eventType === "missingRing"
+                ? primary.interpretationAmbiguity.alternative
+                : null;
+        const frontierYear = truthYears[0]!;
+        const targetData = site.get(seriesId)!;
+        const editableYears = Array.from(targetData.keys());
+
+        expect(truthYears).toEqual([1977, 1879, 1861, 1851, 1845, 1778, 1773]);
+        expect(reviewedMissing).not.toBeNull();
+        expect(reviewedMissing?.startYear).toBeLessThanOrEqual(frontierYear);
+        expect(reviewedMissing?.endYear).toBeGreaterThanOrEqual(frontierYear);
+        expect(planManuallyConfirmedDiagnosisEventEdit(
+            reviewedMissing!,
+            frontierYear,
+            Math.min(...editableYears),
+            Math.max(...editableYears),
+        )).toMatchObject({
+            operationType: "INSERT_MISSING_RING",
+            targetTree: seriesId,
+            targetYear: frontierYear,
+            side: "right",
+        });
     }, 300_000);
 
     naturalCofechaIt("does not collapse mtr842 remote missing rings into an endpoint whole shift", () => {

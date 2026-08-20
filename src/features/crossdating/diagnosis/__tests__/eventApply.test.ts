@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { insertMissingYearAtSide, moveSeriesTailByOffset, deleteYearWithMode } from "@/features/rwl/edit";
-import { planDiagnosisEventEdit } from "../eventApply";
+import {
+    planDiagnosisEventEdit,
+    planManuallyConfirmedDiagnosisEventEdit,
+} from "../eventApply";
 import type { DiagnosisEvent } from "../types";
 
 const event = (
@@ -116,6 +119,17 @@ describe("planDiagnosisEventEdit", () => {
         expect(planDiagnosisEventEdit(event("missingRing", {
             reviewOnly: true,
         }), 1902, 1899, 1903)).toBeNull();
+    });
+
+    it("allows an explicitly confirmed review window through the manual UI path", () => {
+        expect(planManuallyConfirmedDiagnosisEventEdit(event("missingRing", {
+            reviewOnly: true,
+        }), 1902, 1899, 1903)).toEqual({
+            operationType: "INSERT_MISSING_RING",
+            targetTree: "ABC01A",
+            targetYear: 1902,
+            side: "right",
+        });
     });
 
     it("applies the deterministic 1904 / -4 case without touching the fixed side", () => {

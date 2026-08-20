@@ -9,7 +9,7 @@ import {
     isNegativePartialShift,
     markCandidatesStale,
     markDiagnosisEventsStale,
-    planDiagnosisEventEdit,
+    planManuallyConfirmedDiagnosisEventEdit,
     selectSafeDiagnosisCandidateBatch,
     type DiagnosisBatchApplyResult,
     type DiagnosisBatchCandidateResult,
@@ -1357,7 +1357,7 @@ export function useHomeWorkspace() {
             .filter(([, value]) => value !== stopMarker.value)
             .map(([year]) => year);
         if (editableYears.length === 0) return false;
-        const plan = planDiagnosisEventEdit(
+        const plan = planManuallyConfirmedDiagnosisEventEdit(
             event,
             selectedYear,
             Math.min(...editableYears),

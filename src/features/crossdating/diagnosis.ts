@@ -16,6 +16,7 @@ export {
 export { runLocalEditAlignment } from "./diagnosis/localEditAlignment";
 export { runGlobalSlidingMatch } from "./diagnosis/sliding";
 export {
+    planManuallyConfirmedDiagnosisEventEdit,
     planDiagnosisEventEdit,
     type DiagnosisEventEditPlan,
 } from "./diagnosis/eventApply";
