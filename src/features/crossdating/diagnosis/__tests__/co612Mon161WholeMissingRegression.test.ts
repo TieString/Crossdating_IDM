@@ -181,7 +181,6 @@ fixtureDescribe("co612 mon161 whole baseline plus missing-ring regression", () =
                     shiftYears: tailCandidate.deltaYears,
                     strength: tailCandidate.candidateStrength,
                     score: tailCandidate.score,
-                    gain: tailCandidate.evidence.evaluationDelta?.correlationGain,
                     hard: tailCandidate.evidence.evaluationDelta?.hardGatePassed,
                     joint: tailCandidate.evidence.evaluationDelta
                         ?.jointCompositionGatePassed,
