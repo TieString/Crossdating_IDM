@@ -63,8 +63,8 @@ const EXPECTED_ZERO_YEARS = [
     1778,
     1813,
     1861,
-    1870,
     1873,
+    1879,
     1902,
     1977,
 ];
@@ -1818,6 +1818,83 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
             expect(displayed[0].endYear, failureContext)
                 .toBeGreaterThanOrEqual(newestTruth);
         });
+    }, 180_000);
+
+    bundledCofechaIt("keeps the first of four bark-side missing rings as the local review frontier", () => {
+        const sourceHash = fileSha256(NATURAL_FIXTURE_PATH);
+        const removedYears = [...zeroYears]
+            .sort((left, right) => right - left)
+            .slice(0, 4);
+        const frontierYear = removedYears[0]!;
+        const corrupted = buildMultiMissingCorrupted(
+            target.valuesByYear,
+            removedYears,
+        );
+        const site = buildSite(corrupted);
+        const savedOut = runBundledCofecha(site);
+        const savedParts = splitReportByParts(savedOut);
+        const savedReference = createCofechaMasterReferenceConfig({
+            siteData: site,
+            flaggedAIds: extractPart6FlaggedASeriesIds(
+                savedParts.get("PART 6") ?? "",
+            ),
+            cofechaRunId: "co612-mon052-first-four-saved",
+            rwlHash: "co612-mon052-first-four-saved",
+            masterDatingSeries: parseCofechaResult(savedOut).masterDatingSeries,
+        });
+        const runs = [
+            {
+                state: "before-save",
+                diagnosis: diagnoseCrossdating(site, {
+                    referenceConfig,
+                    targetTrees: [TARGET_ID],
+                    reviewWindowDisplayMode: "review",
+                    includeEventDecisionAudits: true,
+                }),
+            },
+            {
+                state: "after-save",
+                diagnosis: diagnoseCrossdating(site, {
+                    referenceConfig: savedReference,
+                    targetTrees: [TARGET_ID],
+                    cofechaText: savedOut,
+                    reviewWindowDisplayMode: "review",
+                    includeEventDecisionAudits: true,
+                }),
+            },
+        ];
+
+        const failures = runs.flatMap(({ state, diagnosis }) => {
+            const displayed = getDisplayedDiagnosisEvents(diagnosis).filter(
+                (event) => event.seriesId === TARGET_ID,
+            );
+            const primary = displayed[0];
+            const local = primary?.eventType === "wholeSeriesMove"
+                ? primary.interpretationAmbiguity?.alternative
+                : primary;
+            return displayed.length === 1
+                && local !== undefined
+                && local.eventType !== "wholeSeriesMove"
+                && local.startYear <= frontierYear
+                && local.endYear >= frontierYear
+                ? []
+                : [{
+                    state,
+                    removedYears,
+                    frontierYear,
+                    displayed: summarize(displayed),
+                    interpretation: primary?.interpretationAmbiguity
+                        ? summarize([primary.interpretationAmbiguity.alternative])[0]
+                        : null,
+                    audit: diagnosis.eventDecisionAudits?.find(
+                        (candidate) => candidate.seriesId === TARGET_ID,
+                    ),
+                }];
+        });
+
+        expect(removedYears).toEqual([1977, 1902, 1879, 1873]);
+        expect(fileSha256(NATURAL_FIXTURE_PATH)).toBe(sourceHash);
+        expect(failures).toEqual([]);
     }, 180_000);
 
     bundledCofechaIt("keeps the terminal mtr722 zero ahead of all older missing rings", () => {

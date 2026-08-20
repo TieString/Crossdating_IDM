@@ -227,6 +227,48 @@ describe("multi-event frontier location consensus", () => {
         });
     });
 
+    it("does not average detached modes that cannot fit in one 13-year window", () => {
+        const input = event();
+        input.startYear = 1973;
+        input.endYear = 1979;
+        input.rankedYears = [{ year: 1977, rank: 1, score: 4, evidenceTags: [] }];
+        input.evidence.notes.push(
+            "distant_sequential_frontier_year=1977",
+            "nominal_boundary_year=1977",
+        );
+
+        expect(projectMultiEventLocationConsensus(
+            input,
+            [1977, 1993],
+            { startYear: 1597, endYear: 2000 },
+            true,
+            16,
+        )).toBe(input);
+    });
+
+    it("keeps the selected event's direct frontier ahead of a weaker checkpoint", () => {
+        const input = event();
+        input.startYear = 1971;
+        input.endYear = 1983;
+        input.rankedYears = [{ year: 1977, rank: 1, score: 4, evidenceTags: [] }];
+        input.evidence.notes.push(
+            "sequential_missing_head_year=1977",
+            "shared_zero_marker_year=1977",
+        );
+
+        const projected = projectMultiEventLocationConsensus(
+            input,
+            [1970, 1973, 1975, 1977],
+            { startYear: 1597, endYear: 2000 },
+            true,
+            12,
+            1975,
+        );
+
+        expect(projected).toMatchObject({ startYear: 1971, endYear: 1983 });
+        expect(projected.rankedYears[0]?.year).toBe(1977);
+    });
+
     it("anchors a cumulative mode to a validated bark-side unit frontier", () => {
         const input = event();
         input.eventType = "partialMove";

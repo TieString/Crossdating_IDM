@@ -19,6 +19,15 @@ const MAXIMUM_INDEPENDENT_UNIT_LOCATION_DRIFT_YEARS = 4;
 const MINIMUM_DYNAMIC_UNIT_LOCATION_SCORE = 0.08;
 const MINIMUM_DYNAMIC_UNIT_LOCATION_MARGIN = 0.04;
 const ALLOWED_LOCAL_WINDOW_WIDTHS = [5, 7, 9, 13] as const;
+const MAXIMUM_SINGLE_WINDOW_MODE_SPAN_YEARS = 12;
+const DIRECT_FRONTIER_NOTE_PREFIXES = [
+    "distant_sequential_frontier_year=",
+    "sequential_missing_head_year=",
+    "sequential_false_head_year=",
+    "shared_zero_marker_year=",
+    "nominal_boundary_year=",
+    "profile_boundary_year=",
+] as const;
 
 export type IndependentUnitOperationLocation = {
     eventType: DiagnosisEventType;
@@ -30,6 +39,17 @@ export type IndependentUnitOperationLocation = {
 const rankedYear = (event: DiagnosisEvent): number | null => (
     event.rankedYears[0]?.year ?? null
 );
+
+const directFrontierYear = (event: DiagnosisEvent): number | null => {
+    for (const prefix of DIRECT_FRONTIER_NOTE_PREFIXES) {
+        const note = [...event.evidence.notes].reverse().find((value) => (
+            value.startsWith(prefix)
+        ));
+        const year = Number(note?.slice(prefix.length));
+        if (Number.isInteger(year)) return year;
+    }
+    return null;
+};
 
 const isUnitEvent = (event: DiagnosisEvent): boolean => (
     event.eventType === "missingRing" || event.eventType === "falseRing"
@@ -188,8 +208,13 @@ export const projectMultiEventLocationConsensus = (
     for (let start = 0; start < years.length; start += 1) {
         for (let end = start; end < years.length; end += 1) {
             const selected = years.slice(start, end + 1);
-            if (selected[selected.length - 1] - selected[0] > maximumModeSpanYears) break;
-            if (selected.length >= 2 && selected.includes(currentYear)) clusters.push(selected);
+            const span = selected[selected.length - 1] - selected[0];
+            if (span > maximumModeSpanYears) break;
+            const hasEnoughWideModeSupport = span <= MAXIMUM_SINGLE_WINDOW_MODE_SPAN_YEARS
+                || selected.length >= 3;
+            if (selected.length >= 2
+                && selected.includes(currentYear)
+                && hasEnoughWideModeSupport) clusters.push(selected);
         }
     }
     const selectedYears = clusters.sort((left, right) => (
@@ -205,7 +230,11 @@ export const projectMultiEventLocationConsensus = (
             : null
     );
     if (!selectedYears) return event;
-    const anchoredFrontierYear = frontierAnchorYear !== null
+    const ownFrontierYear = directFrontierYear(event);
+    const anchoredFrontierYear = ownFrontierYear !== null
+        && selectedYears.includes(ownFrontierYear)
+        ? ownFrontierYear
+        : frontierAnchorYear !== null
         && selectedYears.includes(frontierAnchorYear)
         ? frontierAnchorYear
         : null;
