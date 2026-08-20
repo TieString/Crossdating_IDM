@@ -321,6 +321,141 @@ fixtureDescribe("co612 mon161 whole baseline plus missing-ring regression", () =
         expect(displayed[0]?.endYear, details).toBeGreaterThanOrEqual(1977);
     }, 120_000);
 
+    it("keeps the mon032 -2 whole baseline ahead of a missing ring at displayed year 1977", () => {
+        const parsed = parseRwl(readFileSync(RWL_PATH, "utf8"));
+        const targetId = "mon032";
+        const target = parsed.get(targetId)!;
+        const site: RwlSiteData = new Map(
+            Array.from(parsed, ([seriesId, series]) => [
+                seriesId,
+                new Map(series.valuesByYear),
+            ]),
+        );
+        const wholeMoved = createWholeSeriesMoveCase(target, 2).corrupted;
+        site.set(
+            targetId,
+            deleteYearWithMode(wholeMoved, 1977, "direct", "right"),
+        );
+
+        const outText = runBundledCofecha(site);
+        const parts = splitReportByParts(outText);
+        const referenceConfig = createCofechaMasterReferenceConfig({
+            siteData: site,
+            flaggedAIds: extractPart6FlaggedASeriesIds(parts.get("PART 6") ?? ""),
+            cofechaRunId: "co612-mon032-whole-one-missing",
+            rwlHash: "co612-mon032-whole-one-missing",
+            masterDatingSeries: parseCofechaResult(outText).masterDatingSeries,
+        });
+        const diagnosis = diagnoseCrossdating(site, {
+            referenceConfig,
+            targetTrees: [targetId],
+            cofechaText: outText,
+            reviewWindowDisplayMode: "review",
+            includeEventDecisionAudits: true,
+        });
+        const displayed = getDisplayedDiagnosisEvents(diagnosis)
+            .filter((event) => event.seriesId === targetId);
+        const audit = diagnosis.eventDecisionAudits?.find(
+            (row) => row.seriesId === targetId,
+        );
+        const summarize = (
+            events: NonNullable<typeof audit>["finalEvents"],
+        ) => events.map((event) => ({
+            type: event.eventType,
+            shiftYears: event.shiftYears,
+            range: [event.startYear, event.endYear],
+            topYear: event.topYear,
+            lagBefore: event.lagBefore,
+            lagAfter: event.lagAfter,
+            sources: event.algorithmSources,
+            notes: event.notes.filter((note) => (
+                note.startsWith("whole_")
+                || note.startsWith("recent_tail_")
+                || note.startsWith("endpoint_")
+                || note.startsWith("terminal_")
+            )),
+        }));
+        const details = JSON.stringify({
+            displayed: displayed.map((event) => ({
+                type: event.eventType,
+                shiftYears: event.shiftYears,
+                range: [event.startYear, event.endYear],
+                topYear: event.rankedYears[0]?.year,
+                sources: event.evidence.algorithmSources,
+                notes: event.evidence.notes,
+            })),
+            stages: audit ? {
+                candidate: summarize(audit.candidateProjectedEvents),
+                detected: summarize(audit.detectedBeforeFusion),
+                fused: summarize(audit.detectedAfterFusion),
+                retained: summarize(audit.retainedAfterEndpointGuard),
+                beforeLocator: summarize(audit.displayedBeforeLocator),
+                final: summarize(audit.finalEvents),
+            } : null,
+            joint: diagnosis.jointEventDecisions?.map((decision) => ({
+                status: decision.status,
+                reason: decision.reason,
+                sourceStage: decision.sourceStage,
+                event: decision.event ? {
+                    type: decision.event.eventType,
+                    shiftYears: decision.event.shiftYears,
+                    range: [decision.event.startYear, decision.event.endYear],
+                } : null,
+            })),
+            review: diagnosis.reviewWindowDecisions,
+        }, null, 2);
+
+        expect(displayed, details).toHaveLength(1);
+        expect(displayed[0]?.eventType, details).toBe("wholeSeriesMove");
+        expect(displayed[0]?.shiftYears, details).toBe(-2);
+
+        const corrupted = site.get(targetId)!;
+        const displayedYears = [...corrupted.keys()];
+        site.set(targetId, moveSeriesTailByOffset(
+            corrupted,
+            Math.min(...displayedYears),
+            Math.max(...displayedYears),
+            -2,
+        ));
+        const repairedOutText = runBundledCofecha(site);
+        const repairedParts = splitReportByParts(repairedOutText);
+        const repairedReferenceConfig = createCofechaMasterReferenceConfig({
+            siteData: site,
+            flaggedAIds: extractPart6FlaggedASeriesIds(
+                repairedParts.get("PART 6") ?? "",
+            ),
+            cofechaRunId: "co612-mon032-after-whole-repair",
+            rwlHash: "co612-mon032-after-whole-repair",
+            masterDatingSeries: parseCofechaResult(
+                repairedOutText,
+            ).masterDatingSeries,
+        });
+        const afterWholeDisplayed = getDisplayedDiagnosisEvents(
+            diagnoseCrossdating(site, {
+                referenceConfig: repairedReferenceConfig,
+                targetTrees: [targetId],
+                cofechaText: repairedOutText,
+                reviewWindowDisplayMode: "review",
+                includeEventDecisionAudits: true,
+            }),
+        ).filter((event) => event.seriesId === targetId);
+        const afterWholeDetails = JSON.stringify(afterWholeDisplayed.map((event) => ({
+            type: event.eventType,
+            shiftYears: event.shiftYears,
+            range: [event.startYear, event.endYear],
+            topYear: event.rankedYears[0]?.year,
+            sources: event.evidence.algorithmSources,
+        })), null, 2);
+
+        expect(afterWholeDisplayed, afterWholeDetails).toHaveLength(1);
+        expect(afterWholeDisplayed[0]?.eventType, afterWholeDetails)
+            .toBe("missingRing");
+        expect(afterWholeDisplayed[0]?.startYear, afterWholeDetails)
+            .toBeLessThanOrEqual(1975);
+        expect(afterWholeDisplayed[0]?.endYear, afterWholeDetails)
+            .toBeGreaterThanOrEqual(1975);
+    }, 120_000);
+
     it("keeps the uncontaminated -2 whole-series baseline as a whole move", () => {
         const parsed = parseRwl(readFileSync(RWL_PATH, "utf8"));
         const target = parsed.get(TARGET_ID)!;

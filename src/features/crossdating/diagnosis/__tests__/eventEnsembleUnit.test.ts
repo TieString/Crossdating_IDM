@@ -2773,6 +2773,29 @@ describe("isAuthoritativeWholeSeriesCheckpoint", () => {
         expect(isAuthoritativeWholeSeriesCheckpoint(recentTail)).toBe(true);
     });
 
+    it("protects a unanimous -2 fixed tail when a middle event contaminates long segments", () => {
+        const recentTail = whole();
+        recentTail.shiftYears = -2;
+        recentTail.evidence.score = -19;
+        recentTail.evidence.correlationGain = 0.18;
+        recentTail.evidence.notes = [
+            "candidate_hard_gate_passed",
+            "whole_baseline_source=recent_tail_lag",
+            "recent_tail_lag=-2",
+            "recent_tail_resolution_source=unanimous_recent_tail",
+            "recent_tail_support_count=4",
+            "recent_tail_total_count=4",
+            "recent_tail_competing_support=0",
+            "recent_tail_median_r=0.85",
+            "recent_tail_path_lag=-2",
+            "recent_tail_path_margin=6.49",
+            "whole_state_support_fraction=0",
+            "whole_state_newer_edge_support_fraction=0",
+        ];
+
+        expect(isAuthoritativeWholeSeriesCheckpoint(recentTail)).toBe(true);
+    });
+
     it("rejects a recent-tail whole alias without broader state support", () => {
         const alias = whole();
         alias.shiftYears = -1;

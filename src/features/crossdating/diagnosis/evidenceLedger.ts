@@ -160,11 +160,25 @@ const operationClaims = (event: DiagnosisEvent): DiagnosisEvidenceClaim[] => {
             ?? Number.NEGATIVE_INFINITY) >= 0.4
         && (numberFromNotes(event, ["whole_state_newer_edge_support_fraction="])
             ?? 0) >= 0.5;
+    const unanimousFixedSide = tokens.has(
+        "recent_tail_resolution_source=unanimous_recent_tail",
+    )
+        && (event.shiftYears ?? 0) <= -2
+        && recentTailLag === event.shiftYears
+        && recentTailPathLag === event.shiftYears
+        && recentTailSupport >= 4
+        && recentTailSupport === recentTailTotal
+        && (numberFromNotes(event, ["recent_tail_competing_support="]) ?? 0) === 0
+        && (numberFromNotes(event, ["recent_tail_median_r="])
+            ?? Number.NEGATIVE_INFINITY) >= 0.7
+        && (numberFromNotes(event, ["recent_tail_path_margin="])
+            ?? Number.NEGATIVE_INFINITY) >= 0.1;
     if (event.eventType === "wholeSeriesMove"
         && tokens.has("whole_baseline_source=recent_tail_lag")
         && tokens.has("candidate_hard_gate_passed")
         && (
             segmentBackedFixedSide
+            || unanimousFixedSide
             || (
                 recentTailLag === event.shiftYears
                 && recentTailPathLag === event.shiftYears

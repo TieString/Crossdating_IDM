@@ -5289,6 +5289,8 @@ export const isAuthoritativeWholeSeriesCheckpoint = (
         event,
         "recent_tail_path_margin=",
     ) ?? Number.NEGATIVE_INFINITY;
+    const hasIndependentRecentTailFrame = (event.shiftYears ?? 0) <= -2
+        && evidenceClaimsFor(event).has("whole_recent_tail_baseline");
     const globallyConsistent = event.evidence.notes.includes(
         "whole_state_global_lag_matches_shift=true",
     ) && terminalResidualLag === 0
@@ -5312,7 +5314,7 @@ export const isAuthoritativeWholeSeriesCheckpoint = (
         && newerEdgeSupport >= 0.9
         && stateSupport >= 0.3
         && (event.evidence.correlationGain ?? 0) >= 0.1;
-    return recentTailConsistent || (
+    return hasIndependentRecentTailFrame || recentTailConsistent || (
         event.evidence.score > 0
         && terminalSegments >= 2
         && terminalConsistency >= 0.9

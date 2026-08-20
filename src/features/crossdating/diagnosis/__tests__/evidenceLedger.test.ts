@@ -242,6 +242,40 @@ describe("diagnosis evidence ledger", () => {
         );
     });
 
+    it("records a unanimous negative recent-tail frame without requiring contaminated long segments", () => {
+        const whole = event();
+        whole.eventType = "wholeSeriesMove";
+        whole.shiftYears = -2;
+        whole.evidence.notes.push(
+            "candidate_hard_gate_passed",
+            "whole_baseline_source=recent_tail_lag",
+            "recent_tail_lag=-2",
+            "recent_tail_resolution_source=unanimous_recent_tail",
+            "recent_tail_support_count=4",
+            "recent_tail_total_count=4",
+            "recent_tail_competing_support=0",
+            "recent_tail_median_r=0.85",
+            "recent_tail_path_lag=-2",
+            "recent_tail_path_margin=6.49",
+            "whole_state_support_fraction=0",
+            "whole_state_newer_edge_support_fraction=0",
+        );
+
+        expect(evidenceClaimsFor(whole)).toContain("whole_recent_tail_baseline");
+
+        whole.shiftYears = -1;
+        whole.evidence.notes = whole.evidence.notes.map((note) => (
+            note === "recent_tail_lag=-2"
+                ? "recent_tail_lag=-1"
+                : note === "recent_tail_path_lag=-2"
+                    ? "recent_tail_path_lag=-1"
+                    : note
+        ));
+        expect(evidenceClaimsFor(whole)).not.toContain(
+            "whole_recent_tail_baseline",
+        );
+    });
+
     it("is append-only and idempotent across repeated normalization", () => {
         const once = withEvidenceLedger(event());
         const twice = withEvidenceLedger(once);
