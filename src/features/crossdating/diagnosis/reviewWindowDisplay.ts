@@ -634,8 +634,13 @@ const selectAdjudicatedReviewWindowDisplay = (
                 "standalone_global_whole_frame",
             )
             || (
-                event.evidence.algorithmSources.includes(
-                    "durable_whole_frame_priority",
+                (
+                    event.evidence.algorithmSources.includes(
+                        "durable_whole_frame_priority",
+                    )
+                    || event.evidence.algorithmSources.includes(
+                        "fixed_side_whole_frame_priority",
+                    )
                 )
                 && (
                     wholeClaims.has("whole_path_fixed_baseline")

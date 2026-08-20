@@ -214,6 +214,34 @@ describe("diagnosis evidence ledger", () => {
         );
     });
 
+    it("records a split recent-tail baseline when the newest segment resolves the fixed side", () => {
+        const whole = event();
+        whole.eventType = "wholeSeriesMove";
+        whole.shiftYears = -2;
+        whole.evidence.notes.push(
+            "candidate_hard_gate_passed",
+            "whole_baseline_source=recent_tail_lag",
+            "recent_tail_lag=-2",
+            "recent_tail_resolution_source=recent_tail_newest_segment",
+            "recent_tail_newest_segment_lag=-2",
+            "recent_tail_support_count=2",
+            "recent_tail_total_count=4",
+            "recent_tail_median_r=0.47",
+            "whole_state_newer_edge_support_fraction=0.5",
+        );
+
+        expect(evidenceClaimsFor(whole)).toContain("whole_recent_tail_baseline");
+
+        whole.evidence.notes = whole.evidence.notes.map((note) => (
+            note === "recent_tail_newest_segment_lag=-2"
+                ? "recent_tail_newest_segment_lag=-3"
+                : note
+        ));
+        expect(evidenceClaimsFor(whole)).not.toContain(
+            "whole_recent_tail_baseline",
+        );
+    });
+
     it("is append-only and idempotent across repeated normalization", () => {
         const once = withEvidenceLedger(event());
         const twice = withEvidenceLedger(once);

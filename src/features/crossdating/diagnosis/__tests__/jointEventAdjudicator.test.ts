@@ -283,6 +283,52 @@ describe("joint event adjudicator", () => {
         );
     });
 
+    it("keeps the bark-side whole frame when older events inflate the full-series lag", () => {
+        const fixedSide = {
+            ...event("fixed-side-whole", "wholeSeriesMove", 1600, 2000, 2000),
+            shiftYears: -2,
+        };
+        fixedSide.evidence.notes = [
+            "candidate_hard_gate_passed",
+            "whole_baseline_source=recent_tail_lag",
+            "recent_tail_lag=-2",
+            "recent_tail_resolution_source=recent_tail_newest_segment",
+            "recent_tail_newest_segment_lag=-2",
+            "recent_tail_support_count=2",
+            "recent_tail_total_count=4",
+            "recent_tail_median_r=0.47",
+            "whole_state_newer_edge_support_fraction=0.5",
+        ];
+        const inflatedWhole = {
+            ...event("inflated-whole", "wholeSeriesMove", 1600, 2000, 2000),
+            shiftYears: -3,
+        };
+        inflatedWhole.evidence.notes = [
+            "whole_state_global_lag_matches_shift=true",
+            "whole_state_newer_edge_support_fraction=0.5",
+        ];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("detected", fixedSide),
+            checkpoint("fused", fixedSide),
+            checkpoint("retained", fixedSide),
+            checkpoint("displayed", fixedSide),
+            { stage: "final", authority: "selected", event: inflatedWhole },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            event: {
+                id: "fixed-side-whole",
+                eventType: "wholeSeriesMove",
+                shiftYears: -2,
+            },
+        });
+        expect(decision.event?.evidence.algorithmSources).toContain(
+            "fixed_side_whole_frame_priority",
+        );
+    });
+
     it.each(["falseRing", "partialMove"] as const)(
         "offers a diagnosed %s after the user excludes a durable whole frame",
         (eventType) => {

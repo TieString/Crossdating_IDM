@@ -240,7 +240,9 @@ export const makeRecentTailWholeDraft = (
     effectiveConfig: EffectiveDiagnosisConfig,
 ): CandidateDraft | null => {
     const resolution = resolveFixedSideLag(diagnosis, effectiveConfig);
-    if (!resolution || resolution.lag === 0) return null;
+    // Positive whole-series shifts are available to manual editing only. Automatic dating
+    // suggestions use a negative correction frame; zero means no whole-series correction.
+    if (!resolution || resolution.lag >= 0) return null;
     const supportingRows = resolution.rows.filter((row) => (
         row.bestLag === resolution.lag
     ));

@@ -1349,6 +1349,46 @@ describe("lower review-window display gate", () => {
         expect(result.event).toBe(selected);
     });
 
+    it("does not let the display gate veto an adjudicated bark-side whole frame", () => {
+        const selected = {
+            ...strictEvent(),
+            eventType: "wholeSeriesMove" as const,
+            shiftYears: -2,
+            startYear: 1600,
+            endYear: 2000,
+            evidence: {
+                ...strictEvent().evidence,
+                algorithmSources: ["fixed_side_whole_frame_priority"],
+                notes: [
+                    "candidate_hard_gate_passed",
+                    "whole_baseline_source=recent_tail_lag",
+                    "recent_tail_lag=-2",
+                    "recent_tail_resolution_source=recent_tail_newest_segment",
+                    "recent_tail_newest_segment_lag=-2",
+                    "recent_tail_support_count=2",
+                    "recent_tail_total_count=4",
+                    "recent_tail_median_r=0.47",
+                    "whole_state_newer_edge_support_fraction=0.5",
+                ],
+            },
+        };
+        const result = selectReviewWindowDisplay(
+            audit([], { finalReason: "emitted" }),
+            [],
+            [],
+            {},
+            jointDecision(selected, "displayed"),
+        );
+
+        expect(result).toMatchObject({
+            status: "strict",
+            reason: "strict_event",
+            sourceStage: "displayed",
+            event: { eventType: "wholeSeriesMove", shiftYears: -2 },
+        });
+        expect(result.event).toBe(selected);
+    });
+
     it("displays a durable global-lag whole frame selected from an earlier stage", () => {
         const selected = {
             ...strictEvent(),
