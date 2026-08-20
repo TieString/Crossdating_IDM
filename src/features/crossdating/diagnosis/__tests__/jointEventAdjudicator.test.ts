@@ -241,7 +241,7 @@ describe("joint event adjudicator", () => {
         });
     });
 
-    it("keeps an explicitly validated local frontier on a short durable whole frame", () => {
+    it("repairs a durable whole frame before its compatible local frontier", () => {
         const whole = {
             ...event("path-fixed-whole", "wholeSeriesMove", 1600, 2000, 2000),
             shiftYears: -2,
@@ -273,12 +273,14 @@ describe("joint event adjudicator", () => {
         expect(decision).toMatchObject({
             status: "selected",
             event: {
-                id: "whole-frame-local",
-                eventType: "missingRing",
-                startYear: 1974,
-                endYear: 1980,
+                id: "path-fixed-whole",
+                eventType: "wholeSeriesMove",
+                shiftYears: -2,
             },
         });
+        expect(decision.event?.evidence.algorithmSources).toContain(
+            "durable_whole_frame_priority",
+        );
     });
 
     it.each(["falseRing", "partialMove"] as const)(

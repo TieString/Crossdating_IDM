@@ -1489,15 +1489,6 @@ const wholeFrameAuthority = (event: DiagnosisEvent): number => {
     return 0;
 };
 
-const isWholeFrameCompatibleLocalFrontier = (
-    event: DiagnosisEvent,
-    frameLag: number,
-): boolean => event.eventType !== "wholeSeriesMove"
-    && event.evidence.lagAfter === frameLag
-    && event.evidence.algorithmSources.includes(
-        "whole_frame_compatible_local_frontier",
-    );
-
 /**
  * A durable negative whole hypothesis defines the coordinate frame for later local edits.
  * A local event may precede it only when its untouched side lands exactly on that frame.
@@ -1546,20 +1537,6 @@ const selectDurableWholeFrame = (
             - confidenceScore(representative(left).event)
     ))[0];
     if (compressedMissingAlias) return compressedMissingAlias;
-    const explicitCompatibleFrontier = allFinalClusters.flatMap((cluster) => (
-        cluster.checkpoints.filter((checkpoint) => (
-            checkpoint.stage === "final"
-            && checkpoint.authority !== "supplemental"
-            && isWholeFrameCompatibleLocalFrontier(checkpoint.event, frameLag)
-        ))
-    )).sort((left, right) => (
-        (topYear(right.event) ?? Number.NEGATIVE_INFINITY)
-            - (topYear(left.event) ?? Number.NEGATIVE_INFINITY)
-        || eventLocationQuality(right.event) - eventLocationQuality(left.event)
-    ))[0] ?? null;
-    if (explicitCompatibleFrontier) {
-        return { checkpoints: [explicitCompatibleFrontier] };
-    }
     const compatibleLocal = allFinalClusters.filter((cluster) => {
         const event = representative(cluster).event;
         return event.eventType !== "wholeSeriesMove"
@@ -1716,13 +1693,8 @@ const selectStandaloneGlobalWholeFrame = (
         const event = representative(cluster).event;
         return event.eventType !== "wholeSeriesMove"
             && event.evidence.lagAfter === baselineLag
-            && (
-                isWholeFrameCompatibleLocalFrontier(event, baselineLag)
-                || (
-                    evidenceClaimsFor(event).has("bounded_lag_state_path")
-                    && strongBoundedPathLocation(event) !== null
-                )
-            );
+            && evidenceClaimsFor(event).has("bounded_lag_state_path")
+            && strongBoundedPathLocation(event) !== null;
     });
     if (exactLocalOnBaseline) return null;
 
@@ -2182,20 +2154,10 @@ const finalFrontierClusters = (
         const compatibleBoundedCheckpoints = allFinalClusters.flatMap((cluster) => (
             cluster.checkpoints.filter((checkpoint) => (
                 checkpoint.stage === "final"
+                && evidenceClaimsFor(checkpoint.event).has("bounded_lag_state_path")
                 && checkpoint.event.eventType !== "wholeSeriesMove"
                 && checkpoint.event.evidence.lagAfter === baselineLag
-                && (
-                    isWholeFrameCompatibleLocalFrontier(
-                        checkpoint.event,
-                        baselineLag,
-                    )
-                    || (
-                        evidenceClaimsFor(checkpoint.event).has(
-                            "bounded_lag_state_path",
-                        )
-                        && strongBoundedPathLocation(checkpoint.event) !== null
-                    )
-                )
+                && strongBoundedPathLocation(checkpoint.event) !== null
             ))
         )).sort((left, right) => (
             (topYear(right.event) ?? Number.NEGATIVE_INFINITY)

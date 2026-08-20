@@ -20,7 +20,11 @@ import {
     getDisplayedDiagnosisEvents,
 } from "@/features/crossdating/diagnosis";
 import { createCofechaMasterReferenceConfig } from "@/features/crossdating/reference";
-import { deleteYearWithMode } from "@/features/rwl/edit";
+import {
+    deleteYearWithMode,
+    insertMissingYearAtSide,
+    moveSeriesTailByOffset,
+} from "@/features/rwl/edit";
 import { formatTucson } from "@/features/rwl/parsers/tucson";
 import type { RwlSiteData } from "@/features/rwl/types";
 import {
@@ -179,11 +183,105 @@ fixtureDescribe("co612 mon161 whole baseline plus missing-ring regression", () =
         }, null, 2);
 
         expect(displayed, details).toHaveLength(1);
-        expect(displayed[0]?.eventType, details).toBe("missingRing");
-        expect(displayed[0]?.startYear, details).toBeLessThanOrEqual(1977);
-        expect(displayed[0]?.endYear, details).toBeGreaterThanOrEqual(1977);
-        expect(displayed[0]?.evidence.algorithmSources, details).toContain(
-            "whole_frame_compatible_local_frontier",
+        expect(displayed[0]?.eventType, details).toBe("wholeSeriesMove");
+        expect(displayed[0]?.shiftYears, details).toBe(-2);
+        expect(diagnosis.candidates.some((candidate) => (
+            displayed[0]!.evidence.candidateIds.includes(candidate.id)
+            && candidate.mode === "wholeSeriesMove"
+            && candidate.deltaYears === -2
+        )), details).toBe(true);
+
+        const displayedYears = [...after1925.keys()];
+        const afterWholeRepair = moveSeriesTailByOffset(
+            after1925,
+            Math.min(...displayedYears),
+            Math.max(...displayedYears),
+            -2,
         );
+        site.set(TARGET_ID, afterWholeRepair);
+        const repairedOutText = runBundledCofecha(site);
+        const repairedParts = splitReportByParts(repairedOutText);
+        const repairedReferenceConfig = createCofechaMasterReferenceConfig({
+            siteData: site,
+            flaggedAIds: extractPart6FlaggedASeriesIds(
+                repairedParts.get("PART 6") ?? "",
+            ),
+            cofechaRunId: "co612-mon161-after-whole-repair",
+            rwlHash: "co612-mon161-after-whole-repair",
+            masterDatingSeries: parseCofechaResult(repairedOutText).masterDatingSeries,
+        });
+        const afterWholeDiagnosis = diagnoseCrossdating(site, {
+            referenceConfig: repairedReferenceConfig,
+            targetTrees: [TARGET_ID],
+            cofechaText: repairedOutText,
+            reviewWindowDisplayMode: "review",
+            includeEventDecisionAudits: true,
+        });
+        const afterWholeDisplayed = getDisplayedDiagnosisEvents(afterWholeDiagnosis)
+            .filter((event) => event.seriesId === TARGET_ID);
+        const afterWholeDetails = JSON.stringify(afterWholeDisplayed.map((event) => ({
+            type: event.eventType,
+            shiftYears: event.shiftYears,
+            range: [event.startYear, event.endYear],
+            topYear: event.rankedYears[0]?.year,
+            lagBefore: event.evidence.lagBefore,
+            lagAfter: event.evidence.lagAfter,
+            sources: event.evidence.algorithmSources,
+        })), null, 2);
+
+        expect(afterWholeDisplayed, afterWholeDetails).toHaveLength(1);
+        expect(afterWholeDisplayed[0]?.eventType, afterWholeDetails).toBe("missingRing");
+        expect(afterWholeDisplayed[0]?.startYear, afterWholeDetails)
+            .toBeLessThanOrEqual(1975);
+        expect(afterWholeDisplayed[0]?.endYear, afterWholeDetails)
+            .toBeGreaterThanOrEqual(1975);
+
+        site.set(
+            TARGET_ID,
+            insertMissingYearAtSide(afterWholeRepair, 1975, "right"),
+        );
+        const afterFirstMissingOutText = runBundledCofecha(site);
+        const afterFirstMissingParts = splitReportByParts(afterFirstMissingOutText);
+        const afterFirstMissingReferenceConfig = createCofechaMasterReferenceConfig({
+            siteData: site,
+            flaggedAIds: extractPart6FlaggedASeriesIds(
+                afterFirstMissingParts.get("PART 6") ?? "",
+            ),
+            cofechaRunId: "co612-mon161-after-first-missing-repair",
+            rwlHash: "co612-mon161-after-first-missing-repair",
+            masterDatingSeries: parseCofechaResult(
+                afterFirstMissingOutText,
+            ).masterDatingSeries,
+        });
+        const afterFirstMissingDisplayed = getDisplayedDiagnosisEvents(
+            diagnoseCrossdating(site, {
+                referenceConfig: afterFirstMissingReferenceConfig,
+                targetTrees: [TARGET_ID],
+                cofechaText: afterFirstMissingOutText,
+                reviewWindowDisplayMode: "review",
+                includeEventDecisionAudits: true,
+            }),
+        ).filter((event) => event.seriesId === TARGET_ID);
+        const afterFirstMissingDetails = JSON.stringify(
+            afterFirstMissingDisplayed.map((event) => ({
+                type: event.eventType,
+                shiftYears: event.shiftYears,
+                range: [event.startYear, event.endYear],
+                topYear: event.rankedYears[0]?.year,
+                lagBefore: event.evidence.lagBefore,
+                lagAfter: event.evidence.lagAfter,
+                sources: event.evidence.algorithmSources,
+            })),
+            null,
+            2,
+        );
+
+        expect(afterFirstMissingDisplayed, afterFirstMissingDetails).toHaveLength(1);
+        expect(afterFirstMissingDisplayed[0]?.eventType, afterFirstMissingDetails)
+            .toBe("missingRing");
+        expect(afterFirstMissingDisplayed[0]?.startYear, afterFirstMissingDetails)
+            .toBeLessThanOrEqual(1922);
+        expect(afterFirstMissingDisplayed[0]?.endYear, afterFirstMissingDetails)
+            .toBeGreaterThanOrEqual(1922);
     }, 120_000);
 });
