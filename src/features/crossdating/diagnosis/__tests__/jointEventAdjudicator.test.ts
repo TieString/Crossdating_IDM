@@ -241,6 +241,46 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("keeps an explicitly validated local frontier on a short durable whole frame", () => {
+        const whole = {
+            ...event("path-fixed-whole", "wholeSeriesMove", 1600, 2000, 2000),
+            shiftYears: -2,
+        };
+        whole.evidence.notes = [
+            "candidate_hard_gate_passed",
+            "whole_baseline_source=path_fixed_side_lag",
+            "path_fixed_side_lag=-2",
+            "path_fixed_side_newer_context_years=24",
+            "whole_state_newest_lag=-2",
+            "whole_state_newer_edge_support_fraction=0.500000",
+        ];
+        const local = event("whole-frame-local", "missingRing", 1974, 1980, 1977);
+        local.evidence.lagBefore = -3;
+        local.evidence.lagAfter = -2;
+        local.evidence.algorithmSources = [
+            "piecewise_lag_path",
+            "whole_frame_compatible_local_frontier",
+        ];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("detected", whole),
+            checkpoint("fused", whole),
+            checkpoint("retained", whole),
+            checkpoint("displayed", whole),
+            { stage: "final", authority: "selected", event: local },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            event: {
+                id: "whole-frame-local",
+                eventType: "missingRing",
+                startYear: 1974,
+                endYear: 1980,
+            },
+        });
+    });
+
     it.each(["falseRing", "partialMove"] as const)(
         "offers a diagnosed %s after the user excludes a durable whole frame",
         (eventType) => {

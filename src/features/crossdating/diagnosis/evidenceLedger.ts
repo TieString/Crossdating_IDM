@@ -126,7 +126,19 @@ const operationClaims = (event: DiagnosisEvent): DiagnosisEvidenceClaim[] => {
     if (event.eventType === "wholeSeriesMove"
         && tokens.has("whole_baseline_source=path_fixed_side_lag")
         && tokens.has("candidate_hard_gate_passed")
-        && (numberFromNotes(event, ["path_fixed_side_newer_context_years="]) ?? 0) >= 50
+        && (
+            (numberFromNotes(event, ["path_fixed_side_newer_context_years="]) ?? 0) >= 50
+            || (
+                (numberFromNotes(event, [
+                    "path_fixed_side_newer_context_years=",
+                ]) ?? 0) >= 18
+                && numberFromNotes(event, ["whole_state_newest_lag="])
+                    === event.shiftYears
+                && (numberFromNotes(event, [
+                    "whole_state_newer_edge_support_fraction=",
+                ]) ?? 0) >= 0.5
+            )
+        )
         && (event.shiftYears ?? 0) !== 0) {
         claims.push("whole_path_fixed_baseline");
     }

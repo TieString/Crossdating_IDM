@@ -9274,6 +9274,12 @@ const recoverSequentialMissingHeadEvent = (
         const hasAuthoritativeWholeCheckpoint = whole
             ? isAuthoritativeWholeSeriesCheckpoint(whole)
             : false;
+        const hasPathFixedWholeCheckpoint = whole
+            ? pathFixedWholeBaselinePreemptsLocalPath(
+                whole,
+                earlierLocationCheckpoints,
+            )
+            : false;
         const zeroLagFixedTailResolvesWhole = Number.isFinite(
             head.fixedTailMeanAdvantage,
         ) && head.fixedTailMeanAdvantage >= 0.05;
@@ -9287,6 +9293,7 @@ const recoverSequentialMissingHeadEvent = (
             && !terminalCumulativeStaircaseResolvesWhole
             && (
                 hasAuthoritativeWholeCheckpoint
+                || hasPathFixedWholeCheckpoint
                 || (
                     wholeShift !== head.pathStartLag
                     && detected.some((event) => (
@@ -13456,6 +13463,60 @@ export const makeDiagnosisEvents = (
         const earlySequentialMissing = mayHaveCumulativeMissingFrontier
             ? getSequentialMissing()
             : null;
+        const independentSequentialWhole = earlySequentialMissing?.preserveWholeBaseline
+            ? displayed.find((event) => event.eventType === "wholeSeriesMove") ?? null
+            : null;
+        const independentSequentialWholeShift = wholeSeriesMoveShiftYears(
+            independentSequentialWhole,
+        );
+        if (independentSequentialWhole
+            && independentSequentialWholeShift !== null
+            && earlySequentialMissing!.event.evidence.lagAfter
+                !== independentSequentialWholeShift) {
+            const compatiblePathFrontier = selectWholeBaselineLagPathFrontier(
+                independentSequentialWhole,
+                passRawPathEvents.events,
+            )?.event ?? null;
+            if (compatiblePathFrontier
+                && compatiblePathFrontier.evidence.lagAfter
+                    === independentSequentialWholeShift) {
+                return finalize([{
+                    ...compatiblePathFrontier,
+                    evidence: {
+                        ...compatiblePathFrontier.evidence,
+                        algorithmSources: Array.from(new Set([
+                            ...compatiblePathFrontier.evidence.algorithmSources,
+                            "whole_frame_compatible_local_frontier",
+                        ])).sort(),
+                        notes: Array.from(new Set([
+                            ...compatiblePathFrontier.evidence.notes,
+                            `compatible_whole_frame_lag=${independentSequentialWholeShift}`,
+                            `rejected_zero_baseline_sequential_lag_after=${
+                                earlySequentialMissing!.event.evidence.lagAfter
+                            }`,
+                        ])),
+                    },
+                }], [], false);
+            }
+            const framedWhole: DiagnosisEvent = {
+                ...independentSequentialWhole,
+                evidence: {
+                    ...independentSequentialWhole.evidence,
+                    algorithmSources: Array.from(new Set([
+                        ...independentSequentialWhole.evidence.algorithmSources,
+                        "whole_frame_before_incompatible_sequential_path",
+                    ])).sort(),
+                    notes: Array.from(new Set([
+                        ...independentSequentialWhole.evidence.notes,
+                        `incompatible_sequential_lag_after=${
+                            earlySequentialMissing!.event.evidence.lagAfter
+                        }`,
+                        `preserved_whole_frame_lag=${independentSequentialWholeShift}`,
+                    ])),
+                },
+            };
+            return finalize([framedWhole], [], false);
+        }
         const cumulativeMissingFrontier = earlySequentialMissing
             && !earlySequentialMissing.preserveWholeBaseline
             && earlySequentialMissing.event.eventType === "missingRing"

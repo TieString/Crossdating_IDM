@@ -163,6 +163,28 @@ describe("diagnosis evidence ledger", () => {
         expect(evidenceClaimsFor(whole)).not.toContain("whole_path_fixed_baseline");
     });
 
+    it("records a shorter fixed-side baseline when the newest state independently agrees", () => {
+        const whole = event();
+        whole.eventType = "wholeSeriesMove";
+        whole.shiftYears = -2;
+        whole.evidence.notes.push(
+            "candidate_hard_gate_passed",
+            "whole_baseline_source=path_fixed_side_lag",
+            "path_fixed_side_newer_context_years=24",
+            "whole_state_newest_lag=-2",
+            "whole_state_newer_edge_support_fraction=0.500000",
+        );
+
+        expect(evidenceClaimsFor(whole)).toContain("whole_path_fixed_baseline");
+
+        whole.evidence.notes = whole.evidence.notes.map((note) => (
+            note === "whole_state_newest_lag=-2"
+                ? "whole_state_newest_lag=-4"
+                : note
+        ));
+        expect(evidenceClaimsFor(whole)).not.toContain("whole_path_fixed_baseline");
+    });
+
     it("records a whole baseline resolved by a stable recent tail", () => {
         const whole = event();
         whole.eventType = "wholeSeriesMove";
