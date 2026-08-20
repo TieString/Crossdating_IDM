@@ -1,5 +1,0 @@
-﻿family,structure,scenarios,cases,truth_events,spacing_years
-A,clean control and one missing/false/partial/whole event,5,115,92,not_applicable
-B,distant local pairs and whole plus one local event,12,276,552,30
-C,near local pairs,9,207,414,7
-D,whole plus partial plus missing or false,4,92,276,mixed
