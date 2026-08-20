@@ -94,6 +94,19 @@ const hasConfirmedCumulativeUnitFrontier = (event: DiagnosisEvent): boolean => {
 const hasUnflaggedReviewAuthority = (event: DiagnosisEvent): boolean => {
     if (hasConfirmedCumulativeUnitFrontier(event)) return true;
     const claims = evidenceClaimsFor(event);
+    const terminalAmbiguity = event.interpretationAmbiguity;
+    const verifiedTerminalUnitFrame = event.eventType === "wholeSeriesMove"
+        && event.shiftYears === -1
+        && event.evidence.algorithmSources.includes(
+            "terminal_unit_whole_frame_priority",
+        )
+        && claims.has("whole_global_lag")
+        && (event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY) >= 0.1
+        && event.evidence.samplePairs >= 30
+        && terminalAmbiguity?.kind === "wholeSeriesMoveOrMissingRing"
+        && terminalAmbiguity.alternative.endYear
+            === (event.seriesRange?.endYear ?? event.endYear);
+    if (verifiedTerminalUnitFrame) return true;
     const decisiveClaims: DiagnosisEvidenceClaim[] = [
         "bounded_lag_state_path",
         "fixed_side_resolution",

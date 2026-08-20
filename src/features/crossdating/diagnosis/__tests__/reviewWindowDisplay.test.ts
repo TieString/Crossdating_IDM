@@ -261,6 +261,60 @@ describe("lower review-window display gate", () => {
         });
     });
 
+    it("shows an unflagged verified terminal unit frame with its endpoint review", () => {
+        const whole: DiagnosisEvent = {
+            ...strictEvent(),
+            id: "verified-terminal-unit-frame",
+            eventType: "wholeSeriesMove",
+            startYear: 1800,
+            endYear: 2000,
+            seriesRange: { startYear: 1800, endYear: 2000 },
+            rankedYears: [],
+            shiftYears: -1,
+            evidence: {
+                ...strictEvent().evidence,
+                algorithmSources: [
+                    "durable_whole_frame_priority",
+                    "terminal_unit_whole_frame_priority",
+                ],
+                correlationGain: 0.24,
+                samplePairs: 393,
+                notes: [
+                    "whole_state_global_lag_matches_shift=true",
+                    "whole_state_newer_edge_support_fraction=1.000000",
+                ],
+            },
+        };
+        whole.interpretationAmbiguity = {
+            kind: "wholeSeriesMoveOrMissingRing",
+            alternative: {
+                ...strictEvent(),
+                id: "terminal-missing-review",
+                startYear: 1996,
+                endYear: 2000,
+            },
+            evidence: {
+                wholeShiftYears: -1,
+                endpointDistanceYears: 0,
+                missingWindowWidth: 5,
+                operationScoreMargin: null,
+                finalEvidenceClaims: [],
+            },
+        };
+
+        expect(selectReviewWindowDisplay(
+            audit([], { cofechaFlagged: false }),
+            [whole],
+            [],
+            {},
+            jointDecision(whole, "candidate"),
+        )).toMatchObject({
+            status: "strict",
+            reason: "strict_event",
+            event: whole,
+        });
+    });
+
     it("does not let a final-stage label bypass the unflagged clean-series gate", () => {
         const strict = strictEvent();
         expect(selectReviewWindowDisplay(

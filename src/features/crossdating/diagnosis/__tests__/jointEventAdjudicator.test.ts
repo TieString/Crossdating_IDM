@@ -241,6 +241,129 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("keeps a verified terminal unit frontier ahead of an older bounded transition", () => {
+        const whole = {
+            ...event("terminal-whole", "wholeSeriesMove", 1610, 2002, 2002),
+            shiftYears: -1,
+        };
+        whole.seriesRange = { startYear: 1610, endYear: 2002 };
+        whole.evidence.correlationGain = 0.258;
+        whole.evidence.notes = [
+            "candidate_hard_gate_passed",
+            "whole_state_newest_lag=-1",
+            "whole_state_global_lag=-1",
+            "whole_state_global_lag_matches_shift=true",
+            "whole_state_newer_edge_support_fraction=1.000000",
+        ];
+        const endpoint = event("terminal-missing", "missingRing", 1995, 2001, 1998);
+        endpoint.seriesRange = { startYear: 1610, endYear: 2002 };
+        endpoint.evidence.lagBefore = -1;
+        endpoint.evidence.lagAfter = -3;
+        endpoint.evidence.correlationGain = 0.259;
+        endpoint.evidence.algorithmSources = [
+            "candidate_ranking",
+            "local_edit_alignment",
+            "newer_endpoint_unit_alias_of_global_lag",
+        ];
+        endpoint.evidence.notes = ["candidate_hard_gate_passed"];
+        const older = event("older-partial", "partialMove", 1856, 1868, 1862, 100);
+        older.shiftYears = -3;
+        older.evidence.lagBefore = -4;
+        older.evidence.lagAfter = -1;
+        older.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        older.evidence.locationEvidence = [{
+            source: "bounded_complete_lag_path",
+            startYear: 1856,
+            endYear: 1868,
+            topYear: 1862,
+            referenceCount: 20,
+            concentration: 0.9,
+            remoteMargin: 1,
+            calibrated: false,
+        }];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", whole),
+            checkpoint("detected", endpoint),
+            checkpoint("fused", endpoint),
+            checkpoint("retained", endpoint),
+            { stage: "final", authority: "selected", event: older },
+        ]);
+
+        expect(decision.event).toMatchObject({
+            id: "terminal-whole",
+            eventType: "wholeSeriesMove",
+            shiftYears: -1,
+            interpretationAmbiguity: {
+                kind: "wholeSeriesMoveOrMissingRing",
+                alternative: {
+                    eventType: "missingRing",
+                    endYear: 2002,
+                },
+            },
+        });
+        expect(decision.event?.evidence.algorithmSources).toContain(
+            "terminal_unit_whole_frame_priority",
+        );
+    });
+
+    it("keeps a persisted terminal unit frame without an explicit endpoint alias", () => {
+        const whole = {
+            ...event("persisted-terminal-whole", "wholeSeriesMove", 1610, 2002, 2002),
+            shiftYears: -1,
+        };
+        whole.seriesRange = { startYear: 1610, endYear: 2002 };
+        whole.evidence.samplePairs = 393;
+        whole.evidence.correlationGain = 0.242;
+        whole.evidence.notes = [
+            "candidate_hard_gate_passed",
+            "whole_state_newest_lag=-1",
+            "whole_state_global_lag=-1",
+            "whole_state_global_lag_matches_shift=true",
+            "whole_state_newer_edge_support_fraction=1.000000",
+        ];
+        const older = event("older-partial", "partialMove", 1856, 1868, 1862, 100);
+        older.shiftYears = -3;
+        older.evidence.lagBefore = -4;
+        older.evidence.lagAfter = -1;
+        older.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        older.evidence.locationEvidence = [{
+            source: "bounded_complete_lag_path",
+            startYear: 1856,
+            endYear: 1868,
+            topYear: 1862,
+            referenceCount: 20,
+            concentration: 0.9,
+            remoteMargin: 1,
+            calibrated: false,
+        }];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", whole),
+            checkpoint("detected", whole),
+            checkpoint("fused", whole),
+            checkpoint("retained", whole),
+            checkpoint("displayed", whole),
+            { stage: "final", authority: "selected", event: older },
+        ]);
+
+        expect(decision.event).toMatchObject({
+            id: "persisted-terminal-whole",
+            eventType: "wholeSeriesMove",
+            shiftYears: -1,
+            interpretationAmbiguity: {
+                kind: "wholeSeriesMoveOrMissingRing",
+                alternative: {
+                    eventType: "missingRing",
+                    endYear: 2002,
+                },
+            },
+        });
+        expect(decision.event?.evidence.algorithmSources).toContain(
+            "terminal_unit_whole_frame_priority",
+        );
+    });
+
     it("repairs a durable whole frame before its compatible local frontier", () => {
         const whole = {
             ...event("path-fixed-whole", "wholeSeriesMove", 1600, 2000, 2000),

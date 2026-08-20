@@ -1528,6 +1528,99 @@ const selectFixedSideWholeFrame = (
     };
 };
 
+const annotateDurableWholeFrame = (
+    frame: HypothesisCluster,
+    extraSource?: string,
+    extraNote?: string,
+): HypothesisCluster => ({
+    checkpoints: frame.checkpoints.map((checkpoint) => ({
+        ...checkpoint,
+        event: withEvidenceLedger({
+            ...checkpoint.event,
+            evidence: {
+                ...checkpoint.event.evidence,
+                algorithmSources: Array.from(new Set([
+                    ...checkpoint.event.evidence.algorithmSources,
+                    "durable_whole_frame_priority",
+                    ...(extraSource ? [extraSource] : []),
+                ])).sort(),
+                notes: Array.from(new Set([
+                    ...checkpoint.event.evidence.notes,
+                    "whole_frame_precedes_unresolved_local_aggregate=true",
+                    ...(extraNote ? [extraNote] : []),
+                ])),
+            },
+        }),
+    })),
+});
+
+const hasVerifiedTerminalUnitCandidate = (
+    evidenceClusters: readonly HypothesisCluster[],
+    frame: HypothesisCluster,
+): boolean => {
+    const frameEvidence = frame.checkpoints.map(({ event }) => event).filter((event) => (
+        event.eventType === "wholeSeriesMove"
+        && event.shiftYears === -1
+        && noteNumber(event, "whole_state_newest_lag=") === -1
+        && noteNumber(event, "whole_state_global_lag=") === -1
+        && event.evidence.notes.includes("whole_state_global_lag_matches_shift=true")
+        && (noteNumber(event, "whole_state_newer_edge_support_fraction=") ?? 0) >= 0.8
+        && event.evidence.notes.includes("candidate_hard_gate_passed")
+    ));
+    if (frameEvidence.length === 0) return false;
+    const frameGain = Math.max(...frameEvidence.map((event) => (
+        event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY
+    )));
+    const endpointYear = Math.max(...frameEvidence.map((event) => (
+        event.seriesRange?.endYear ?? event.endYear
+    )));
+    const frameStages = new Set(frame.checkpoints.map(({ stage }) => stage));
+    const persistedStrongFrame = [...WHOLE_FRAME_STAGES].every((stage) => (
+        frameStages.has(stage)
+    )) && frameEvidence.some((event) => (
+        (event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY) >= 0.1
+        && event.evidence.samplePairs >= 30
+    ));
+    if (persistedStrongFrame) return true;
+
+    const persistedAliasStages = new Set(evidenceClusters.flatMap((cluster) => (
+        cluster.checkpoints.filter((checkpoint) => {
+            const candidate = checkpoint.event;
+            const candidateGain = candidate.evidence.correlationGain
+                ?? Number.NEGATIVE_INFINITY;
+            return checkpoint.stage !== "candidate"
+                && checkpoint.stage !== "final"
+                && candidate.eventType === "missingRing"
+                && candidate.endYear <= endpointYear
+                && endpointYear - candidate.endYear <= 2
+                && candidate.evidence.notes.includes("candidate_hard_gate_passed")
+                && candidate.evidence.algorithmSources.includes(
+                    "newer_endpoint_unit_alias_of_global_lag",
+                )
+                && candidate.evidence.lagBefore === -1
+                && candidateGain >= 0.05
+                && candidateGain >= frameGain - 0.02;
+        })
+    )).map(({ stage }) => stage));
+    if (persistedAliasStages.size >= 2) return true;
+
+    return evidenceClusters.some((cluster) => cluster.checkpoints.some((checkpoint) => {
+        const candidate = checkpoint.event;
+        const candidateGain = candidate.evidence.correlationGain
+            ?? Number.NEGATIVE_INFINITY;
+        return checkpoint.stage === "candidate"
+            && candidate.eventType === "missingRing"
+            && candidate.endYear <= endpointYear
+            && endpointYear - candidate.endYear <= 2
+            && candidate.evidence.notes.includes("candidate_hard_gate_passed")
+            && candidate.evidence.algorithmSources.includes("candidate_ranking")
+            && candidate.evidence.algorithmSources.includes("local_edit_alignment")
+            && candidate.evidence.lagBefore === -1
+            && candidateGain >= 0.05
+            && candidateGain >= frameGain - 0.02;
+    }));
+};
+
 /**
  * A durable negative whole hypothesis defines the coordinate frame for later local edits.
  * A local event may precede it only when its untouched side lands exactly on that frame.
@@ -1590,25 +1683,43 @@ const selectDurableWholeFrame = (
     ))[0];
     if (compatibleLocal) return compatibleLocal;
 
-    return {
-        checkpoints: frame.checkpoints.map((checkpoint) => ({
-            ...checkpoint,
-            event: withEvidenceLedger({
-                ...checkpoint.event,
-                evidence: {
-                    ...checkpoint.event.evidence,
-                    algorithmSources: Array.from(new Set([
-                        ...checkpoint.event.evidence.algorithmSources,
-                        "durable_whole_frame_priority",
-                    ])).sort(),
-                    notes: Array.from(new Set([
-                        ...checkpoint.event.evidence.notes,
-                        "whole_frame_precedes_unresolved_local_aggregate=true",
-                    ])),
-                },
-            }),
-        })),
-    };
+    return annotateDurableWholeFrame(frame);
+};
+
+const selectVerifiedTerminalUnitFrame = (
+    clusters: readonly HypothesisCluster[],
+    evidenceClusters: readonly HypothesisCluster[],
+    selectedFinalClusters: readonly HypothesisCluster[],
+    config: JointEventAdjudicationConfig,
+): HypothesisCluster | null => {
+    const frames = clusters.filter((cluster) => {
+        const event = representative(cluster).event;
+        if (event.eventType !== "wholeSeriesMove"
+            || event.shiftYears !== -1
+            || !hasVerifiedTerminalUnitCandidate(evidenceClusters, cluster)) return false;
+        const endpointYear = event.seriesRange?.endYear ?? event.endYear;
+        return selectedFinalClusters.some((finalCluster) => {
+            const finalEvent = representative(finalCluster).event;
+            const finalTop = topYear(finalEvent);
+            return finalEvent.eventType !== "wholeSeriesMove"
+                && finalTop !== null
+                && endpointYear - finalTop > config.remoteModeDistanceYears;
+        });
+    }).sort((left, right) => (
+        new Set(right.checkpoints.map(({ stage }) => stage)).size
+            - new Set(left.checkpoints.map(({ stage }) => stage)).size
+        || confidenceScore(representative(right).event)
+            - confidenceScore(representative(left).event)
+    ));
+    const frame = frames[0];
+    if (!frame) return null;
+    // A terminal missing ring has no newer fixed side and is observationally equivalent to
+    // whole -1. Resolve that newest ambiguity before a remote bounded transition.
+    return annotateDurableWholeFrame(
+        frame,
+        "terminal_unit_whole_frame_priority",
+        "terminal_unit_frontier_precedes_older_transition=true",
+    );
 };
 
 const selectStrongerGlobalWholeCandidate = (
@@ -1891,7 +2002,21 @@ const selectEndpointMissingInterpretation = (
 ): DiagnosisEvent | null => {
     if (whole.eventType !== "wholeSeriesMove"
         || reviewableWholeMissingShift(whole) === null) return null;
-    return clusters.flatMap((cluster) => cluster.checkpoints)
+    const checkpoints = clusters.flatMap((cluster) => cluster.checkpoints);
+    const persistedAliasStages = new Set(checkpoints.filter((checkpoint) => {
+        const { event } = checkpoint;
+        const endpointDistance = whole.endYear - event.endYear;
+        return checkpoint.stage !== "candidate"
+            && checkpoint.stage !== "final"
+            && event.eventType === "missingRing"
+            && endpointDistance >= 0
+            && endpointDistance <= 2
+            && event.evidence.notes.includes("candidate_hard_gate_passed")
+            && event.evidence.algorithmSources.includes(
+                "newer_endpoint_unit_alias_of_global_lag",
+            );
+    }).map(({ stage }) => stage));
+    return checkpoints
         .filter((checkpoint) => {
             const { event } = checkpoint;
             if (event.eventType !== "missingRing") return false;
@@ -1901,17 +2026,25 @@ const selectEndpointMissingInterpretation = (
             if (checkpoint.stage === "final") {
                 return endpointDistance <= 29 && endpointMissingAuthority(event) >= 0;
             }
-            return checkpoint.stage === "candidate"
-                && endpointDistance
-                    <= MAX_CANDIDATE_ENDPOINT_INTERPRETATION_DISTANCE_YEARS
+            if (checkpoint.stage === "candidate") {
+                return endpointDistance
+                        <= MAX_CANDIDATE_ENDPOINT_INTERPRETATION_DISTANCE_YEARS
+                    && event.evidence.notes.includes("candidate_hard_gate_passed")
+                    && event.evidence.algorithmSources.includes("candidate_ranking")
+                    && event.evidence.algorithmSources.includes("local_edit_alignment");
+            }
+            return persistedAliasStages.size >= 2
+                && endpointDistance <= 2
                 && event.evidence.notes.includes("candidate_hard_gate_passed")
-                && event.evidence.algorithmSources.includes("candidate_ranking")
-                && event.evidence.algorithmSources.includes("local_edit_alignment");
+                && event.evidence.algorithmSources.includes(
+                    "newer_endpoint_unit_alias_of_global_lag",
+                );
         })
         .sort((left, right) => (
             (right.stage === "final" ? 1 : 0) - (left.stage === "final" ? 1 : 0)
             || endpointMissingAuthority(right.event)
                 - endpointMissingAuthority(left.event)
+            || stagePriority[right.stage] - stagePriority[left.stage]
             || confidenceScore(right.event) - confidenceScore(left.event)
             || right.event.endYear - left.event.endYear
             || (topYear(right.event) ?? Number.NEGATIVE_INFINITY)
@@ -2140,6 +2273,7 @@ const selectEndpointCandidate = (
 const finalFrontierClusters = (
     clusters: readonly HypothesisCluster[],
     config: JointEventAdjudicationConfig,
+    evidenceClusters: readonly HypothesisCluster[] = clusters,
 ): HypothesisCluster[] | null => {
     const allFinalClusters = clusters.filter(hasFinalCheckpoint);
     if (allFinalClusters.length === 0) return null;
@@ -2152,6 +2286,13 @@ const finalFrontierClusters = (
             && checkpoint.authority !== "supplemental"
         ))
     ));
+    const terminalUnitFrame = selectVerifiedTerminalUnitFrame(
+        clusters,
+        evidenceClusters,
+        selectedFinalClusters,
+        config,
+    );
+    if (terminalUnitFrame) return [terminalUnitFrame];
     const fixedSideWholeFrame = selectFixedSideWholeFrame(clusters);
     if (fixedSideWholeFrame) return [fixedSideWholeFrame];
     const durableWholeFrame = selectDurableWholeFrame(
@@ -2634,7 +2775,11 @@ export const adjudicateJointEventHypotheses = (
 
     // Final output may contain several serial events. Only the newest local mode is the current
     // user-facing frontier; older modes stay immutable and are reconsidered after one edit.
-    const frontierClusters = finalFrontierClusters(clusters, config) ?? clusters;
+    const frontierClusters = finalFrontierClusters(
+        clusters,
+        config,
+        submittedClusters,
+    ) ?? clusters;
     const operationGroups = groupOperations(frontierClusters).sort((left, right) => (
         operationScore(right) - operationScore(left)
         || operationKey(representative(left.clusters[0]).event).localeCompare(
@@ -2702,10 +2847,18 @@ export const adjudicateJointEventHypotheses = (
         ? selectWholeLocalInterpretation(clusters)
         : null;
     const endpointMissingInterpretation = baseSelectedEvent
-        ? selectEndpointMissingInterpretation(clusters, baseSelectedEvent)
+        ? selectEndpointMissingInterpretation(submittedClusters, baseSelectedEvent)
+        : null;
+    const syntheticTerminalMissingInterpretation = baseSelectedEvent
+        && endpointWholeShift === -1
+        && baseSelectedEvent.evidence.algorithmSources.includes(
+            "terminal_unit_whole_frame_priority",
+        )
+        ? makeEndpointMissingReviewFromWhole(baseSelectedEvent)
         : null;
     const endpointLocalEvent = baseSelectedEvent
         ? endpointMissingInterpretation
+            ?? syntheticTerminalMissingInterpretation
             ?? diagnosedLocalEvent
             ?? makeEndpointMissingReviewFromWhole(baseSelectedEvent)
         : null;

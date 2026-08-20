@@ -1818,6 +1818,109 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
         });
     }, 180_000);
 
+    bundledCofechaIt("keeps the terminal mtr722 zero ahead of all older missing rings", () => {
+        const seriesId = "mtr722";
+        const series = parsed.get(seriesId)!;
+        const truthYears = Array.from(series.valuesByYear)
+            .filter(([, value]) => value === 0)
+            .map(([year]) => year)
+            .sort((left, right) => left - right);
+        const newestTruth = truthYears[truthYears.length - 1]!;
+        const site = new Map(cleanSite);
+        site.set(seriesId, buildMultiMissingCorrupted(
+            series.valuesByYear,
+            truthYears,
+        ));
+        const outText = runBundledCofecha(site);
+        const parts = splitReportByParts(outText);
+        const freshReference = createCofechaMasterReferenceConfig({
+            siteData: site,
+            flaggedAIds: extractPart6FlaggedASeriesIds(parts.get("PART 6") ?? ""),
+            cofechaRunId: "co612-mtr722-all-zero-terminal-frontier",
+            rwlHash: "co612-mtr722-all-zero-terminal-frontier",
+            masterDatingSeries: parseCofechaResult(outText).masterDatingSeries,
+        });
+        const states = [
+            {
+                name: "before_save",
+                diagnosis: diagnoseCrossdating(site, {
+                    referenceConfig,
+                    targetTrees: [seriesId],
+                    reviewWindowDisplayMode: "review",
+                    includeEventDecisionAudits: true,
+                }),
+            },
+            {
+                name: "after_save",
+                diagnosis: diagnoseCrossdating(site, {
+                    referenceConfig: freshReference,
+                    targetTrees: [seriesId],
+                    cofechaText: outText,
+                    reviewWindowDisplayMode: "review",
+                    includeEventDecisionAudits: true,
+                }),
+            },
+        ].map((state) => ({
+            ...state,
+            displayed: getDisplayedDiagnosisEvents(state.diagnosis)
+                .filter((event) => event.seriesId === seriesId),
+        }));
+        const failureContext = JSON.stringify({
+            truthYears,
+            states: states.map((state) => ({
+                name: state.name,
+                displayed: summarize(state.displayed),
+                stages: state.diagnosis.eventDecisionAudits?.map((audit) => ({
+                    candidate: summarizeAudit(audit.candidateProjectedEvents),
+                    detected: summarizeAudit(audit.detectedBeforeFusion),
+                    fused: summarizeAudit(audit.detectedAfterFusion),
+                    retained: summarizeAudit(audit.retainedAfterEndpointGuard),
+                    preLocator: summarizeAudit(audit.displayedBeforeLocator),
+                    final: summarizeAudit(audit.finalEvents),
+                })),
+                joint: state.diagnosis.jointEventDecisions?.map((decision) => ({
+                    status: decision.status,
+                    reason: decision.reason,
+                    sourceStage: decision.sourceStage,
+                    event: decision.event ? summarize([decision.event])[0] : null,
+                })),
+                review: state.diagnosis.reviewWindowDecisions?.map((decision) => ({
+                    status: decision.status,
+                    reason: decision.reason,
+                    sourceStage: decision.sourceStage,
+                    event: decision.event ? summarize([decision.event])[0] : null,
+                })),
+            })),
+        });
+
+        expect(newestTruth).toBe(2002);
+        states.forEach(({ name, displayed }) => {
+            expect(displayed, `${name}: ${failureContext}`).toHaveLength(1);
+            const event = displayed[0]!;
+            const terminalWhole = event.eventType === "wholeSeriesMove"
+                && event.shiftYears === -1;
+            const terminalMissing = event.eventType === "missingRing"
+                && event.startYear <= newestTruth
+                && event.endYear >= newestTruth;
+            expect(
+                terminalWhole || terminalMissing,
+                `${name}: ${failureContext}`,
+            ).toBe(true);
+            if (terminalWhole) {
+                expect(
+                    event.interpretationAmbiguity,
+                    `${name}: ${failureContext}`,
+                ).toMatchObject({
+                    kind: "wholeSeriesMoveOrMissingRing",
+                    alternative: {
+                        eventType: "missingRing",
+                        endYear: newestTruth,
+                    },
+                });
+            }
+        });
+    }, 180_000);
+
     bundledCofechaIt("keeps the first two bark-side mtr721 zero removals as one missing-ring frontier", () => {
         const seriesId = "mtr721";
         const mtr721 = parsed.get(seriesId)!;
