@@ -4818,6 +4818,75 @@ describe("selectCumulativePartialFrontier", () => {
         )).toBeNull();
     });
 
+    it("lets a stale master locate but not own a repeated older partial operation", () => {
+        const olderPartial = partialMoveEvent(-3);
+        olderPartial.startYear = 1895;
+        olderPartial.endYear = 1907;
+        olderPartial.rankedYears = [{ year: 1902, rank: 1, score: 5, evidenceTags: [] }];
+        olderPartial.evidence = {
+            ...olderPartial.evidence,
+            algorithmSources: [
+                "bounded_complete_lag_path",
+                "repeated_partial_component_frontier",
+            ],
+        };
+        const newestUnit = falseRingEvent(1974, false);
+        newestUnit.eventType = "missingRing";
+        newestUnit.startYear = 1973;
+        newestUnit.endYear = 1979;
+        newestUnit.rankedYears = [{ year: 1976, rank: 1, score: 3, evidenceTags: [] }];
+        newestUnit.evidence = {
+            ...newestUnit.evidence,
+            scoreMargin: 0.12,
+            correlationGain: 0.23,
+            samplePairs: 58,
+            lagBefore: -1,
+            lagAfter: 0,
+            algorithmSources: ["piecewise_lag_path"],
+            notes: [
+                "mixed_reference_counterfactual_selected",
+                "nominal_boundary_year=1977",
+                "profile_boundary_year=1977",
+            ],
+        };
+        const olderTerminalOne = pathEvent(-1, -1, 0, 1902);
+        olderTerminalOne.eventType = "missingRing";
+        const olderTerminalHalf = pathEvent(-1, -1, 0, 1903);
+        olderTerminalHalf.eventType = "missingRing";
+        const selected = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                pathEvent(-10, -11, -1, 1810),
+                olderTerminalOne,
+            ]),
+            boundedPath([
+                pathEvent(-10, -11, -1, 1811),
+                olderTerminalHalf,
+            ]),
+        );
+
+        expect(selectDirectTerminalUnitBeforeDerivedStablePartial(
+            selected,
+            olderPartial,
+            [newestUnit],
+        )).toBeNull();
+        expect(selectDirectTerminalUnitBeforeDerivedStablePartial(
+            selected,
+            olderPartial,
+            [newestUnit],
+            [],
+            true,
+        )).toMatchObject({
+            eventType: "missingRing",
+            startYear: 1973,
+            endYear: 1979,
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "stale_reference_terminal_unit_checkpoint",
+                ]),
+            },
+        });
+    });
+
     it("uses a displayed cumulative operation to authorize the newest path component", () => {
         const selected = selectStableBoundedLagPathFrontier(
             boundedPath([

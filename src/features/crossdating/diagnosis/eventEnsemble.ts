@@ -7859,55 +7859,78 @@ export const selectDirectTerminalUnitBeforeDerivedStablePartial = (
     stableEvent: DiagnosisEvent | null,
     displayed: readonly DiagnosisEvent[],
     candidateEvents: readonly DiagnosisEvent[] = [],
+    referenceIsStale = false,
 ): DiagnosisEvent | null => {
     if (!frontier
         || !stableEvent
         || frontier.transitionCount < 2) return null;
 
     const stableYear = rankedEventYear(stableEvent);
+    const stableIsRepeatedDerivedPartial = stableEvent.eventType === "partialMove"
+        && stableEvent.evidence.algorithmSources.includes(
+            "repeated_partial_component_frontier",
+        );
     const hypotheses = [...displayed, ...candidateEvents];
-    const terminalUnits = hypotheses.filter((event) => {
-        if (event.eventType !== "missingRing" && event.eventType !== "falseRing") return false;
+    const terminalUnits = hypotheses.flatMap((event) => {
+        if (event.eventType !== "missingRing" && event.eventType !== "falseRing") return [];
         const expectedShift = event.eventType === "missingRing" ? -1 : 1;
         const year = rankedEventYear(event);
         const nominalBoundaryYear = noteYear(event, "nominal_boundary_year=");
         const profileBoundaryYear = noteYear(event, "profile_boundary_year=");
         const sources = new Set(event.evidence.algorithmSources);
-        return lagPathTransitionShift(event) === expectedShift
+        const hasConsistentDirectBoundary = lagPathTransitionShift(event) === expectedShift
             && event.evidence.lagAfter === 0
             && sources.has("piecewise_lag_path")
-            && sources.has("counterfactual_window_refinement")
-            && sources.has("joint_event_counterfactual")
             && event.evidence.scoreMargin >= 0.05
             && (event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY) >= 0.1
             && event.evidence.samplePairs >= 30
             && nominalBoundaryYear !== null
             && nominalBoundaryYear === profileBoundaryYear
             && Math.abs(year - nominalBoundaryYear) <= 1;
+        if (!hasConsistentDirectBoundary) return [];
+        const independentlyLocalized = sources.has("counterfactual_window_refinement")
+            && sources.has("joint_event_counterfactual");
+        // Before save, the previous COFECHA master may still locate older structure. It cannot
+        // turn that repeated aggregate into the active operation over an exact terminal step.
+        const staleReferenceFallback = referenceIsStale
+            && stableIsRepeatedDerivedPartial
+            && event.evidence.notes.includes("mixed_reference_counterfactual_selected")
+            && (event.evidence.correlationGain ?? Number.NEGATIVE_INFINITY) >= 0.15
+            && event.evidence.samplePairs >= 50;
+        return independentlyLocalized || staleReferenceFallback
+            ? [{ event, staleReferenceFallback }]
+            : [];
     });
     const remoteDirectUnit = terminalUnits
-        .filter((event) => rankedEventYear(event) > stableEvent.endYear + 2)
+        .filter(({ event }) => rankedEventYear(event) > stableEvent.endYear + 2)
         .sort((left, right) => (
-            rankedEventYear(right) - rankedEventYear(left)
-            || right.evidence.score - left.evidence.score
+            rankedEventYear(right.event) - rankedEventYear(left.event)
+            || right.event.evidence.score - left.event.evidence.score
         ))[0];
     if (remoteDirectUnit) {
+        const { event, staleReferenceFallback } = remoteDirectUnit;
         return {
-            ...remoteDirectUnit,
-            id: `${remoteDirectUnit.id}-terminal-unit-frontier-checkpoint`,
+            ...event,
+            id: `${event.id}-terminal-unit-frontier-checkpoint`,
             alternativeTypes: [],
             locationAlternatives: undefined,
             operationAlternatives: undefined,
             evidence: {
-                ...remoteDirectUnit.evidence,
+                ...event.evidence,
                 algorithmSources: Array.from(new Set([
-                    ...remoteDirectUnit.evidence.algorithmSources,
+                    ...event.evidence.algorithmSources,
                     "direct_terminal_unit_frontier_checkpoint",
+                    ...(staleReferenceFallback
+                        ? ["stale_reference_terminal_unit_checkpoint"]
+                        : []),
                 ])).sort(),
                 notes: Array.from(new Set([
-                    ...remoteDirectUnit.evidence.notes,
+                    ...event.evidence.notes,
                     `older_stable_path_deferred_year=${stableYear}`,
                     `older_stable_path_transition_count=${frontier.transitionCount}`,
+                    ...(staleReferenceFallback
+                        ? ["stale_reference_cannot_own_repeated_partial_operation=true"]
+                        : []),
                 ])),
             },
         };
@@ -13683,10 +13706,15 @@ export const makeDiagnosisEvents = (
                 stableBoundedPathFrontier,
                 [...displayed, ...detectedBeforeFusion],
                 candidateEvents,
+                effectiveConfig.referenceConfig?.isStale === true,
             );
+        const staleReferenceTerminalUnitOwnsOperation =
+            directTerminalUnitFrontier?.evidence.algorithmSources.includes(
+                "stale_reference_terminal_unit_checkpoint",
+            ) ?? false;
         if (directTerminalUnitFrontier
             && stablePathHasFinalAuthority
-            && !stablePartialPathOwnsOperation) {
+            && (!stablePartialPathOwnsOperation || staleReferenceTerminalUnitOwnsOperation)) {
             return finalize([directTerminalUnitFrontier], [], false);
         }
         const stableFrontierYear = stableBoundedPathFrontier

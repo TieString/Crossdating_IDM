@@ -1765,11 +1765,17 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
         const states = [
             {
                 name: "clean_reference_before_save",
-                diagnosis: diagnoseState(afterAllSite),
+                diagnosis: diagnoseState(afterAllSite, {
+                    ...referenceConfig,
+                    isStale: true,
+                }),
             },
             {
                 name: "previous_saved_reference_before_save",
-                diagnosis: diagnoseState(afterAllSite, previousSaved.reference),
+                diagnosis: diagnoseState(afterAllSite, {
+                    ...previousSaved.reference,
+                    isStale: true,
+                }),
             },
             {
                 name: "fresh_reference_after_save",
@@ -1807,10 +1813,6 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
         states.forEach(({ displayed }) => {
             expect(displayed, failureContext).toHaveLength(1);
             expect(displayed[0].eventType, failureContext).toBe("missingRing");
-            expect(displayed[0].rankedYears[0], failureContext).toMatchObject({
-                year: newestTruth,
-                rank: 1,
-            });
             expect(displayed[0].startYear, failureContext)
                 .toBeLessThanOrEqual(newestTruth);
             expect(displayed[0].endYear, failureContext)

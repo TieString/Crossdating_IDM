@@ -93,6 +93,10 @@ const hasConfirmedCumulativeUnitFrontier = (event: DiagnosisEvent): boolean => {
 
 const hasUnflaggedReviewAuthority = (event: DiagnosisEvent): boolean => {
     if (hasConfirmedCumulativeUnitFrontier(event)) return true;
+    // A stale PART 6 classification cannot veto a stricter current-data terminal checkpoint.
+    if (event.evidence.algorithmSources.includes(
+        "stale_reference_terminal_unit_checkpoint",
+    )) return true;
     const claims = evidenceClaimsFor(event);
     const terminalAmbiguity = event.interpretationAmbiguity;
     const verifiedTerminalUnitFrame = event.eventType === "wholeSeriesMove"

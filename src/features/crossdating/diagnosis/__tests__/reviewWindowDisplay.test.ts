@@ -1208,6 +1208,18 @@ describe("lower review-window display gate", () => {
             [],
             [checkpoint(missing)],
         ).reason).toBe("cofecha_target_unflagged");
+        const staleReferenceTerminal = checkpoint(missing).event;
+        staleReferenceTerminal.evidence.algorithmSources.push(
+            "stale_reference_terminal_unit_checkpoint",
+        );
+        expect(selectReviewWindowDisplay(
+            audit([missing], { cofechaFlagged: false }),
+            [staleReferenceTerminal],
+        )).toMatchObject({
+            status: "strict",
+            reason: "strict_event",
+            event: { eventType: "missingRing" },
+        });
         expect(selectReviewWindowDisplay(
             audit([partial]),
             [],
