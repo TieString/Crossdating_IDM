@@ -15,6 +15,7 @@ import {
     createCofechaMasterReferenceConfig,
     createCofechaPassReferenceConfig,
 } from "@/features/crossdating/reference";
+import { createPairwiseBootstrapTargetReferenceConfig } from "@/features/crossdating/pairwiseBootstrap";
 import { formatTucson } from "@/features/rwl/parsers/tucson";
 import type { RwlSiteData } from "@/features/rwl/types";
 import {
@@ -1137,6 +1138,95 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
             targetYear: frontierYear,
             side: "right",
         });
+    }, 300_000);
+
+    naturalCofechaIt("keeps mon023 on its third bark-side frontier before saving", () => {
+        const seriesId = "mon023";
+        const natural = parseRwl(readFileSync(NATURAL_FIXTURE_PATH, "utf8"));
+        const targetSeries = natural.get(seriesId)!;
+        const truthYears = Array.from(targetSeries.valuesByYear)
+            .filter(([, value]) => value === 0)
+            .map(([year]) => year)
+            .sort((left, right) => right - left);
+        const cleanSite: RwlSiteData = new Map(
+            Array.from(natural, ([id, series]) => [id, new Map(series.valuesByYear)]),
+        );
+        const allMissingSite = new Map(cleanSite);
+        let working = buildMultiMissingCorrupted(targetSeries.valuesByYear, truthYears);
+        allMissingSite.set(seriesId, new Map(working));
+        const allMissingOut = runBundledCofecha(allMissingSite);
+        const allMissingParts = splitReportByParts(allMissingOut);
+        const allMissingReference = createCofechaMasterReferenceConfig({
+            siteData: allMissingSite,
+            flaggedAIds: extractPart6FlaggedASeriesIds(
+                allMissingParts.get("PART 6") ?? "",
+            ),
+            cofechaRunId: "co612-mon023-all-missing",
+            rwlHash: "co612-mon023-all-missing",
+            masterDatingSeries: parseCofechaResult(allMissingOut).masterDatingSeries,
+        });
+        working = applyInsertRestore(working, truthYears[0]!);
+        working = applyInsertRestore(working, truthYears[1]!);
+        const currentSite = new Map(cleanSite);
+        currentSite.set(seriesId, working);
+        const targetReference = createPairwiseBootstrapTargetReferenceConfig(
+            currentSite,
+            allMissingReference,
+            seriesId,
+        );
+        const diagnosis = diagnoseCrossdating(currentSite, {
+            referenceConfig: targetReference,
+            targetTrees: [seriesId],
+            reviewWindowDisplayMode: "review",
+            includeEventDecisionAudits: true,
+        });
+        const displayed = getDisplayedDiagnosisEvents(diagnosis).filter(
+            (event) => event.seriesId === seriesId,
+        );
+        const primary = displayed[0];
+        const reviewedMissing = primary?.eventType === "missingRing"
+            ? primary
+            : primary?.interpretationAmbiguity?.alternative.eventType === "missingRing"
+                ? primary.interpretationAmbiguity.alternative
+                : null;
+        const frontierYear = truthYears[2]!;
+        const audit = diagnosis.eventDecisionAudits?.find(
+            (row) => row.seriesId === seriesId,
+        );
+        const context = JSON.stringify({
+            truthYears,
+            displayed: summarize(displayed),
+            reviewedMissing: reviewedMissing ? summarize([reviewedMissing])[0] : null,
+            stages: audit ? {
+                candidate: summarizeAudit(audit.candidateProjectedEvents),
+                detected: summarizeAudit(audit.detectedBeforeFusion),
+                fused: summarizeAudit(audit.detectedAfterFusion),
+                retained: summarizeAudit(audit.retainedAfterEndpointGuard),
+                displayed: summarizeAudit(audit.displayedBeforeLocator),
+                stableBounded: audit.stableBoundedPathEvidence,
+                localLag: audit.localLagTransitionEvidence,
+            } : null,
+            final: audit ? summarizeAudit(audit.finalEvents) : null,
+            joint: diagnosis.jointEventDecisions?.map((decision) => ({
+                status: decision.status,
+                reason: decision.reason,
+                event: decision.event ? summarize([decision.event])[0] : null,
+            })),
+            decisions: diagnosis.reviewWindowDecisions?.map((decision) => ({
+                status: decision.status,
+                reason: decision.reason,
+                sourceStage: decision.sourceStage,
+            })),
+        });
+
+        expect(truthYears.slice(0, 5)).toEqual([1977, 1902, 1879, 1861, 1851]);
+        expect(displayed, context).toHaveLength(1);
+        expect(reviewedMissing?.eventType, context).toBe("missingRing");
+        expect(reviewedMissing?.startYear, context).toBeLessThanOrEqual(frontierYear);
+        expect(reviewedMissing?.endYear, context).toBeGreaterThanOrEqual(frontierYear);
+        expect(reviewedMissing?.evidence.notes, context).toContain(
+            "multi_frontier_validated_unit_anchor=1875",
+        );
     }, 300_000);
 
     naturalCofechaIt("does not collapse mtr842 remote missing rings into an endpoint whole shift", () => {

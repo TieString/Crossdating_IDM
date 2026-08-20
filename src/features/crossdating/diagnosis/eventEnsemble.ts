@@ -6672,6 +6672,38 @@ export const selectStableUnitPathLocationCheckpoints = (
     });
 };
 
+export const selectCorroboratedUnitPathLocationCheckpoint = (
+    pathEvents: readonly DiagnosisEvent[],
+    independentEvents: readonly DiagnosisEvent[],
+    maximumYearDrift = 4,
+): DiagnosisEvent | null => pathEvents.filter((event) => {
+    if ((event.eventType !== "missingRing" && event.eventType !== "falseRing")
+        || event.evidence.lagAfter !== 0
+        || strongBoundedPathLocation(event) === null) return false;
+    const year = rankedEventYear(event);
+    if (year === null) return false;
+    return independentEvents.some((independent) => {
+        const independentYear = rankedEventYear(independent);
+        const hasIndependentSource = independent.evidence.algorithmSources.some((source) => (
+            source !== "bounded_complete_lag_path"
+            && source !== "piecewise_lag_path"
+            && source !== "stable_multiscale_bounded_path_frontier"
+        ));
+        const compatibleOperation = independent.eventType === event.eventType
+            || (event.eventType === "missingRing"
+                && independent.eventType === "partialMove"
+                && (independent.shiftYears ?? 0) < -1);
+        return independentYear !== null
+            && hasIndependentSource
+            && compatibleOperation
+            && Math.abs(independentYear - year) <= maximumYearDrift;
+    });
+}).sort((left, right) => (
+    (rankedEventYear(right) ?? Number.NEGATIVE_INFINITY)
+        - (rankedEventYear(left) ?? Number.NEGATIVE_INFINITY)
+    || right.evidence.score - left.evidence.score
+))[0] ?? null;
+
 /** Pairwise cold starts keep bounded paths as evidence until an absolute anchor is restored. */
 export const allowStableBoundedPathFinalAuthority = (
     preferRemotePairedMissingFrontier = false,
@@ -12764,10 +12796,18 @@ export const makeDiagnosisEvents = (
                     ...detected,
                     ...displayed,
                 ];
+                const corroboratedNearUnitCheckpoint =
+                    selectCorroboratedUnitPathLocationCheckpoint(
+                        rawNearPenaltyTwoPath?.events ?? [],
+                        preliminaryLocations,
+                    );
                 const stageEvents = [
                     ...supportedCandidateLocations,
                     ...preliminaryLocations,
                     ...stableUnitPathLocationCheckpoints,
+                    ...(corroboratedNearUnitCheckpoint
+                        ? [corroboratedNearUnitCheckpoint]
+                        : []),
                     ...(stableBoundedPathFrontier ? [stableBoundedPathFrontier] : []),
                     ...(stableTerminalSequentialUnit ? [stableTerminalSequentialUnit] : []),
                 ];
@@ -12824,12 +12864,28 @@ export const makeDiagnosisEvents = (
                     && stableTerminalSequentialUnit === null
                     && localLagTransitionEvidence === null;
                 if (preserveStrongSelectedPartial) return event;
+                const stableUnitFrontierAnchor = [
+                    ...stableUnitPathLocationCheckpoints,
+                    ...(corroboratedNearUnitCheckpoint
+                        ? [corroboratedNearUnitCheckpoint]
+                        : []),
+                ]
+                    .filter((checkpoint) => (
+                        checkpoint.eventType === event.eventType
+                        || (event.eventType === "partialMove"
+                            && (event.shiftYears ?? 0) < -1
+                            && checkpoint.eventType === "missingRing")
+                    ))
+                    .map(rankedEventYear)
+                    .filter((year): year is number => Number.isInteger(year))
+                    .sort((left, right) => right - left)[0] ?? null;
                 return projectMultiEventLocationConsensus(
                     event,
                     stageYears,
                     diagnosis.targetRange,
                     hasStructuralMultiEventEvidence,
                     stableBoundedPathFrontier ? 16 : 12,
+                    stableUnitFrontierAnchor,
                 );
             });
             const automaticSemanticsRejectedCount = frontierConsensusEvents.filter(

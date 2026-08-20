@@ -43,6 +43,7 @@ import {
     selectOperationAnchoredRegularizedAggregatePartialFrontier,
     selectCandidateAnchoredStableBoundedLagPathFrontier,
     selectStableUnitPathLocationCheckpoints,
+    selectCorroboratedUnitPathLocationCheckpoint,
     selectCumulativeLagPathFrontier,
     selectStableBoundedLagPathFrontier,
     selectConservativeStableBoundedLagPathFrontier,
@@ -4239,6 +4240,51 @@ describe("selectCumulativePartialFrontier", () => {
                 intermediateMissing,
             ]),
         )).toEqual([missing]);
+    });
+
+    it("anchors a strong unit path only when an independent location agrees", () => {
+        const located = (input: DiagnosisEvent): DiagnosisEvent => ({
+            ...input,
+            evidence: {
+                ...input.evidence,
+                algorithmSources: ["bounded_complete_lag_path"],
+                locationEvidence: [{
+                    source: "bounded_complete_lag_path",
+                    startYear: input.startYear,
+                    endYear: input.endYear,
+                    topYear: input.rankedYears[0]?.year ?? input.startYear,
+                    referenceCount: 20,
+                    concentration: 0.91,
+                    remoteMargin: 2.4,
+                    calibrated: false,
+                }],
+            },
+        });
+        const missing = located({
+            ...pathEvent(-1, -1, 0, 1875),
+            eventType: "missingRing",
+            shiftYears: undefined,
+            shiftSide: undefined,
+        });
+        const independentPartial = {
+            ...pathEvent(-99, -99, 0, 1875),
+            evidence: {
+                ...pathEvent(-99, -99, 0, 1875).evidence,
+                algorithmSources: ["reference_core_voting"],
+            },
+        };
+
+        expect(selectCorroboratedUnitPathLocationCheckpoint(
+            [missing],
+            [independentPartial],
+        )).toBe(missing);
+        expect(selectCorroboratedUnitPathLocationCheckpoint(
+            [missing],
+            [{ ...independentPartial, rankedYears: [{
+                ...independentPartial.rankedYears[0],
+                year: 1868,
+            }] }],
+        )).toBeNull();
     });
 
     it("rejects close, discontinuous, or penalty-unstable decompositions", () => {

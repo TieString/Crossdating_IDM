@@ -227,6 +227,37 @@ describe("multi-event frontier location consensus", () => {
         });
     });
 
+    it("anchors a cumulative mode to a validated bark-side unit frontier", () => {
+        const input = event();
+        input.eventType = "partialMove";
+        input.shiftYears = -3;
+        input.startYear = 1855;
+        input.endYear = 1867;
+        input.rankedYears = [{ year: 1865, rank: 1, score: 4, evidenceTags: [] }];
+
+        expect(projectMultiEventLocationConsensus(
+            input,
+            [1865, 1875],
+            { startYear: 1503, endYear: 2000 },
+            true,
+            16,
+            1875,
+        )).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -3,
+            startYear: 1869,
+            endYear: 1881,
+            rankedYears: expect.arrayContaining([
+                expect.objectContaining({ year: 1875, rank: 1 }),
+            ]),
+            evidence: {
+                notes: expect.arrayContaining([
+                    "multi_frontier_validated_unit_anchor=1875",
+                ]),
+            },
+        });
+    });
+
     it("uses a 13-year window without moving a single unsupported mode", () => {
         const input = event();
         input.startYear = 1887;

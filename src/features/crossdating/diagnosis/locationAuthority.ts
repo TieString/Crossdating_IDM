@@ -168,6 +168,7 @@ export const projectMultiEventLocationConsensus = (
     targetRange: { startYear: number; endYear: number },
     forceMultiEventWindow = false,
     maximumModeSpanYears = 16,
+    frontierAnchorYear: number | null = null,
 ): DiagnosisEvent => {
     if (event.eventType === "wholeSeriesMove") return event;
     const currentYear = rankedYear(event);
@@ -204,7 +205,11 @@ export const projectMultiEventLocationConsensus = (
             : null
     );
     if (!selectedYears) return event;
-    const centerYear = Math.round(selectedYears.reduce(
+    const anchoredFrontierYear = frontierAnchorYear !== null
+        && selectedYears.includes(frontierAnchorYear)
+        ? frontierAnchorYear
+        : null;
+    const centerYear = anchoredFrontierYear ?? Math.round(selectedYears.reduce(
         (sum, year) => sum + year,
         0,
     ) / selectedYears.length);
@@ -324,6 +329,9 @@ export const projectMultiEventLocationConsensus = (
                 `multi_frontier_evidence_years=${selectedYears.join(",")}`,
                 `multi_frontier_center_year=${centerYear}`,
                 `multi_frontier_consensus_window=${window.startYear}-${window.endYear}`,
+                ...(anchoredFrontierYear === null ? [] : [
+                    `multi_frontier_validated_unit_anchor=${anchoredFrontierYear}`,
+                ]),
                 ...(guardedByTerminalBoundary ? [
                     `multi_frontier_terminal_boundary_guard=${terminalBoundaryYear}`,
                 ] : []),
