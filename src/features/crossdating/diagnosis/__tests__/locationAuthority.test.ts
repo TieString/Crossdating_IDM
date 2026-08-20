@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DiagnosisEvent } from "../types";
 import {
     preservesStrongBoundedPathMode,
+    projectCumulativePartialToValidatedUnitFrontier,
     projectMultiEventLocationConsensus,
     projectUnsupportedLocationToStrongBoundedPath,
     projectUnitLocationFromIndependentConsensus,
@@ -79,6 +80,139 @@ describe("strong bounded-path location authority", () => {
 });
 
 describe("multi-event frontier location consensus", () => {
+    it("moves a calibrated cumulative partial to a newer independently verified unit frontier", () => {
+        const partial = event({ calibrated: true });
+        partial.eventType = "partialMove";
+        partial.shiftYears = -3;
+        partial.shiftSide = "older";
+        partial.startYear = 1858;
+        partial.endYear = 1870;
+        partial.seriesRange = { startYear: 1602, endYear: 2000 };
+        partial.rankedYears = [{ year: 1864, rank: 1, score: 4, evidenceTags: [] }];
+        partial.evidence.lagBefore = -3;
+        partial.evidence.lagAfter = 0;
+        partial.evidence.notes.push(
+            "stable_bounded_path_transition_count=4",
+            "stable_bounded_path_all_transitions_partial=false",
+        );
+        const frontier = event();
+        frontier.startYear = 1875;
+        frontier.endYear = 1883;
+        frontier.rankedYears = [{ year: 1879, rank: 1, score: 3, evidenceTags: [] }];
+        frontier.evidence = {
+            ...frontier.evidence,
+            scoreMargin: 0.33,
+            correlationGain: 0.08,
+            samplePairs: 35,
+            lagBefore: -1,
+            lagAfter: 0,
+            algorithmSources: [
+                "collapsed_missing_staircase_head",
+                "counterfactual_window_refinement",
+                "local_counterfactual_raw_year",
+                "piecewise_lag_path",
+            ],
+            notes: [
+                "nominal_boundary_year=1879",
+                "profile_boundary_year=1879",
+                "scan_top_year=1879",
+                "unit_local_raw31_year=1879",
+                "unit_local_difference31_year=1879",
+                "unit_local_whitened31_year=1879",
+                "unit_local_multiScale_year=1879",
+                "unit_local_pairMean31_year=1879",
+            ],
+        };
+
+        const projected = projectCumulativePartialToValidatedUnitFrontier(
+            partial,
+            [frontier],
+            { startYear: 1602, endYear: 2000 },
+        );
+
+        expect(projected).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -3,
+            startYear: 1873,
+            endYear: 1885,
+            rankedYears: expect.arrayContaining([
+                expect.objectContaining({ year: 1880, rank: 1 }),
+            ]),
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "validated_newer_unit_frontier_location",
+                ]),
+                notes: expect.arrayContaining([
+                    "validated_unit_frontier_missing_year=1879",
+                    "validated_unit_frontier_first_fixed_year=1880",
+                ]),
+            },
+        });
+    });
+
+    it("does not move a cumulative partial for a weak or boundary-inconsistent unit mode", () => {
+        const partial = event();
+        partial.eventType = "partialMove";
+        partial.shiftYears = -3;
+        partial.shiftSide = "older";
+        partial.startYear = 1858;
+        partial.endYear = 1870;
+        partial.evidence.lagBefore = -3;
+        partial.evidence.lagAfter = 0;
+        partial.evidence.notes.push(
+            "stable_bounded_path_transition_count=4",
+            "stable_bounded_path_all_transitions_partial=false",
+        );
+        const weak = event();
+        weak.startYear = 1875;
+        weak.endYear = 1883;
+        weak.rankedYears = [{ year: 1879, rank: 1, score: 3, evidenceTags: [] }];
+        weak.evidence = {
+            ...weak.evidence,
+            lagBefore: -1,
+            lagAfter: 0,
+            algorithmSources: [
+                "collapsed_missing_staircase_head",
+                "counterfactual_window_refinement",
+                "local_counterfactual_raw_year",
+                "piecewise_lag_path",
+            ],
+            notes: [
+                "nominal_boundary_year=1879",
+                "profile_boundary_year=1878",
+                "scan_top_year=1879",
+            ],
+        };
+
+        expect(projectCumulativePartialToValidatedUnitFrontier(
+            partial,
+            [weak],
+            { startYear: 1602, endYear: 2000 },
+        )).toBe(partial);
+        expect(projectCumulativePartialToValidatedUnitFrontier(
+            partial,
+            [{
+                ...weak,
+                evidence: {
+                    ...weak.evidence,
+                    notes: [
+                        ...weak.evidence.notes.filter((note) => !note.startsWith(
+                            "profile_boundary_year=",
+                        )),
+                        "profile_boundary_year=1879",
+                        "unit_local_raw31_year=1879",
+                        "unit_local_difference31_year=1879",
+                        "unit_local_whitened31_year=1879",
+                        "unit_local_multiScale_year=1879",
+                        "unit_local_pairMean31_year=1879",
+                    ],
+                },
+            }],
+            { startYear: 1602, endYear: 2000 },
+            true,
+        )).toBe(partial);
+    });
+
     it("does not rewrite an already calibrated current window", () => {
         const input = event({ calibrated: true });
         expect(projectMultiEventLocationConsensus(

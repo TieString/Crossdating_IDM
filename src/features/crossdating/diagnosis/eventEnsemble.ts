@@ -81,6 +81,7 @@ import {
     refineStablePartialMoveLocation,
 } from "./stablePartialLocationConsensus";
 import {
+    projectCumulativePartialToValidatedUnitFrontier,
     projectMultiEventLocationConsensus,
     projectUnitLocationFromIndependentConsensus,
     strongBoundedPathLocation,
@@ -13906,7 +13907,8 @@ export const makeDiagnosisEvents = (
             // exact partials remain as supplemental hypotheses; the joint adjudicator may use
             // one when the path has over-decomposed that same operation without repeated parts.
             const locatedStableFrontier = stableBoundedPathFrontier.eventType === "partialMove"
-                ? addStablePartialRankEdgeGuard(
+                ? projectCumulativePartialToValidatedUnitFrontier(
+                    addStablePartialRankEdgeGuard(
                         refineStablePartialMoveLocation(
                             stableBoundedPathFrontier,
                             diagnosis,
@@ -13914,7 +13916,11 @@ export const makeDiagnosisEvents = (
                             stableMultiscaleBoundedFrontier?.baselineLag ?? 0,
                         ),
                         diagnosis,
-                    )
+                    ),
+                    [...detectedBeforeFusion, ...displayed],
+                    diagnosis.targetRange,
+                    hasAuthoritativeWholeBaseline,
+                )
                 : refineStableUnitEventWithLocalConsensus(
                         stableBoundedPathFrontier,
                         diagnosis,

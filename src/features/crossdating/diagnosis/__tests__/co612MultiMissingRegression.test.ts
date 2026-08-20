@@ -1990,6 +1990,112 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
         expect(failures).toEqual([]);
     }, 180_000);
 
+    naturalCofechaIt("keeps the third frontier after save under a perturbed reference state", () => {
+        const naturalParsed = parseRwl(readFileSync(NATURAL_FIXTURE_PATH, "utf8"));
+        const naturalTarget = naturalParsed.get(TARGET_ID)!;
+        const truths = Array.from(naturalTarget.valuesByYear)
+            .filter(([, value]) => value === 0)
+            .map(([year]) => year)
+            .sort((left, right) => right - left);
+        const allMissing = buildMultiMissingCorrupted(naturalTarget.valuesByYear, truths);
+        const afterTwo = applyInsertRestore(
+            applyInsertRestore(allMissing, truths[0]!),
+            truths[1]!,
+        );
+        const site: RwlSiteData = new Map(
+            Array.from(naturalParsed, ([seriesId, series]) => [
+                seriesId,
+                new Map(series.valuesByYear),
+            ]),
+        );
+        // Fixed reference perturbations reproduce a saved file in which several other cores
+        // have already been edited. They deliberately contain no change to the target core.
+        site.set("mon232", new Map(
+            Array.from(site.get("mon232")!).filter(([year]) => (
+                year < 1897 || year >= 1938
+            )),
+        ));
+        site.set("mon241", applyInsertRestore(
+            naturalParsed.get("mon241")!.valuesByYear,
+            1632,
+        ));
+        site.set("mon242", applyInsertRestore(
+            naturalParsed.get("mon242")!.valuesByYear,
+            1632,
+        ));
+        site.set("mtr722", new Map(
+            Array.from(site.get("mtr722")!).filter(([year]) => year !== 2002),
+        ));
+        site.set(TARGET_ID, afterTwo);
+
+        const outText = runBundledCofecha(site);
+        const parts = splitReportByParts(outText);
+        const freshReference = createCofechaMasterReferenceConfig({
+            siteData: site,
+            flaggedAIds: extractPart6FlaggedASeriesIds(parts.get("PART 6") ?? ""),
+            cofechaRunId: "co612-mon052-perturbed-reference-after-two",
+            rwlHash: "co612-mon052-perturbed-reference-after-two",
+            masterDatingSeries: parseCofechaResult(outText).masterDatingSeries,
+        });
+        const diagnosis = diagnoseCrossdating(site, {
+            referenceConfig: freshReference,
+            targetTrees: [TARGET_ID],
+            cofechaText: outText,
+            reviewWindowDisplayMode: "review",
+            includeEventDecisionAudits: true,
+        });
+        const displayed = getDisplayedDiagnosisEvents(diagnosis).filter(
+            (event) => event.seriesId === TARGET_ID,
+        );
+        const primary = displayed[0];
+        const missingInterpretation = primary?.interpretationAmbiguity?.kind
+            === "missingRingsOrPartialMove"
+            ? primary.interpretationAmbiguity.alternative
+            : primary;
+        const frontierYear = truths[2]!;
+        const context = JSON.stringify({
+            frontierYear,
+            displayed: summarize(displayed),
+            interpretation: missingInterpretation
+                ? summarize([missingInterpretation])[0]
+                : null,
+            audit: diagnosis.eventDecisionAudits?.find(
+                (candidate) => candidate.seriesId === TARGET_ID,
+            ),
+        });
+
+        expect(truths.slice(0, 5)).toEqual([1977, 1902, 1879, 1873, 1861]);
+        expect(displayed, context).toHaveLength(1);
+        expect(primary, context).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -3,
+            startYear: 1873,
+            endYear: 1885,
+            rankedYears: expect.arrayContaining([
+                expect.objectContaining({ year: 1880, rank: 1 }),
+            ]),
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "validated_newer_unit_frontier_location",
+                ]),
+            },
+        });
+        expect(primary!.startYear, context).toBeLessThanOrEqual(frontierYear);
+        expect(primary!.endYear, context).toBeGreaterThanOrEqual(frontierYear);
+        expect(missingInterpretation, context).toMatchObject({
+            eventType: "missingRing",
+            startYear: 1873,
+            endYear: 1885,
+            rankedYears: expect.arrayContaining([
+                expect.objectContaining({ year: 1879, rank: 1 }),
+            ]),
+        });
+        expect(missingInterpretation!.startYear, context)
+            .toBeLessThanOrEqual(frontierYear);
+        expect(missingInterpretation!.endYear, context)
+            .toBeGreaterThanOrEqual(frontierYear);
+    }, 180_000);
+
     bundledCofechaIt("keeps the terminal mtr722 zero ahead of all older missing rings", () => {
         const seriesId = "mtr722";
         const series = parsed.get(seriesId)!;

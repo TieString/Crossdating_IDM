@@ -2329,6 +2329,23 @@ const finalFrontierClusters = (
         // observed current-data fixed side must not be replaced by an older stale-reference mode.
         return [staleReferenceCurrentDataFrontier];
     }
+    const validatedNewerUnitFrontier = selectedFinalClusters.filter((cluster) => (
+        cluster.checkpoints.some((checkpoint) => (
+            checkpoint.stage === "final"
+            && checkpoint.authority !== "supplemental"
+            && checkpoint.event.evidence.algorithmSources.includes(
+                "validated_newer_unit_frontier_location",
+            )
+        ))
+    )).sort((left, right) => (
+        (topYear(representative(right).event) ?? Number.NEGATIVE_INFINITY)
+            - (topYear(representative(left).event) ?? Number.NEGATIVE_INFINITY)
+    ))[0] ?? null;
+    if (validatedNewerUnitFrontier) {
+        // Whole-frame selectors above still own the coordinate baseline. Otherwise, a final
+        // multi-view unit anchor is the location authority for this already-selected partial.
+        return [validatedNewerUnitFrontier];
+    }
     const concentratedAggregatePartial = selectConcentratedAggregatePartial(
         allFinalClusters,
         selectedFinalClusters,

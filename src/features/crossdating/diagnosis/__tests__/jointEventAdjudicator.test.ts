@@ -241,6 +241,43 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("keeps a validated newer unit location ahead of an older aggregate partial mode", () => {
+        const older = event("older-aggregate", "partialMove", 1856, 1868, 1862, 20);
+        older.shiftYears = -3;
+        older.evidence.lagBefore = -3;
+        older.evidence.algorithmSources = [
+            "bounded_complete_lag_path",
+            "stable_multiscale_bounded_path_frontier",
+        ];
+        const frontier = event("newer-frontier", "partialMove", 1873, 1885, 1880, 10);
+        frontier.shiftYears = -3;
+        frontier.evidence.lagBefore = -3;
+        frontier.evidence.algorithmSources = [
+            "bounded_complete_lag_path",
+            "stable_multiscale_bounded_path_frontier",
+            "validated_newer_unit_frontier_location",
+        ];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("detected", older),
+            checkpoint("displayed", older),
+            checkpoint("final", older),
+            checkpoint("final", frontier),
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "final",
+            event: {
+                id: "newer-frontier",
+                eventType: "partialMove",
+                shiftYears: -3,
+                startYear: 1873,
+                endYear: 1885,
+            },
+        });
+    });
+
     it("keeps a verified terminal unit frontier ahead of an older bounded transition", () => {
         const whole = {
             ...event("terminal-whole", "wholeSeriesMove", 1610, 2002, 2002),

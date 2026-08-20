@@ -629,6 +629,154 @@ const noteNumber = (event: DiagnosisEvent, prefix: string): number | null => {
     return Number.isFinite(parsed) ? parsed : null;
 };
 
+const independentlySupportedUnitFrontierYears = (
+    event: DiagnosisEvent,
+): number[] => event.evidence.notes.flatMap((note) => {
+    const match = note.match(
+        /^(?:scan_top|unit_local_(?:raw31|difference31|whitened31|multiScale|pairMean31|pairMedian31|pairTrimmed31|pairWeighted31|bestReference31|pairedCore31))_year=(-?\d+)$/,
+    );
+    return match ? [Number(match[1])] : [];
+});
+
+const validatedNewerMissingFrontier = (
+    partial: DiagnosisEvent,
+    hypotheses: readonly DiagnosisEvent[],
+): { event: DiagnosisEvent; year: number; supportCount: number } | null => {
+    const partialTransitionCount = noteNumber(
+        partial,
+        "stable_bounded_path_transition_count=",
+    ) ?? 0;
+    if (partial.eventType !== "partialMove"
+        || partial.shiftSide !== "older"
+        || (partial.shiftYears ?? 0) >= -1
+        || partial.evidence.lagAfter !== 0
+        || partialTransitionCount < 2
+        || !partial.evidence.notes.includes(
+            "stable_bounded_path_all_transitions_partial=false",
+        )) return null;
+
+    return hypotheses.flatMap((candidate) => {
+        if (candidate.eventType !== "missingRing"
+            || candidate.evidence.lagBefore !== -1
+            || candidate.evidence.lagAfter !== 0) return [];
+        const year = rankedYear(candidate);
+        const nominalYear = noteNumber(candidate, "nominal_boundary_year=");
+        const profileYear = noteNumber(candidate, "profile_boundary_year=");
+        const sources = new Set(candidate.evidence.algorithmSources);
+        const supportCount = independentlySupportedUnitFrontierYears(candidate)
+            .filter((supportYear) => Math.abs(supportYear - (year ?? supportYear)) <= 2)
+            .length;
+        const independentlyLocalized = year !== null
+            && year > partial.endYear + 2
+            && year + 1 <= (partial.seriesRange?.endYear ?? Number.POSITIVE_INFINITY)
+            && nominalYear === year
+            && profileYear === year
+            && sources.has("collapsed_missing_staircase_head")
+            && sources.has("piecewise_lag_path")
+            && sources.has("counterfactual_window_refinement")
+            && sources.has("local_counterfactual_raw_year")
+            && candidate.evidence.scoreMargin >= 0.1
+            && (candidate.evidence.correlationGain ?? Number.NEGATIVE_INFINITY) >= 0.05
+            && candidate.evidence.samplePairs >= 30
+            && supportCount >= 6;
+        return independentlyLocalized ? [{ event: candidate, year, supportCount }] : [];
+    }).sort((left, right) => (
+        right.year - left.year
+        || right.supportCount - left.supportCount
+        || right.event.evidence.scoreMargin - left.event.evidence.scoreMargin
+    ))[0] ?? null;
+};
+
+/**
+ * Keeps a selected cumulative partial operation, but locates it at a newer independently
+ * verified unit frontier. The partial Top1 remains firstFixedYear; its missing interpretation
+ * therefore points to the preceding calendar year without an ad-hoc +/-1 conversion.
+ */
+export const projectCumulativePartialToValidatedUnitFrontier = (
+    partial: DiagnosisEvent,
+    hypotheses: readonly DiagnosisEvent[],
+    targetRange: { startYear: number; endYear: number },
+    hasIndependentWholeBaseline = false,
+): DiagnosisEvent => {
+    if (hasIndependentWholeBaseline) return partial;
+    const frontier = validatedNewerMissingFrontier(partial, hypotheses);
+    if (!frontier) return partial;
+
+    const missingYear = frontier.year;
+    const firstFixedYear = missingYear + 1;
+    const currentWidth = partial.endYear - partial.startYear + 1;
+    const width = ALLOWED_LOCAL_WINDOW_WIDTHS.includes(
+        currentWidth as (typeof ALLOWED_LOCAL_WINDOW_WIDTHS)[number],
+    ) ? currentWidth : 13;
+    const window = clampWindowToRange(
+        missingYear - Math.floor((width - 1) / 2),
+        width,
+        targetRange,
+    );
+    if (firstFixedYear < window.startYear || firstFixedYear > window.endYear) return partial;
+
+    const prior = new Map(partial.rankedYears.map((row) => [row.year, row]));
+    const maximumScore = Math.max(0, ...partial.rankedYears.map(({ score }) => score));
+    const minimumScore = Math.min(0, ...partial.rankedYears.map(({ score }) => score));
+    const rankedYears = Array.from(
+        { length: width },
+        (_, index) => window.startYear + index,
+    ).map((year) => ({
+        year,
+        rank: 0,
+        score: year === firstFixedYear
+            ? maximumScore + Math.max(1e-9, Math.abs(maximumScore) * 1e-12)
+            : prior.get(year)?.score ?? minimumScore - 1,
+        evidenceTags: Array.from(new Set([
+            ...(prior.get(year)?.evidenceTags ?? []),
+            "validated_newer_unit_frontier_location",
+        ])).sort(),
+    })).sort((left, right) => (
+        right.score - left.score || right.year - left.year
+    )).map((row, index) => ({ ...row, rank: index + 1 }));
+    const referenceCount = Math.max(
+        0,
+        ...locationEvidenceFor(frontier.event).map((entry) => entry.referenceCount),
+    );
+
+    return withEvidenceLedger({
+        ...partial,
+        id: `${partial.id}-validated-unit-frontier-${missingYear}`,
+        ...window,
+        rankedYears,
+        reviewCoreRange: undefined,
+        evidence: {
+            ...partial.evidence,
+            algorithmSources: Array.from(new Set([
+                ...partial.evidence.algorithmSources,
+                "validated_newer_unit_frontier_location",
+            ])).sort(),
+            locationEvidence: [
+                ...(partial.evidence.locationEvidence ?? []),
+                {
+                    source: "validated_newer_unit_frontier_location",
+                    ...window,
+                    topYear: firstFixedYear,
+                    referenceCount,
+                    concentration: Math.min(1, frontier.supportCount / 10),
+                    remoteMargin: frontier.event.evidence.scoreMargin,
+                    calibrated: true,
+                },
+            ],
+            notes: Array.from(new Set([
+                ...partial.evidence.notes,
+                `validated_unit_frontier_previous_window=${
+                    partial.startYear
+                }-${partial.endYear}`,
+                `validated_unit_frontier_missing_year=${missingYear}`,
+                `validated_unit_frontier_first_fixed_year=${firstFixedYear}`,
+                `validated_unit_frontier_support_count=${frontier.supportCount}`,
+                `validated_unit_frontier_window=${window.startYear}-${window.endYear}`,
+            ])),
+        },
+    });
+};
+
 const hasCurrentLocationAuthority = (event: DiagnosisEvent): boolean => {
     if (locationEvidenceFor(event).some((entry) => (
         entry.startYear === event.startYear && entry.endYear === event.endYear
