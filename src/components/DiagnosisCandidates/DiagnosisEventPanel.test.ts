@@ -1,13 +1,30 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { DiagnosisEvent } from "@/features/crossdating/diagnosis";
 import {
   DiagnosisEventPanel,
+  dispatchDiagnosisInterpretationChange,
   selectDiagnosisEventInterpretation,
 } from "./DiagnosisEventPanel";
 
 describe("DiagnosisEventPanel", () => {
+  it("routes interpretation switches through their dedicated handler", () => {
+    const event = { id: "whole" } as DiagnosisEvent;
+    const onInterpretationChange = vi.fn();
+    const onFocusEvent = vi.fn();
+
+    dispatchDiagnosisInterpretationChange(
+      event,
+      1904,
+      onInterpretationChange,
+      onFocusEvent,
+    );
+
+    expect(onInterpretationChange).toHaveBeenCalledWith(event, 1904);
+    expect(onFocusEvent).not.toHaveBeenCalled();
+  });
+
   it("does not project multi-transition evidence as a special cluster UI", () => {
     const event: DiagnosisEvent = {
       id: "frontier",

@@ -813,6 +813,36 @@ export default function Home() {
         handleOpenWorkspaceWindow,
     ]);
 
+    const handleDiagnosisInterpretationChange = useCallback((
+        event: DiagnosisEvent,
+        selectedYear?: number,
+    ) => {
+        if (event.eventType !== "wholeSeriesMove") {
+            handleDiagnosisPreviewSelection(
+                event,
+                selectedYear
+                    ?? event.rankedYears[0]?.year
+                    ?? Math.round((event.startYear + event.endYear) / 2),
+            );
+            return;
+        }
+
+        setActiveDiagnosisEvent(event);
+        setChartJumpTarget((previous) => (
+            previous?.diagnosisPreviewEventId ? null : previous
+        ));
+        setChartSelectedTrees((previous) => (
+            previous.includes(event.seriesId) ? previous : [...previous, event.seriesId]
+        ));
+        if (externalWorkspaceWindows["line-chart"]) {
+            handleOpenWorkspaceWindow("line-chart");
+        }
+    }, [
+        externalWorkspaceWindows,
+        handleDiagnosisPreviewSelection,
+        handleOpenWorkspaceWindow,
+    ]);
+
     const handleDiagnosisPreviewSelectionById = useCallback((eventId: string, year: number) => {
         const event = projectedDiagnosisEvents.find((candidate) => (
             !candidate.stale
@@ -1766,6 +1796,7 @@ export default function Home() {
                                                                 selectedEventId={chartJumpTarget?.diagnosisPreviewEventId}
                                                                 selectedReviewYear={chartJumpTarget?.year}
                                                                 onFocusEvent={handleFocusDiagnosisEvent}
+                                                                onInterpretationChange={handleDiagnosisInterpretationChange}
                                                                 onApplyEvent={handleApplyDiagnosisEvent}
                                                                 onDismiss={handleDismissCurrentDiagnosis}
                                                             />

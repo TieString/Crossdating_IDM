@@ -11,6 +11,7 @@ type Props = {
   selectedEventId?: string | null;
   selectedReviewYear?: number | null;
   onFocusEvent?: (event: DiagnosisEvent, selectedYear?: number) => void;
+  onInterpretationChange?: (event: DiagnosisEvent, selectedYear?: number) => void;
   onApplyEvent?: (event: DiagnosisEvent, selectedYear: number) => boolean | void;
   onDismiss?: () => void;
 };
@@ -107,6 +108,16 @@ const applyPreview = (event: DiagnosisEvent, selectedYear: number) => {
 };
 
 type InterpretationSelection = "primary" | "alternative";
+type EventSelectionHandler = (event: DiagnosisEvent, selectedYear?: number) => void;
+
+export const dispatchDiagnosisInterpretationChange = (
+  event: DiagnosisEvent,
+  selectedYear: number,
+  onInterpretationChange?: EventSelectionHandler,
+  onFocusEvent?: EventSelectionHandler,
+) => {
+  (onInterpretationChange ?? onFocusEvent)?.(event, selectedYear);
+};
 
 export const selectDiagnosisEventInterpretation = (
   event: DiagnosisEvent,
@@ -158,6 +169,7 @@ export function DiagnosisEventPanel({
   selectedEventId = null,
   selectedReviewYear = null,
   onFocusEvent,
+  onInterpretationChange,
   onApplyEvent,
   onDismiss,
 }: Props) {
@@ -389,7 +401,12 @@ export function DiagnosisEventPanel({
                         && nextSelectableYears.some((row) => row.year === savedNextYear)
                         ? savedNextYear
                         : defaultSelectedYear(nextEvent, nextSelectableYears);
-                      onFocusEvent?.(nextEvent, nextYear);
+                      dispatchDiagnosisInterpretationChange(
+                        nextEvent,
+                        nextYear,
+                        onInterpretationChange,
+                        onFocusEvent,
+                      );
                     }}
                     className={`${style.interpretationButton} ${event.stale ? style.disabledButton : ""}`}
                   >
