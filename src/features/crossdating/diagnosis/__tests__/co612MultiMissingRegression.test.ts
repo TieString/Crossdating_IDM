@@ -1897,6 +1897,99 @@ fixtureDescribe("co612 mon052 multi-missing-ring regression", () => {
         expect(failures).toEqual([]);
     }, 180_000);
 
+    bundledCofechaIt("keeps the third bark-side frontier after restoring the first two", () => {
+        const truthYears = [...zeroYears].sort((left, right) => right - left);
+        const allMissing = buildMultiMissingCorrupted(
+            target.valuesByYear,
+            truthYears,
+        );
+        const afterFirst = applyInsertRestore(allMissing, truthYears[0]!);
+        const afterSecond = applyInsertRestore(afterFirst, truthYears[1]!);
+        const previousSite = buildSite(afterFirst);
+        const currentSite = buildSite(afterSecond);
+        const referenceForState = (site: RwlSiteData, runId: string) => {
+            const outText = runBundledCofecha(site);
+            const parts = splitReportByParts(outText);
+            return {
+                outText,
+                reference: createCofechaMasterReferenceConfig({
+                    siteData: site,
+                    flaggedAIds: extractPart6FlaggedASeriesIds(
+                        parts.get("PART 6") ?? "",
+                    ),
+                    cofechaRunId: runId,
+                    rwlHash: runId,
+                    masterDatingSeries: parseCofechaResult(outText).masterDatingSeries,
+                }),
+            };
+        };
+        const previousSaved = referenceForState(
+            previousSite,
+            "co612-mon052-after-first-repair",
+        );
+        const freshCurrent = referenceForState(
+            currentSite,
+            "co612-mon052-after-second-repair",
+        );
+        const runs = [
+            {
+                state: "before-second-save",
+                reference: { ...previousSaved.reference, isStale: true },
+                cofechaText: undefined,
+            },
+            {
+                state: "after-second-save",
+                reference: freshCurrent.reference,
+                cofechaText: freshCurrent.outText,
+            },
+        ].map(({ state, reference, cofechaText }) => {
+            const diagnosis = diagnoseCrossdating(currentSite, {
+                referenceConfig: reference,
+                targetTrees: [TARGET_ID],
+                reviewWindowDisplayMode: "review",
+                includeEventDecisionAudits: true,
+                ...(cofechaText ? { cofechaText } : {}),
+            });
+            return {
+                state,
+                diagnosis,
+                displayed: getDisplayedDiagnosisEvents(diagnosis).filter(
+                    (event) => event.seriesId === TARGET_ID,
+                ),
+            };
+        });
+        const frontierYear = truthYears[2]!;
+        const failures = runs.flatMap(({ state, diagnosis, displayed }) => {
+            const primary = displayed[0];
+            const local = primary?.eventType === "wholeSeriesMove"
+                ? primary.interpretationAmbiguity?.alternative
+                : primary;
+            return displayed.length === 1
+                && local !== undefined
+                && local.eventType !== "wholeSeriesMove"
+                && local.startYear <= frontierYear
+                && local.endYear >= frontierYear
+                ? []
+                : [{
+                    state,
+                    frontierYear,
+                    displayed: summarize(displayed),
+                    interpretation: primary?.interpretationAmbiguity
+                        ? summarize([primary.interpretationAmbiguity.alternative])[0]
+                        : null,
+                    audit: diagnosis.eventDecisionAudits?.find(
+                        (candidate) => candidate.seriesId === TARGET_ID,
+                    ),
+                }];
+        });
+
+        expect(truthYears.slice(0, 3)).toEqual([1977, 1902, 1879]);
+        expect(runs[0]?.displayed[0]?.evidence.algorithmSources).toContain(
+            "stale_reference_newest_fixed_side_path_frontier",
+        );
+        expect(failures).toEqual([]);
+    }, 180_000);
+
     bundledCofechaIt("keeps the terminal mtr722 zero ahead of all older missing rings", () => {
         const seriesId = "mtr722";
         const series = parsed.get(seriesId)!;

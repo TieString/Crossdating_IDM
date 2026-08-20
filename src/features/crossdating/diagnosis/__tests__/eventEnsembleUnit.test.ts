@@ -35,6 +35,7 @@ import {
     recoverAggregatePartialUnitFrontier,
     recoverStableBoundedLagPathFrontier,
     selectDirectTerminalUnitBeforeDerivedStablePartial,
+    selectStaleReferenceNewestFixedSidePathFrontier,
     selectCandidateBackedStableTerminalUnit,
     selectCandidateAnchoredDistantMissingFrontier,
     selectDistantSequentialMissingFrontier,
@@ -4885,6 +4886,79 @@ describe("selectCumulativePartialFrontier", () => {
                 ]),
             },
         });
+    });
+
+    it("uses a newer current-data fixed-side path before an older stale-reference mode", () => {
+        const selected = pathEvent(-3, -3, 0, 1862);
+        selected.evidence.notes.push(
+            "bounded_path_reference_view=raw",
+            "bounded_path_fixed_side_observed=true",
+            "bounded_path_location_concentration=0.969291",
+        );
+        const currentFrontier = pathEvent(-2, -2, 0, 1873);
+        currentFrontier.startYear = 1867;
+        currentFrontier.endYear = 1879;
+        currentFrontier.evidence = {
+            ...currentFrontier.evidence,
+            algorithmSources: ["bounded_complete_lag_path"],
+            scoreMargin: 8.2,
+            correlationGain: 0.65,
+            samplePairs: 270,
+            notes: [
+                "bounded_path_reference_view=raw",
+                "bounded_path_fixed_side_observed=true",
+                "bounded_path_location_concentration=0.961710",
+            ],
+        };
+
+        expect(selectStaleReferenceNewestFixedSidePathFrontier(
+            true,
+            4,
+            selected,
+            [currentFrontier],
+            false,
+        )).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -2,
+            startYear: 1867,
+            endYear: 1879,
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "stale_reference_newest_fixed_side_path_frontier",
+                ]),
+            },
+        });
+        expect(selectStaleReferenceNewestFixedSidePathFrontier(
+            true,
+            4,
+            null,
+            [currentFrontier],
+            false,
+        )).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -2,
+            startYear: 1867,
+            endYear: 1879,
+            evidence: {
+                notes: expect.arrayContaining([
+                    "stale_reference_deferred_selected_year=none",
+                ]),
+            },
+        });
+        expect(selectStaleReferenceNewestFixedSidePathFrontier(
+            true,
+            4,
+            selected,
+            [currentFrontier],
+            true,
+        )).toBeNull();
+        expect(selectStaleReferenceNewestFixedSidePathFrontier(
+            false,
+            4,
+            selected,
+            [currentFrontier],
+            false,
+        )).toBeNull();
     });
 
     it("uses a displayed cumulative operation to authorize the newest path component", () => {

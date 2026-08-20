@@ -8000,6 +8000,87 @@ export const selectDirectTerminalUnitBeforeDerivedStablePartial = (
     };
 };
 
+export const selectStaleReferenceNewestFixedSidePathFrontier = (
+    referenceIsStale: boolean,
+    transitionCount: number,
+    selectedEvent: DiagnosisEvent | null,
+    rawPathEvents: readonly DiagnosisEvent[],
+    hasIndependentWholeBaseline: boolean,
+): DiagnosisEvent | null => {
+    if (!referenceIsStale
+        || transitionCount < 2
+        || hasIndependentWholeBaseline) return null;
+    const selectedYear = selectedEvent ? rankedEventYear(selectedEvent) : null;
+
+    const frontier = rawPathEvents.filter((event) => {
+        const year = rankedEventYear(event);
+        const concentration = latestEventNoteNumber(
+            event,
+            "bounded_path_location_concentration=",
+        );
+        const overlapsSelectedWindow = selectedEvent !== null
+            && Math.max(event.startYear, selectedEvent.startYear)
+                <= Math.min(event.endYear, selectedEvent.endYear) + 1;
+        const advancesSelectedLocation = year !== null && (
+            selectedYear === null
+            || year >= selectedYear + 4
+            || (
+                year >= selectedYear - 2
+                && selectedEvent !== null
+                && event.endYear > selectedEvent.endYear
+                && overlapsSelectedWindow
+            )
+        );
+        return year !== null
+            && advancesSelectedLocation
+            && event.evidence.lagAfter === 0
+            && (event.evidence.lagBefore ?? 0) < 0
+            && (
+                event.eventType === "missingRing"
+                || (event.eventType === "partialMove" && (event.shiftYears ?? 0) < -1)
+            )
+            && event.evidence.algorithmSources.includes("bounded_complete_lag_path")
+            && event.evidence.notes.includes("bounded_path_reference_view=raw")
+            && event.evidence.notes.includes("bounded_path_fixed_side_observed=true")
+            && (concentration ?? 0) >= 0.85
+            && event.evidence.scoreMargin >= 0.1
+            && (event.evidence.correlationGain ?? 0) >= 0.1
+            && event.evidence.samplePairs >= 80;
+    }).sort((left, right) => (
+        rankedEventYear(right) - rankedEventYear(left)
+        || (latestEventNoteNumber(
+            right,
+            "bounded_path_location_concentration=",
+        ) ?? 0) - (latestEventNoteNumber(
+            left,
+            "bounded_path_location_concentration=",
+        ) ?? 0)
+        || right.evidence.score - left.evidence.score
+    ))[0] ?? null;
+    if (!frontier) return null;
+
+    return {
+        ...frontier,
+        id: `${frontier.id}-stale-reference-newest-fixed-side-frontier`,
+        alternativeTypes: [],
+        locationAlternatives: undefined,
+        operationAlternatives: undefined,
+        evidence: {
+            ...frontier.evidence,
+            algorithmSources: Array.from(new Set([
+                ...frontier.evidence.algorithmSources,
+                "stale_reference_newest_fixed_side_path_frontier",
+            ])).sort(),
+            notes: Array.from(new Set([
+                ...frontier.evidence.notes,
+                `stale_reference_deferred_selected_year=${selectedYear ?? "none"}`,
+                `stale_reference_current_frontier_year=${rankedEventYear(frontier)}`,
+                `stale_reference_path_transition_count=${transitionCount}`,
+            ])),
+        },
+    };
+};
+
 /** A candidate-backed newest unit transition outranks an aggregate partial from the same path. */
 export const selectCandidateBackedStableTerminalUnit = (
     frontier: StableBoundedLagPathFrontier | null,
@@ -13527,6 +13608,21 @@ export const makeDiagnosisEvents = (
         const earlySequentialMissing = mayHaveCumulativeMissingFrontier
             ? getSequentialMissing()
             : null;
+        const staleReferenceCurrentDataFrontier =
+            selectStaleReferenceNewestFixedSidePathFrontier(
+                effectiveConfig.referenceConfig?.isStale === true,
+                stableMultiscaleBoundedFrontier?.transitionCount ?? 0,
+                earlySequentialMissing?.event ?? stableBoundedPathFrontier,
+                [
+                    ...(rawNearPenaltyTwoPath?.events ?? []),
+                    ...(rawNearPenaltyOnePath?.events ?? []),
+                    ...(rawPenaltyOneStablePath?.events ?? []),
+                ],
+                hasAuthoritativeWholeBaseline,
+            );
+        if (staleReferenceCurrentDataFrontier) {
+            return finalize([staleReferenceCurrentDataFrontier], [], false);
+        }
         const independentSequentialWhole = earlySequentialMissing?.preserveWholeBaseline
             ? displayed.find((event) => event.eventType === "wholeSeriesMove") ?? null
             : null;

@@ -2311,6 +2311,24 @@ const finalFrontierClusters = (
         allFinalClusters,
     );
     if (standaloneGlobalWholeFrame) return [standaloneGlobalWholeFrame];
+    const staleReferenceCurrentDataFrontier = selectedFinalClusters.filter((cluster) => (
+        cluster.checkpoints.some((checkpoint) => (
+            checkpoint.stage === "final"
+            && checkpoint.authority !== "supplemental"
+            && checkpoint.event.evidence.algorithmSources.includes(
+                "stale_reference_newest_fixed_side_path_frontier",
+            )
+        ))
+    )).sort((left, right) => (
+        (topYear(representative(right).event) ?? Number.NEGATIVE_INFINITY)
+            - (topYear(representative(left).event) ?? Number.NEGATIVE_INFINITY)
+        || representative(right).event.endYear - representative(left).event.endYear
+    ))[0] ?? null;
+    if (staleReferenceCurrentDataFrontier) {
+        // Whole-frame selectors above retain first authority. Once none survives, a strongly
+        // observed current-data fixed side must not be replaced by an older stale-reference mode.
+        return [staleReferenceCurrentDataFrontier];
+    }
     const concentratedAggregatePartial = selectConcentratedAggregatePartial(
         allFinalClusters,
         selectedFinalClusters,
