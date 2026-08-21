@@ -247,6 +247,10 @@ export const projectMultiEventLocationConsensus = (
         note.startsWith("terminal_unit_staircase_boundary_year=")
     ));
     const terminalBoundaryYear = Number(terminalBoundaryNote?.split("=")[1]);
+    const rawTerminalBoundaryNote = [...event.evidence.notes].reverse().find((note) => (
+        note.startsWith("terminal_unit_staircase_raw_boundary_year=")
+    ));
+    const rawTerminalBoundaryYear = Number(rawTerminalBoundaryNote?.split("=")[1]);
     const guardedByTerminalBoundary = event.evidence.algorithmSources.includes(
         "stable_terminal_unit_staircase_frontier",
     ) && Number.isInteger(terminalBoundaryYear)
@@ -274,6 +278,17 @@ export const projectMultiEventLocationConsensus = (
             13,
             targetRange,
         );
+    }
+    const guardsRawCadenceBoundary = Number.isInteger(rawTerminalBoundaryYear)
+        && rawTerminalBoundaryYear !== terminalBoundaryYear
+        && (rawTerminalBoundaryYear < window.startYear
+            || rawTerminalBoundaryYear > window.endYear);
+    if (guardsRawCadenceBoundary) {
+        // Cadence extrapolation is useful for ranking a plateau, but it must not discard the
+        // complete-path boundary that justified the staircase in the first place.
+        window = rawTerminalBoundaryYear < window.startYear
+            ? clampWindowToRange(rawTerminalBoundaryYear, 13, targetRange)
+            : clampWindowToRange(rawTerminalBoundaryYear - 12, 13, targetRange);
     }
     if (event.startYear === window.startYear && event.endYear === window.endYear) return event;
 
@@ -380,6 +395,9 @@ export const projectMultiEventLocationConsensus = (
                         missingRingNewerPadding
                     }`,
                 ]),
+                ...(guardsRawCadenceBoundary ? [
+                    `terminal_cadence_raw_boundary_guard=${rawTerminalBoundaryYear}`,
+                ] : []),
             ])),
         },
     });

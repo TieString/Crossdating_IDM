@@ -344,6 +344,39 @@ describe("multi-event frontier location consensus", () => {
         });
     });
 
+    it("keeps the raw path boundary inside a cadence-calibrated terminal window", () => {
+        const input = event();
+        input.startYear = 1793;
+        input.endYear = 1801;
+        input.rankedYears = [{ year: 1797, rank: 1, score: 4, evidenceTags: [] }];
+        input.evidence.algorithmSources.push(
+            "stable_terminal_unit_staircase_frontier",
+        );
+        input.evidence.notes.push(
+            "terminal_unit_staircase_boundary_year=1797",
+            "terminal_unit_staircase_raw_boundary_year=1793",
+            "terminal_unit_staircase_transition_years=1765,1776,1786,1793",
+            "terminal_unit_staircase_max_adjacent_gap_years=11",
+        );
+
+        expect(projectMultiEventLocationConsensus(
+            input,
+            [1785, 1792, 1797],
+            { startYear: 1400, endYear: 2000 },
+            true,
+            16,
+            1792,
+        )).toMatchObject({
+            startYear: 1793,
+            endYear: 1805,
+            evidence: {
+                notes: expect.arrayContaining([
+                    "terminal_cadence_raw_boundary_guard=1793",
+                ]),
+            },
+        });
+    });
+
     it("chooses the newer compact mode instead of joining a distant older peak", () => {
         const input = event();
         input.startYear = 1863;
