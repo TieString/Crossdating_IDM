@@ -220,6 +220,13 @@ const eventHasIndependentLocationAuthority = (event: DiagnosisEvent): boolean =>
         || event.evidence.algorithmSources.includes(
             "sequential_missing_checkpoint_location",
         )
+        || (
+            (event.eventType === "missingRing" || event.eventType === "falseRing")
+            && event.evidence.algorithmSources.includes("adjacent_independent_guard")
+            && event.evidence.notes.includes(
+                "locator_adjudication=fallback_detached_locator_mode",
+            )
+        )
         || isCandidateAnchoredDistantMissingEvent(event)
         || (
             event.evidence.algorithmSources.includes(
@@ -551,6 +558,31 @@ const preferredStrongBoundedLocation = (
         ? strongest
         : null;
 };
+
+const preferredCalibratedStablePartialLocation = (
+    cluster: HypothesisCluster,
+): DiagnosisReviewEventCheckpoint | null => cluster.checkpoints
+    .filter((checkpoint) => {
+        const event = checkpoint.event;
+        const operationYear = noteNumber(event, "stable_bounded_path_operation_year=");
+        return checkpoint.stage === "final"
+            && checkpoint.authority !== "supplemental"
+            && event.eventType === "partialMove"
+            && event.evidence.algorithmSources.includes(
+                "stable_multiscale_bounded_path_frontier",
+            )
+            && event.evidence.notes.includes(
+                "stable_partial_location_retained=joint_operation_year_calibration",
+            )
+            && operationYear !== null
+            && operationYear >= event.startYear
+            && operationYear <= event.endYear
+            && topYear(event) === operationYear;
+    })
+    .sort((left, right) => (
+        eventLocationQuality(right.event) - eventLocationQuality(left.event)
+        || confidenceScore(right.event) - confidenceScore(left.event)
+    ))[0] ?? null;
 
 const preferredStrongSelectedBoundedLocation = (
     cluster: HypothesisCluster,
@@ -1037,6 +1069,7 @@ const representative = (
         ?? preferredSelectedCompletedComposition(cluster)
         ?? preferredHighConfidenceBarkSidePartialCandidate(cluster)
         ?? preferredAcceptedFinalLocation(cluster)
+        ?? preferredCalibratedStablePartialLocation(cluster)
         ?? preferredStrongBoundedLocation(cluster)
         ?? preferredStrongSelectedBoundedLocation(cluster)
         ?? preferredSelectedFinalLocation(cluster)

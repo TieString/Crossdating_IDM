@@ -78,6 +78,17 @@ describe("strong bounded-path location authority", () => {
             },
         });
     });
+
+    it("does not overwrite a three-vote unit consensus with its raw path mode", () => {
+        const input = event();
+        input.startYear = 1889;
+        input.endYear = 1901;
+        input.rankedYears = [{ year: 1895, rank: 1, score: 2, evidenceTags: [] }];
+        input.evidence.algorithmSources.push("stable_unit_local_consensus");
+        input.evidence.notes.push("stable_unit_local_consensus_votes=3");
+
+        expect(projectUnsupportedLocationToStrongBoundedPath(input)).toBe(input);
+    });
 });
 
 describe("multi-event frontier location consensus", () => {

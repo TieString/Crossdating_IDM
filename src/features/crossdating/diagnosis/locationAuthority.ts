@@ -954,6 +954,10 @@ const hasCurrentLocationAuthority = (event: DiagnosisEvent): boolean => {
         && entry.topYear <= event.endYear
     ))) return true;
     if (event.evidence.algorithmSources.includes("stable_partial_rank_edge_guard")
+        || (
+            event.evidence.algorithmSources.includes("stable_unit_local_consensus")
+            && (noteNumber(event, "stable_unit_local_consensus_votes=") ?? 0) >= 3
+        )
         || event.evidence.algorithmSources.includes(
             "compressed_missing_staircase_projection",
         )

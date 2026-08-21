@@ -1184,6 +1184,64 @@ describe("joint event adjudicator", () => {
         ]).event).toMatchObject({ id: "partial-minus-20", shiftYears: -20 });
     });
 
+    it("keeps an accepted stable partial calibration over a stronger raw path", () => {
+        const calibrated = event("calibrated-partial", "partialMove", 1645, 1657, 1645);
+        calibrated.shiftYears = -20;
+        calibrated.evidence.lagBefore = -20;
+        calibrated.evidence.algorithmSources = [
+            "bounded_complete_lag_path",
+            "stable_multiscale_bounded_path_frontier",
+        ];
+        calibrated.evidence.notes = [
+            "stable_bounded_path_operation_year=1645",
+            "stable_partial_location_retained=joint_operation_year_calibration",
+        ];
+        const rawPath = event("raw-path", "partialMove", 1653, 1665, 1659, 100);
+        rawPath.shiftYears = -20;
+        rawPath.evidence.lagBefore = -20;
+        rawPath.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        rawPath.evidence.locationEvidence = [{
+            source: "bounded_complete_lag_path",
+            startYear: 1653,
+            endYear: 1665,
+            topYear: 1659,
+            referenceCount: 30,
+            concentration: 0.8,
+            remoteMargin: 0.5,
+            calibrated: false,
+        }];
+
+        expect(adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: calibrated },
+            { stage: "final", authority: "supplemental", event: rawPath },
+        ]).event).toMatchObject({ id: "calibrated-partial", startYear: 1645 });
+    });
+
+    it("keeps a unit mode after its detached locator was explicitly rejected", () => {
+        const selected = event("selected-false", "falseRing", 1763, 1771, 1770);
+        selected.evidence.algorithmSources = ["adjacent_independent_guard"];
+        selected.evidence.notes = [
+            "locator_adjudication=fallback_detached_locator_mode",
+        ];
+        const remotePath = event("remote-path", "falseRing", 1743, 1755, 1749, 100);
+        remotePath.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        remotePath.evidence.locationEvidence = [{
+            source: "bounded_complete_lag_path",
+            startYear: 1743,
+            endYear: 1755,
+            topYear: 1749,
+            referenceCount: 30,
+            concentration: 0.8,
+            remoteMargin: 0.5,
+            calibrated: false,
+        }];
+
+        expect(adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: selected },
+            { stage: "final", authority: "supplemental", event: remotePath },
+        ]).event).toMatchObject({ id: "selected-false", startYear: 1763 });
+    });
+
     it("keeps a strongly located terminal bounded partial over an unanchored composition", () => {
         const composition = event("unanchored-composition", "falseRing", 1893, 1905, 1899);
         composition.evidence.algorithmSources = [
