@@ -50,6 +50,7 @@ import {
     selectStableBoundedLagPathFrontier,
     selectConservativeStableBoundedLagPathFrontier,
     selectParsimoniousPartialOperationCheckpoint,
+    selectSeparatedPartialComponentCheckpoint,
     selectRegularizedPartialOperationConsensus,
     selectRegularizedPartialConsensusCheckpoint,
     selectRepeatedPartialComponentCheckpoint,
@@ -3746,6 +3747,44 @@ describe("selectCumulativePartialFrontier", () => {
             [],
             { startYear: 1600, endYear: 2000 },
         )).toMatchObject({ eventType: "partialMove", shiftYears: -6 });
+    });
+
+    it("keeps the newest component of a stable distant partial chain", () => {
+        const separated = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                pathEvent(-20, -26, -6, 1700),
+                pathEvent(-6, -6, 0, 1730),
+            ]),
+            boundedPath([
+                pathEvent(-20, -26, -6, 1701),
+                pathEvent(-6, -6, 0, 1731),
+            ]),
+        );
+
+        expect(selectSeparatedPartialComponentCheckpoint(separated)).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -6,
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "separated_partial_component_frontier",
+                ]),
+            },
+        });
+    });
+
+    it("leaves a compact split partial to the aggregate operation checkpoint", () => {
+        const compact = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                pathEvent(-5, -20, -15, 1700),
+                pathEvent(-15, -15, 0, 1722),
+            ]),
+            boundedPath([
+                pathEvent(-5, -20, -15, 1701),
+                pathEvent(-15, -15, 0, 1723),
+            ]),
+        );
+
+        expect(selectSeparatedPartialComponentCheckpoint(compact)).toBeNull();
     });
 
     it("projects the newest member of a repeated partial component from one conservative path", () => {

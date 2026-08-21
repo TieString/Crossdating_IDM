@@ -5994,6 +5994,52 @@ export const stableFrontierHasRepeatedOperationSupport = (
 };
 
 /**
+ * Keeps the bark-side component of a stable distant partial chain. A two-state aggregate can
+ * improve more total years, but applying it would skip every independently sustained state
+ * between the aggregate endpoints.
+ */
+export const selectSeparatedPartialComponentCheckpoint = (
+    frontier: StableBoundedLagPathFrontier | null,
+    minimumSeparationYears = 25,
+): DiagnosisEvent | null => {
+    if (!frontier
+        || frontier.structuralSubset
+        || !frontier.allTransitionsPartial
+        || frontier.transitionCount < 2) return null;
+    const transitions = frontier.transitions;
+    const newest = transitions[transitions.length - 1];
+    if (!newest
+        || newest.event.eventType !== "partialMove"
+        || newest.shiftYears > -2
+        || newest.event.evidence.lagAfter !== frontier.baselineLag
+        || newest.shiftYears === frontier.aggregateShiftYears) return null;
+    for (let index = 1; index < transitions.length; index += 1) {
+        const older = transitions[index - 1]!;
+        const newer = transitions[index]!;
+        if (newer.topYear - older.topYear < minimumSeparationYears
+            || older.event.evidence.lagAfter !== newer.event.evidence.lagBefore) return null;
+    }
+    return withEvidenceLedger({
+        ...frontier.event,
+        id: `${frontier.event.id}-separated-partial-component`,
+        evidence: {
+            ...frontier.event.evidence,
+            algorithmSources: Array.from(new Set([
+                ...frontier.event.evidence.algorithmSources,
+                "separated_partial_component_frontier",
+            ])).sort(),
+            notes: Array.from(new Set([
+                ...frontier.event.evidence.notes,
+                `separated_partial_component_count=${frontier.transitionCount}`,
+                `separated_partial_component_aggregate_shift=${frontier.aggregateShiftYears}`,
+                `separated_partial_component_frontier_shift=${newest.shiftYears}`,
+                `separated_partial_component_minimum_spacing=${minimumSeparationYears}`,
+            ])),
+        },
+    });
+};
+
+/**
  * Uses the two more strongly regularized complete paths as an operation-family checkpoint.
  * Distant mixed events remain eligible; a dense path is accepted only when every transition is
  * the same signed unit operation, so nearby missing/false chains cannot be reversed by an
@@ -12798,8 +12844,11 @@ export const makeDiagnosisEvents = (
             diagnosis.targetRange,
             candidateEvents,
         );
+        const separatedPartialComponentCheckpoint =
+            selectSeparatedPartialComponentCheckpoint(stableMultiscaleBoundedFrontier);
         const stableBoundedPathFrontier = repeatedPartialComponentCheckpoint
             ?? splitRepeatedPartialComponentCheckpoint
+            ?? separatedPartialComponentCheckpoint
             ?? collapsedMissingFalsePartialCheckpoint
             ?? crossPenaltyExactPartialCheckpoint
             ?? terminalOperationAnchoredPartialCheckpoint
