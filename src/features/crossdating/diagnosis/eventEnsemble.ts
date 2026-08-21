@@ -8060,6 +8060,115 @@ export const selectDirectTerminalUnitBeforeDerivedStablePartial = (
     };
 };
 
+/**
+ * Keeps an independently proposed unit event when two complete near-lag paths reproduce it as
+ * the bark-side transition. Older mixed events may change the net lag and the parsimonious
+ * partial score, but they cannot change which transition is currently actionable.
+ */
+export const selectCandidateBackedCrossPenaltyUnitFrontier = (
+    strongerPath: BoundedLagStateEventSet | null,
+    regularizedPath: BoundedLagStateEventSet | null,
+    candidates: readonly DiagnosisEvent[],
+    baselineLag = 0,
+    maximumYearDrift = 2,
+    maximumCandidateDrift = 5,
+): DiagnosisEvent | null => {
+    if (!strongerPath
+        || !regularizedPath
+        || !boundedLagPathHasObservedFixedSide(strongerPath)
+        || !boundedLagPathHasObservedFixedSide(regularizedPath)
+        || strongerPath.path.transitionGain < 20
+        || regularizedPath.path.transitionGain < 20
+        || Math.max(
+            strongerPath.path.runnerUpMargin,
+            regularizedPath.path.runnerUpMargin,
+        ) < 0.3) return null;
+
+    const newestUnit = (path: BoundedLagStateEventSet): ExactLagPathTransition | null => {
+        const newest = exactLagPathTransitions(
+            path.events,
+            Number.NEGATIVE_INFINITY,
+        ).sort((left, right) => right.topYear - left.topYear)[0] ?? null;
+        return newest
+            && (newest.event.eventType === "missingRing"
+                || newest.event.eventType === "falseRing")
+            && newest.event.evidence.lagAfter === baselineLag
+            ? newest
+            : null;
+    };
+    const stronger = newestUnit(strongerPath);
+    const regularized = newestUnit(regularizedPath);
+    if (!stronger
+        || !regularized
+        || stronger.event.eventType !== regularized.event.eventType
+        || stronger.shiftYears !== regularized.shiftYears
+        || stronger.event.evidence.lagBefore !== regularized.event.evidence.lagBefore
+        || Math.abs(stronger.topYear - regularized.topYear) > maximumYearDrift) return null;
+
+    const pathYear = Math.round((stronger.topYear + regularized.topYear) / 2);
+    const candidate = candidates.filter((event) => (
+        event.eventType === stronger.event.eventType
+        && event.evidence.candidateIds.length > 0
+        && event.evidence.notes.includes("candidate_hard_gate_passed")
+        && Math.abs(rankedEventYear(event) - pathYear) <= maximumCandidateDrift
+    )).sort((left, right) => (
+        Math.abs(rankedEventYear(left) - pathYear)
+            - Math.abs(rankedEventYear(right) - pathYear)
+        || right.evidence.scoreMargin - left.evidence.scoreMargin
+        || right.evidence.score - left.evidence.score
+    ))[0] ?? null;
+    if (!candidate) return null;
+
+    const source = stronger.event;
+    return withEvidenceLedger({
+        ...source,
+        id: `${source.id}-candidate-backed-cross-penalty-unit`,
+        startYear: candidate.startYear,
+        endYear: candidate.endYear,
+        rankedYears: candidate.rankedYears.map((row) => ({
+            ...row,
+            evidenceTags: Array.from(new Set([
+                ...row.evidenceTags,
+                "candidate_backed_cross_penalty_unit_frontier",
+            ])).sort(),
+        })),
+        confidenceLevel: source.confidenceLevel === "low" ? "medium" : source.confidenceLevel,
+        evidence: {
+            ...source.evidence,
+            algorithmSources: Array.from(new Set([
+                ...source.evidence.algorithmSources,
+                ...candidate.evidence.algorithmSources,
+                "candidate_backed_cross_penalty_unit_frontier",
+            ])).sort(),
+            score: Math.min(
+                strongerPath.path.transitionGain,
+                regularizedPath.path.transitionGain,
+            ),
+            scoreMargin: Math.min(
+                strongerPath.path.runnerUpMargin,
+                regularizedPath.path.runnerUpMargin,
+            ),
+            candidateIds: Array.from(new Set([
+                ...source.evidence.candidateIds,
+                ...candidate.evidence.candidateIds,
+            ])),
+            notes: Array.from(new Set([
+                ...source.evidence.notes,
+                ...candidate.evidence.notes,
+                `cross_penalty_unit_operation=${source.eventType}`,
+                `cross_penalty_unit_stronger_year=${stronger.topYear}`,
+                `cross_penalty_unit_regularized_year=${regularized.topYear}`,
+                `cross_penalty_unit_candidate_year=${rankedEventYear(candidate)}`,
+                `cross_penalty_unit_baseline_lag=${baselineLag}`,
+                "cross_penalty_unit_preempts_older_net_partial=true",
+            ])),
+        },
+        alternativeTypes: [],
+        locationAlternatives: undefined,
+        operationAlternatives: undefined,
+    });
+};
+
 export const selectStaleReferenceNewestFixedSidePathFrontier = (
     referenceIsStale: boolean,
     transitionCount: number,
@@ -12429,6 +12538,12 @@ export const makeDiagnosisEvents = (
         );
         const crossPenaltyFalseRingFrontier = nearCrossPenaltyFalseRingFrontier
             ?? regularizedCrossPenaltyFalseRingFrontier;
+        const candidateBackedCrossPenaltyUnitFrontier =
+            selectCandidateBackedCrossPenaltyUnitFrontier(
+                recoveryNearPenaltyTwoPath,
+                recoveryNearPenaltyOnePath,
+                candidateEvents,
+            );
         const selfContainedCrossPenaltyFalseAuthority =
             hasSelfContainedPositiveUnitChainAuthority(
                 recoveryNearPenaltyTwoPath,
@@ -13696,6 +13811,10 @@ export const makeDiagnosisEvents = (
                 ),
                 false,
             );
+        }
+        if (candidateBackedCrossPenaltyUnitFrontier
+            && dominantWholeSeriesBaseline === null) {
+            return finalize([candidateBackedCrossPenaltyUnitFrontier], [], false);
         }
         const endpointAggregatePartialFrontier = selectEndpointAggregatePartialFrontier(
             displayed,

@@ -58,6 +58,7 @@ import {
     selectTerminalOperationAnchoredPartialCheckpoint,
     selectCollapsedMissingFalsePartialCheckpoint,
     selectCrossPenaltyFalseRingFrontier,
+    selectCandidateBackedCrossPenaltyUnitFrontier,
     hasSelfContainedPositiveUnitChainAuthority,
     selectSelfContainedPositiveUnitChainFrontier,
     selectCumulativeMissingWholeAliasFrontier,
@@ -3770,6 +3771,70 @@ describe("selectCumulativePartialFrontier", () => {
                 ]),
             },
         });
+    });
+
+    it("keeps a candidate-backed newest false ring when older mixed states change net lag", () => {
+        const newestFalse = pathEvent(1, 1, 0, 1858, 80);
+        newestFalse.eventType = "falseRing";
+        newestFalse.shiftYears = undefined;
+        newestFalse.shiftSide = undefined;
+        const olderPartial = pathEvent(-20, -19, 1, 1828, 80);
+        const olderMissing = pathEvent(-1, -20, -19, 1798, 80);
+        olderMissing.eventType = "missingRing";
+        olderMissing.shiftYears = undefined;
+        olderMissing.shiftSide = undefined;
+        const stronger = boundedPath([olderMissing, olderPartial, newestFalse]);
+        stronger.path.runnerUpMargin = 0.15;
+        const regularized = boundedPath([
+            olderMissing,
+            olderPartial,
+            { ...newestFalse, rankedYears: [{
+                year: 1859,
+                rank: 1,
+                score: 1,
+                evidenceTags: [],
+            }] },
+        ]);
+        regularized.path.runnerUpMargin = 0.8;
+        const falseCandidate = falseRingEvent(1855, true);
+        falseCandidate.rankedYears = [{
+            year: 1854,
+            rank: 1,
+            score: 1,
+            evidenceTags: [],
+        }];
+        falseCandidate.evidence.notes.push("candidate_hard_gate_passed");
+
+        expect(selectCandidateBackedCrossPenaltyUnitFrontier(
+            stronger,
+            regularized,
+            [falseCandidate],
+        )).toMatchObject({
+            eventType: "falseRing",
+            startYear: 1855,
+            endYear: 1861,
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "candidate_backed_cross_penalty_unit_frontier",
+                ]),
+                lagBefore: 1,
+                lagAfter: 0,
+            },
+        });
+    });
+
+    it("does not promote an unanchored near-path unit transition", () => {
+        const newestFalse = pathEvent(1, 1, 0, 1858, 80);
+        newestFalse.eventType = "falseRing";
+        newestFalse.shiftYears = undefined;
+        newestFalse.shiftSide = undefined;
+        const olderPartial = pathEvent(-20, -19, 1, 1828, 80);
+
+        expect(selectCandidateBackedCrossPenaltyUnitFrontier(
+            boundedPath([olderPartial, newestFalse]),
+            boundedPath([olderPartial, newestFalse]),
+            [],
+        )).toBeNull();
     });
 
     it("keeps the newest partial after a distant missing step in one negative chain", () => {
