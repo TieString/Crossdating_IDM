@@ -42,21 +42,13 @@
 - `VERYCOF.OUT` 是前端消费的关键输出文件。
 - OUT 导出按钮固定在主窗口和独立 COFECHA 工具栏最右侧，使用 24 px 纯图标样式；只写出内存中的完整原始 `outFileContent`，不得导出当前 PART 筛选文本或带链接、复选框、排序和 `Age` 列的 HTML 渲染副本；没有 OUT 时图标按钮保持显示但禁用。
 
-## 已知问题与设计决策
+## 开源许可
 
-### 格式透明性（已解决，2026-04-02）
+- 项目元数据使用 SPDX 标识 `GPL-3.0-only`，根目录 [LICENSE](LICENSE) 保存未经修改的 GNU GPL v3.0 官方全文；除文件内另有说明或 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 列出的第三方内容外，本项目按该协议授权。
+- `src-tauri/bin/cofecha*.exe` 是第三方可执行程序，不得视为被项目 GPL 重新授权。公开仓库、安装包或 Release 资产包含这些文件前，必须确认独立的再分发权；无法确认时应移除二进制并要求用户自行提供。
+- 新增第三方源码、资源或二进制时必须同步维护 `THIRD_PARTY_NOTICES.md`，不得用项目级 GPL 声明覆盖其原有许可证、版权或商标条款。
 
-**问题**：读取 Tucson 格式时自动判断 8 列或 7 列编号，但保存时固定用 6 列，导致：
-- 长编号（7-8 字符）被截断
-- 原始格式不保留，用户 RWL 文件被无声改变
-
-**解决方案**（[RWL_FORMAT_SPEC.md](RWL_FORMAT_SPEC.md#格式透明性原则)）：
-- [src/features/rwl/types.ts](src/features/rwl/types.ts)：`RwlReadResult` 新增 `readOptions` 字段记录格式参数
-- [src/features/rwl/parsers/tucson.ts](src/features/rwl/parsers/tucson.ts)：自动检测 long/short 格式，结果保存到 readOptions
-- [src/features/rwl/edit.ts](src/features/rwl/edit.ts)：RwlEditor 记录格式信息，formateRwlFromMapToString 支持格式参数
-- [src/pages/Home.tsx](src/pages/Home.tsx)：打开/保存时透传格式信息
-
-**验证**：打开 8 列编号 RWL → 编辑 → 保存 → 再打开 → 确认仍为 8 列；7 列格式同理
+## 设计决策
 
 ### 统一格式处理器框架（已实现，2026-04-10）
 
@@ -85,7 +77,7 @@
 - 待复核列表复用全局 `FloatingScrollArea` 滚动条样式；界面状态、按钮 title 与无障碍标签使用中性“待复核/后台扫描”文案，不向用户暴露内部目标筛选规则。
 - [src/components/WidthContainer/WidthGridContextMenu.tsx](src/components/WidthContainer/WidthGridContextMenu.tsx)：宽度元素右键“在图表中定位”会选中对应折线，以固定 50 年窗口定位到目标年份，并复用图表单击标记线显示该年份；标记状态保存日历年而非数组索引，独立折线图窗口复用同一跳转目标。
 - [src/pages/home/gridFindReplace.ts](src/pages/home/gridFindReplace.ts)：主界面查找/替换同时匹配序列名、普通宽度、显式/结构性 `missing` 和当前 `999/-9999` 终止分隔符；纯数字序列名仍作为序列名命中，不能只按宽度解释。序列改名、missing 填值和混合批量替换以一次完整站点快照提交；终止符是文件级精度约束，替换任意一个终止符时必须同步替换全部序列终止符并在撤销/恢复后同步全局精度。
-- “转为文本编辑”期间，焦点位于文本框、contenteditable 或 CodeMirror 时，`Ctrl+Z / Ctrl+Y` 必须留给文本编辑历史，不能触发 RWL 数据层撤销/恢复；标题栏撤销/恢复按钮在文本模式下也作用于当前文本。因此误输入、删除和换行可在应用文本前独立撤回。
+- “转为文本编辑”使用 CodeMirror 多光标编辑器：`Alt + 单击`追加光标，按住鼠标中键拖动按矩形经过的各行生成多光标/列选择，普通单击回到单光标；输入、粘贴、删除和换行同时作用于全部光标。焦点位于文本框、contenteditable 或 CodeMirror 时，`Ctrl+Z / Ctrl+Y` 必须留给文本编辑历史，不能触发 RWL 数据层撤销/恢复；标题栏撤销/恢复按钮在文本模式下也作用于当前文本。因此误输入、删除和换行可在应用文本前独立撤回。
 - [src/components/WidthContainer/treeRingArtwork.ts](src/components/WidthContainer/treeRingArtwork.ts) 与 [src/components/WidthContainer/treeRingHeaderCanvas.ts](src/components/WidthContainer/treeRingHeaderCanvas.ts)：按 Tucson 终止符同步换算 RWL 宽度单位（`999` 为 `0.01 mm`，`-9999` 为 `0.001 mm`），并在高 DPI Canvas 中按原 SVG 参数复现早材白底、六层晚材点纹、0.18 mm 年轮边界、缺测/缺轮标记和选中高亮。运行时不再预热、创建或显示完整年轮 SVG；`series-header` 与悬浮窗的 1 cm 绘制图共用 Canvas 渲染器，完整 SVG 只保留给显式导出测试夹具。header 窗口占满标题统计项以外的剩余宽度，以 10 mm 为基准按实际像素比例扩展或收窄垂直物理视窗，禁止横纵独立拉伸；支持 1–32 倍滚轮缩放和横向拖动，滚轮由非被动捕获监听消费。悬停年份提示显示在按钮上方，单击只选择对应宽度格并标出该轮，不改变影像视角。双击继承当前 header 类型：绘制横条打开 1 cm，扫描横条打开扫描视图；唯一悬浮窗只提供“1 cm / 扫描”两种 Canvas 视图，不得恢复“完整”SVG 入口。悬浮窗及内部扫描工具不得设置原生 HTML `title`，图标按钮用 `aria-label` 保留无障碍名称。只有直接点击宽度格或外部定位才允许反向聚焦影像；影像自身单击不得居中。滚轮缩放、放大后平移和双击重置只作用于当前视图。标题栏负责移动窗口，右下角手柄可调窗口大小且始终限制在可视区域。影像右键菜单复用宽度右键菜单样式并可显示在悬浮窗上方。中间缺失年份以不虚构物理宽度的分隔标记显示，显式 0 宽缺轮单独标记；编辑后的当前序列按新精度和宽度签名自动更新。
 - [src/features/settings/settings.ts](src/features/settings/settings.ts) 的 `treeRingImage.showGeneratedPreview` 控制 header 绘制图片，默认开启并随设置持久化。关闭时跳过 header Canvas 绘制，只保留原按钮尺寸、右键菜单和双击打开入口；同名扫描影像及悬浮窗中的按需 Canvas 绘制不受影响。
 - [src/features/treeRingScans](src/features/treeRingScans)：扫描影像文件夹只按不区分大小写的同名文件建立索引，不在载入文件夹时批量读取影像。双击影像进入悬浮窗后可切换扫描版并依次标注锚点：首点是序列最新年份之前最近的整十年，随后每点递减 10 年；整 50 年显示两个竖排点，整百年显示三个。锚点坐标原点只绑定红点组，年份标签独立绝对定位，不得把红点从点击位置挤开；多点标记围绕点击坐标对称排列并使用加大的点间距。至少两个锚点后才允许在 `series-header` 显示扫描图 1 cm 近似窗口。锚点保留校准时的原始年份身份，之后通过已应用的 RWL 操作日志重放为当前年份；header 与悬浮窗平移工具都会悬停显示“原年份 / 现年份”，单击按当前年份定位宽度格但不改变扫描视角，直接选择宽度格才会反向高亮并在已放大时聚焦对应位置。点工具单击只添加锚点，不触发宽度选择；替换整段数据等无法可靠追踪身份的操作会要求重新校准。

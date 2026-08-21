@@ -1,7 +1,15 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { EditorState, Prec } from "@codemirror/state";
 import { EditorView, keymap, drawSelection, rectangularSelection } from "@codemirror/view";
-import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import {
+    defaultKeymap,
+    history,
+    historyKeymap,
+    redo as cmRedo,
+    redoDepth,
+    undo as cmUndo,
+    undoDepth,
+} from "@codemirror/commands";
 import {
     search,
     setSearchQuery,
@@ -13,6 +21,7 @@ import {
     replaceNext as cmReplaceNext,
     replaceAll as cmReplaceAll,
 } from "@codemirror/search";
+import { FloatingScrollbar } from "@/components/FloatingScrollbar/FloatingScrollbar";
 import styles from "./RawTextEditor.module.css";
 
 // 基于 CodeMirror 6 的原始文本编辑器。
@@ -37,6 +46,10 @@ export interface RawEditorHandle {
     replaceAll: () => void;
     /** Clears the active search query. */
     clearSearch: () => void;
+    /** Undoes one text-editor change without touching the RWL data history. */
+    undo: () => boolean;
+    /** Redoes one text-editor change without touching the RWL data history. */
+    redo: () => boolean;
 }
 
 export interface RawEditorSearchState {
@@ -44,6 +57,13 @@ export interface RawEditorSearchState {
     count: number;
     /** One-based active match index, or 0 when no match is active. */
     current: number;
+}
+
+export interface RawEditorHistoryState {
+    /** Number of text-editor transactions that can currently be undone. */
+    undoCount: number;
+    /** Number of text-editor transactions that can currently be redone. */
+    redoCount: number;
 }
 
 /** Props for the controlled raw text editor wrapper around CodeMirror 6. */
@@ -56,6 +76,8 @@ export interface RawTextEditorProps {
     onInput?: () => void;
     /** Called when search count or active match changes. */
     onSearchStateChange?: (state: RawEditorSearchState) => void;
+    /** Called when the local text undo/redo depth changes. */
+    onHistoryStateChange?: (state: RawEditorHistoryState) => void;
     /** Called by the Mod+S key binding. */
     onSave?: () => void;
     /** Called by the Mod+Enter key binding. */
@@ -70,14 +92,31 @@ export const RawTextEditor = forwardRef<RawEditorHandle, RawTextEditorProps>(fun
     invalid,
     onInput,
     onSearchStateChange,
+    onHistoryStateChange,
     onSave,
     onApply,
     onCancel,
 }, ref) {
     const hostRef = useRef<HTMLDivElement>(null);
+    const scrollTargetRef = useRef<HTMLElement | null>(null);
     const viewRef = useRef<EditorView | null>(null);
-    const callbacksRef = useRef({ onInput, onSearchStateChange, onSave, onApply, onCancel });
-    callbacksRef.current = { onInput, onSearchStateChange, onSave, onApply, onCancel };
+    const [scrollerRevision, setScrollerRevision] = useState(0);
+    const callbacksRef = useRef({
+        onInput,
+        onSearchStateChange,
+        onHistoryStateChange,
+        onSave,
+        onApply,
+        onCancel,
+    });
+    callbacksRef.current = {
+        onInput,
+        onSearchStateChange,
+        onHistoryStateChange,
+        onSave,
+        onApply,
+        onCancel,
+    };
 
     const emitSearchState = useCallback((view: EditorView) => {
         const notify = callbacksRef.current.onSearchStateChange;
@@ -103,6 +142,13 @@ export const RawTextEditor = forwardRef<RawEditorHandle, RawTextEditorProps>(fun
         notify({ count, current });
     }, []);
 
+    const emitHistoryState = useCallback((view: EditorView) => {
+        callbacksRef.current.onHistoryStateChange?.({
+            undoCount: undoDepth(view.state),
+            redoCount: redoDepth(view.state),
+        });
+    }, []);
+
     useEffect(() => {
         if (!hostRef.current) {
             return;
@@ -116,10 +162,12 @@ export const RawTextEditor = forwardRef<RawEditorHandle, RawTextEditorProps>(fun
                 // 鼠标中键拖拽触发矩形（列）选择。
                 rectangularSelection({ eventFilter: (event) => event.button === 1 }),
                 EditorState.allowMultipleSelections.of(true),
+                // CodeMirror 在 Windows 上默认用 Ctrl+Click 添加光标；这里按产品交互
+                // 明确改为 Alt+Click，同时保留普通单击清除其它光标的默认行为。
+                EditorView.clickAddsSelectionRange.of((event) => event.button === 0 && event.altKey),
                 search({ literal: true }),
                 // 让保存/应用/取消的快捷键优先于编辑器默认键位。
                 Prec.highest(keymap.of([
-                    { key: "Mod-s", preventDefault: true, run: () => { callbacksRef.current.onSave?.(); return true; } },
                     { key: "Mod-Enter", preventDefault: true, run: () => { callbacksRef.current.onApply?.(); return true; } },
                     { key: "Escape", preventDefault: true, run: () => { callbacksRef.current.onCancel?.(); return true; } },
                 ])),
@@ -128,24 +176,43 @@ export const RawTextEditor = forwardRef<RawEditorHandle, RawTextEditorProps>(fun
                     if (update.docChanged) {
                         callbacksRef.current.onInput?.();
                         emitSearchState(update.view);
+                        emitHistoryState(update.view);
                     } else if (update.selectionSet) {
                         emitSearchState(update.view);
                     }
                 }),
-                // 阻止鼠标中键在 WebView 中触发自动滚动。
-                EditorView.domEventHandlers({
-                    mousedown: (event) => {
-                        if (event.button === 1) {
+                // 矩形选择完成后的 auxclick 不应触发 WebView 的中键默认动作。
+                // mousedown 由 CodeMirror 自己消费，不能提前 preventDefault，否则会
+                // 阻断 rectangularSelection 的拖动状态机。
+                Prec.highest(EditorView.domEventHandlers({
+                    keydown: (event) => {
+                        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
                             event.preventDefault();
+                            if (!event.repeat) {
+                                callbacksRef.current.onSave?.();
+                            }
+                            return true;
                         }
                         return false;
                     },
+                    auxclick: (event) => event.button === 1,
+                })),
+                EditorView.contentAttributes.of({
+                    "aria-label": "RWL 文本编辑器",
+                    "aria-multiline": "true",
                 }),
                 EditorView.theme({
-                    "&": { height: "100%", fontSize: "13px" },
-                    ".cm-scroller": { fontFamily: "Consolas, 'Courier New', monospace", overflow: "auto", lineHeight: "1.5" },
+                    "&": { height: "100%", fontSize: "16px" },
+                    ".cm-scroller": {
+                        fontFamily: "Consolas, 'Courier New', monospace",
+                        overflow: "auto",
+                        lineHeight: "1.45",
+                        scrollbarWidth: "none",
+                    },
+                    ".cm-scroller::-webkit-scrollbar": { width: "0", height: "0" },
                     "&.cm-focused": { outline: "none" },
-                    ".cm-content": { caretColor: "#1f2a3a" },
+                    ".cm-content": { padding: "10px 20px", caretColor: "#1f2a3a" },
+                    ".cm-line": { padding: "0" },
                     ".cm-selectionBackground": { backgroundColor: "rgba(47, 95, 147, 0.18)" },
                     "&.cm-focused .cm-selectionBackground": { backgroundColor: "rgba(47, 95, 147, 0.28)" },
                     ".cm-searchMatch": { backgroundColor: "rgba(250, 204, 21, 0.4)", outline: "1px solid rgba(202, 138, 4, 0.32)" },
@@ -155,12 +222,26 @@ export const RawTextEditor = forwardRef<RawEditorHandle, RawTextEditorProps>(fun
         });
 
         const view = new EditorView({ state, parent: hostRef.current });
+        const host = hostRef.current;
+        const preventMiddleButtonDefault = (event: MouseEvent) => {
+            if (event.button === 1) {
+                // 该监听位于 contentDOM 的冒泡上游：CodeMirror 已先建立矩形选择，
+                // 随后再阻止 WebView 的中键自动滚动，不会截断拖动手势。
+                event.preventDefault();
+            }
+        };
+        host.addEventListener("mousedown", preventMiddleButtonDefault);
         viewRef.current = view;
+        scrollTargetRef.current = view.scrollDOM;
+        setScrollerRevision((revision) => revision + 1);
         view.focus();
+        emitHistoryState(view);
 
         return () => {
+            host.removeEventListener("mousedown", preventMiddleButtonDefault);
             view.destroy();
             viewRef.current = null;
+            scrollTargetRef.current = null;
         };
         // 仅在挂载时根据当时的 initialText 创建一次（外部用 key 控制重建）。
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -174,9 +255,15 @@ export const RawTextEditor = forwardRef<RawEditorHandle, RawTextEditorProps>(fun
             if (!view) {
                 return;
             }
+            const previousQuery = getSearchQuery(view.state).search;
             view.dispatch({
                 effects: setSearchQuery.of(new SearchQuery({ search: query, replace, caseSensitive: false, literal: true })),
             });
+            // 新查询自动落到一个真实命中，计数不会出现“有结果但没有当前项”。
+            // 只修改替换文本时不移动当前命中。
+            if (query && query !== previousQuery) {
+                cmFindNext(view);
+            }
             emitSearchState(view);
         },
         findNext: () => {
@@ -214,7 +301,30 @@ export const RawTextEditor = forwardRef<RawEditorHandle, RawTextEditorProps>(fun
                 emitSearchState(view);
             }
         },
+        undo: () => {
+            const view = viewRef.current;
+            if (!view) {
+                return false;
+            }
+            const changed = cmUndo(view);
+            view.focus();
+            return changed;
+        },
+        redo: () => {
+            const view = viewRef.current;
+            if (!view) {
+                return false;
+            }
+            const changed = cmRedo(view);
+            view.focus();
+            return changed;
+        },
     }), [emitSearchState, initialText]);
 
-    return <div ref={hostRef} className={`${styles["editor-host"]} ${invalid ? styles["editor-host-invalid"] : ""}`} />;
+    return (
+        <div className={styles["editor-root"]}>
+            <div ref={hostRef} className={`${styles["editor-host"]} ${invalid ? styles["editor-host-invalid"] : ""}`} />
+            <FloatingScrollbar targetRef={scrollTargetRef} revision={scrollerRevision} />
+        </div>
+    );
 });

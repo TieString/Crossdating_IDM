@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ClipboardEvent, type KeyboardEvent, type MouseEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -14,8 +14,13 @@ import {
 import WidthContainer, { WidthGridSkeleton } from "@/components/WidthContainer/WidthContainer";
 import ContextMenu, { type ContextMenuItem } from "@/components/ContextMenu/ContextMenu";
 import { FloatingScrollArea } from "@/components/FloatingScrollArea/FloatingScrollArea";
-import { FloatingScrollbar } from "@/components/FloatingScrollbar/FloatingScrollbar";
 import { FindReplaceBar, type FindReplaceMode } from "@/components/FindReplace/FindReplaceBar";
+import {
+    RawTextEditor,
+    type RawEditorHandle,
+    type RawEditorHistoryState,
+    type RawEditorSearchState,
+} from "@/components/FindReplace/RawTextEditor";
 import { openSettingsWindow } from "@/pages/settings/openSettingsWindow";
 import { stopMarker } from "@/shared/constants";
 import style from "./Home.module.css";
@@ -331,7 +336,7 @@ const renderCofechaHtmlWithLinks = (
 
 export default function Home() {
     const homeContainerRef = useRef<HTMLDivElement>(null);
-    const rawEditorRef = useRef<HTMLParagraphElement>(null);
+    const rawEditorRef = useRef<RawEditorHandle>(null);
     const leftPanelsRef = useRef<HTMLDivElement>(null);
     const rightPanelsRef = useRef<HTMLDivElement>(null);
     const deleteSeriesRequestIdRef = useRef(0);
@@ -354,6 +359,8 @@ export default function Home() {
     const [rawEditorInitialText, setRawEditorInitialText] = useState("");
     const [rawEditorRevision, setRawEditorRevision] = useState(0);
     const [rawEditorError, setRawEditorError] = useState("");
+    const [rawEditorSearchState, setRawEditorSearchState] = useState<RawEditorSearchState>({ count: 0, current: 0 });
+    const [rawEditorHistoryState, setRawEditorHistoryState] = useState<RawEditorHistoryState>({ undoCount: 0, redoCount: 0 });
     const [externalWorkspaceWindows, setExternalWorkspaceWindows] = useState<ExternalWorkspaceWindows>(EMPTY_EXTERNAL_WORKSPACE_WINDOWS);
     const [panelContextMenu, setPanelContextMenu] = useState<{ x: number; y: number; kind: WorkspaceWindowKind } | null>(null);
     const [findReplaceOpen, setFindReplaceOpen] = useState(false);
@@ -771,6 +778,8 @@ export default function Home() {
         setRawEditorTree(resolvedTree);
         setRawEditorInitialText(getCurrentRwlText(resolvedTree));
         setRawEditorError("");
+        setRawEditorSearchState({ count: 0, current: 0 });
+        setRawEditorHistoryState({ undoCount: 0, redoCount: 0 });
         setIsRawEditing(true);
         setRawEditorRevision((revision) => revision + 1);
         // 从独立折线图发起时，把已打开文本编辑器的主窗口带到前台。
@@ -1254,10 +1263,14 @@ export default function Home() {
         [findQuery, siteData],
     );
 
-    const matchCount = gridMatches.length;
-    const effectiveMatchIndex = matchCount > 0 ? ((findMatchIndex % matchCount) + matchCount) % matchCount : 0;
+    const matchCount = isRawEditing ? rawEditorSearchState.count : gridMatches.length;
+    const effectiveMatchIndex = isRawEditing
+        ? Math.max(0, rawEditorSearchState.current - 1)
+        : matchCount > 0
+            ? ((findMatchIndex % matchCount) + matchCount) % matchCount
+            : 0;
 
-    const currentGridMatch = findReplaceOpen && matchCount > 0
+    const currentGridMatch = !isRawEditing && findReplaceOpen && matchCount > 0
         ? gridMatches[effectiveMatchIndex]
         : undefined;
     const currentGridMatchTree = currentGridMatch?.tree;
@@ -1284,6 +1297,7 @@ export default function Home() {
     }, []);
 
     const handleCloseFindReplace = useCallback(() => {
+        rawEditorRef.current?.clearSearch();
         setFindReplaceOpen(false);
     }, []);
 
@@ -1296,13 +1310,35 @@ export default function Home() {
         setFindMatchIndex(0);
     }, []);
 
+    useEffect(() => {
+        if (!isRawEditing) {
+            return;
+        }
+        const frameId = window.requestAnimationFrame(() => {
+            if (findReplaceOpen) {
+                rawEditorRef.current?.setSearch(findQuery, replaceValue);
+            } else {
+                rawEditorRef.current?.clearSearch();
+            }
+        });
+        return () => window.cancelAnimationFrame(frameId);
+    }, [findQuery, findReplaceOpen, isRawEditing, rawEditorRevision, replaceValue]);
+
     const handleFindNext = useCallback(() => {
+        if (isRawEditing) {
+            rawEditorRef.current?.findNext();
+            return;
+        }
         setFindMatchIndex((previous) => matchCount > 0 ? (previous + 1) % matchCount : 0);
-    }, [matchCount]);
+    }, [isRawEditing, matchCount]);
 
     const handleFindPrev = useCallback(() => {
+        if (isRawEditing) {
+            rawEditorRef.current?.findPrev();
+            return;
+        }
         setFindMatchIndex((previous) => matchCount > 0 ? (previous - 1 + matchCount) % matchCount : 0);
-    }, [matchCount]);
+    }, [isRawEditing, matchCount]);
 
     const commitGridReplacement = useCallback((
         matches: readonly GridFindMatch[],
@@ -1332,6 +1368,10 @@ export default function Home() {
     }, [handleReplaceSiteData, handleReplaceTreeData, siteData]);
 
     const handleReplaceOne = useCallback(() => {
+        if (isRawEditing) {
+            rawEditorRef.current?.replaceCurrent();
+            return;
+        }
         const match = gridMatches[effectiveMatchIndex];
         if (!match) return;
         const result = replaceGridMatches(
@@ -1342,9 +1382,13 @@ export default function Home() {
             stopMarker.value,
         );
         commitGridReplacement([match], result);
-    }, [commitGridReplacement, effectiveMatchIndex, findQuery, gridMatches, replaceValue, siteData]);
+    }, [commitGridReplacement, effectiveMatchIndex, findQuery, gridMatches, isRawEditing, replaceValue, siteData]);
 
     const handleReplaceAll = useCallback(() => {
+        if (isRawEditing) {
+            rawEditorRef.current?.replaceAll();
+            return;
+        }
         const result = replaceGridMatches(
             siteData,
             gridMatches,
@@ -1354,21 +1398,22 @@ export default function Home() {
         );
         commitGridReplacement(gridMatches, result);
         setFindMatchIndex(0);
-    }, [commitGridReplacement, findQuery, gridMatches, replaceValue, siteData]);
+    }, [commitGridReplacement, findQuery, gridMatches, isRawEditing, replaceValue, siteData]);
 
     const getRawEditorText = useCallback(() => (
-        rawEditorRef.current?.innerText ?? rawEditorInitialText
+        rawEditorRef.current?.getValue() ?? rawEditorInitialText
     ), [rawEditorInitialText]);
 
     const handleCancelRawEditor = useCallback(() => {
         setIsRawEditing(false);
         setRawEditorError("");
+        setRawEditorSearchState({ count: 0, current: 0 });
+        setRawEditorHistoryState({ undoCount: 0, redoCount: 0 });
     }, []);
 
     const handleContextualUndo = useCallback(() => {
         if (isRawEditing && rawEditorRef.current) {
-            rawEditorRef.current.focus();
-            document.execCommand("undo");
+            rawEditorRef.current.undo();
             return;
         }
         handleUndo();
@@ -1376,8 +1421,7 @@ export default function Home() {
 
     const handleContextualRedo = useCallback(() => {
         if (isRawEditing && rawEditorRef.current) {
-            rawEditorRef.current.focus();
-            document.execCommand("redo");
+            rawEditorRef.current.redo();
             return;
         }
         handleRedo();
@@ -1485,51 +1529,17 @@ export default function Home() {
         }
     }, [rawEditorError]);
 
-    const handleRawEditorPaste = useCallback((event: ClipboardEvent<HTMLParagraphElement>) => {
-        event.preventDefault();
-        const text = event.clipboardData.getData("text/plain");
-        document.execCommand("insertText", false, text);
+    const handleRawEditorSearchStateChange = useCallback((next: RawEditorSearchState) => {
+        setRawEditorSearchState((previous) => (
+            previous.count === next.count && previous.current === next.current ? previous : next
+        ));
     }, []);
 
-    const handleRawEditorKeyDown = useCallback((event: KeyboardEvent<HTMLParagraphElement>) => {
-        const key = event.key.toLowerCase();
-        const isCommandKey = event.ctrlKey || event.metaKey;
-
-        if (isCommandKey && key === "s") {
-            event.preventDefault();
-            // 忽略按住时的自动重复，避免连续触发保存与 COFECHA 验证。
-            if (event.repeat) {
-                return;
-            }
-            void handleSave();
-            return;
-        }
-
-        if (isCommandKey && event.key === "Enter") {
-            event.preventDefault();
-            void applyRawEditor();
-            return;
-        }
-
-        if (event.key === "Escape") {
-            event.preventDefault();
-            handleCancelRawEditor();
-        }
-    }, [applyRawEditor, handleCancelRawEditor, handleSave]);
-
-    useEffect(() => {
-        if (!isRawEditing) {
-            return;
-        }
-
-        const frameId = window.requestAnimationFrame(() => {
-            rawEditorRef.current?.focus();
-        });
-
-        return () => {
-            window.cancelAnimationFrame(frameId);
-        };
-    }, [isRawEditing, rawEditorRevision]);
+    const handleRawEditorHistoryStateChange = useCallback((next: RawEditorHistoryState) => {
+        setRawEditorHistoryState((previous) => (
+            previous.undoCount === next.undoCount && previous.redoCount === next.redoCount ? previous : next
+        ));
+    }, []);
 
     // 标题栏图例的 portal 挂载点（位于 index.html 的 .titlebar 内）
     useEffect(() => {
@@ -1546,8 +1556,8 @@ export default function Home() {
                 onSaveAs={handleSaveAs}
                 onUndo={handleContextualUndo}
                 onRedo={handleContextualRedo}
-                canUndo={isRawEditing || historyStatus.undoCount > 0}
-                canRedo={isRawEditing || historyStatus.redoCount > 0}
+                canUndo={isRawEditing ? rawEditorHistoryState.undoCount > 0 : historyStatus.undoCount > 0}
+                canRedo={isRawEditing ? rawEditorHistoryState.redoCount > 0 : historyStatus.redoCount > 0}
                 onCofechaVersionChange={setCofechaVersion}
                 onActiveMenuChange={setActiveMenu}
                 onOpenOperationLog={() => handleOpenWorkspaceWindow("operation-log")}
@@ -1605,25 +1615,17 @@ export default function Home() {
                                 </button>
                             </div>
 
-                            <p
+                            <RawTextEditor
                                 key={rawEditorRevision}
                                 ref={rawEditorRef}
-                                className={`${style["width-text"]} ${rawEditorError ? style["raw-editor-invalid"] : ""}`}
-                                contentEditable
-                                suppressContentEditableWarning
-                                role="textbox"
-                                aria-label="RWL 文本编辑器"
-                                aria-multiline="true"
-                                spellCheck={false}
+                                initialText={rawEditorInitialText}
+                                invalid={Boolean(rawEditorError)}
                                 onInput={handleRawEditorInput}
-                                onPaste={handleRawEditorPaste}
-                                onKeyDown={handleRawEditorKeyDown}
-                            >
-                                {rawEditorInitialText}
-                            </p>
-                            <FloatingScrollbar
-                                targetRef={rawEditorRef}
-                                revision={rawEditorRevision}
+                                onSearchStateChange={handleRawEditorSearchStateChange}
+                                onHistoryStateChange={handleRawEditorHistoryStateChange}
+                                onSave={handleSave}
+                                onApply={handleApplyRawEditor}
+                                onCancel={handleCancelRawEditor}
                             />
 
                             {rawEditorError ? (
