@@ -1,8 +1,9 @@
 [package]
 name = "crossdating_tauri"
-version = "2.0.0"
-description = "A Tauri App"
-authors = ["you"]
+version = "1.5.0"
+description = "面向树轮 RWL 数据的可视化编辑、COFECHA 验证与事件级交叉定年桌面工作站。"
+authors = ["TieString"]
+license = "GPL-3.0-only"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
