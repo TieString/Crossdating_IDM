@@ -8,19 +8,13 @@ import { createServer } from "vite";
 const args = process.argv.slice(2);
 const includeRaw = args.includes("--include-raw");
 const keepWorkDirs = args.includes("--keep-workdirs");
-const versionArg = args.find((arg) => arg.startsWith("--version="));
-const version = versionArg?.split("=")[1] === "cofecha12k" ? "cofecha12k" : "cofecha";
+const cofechaArg = args.find((arg) => arg.startsWith("--cofecha-exe="));
 const explicitRoot = args.find((arg) => !arg.startsWith("--"));
 const sampleRoot = explicitRoot
   ? path.resolve(process.cwd(), explicitRoot)
   : path.join(process.cwd(), "笔记", "数据");
 
-const sidecarPath = path.join(
-  process.cwd(),
-  "src-tauri",
-  "bin",
-  `${version}-x86_64-pc-windows-msvc.exe`,
-);
+const cofechaPath = cofechaArg?.slice("--cofecha-exe=".length) || process.env.COFECHA_EXE || "";
 
 async function listSamples(root) {
   const entries = await readdir(root, { withFileTypes: true });
@@ -85,7 +79,7 @@ async function runCofechaForFile(filePath, sampleName, label, parseCofechaResult
 
   try {
     await cp(filePath, inputPath);
-    await runExecutable(sidecarPath, workDir, [
+    await runExecutable(cofechaPath, workDir, [
       "very",
       inputName,
       "",
@@ -123,8 +117,8 @@ async function main() {
   if (!existsSync(sampleRoot)) {
     throw new Error(`Sample root not found: ${sampleRoot}`);
   }
-  if (!existsSync(sidecarPath)) {
-    throw new Error(`COFECHA sidecar not found: ${sidecarPath}`);
+  if (!cofechaPath || !existsSync(cofechaPath)) {
+    throw new Error("COFECHA executable not found; pass --cofecha-exe=PATH or set COFECHA_EXE");
   }
 
   const server = await createServer({

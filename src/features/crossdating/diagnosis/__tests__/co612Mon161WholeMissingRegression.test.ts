@@ -8,7 +8,6 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
     extractPart6FlaggedASeriesIds,
@@ -43,10 +42,7 @@ import {
 const RWL_PATH = process.env.CO612_SOURCE_RWL_PATH
     ?? "D:/软件测试/数据/ITRDB/itrdb_download/measurements/northamerica/usa/co612.rwl";
 const TARGET_ID = "mon161";
-const COFECHA_EXE = fileURLToPath(new URL(
-    "../../../../../src-tauri/bin/cofecha-x86_64-pc-windows-msvc.exe",
-    import.meta.url,
-));
+const COFECHA_EXE = process.env.COFECHA_EXE?.trim() ?? "";
 
 const fixtureDescribe = existsSync(RWL_PATH) && existsSync(COFECHA_EXE)
     ? describe

@@ -9,6 +9,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { diagnoseCrossdating } from "../engine";
@@ -121,8 +122,10 @@ const ITRDB_DIR_CANDIDATES = [
 ].filter((candidate): candidate is string => Boolean(candidate));
 const ITRDB_DIR = ITRDB_DIR_CANDIDATES.find((candidate) => existsSync(candidate))
     ?? ITRDB_DIR_CANDIDATES[ITRDB_DIR_CANDIDATES.length - 1];
-const COF_DIR = fileURLToPath(new URL("../../../../../笔记/数据/", import.meta.url));
-const COF_EXE = `${COF_DIR}cofecha-x86_64-pc-windows-msvc.exe`;
+const COF_EXE = process.env.COFECHA_EXE?.trim() ?? "";
+const COF_DIR = COF_EXE ? dirname(COF_EXE) : "";
+const COF_INPUT = COF_DIR ? join(COF_DIR, "_bench.rwl") : "";
+const COF_OUTPUT = COF_DIR ? join(COF_DIR, "TESTCOF.OUT") : "";
 // 全量跑（用上全部 ITRDB 文件）远超默认 10 分钟，单个 it 超时按需放大（默认仍 10 分钟）。
 const BENCH_TIMEOUT = Number(process.env.ITRDB_TIMEOUT ?? 600000);
 const cofechaBenchmarkPreprocess = (series: NumericSeries): NumericSeries => new Map(
@@ -131,9 +134,9 @@ const cofechaBenchmarkPreprocess = (series: NumericSeries): NumericSeries => new
 
 const runCofecha = (site: RwlSiteData): string | null => {
     try {
-        writeFileSync(`${COF_DIR}_bench.rwl`, formatTucson(site, false), "utf8");
+        writeFileSync(COF_INPUT, formatTucson(site, false), "utf8");
         execFileSync(COF_EXE, [], { cwd: COF_DIR, input: "test\n_bench.rwl\n\n\n\n\n\n", timeout: 30000, stdio: ["pipe", "ignore", "ignore"] });
-        return existsSync(`${COF_DIR}TESTCOF.OUT`) ? readFileSync(`${COF_DIR}TESTCOF.OUT`, "utf8") : null;
+        return existsSync(COF_OUTPUT) ? readFileSync(COF_OUTPUT, "utf8") : null;
     } catch { return null; }
 };
 const STOP_MARKERS = new Set([999, -999, 9990, -9999]);

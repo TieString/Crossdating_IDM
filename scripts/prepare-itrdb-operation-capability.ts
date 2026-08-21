@@ -40,8 +40,11 @@ const outputPath = resolve(valueFor("--output")
     ?? "docs/benchmarks/itrdb-operation-capability-manifest-v1.json");
 const workRoot = resolve(valueFor("--work-dir")
     ?? "D:/软件测试/itrdb-operation-capability/manifest-clean-cofecha-v1");
-const cofechaExe = resolve(valueFor("--cofecha-exe")
-    ?? "src-tauri/bin/cofecha-x86_64-pc-windows-msvc.exe");
+const cofechaExeInput = valueFor("--cofecha-exe") ?? process.env.COFECHA_EXE;
+if (!cofechaExeInput) {
+    throw new Error("COFECHA executable required: pass --cofecha-exe or set COFECHA_EXE");
+}
+const cofechaExe = resolve(cofechaExeInput);
 
 if (!existsSync(configPath)) throw new Error(`config not found: ${configPath}`);
 if (!existsSync(cofechaExe)) throw new Error(`COFECHA not found: ${cofechaExe}`);

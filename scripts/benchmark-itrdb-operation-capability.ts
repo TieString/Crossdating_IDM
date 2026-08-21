@@ -192,8 +192,11 @@ const outputRoot = resolve(valueFor("--output-dir")
 const runId = valueFor("--run-id")
     ?? `capability-${new Date().toISOString().replace(/[:.]/g, "-")}`;
 const runDir = resolve(valueFor("--run-dir") ?? join(outputRoot, runId));
-const cofechaExe = resolve(valueFor("--cofecha-exe")
-    ?? "src-tauri/bin/cofecha-x86_64-pc-windows-msvc.exe");
+const cofechaExeInput = valueFor("--cofecha-exe") ?? process.env.COFECHA_EXE;
+if (!cofechaExeInput) {
+    throw new Error("COFECHA executable required: pass --cofecha-exe or set COFECHA_EXE");
+}
+const cofechaExe = resolve(cofechaExeInput);
 const workerIndexRaw = valueFor("--worker-index");
 const workerIndex = workerIndexRaw === null ? null : Number(workerIndexRaw);
 const planPath = resolve(valueFor("--plan") ?? join(runDir, "run-plan.json"));

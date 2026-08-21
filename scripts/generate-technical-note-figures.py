@@ -88,7 +88,7 @@ def workflow_figure():
     arrow(draw, (300, 555), (300, 635))
     arrow(draw, (300, 805), (300, 885))
 
-    rounded_box(draw, (680, 240, 1120, 375), "Current working RWL\nexported to selected COFECHA sidecar", PALE_ORANGE, title=True)
+    rounded_box(draw, (680, 240, 1120, 375), "Current working RWL\nexported to user-selected COFECHA", PALE_ORANGE, title=True)
     rounded_box(draw, (680, 455, 1120, 620), "VERYCOF.OUT parser\nPART 1 summary | PART 3 master\nPART 6 problem blocks | PART 7 stats", PALE_ORANGE)
     rounded_box(draw, (680, 710, 1120, 860), "Dynamic reference state\nPART 3 master dating series used\nPART 6 A flags classified", PALE_ORANGE)
     rounded_box(draw, (680, 940, 1120, 1065), "Web Worker diagnosis\nlag scans + segments + constrained edits", PALE_BLUE)
@@ -151,7 +151,7 @@ def validation_figure():
     draw.text((100, 880), "This is a regression-screening result, not sensitivity, specificity, or independent crossdating accuracy.", font=font(17), fill=MUTED)
 
     draw.rounded_rectangle((1190, 145, 1740, 650), radius=24, fill="#FBFCFE", outline="#D6E2EC", width=2)
-    draw.text((1230, 180), "COFECHA sidecar validation", font=font(25, bold=True), fill=NAVY)
+    draw.text((1230, 180), "User-selected COFECHA validation", font=font(25, bold=True), fill=NAVY)
     draw.text((1230, 225), "Supplied crossdated RWL files", font=font(18), fill=MUTED)
     draw.rounded_rectangle((1230, 280, 1695, 400), radius=16, fill=PALE_GREEN, outline="#B7D6BF", width=2)
     center_text(draw, (1230, 280, 1695, 400), "7 / 8 datasets\n0 PART 6 A/problem flags", font(27, bold=True), fill=GREEN)

@@ -96,10 +96,11 @@ const outputRoot = resolve(
 const runId = valueFor("--run-id")
     ?? `zsl-serial-operation-replay-${new Date().toISOString().replace(/[:.]/g, "-")}`;
 const runDir = join(outputRoot, runId);
-const cofechaExe = resolve(valueFor("--cofecha-exe") ?? fileURLToPath(new URL(
-    "../src-tauri/bin/cofecha-x86_64-pc-windows-msvc.exe",
-    import.meta.url,
-)));
+const cofechaExeInput = valueFor("--cofecha-exe") ?? process.env.COFECHA_EXE;
+if (!cofechaExeInput) {
+    throw new Error("COFECHA executable required: pass --cofecha-exe or set COFECHA_EXE");
+}
+const cofechaExe = resolve(cofechaExeInput);
 const timeoutSeconds = Math.max(10, Number(valueFor("--timeout-seconds") ?? 60));
 const requestedMode = valueFor("--mode") ?? "both";
 const requestedTarget = valueFor("--target");

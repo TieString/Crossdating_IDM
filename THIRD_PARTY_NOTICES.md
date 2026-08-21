@@ -2,15 +2,9 @@
 
 Crossdating IDM 使用或随附若干第三方组件。项目根目录中的 GNU GPL v3.0 only 许可证不会取代这些第三方组件各自的版权和许可条款。
 
-## COFECHA 可执行程序
+## COFECHA
 
-以下文件是第三方 COFECHA 可执行程序，不属于 Crossdating IDM 的 GPL-3.0-only 授权范围：
-
-- `src-tauri/bin/cofecha-x86_64-pc-windows-msvc.exe`
-- `src-tauri/bin/cofecha12k-x86_64-pc-windows-msvc.exe`
-- `src-tauri/bin/cofechawin-x86_64-pc-windows-msvc.exe`
-
-这些文件的版权和许可权利仍归其各自权利人所有。公开分发源码、安装包或 Release 资产前，发布者必须自行确认拥有分发这些文件的许可；如果无法确认，应从公开仓库和发布包中移除这些文件，并改为要求用户从获授权的来源自行提供。
+Crossdating IDM 不包含、复制或分发 COFECHA 可执行程序。用户可从 [LTRR Dendrochronology Program Library](https://cambium.ltrr.arizona.edu/research/software) 独立获取 COFECHA，并在应用设置中选择本机 EXE；所选程序继续适用其权利人提供的条款，不属于 Crossdating IDM 的 GPL-3.0-only 授权范围。
 
 COFECHA 由 Richard L. Holmes 创建。推荐引用：Holmes, R. L. (1983). Computer-assisted quality control in tree-ring dating and measurement. *Tree-Ring Bulletin*, 43, 69-78。
 

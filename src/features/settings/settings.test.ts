@@ -41,6 +41,19 @@ describe("settings", () => {
 
         expect(loadSettings().diagnosis.enabled).toBe(true);
         expect(loadSettings().treeRingImage.showGeneratedPreview).toBe(true);
+        expect(loadSettings().cofecha.executablePath).toBe("");
+    });
+
+    it("persists and normalizes one user-selected COFECHA executable path", () => {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+            cofecha: {
+                executablePath: "  C:\\LTRR\\COFECHA.EXE  ",
+            },
+        }));
+
+        expect(loadSettings().cofecha).toEqual({
+            executablePath: "C:\\LTRR\\COFECHA.EXE",
+        });
     });
 
     it("persists a disabled automatic dating-suggestion setting", () => {

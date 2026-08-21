@@ -1,40 +1,32 @@
-import { Command } from "@tauri-apps/plugin-shell";
+import { invoke } from "@tauri-apps/api/core";
 import { readTextFile, exists, remove } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
 import { clearWorkDir, getCofechaWorkDir } from "@/services/fs";
 import { saveFile } from "../fs/io";
 
-type CofechaVersion = "cofecha" | "cofecha12k" | "cofechawin";
+interface CofechaProcessOutput {
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+}
 
-const COFECHA_SIDECAR_NAME = "bin/cofecha";
-const COFECHA12K_SIDECAR_NAME = "bin/cofecha12k";
-const COFECHAWIN_SIDECAR_NAME = "bin/cofechawin";
-
-const SIDECAR_NAME_BY_VERSION: Record<CofechaVersion, string> = {
-  cofecha: COFECHA_SIDECAR_NAME,
-  cofecha12k: COFECHA12K_SIDECAR_NAME,
-  cofechawin: COFECHAWIN_SIDECAR_NAME,
-};
-
-// COFECHA 执行入口。
-// 这个函数负责把 RWL 文本写到临时工作目录，启动 sidecar，读取 VERYCOF.OUT，
-// 再把结果返回给前端。它同时处理两个约束：
-// 1. 每次执行前清空 COFECHA 工作目录；
-// 2. 非 ASCII 输入名在当前集成方式下不稳定，因此会降级为默认文件名。
-// 参数 version 用于选择 COFECHA / COFECHA12K / COFECHA Win（默认为 "cofecha"）。
-// 三个版本共用同一套 stdin 交互协议与 VERYCOF.OUT 输出，仅可执行文件不同。
+/** Runs whichever COFECHA executable the user selected; the executable is never copied. */
 
 export async function runCofecha(
   rwlText: string,
   inputFileName?: string,
-  version: CofechaVersion = "cofecha"
+  executablePath?: string,
 ): Promise<string> {
+  const normalizedExecutablePath = executablePath?.trim() ?? "";
+  if (!normalizedExecutablePath) {
+    throw new Error("尚未配置 COFECHA 可执行文件");
+  }
+
   const cleanResult = await clearWorkDir();
   if (cleanResult.failedPaths.length > 0) {
     console.warn("workspace cleanup had failures:", cleanResult.failedPaths);
   }
 
-  const sidecarName = SIDECAR_NAME_BY_VERSION[version] ?? COFECHA_SIDECAR_NAME;
   const workDir = await getCofechaWorkDir();
   const defaultInputName = "INPUT.RWL";
 
@@ -47,61 +39,32 @@ export async function runCofecha(
 
   await saveFile(inputPath, rwlText);
 
-  const command = Command.sidecar(sidecarName, [], {
-    cwd: workDir,
-    encoding: "utf-8",
+  const processOutput = await invoke<CofechaProcessOutput>("run_external_cofecha", {
+    executablePath: normalizedExecutablePath,
+    runtimeInputName,
   });
+  const outPath = await join(workDir, "VERYCOF.OUT");
 
-  return new Promise<string>(async (resolve, reject) => {
-    command.on("error", (e) => {
-      console.error("cofecha error:", e);
-      reject(e);
-    });
+  if (!(await exists(outPath))) {
+    const detail = processOutput.stderr.trim() || processOutput.stdout.trim();
+    const exitCode = processOutput.exitCode === null ? "unknown" : String(processOutput.exitCode);
+    throw new Error(
+      `COFECHA 未生成 VERYCOF.OUT（退出码 ${exitCode}）${detail ? `: ${detail}` : ""}`,
+    );
+  }
 
-    command.on("close", async (data) => {
-      console.log(`cofecha finished: code=${data.code} signal=${data.signal}`);
+  const outRawText = await readTextFile(outPath);
+  const outText = runtimeInputName !== requestedName
+    ? outRawText.split(runtimeInputName).join(requestedName)
+    : outRawText;
 
-      try {
-        const outPath = await join(workDir, "VERYCOF.OUT");
-
-        if (await exists(outPath)) {
-          const outRawText = await readTextFile(outPath);
-          // 如果运行时文件名被降级成 ASCII，把展示名补回 OUT 文本中。
-          const outText =
-            runtimeInputName !== requestedName
-              ? outRawText.split(runtimeInputName).join(requestedName)
-              : outRawText;
-
-          try {
-            if (runtimeInputName !== defaultInputName && (await exists(inputPath))) {
-              await remove(inputPath);
-            }
-          } catch (rmErr) {
-            console.warn("failed to remove temporary input file:", rmErr);
-          }
-
-          resolve(outText);
-        } else {
-          const msg = `VERYCOF.OUT not found: ${outPath}`;
-          console.error(msg);
-          reject(new Error(msg));
-        }
-      } catch (err) {
-        reject(err);
-      }
-    });
-
-    try {
-      const child = await command.spawn();
-      await child.write("very\n");
-      await child.write(`${runtimeInputName}\n`);
-      await child.write("\n");
-      await child.write("\n");
-      await child.write("\n");
-      await child.write("\n");
-      await child.write("\n");
-    } catch (spawnErr) {
-      reject(spawnErr);
+  try {
+    if (runtimeInputName !== defaultInputName && (await exists(inputPath))) {
+      await remove(inputPath);
     }
-  });
+  } catch (error) {
+    console.warn("failed to remove temporary input file:", error);
+  }
+
+  return outText;
 }

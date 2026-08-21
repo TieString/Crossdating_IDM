@@ -28,14 +28,9 @@ export interface AnimationSettings {
     historyAnim: HistoryAnimation;
 }
 
-/** Selectable COFECHA executable (sidecar) used for crossdating runs. */
-export type CofechaEngine = "cofecha" | "cofecha12k" | "cofechawin";
-
-export const COFECHA_ENGINES: readonly CofechaEngine[] = ["cofecha", "cofecha12k", "cofechawin"];
-
 export interface CofechaSettings {
-    /** Which COFECHA executable to run. */
-    engine: CofechaEngine;
+    /** User-selected COFECHA executable, regardless of release family. */
+    executablePath: string;
 }
 
 export interface DiagnosisSettings {
@@ -70,7 +65,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
         historyAnim: "enabled",
     },
     cofecha: {
-        engine: "cofecha",
+        executablePath: "",
     },
     diagnosis: {
         enabled: true,
@@ -79,13 +74,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
         showGeneratedPreview: true,
     },
 };
-
-/** Coerces any input to a valid COFECHA engine, falling back to the default. */
-export function normalizeCofechaEngine(value: unknown): CofechaEngine {
-    return COFECHA_ENGINES.includes(value as CofechaEngine)
-        ? (value as CofechaEngine)
-        : DEFAULT_SETTINGS.cofecha.engine;
-}
 
 export const STORAGE_KEY = "crossdating-idm-settings";
 
@@ -121,6 +109,7 @@ export function loadSettings(): AppSettings {
             : {};
         const parsedDiagnosisEnabled = (parsedDiagnosis as Partial<DiagnosisSettings>).enabled;
         const parsedGeneratedPreview = (parsedTreeRingImage as Partial<TreeRingImageSettings>).showGeneratedPreview;
+        const parsedExecutablePath = (parsedCofecha as Partial<CofechaSettings>).executablePath;
 
         return {
             animation: {
@@ -129,9 +118,9 @@ export function loadSettings(): AppSettings {
                 speed: normalizeAnimationSpeed((parsedAnimation as Partial<AnimationSettings>).speed),
             },
             cofecha: {
-                ...DEFAULT_SETTINGS.cofecha,
-                ...parsedCofecha,
-                engine: normalizeCofechaEngine((parsedCofecha as Partial<CofechaSettings>).engine),
+                executablePath: typeof parsedExecutablePath === "string"
+                    ? parsedExecutablePath.trim()
+                    : DEFAULT_SETTINGS.cofecha.executablePath,
             },
             diagnosis: {
                 enabled: typeof parsedDiagnosisEnabled === "boolean"

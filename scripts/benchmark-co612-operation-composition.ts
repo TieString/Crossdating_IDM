@@ -209,10 +209,11 @@ const wholeShifts = (valueFor("--whole-shifts") ?? "-5,-1,1,5")
     .split(",")
     .map(Number)
     .filter((value) => Number.isInteger(value) && value !== 0);
-const cofechaExe = resolve(valueFor("--cofecha-exe") ?? fileURLToPath(new URL(
-    "../src-tauri/bin/cofecha-x86_64-pc-windows-msvc.exe",
-    import.meta.url,
-)));
+const cofechaExeInput = valueFor("--cofecha-exe") ?? process.env.COFECHA_EXE;
+if (!cofechaExeInput) {
+    throw new Error("COFECHA executable required: pass --cofecha-exe or set COFECHA_EXE");
+}
+const cofechaExe = resolve(cofechaExeInput);
 const requestedPositionFractions = (valueFor("--position-fractions") ?? "0.5,0.75")
     .split(",")
     .map(Number);

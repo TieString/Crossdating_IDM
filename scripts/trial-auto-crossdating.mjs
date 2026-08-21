@@ -7,8 +7,7 @@ import { createServer } from "vite";
 
 const args = process.argv.slice(2);
 const keepWorkDirs = args.includes("--keep-workdirs");
-const versionArg = args.find((arg) => arg.startsWith("--version="));
-const version = versionArg?.split("=")[1] === "cofecha12k" ? "cofecha12k" : "cofecha";
+const cofechaArg = args.find((arg) => arg.startsWith("--cofecha-exe="));
 const maxCandidatesArg = args.find((arg) => arg.startsWith("--max-candidates="));
 const maxCandidates = Math.max(1, Number(maxCandidatesArg?.split("=")[1] ?? 8));
 const siteArg = args.find((arg) => arg.startsWith("--site="));
@@ -18,12 +17,7 @@ const sampleRoot = explicitRoot
   ? path.resolve(process.cwd(), explicitRoot)
   : path.join(process.cwd(), "笔记", "数据");
 
-const sidecarPath = path.join(
-  process.cwd(),
-  "src-tauri",
-  "bin",
-  `${version}-x86_64-pc-windows-msvc.exe`,
-);
+const cofechaPath = cofechaArg?.slice("--cofecha-exe=".length) || process.env.COFECHA_EXE || "";
 
 const isActionableCandidate = (candidate) => {
   if (candidate.operationType === "SHIFT_RANGE") {
@@ -106,7 +100,7 @@ async function runCofechaForText(rwlText, sampleName, label, parseCofechaResult)
 
   try {
     await writeFile(inputPath, rwlText, "utf8");
-    await runExecutable(sidecarPath, workDir, [
+    await runExecutable(cofechaPath, workDir, [
       "very",
       inputName,
       "",
@@ -190,8 +184,8 @@ async function main() {
   if (!existsSync(sampleRoot)) {
     throw new Error(`Sample root not found: ${sampleRoot}`);
   }
-  if (!existsSync(sidecarPath)) {
-    throw new Error(`COFECHA sidecar not found: ${sidecarPath}`);
+  if (!cofechaPath || !existsSync(cofechaPath)) {
+    throw new Error("COFECHA executable not found; pass --cofecha-exe=PATH or set COFECHA_EXE");
   }
 
   const server = await createServer({

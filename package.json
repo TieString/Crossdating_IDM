@@ -63,7 +63,6 @@
     "@tauri-apps/plugin-dialog": "~2",
     "@tauri-apps/plugin-fs": "~2",
     "@tauri-apps/plugin-opener": "^2",
-    "@tauri-apps/plugin-shell": "2.3.5",
     "chart.js": "^4.4.9",
     "chartjs-plugin-crosshair": "^2.0.0",
     "chartjs-plugin-zoom": "^2.2.0",

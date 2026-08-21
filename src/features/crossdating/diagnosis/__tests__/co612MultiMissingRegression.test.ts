@@ -4,7 +4,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
     extractPart6FlaggedASeriesIds,
@@ -54,10 +53,7 @@ const NATURAL_FIXTURE_PATH =
 const FIXTURE_PATH = process.env.CO612_RWL_PATH ?? NATURAL_FIXTURE_PATH;
 const OUT_PATH = process.env.CO612_OUT_PATH ?? null;
 const TARGET_ID = "mon052";
-const COFECHA_EXE = fileURLToPath(new URL(
-    "../../../../../src-tauri/bin/cofecha-x86_64-pc-windows-msvc.exe",
-    import.meta.url,
-));
+const COFECHA_EXE = process.env.COFECHA_EXE?.trim() ?? "";
 const EXPECTED_ZERO_YEARS = [
     1685,
     1773,

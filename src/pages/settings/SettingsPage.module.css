@@ -242,6 +242,90 @@
     line-height: 1.5;
 }
 
+.executable-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 8px;
+    width: 100%;
+    max-width: 680px;
+}
+
+.path-input {
+    min-width: 0;
+    height: 34px;
+    box-sizing: border-box;
+    padding: 6px 10px;
+    border: 1px solid #cfcfcf;
+    border-radius: 5px;
+    background: #f7f7f7;
+    color: #444;
+    font-family: Consolas, "Microsoft YaHei", sans-serif;
+    font-size: 12px;
+}
+
+.path-input:focus {
+    outline: none;
+    border-color: #8bb7e0;
+}
+
+.action-button,
+.secondary-button,
+.download-button {
+    min-height: 34px;
+    padding: 6px 12px;
+    border: 1px solid #9fb7a3;
+    border-radius: 5px;
+    background: #fff;
+    color: #2f6840;
+    font-family: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    box-shadow: none;
+}
+
+.action-button:hover,
+.download-button:hover {
+    border-color: #5f956d;
+    background: #f3f8f4;
+}
+
+.secondary-button {
+    border-color: #d0d0d0;
+    color: #666;
+}
+
+.secondary-button:hover {
+    background: #f4f4f4;
+}
+
+.download-button {
+    align-self: flex-start;
+}
+
+.configured-status,
+.unconfigured-status {
+    font-size: 12.5px;
+    line-height: 1.4;
+}
+
+.configured-status {
+    color: #347346;
+}
+
+.unconfigured-status {
+    color: #a05a23;
+}
+
+@media (max-width: 700px) {
+    .executable-row {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .secondary-button {
+        grid-column: 2;
+    }
+}
+
 /* ── About text ──────────────────────────────────── */
 
 .about-text {

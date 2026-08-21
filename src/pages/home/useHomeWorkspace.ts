@@ -1,4 +1,4 @@
-import { ask, open, save } from "@tauri-apps/plugin-dialog";
+import { ask, message, open, save } from "@tauri-apps/plugin-dialog";
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { extractPart6FlaggedASeriesIds, parseCofechaResult, splitReportByParts } from "@/features/cofecha/formatter";
 import { getCofechaSeriesMapValue } from "@/features/cofecha/seriesId";
@@ -295,12 +295,10 @@ export function useHomeWorkspace() {
     const [possibleProblemsDetail, setPossibleProblemsDetail] = useState<Map<string, string>>(new Map());
     const [cofechaParts, setCofechaParts] = useState<Map<string, string>>(new Map());
     const [selectedPart, setSelectedPart] = useState<string>(ALL_OPTION_VALUE);
-    // COFECHA 引擎是全局设置（运行菜单与设置窗口共享同一来源），不再随工作区局部保存。
-    const { settings, updateCofechaSettings } = useSettings();
-    const cofechaVersion = settings.cofecha.engine;
-    const setCofechaVersion = useCallback((version: CofechaVersion) => {
-        updateCofechaSettings({ engine: version });
-    }, [updateCofechaSettings]);
+    const { settings } = useSettings();
+    // Persisted workspaces retain this identifier, while execution always uses the one loaded EXE.
+    const cofechaVersion: CofechaVersion = "cofecha";
+    const setCofechaVersion = useCallback((_version: CofechaVersion) => undefined, []);
     const [isFileLoading, setIsFileLoading] = useState(false);
     const [isCofechaRunning, setIsCofechaRunning] = useState(false);
     const [isEventDiagnosisRunning, setIsEventDiagnosisRunning] = useState(false);
@@ -542,6 +540,10 @@ export function useHomeWorkspace() {
     ) => {
         const resolvedOptions = typeof options === "object" ? options : undefined;
         const version = typeof options === "string" ? options : options?.version ?? cofechaVersion;
+        const executablePath = settings.cofecha.executablePath.trim();
+        if (!executablePath) {
+            return;
+        }
         const selectedPartForPersistence = resolvedOptions?.selectedPart ?? selectedPart;
         const inputData = resolvedOptions?.inputData ?? rwlEditorRef.current.getData();
         const inputSignature = hashRwlSiteData(inputData);
@@ -556,7 +558,7 @@ export function useHomeWorkspace() {
                 if (requestId !== cofechaRequestIdRef.current) {
                     return null;
                 }
-                return runCofecha(input, baseName, version);
+                return runCofecha(input, baseName, executablePath);
             });
             if (nextOutText === null) {
                 return;
@@ -622,7 +624,7 @@ export function useHomeWorkspace() {
                 setIsCofechaRunning(false);
             }
         }
-    }, [cofechaVersion, selectedPart]);
+    }, [cofechaVersion, selectedPart, settings.cofecha.executablePath]);
 
     const handleLoad = useCallback(async () => {
         if (isFileLoadingRef.current) {
@@ -923,6 +925,13 @@ export function useHomeWorkspace() {
         if (!filePath || isCofechaRunning || isFileLoadingRef.current) {
             return;
         }
+        if (!settings.cofecha.executablePath.trim()) {
+            await message("请先通过“运行 > 加载 COFECHA...”或“设置 > COFECHA”选择从 LTRR 获取的 EXE 文件。", {
+                title: "需要加载 COFECHA",
+                kind: "info",
+            });
+            return;
+        }
 
         try {
             const editor = rwlEditorRef.current;
@@ -943,8 +952,12 @@ export function useHomeWorkspace() {
             );
         } catch (error) {
             console.error("cofecha 执行失败", error);
+            await message(error instanceof Error ? error.message : String(error), {
+                title: "COFECHA 运行失败",
+                kind: "error",
+            });
         }
-    }, [cofechaVersion, isCofechaRunning, runCofechaAndApplyResult]);
+    }, [cofechaVersion, isCofechaRunning, runCofechaAndApplyResult, settings.cofecha.executablePath]);
 
     const handleExportCofechaOut = useCallback(async (): Promise<string | null> => {
         if (!outFileContent) return null;

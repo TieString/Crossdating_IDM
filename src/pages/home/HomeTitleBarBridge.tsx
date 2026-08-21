@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { open } from "@tauri-apps/plugin-dialog";
 import { createPortal } from "react-dom";
 import Menu from "@/components/Menu/Menu";
+import { useSettings } from "@/features/settings/SettingsContext";
 import { CofechaVersion, TitleMenuKind } from "./homeShared";
 
 type MenuItem = {
@@ -48,7 +50,6 @@ const isTextEditingTarget = (target: EventTarget | null) => (
 
 export function HomeTitleBarBridge({
     title,
-    cofechaVersion,
     onLoad,
     onSave,
     onSaveAs,
@@ -56,13 +57,13 @@ export function HomeTitleBarBridge({
     onRedo,
     canUndo = true,
     canRedo = true,
-    onCofechaVersionChange,
     onActiveMenuChange,
     onOpenOperationLog,
     onOpenSettings,
     onOpenFind,
     onOpenReplace,
 }: HomeTitleBarBridgeProps) {
+    const { settings, updateCofechaSettings } = useSettings();
     const [activeMenu, setActiveMenu] = useState<TitleMenuKind | null>(null);
     const [menuElements, setMenuElements] = useState<MenuElements>(EMPTY_MENU_ELEMENTS);
     const activeMenuRef = useRef<TitleMenuKind | null>(null);
@@ -111,32 +112,23 @@ export function HomeTitleBarBridge({
         { label: "\u66ff\u6362", onClick: closeAnd(onOpenReplace) },
     ]), [closeAnd, canRedo, canUndo, onOpenFind, onOpenOperationLog, onOpenReplace, onRedo, onUndo]);
 
+    const selectCofechaExecutable = useCallback(async () => {
+        const selected = await open({
+            title: "加载 COFECHA 可执行文件",
+            multiple: false,
+            directory: false,
+            filters: [{ name: "Windows 可执行文件", extensions: ["exe"] }],
+        });
+        if (typeof selected !== "string") return;
+        updateCofechaSettings({ executablePath: selected });
+    }, [updateCofechaSettings]);
+
     const runItems = useMemo<MenuItem[]>(() => ([
         {
-            label: "COFECHA",
-            checked: cofechaVersion === "cofecha",
-            onClick: () => {
-                onCofechaVersionChange("cofecha");
-                setActiveMenu(null);
-            },
+            label: settings.cofecha.executablePath ? "更换 COFECHA..." : "加载 COFECHA...",
+            onClick: closeAnd(selectCofechaExecutable),
         },
-        {
-            label: "COFECHA 12K",
-            checked: cofechaVersion === "cofecha12k",
-            onClick: () => {
-                onCofechaVersionChange("cofecha12k");
-                setActiveMenu(null);
-            },
-        },
-        {
-            label: "COFECHA Win",
-            checked: cofechaVersion === "cofechawin",
-            onClick: () => {
-                onCofechaVersionChange("cofechawin");
-                setActiveMenu(null);
-            },
-        },
-    ]), [cofechaVersion, onCofechaVersionChange]);
+    ]), [closeAnd, selectCofechaExecutable, settings.cofecha.executablePath]);
 
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {

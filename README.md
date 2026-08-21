@@ -47,6 +47,14 @@ Crossdating-IDM_1.5.0_x64-setup.exe
 
 安装完成后，示例 RWL 会随软件放入安装资源目录的 `test-data` 文件夹，也可直接使用仓库根目录中的 [`test-data`](test-data)。
 
+COFECHA 由 LTRR 独立提供，不包含在 Crossdating IDM 的源码和安装包中。安装应用后：
+
+1. 前往 [LTRR Software](https://cambium.ltrr.arizona.edu/research/software) 获取 COFECHA。
+2. 解压下载内容。
+3. 在 Crossdating IDM 的“运行 > 加载 COFECHA...”或“设置 > COFECHA”中选择需要使用的 EXE。
+
+需要切换 COFECHA 版本时，直接加载另一个 EXE 即可。
+
 从源码运行：
 
 ```powershell
@@ -73,7 +81,7 @@ yarn tauri dev
 - **高效宽度编辑**：网格选择、查找替换、文本多光标编辑、右键插入/删除、整体移动、局部移动以及稳定的撤销恢复。
 - **树轮与扫描影像**：按真实宽度生成树轮横条，可加载大型扫描图、裁切样芯、标定十年锚点并同步当前年份。
 - **交互式曲线对照**：多序列折线、参考序列、样本量、年份窗口、缩放、片段移动预览和双线错配分析。
-- **COFECHA 集成**：一键运行、PART 导航、问题段定位、原始 OUT 导出和 COFECHA-pass 动态参考。
+- **COFECHA 集成**：加载用户从 LTRR 获取的本机 EXE，一键运行、PART 导航、问题段定位、原始 OUT 导出和 COFECHA-pass 动态参考。
 - **事件级定年建议**：识别缺轮、伪轮、局部移动和负向整体移动，每次只显示当前最值得复核的一个事件。
 - **全文件导航**：按需扫描其他候选序列，优先呈现证据清晰、能够增强全文件共同年份结构的复核入口。
 
@@ -143,6 +151,8 @@ yarn validate:co612-recovery-regression
 yarn benchmark:co612-zero-frontier-matrix
 ```
 
+需要实时调用 COFECHA 的基准通过 `--cofecha-exe PATH` 或环境变量 `COFECHA_EXE` 指向开发者自行获取的可执行文件。
+
 主要入口：
 
 - [`src/pages/Home.tsx`](src/pages/Home.tsx)：主工作区与界面编排。
@@ -150,7 +160,7 @@ yarn benchmark:co612-zero-frontier-matrix
 - [`src/features/crossdating/diagnosis.ts`](src/features/crossdating/diagnosis.ts)：JS 事件级诊断入口。
 - [`src/features/crossdating/diagnosis/eventEnsemble.ts`](src/features/crossdating/diagnosis/eventEnsemble.ts)：事件证据与前沿恢复。
 - [`src/features/crossdating/diagnosis/jointEventAdjudicator.ts`](src/features/crossdating/diagnosis/jointEventAdjudicator.ts)：操作、位移与位置的统一裁决。
-- [`src/services/cofecha/runner.ts`](src/services/cofecha/runner.ts)：COFECHA sidecar 与 OUT 处理。
+- [`src/services/cofecha/runner.ts`](src/services/cofecha/runner.ts)：用户所选 COFECHA EXE 的本地运行与 OUT 处理。
 
 ## 文档
 
@@ -166,7 +176,7 @@ yarn benchmark:co612-zero-frontier-matrix
 ## 致谢
 
 - [International Tree-Ring Data Bank](https://www.ncei.noaa.gov/products/paleoclimatology/tree-ring) 及所有贡献树轮数据的调查者。
-- Richard L. Holmes 创建的 COFECHA。推荐引用：Holmes, R. L. (1983). Computer-assisted quality control in tree-ring dating and measurement. *Tree-Ring Bulletin*, 43, 69-78.
+- [LTRR Dendrochronology Program Library](https://cambium.ltrr.arizona.edu/research/software) 与 Richard L. Holmes 创建的 COFECHA。推荐引用：Holmes, R. L. (1983). Computer-assisted quality control in tree-ring dating and measurement. *Tree-Ring Bulletin*, 43, 69-78.
 - [Standard Readme](https://github.com/RichardLitt/standard-readme) 提供的 README 组织规范。
 
 ## 贡献

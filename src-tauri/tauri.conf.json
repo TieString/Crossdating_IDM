@@ -41,11 +41,6 @@
       "wix": {
         "language": "zh-CN"
       }
-    },
-    "externalBin":[
-      "bin/cofecha",
-      "bin/cofecha12k",
-      "bin/cofechawin"
-    ]
+    }
   }
 }

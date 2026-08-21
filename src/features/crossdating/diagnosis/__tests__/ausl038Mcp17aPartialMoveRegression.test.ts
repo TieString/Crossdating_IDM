@@ -2,7 +2,6 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
     extractPart6FlaggedASeriesIds,
@@ -26,10 +25,7 @@ const TARGET_ID = "MCP17A";
 const FIRST_FIXED_YEAR = 1788;
 const SHIFT_YEARS = -9;
 const EXPECTED_ZERO_YEARS = [1779, 1780, 1781, 1782, 1783, 1784, 1785, 1786, 1787];
-const COFECHA_EXE = fileURLToPath(new URL(
-    "../../../../../src-tauri/bin/cofecha-x86_64-pc-windows-msvc.exe",
-    import.meta.url,
-));
+const COFECHA_EXE = process.env.COFECHA_EXE?.trim() ?? "";
 
 const fixtureDescribe = existsSync(FIXTURE_PATH) && existsSync(COFECHA_EXE)
     ? describe

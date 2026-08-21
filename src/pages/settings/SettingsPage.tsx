@@ -1,10 +1,11 @@
 import { useId, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { FloatingScrollArea } from "@/components/FloatingScrollArea/FloatingScrollArea";
 import { useSettings } from "@/features/settings/SettingsContext";
 import {
     normalizeAnimationSpeed,
     type AnimationSettings,
-    type CofechaEngine,
 } from "@/features/settings/settings";
 import styles from "./SettingsPage.module.css";
 
@@ -14,7 +15,7 @@ const SECTIONS: { id: SectionId; label: string }[] = [
     { id: "animation", label: "动画" },
     { id: "tree-ring-image", label: "年轮图像" },
     { id: "diagnosis", label: "定年建议" },
-    { id: "cofecha", label: "COFECHA 引擎" },
+    { id: "cofecha", label: "COFECHA" },
     { id: "about", label: "关于" },
 ];
 
@@ -27,36 +28,7 @@ const SPEED_PRESETS: { value: number; label: string }[] = [
     { value: 3, label: "3×（极快）" },
 ];
 
-/** Per-engine metadata shown beneath the COFECHA engine picker. */
-const COFECHA_ENGINE_INFO: {
-    engine: CofechaEngine;
-    name: string;
-    build: string;
-    deps: string;
-    note: string;
-}[] = [
-    {
-        engine: "cofecha",
-        name: "COFECHA（经典）",
-        build: "32 位；Microsoft Fortran + Phar Lap TNT DOS 扩展器（COF6.06，1990 年代）",
-        deps: "tnt.dll（Phar Lap DOS 扩展器）",
-        note: "经典版本，标准最大时间跨度。兼容性最稳，作为默认引擎。",
-    },
-    {
-        engine: "cofecha12k",
-        name: "COFECHA 12K（扩展）",
-        build: "与经典版同源重编译，仅放大内部数组维度",
-        deps: "tnt.dll（Phar Lap DOS 扩展器）",
-        note: "最大时间跨度扩展到约 12,000 年，用于超长年表；其余算法与经典版一致。",
-    },
-    {
-        engine: "cofechawin",
-        name: "COFECHA Win（原生）",
-        build: "32 位；GNU/MinGW（gfortran）原生 Windows 重编译",
-        deps: "仅系统 DLL（KERNEL32 / comdlg32），自包含，无需 DOS 扩展器",
-        note: "现代原生 Windows 版本，算法相同。文件交互沿用控制台输入。",
-    },
-];
+const LTRR_COFECHA_DOWNLOAD_URL = "https://cambium.ltrr.arizona.edu/research/software";
 
 interface RowProps {
     label: string;
@@ -203,28 +175,61 @@ function AnimationSection() {
 
 function CofechaSection() {
     const { settings, updateCofechaSettings } = useSettings();
-    const current = settings.cofecha.engine;
-    const groupId = useId();
-    const info = COFECHA_ENGINE_INFO.find((item) => item.engine === current) ?? COFECHA_ENGINE_INFO[0];
+    const executablePath = settings.cofecha.executablePath;
+
+    const selectExecutable = async () => {
+        const selected = await open({
+            title: "加载 COFECHA 可执行文件",
+            multiple: false,
+            directory: false,
+            filters: [{ name: "Windows 可执行文件", extensions: ["exe"] }],
+        });
+        if (typeof selected !== "string") return;
+
+        updateCofechaSettings({ executablePath: selected });
+    };
+
+    const clearExecutable = () => {
+        updateCofechaSettings({ executablePath: "" });
+    };
 
     return (
         <div>
-            <h2 className={styles["section-title"]}>COFECHA 引擎</h2>
+            <h2 className={styles["section-title"]}>COFECHA</h2>
 
-            <Row label="交叉定年引擎" htmlFor={`${groupId}-engine`} align="top">
-                <Select
-                    id={`${groupId}-engine`}
-                    value={current}
-                    onChange={(value) => updateCofechaSettings({ engine: value as CofechaEngine })}
-                    options={COFECHA_ENGINE_INFO.map((item) => ({ value: item.engine, label: item.name }))}
-                />
-                <div className={styles["engine-spec"]}>
-                    <span className={styles["engine-spec-key"]}>架构/编译</span>
-                    <span className={styles["engine-spec-val"]}>{info.build}</span>
-                    <span className={styles["engine-spec-key"]}>依赖</span>
-                    <span className={styles["engine-spec-val"]}>{info.deps}</span>
-                    <span className={styles["engine-spec-key"]}>说明</span>
-                    <span className={styles["engine-spec-val"]}>{info.note}</span>
+            <Row label="可执行文件" align="top">
+                <div className={styles["executable-row"]}>
+                    <input
+                        className={styles["path-input"]}
+                        value={executablePath}
+                        readOnly
+                        placeholder="尚未选择 COFECHA EXE"
+                        aria-label="COFECHA 可执行文件路径"
+                    />
+                    <button className={styles["action-button"]} type="button" onClick={() => void selectExecutable()}>
+                        选择 EXE
+                    </button>
+                    {executablePath && (
+                        <button className={styles["secondary-button"]} type="button" onClick={clearExecutable}>
+                            清除
+                        </button>
+                    )}
+                </div>
+                <div className={executablePath ? styles["configured-status"] : styles["unconfigured-status"]}>
+                    {executablePath ? "COFECHA 已配置" : "COFECHA 尚未配置"}
+                </div>
+            </Row>
+
+            <Row label="官方获取" align="top">
+                <button
+                    className={styles["download-button"]}
+                    type="button"
+                    onClick={() => void openUrl(LTRR_COFECHA_DOWNLOAD_URL)}
+                >
+                    下载
+                </button>
+                <div className={styles["setting-note"]}>
+                    Crossdating IDM 不附带 COFECHA。
                 </div>
             </Row>
         </div>
@@ -289,9 +294,9 @@ function AboutSection() {
             <h2 className={styles["section-title"]}>关于</h2>
 
             <Row label="应用名称"><span className={styles["about-text"]}>交叉定年 · IDM</span></Row>
-            <Row label="版本"><span className={styles["about-text"]}>1.2.0</span></Row>
+            <Row label="版本"><span className={styles["about-text"]}>1.5.0</span></Row>
             <Row label="技术栈"><span className={styles["about-text"]}>Tauri · React · TypeScript</span></Row>
-            <Row label="COFECHA"><span className={styles["about-text"]}>International Tree-Ring Data Bank</span></Row>
+            <Row label="COFECHA"><span className={styles["about-text"]}>Richard L. Holmes · LTRR Dendrochronology Program Library</span></Row>
             <Row label="研发团队" align="top">
                 <span className={styles["about-text"]}>
                     何志浩、张同文、张瑞波<br />
