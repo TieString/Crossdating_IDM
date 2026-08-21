@@ -40,6 +40,7 @@ import {
     selectCandidateAnchoredDistantMissingFrontier,
     selectDistantSequentialMissingFrontier,
     selectEndpointAggregatePartialFrontier,
+    projectEndpointMissingFromCumulativeWholeAlias,
     selectAggregateAnchoredRegularizedPartialFrontier,
     selectOperationAnchoredRegularizedAggregatePartialFrontier,
     selectCandidateAnchoredStableBoundedLagPathFrontier,
@@ -4888,6 +4889,39 @@ describe("selectCumulativePartialFrontier", () => {
         });
     });
 
+    it("projects a bark-side unit event instead of a deep unsupported cumulative whole alias", () => {
+        const alias = wholeSeriesEvent(-8);
+        alias.shiftYears = -8;
+        alias.seriesRange = { startYear: 1500, endYear: 2000 };
+        alias.evidence.notes = [
+            "candidate_hard_gate_passed",
+            "whole_state_older_edge_support_fraction=1.000000",
+            "whole_state_newer_edge_support_fraction=0.000000",
+            "whole_state_newest_lag=-1",
+        ];
+
+        const projected = projectEndpointMissingFromCumulativeWholeAlias(alias, [-8]);
+        expect(projected).toMatchObject({
+            eventType: "missingRing",
+            startYear: 1988,
+            endYear: 2000,
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "terminal_cumulative_missing_whole_alias_frontier",
+                ]),
+                notes: expect.arrayContaining([
+                    "terminal_cumulative_alias_replaces_whole=true",
+                ]),
+            },
+        });
+        expect(projected?.rankedYears.map(({ year }) => year)).toContain(2000);
+        expect(projectEndpointMissingFromCumulativeWholeAlias(alias, [-7])).toBeNull();
+        alias.evidence.notes = alias.evidence.notes.map((note) => (
+            note === "whole_state_newest_lag=-1" ? "whole_state_newest_lag=-8" : note
+        ));
+        expect(projectEndpointMissingFromCumulativeWholeAlias(alias, [-8])).toBeNull();
+    });
+
     it("uses a newer current-data fixed-side path before an older stale-reference mode", () => {
         const selected = pathEvent(-3, -3, 0, 1862);
         selected.evidence.notes.push(
@@ -4957,6 +4991,23 @@ describe("selectCumulativePartialFrontier", () => {
             4,
             selected,
             [currentFrontier],
+            false,
+        )).toBeNull();
+
+        const detached = {
+            ...currentFrontier,
+            startYear: 1939,
+            endYear: 1951,
+            rankedYears: [{
+                ...currentFrontier.rankedYears[0]!,
+                year: 1945,
+            }],
+        };
+        expect(selectStaleReferenceNewestFixedSidePathFrontier(
+            true,
+            4,
+            selected,
+            [detached],
             false,
         )).toBeNull();
     });

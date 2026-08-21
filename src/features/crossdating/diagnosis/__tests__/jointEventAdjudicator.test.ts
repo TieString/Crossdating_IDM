@@ -2874,12 +2874,15 @@ describe("joint event adjudicator", () => {
             sourceStage: "candidate",
             event: {
                 id: "endpoint-candidate",
-                startYear: 1987,
-                endYear: 1993,
+                startYear: 1986,
+                endYear: 1994,
             },
         });
         expect(decision.event?.evidence.algorithmSources).toContain(
             "endpoint_candidate_location_authority",
+        );
+        expect(decision.event?.evidence.notes).toContain(
+            "endpoint_candidate_aligned_window=1986-1994",
         );
     });
 

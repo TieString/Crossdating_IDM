@@ -19,6 +19,7 @@ import {
     splitReportByParts,
 } from "@/features/cofecha/formatter";
 import {
+    diagnosisEventInterpretationChain,
     diagnoseCrossdating,
     getDisplayedDiagnosisEvents,
 } from "@/features/crossdating/diagnosis";
@@ -207,9 +208,10 @@ const previewEvent = (event: DiagnosisEvent | null): EventPreview | null => even
 } : null;
 
 const missingReviewEvent = (event: DiagnosisEvent | null): DiagnosisEvent | null => {
-    if (event?.eventType === "missingRing") return event;
-    const alternative = event?.interpretationAmbiguity?.alternative;
-    return alternative?.eventType === "missingRing" ? alternative : null;
+    if (!event) return null;
+    return diagnosisEventInterpretationChain(event).find(
+        (interpretation) => interpretation.eventType === "missingRing",
+    ) ?? null;
 };
 
 const windowCovers = (event: DiagnosisEvent | null, year: number): boolean => Boolean(

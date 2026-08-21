@@ -123,6 +123,7 @@ import {
     isAllowedAutomaticDiagnosisEvent,
     wholeSeriesMoveShiftYears,
 } from "./wholeSeriesMoveSemantics";
+import { makeEndpointMissingReviewFromWhole } from "./endpointWholeMissingInterpretation";
 import {
     completeUnitTransitionChainExplainsWholeShift,
     measureWholeSeriesStateConsistency,
@@ -8007,6 +8008,7 @@ export const selectStaleReferenceNewestFixedSidePathFrontier = (
     selectedEvent: DiagnosisEvent | null,
     rawPathEvents: readonly DiagnosisEvent[],
     hasIndependentWholeBaseline: boolean,
+    maximumDetachedAdvanceYears = 13,
 ): DiagnosisEvent | null => {
     if (!referenceIsStale
         || transitionCount < 2
@@ -8024,7 +8026,10 @@ export const selectStaleReferenceNewestFixedSidePathFrontier = (
                 <= Math.min(event.endYear, selectedEvent.endYear) + 1;
         const advancesSelectedLocation = year !== null && (
             selectedYear === null
-            || year >= selectedYear + 4
+            || (
+                year >= selectedYear + 4
+                && year - selectedYear <= maximumDetachedAdvanceYears
+            )
             || (
                 year >= selectedYear - 2
                 && selectedEvent !== null
@@ -8330,6 +8335,61 @@ export const selectDistantSequentialMissingFrontier = (
             ])),
         },
     };
+};
+
+/**
+ * Projects the first bark-side unit step when an accumulated missing-ring depth is masquerading
+ * as one large whole-series shift. The whole candidate itself must say that its large lag has no
+ * newer-edge support and that the newest observed state is only -1.
+ */
+export const projectEndpointMissingFromCumulativeWholeAlias = (
+    stateEvidenceWhole: DiagnosisEvent | null,
+    cumulativeDepths: readonly number[],
+    frameWhole: DiagnosisEvent | null = stateEvidenceWhole,
+): DiagnosisEvent | null => {
+    const shiftYears = wholeSeriesMoveShiftYears(stateEvidenceWhole);
+    if (!stateEvidenceWhole
+        || !frameWhole
+        || shiftYears === null
+        || shiftYears > -2
+        || !cumulativeDepths.includes(shiftYears)
+        || isAuthoritativeWholeSeriesCheckpoint(stateEvidenceWhole)) return null;
+    const newerEdgeSupport = noteYear(
+        stateEvidenceWhole,
+        "whole_state_newer_edge_support_fraction=",
+    );
+    const olderEdgeSupport = noteYear(
+        stateEvidenceWhole,
+        "whole_state_older_edge_support_fraction=",
+    );
+    const newestLag = noteYear(stateEvidenceWhole, "whole_state_newest_lag=");
+    if (newerEdgeSupport === null
+        || newerEdgeSupport > 0.05
+        || olderEdgeSupport === null
+        || olderEdgeSupport < 0.9
+        || newestLag !== -1) return null;
+    const missing = makeEndpointMissingReviewFromWhole(frameWhole);
+    if (!missing) return null;
+    return withEvidenceLedger({
+        ...missing,
+        id: `${missing.id}-cumulative-whole-alias-frontier`,
+        confidenceLevel: "medium",
+        evidence: {
+            ...missing.evidence,
+            algorithmSources: Array.from(new Set([
+                ...missing.evidence.algorithmSources,
+                ...stateEvidenceWhole.evidence.algorithmSources,
+                "terminal_cumulative_missing_whole_alias_frontier",
+            ])).sort(),
+            notes: Array.from(new Set([
+                ...missing.evidence.notes,
+                ...stateEvidenceWhole.evidence.notes,
+                `terminal_cumulative_alias_depth=${shiftYears}`,
+                `terminal_cumulative_alias_newest_lag=${newestLag}`,
+                "terminal_cumulative_alias_replaces_whole=true",
+            ])),
+        },
+    });
 };
 
 /**
@@ -13367,10 +13427,38 @@ export const makeDiagnosisEvents = (
             }
             return cachedSequentialMissing;
         };
-        if (latentEndpointWholeFrame) {
+        const latentWholeStateEvidence = latentEndpointWholeFrame
+            ? wholeBaselineHypotheses.filter((event) => (
+                wholeSeriesMoveShiftYears(event)
+                    === wholeSeriesMoveShiftYears(latentEndpointWholeFrame)
+            )).sort((left, right) => (
+                Number(right.evidence.notes.includes("candidate_hard_gate_passed"))
+                    - Number(left.evidence.notes.includes("candidate_hard_gate_passed"))
+                || right.evidence.score - left.evidence.score
+            ))[0] ?? null
+            : null;
+        const endpointMissingFromCumulativeWholeAlias =
+            projectEndpointMissingFromCumulativeWholeAlias(
+                latentWholeStateEvidence,
+                cumulativeUnitCandidateDepths,
+                latentEndpointWholeFrame,
+            );
+        if (endpointMissingFromCumulativeWholeAlias) {
+            return finalize([endpointMissingFromCumulativeWholeAlias], [], false);
+        }
+        const stableCumulativeLocalPathContradictsLatentWhole =
+            !hasAuthoritativeWholeBaseline
+            && (
+                zeroTerminalUnitWholeAliasEvent !== null
+                || cumulativeMissingWholeAliasFrontier !== null
+                || decomposedWholeAliasFrontier !== null
+            );
+        if (latentEndpointWholeFrame && !stableCumulativeLocalPathContradictsLatentWhole) {
             // Establish the shared non-zero coordinate frame before any local component.
             // The two path penalties have already agreed on both the endpoint alias and a
-            // separated transition returning to this baseline.
+            // separated transition returning to this baseline. A complete cumulative local
+            // path may veto this alias unless an independently authoritative whole baseline
+            // confirms that the non-zero frame really belongs to the entire series.
             return finalize([latentEndpointWholeFrame], [], false);
         }
         if (unobservedFixedSideWholeBaseline

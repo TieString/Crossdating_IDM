@@ -2206,23 +2206,72 @@ const annotateEndpointCandidate = (
 ): HypothesisCluster => ({
     checkpoints: cluster.checkpoints.map((checkpoint) => ({
         ...checkpoint,
-        event: withEvidenceLedger({
-            ...checkpoint.event,
-            evidence: {
-                ...checkpoint.event.evidence,
-                algorithmSources: Array.from(new Set([
-                    ...checkpoint.event.evidence.algorithmSources,
-                    "endpoint_candidate_location_authority",
-                ])).sort(),
-                notes: Array.from(new Set([
-                    ...checkpoint.event.evidence.notes,
-                    `endpoint_candidate_authority_distance=${endpointDistance}`,
-                    `endpoint_candidate_authority_discarded_window=${
-                        finalEvent.startYear
-                    }-${finalEvent.endYear}`,
-                ])),
-            },
-        }),
+        event: withEvidenceLedger((() => {
+            const event = checkpoint.event;
+            const endpointYear = event.seriesRange?.endYear ?? event.endYear;
+            const originalWidth = eventWidth(event);
+            const completeSpan = endpointYear - event.startYear + 1;
+            const alignedWidth = [...PATH_ANCHORED_REVIEW_WIDTHS]
+                .sort((left, right) => left - right)
+                .find((width) => width >= completeSpan)
+                ?? originalWidth;
+            const alignedRange = endpointDistance > 0 ? {
+                startYear: endpointYear - alignedWidth + 1,
+                endYear: endpointYear,
+            } : {
+                startYear: event.startYear,
+                endYear: event.endYear,
+            };
+            const rankedByYear = new Map(event.rankedYears.map((row) => [row.year, row]));
+            const minimumScore = event.rankedYears.length > 0
+                ? Math.min(...event.rankedYears.map((row) => row.score))
+                : 0;
+            const alignedRankedYears = Array.from(
+                { length: alignedRange.endYear - alignedRange.startYear + 1 },
+                (_, index) => {
+                    const year = alignedRange.startYear + index;
+                    const retained = rankedByYear.get(year);
+                    return {
+                        year,
+                        rank: 0,
+                        score: retained?.score
+                            ?? minimumScore - 1 - Math.abs(endpointYear - year) / 100,
+                        evidenceTags: Array.from(new Set([
+                            ...(retained?.evidenceTags ?? []),
+                            "endpoint_candidate_aligned_window",
+                        ])).sort(),
+                    };
+                },
+            ).sort((left, right) => (
+                right.score - left.score || right.year - left.year
+            )).map((row, index) => ({ ...row, rank: index + 1 }));
+            return {
+                ...event,
+                ...alignedRange,
+                reviewCoreRange: { ...alignedRange },
+                rankedYears: alignedRankedYears,
+                evidence: {
+                    ...event.evidence,
+                    algorithmSources: Array.from(new Set([
+                        ...event.evidence.algorithmSources,
+                        "endpoint_candidate_location_authority",
+                    ])).sort(),
+                    notes: Array.from(new Set([
+                        ...event.evidence.notes,
+                        `endpoint_candidate_authority_distance=${endpointDistance}`,
+                        `endpoint_candidate_authority_discarded_window=${
+                            finalEvent.startYear
+                        }-${finalEvent.endYear}`,
+                        ...(endpointDistance > 0 ? [
+                            `endpoint_candidate_original_window=${event.startYear}-${event.endYear}`,
+                            `endpoint_candidate_aligned_window=${
+                                alignedRange.startYear
+                            }-${alignedRange.endYear}`,
+                        ] : []),
+                    ])),
+                },
+            };
+        })()),
     })),
 });
 
