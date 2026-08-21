@@ -98,12 +98,6 @@ type CaseRow = {
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const scriptPath = fileURLToPath(import.meta.url);
 const viteNodePath = join(repoRoot, "node_modules", "vite-node", "vite-node.mjs");
-const cofechaExe = join(
-    repoRoot,
-    "src-tauri",
-    "bin",
-    "cofecha-x86_64-pc-windows-msvc.exe",
-);
 const expectedSourceHash =
     "b1d4756303eb1c8af9805e5f14a95b7e4e04c6ef18ada0a86aa9dedf715af048";
 const args = process.argv.slice(2);
@@ -111,10 +105,14 @@ const valueFor = (name: string): string | null => {
     const index = args.indexOf(name);
     return index >= 0 ? args[index + 1] ?? null : null;
 };
+const cofechaInput = valueFor("--cofecha-exe")
+    ?? process.env.COFECHA_EXE
+    ?? "";
+const cofechaExe = cofechaInput ? resolve(cofechaInput) : "";
 const inputPath = resolve(valueFor("--input")
-    ?? "D:/软件测试/数据/ITRDB/itrdb_download/measurements/northamerica/usa/co612.rwl");
+    ?? join(repoRoot, "test-data", "co612.rwl"));
 const outputRoot = resolve(valueFor("--output-dir")
-    ?? "D:/软件测试/co612-zero-frontier-matrix-results");
+    ?? join(repoRoot, ".benchmark-results", "co612-zero-frontier-matrix"));
 const runId = valueFor("--run-id")
     ?? `run-${new Date().toISOString().replace(/[:.]/g, "-")}`;
 const runDir = resolve(valueFor("--run-dir") ?? join(outputRoot, runId));
@@ -147,7 +145,9 @@ const assertSafeRunDirectory = (): void => {
 };
 
 if (!existsSync(inputPath)) throw new Error(`RWL not found: ${inputPath}`);
-if (!existsSync(cofechaExe)) throw new Error(`COFECHA not found: ${cofechaExe}`);
+if (!cofechaExe || !existsSync(cofechaExe)) {
+    throw new Error("COFECHA executable not found; pass --cofecha-exe PATH or set COFECHA_EXE");
+}
 assertSafeRunDirectory();
 const sourceBytes = readFileSync(inputPath);
 const sourceHash = createHash("sha256").update(sourceBytes).digest("hex");

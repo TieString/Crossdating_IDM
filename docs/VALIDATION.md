@@ -2,7 +2,7 @@
 
 ## 协议与数据隔离
 
-- 生产诊断提交：`a53217221fc44f06e25ffaff1c41a39b246a6316`
+- 冻结诊断提交：`a53217221fc44f06e25ffaff1c41a39b246a6316`
 - 事件协议：`itrdb-operation-capability-v4-1000`
 - 评估协议：`human-rescue-full-event-v2`
 - 文件级冻结留出集：25 个 ITRDB 文件
@@ -11,10 +11,6 @@
 - 执行错误：0
 - `sourceFilesUnchanged=true`，`sourceMismatches=[]`
 - 所有保存重开结果一致，所有局部窗口宽度合法
-
-结果目录：
-
-`D:\软件测试\itrdb-operation-capability\results\human-rescue-v2-clean-abcd-1000-current-20260819`
 
 A/B/C/D 的 4000 个案例与 2026-08-18 的人工解阻 v1 运行逐案相同。本轮另外加入同一冻结
 序列池的 1000 个 Clean 案例。

@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createServer } from "vite";
@@ -12,13 +12,13 @@ const cofechaArg = args.find((arg) => arg.startsWith("--cofecha-exe="));
 const explicitRoot = args.find((arg) => !arg.startsWith("--"));
 const sampleRoot = explicitRoot
   ? path.resolve(process.cwd(), explicitRoot)
-  : path.join(process.cwd(), "笔记", "数据");
+  : path.join(process.cwd(), "test-data");
 
 const cofechaPath = cofechaArg?.slice("--cofecha-exe=".length) || process.env.COFECHA_EXE || "";
 
 async function listSamples(root) {
   const entries = await readdir(root, { withFileTypes: true });
-  return entries
+  const pairedSamples = entries
     .filter((entry) => entry.isDirectory())
     .map((entry) => {
       const folder = path.join(root, entry.name);
@@ -28,7 +28,15 @@ async function listSamples(root) {
         crossdatedPath: path.join(folder, "crossdated.rwl"),
       };
     })
-    .filter((sample) => existsSync(sample.crossdatedPath) || (includeRaw && existsSync(sample.rawPath)))
+    .filter((sample) => existsSync(sample.crossdatedPath) || (includeRaw && existsSync(sample.rawPath)));
+  const standaloneSamples = entries
+    .filter((entry) => entry.isFile() && path.extname(entry.name).toLowerCase() === ".rwl")
+    .map((entry) => ({
+      name: path.parse(entry.name).name,
+      rawPath: null,
+      crossdatedPath: path.join(root, entry.name),
+    }));
+  return [...pairedSamples, ...standaloneSamples]
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -142,8 +150,8 @@ async function main() {
 
     for (const sample of samples) {
       const targets = [
-        includeRaw && existsSync(sample.rawPath) ? { label: "RAW", path: sample.rawPath } : null,
-        existsSync(sample.crossdatedPath) ? { label: "crossdated", path: sample.crossdatedPath } : null,
+        includeRaw && sample.rawPath && existsSync(sample.rawPath) ? { label: "RAW", path: sample.rawPath } : null,
+        sample.crossdatedPath && existsSync(sample.crossdatedPath) ? { label: "crossdated", path: sample.crossdatedPath } : null,
       ].filter(Boolean);
 
       for (const target of targets) {
@@ -156,7 +164,7 @@ async function main() {
     }
 
     console.log(`Sample root: ${sampleRoot}`);
-    console.log(`COFECHA version: ${version}`);
+    console.log(`COFECHA executable: ${cofechaPath}`);
     console.log(`Targets: ${includeRaw ? "RAW + crossdated" : "crossdated"}`);
     console.log("");
     console.log("site  target       A/problem  intercorr.  mean length  problem series");

@@ -143,12 +143,12 @@ yarn tauri dev
 yarn tauri build
 ```
 
-常用专项验证：
+常用验证：
 
 ```powershell
 yarn validate
-yarn validate:co612-recovery-regression
-yarn benchmark:co612-zero-frontier-matrix
+yarn validate:cofecha:samples --cofecha-exe="C:\path\to\COFECHA.exe"
+yarn benchmark:co612-zero-frontier-matrix --cofecha-exe "C:\path\to\COFECHA.exe"
 ```
 
 需要实时调用 COFECHA 的基准通过 `--cofecha-exe PATH` 或环境变量 `COFECHA_EXE` 指向开发者自行获取的可执行文件。
@@ -165,7 +165,7 @@ yarn benchmark:co612-zero-frontier-matrix
 ## 文档
 
 - [RWL 格式规范](RWL_FORMAT_SPEC.md)
-- [ITRDB A/B/C/D 验证报告](docs/benchmarks/itrdb-human-rescue-v2-clean-abcd-1000-results-2026-08-19.md)
+- [ITRDB A/B/C/D 验证报告](docs/VALIDATION.md)
 - [示例数据与引用](test-data/README.md)
 - [第三方声明](THIRD_PARTY_NOTICES.md)
 

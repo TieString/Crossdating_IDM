@@ -13,9 +13,12 @@ dist
 dist-ssr
 *.local
 
-# Generated documentation/build artifacts
-/docs/api/
-/storybook-static/
+# Generated benchmark artifacts
+/.benchmark-results/
+
+# Python caches
+__pycache__/
+*.py[cod]
 
 # verify-widthgrid-anim skill: harness copied to root + screenshot output (transient)
 /harness.html
@@ -23,8 +26,7 @@ dist-ssr
 /.tmp-widthgrid-shots/
 
 # Editor directories and files
-.vscode/*
-!.vscode/extensions.json
+.vscode/
 .idea
 .DS_Store
 *.suo
@@ -37,8 +39,5 @@ target-codex-check/
 notes
 
 *.tmp*
-.codex
-.storybook
-.vscode
-docs
+/.codex/
 output

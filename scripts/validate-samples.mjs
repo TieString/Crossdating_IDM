@@ -3,67 +3,66 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { createServer } from "vite";
 
-const strictInternal = process.argv.includes("--strict-internal");
 const explicitRoot = process.argv.slice(2).find((arg) => !arg.startsWith("--"));
-const defaultSampleRoots = [
-  process.env.CROSSDATING_SAMPLE_ROOT,
-  "D:/软件测试/数据",
-  path.join(process.cwd(), "笔记", "数据"),
-].filter(Boolean);
 const sampleRoot = explicitRoot
   ? path.resolve(process.cwd(), explicitRoot)
-  : defaultSampleRoots.find((candidate) => existsSync(candidate))
-    ?? defaultSampleRoots[defaultSampleRoots.length - 1];
+  : path.join(process.cwd(), "test-data");
 
-const formatCount = (value) => String(value).padStart(4, " ");
-
-async function listSamplePairs(root) {
+async function listSamples(root) {
   const entries = await readdir(root, { withFileTypes: true });
-  return entries
+  const pairedSamples = entries
     .filter((entry) => entry.isDirectory())
-    .map((entry) => {
+    .flatMap((entry) => {
       const folder = path.join(root, entry.name);
-      return {
-        name: entry.name,
-        rawPath: path.join(folder, "RAW.rwl"),
-        crossdatedPath: path.join(folder, "crossdated.rwl"),
-      };
-    })
-    .filter((sample) => existsSync(sample.rawPath) || existsSync(sample.crossdatedPath))
-    .sort((a, b) => a.name.localeCompare(b.name));
+      return ["RAW.rwl", "crossdated.rwl"]
+        .map((fileName) => path.join(folder, fileName))
+        .filter((filePath) => existsSync(filePath));
+    });
+  const standaloneSamples = entries
+    .filter((entry) => entry.isFile() && path.extname(entry.name).toLowerCase() === ".rwl")
+    .map((entry) => path.join(root, entry.name));
+  return [...pairedSamples, ...standaloneSamples]
+    .sort((left, right) => left.localeCompare(right));
 }
 
-async function analyzeFile(filePath, modules) {
-  const text = await readFile(filePath, "utf8");
-  const result = await modules.readRwlString(text);
-  const diagnosis = modules.diagnoseCrossdating(result.data);
-  const summary = modules.buildCrossdatingValidationSummary({
-    hasData: result.data.size > 0,
-    isCofechaRunning: false,
-    isCofechaOutdated: false,
-    cofechaPossibleProblemsCount: undefined,
-    internalProblemSegmentCount: diagnosis.problemSegmentCount,
-    internalCandidateCount: diagnosis.candidateCount,
-    batchResult: null,
-  });
+function dataSignature(data) {
+  return JSON.stringify(Array.from(data, ([seriesId, values]) => {
+    const entries = Array.from(values);
+    while (entries.length > 0) {
+      const terminalValue = entries.at(-1)?.[1];
+      if (terminalValue !== 999 && terminalValue !== -9999) break;
+      entries.pop();
+    }
+    return [seriesId, entries];
+  }));
+}
 
+async function inspectSample(filePath, rwlModule) {
+  const text = await readFile(filePath, "utf8");
+  const result = await rwlModule.readRwlString(text);
+  if (result.data.size === 0) {
+    throw new Error(`${filePath}: parsed data is empty`);
+  }
+
+  let roundTrip = "n/a";
+  const formatter = rwlModule.formatHandlers[result.format]?.format;
+  if (formatter) {
+    const formatted = formatter(result.data, result.readOptions);
+    const reparsed = await rwlModule.readRwlString(formatted, { preferFormat: result.format });
+    if (dataSignature(reparsed.data) !== dataSignature(result.data)) {
+      throw new Error(`${filePath}: parse/format round trip changed data`);
+    }
+    roundTrip = "ok";
+  }
+
+  const valueCount = Array.from(result.data.values())
+    .reduce((total, values) => total + values.size, 0);
   return {
-    seriesCount: result.data.size,
+    file: path.relative(sampleRoot, filePath),
     format: result.format,
-    problemSegmentCount: diagnosis.problemSegmentCount,
-    candidateCount: diagnosis.candidateCount,
-    problemTrees: diagnosis.summaries
-      .filter((summary) => summary.flaggedSegmentCount > 0)
-      .sort((a, b) => b.flaggedSegmentCount - a.flaggedSegmentCount)
-      .slice(0, 5)
-      .map((summary) => ({
-        tree: summary.tree,
-        flaggedSegmentCount: summary.flaggedSegmentCount,
-        candidateCount: summary.candidateCount,
-        worstCorrelation: summary.worstCorrelation,
-      })),
-    status: summary.status,
-    title: summary.title,
+    seriesCount: result.data.size,
+    valueCount,
+    roundTrip,
   };
 }
 
@@ -76,85 +75,33 @@ async function main() {
     configFile: false,
     appType: "custom",
     logLevel: "error",
-    resolve: {
-      alias: {
-        "@": path.join(process.cwd(), "src"),
-      },
-    },
+    resolve: { alias: { "@": path.join(process.cwd(), "src") } },
     optimizeDeps: { noDiscovery: true },
-    server: { hmr: { port: 20_000 + Math.floor(Math.random() * 20_000) }, middlewareMode: true },
+    server: {
+      hmr: { port: 20_000 + Math.floor(Math.random() * 20_000) },
+      middlewareMode: true,
+    },
   });
 
   try {
     const rwlModule = await server.ssrLoadModule("/src/features/rwl/index.ts");
-    const diagnosisModule = await server.ssrLoadModule("/src/features/crossdating/diagnosis.ts");
-    const validationModule = await server.ssrLoadModule("/src/features/crossdating/validation.ts");
-    const modules = {
-      readRwlString: rwlModule.readRwlString,
-      diagnoseCrossdating: diagnosisModule.diagnoseCrossdating,
-      buildCrossdatingValidationSummary: validationModule.buildCrossdatingValidationSummary,
-    };
-
-    const samples = await listSamplePairs(sampleRoot);
+    const samples = await listSamples(sampleRoot);
     if (samples.length === 0) {
-      throw new Error(`No RAW/crossdated RWL sample pairs found under ${sampleRoot}`);
+      throw new Error(`No RWL samples found under ${sampleRoot}`);
     }
 
-    const failures = [];
     const rows = [];
-
-    for (const sample of samples) {
-      const raw = existsSync(sample.rawPath)
-        ? await analyzeFile(sample.rawPath, modules)
-        : null;
-      const crossdated = existsSync(sample.crossdatedPath)
-        ? await analyzeFile(sample.crossdatedPath, modules)
-        : null;
-
-      if (!raw && !crossdated) {
-        failures.push(`${sample.name}: no readable RAW.rwl or crossdated.rwl`);
-        continue;
-      }
-
-      if (strictInternal && crossdated && crossdated.problemSegmentCount > 0) {
-        const problemTrees = crossdated.problemTrees
-          .map((tree) => {
-            const worst = tree.worstCorrelation === null ? "n/a" : tree.worstCorrelation.toFixed(2);
-            return `${tree.tree}(${tree.flaggedSegmentCount}段,候选${tree.candidateCount},worst ${worst})`;
-          })
-          .join("; ");
-        failures.push(`${sample.name}: crossdated internal problems=${crossdated.problemSegmentCount}${problemTrees ? `; ${problemTrees}` : ""}`);
-      }
-
-      rows.push({ sample, raw, crossdated });
+    for (const filePath of samples) {
+      rows.push(await inspectSample(filePath, rwlModule));
     }
 
     console.log(`Sample root: ${sampleRoot}`);
-    console.log(`Strict internal gate: ${strictInternal ? "on" : "off"}`);
-    console.log("");
-    console.log("site  raw problems/candidates  crossdated problems/candidates  delta");
-    console.log("----  -----------------------  ------------------------------  -----");
-
-    for (const { sample, raw, crossdated } of rows) {
-      const rawText = raw
-        ? `${formatCount(raw.problemSegmentCount)} / ${formatCount(raw.candidateCount)}`
-        : "missing";
-      const crossdatedText = crossdated
-        ? `${formatCount(crossdated.problemSegmentCount)} / ${formatCount(crossdated.candidateCount)}`
-        : "missing";
-      const delta = raw && crossdated
-        ? crossdated.problemSegmentCount - raw.problemSegmentCount
-        : null;
+    console.log("file       format  series  values  round trip");
+    console.log("---------  ------  ------  ------  ----------");
+    for (const row of rows) {
       console.log(
-        `${sample.name.padEnd(4)}  ${rawText.padEnd(23)}  ${crossdatedText.padEnd(30)}  ${delta === null ? "-" : delta}`,
+        `${row.file.padEnd(9)}  ${row.format.padEnd(6)}  ${String(row.seriesCount).padStart(6)}  ${String(row.valueCount).padStart(6)}  ${row.roundTrip}`,
       );
-    }
-
-    if (failures.length > 0) {
-      console.log("");
-      console.error("Validation failures:");
-      failures.forEach((failure) => console.error(`- ${failure}`));
-      process.exitCode = 1;
     }
   } finally {
     await server.close();
