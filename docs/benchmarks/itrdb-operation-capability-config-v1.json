@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": "itrdb-operation-capability-v1",
+  "scenarioGeneratorVersion": 3,
+  "frozenDate": "2026-08-15",
+  "seed": "itrdb-operation-capability-2026-08-12-v1",
+  "itrdbRoot": "D:/软件测试/数据/ITRDB/itrdb_download/measurements",
+  "fileIds": [
+    "az086", "ca612", "ca646", "ca660", "co021", "co583", "co589",
+    "co593", "co604", "co605", "co612", "co616", "co617", "co624",
+    "co629", "co631", "co632", "co647", "co649", "co650", "co651",
+    "co658", "co699", "mt001", "nm025", "nm026", "nm560", "nm565",
+    "nm572", "nm580", "or093", "paki033", "ut529", "ut530"
+  ],
+  "selection": {
+    "minimumSeriesYears": 200,
+    "minimumMasterCorrelation": 0.8,
+    "maximumProblemSegments": 0,
+    "minimumOlderContextYears": 45,
+    "minimumNewerContextYears": 35,
+    "usesSignalStrength": false,
+    "usesDiagnosisOutput": false
+  },
+  "injection": {
+    "falseRingMode": "moderate",
+    "partialShiftYears": [-6, -20],
+    "wholeShiftYears": [-4, 4],
+    "distantSpacingYears": 30,
+    "distantEventCounts": [2, 3, 4],
+    "nearSpacingYears": [2, 5, 9, 13],
+    "nearUnitEventCounts": [2, 3, 4],
+    "includeAdjacentOptionalSuccess": true,
+    "allowedWindowWidths": [5, 7, 9, 13]
+  },
+  "families": {
+    "Clean": "clean control used only for review false-positive measurement",
+    "A": "one missing, false, partial, or whole event per eligible series",
+    "B": "distant same-type chains of missing, false, or partial events; local spacing is at least 14 years",
+    "C": "same-direction unit missing or false chains at 2-13 years; adjacent pairs are optional-success only",
+    "D": "all two-type combinations, representative three-type combinations, and one four-type combination"
+  },
+  "runtime": {
+    "workers": 12,
+    "cofechaTimeoutSeconds": 60
+  }
+}

@@ -155,6 +155,7 @@ yarn benchmark:co612-zero-frontier-matrix
 ## 文档
 
 - [RWL 格式规范](RWL_FORMAT_SPEC.md)
+- [ITRDB A/B/C/D 验证报告](docs/benchmarks/itrdb-human-rescue-v2-clean-abcd-1000-results-2026-08-19.md)
 - [示例数据与引用](test-data/README.md)
 - [第三方声明](THIRD_PARTY_NOTICES.md)
 

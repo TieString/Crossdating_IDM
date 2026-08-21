@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": "itrdb-operation-capability-v1",
+  "scenarioGeneratorVersion": 2,
+  "frozenDate": "2026-08-14",
+  "seed": "itrdb-high-quality-multievent-development-2026-08-14-v2",
+  "itrdbRoot": "D:/软件测试/数据/ITRDB/itrdb_download/measurements",
+  "fileIds": [
+    "az086", "ca612", "ca646", "ca660", "co021", "co583", "co589",
+    "co593", "co604", "co605", "co612", "co616", "co617", "co624",
+    "co629", "co631", "co632", "co647", "co649", "co650", "co651",
+    "co658", "co699", "mt001", "nm025", "nm026", "nm560", "nm565",
+    "nm572", "nm580", "or093", "paki033", "ut529", "ut530"
+  ],
+  "selection": {
+    "minimumSeriesYears": 200,
+    "minimumMasterCorrelation": 0.8,
+    "maximumProblemSegments": 0,
+    "minimumFileIntercorrelation": 0.845,
+    "maximumFileProblemSegments": 0,
+    "minimumOlderContextYears": 45,
+    "minimumNewerContextYears": 35,
+    "maximumTargetsPerFile": 1,
+    "targetSelectionSeed": "itrdb-high-quality-multievent-target-2026-08-14-v2",
+    "excludeFilesWithoutEligibleTargets": true,
+    "usesSignalStrength": false,
+    "usesDiagnosisOutput": false
+  },
+  "injection": {
+    "falseRingMode": "moderate",
+    "partialShiftYears": [-6, -20],
+    "wholeShiftYears": [-4, 4],
+    "distantSpacingYears": 30,
+    "nearSpacingYears": 7,
+    "distantEventCounts": [3, 4],
+    "nearClusterEventCounts": [3, 4, 5],
+    "nearClusterMaximumSpanYears": 12,
+    "allowedWindowWidths": [5, 7, 9, 13]
+  },
+  "families": {
+    "A": "clean control and one missing, false, partial, or whole event per target",
+    "B": "two to four local events separated by 30 years, plus whole with one local event; evaluate exact sequential recovery",
+    "C": "two to five local events contained within at most 13 calendar years; evaluate one explicit near-event cluster review window",
+    "D": "whole plus partial plus missing or false on the same target"
+  },
+  "runtime": {
+    "workers": 12,
+    "cofechaTimeoutSeconds": 60
+  }
+}

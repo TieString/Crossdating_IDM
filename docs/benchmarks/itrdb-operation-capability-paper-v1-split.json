@@ -1,0 +1,265 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": "itrdb-operation-capability-paper-split-v1",
+  "frozenDate": "2026-08-15",
+  "splitSeed": "itrdb-operation-capability-paper-file-split-2026-08-15-v1",
+  "sourceConfigPath": "D:/Code/Crossdating_Tauri_js-diagnosis-events-v1/docs/benchmarks/itrdb-operation-capability-config-v1.json",
+  "sourceManifestPath": "D:/Code/Crossdating_Tauri_js-diagnosis-events-v1/docs/benchmarks/itrdb-operation-capability-manifest-v1.json",
+  "sourceConfigSha256": "094a0a5498fed8c731602e939cff3377e0d69402df50f5de97cd3d39ed5f9a9c",
+  "sourceManifestSha256": "3126e4fc59f7fcfa4a331a46775519970d431085965b442728a2332c015e0f7f",
+  "selection": {
+    "finalFileCount": 25,
+    "targetsPerFile": 20,
+    "minimumEligibleTargetsForFinalFile": 20,
+    "forcedDevelopmentFiles": [
+      "co612"
+    ],
+    "usesSignalStrength": false,
+    "usesDiagnosisOutput": false
+  },
+  "counts": {
+    "developmentFiles": 9,
+    "finalHoldoutFiles": 25,
+    "finalCasesPerFamily": 500
+  },
+  "files": [
+    {
+      "fileId": "az086",
+      "relativePath": "northamerica/usa/az086.rwl",
+      "sourceSha256": "c6befebbabc5cf692188c7b306634e7c63138b214dbb1e678a2919d679ea039c",
+      "eligibleTargetsBeforeLimit": 27,
+      "role": "finalHoldout"
+    },
+    {
+      "fileId": "ca612",
+      "relativePath": "northamerica/usa/ca612.rwl",
+      "sourceSha256": "f391460507483e0274188aa4b08b2579c6a40cbd7ebb890582e32df28ce777a2",
+      "eligibleTargetsBeforeLimit": 15,
+      "role": "development"
+    },
+    {
+      "fileId": "ca646",
+      "relativePath": "northamerica/usa/ca646.rwl",
+      "sourceSha256": "65d239d1f4abfd5b7dc96ed5cfcbeb6499d00d2d372e34f10b8f663a99f39e76",
+      "eligibleTargetsBeforeLimit": 20,
+      "role": "finalHoldout"
+    },
+    {
+      "fileId": "ca660",
+      "relativePath": "northamerica/usa/ca660.rwl",
+      "sourceSha256": "a84a34dfe9ad3f2c2074f7b057f435af87e576114a146d08c19b50d5fc5ae24a",
+      "eligibleTargetsBeforeLimit": 28,
+      "role": "finalHoldout"
+    },
+    {
+      "fileId": "co021",
+      "relativePath": "northamerica/usa/co021.rwl",
+      "sourceSha256": "b4b9376eaf527d7377fa0db6fab0a3b72d6070739c20901946228d219b80adba",
+      "eligibleTargetsBeforeLimit": 34,
+      "role": "finalHoldout"
+    },
+    {
+      "fileId": "co583",
+      "relativePath": "northamerica/usa/co583.rwl",
+      "sourceSha256": "c20353734e949ef5c834b964b17d371929cea66fa1b71e1bd68c87c00889ac54",
+      "eligibleTargetsBeforeLimit": 32,
+      "role": "finalHoldout"
+    },
+    {
+      "fileId": "co589",
+      "relativePath": "northamerica/usa/co589.rwl",
+      "sourceSha256": "f4539835802fdfd9abcf56020fd35ee3da0df1985433f4cf03b56a0422ce3031",
+      "eligibleTargetsBeforeLimit": 39,
+      "role": "finalHoldout"
+    },
+    {
+      "fileId": "co593",
+      "relativePath": "northamerica/usa/co593.rwl",
+      "sourceSha256": "7fec71a680328b2639e45a61a8deffddeacb0e13efb7facdec7a1655c07a3d62",
+      "eligibleTargetsBeforeLimit": 48,
+      "role": "finalHoldout"
+    },
+    {
+      "fileId": "co604",
+      "relativePath": "northamerica/usa/co604.rwl",
+      "sourceSha256": "6de08c349629c7fe5b07d2df9ac658b94ebbbca804497b8a410f9e5cab91d998",
+      "eligibleTargetsBeforeLimit": 22,
+      "role": "finalHoldout"
+    },
+    {
+      "fileId": "co605",
+      "relativePath": "northamerica/usa/co605.rwl",
+      "sourceSha256": "06a005529befebd9047352023770080b1fc2ce3f28e6523a904e02574ab851b1",
+      "eligibleTargetsBeforeLimit": 50,
+      "role": "finalHoldout"
+    },
+    {
+      "fileId": "co612",
+      "relativePath": "northamerica/usa/co612.rwl",
+      "sourceSha256": "b1d4756303eb1c8af9805e5f14a95b7e4e04c6ef18ada0a86aa9dedf715af048",
+      "eligibleTargetsBeforeLimit": 50,
+      "role": "development"
+    },
+    {
+      "fileId": "co616",
+      "relativePath": "northamerica/usa/co616.rwl",
+      "sourceSha256": "337cef8bde1aec09afbbfc4c935eeae888a88a17c30bebf51c991b8cbb89c48e",
+      "eligibleTargetsBeforeLimit": 37,
+      "role": "finalHoldout"
+    },
+    {
+      "fileId": "co617",
+      "relativePath": "northamerica/usa/co617.rwl",
+      "sourceSha256": "045d5b6c992a48ac4732c25c62db5620fd6ef99295d60627e98d04a50c47610b",
+      "eligibleTargetsBeforeLimit": 53,
+      "role": "finalHoldout"
+    },
+    {
+      "fileId": "co624",
+      "relativePath": "northamerica/usa/co624.rwl",
+      "sourceSha256": "a08e70116da0d72fc9e6898f8447872a1b0ef4aad6fa5f47c57d4b160ebade6b",
+      "eligibleTargetsBeforeLimit": 33,
+      "role": "finalHoldout"
+    },
+    {
+      "fileId": "co629",
+      "relativePath": "northamerica/usa/co629.rwl",
+      "sourceSha256": "6e77509edccdd85c1242f638972113149189346ce057ccb85b50a273453275e3",
+      "eligibleTargetsBeforeLimit": 54,
+      "role": "finalHoldout"
+    },
+    {
+      "fileId": "co631",
+      "relativePath": "northamerica/usa/co631.rwl",
+      "sourceSha256": "578ef70afe2c8a62fe7eec46ab8ed615b577ca6354c2b454e53b8162b2b63056",
+      "eligibleTargetsBeforeLimit": 46,
+      "role": "finalHoldout"
+    },
+    {
+      "fileId": "co632",
+      "relativePath": "northamerica/usa/co632.rwl",
+      "sourceSha256": "aeee5affcfecb029188af4d9f613a38a1a2b1cfbc44cde0d2cc52cf837481290",
+      "eligibleTargetsBeforeLimit": 16,
+      "role": "development"
+    },
+    {
+      "fileId": "co647",
+      "relativePath": "northamerica/usa/co647.rwl",
+      "sourceSha256": "7ba61dc8308edfc12d9757c1e45548e594c1c0489af9c866c604b71e5c5f58cf",
+      "eligibleTargetsBeforeLimit": 23,
+      "role": "finalHoldout"
+    },
+    {
+      "fileId": "co649",
+      "relativePath": "northamerica/usa/co649.rwl",
+      "sourceSha256": "b2d1bfb88c1380dd83ebf302f0e511893d34ab3f6d59de759481ac9c4fa036d9",
+      "eligibleTargetsBeforeLimit": 44,
+      "role": "finalHoldout"
+    },
+    {
+      "fileId": "co650",
+      "relativePath": "northamerica/usa/co650.rwl",
+      "sourceSha256": "66b069ac463172c8ca3acb53365e4167fcf20fdc3d0a82ec15c5c05d0787bc13",
+      "eligibleTargetsBeforeLimit": 53,
+      "role": "finalHoldout"
+    },
+    {
+      "fileId": "co651",
+      "relativePath": "northamerica/usa/co651.rwl",
+      "sourceSha256": "78c84df37723d277488e7d290b1fc3674f51b7fd778ce6512e9fb3fbbff6949c",
+      "eligibleTargetsBeforeLimit": 50,
+      "role": "finalHoldout"
+    },
+    {
+      "fileId": "co658",
+      "relativePath": "northamerica/usa/co658.rwl",
+      "sourceSha256": "133a0c64fd7cbc387755efa4c7f61e845056217e33c806534460bdfa173ffaed",
+      "eligibleTargetsBeforeLimit": 40,
+      "role": "finalHoldout"
+    },
+    {
+      "fileId": "co699",
+      "relativePath": "northamerica/usa/co699.rwl",
+      "sourceSha256": "6cac2dbe36ff69eaee96d3588292d64cdeb77d02b683ad0c6c331e894f5cfab0",
+      "eligibleTargetsBeforeLimit": 17,
+      "role": "development"
+    },
+    {
+      "fileId": "mt001",
+      "relativePath": "northamerica/usa/mt001.rwl",
+      "sourceSha256": "e5382888b1aeac2f053836c522a172ebaeb13546a609360881b3b4d7157f7309",
+      "eligibleTargetsBeforeLimit": 11,
+      "role": "development"
+    },
+    {
+      "fileId": "nm025",
+      "relativePath": "northamerica/usa/nm025.rwl",
+      "sourceSha256": "dc0934783229e8eda5aad5f14ed288a4365dfbd82b99195a5c66299148d9d04b",
+      "eligibleTargetsBeforeLimit": 38,
+      "role": "finalHoldout"
+    },
+    {
+      "fileId": "nm026",
+      "relativePath": "northamerica/usa/nm026.rwl",
+      "sourceSha256": "1dfdf34f2b5654bcb3a6e4527f3808c71e2417cc999f34a8cbc8ca0d3e6cb555",
+      "eligibleTargetsBeforeLimit": 19,
+      "role": "development"
+    },
+    {
+      "fileId": "nm560",
+      "relativePath": "northamerica/usa/nm560.rwl",
+      "sourceSha256": "e31ece72f2afeb3b61cc82b5e7c5a97987e5319ecee4ae8c338d180511bebeae",
+      "eligibleTargetsBeforeLimit": 57,
+      "role": "finalHoldout"
+    },
+    {
+      "fileId": "nm565",
+      "relativePath": "northamerica/usa/nm565.rwl",
+      "sourceSha256": "8a2a9e980964553c0d9a4599067155b1a0d12e7a3df95b9edafb63a38d1e2666",
+      "eligibleTargetsBeforeLimit": 46,
+      "role": "finalHoldout"
+    },
+    {
+      "fileId": "nm572",
+      "relativePath": "northamerica/usa/nm572.rwl",
+      "sourceSha256": "558eee6d35ebf033b7a5a1bb1db7cf9f8fabe002bbbf463380017b963c2b0529",
+      "eligibleTargetsBeforeLimit": 25,
+      "role": "finalHoldout"
+    },
+    {
+      "fileId": "nm580",
+      "relativePath": "northamerica/usa/nm580.rwl",
+      "sourceSha256": "d9ee676597323f96c1c73164c4fbc97a47a65c44fe0becc701b59377456d60b4",
+      "eligibleTargetsBeforeLimit": 58,
+      "role": "finalHoldout"
+    },
+    {
+      "fileId": "or093",
+      "relativePath": "northamerica/usa/or093.rwl",
+      "sourceSha256": "f66508262b8f2d8c897280a9a45a1073317daab3981744776ec099e22e4eaae8",
+      "eligibleTargetsBeforeLimit": 4,
+      "role": "development"
+    },
+    {
+      "fileId": "paki033",
+      "relativePath": "paki033.rwl",
+      "sourceSha256": "4f4d82079ddb4ba77141e0998af76fa07a2195e9bba968f02d771995a4ea6e71",
+      "eligibleTargetsBeforeLimit": 6,
+      "role": "development"
+    },
+    {
+      "fileId": "ut529",
+      "relativePath": "northamerica/usa/ut529.rwl",
+      "sourceSha256": "feae1d7abb5c9484627ba6a8cf41c8dc5cc6ab496dd03d9e5d31255e6b7520b1",
+      "eligibleTargetsBeforeLimit": 34,
+      "role": "development"
+    },
+    {
+      "fileId": "ut530",
+      "relativePath": "northamerica/usa/ut530.rwl",
+      "sourceSha256": "b8e156327f8cc361708693816ca498510ae74024292e1fadc71174144776f7a0",
+      "eligibleTargetsBeforeLimit": 66,
+      "role": "finalHoldout"
+    }
+  ]
+}
