@@ -79,21 +79,28 @@ describe("event-level one-to-one matching", () => {
             shiftYears: -2,
             shiftSide: "older",
         });
+        const nestedMissing = event("nested-missing", "missingRing", 1897, 1903);
+        const interpretationEvidence = {
+            missingRingCount: 2,
+            cumulativeShiftYears: -2,
+            missingYears: [1899, 1901],
+            partialFirstFixedYear: 1902,
+            normalizedCounterfactualGainDifference: 0.5,
+            masterMargin: 0.01,
+            referenceMedianMargin: 0.005,
+            referenceCount: 10,
+            missingReferenceSupport: 5,
+            partialReferenceSupport: 5,
+        };
+        alternative.interpretationAmbiguity = {
+            kind: "missingRingsOrPartialMove",
+            alternative: nestedMissing,
+            evidence: interpretationEvidence,
+        };
         completed.interpretationAmbiguity = {
             kind: "missingRingsOrPartialMove",
             alternative,
-            evidence: {
-                missingRingCount: 2,
-                cumulativeShiftYears: -2,
-                missingYears: [1899, 1901],
-                partialFirstFixedYear: 1902,
-                normalizedCounterfactualGainDifference: 0.5,
-                masterMargin: 0.01,
-                referenceMedianMargin: 0.005,
-                referenceCount: 10,
-                missingReferenceSupport: 5,
-                partialReferenceSupport: 5,
-            },
+            evidence: interpretationEvidence,
         };
         const original = [completed];
         const stale = markDiagnosisEventsStale(original);
@@ -105,5 +112,10 @@ describe("event-level one-to-one matching", () => {
         expect(alternative.stale).toBeUndefined();
         expect(stale[0].interpretationAmbiguity?.alternative).not.toBe(alternative);
         expect(stale[0].interpretationAmbiguity?.alternative.stale).toBe(true);
+        expect(nestedMissing.stale).toBeUndefined();
+        expect(
+            stale[0].interpretationAmbiguity?.alternative.interpretationAmbiguity
+                ?.alternative.stale,
+        ).toBe(true);
     });
 });

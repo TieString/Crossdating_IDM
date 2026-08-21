@@ -432,6 +432,96 @@ describe("DiagnosisEventPanel", () => {
     expect(html).not.toContain("1900–1906 · 7 年");
   });
 
+  it("keeps the missing-ring review available inside a whole-to-partial interpretation", () => {
+    const missing: DiagnosisEvent = {
+      id: "nested-missing",
+      seriesId: "MON052",
+      eventType: "missingRing",
+      startYear: 1873,
+      endYear: 1885,
+      rankedYears: [{ year: 1879, rank: 1, score: 0.4, evidenceTags: [] }],
+      confidenceLevel: "medium",
+      evidence: {
+        algorithmSources: ["sequential_missing_staircase_head"],
+        score: 0.4,
+        scoreMargin: 0.05,
+        baselineCorrelation: 0.2,
+        correctedCorrelation: 0.5,
+        correlationGain: 0.3,
+        lagBefore: -1,
+        lagAfter: 0,
+        samplePairs: 50,
+        candidateIds: [],
+        notes: [],
+      },
+      alternativeTypes: [],
+    };
+    const partial: DiagnosisEvent = {
+      ...missing,
+      id: "nested-partial",
+      eventType: "partialMove",
+      rankedYears: [{ year: 1880, rank: 1, score: 0.4, evidenceTags: [] }],
+      shiftYears: -3,
+      shiftSide: "older",
+      evidence: { ...missing.evidence, lagBefore: -3 },
+      interpretationAmbiguity: {
+        kind: "missingRingsOrPartialMove",
+        alternative: missing,
+        evidence: {
+          missingRingCount: 3,
+          cumulativeShiftYears: -3,
+          missingYears: [1879],
+          partialFirstFixedYear: 1880,
+          normalizedCounterfactualGainDifference: 0.03,
+          masterMargin: 0.01,
+          referenceMedianMargin: 0.01,
+          referenceCount: 10,
+          missingReferenceSupport: 5,
+          partialReferenceSupport: 5,
+          countEvidence: "cumulativeLagOnly",
+        },
+      },
+    };
+    const whole: DiagnosisEvent = {
+      ...partial,
+      id: "nested-whole",
+      eventType: "wholeSeriesMove",
+      startYear: 1790,
+      endYear: 2002,
+      rankedYears: [],
+      shiftYears: -3,
+      shiftSide: undefined,
+      interpretationAmbiguity: {
+        kind: "wholeSeriesMoveOrLocalEvent",
+        alternative: partial,
+        evidence: {
+          wholeShiftYears: -3,
+          localEventType: "partialMove",
+          localWindowWidth: 13,
+          localEvidenceSource: "diagnosed",
+          operationScoreMargin: 0.02,
+          finalEvidenceClaims: [],
+        },
+      },
+    };
+
+    const partialHtml = renderToStaticMarkup(createElement(DiagnosisEventPanel, {
+      events: [whole],
+      selectedEventId: partial.id,
+    }));
+    expect(partialHtml).toContain("可能局部移动");
+    expect(partialHtml).toContain("未见断裂，按缺轮逐轮复核");
+    expect(partialHtml).toContain("恢复整体移动解释");
+
+    const missingHtml = renderToStaticMarkup(createElement(DiagnosisEventPanel, {
+      events: [whole],
+      selectedEventId: missing.id,
+    }));
+    expect(missingHtml).toContain("可能缺轮");
+    expect(missingHtml).toContain("存在断裂，返回局部移动解释");
+    expect(missingHtml).toContain("恢复整体移动解释");
+  });
+
   it("offers one reviewed missing-ring interpretation for an endpoint whole alias", () => {
     const missing: DiagnosisEvent = {
       id: "endpoint-missing",

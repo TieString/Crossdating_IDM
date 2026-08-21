@@ -178,21 +178,19 @@ export const markCandidatesStale = (
     candidates.map((candidate) => ({ ...candidate, status: "stale" as const }))
 );
 
+const markDiagnosisEventStale = (event: DiagnosisEvent): DiagnosisEvent => ({
+    ...event,
+    stale: true,
+    interpretationAmbiguity: event.interpretationAmbiguity ? {
+        ...event.interpretationAmbiguity,
+        alternative: markDiagnosisEventStale(event.interpretationAmbiguity.alternative),
+    } : undefined,
+});
+
 export const markDiagnosisEventsStale = (
     events: DiagnosisEvent[],
 ): DiagnosisEvent[] => (
-    events.map((event) => ({
-        ...event,
-        stale: true,
-        interpretationAmbiguity: event.interpretationAmbiguity ? {
-            ...event.interpretationAmbiguity,
-            alternative: {
-                ...event.interpretationAmbiguity.alternative,
-                interpretationAmbiguity: undefined,
-                stale: true,
-            },
-        } : undefined,
-    }))
+    events.map(markDiagnosisEventStale)
 );
 
 export const selectSafeDiagnosisCandidateBatch = (

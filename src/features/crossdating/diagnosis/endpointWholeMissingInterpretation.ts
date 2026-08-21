@@ -156,7 +156,6 @@ export const attachEndpointWholeMissingInterpretation = (
             kind: "wholeSeriesMoveOrMissingRing",
             alternative: {
                 ...alignedMissing,
-                interpretationAmbiguity: undefined,
                 stale: whole.stale || alignedMissing.stale ? true : undefined,
                 evidence: {
                     ...alignedMissing.evidence,
@@ -191,7 +190,6 @@ export const attachWholeLocalEventInterpretation = (
         kind: "wholeSeriesMoveOrLocalEvent",
         alternative: {
             ...local,
-            interpretationAmbiguity: undefined,
             stale: whole.stale || local.stale ? true : undefined,
             evidence: {
                 ...local.evidence,

@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { DiagnosisEvent, DiagnosisEventType } from "../types";
 import {
+    diagnosisEventInterpretationChain,
     projectActiveDiagnosisEventInterpretation,
     refreshActiveDiagnosisEventInterpretation,
+    resolveDiagnosisEventInterpretation,
 } from "../activeEventInterpretation";
+import { attachWholeLocalEventInterpretation } from "../endpointWholeMissingInterpretation";
 
 const eventOf = (
     id: string,
@@ -115,5 +118,52 @@ describe("active diagnosis event interpretation", () => {
 
         expect(refreshActiveDiagnosisEventInterpretation([whole], oldMissing)).toBe(refreshedMissing);
         expect(refreshActiveDiagnosisEventInterpretation([], oldMissing)).toBeNull();
+    });
+
+    it("preserves and resolves whole, partial, and missing interpretations as one chain", () => {
+        const missing = eventOf("local-missing", "missingRing", 1873, 1885);
+        const partial: DiagnosisEvent = {
+            ...eventOf("local-partial", "partialMove", 1873, 1885),
+            shiftYears: -3,
+            shiftSide: "older",
+            interpretationAmbiguity: {
+                kind: "missingRingsOrPartialMove",
+                alternative: missing,
+                evidence: {
+                    missingRingCount: 3,
+                    cumulativeShiftYears: -3,
+                    missingYears: [1879],
+                    partialFirstFixedYear: 1880,
+                    normalizedCounterfactualGainDifference: 0.03,
+                    masterMargin: 0.01,
+                    referenceMedianMargin: 0.01,
+                    referenceCount: 10,
+                    missingReferenceSupport: 5,
+                    partialReferenceSupport: 5,
+                    countEvidence: "cumulativeLagOnly",
+                },
+            },
+        };
+        const whole = {
+            ...eventOf("whole-minus-3", "wholeSeriesMove", 1790, 2002),
+            shiftYears: -3,
+        };
+        const attached = attachWholeLocalEventInterpretation(whole, partial, {
+            wholeShiftYears: -3,
+            localEventType: "partialMove",
+            localWindowWidth: 13,
+            localEvidenceSource: "diagnosed",
+            operationScoreMargin: 0.02,
+            finalEvidenceClaims: [],
+        });
+
+        expect(diagnosisEventInterpretationChain(attached).map(({ id }) => id)).toEqual([
+            whole.id,
+            partial.id,
+            missing.id,
+        ]);
+        expect(resolveDiagnosisEventInterpretation(attached, missing.id)).toBe(missing);
+        expect(refreshActiveDiagnosisEventInterpretation([attached], missing)).toBe(missing);
+        expect(projectActiveDiagnosisEventInterpretation([attached], missing)).toEqual([missing]);
     });
 });

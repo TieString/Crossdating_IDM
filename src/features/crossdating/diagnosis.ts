@@ -25,8 +25,10 @@ export {
 } from "./diagnosis/eventLocationAlternatives";
 export { getDisplayedDiagnosisEvents } from "./diagnosis/eventDisplay";
 export {
+    diagnosisEventInterpretationChain,
     projectActiveDiagnosisEventInterpretation,
     refreshActiveDiagnosisEventInterpretation,
+    resolveDiagnosisEventInterpretation,
 } from "./diagnosis/activeEventInterpretation";
 export {
     applyLocalCrossdatingOption,
