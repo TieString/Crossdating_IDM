@@ -5995,9 +5995,10 @@ export const stableFrontierHasRepeatedOperationSupport = (
 };
 
 /**
- * Keeps the bark-side component of a stable distant partial chain. A two-state aggregate can
+ * Keeps the bark-side component of a stable distant negative chain. A two-state aggregate can
  * improve more total years, but applying it would skip every independently sustained state
- * between the aggregate endpoints.
+ * between the aggregate endpoints. A missing step may sit between partial components because
+ * both are compatible representations of the same one-direction cumulative lag path.
  */
 export const selectSeparatedPartialComponentCheckpoint = (
     frontier: StableBoundedLagPathFrontier | null,
@@ -6005,9 +6006,16 @@ export const selectSeparatedPartialComponentCheckpoint = (
 ): DiagnosisEvent | null => {
     if (!frontier
         || frontier.structuralSubset
-        || !frontier.allTransitionsPartial
         || frontier.transitionCount < 2) return null;
     const transitions = frontier.transitions;
+    const allTransitionsNegative = transitions.every(({ event, shiftYears }) => (
+        shiftYears < 0
+        && (event.eventType === "missingRing" || event.eventType === "partialMove")
+    ));
+    const hasPartialComponent = transitions.some(({ event }) => (
+        event.eventType === "partialMove"
+    ));
+    if (!allTransitionsNegative || !hasPartialComponent) return null;
     const newest = transitions[transitions.length - 1];
     if (!newest
         || newest.event.eventType !== "partialMove"
@@ -6020,6 +6028,9 @@ export const selectSeparatedPartialComponentCheckpoint = (
         if (newer.topYear - older.topYear < minimumSeparationYears
             || older.event.evidence.lagAfter !== newer.event.evidence.lagBefore) return null;
     }
+    const source = frontier.allTransitionsPartial
+        ? "separated_partial_component_frontier"
+        : "separated_negative_component_frontier";
     return withEvidenceLedger({
         ...frontier.event,
         id: `${frontier.event.id}-separated-partial-component`,
@@ -6027,7 +6038,7 @@ export const selectSeparatedPartialComponentCheckpoint = (
             ...frontier.event.evidence,
             algorithmSources: Array.from(new Set([
                 ...frontier.event.evidence.algorithmSources,
-                "separated_partial_component_frontier",
+                source,
             ])).sort(),
             notes: Array.from(new Set([
                 ...frontier.event.evidence.notes,

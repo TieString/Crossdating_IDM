@@ -3772,6 +3772,56 @@ describe("selectCumulativePartialFrontier", () => {
         });
     });
 
+    it("keeps the newest partial after a distant missing step in one negative chain", () => {
+        const missing = (year: number): DiagnosisEvent => ({
+            ...pathEvent(-1, -4, -3, year),
+            eventType: "missingRing",
+            shiftYears: undefined,
+            shiftSide: undefined,
+        });
+        const separated = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                missing(1700),
+                pathEvent(-3, -3, 0, 1730),
+            ]),
+            boundedPath([
+                missing(1701),
+                pathEvent(-3, -3, 0, 1731),
+            ]),
+        );
+
+        expect(selectSeparatedPartialComponentCheckpoint(separated)).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -3,
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "separated_negative_component_frontier",
+                ]),
+            },
+        });
+    });
+
+    it("does not treat a mixed-sign distant chain as one negative frontier", () => {
+        const falseRing = (year: number): DiagnosisEvent => ({
+            ...pathEvent(1, -2, -3, year),
+            eventType: "falseRing",
+            shiftYears: undefined,
+            shiftSide: undefined,
+        });
+        const mixed = selectStableBoundedLagPathFrontier(
+            boundedPath([
+                falseRing(1700),
+                pathEvent(-3, -3, 0, 1730),
+            ]),
+            boundedPath([
+                falseRing(1701),
+                pathEvent(-3, -3, 0, 1731),
+            ]),
+        );
+
+        expect(selectSeparatedPartialComponentCheckpoint(mixed)).toBeNull();
+    });
+
     it("leaves a compact split partial to the aggregate operation checkpoint", () => {
         const compact = selectStableBoundedLagPathFrontier(
             boundedPath([
