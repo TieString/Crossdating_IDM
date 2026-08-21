@@ -4,6 +4,7 @@ import {
     preservesStrongBoundedPathMode,
     projectCumulativePartialToValidatedUnitFrontier,
     projectMultiEventLocationConsensus,
+    projectNegativeEventToCrossPenaltyEquivalentFrontier,
     projectUnsupportedLocationToStrongBoundedPath,
     projectUnitLocationFromIndependentConsensus,
     strongBoundedPathLocation,
@@ -80,6 +81,84 @@ describe("strong bounded-path location authority", () => {
 });
 
 describe("multi-event frontier location consensus", () => {
+    it("keeps a cumulative partial operation at a cross-penalty missing frontier", () => {
+        const partial = event();
+        partial.eventType = "partialMove";
+        partial.shiftYears = -3;
+        partial.shiftSide = "older";
+        partial.startYear = 1600;
+        partial.endYear = 1612;
+        partial.rankedYears = [{ year: 1606, rank: 1, score: 4, evidenceTags: [] }];
+        partial.evidence.lagBefore = -3;
+        partial.evidence.lagAfter = 0;
+        const missing = event();
+        missing.startYear = 1612;
+        missing.endYear = 1624;
+        missing.rankedYears = [{ year: 1618, rank: 1, score: 8, evidenceTags: [] }];
+        missing.evidence.lagBefore = -1;
+        missing.evidence.lagAfter = 0;
+        missing.evidence.notes = ["bounded_path_location_concentration=0.91"];
+        const probe = (year: number) => ({
+            transitionGain: 40,
+            runnerUpMargin: 0.3,
+            events: [{
+                ...missing,
+                rankedYears: [{ year, rank: 1, score: 8, evidenceTags: [] }],
+            }],
+        });
+
+        expect(projectNegativeEventToCrossPenaltyEquivalentFrontier(
+            partial,
+            probe(1618),
+            probe(1619),
+            { startYear: 1400, endYear: 2000 },
+        )).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -3,
+            startYear: 1614,
+            endYear: 1626,
+            rankedYears: expect.arrayContaining([
+                expect.objectContaining({ year: 1620, rank: 1 }),
+            ]),
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "cross_penalty_equivalent_frontier_location",
+                ]),
+            },
+        });
+    });
+
+    it("does not let the same operation encoding become a second locator", () => {
+        const partial = event();
+        partial.eventType = "partialMove";
+        partial.shiftYears = -6;
+        partial.shiftSide = "older";
+        partial.evidence.lagBefore = -6;
+        partial.evidence.lagAfter = 0;
+        const other = {
+            ...partial,
+            startYear: 1920,
+            endYear: 1932,
+            rankedYears: [{ year: 1926, rank: 1, score: 8, evidenceTags: [] }],
+            evidence: {
+                ...partial.evidence,
+                notes: ["bounded_path_location_concentration=0.95"],
+            },
+        };
+        const probe = {
+            transitionGain: 50,
+            runnerUpMargin: 0.5,
+            events: [other],
+        };
+
+        expect(projectNegativeEventToCrossPenaltyEquivalentFrontier(
+            partial,
+            probe,
+            probe,
+            { startYear: 1400, endYear: 2000 },
+        )).toBe(partial);
+    });
+
     it("moves a calibrated cumulative partial to a newer independently verified unit frontier", () => {
         const partial = event({ calibrated: true });
         partial.eventType = "partialMove";

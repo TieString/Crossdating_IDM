@@ -83,6 +83,7 @@ import {
 import {
     projectCumulativePartialToValidatedUnitFrontier,
     projectMultiEventLocationConsensus,
+    projectNegativeEventToCrossPenaltyEquivalentFrontier,
     projectUnitLocationFromIndependentConsensus,
     strongBoundedPathLocation,
     terminalFalseRingOlderPadding,
@@ -13021,7 +13022,23 @@ export const makeDiagnosisEvents = (
                     localLagTransitionEvidence,
                 )
             );
-            const independentlyLocatedEvents = sourceEvents.map((event) => (
+            const crossPenaltyLocatedEvents = sourceEvents.map((event) => (
+                projectNegativeEventToCrossPenaltyEquivalentFrontier(
+                    event,
+                    rawNearPenaltyTwoPath ? {
+                        transitionGain: rawNearPenaltyTwoPath.path.transitionGain,
+                        runnerUpMargin: rawNearPenaltyTwoPath.path.runnerUpMargin,
+                        events: rawNearPenaltyTwoPath.events,
+                    } : null,
+                    rawNearPenaltyOnePath ? {
+                        transitionGain: rawNearPenaltyOnePath.path.transitionGain,
+                        runnerUpMargin: rawNearPenaltyOnePath.path.runnerUpMargin,
+                        events: rawNearPenaltyOnePath.events,
+                    } : null,
+                    diagnosis.targetRange,
+                )
+            ));
+            const independentlyLocatedEvents = crossPenaltyLocatedEvents.map((event) => (
                 preservesSequentialFalseAsymmetricFrontierWindow(
                     event,
                     stableTerminalSequentialUnit !== null,

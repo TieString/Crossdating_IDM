@@ -51,6 +51,12 @@ const directFrontierYear = (event: DiagnosisEvent): number | null => {
     return null;
 };
 
+export type CrossPenaltyLocationProbe = {
+    transitionGain: number;
+    runnerUpMargin: number;
+    events: readonly DiagnosisEvent[];
+};
+
 const isUnitEvent = (event: DiagnosisEvent): boolean => (
     event.eventType === "missingRing" || event.eventType === "falseRing"
 );
@@ -398,6 +404,146 @@ export const projectMultiEventLocationConsensus = (
                 ...(guardsRawCadenceBoundary ? [
                     `terminal_cadence_raw_boundary_guard=${rawTerminalBoundaryYear}`,
                 ] : []),
+            ])),
+        },
+    });
+};
+
+const isNegativeLocalEvent = (event: DiagnosisEvent): boolean => (
+    event.eventType === "missingRing"
+    || (event.eventType === "partialMove" && (event.shiftYears ?? 0) < -1)
+);
+
+/**
+ * Shares location authority between the two physically equivalent negative-event encodings.
+ * Operation and shift stay immutable; only a detached window can move.
+ */
+export const projectNegativeEventToCrossPenaltyEquivalentFrontier = (
+    event: DiagnosisEvent,
+    stronger: CrossPenaltyLocationProbe | null,
+    regularized: CrossPenaltyLocationProbe | null,
+    targetRange: { startYear: number; endYear: number },
+    maximumYearDrift = 2,
+): DiagnosisEvent => {
+    if (!stronger
+        || !regularized
+        || !isNegativeLocalEvent(event)
+        || event.evidence.lagAfter === null
+        || event.evidence.lagAfter === undefined
+        || stronger.transitionGain < 20
+        || regularized.transitionGain < 20
+        || stronger.runnerUpMargin < 0.05
+        || regularized.runnerUpMargin < 0.05) return event;
+    const oppositeType = event.eventType === "partialMove"
+        ? "missingRing"
+        : "partialMove";
+    const matches = stronger.events.flatMap((candidate) => {
+        const candidateYear = rankedYear(candidate);
+        if (candidate.eventType !== oppositeType
+            || !isNegativeLocalEvent(candidate)
+            || candidateYear === null
+            || candidate.evidence.lagAfter !== event.evidence.lagAfter
+            || candidate.evidence.samplePairs < 30) return [];
+        const concentration = Number(candidate.evidence.notes.find((note) => (
+            note.startsWith("bounded_path_location_concentration=")
+        ))?.split("=")[1]);
+        if (!Number.isFinite(concentration) || concentration < 0.7) return [];
+        const corroborating = regularized.events.find((other) => {
+            const otherYear = rankedYear(other);
+            return other.eventType === candidate.eventType
+                && other.shiftYears === candidate.shiftYears
+                && other.evidence.lagBefore === candidate.evidence.lagBefore
+                && other.evidence.lagAfter === candidate.evidence.lagAfter
+                && otherYear !== null
+                && Math.abs(otherYear - candidateYear) <= maximumYearDrift;
+        });
+        const corroboratingYear = corroborating ? rankedYear(corroborating) : null;
+        return corroboratingYear === null ? [] : [{
+            candidate,
+            centerYear: Math.round((candidateYear + corroboratingYear) / 2),
+            concentration,
+        }];
+    }).sort((left, right) => right.centerYear - left.centerYear);
+    const selected = matches[0];
+    if (!selected) return event;
+    const outsideDistance = selected.centerYear < event.startYear
+        ? event.startYear - selected.centerYear
+        : selected.centerYear > event.endYear
+            ? selected.centerYear - event.endYear
+            : 0;
+    if (outsideDistance < 2) return event;
+
+    const semanticYear = event.eventType === "partialMove"
+        ? selected.centerYear + 1
+        : selected.centerYear - 1;
+    const currentWidth = event.endYear - event.startYear + 1;
+    const width = ALLOWED_LOCAL_WINDOW_WIDTHS.includes(
+        currentWidth as (typeof ALLOWED_LOCAL_WINDOW_WIDTHS)[number],
+    ) ? currentWidth : 13;
+    const window = clampWindowToRange(
+        semanticYear - Math.floor((width - 1) / 2),
+        width,
+        targetRange,
+    );
+    const prior = new Map(event.rankedYears.map((row) => [row.year, row]));
+    const maximumScore = Math.max(0, ...event.rankedYears.map(({ score }) => score));
+    const minimumScore = Math.min(0, ...event.rankedYears.map(({ score }) => score));
+    const rankedYears = Array.from(
+        { length: width },
+        (_, index) => window.startYear + index,
+    ).map((year) => ({
+        year,
+        rank: 0,
+        score: year === semanticYear
+            ? maximumScore + Math.max(1e-9, Math.abs(maximumScore) * 1e-12)
+            : prior.get(year)?.score ?? minimumScore - 1,
+        evidenceTags: Array.from(new Set([
+            ...(prior.get(year)?.evidenceTags ?? []),
+            "cross_penalty_equivalent_frontier_location",
+        ])).sort(),
+    })).sort((left, right) => (
+        right.score - left.score || right.year - left.year
+    )).map((row, index) => ({ ...row, rank: index + 1 }));
+    const referenceCount = Math.max(
+        0,
+        ...locationEvidenceFor(selected.candidate).map((entry) => entry.referenceCount),
+    );
+    return withEvidenceLedger({
+        ...event,
+        id: `${event.id}-cross-penalty-equivalent-${semanticYear}`,
+        ...window,
+        rankedYears,
+        reviewCoreRange: undefined,
+        evidence: {
+            ...event.evidence,
+            algorithmSources: Array.from(new Set([
+                ...event.evidence.algorithmSources,
+                "cross_penalty_equivalent_frontier_location",
+            ])).sort(),
+            locationEvidence: [
+                ...(event.evidence.locationEvidence ?? []),
+                {
+                    source: "cross_penalty_equivalent_frontier_location",
+                    ...window,
+                    topYear: semanticYear,
+                    referenceCount,
+                    concentration: selected.concentration,
+                    remoteMargin: Math.min(
+                        stronger.runnerUpMargin,
+                        regularized.runnerUpMargin,
+                    ),
+                    calibrated: true,
+                },
+            ],
+            notes: Array.from(new Set([
+                ...event.evidence.notes,
+                `cross_penalty_equivalent_previous_window=${
+                    event.startYear
+                }-${event.endYear}`,
+                `cross_penalty_equivalent_path_type=${selected.candidate.eventType}`,
+                `cross_penalty_equivalent_path_year=${selected.centerYear}`,
+                `cross_penalty_equivalent_semantic_year=${semanticYear}`,
+                `cross_penalty_equivalent_window=${window.startYear}-${window.endYear}`,
             ])),
         },
     });
