@@ -1148,6 +1148,42 @@ describe("joint event adjudicator", () => {
         ]).event).toMatchObject({ id: "repeated-minus-20", shiftYears: -20 });
     });
 
+    it("does not net an opposite-direction unit event into a partial move", () => {
+        const partial = event("partial-minus-20", "partialMove", 1531, 1543, 1537);
+        partial.shiftYears = -20;
+        partial.evidence.lagBefore = -20;
+        partial.evidence.algorithmSources = [
+            "bounded_complete_lag_path",
+            "stable_multiscale_bounded_path_frontier",
+        ];
+        partial.evidence.notes = [
+            "bounded_path_complete_hypothesis=true",
+            "stable_bounded_path_aggregate_shift=-19",
+            "stable_bounded_path_suffix_shifts=-20,-19",
+        ];
+        const net = event("net-minus-19", "partialMove", 1502, 1514, 1507);
+        net.shiftYears = -19;
+        net.evidence.lagBefore = -19;
+        net.evidence.correlationGain = 0.54;
+        net.evidence.algorithmSources = [
+            "candidate_grid_reference_partial_consensus",
+            "per_reference_counterfactual_evidence",
+        ];
+        net.evidence.notes = [
+            "candidate_hard_gate_passed",
+            "candidate_grid_partial_shift=-19",
+            "candidate_grid_partial_family_margin=0.46",
+            "candidate_grid_partial_shift_margin=0.37",
+            "candidate_grid_partial_reference_count=12",
+            "candidate_grid_partial_reference_peak_kernel5=0.62",
+        ];
+
+        expect(adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: partial },
+            { stage: "final", authority: "supplemental", event: net },
+        ]).event).toMatchObject({ id: "partial-minus-20", shiftYears: -20 });
+    });
+
     it("keeps a strongly located terminal bounded partial over an unanchored composition", () => {
         const composition = event("unanchored-composition", "falseRing", 1893, 1905, 1899);
         composition.evidence.algorithmSources = [

@@ -1400,7 +1400,7 @@ const stablePathComponentShifts = (event: DiagnosisEvent): number[] => {
     ));
 };
 
-/** A concentrated exact operation may undo an unsupported over-decomposition, never a repeat. */
+/** A concentrated exact operation may undo a same-direction over-decomposition, never a repeat. */
 const selectConcentratedAggregatePartial = (
     allFinalClusters: readonly HypothesisCluster[],
     selectedFinalClusters: readonly HypothesisCluster[],
@@ -1421,9 +1421,16 @@ const selectConcentratedAggregatePartial = (
     );
     const selectedShift = selectedEvent.shiftYears;
     const components = stablePathComponentShifts(selectedEvent);
+    const aggregateDirection = aggregateShift === null ? 0 : Math.sign(aggregateShift);
+    const hasOnlyAggregateDirectionComponents = aggregateDirection !== 0
+        && components.length >= 2
+        && components.every((shift) => (
+            shift !== 0 && Math.sign(shift) === aggregateDirection
+        ));
     if (aggregateShift === null
         || selectedShift === undefined
         || aggregateShift === selectedShift
+        || !hasOnlyAggregateDirectionComponents
         || components.filter((shift) => shift === selectedShift).length > 1) return null;
 
     return allFinalClusters.filter((cluster) => {
