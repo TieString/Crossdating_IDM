@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { FloatingScrollArea } from "@/components/FloatingScrollArea/FloatingScrollArea";
 import { useSettings } from "@/features/settings/SettingsContext";
+import ltrrFavicon from "@/assets/ltrr-favicon.ico";
 import {
     normalizeAnimationSpeed,
     type AnimationSettings,
@@ -28,7 +29,7 @@ const SPEED_PRESETS: { value: number; label: string }[] = [
     { value: 3, label: "3×（极快）" },
 ];
 
-const LTRR_COFECHA_DOWNLOAD_URL = "https://cambium.ltrr.arizona.edu/research/software";
+const LTRR_COFECHA_DOWNLOAD_URL = "https://www.ltrr.arizona.edu/pub/dpl/";
 
 interface RowProps {
     label: string;
@@ -226,7 +227,8 @@ function CofechaSection() {
                     type="button"
                     onClick={() => void openUrl(LTRR_COFECHA_DOWNLOAD_URL)}
                 >
-                    下载
+                    <img className={styles["website-icon"]} src={ltrrFavicon} alt="" aria-hidden="true" />
+                    <span>下载</span>
                 </button>
                 <div className={styles["setting-note"]}>
                     Crossdating IDM 不附带 COFECHA。

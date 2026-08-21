@@ -49,7 +49,7 @@ Crossdating-IDM_1.5.0_x64-setup.exe
 
 COFECHA 由 LTRR 独立提供，不包含在 Crossdating IDM 的源码和安装包中。安装应用后：
 
-1. 前往 [LTRR Software](https://cambium.ltrr.arizona.edu/research/software) 获取 COFECHA。
+1. 前往 [LTRR Dendrochronology Program Library](https://www.ltrr.arizona.edu/pub/dpl/) 获取 COFECHA。
 2. 解压下载内容。
 3. 在 Crossdating IDM 的“运行 > 加载 COFECHA...”或“设置 > COFECHA”中选择需要使用的 EXE。
 
@@ -176,7 +176,7 @@ yarn benchmark:co612-zero-frontier-matrix
 ## 致谢
 
 - [International Tree-Ring Data Bank](https://www.ncei.noaa.gov/products/paleoclimatology/tree-ring) 及所有贡献树轮数据的调查者。
-- [LTRR Dendrochronology Program Library](https://cambium.ltrr.arizona.edu/research/software) 与 Richard L. Holmes 创建的 COFECHA。推荐引用：Holmes, R. L. (1983). Computer-assisted quality control in tree-ring dating and measurement. *Tree-Ring Bulletin*, 43, 69-78.
+- [LTRR Dendrochronology Program Library](https://www.ltrr.arizona.edu/pub/dpl/) 与 Richard L. Holmes 创建的 COFECHA。推荐引用：Holmes, R. L. (1983). Computer-assisted quality control in tree-ring dating and measurement. *Tree-Ring Bulletin*, 43, 69-78.
 - [Standard Readme](https://github.com/RichardLitt/standard-readme) 提供的 README 组织规范。
 
 ## 贡献
