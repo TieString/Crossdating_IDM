@@ -35,6 +35,7 @@ import {
     recoverCandidateAnchoredRawPartialFrontier,
     recoverAggregatePartialUnitFrontier,
     projectUnitToDistantDynamicConsensus,
+    projectMissingToPositivePathOperationConsensus,
     recoverStableBoundedLagPathFrontier,
     selectDirectTerminalUnitBeforeDerivedStablePartial,
     selectStaleReferenceNewestFixedSidePathFrontier,
@@ -5728,6 +5729,69 @@ describe("selectCumulativePartialFrontier", () => {
             },
             { startYear: 1500, endYear: 2000 },
             [bounded],
+        )).toBe(missing);
+    });
+
+    it("lets a multi-path positive consensus challenge a separated missing mode", () => {
+        const missing = pathEvent(-1, -1, 0, 1000);
+        missing.eventType = "missingRing";
+        missing.shiftYears = undefined;
+        missing.shiftSide = undefined;
+        const variants = Array.from({ length: 10 }, (_, index) => {
+            const event = pathEvent(1, 1, 0, 1028 + index % 3);
+            event.eventType = "falseRing";
+            event.shiftYears = undefined;
+            event.shiftSide = undefined;
+            event.evidence.algorithmSources = ["bounded_complete_lag_path"];
+            return { source: `path-${index}`, events: [event] };
+        });
+
+        const selected = projectMissingToPositivePathOperationConsensus(
+            missing,
+            variants,
+            { startYear: 800, endYear: 1200 },
+        );
+        expect(selected).toMatchObject({
+            eventType: "falseRing",
+            startYear: 1023,
+            endYear: 1035,
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "positive_path_operation_consensus",
+                ]),
+            },
+        });
+        expect(selected.evidence.notes).toEqual(expect.arrayContaining([
+            "positive_path_false_support=10",
+            "positive_path_missing_support=0",
+            "positive_path_direction_margin=10",
+        ]));
+    });
+
+    it("keeps a missing mode when positive paths lack a direction margin", () => {
+        const missing = pathEvent(-1, -1, 0, 1000);
+        missing.eventType = "missingRing";
+        missing.shiftYears = undefined;
+        missing.shiftSide = undefined;
+        const falseVariants = Array.from({ length: 10 }, (_, index) => {
+            const event = pathEvent(1, 1, 0, 1030);
+            event.eventType = "falseRing";
+            event.shiftYears = undefined;
+            event.shiftSide = undefined;
+            return { source: `false-${index}`, events: [event] };
+        });
+        const missingVariants = Array.from({ length: 7 }, (_, index) => {
+            const event = pathEvent(-1, -1, 0, 1030);
+            event.eventType = "missingRing";
+            event.shiftYears = undefined;
+            event.shiftSide = undefined;
+            return { source: `missing-${index}`, events: [event] };
+        });
+
+        expect(projectMissingToPositivePathOperationConsensus(
+            missing,
+            [...falseVariants, ...missingVariants],
+            { startYear: 800, endYear: 1200 },
         )).toBe(missing);
     });
 

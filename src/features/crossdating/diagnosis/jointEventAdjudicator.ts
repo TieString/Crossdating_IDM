@@ -512,11 +512,23 @@ const isValidatedSelectedCandidateAnchoredDistantMissingCheckpoint = (
     && checkpoint.authority !== "supplemental"
     && isCandidateAnchoredDistantMissingEvent(checkpoint.event);
 
+const isValidatedSelectedPositivePathOperation = (
+    checkpoint: DiagnosisReviewEventCheckpoint,
+): boolean => checkpoint.stage === "final"
+    && checkpoint.authority !== "supplemental"
+    && checkpoint.event.eventType === "falseRing"
+    && checkpoint.event.evidence.algorithmSources.includes(
+        "positive_path_operation_consensus",
+    )
+    && (noteNumber(checkpoint.event, "positive_path_false_support=") ?? 0) >= 5
+    && (noteNumber(checkpoint.event, "positive_path_direction_margin=") ?? 0) >= 4;
+
 const isValidatedSelectedSequentialUnit = (
     checkpoint: DiagnosisReviewEventCheckpoint,
 ): boolean => isValidatedSelectedSequentialFalseCheckpoint(checkpoint)
     || isValidatedSelectedTerminalUnitStaircaseCheckpoint(checkpoint)
-    || isValidatedSelectedCandidateAnchoredDistantMissingCheckpoint(checkpoint);
+    || isValidatedSelectedCandidateAnchoredDistantMissingCheckpoint(checkpoint)
+    || isValidatedSelectedPositivePathOperation(checkpoint);
 
 const preferredStrongBoundedLocation = (
     cluster: HypothesisCluster,

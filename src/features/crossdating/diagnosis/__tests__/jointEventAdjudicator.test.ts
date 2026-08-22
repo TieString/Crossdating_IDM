@@ -1780,6 +1780,35 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("keeps a selected positive-path operation consensus over a missing supplement", () => {
+        const positive = event("positive-consensus", "falseRing", 1828, 1840, 1834);
+        positive.evidence.algorithmSources = ["positive_path_operation_consensus"];
+        positive.evidence.notes = [
+            "positive_path_false_support=12",
+            "positive_path_missing_support=0",
+            "positive_path_direction_margin=12",
+        ];
+        const missing = event("missing-supplement", "missingRing", 1810, 1822, 1816);
+        missing.evidence.algorithmSources = ["bounded_complete_lag_path"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", positive),
+            { stage: "final", authority: "selected", event: positive },
+            { stage: "final", authority: "supplemental", event: missing },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "final",
+            event: {
+                id: "positive-consensus",
+                eventType: "falseRing",
+                startYear: 1828,
+                endYear: 1840,
+            },
+        });
+    });
+
     it("keeps the selected positive staircase inside an overlapping bounded cluster", () => {
         const selected = event("sequential-false-overlap", "falseRing", 1845, 1857, 1851);
         selected.evidence.algorithmSources = [
