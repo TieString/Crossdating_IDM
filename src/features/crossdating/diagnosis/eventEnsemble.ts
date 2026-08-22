@@ -78,6 +78,7 @@ import { locateSegmentedLagEvents } from "./segmentedEventPath";
 import { refinePartialMoveWithRepeatedBlock } from "./partialBreakpointRefinement";
 import {
     addStablePartialRankEdgeGuard,
+    centerDetachedPartialOnStrongBoundedPath,
     refineStablePartialMoveLocation,
 } from "./stablePartialLocationConsensus";
 import {
@@ -14534,7 +14535,10 @@ export const makeDiagnosisEvents = (
                     diagnosis.targetRange,
                 )
             ));
-            const finalEvents = validAutomaticEvents(partialConsensusEvents)
+            const centeredPartialEvents = partialConsensusEvents.map((event) => (
+                centerDetachedPartialOnStrongBoundedPath(event, diagnosis)
+            ));
+            const finalEvents = validAutomaticEvents(centeredPartialEvents)
                 .map(attachAndPrioritizeMissingWorkflow)
                 .map(withEvidenceLedger);
             const boundedFinalEvents = includeBoundedPathHypotheses

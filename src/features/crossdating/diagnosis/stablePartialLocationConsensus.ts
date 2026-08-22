@@ -99,7 +99,7 @@ const bestLocalYear = <Row extends { year: number }>(
 
 const boundedWindow = (
     centerYear: number,
-    diagnosis: SeriesCoreDiagnosis,
+    diagnosis: Pick<SeriesCoreDiagnosis, "targetRange">,
 ): { startYear: number; endYear: number } => {
     const requestedWidth = 13;
     const availableWidth = diagnosis.targetRange.endYear
@@ -112,6 +112,71 @@ const boundedWindow = (
         Math.min(startYear, diagnosis.targetRange.endYear - width + 1),
     );
     return { startYear, endYear: startYear + width - 1 };
+};
+
+/**
+ * Restores a detached final partial window to the complete lag-state breakpoint that supports
+ * the already selected operation. Small local adjustments remain untouched; only a distant
+ * downstream rewrite is corrected here.
+ */
+export const centerDetachedPartialOnStrongBoundedPath = (
+    event: DiagnosisEvent,
+    diagnosis: Pick<SeriesCoreDiagnosis, "targetRange">,
+    minimumDistanceYears = 10,
+): DiagnosisEvent => {
+    if (event.eventType !== "partialMove") return event;
+    const path = strongBoundedPathLocation(event);
+    const currentTopYear = event.rankedYears[0]?.year ?? null;
+    if (!path
+        || path.topYear === null
+        || currentTopYear === null
+        || Math.abs(path.topYear - currentTopYear) < minimumDistanceYears) {
+        return event;
+    }
+    const window = boundedWindow(path.topYear, diagnosis);
+    const prior = new Map(event.rankedYears.map((row) => [row.year, row]));
+    const maximumScore = Math.max(0, ...event.rankedYears.map(({ score }) => score));
+    const minimumScore = Math.min(0, ...event.rankedYears.map(({ score }) => score));
+    const rankedYears = Array.from(
+        { length: window.endYear - window.startYear + 1 },
+        (_, index) => window.startYear + index,
+    ).map((year) => {
+        const existing = prior.get(year);
+        return {
+            year,
+            rank: 0,
+            score: year === path.topYear
+                ? maximumScore + Math.max(1e-9, Math.abs(maximumScore) * 1e-12)
+                : existing?.score ?? minimumScore - 1,
+            evidenceTags: Array.from(new Set([...(existing?.evidenceTags ?? []),
+                "detached_strong_partial_path_center",
+            ])).sort(),
+        };
+    }).sort((left, right) => (
+        right.score - left.score || right.year - left.year
+    )).map((row, index) => ({ ...row, rank: index + 1 }));
+    return {
+        ...event,
+        id: `${event.id}-strong-path-center-${path.topYear}`,
+        ...window,
+        rankedYears,
+        evidence: {
+            ...event.evidence,
+            algorithmSources: Array.from(new Set([
+                ...event.evidence.algorithmSources,
+                "detached_strong_partial_path_center",
+            ])).sort(),
+            notes: Array.from(new Set([
+                ...event.evidence.notes,
+                `detached_partial_previous_window=${event.startYear}-${event.endYear}`,
+                `detached_partial_previous_top_year=${currentTopYear}`,
+                `detached_partial_strong_path_year=${path.topYear}`,
+                `detached_partial_center_distance=${Math.abs(
+                    path.topYear - currentTopYear,
+                )}`,
+            ])),
+        },
+    };
 };
 
 const rerank = (

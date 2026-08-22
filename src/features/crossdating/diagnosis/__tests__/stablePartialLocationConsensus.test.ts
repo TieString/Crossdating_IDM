@@ -1,12 +1,72 @@
 import { describe, expect, it } from "vitest";
 import {
     allowsNewerUnitChainLocationConsensus,
+    centerDetachedPartialOnStrongBoundedPath,
     selectStablePartialLocationConsensus,
     selectStablePartialRankEdgeShift,
 } from "../stablePartialLocationConsensus";
 import type { DiagnosisEvent } from "../types";
 
 describe("stable partial location consensus", () => {
+    const detachedPartial = (pathYear: number): DiagnosisEvent => ({
+        id: "partial-detached",
+        seriesId: "TEST",
+        eventType: "partialMove",
+        shiftYears: -6,
+        shiftSide: "older",
+        startYear: 1794,
+        endYear: 1806,
+        rankedYears: Array.from({ length: 13 }, (_, index) => ({
+            year: 1794 + index,
+            rank: 0,
+            score: 13 - Math.abs(index - 6),
+            evidenceTags: [],
+        })).sort((left, right) => right.score - left.score)
+            .map((row, index) => ({ ...row, rank: index + 1 })),
+        confidenceLevel: "high",
+        evidence: {
+            algorithmSources: ["bounded_complete_lag_path"],
+            score: 20,
+            scoreMargin: 1,
+            baselineCorrelation: 0.2,
+            correctedCorrelation: 0.7,
+            correlationGain: 0.5,
+            lagBefore: -6,
+            lagAfter: 0,
+            samplePairs: 100,
+            candidateIds: [],
+            notes: [],
+            locationEvidence: [{
+                source: "bounded_complete_lag_path",
+                startYear: pathYear - 6,
+                endYear: pathYear + 6,
+                topYear: pathYear,
+                referenceCount: 8,
+                concentration: 0.8,
+                remoteMargin: 1,
+                calibrated: false,
+            }],
+        },
+        alternativeTypes: [],
+    });
+
+    it("recenters only a partial window detached from its strong path by ten years", () => {
+        const event = detachedPartial(1810);
+        const centered = centerDetachedPartialOnStrongBoundedPath(event, {
+            targetRange: { startYear: 1700, endYear: 1900 },
+        });
+        expect(centered).toMatchObject({
+            startYear: 1804,
+            endYear: 1816,
+        });
+        expect(centered.rankedYears[0]).toMatchObject({ year: 1810, rank: 1 });
+
+        const nearby = detachedPartial(1809);
+        expect(centerDetachedPartialOnStrongBoundedPath(nearby, {
+            targetRange: { startYear: 1700, endYear: 1900 },
+        })).toBe(nearby);
+    });
+
     it("moves a lag-path plateau to the robust boundary consensus", () => {
         expect(selectStablePartialLocationConsensus(
             1808,
