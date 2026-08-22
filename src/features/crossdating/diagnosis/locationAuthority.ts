@@ -296,6 +296,31 @@ export const projectMultiEventLocationConsensus = (
             ? clampWindowToRange(rawTerminalBoundaryYear, 13, targetRange)
             : clampWindowToRange(rawTerminalBoundaryYear - 12, 13, targetRange);
     }
+    const sequentialFalseHeadYear = Number([...event.evidence.notes].reverse()
+        .find((note) => note.startsWith("sequential_false_head_year="))
+        ?.split("=")[1]);
+    const sequentialFalseCandidateYear = Number([...event.evidence.notes].reverse()
+        .find((note) => note.startsWith("sequential_false_candidate_frontier_year="))
+        ?.split("=")[1]);
+    const sequentialHeadWindow = Number.isInteger(sequentialFalseHeadYear)
+        ? clampWindowToRange(sequentialFalseHeadYear - 6, 13, targetRange)
+        : null;
+    const hasNewerSequentialFalseFrontier = event.eventType === "falseRing"
+        && event.evidence.algorithmSources.includes("sequential_false_staircase_head")
+        && !event.evidence.algorithmSources.includes(
+            "stable_terminal_unit_staircase_frontier",
+        )
+        && Number.isInteger(sequentialFalseCandidateYear)
+        && Math.max(sequentialFalseHeadYear, sequentialFalseCandidateYear) > window.endYear
+        && sequentialFalseHeadYear >= window.startYear
+        && sequentialFalseHeadYear <= window.endYear + 7
+        && sequentialHeadWindow !== null
+        && sequentialHeadWindow.startYear > window.startYear;
+    if (hasNewerSequentialFalseFrontier) {
+        // A false-ring chain is reviewed from the bark side. A compact newer head may move the
+        // mode forward, but an older or detached head must not pull a correct window backwards.
+        window = sequentialHeadWindow;
+    }
     if (event.startYear === window.startYear && event.endYear === window.endYear) return event;
 
     const prior = new Map(event.rankedYears.map((row) => [row.year, row]));
@@ -403,6 +428,9 @@ export const projectMultiEventLocationConsensus = (
                 ]),
                 ...(guardsRawCadenceBoundary ? [
                     `terminal_cadence_raw_boundary_guard=${rawTerminalBoundaryYear}`,
+                ] : []),
+                ...(hasNewerSequentialFalseFrontier ? [
+                    `sequential_false_newer_frontier_guard=${sequentialFalseHeadYear}`,
                 ] : []),
             ])),
         },

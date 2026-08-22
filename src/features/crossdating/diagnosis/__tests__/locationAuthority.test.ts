@@ -484,6 +484,60 @@ describe("multi-event frontier location consensus", () => {
         });
     });
 
+    it("keeps a sequential false-ring head inside the newer-side review mode", () => {
+        const input = event();
+        input.eventType = "falseRing";
+        input.startYear = 1542;
+        input.endYear = 1554;
+        input.rankedYears = [{ year: 1548, rank: 1, score: 4, evidenceTags: [] }];
+        input.evidence.algorithmSources.push("sequential_false_staircase_head");
+        input.evidence.notes.push(
+            "sequential_false_head_year=1554",
+            "sequential_false_candidate_frontier_year=1557",
+        );
+
+        expect(projectMultiEventLocationConsensus(
+            input,
+            [1548, 1556, 1557],
+            { startYear: 1400, endYear: 2000 },
+            true,
+            12,
+            1548,
+        )).toMatchObject({
+            startYear: 1548,
+            endYear: 1560,
+            evidence: {
+                notes: expect.arrayContaining([
+                    "sequential_false_newer_frontier_guard=1554",
+                ]),
+            },
+        });
+    });
+
+    it("does not let a sequential false-ring head move a window to the older side", () => {
+        const input = event();
+        input.eventType = "falseRing";
+        input.startYear = 1605;
+        input.endYear = 1617;
+        input.rankedYears = [{ year: 1611, rank: 1, score: 4, evidenceTags: [] }];
+        input.evidence.algorithmSources.push("sequential_false_staircase_head");
+        input.evidence.notes.push(
+            "sequential_false_head_year=1599",
+            "sequential_false_candidate_frontier_year=1618",
+        );
+
+        const projected = projectMultiEventLocationConsensus(
+            input,
+            [1610, 1611, 1612],
+            { startYear: 1400, endYear: 2000 },
+            true,
+        );
+        expect(projected).toMatchObject({ startYear: 1605, endYear: 1617 });
+        expect(projected.evidence.notes).not.toContain(
+            "sequential_false_newer_frontier_guard=1599",
+        );
+    });
+
     it("does not average detached modes that cannot fit in one 13-year window", () => {
         const input = event();
         input.startYear = 1973;
