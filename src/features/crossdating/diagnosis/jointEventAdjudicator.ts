@@ -2484,9 +2484,10 @@ const finalFrontierClusters = (
         cluster.checkpoints.some((checkpoint) => (
             checkpoint.stage === "final"
             && checkpoint.authority !== "supplemental"
-            && checkpoint.event.evidence.algorithmSources.includes(
-                "validated_newer_unit_frontier_location",
-            )
+            && checkpoint.event.evidence.algorithmSources.some((source) => (
+                source === "validated_newer_unit_frontier_location"
+                || source === "partial_path_operation_consensus"
+            ))
         ))
     )).sort((left, right) => (
         (topYear(representative(right).event) ?? Number.NEGATIVE_INFINITY)

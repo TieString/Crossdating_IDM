@@ -109,6 +109,7 @@ const operationClaims = (event: DiagnosisEvent): DiagnosisEvidenceClaim[] => {
     if (event.eventType === "partialMove" && (
         hasToken(tokens, "negative_partial_multiview_consensus")
         || hasToken(tokens, "candidate_grid_reference_partial_consensus")
+        || hasToken(tokens, "partial_path_operation_consensus")
         || hasToken(tokens,
             "completed_partial_preferred_over_discrete_missing_staircase")
     )) {

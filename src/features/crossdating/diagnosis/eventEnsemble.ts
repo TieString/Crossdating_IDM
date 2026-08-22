@@ -6302,6 +6302,143 @@ export const projectMissingToPositivePathOperationConsensus = (
     });
 };
 
+export const projectMissingToPartialPathOperationConsensus = (
+    event: DiagnosisEvent,
+    variants: readonly PositivePathOperationVariant[],
+    targetRange: { startYear: number; endYear: number },
+    minimumSupport = 4,
+    minimumGapYears = 3,
+    maximumModeDistance = 7,
+): DiagnosisEvent => {
+    if (event.eventType !== "missingRing") return event;
+    const observations = variants.flatMap((variant) => variant.events
+        .filter((candidate) => (
+            candidate.eventType === "partialMove"
+            && candidate.shiftSide === "older"
+            && (candidate.shiftYears ?? 0) <= -minimumGapYears
+        ))
+        .map((candidate) => ({
+            source: variant.source,
+            shiftYears: candidate.shiftYears!,
+            topYear: rankedEventYear(candidate),
+            event: candidate,
+        })));
+    const modes = Array.from(observations.reduce((groups, observation) => {
+        const group = groups.get(observation.shiftYears) ?? [];
+        group.push(observation);
+        groups.set(observation.shiftYears, group);
+        return groups;
+    }, new Map<number, typeof observations>()).entries()).flatMap(
+        ([shiftYears, shiftObservations]) => Array.from(new Set(
+            shiftObservations.map(({ topYear }) => topYear),
+        )).map((year) => {
+            const support = shiftObservations.filter((observation) => (
+                Math.abs(observation.topYear - year) <= 4
+            ));
+            const sourceCount = new Set(support.map(({ source }) => source)).size;
+            const orderedYears = support.map(({ topYear }) => topYear)
+                .sort((left, right) => left - right);
+            const centerYear = orderedYears[Math.floor(orderedYears.length / 2)] ?? year;
+            const meanDistance = support.length > 0
+                ? support.reduce((sum, observation) => (
+                    sum + Math.abs(observation.topYear - centerYear)
+                ), 0) / support.length
+                : Number.POSITIVE_INFINITY;
+            return { shiftYears, sourceCount, centerYear, meanDistance, support };
+        }),
+    ).sort((left, right) => (
+        right.sourceCount - left.sourceCount
+        || left.meanDistance - right.meanDistance
+        || Math.abs(left.shiftYears) - Math.abs(right.shiftYears)
+        || right.centerYear - left.centerYear
+    ));
+    const selected = modes[0];
+    if (!selected || selected.sourceCount < minimumSupport) return event;
+    const currentYear = rankedEventYear(event);
+    const modeDistance = Math.abs(selected.centerYear - currentYear);
+    if (modeDistance > maximumModeDistance) return event;
+    const representative = selected.support.slice().sort((left, right) => (
+        Math.abs(left.topYear - selected.centerYear)
+            - Math.abs(right.topYear - selected.centerYear)
+        || right.event.evidence.score - left.event.evidence.score
+    ))[0]?.event ?? null;
+    if (!representative) return event;
+    const window = boundedSequentialWindow(selected.centerYear, 13, targetRange);
+    const prior = new Map(representative.rankedYears.map((row) => [row.year, row]));
+    const maximumScore = Math.max(
+        0,
+        ...representative.rankedYears.map((row) => row.score),
+    );
+    const minimumScore = Math.min(
+        0,
+        ...representative.rankedYears.map((row) => row.score),
+    );
+    const rankedYears = Array.from(
+        { length: window.endYear - window.startYear + 1 },
+        (_, index) => window.startYear + index,
+    ).map((year) => {
+        const existing = prior.get(year);
+        return {
+            year,
+            rank: 0,
+            score: year === selected.centerYear
+                ? maximumScore + Math.max(1e-9, Math.abs(maximumScore) * 1e-12)
+                : existing?.score ?? minimumScore - 1,
+            evidenceTags: Array.from(new Set([
+                ...(existing?.evidenceTags ?? []),
+                "partial_path_operation_consensus",
+            ])).sort(),
+        };
+    }).sort((left, right) => (
+        right.score - left.score || right.year - left.year
+    )).map((row, index) => ({ ...row, rank: index + 1 }));
+    const lagAfter = representative.evidence.lagAfter ?? 0;
+    const referenceCount = Math.max(
+        0,
+        ...locationEvidenceFor(representative).map((entry) => entry.referenceCount),
+    );
+    return withEvidenceLedger({
+        ...representative,
+        id: `${representative.id}-partial-path-consensus-${selected.shiftYears}`,
+        eventType: "partialMove",
+        shiftYears: selected.shiftYears,
+        shiftSide: "older",
+        ...window,
+        rankedYears,
+        reviewCoreRange: { ...window },
+        seriesRange: event.seriesRange ?? representative.seriesRange,
+        evidence: {
+            ...representative.evidence,
+            lagBefore: lagAfter + selected.shiftYears,
+            lagAfter,
+            algorithmSources: Array.from(new Set([
+                ...representative.evidence.algorithmSources,
+                "partial_path_operation_consensus",
+            ])).sort(),
+            locationEvidence: [
+                ...(representative.evidence.locationEvidence ?? []),
+                {
+                    source: "partial_path_operation_consensus",
+                    ...window,
+                    topYear: selected.centerYear,
+                    referenceCount,
+                    concentration: Math.min(1, selected.sourceCount / variants.length),
+                    remoteMargin: selected.sourceCount / variants.length,
+                    calibrated: true,
+                },
+            ],
+            notes: Array.from(new Set([
+                ...representative.evidence.notes,
+                `partial_path_support=${selected.sourceCount}`,
+                `partial_path_selected_shift=${selected.shiftYears}`,
+                `partial_path_previous_year=${currentYear}`,
+                `partial_path_selected_year=${selected.centerYear}`,
+                `partial_path_mode_distance=${modeDistance}`,
+            ])),
+        },
+    });
+};
+
 /**
  * Keeps the bark-side component of a stable distant negative chain. A two-state aggregate can
  * improve more total years, but applying it would skip every independently sustained state
@@ -14358,7 +14495,14 @@ export const makeDiagnosisEvents = (
                     diagnosis.targetRange,
                 )
             ));
-            const finalEvents = validAutomaticEvents(operationConsensusEvents)
+            const partialConsensusEvents = operationConsensusEvents.map((event) => (
+                projectMissingToPartialPathOperationConsensus(
+                    event,
+                    positivePathVariants,
+                    diagnosis.targetRange,
+                )
+            ));
+            const finalEvents = validAutomaticEvents(partialConsensusEvents)
                 .map(attachAndPrioritizeMissingWorkflow)
                 .map(withEvidenceLedger);
             const boundedFinalEvents = includeBoundedPathHypotheses

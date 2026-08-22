@@ -1809,6 +1809,36 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("keeps a selected partial-path operation consensus over a missing supplement", () => {
+        const partial = event("partial-consensus", "partialMove", 1702, 1714, 1708);
+        partial.shiftYears = -6;
+        partial.shiftSide = "older";
+        partial.evidence.lagBefore = -6;
+        partial.evidence.algorithmSources = ["partial_path_operation_consensus"];
+        partial.evidence.notes = [
+            "partial_path_support=4",
+            "partial_path_selected_shift=-6",
+        ];
+        const missing = event("missing-supplement", "missingRing", 1714, 1726, 1720);
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: partial },
+            { stage: "final", authority: "supplemental", event: missing },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "final",
+            event: {
+                id: "partial-consensus",
+                eventType: "partialMove",
+                shiftYears: -6,
+                startYear: 1702,
+                endYear: 1714,
+            },
+        });
+    });
+
     it("keeps the selected positive staircase inside an overlapping bounded cluster", () => {
         const selected = event("sequential-false-overlap", "falseRing", 1845, 1857, 1851);
         selected.evidence.algorithmSources = [

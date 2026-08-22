@@ -36,6 +36,7 @@ import {
     recoverAggregatePartialUnitFrontier,
     projectUnitToDistantDynamicConsensus,
     projectMissingToPositivePathOperationConsensus,
+    projectMissingToPartialPathOperationConsensus,
     recoverStableBoundedLagPathFrontier,
     selectDirectTerminalUnitBeforeDerivedStablePartial,
     selectStaleReferenceNewestFixedSidePathFrontier,
@@ -5791,6 +5792,73 @@ describe("selectCumulativePartialFrontier", () => {
         expect(projectMissingToPositivePathOperationConsensus(
             missing,
             [...falseVariants, ...missingVariants],
+            { startYear: 800, endYear: 1200 },
+        )).toBe(missing);
+    });
+
+    it("selects a nearby multi-path continuous-gap operation", () => {
+        const missing = pathEvent(-1, -1, 0, 1000);
+        missing.eventType = "missingRing";
+        missing.shiftYears = undefined;
+        missing.shiftSide = undefined;
+        const variants = Array.from({ length: 4 }, (_, index) => {
+            const event = partialMoveEvent(-6);
+            event.rankedYears = [{
+                year: 1005 + index % 2,
+                rank: 1,
+                score: 2,
+                evidenceTags: [],
+            }];
+            event.evidence.algorithmSources = ["bounded_complete_lag_path"];
+            return { source: `path-${index}`, events: [event] };
+        });
+
+        const selected = projectMissingToPartialPathOperationConsensus(
+            missing,
+            variants,
+            { startYear: 800, endYear: 1200 },
+        );
+        expect(selected).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -6,
+            shiftSide: "older",
+            startYear: 1000,
+            endYear: 1012,
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "partial_path_operation_consensus",
+                ]),
+            },
+        });
+    });
+
+    it("keeps a missing mode for a two-year or detached partial path", () => {
+        const missing = pathEvent(-1, -1, 0, 1000);
+        missing.eventType = "missingRing";
+        missing.shiftYears = undefined;
+        missing.shiftSide = undefined;
+        const variants = (shiftYears: number, year: number) => Array.from(
+            { length: 4 },
+            (_, index) => {
+                const event = partialMoveEvent(shiftYears);
+                event.rankedYears = [{
+                    year,
+                    rank: 1,
+                    score: 2,
+                    evidenceTags: [],
+                }];
+                return { source: `path-${index}`, events: [event] };
+            },
+        );
+
+        expect(projectMissingToPartialPathOperationConsensus(
+            missing,
+            variants(-2, 1010),
+            { startYear: 800, endYear: 1200 },
+        )).toBe(missing);
+        expect(projectMissingToPartialPathOperationConsensus(
+            missing,
+            variants(-6, 1050),
             { startYear: 800, endYear: 1200 },
         )).toBe(missing);
     });
