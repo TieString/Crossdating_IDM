@@ -5603,6 +5603,7 @@ export const selectUnobservedFixedSideWholeLag = (
     candidateWholeLags: ReadonlySet<number>,
     minimumObservedPairs = 30,
     maximumBoundaryDrift = 2,
+    requireCandidateAnchor = true,
 ): number | null => {
     if (!penaltyOnePath || !penaltyHalfPath) return null;
     const stronger = unobservedFixedSideWholeLag(
@@ -5617,7 +5618,7 @@ export const selectUnobservedFixedSideWholeLag = (
         && weaker
         && stronger.lag === weaker.lag
         && Math.abs(stronger.boundaryYear - weaker.boundaryYear) <= maximumBoundaryDrift
-        && candidateWholeLags.has(stronger.lag)
+        && (!requireCandidateAnchor || candidateWholeLags.has(stronger.lag))
         ? stronger.lag
         : null;
 };
@@ -12456,6 +12457,46 @@ export const makeDiagnosisEvents = (
         const rawBoundedResult = needsRawBoundedView
             ? locateBoundedEvents(false)
             : null;
+        const rawBoundedFixedSideWholeCandidate = rawBoundedResult
+            ? evaluatePathFixedSideWholeCandidate(
+                siteData,
+                diagnosis,
+                rawBoundedResult.events,
+                effectiveConfig,
+            )
+            : null;
+        const rawBoundedFixedSideWholeBaseline = rawBoundedFixedSideWholeCandidate
+            && rawBoundedFixedSideWholeCandidate.evidence.recallSourceTags?.includes(
+                "bounded_fixed_side_whole_baseline",
+            )
+            && (
+                rawBoundedFixedSideWholeCandidate.evidence.recallSourceTags.includes(
+                    "path_fixed_side_joint_composition",
+                )
+                || rawBoundedFixedSideWholeCandidate.evidence.evaluationDelta
+                    ?.hardGatePassed === true
+            )
+            ? (() => {
+                const event = wholeEventFromCandidate(
+                    diagnosis,
+                    rawBoundedFixedSideWholeCandidate,
+                );
+                return {
+                    ...event,
+                    evidence: {
+                        ...event.evidence,
+                        algorithmSources: Array.from(new Set([
+                            ...event.evidence.algorithmSources,
+                            "bounded_fixed_side_whole_baseline",
+                        ])).sort(),
+                        notes: Array.from(new Set([
+                            ...event.evidence.notes,
+                            "whole_baseline_source=bounded_fixed_side_joint_composition",
+                        ])),
+                    },
+                };
+            })()
+            : null;
         const supportedRawResult = boundedFrameIsSupported(rawBoundedResult)
             && boundedResultIsOperationCompatible(rawBoundedResult)
             ? rawBoundedResult
@@ -12918,8 +12959,60 @@ export const makeDiagnosisEvents = (
             rawPenaltyOneStablePath,
             rawPenaltyHalfStablePath,
             candidateWholeLags,
+            30,
+            2,
+            false,
         );
-        const unobservedFixedSideWholeCandidate = unobservedFixedSideBaselineLag === null
+        const unobservedStrongerRun = unobservedFixedSideBaselineLag === null
+            ? null
+            : rawPenaltyOneStablePath?.path.runs.slice(-2)[0] ?? null;
+        const unobservedWeakerRun = unobservedFixedSideBaselineLag === null
+            ? null
+            : rawPenaltyHalfStablePath?.path.runs.slice(-2)[0] ?? null;
+        const generatedUnobservedFixedSideWholeCandidate =
+            unobservedFixedSideBaselineLag !== null
+            && rawPenaltyOneStablePath
+            && rawPenaltyHalfStablePath
+            && unobservedStrongerRun?.lag === unobservedFixedSideBaselineLag
+            && unobservedWeakerRun?.lag === unobservedFixedSideBaselineLag
+                ? evaluatePathFixedSideWholeCandidate(
+                    siteData,
+                    diagnosis,
+                    rawPenaltyOneStablePath.events,
+                    effectiveConfig,
+                    undefined,
+                    [
+                        "bounded_unobserved_fixed_side_consensus",
+                        `bounded_unobserved_fixed_side_lag:${
+                            unobservedFixedSideBaselineLag
+                        }`,
+                        `bounded_unobserved_fixed_side_context_years:${Math.min(
+                            unobservedStrongerRun.endYear
+                                - unobservedStrongerRun.startYear + 1,
+                            unobservedWeakerRun.endYear
+                                - unobservedWeakerRun.startYear + 1,
+                        )}`,
+                        `bounded_unobserved_fixed_side_stronger_gain:${
+                            rawPenaltyOneStablePath.path.transitionGain
+                        }`,
+                        `bounded_unobserved_fixed_side_weaker_gain:${
+                            rawPenaltyHalfStablePath.path.transitionGain
+                        }`,
+                        `bounded_unobserved_fixed_side_stronger_pairs:${
+                            unobservedStrongerRun.samplePairs
+                        }`,
+                        `bounded_unobserved_fixed_side_weaker_pairs:${
+                            unobservedWeakerRun.samplePairs
+                        }`,
+                        `bounded_unobserved_fixed_side_boundary_drift:${Math.abs(
+                            unobservedStrongerRun.endYear
+                                - unobservedWeakerRun.endYear,
+                        )}`,
+                    ],
+                )
+                : null;
+        const existingUnobservedFixedSideWholeCandidate =
+            unobservedFixedSideBaselineLag === null
             ? null
             : ownCandidates
                 .filter((candidate) => (
@@ -12929,6 +13022,9 @@ export const makeDiagnosisEvents = (
                         === unobservedFixedSideBaselineLag
                 ))
                 .sort((left, right) => right.score - left.score)[0] ?? null;
+        const unobservedFixedSideWholeCandidate =
+            generatedUnobservedFixedSideWholeCandidate
+            ?? existingUnobservedFixedSideWholeCandidate;
         const unobservedFixedSideWholeBaseline = unobservedFixedSideWholeCandidate
             ? (() => {
                     const event = wholeEventFromCandidate(
@@ -13097,6 +13193,90 @@ export const makeDiagnosisEvents = (
             : null;
         const zeroTerminalPenaltyHalfStablePath = zeroTerminalPenaltyOneStablePath
             ? locateBoundedEvents(false, undefined, [0], 0.5, 0.5, false, 6)
+            : null;
+        const fixedSideZeroTerminalPenaltyOnePath = needsStableMultiscaleBoundedPath
+            && terminalBaselineLag !== 0
+            ? zeroTerminalPenaltyOneStablePath
+                ?? locateBoundedEvents(false, undefined, [0], 1, 2, false, 6)
+            : null;
+        const fixedSideZeroTerminalPenaltyHalfPath = fixedSideZeroTerminalPenaltyOnePath
+            ? zeroTerminalPenaltyHalfStablePath
+                ?? locateBoundedEvents(false, undefined, [0], 0.5, 0.5, false, 6)
+            : null;
+        const zeroTerminalFixedSideLag = selectUnobservedFixedSideWholeLag(
+            fixedSideZeroTerminalPenaltyOnePath,
+            fixedSideZeroTerminalPenaltyHalfPath,
+            new Set<number>(),
+            30,
+            2,
+            false,
+        );
+        const zeroTerminalStrongerObservedRun = zeroTerminalFixedSideLag === null
+            ? null
+            : fixedSideZeroTerminalPenaltyOnePath?.path.runs.slice(-2)[0] ?? null;
+        const zeroTerminalWeakerObservedRun = zeroTerminalFixedSideLag === null
+            ? null
+            : fixedSideZeroTerminalPenaltyHalfPath?.path.runs.slice(-2)[0] ?? null;
+        const zeroTerminalFixedSideWholeCandidate = zeroTerminalFixedSideLag !== null
+            && fixedSideZeroTerminalPenaltyOnePath
+            && fixedSideZeroTerminalPenaltyHalfPath
+            && zeroTerminalStrongerObservedRun?.lag === zeroTerminalFixedSideLag
+            && zeroTerminalWeakerObservedRun?.lag === zeroTerminalFixedSideLag
+            ? evaluatePathFixedSideWholeCandidate(
+                siteData,
+                diagnosis,
+                fixedSideZeroTerminalPenaltyOnePath.events,
+                effectiveConfig,
+                undefined,
+                [
+                    "bounded_unobserved_fixed_side_consensus",
+                    `bounded_unobserved_fixed_side_lag:${zeroTerminalFixedSideLag}`,
+                    `bounded_unobserved_fixed_side_context_years:${Math.min(
+                        zeroTerminalStrongerObservedRun.endYear
+                            - zeroTerminalStrongerObservedRun.startYear + 1,
+                        zeroTerminalWeakerObservedRun.endYear
+                            - zeroTerminalWeakerObservedRun.startYear + 1,
+                    )}`,
+                    `bounded_unobserved_fixed_side_stronger_gain:${
+                        fixedSideZeroTerminalPenaltyOnePath.path.transitionGain
+                    }`,
+                    `bounded_unobserved_fixed_side_weaker_gain:${
+                        fixedSideZeroTerminalPenaltyHalfPath.path.transitionGain
+                    }`,
+                    `bounded_unobserved_fixed_side_stronger_pairs:${
+                        zeroTerminalStrongerObservedRun.samplePairs
+                    }`,
+                    `bounded_unobserved_fixed_side_weaker_pairs:${
+                        zeroTerminalWeakerObservedRun.samplePairs
+                    }`,
+                    `bounded_unobserved_fixed_side_boundary_drift:${Math.abs(
+                        zeroTerminalStrongerObservedRun.endYear
+                            - zeroTerminalWeakerObservedRun.endYear,
+                    )}`,
+                ],
+            )
+            : null;
+        const zeroTerminalFixedSideWholeBaseline = zeroTerminalFixedSideWholeCandidate
+            ? (() => {
+                const event = wholeEventFromCandidate(
+                    diagnosis,
+                    zeroTerminalFixedSideWholeCandidate,
+                );
+                return {
+                    ...event,
+                    evidence: {
+                        ...event.evidence,
+                        algorithmSources: Array.from(new Set([
+                            ...event.evidence.algorithmSources,
+                            "bounded_zero_terminal_fixed_side_whole_baseline",
+                        ])).sort(),
+                        notes: Array.from(new Set([
+                            ...event.evidence.notes,
+                            "whole_baseline_source=bounded_zero_terminal_fixed_side",
+                        ])),
+                    },
+                };
+            })()
             : null;
         const zeroTerminalWholeAliasFrontier = selectStableBoundedLagPathFrontier(
             zeroTerminalPenaltyOneStablePath,
@@ -14018,6 +14198,25 @@ export const makeDiagnosisEvents = (
                 cumulativeUnitCandidateDepths,
                 latentEndpointWholeFrame,
             );
+        const boundedFixedSideWholeBaseline = zeroTerminalFixedSideWholeBaseline
+            ?? rawBoundedFixedSideWholeBaseline;
+        const boundedFixedSideWholeShift = wholeSeriesMoveShiftYears(
+            boundedFixedSideWholeBaseline,
+        );
+        const boundedFixedSideWholeState = boundedFixedSideWholeShift === null
+            ? null
+            : measureWholeSeriesStateConsistency(
+                diagnosis,
+                boundedFixedSideWholeShift,
+            );
+        if (boundedFixedSideWholeBaseline
+            && boundedFixedSideWholeState !== null
+            && boundedFixedSideWholeState.newerEdgeSupportFraction >= 0.5) {
+            // Establish the globally shared coordinate frame before exposing any local event.
+            // The same bounded path has already verified that applying this frame together with
+            // its remaining local chain returns the diagnosis to zero lag.
+            return finalize([boundedFixedSideWholeBaseline], [], false);
+        }
         if (endpointMissingFromCumulativeWholeAlias) {
             return finalize([endpointMissingFromCumulativeWholeAlias], [], false);
         }

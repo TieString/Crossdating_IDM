@@ -124,6 +124,37 @@ export const pathFixedSideWholeCompositionGatePassed = ({
     )
 );
 
+export type BoundedUnobservedFixedSideGateInput = {
+    wholeShift: number;
+    fixedSideLag: number;
+    newerContextYears: number;
+    strongerGain: number;
+    weakerGain: number;
+    strongerPairs: number;
+    weakerPairs: number;
+    boundaryDriftYears: number;
+};
+
+export const boundedUnobservedFixedSideGatePassed = ({
+    wholeShift,
+    fixedSideLag,
+    newerContextYears,
+    strongerGain,
+    weakerGain,
+    strongerPairs,
+    weakerPairs,
+    boundaryDriftYears,
+}: BoundedUnobservedFixedSideGateInput): boolean => (
+    wholeShift < 0
+    && wholeShift === fixedSideLag
+    && newerContextYears >= 18
+    && strongerGain >= 8
+    && weakerGain >= 8
+    && strongerPairs >= 30
+    && weakerPairs >= 30
+    && boundaryDriftYears <= 2
+);
+
 export type RecentTailPathTerminalGateInput = {
     wholeShift: number;
     tailLag: number;
@@ -689,6 +720,42 @@ export const evaluateDraft = (
                 "path_fixed_side_joint_problem_reduction:",
             ),
         });
+    const boundedUnobservedFixedSideGate = draft.operationType === "SHIFT_RANGE"
+        && draft.mode === "wholeSeriesMove"
+        && draft.recallSourceTags?.includes(
+            "bounded_unobserved_fixed_side_consensus",
+        ) === true
+        && boundedUnobservedFixedSideGatePassed({
+            wholeShift: draft.deltaYears ?? 0,
+            fixedSideLag: recallTagNumber(
+                draft,
+                "bounded_unobserved_fixed_side_lag:",
+            ),
+            newerContextYears: recallTagNumber(
+                draft,
+                "bounded_unobserved_fixed_side_context_years:",
+            ),
+            strongerGain: recallTagNumber(
+                draft,
+                "bounded_unobserved_fixed_side_stronger_gain:",
+            ),
+            weakerGain: recallTagNumber(
+                draft,
+                "bounded_unobserved_fixed_side_weaker_gain:",
+            ),
+            strongerPairs: recallTagNumber(
+                draft,
+                "bounded_unobserved_fixed_side_stronger_pairs:",
+            ),
+            weakerPairs: recallTagNumber(
+                draft,
+                "bounded_unobserved_fixed_side_weaker_pairs:",
+            ),
+            boundaryDriftYears: recallTagNumber(
+                draft,
+                "bounded_unobserved_fixed_side_boundary_drift:",
+            ),
+        });
     const recentTailTerminalGatePassed = draft.operationType === "SHIFT_RANGE"
         && draft.mode === "wholeSeriesMove"
         && draft.recallSourceTags?.includes(
@@ -807,6 +874,7 @@ export const evaluateDraft = (
         });
     const jointCompositionGatePassed = terminalCompositionGatePassed
         || pathCompositionGatePassed
+        || boundedUnobservedFixedSideGate
         || recentTailTerminalGatePassed
         || recentTailGlobalGatePassed
         || recentTailJointGatePassed

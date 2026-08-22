@@ -283,6 +283,11 @@ const pathTransitionMatchesOperation = (event: DiagnosisEvent): boolean => {
         && isExactPartialLagTransition(event.shiftYears, lagBefore, lagAfter);
 };
 
+const isSupportedPathTransitionSource = (event: DiagnosisEvent): boolean => (
+    event.evidence.algorithmSources.includes("piecewise_lag_path")
+    || event.evidence.algorithmSources.includes("bounded_complete_lag_path")
+);
+
 const topRankedEventYear = (event: DiagnosisEvent): number => (
     event.rankedYears
         .slice()
@@ -297,7 +302,7 @@ const coherentPathSuffixFromFixedLag = (
     const ordered = pathEvents
         .filter((event) => (
             event.eventType !== "wholeSeriesMove"
-            && event.evidence.algorithmSources.includes("piecewise_lag_path")
+            && isSupportedPathTransitionSource(event)
             && pathTransitionMatchesOperation(event)
         ))
         .sort((left, right) => (
@@ -417,7 +422,7 @@ export const makePathFixedSideWholeDraft = (
     const eligible = pathEvents
         .filter((event) => (
             event.eventType !== "wholeSeriesMove"
-            && event.evidence.algorithmSources.includes("piecewise_lag_path")
+            && isSupportedPathTransitionSource(event)
             && pathTransitionMatchesOperation(event)
             && event.evidence.score >= 1
             && event.evidence.samplePairs >= effectiveConfig.minPairsForCorrelation
@@ -460,6 +465,9 @@ export const makePathFixedSideWholeDraft = (
         algorithmSource: ["piecewise_lag_path", "segmented_diagnosis"],
         recallSourceTags: [
             "path_fixed_side_whole_baseline",
+            ...(transition.evidence.algorithmSources.includes(
+                "bounded_complete_lag_path",
+            ) ? ["bounded_fixed_side_whole_baseline"] : []),
             `path_fixed_side_lag:${fixedSideLag}`,
             `path_fixed_side_event_type:${transition.eventType}`,
             `path_fixed_side_transition:${transition.evidence.lagBefore}->${fixedSideLag}`,
@@ -477,6 +485,7 @@ export const evaluatePathFixedSideWholeCandidate = (
     pathEvents: readonly DiagnosisEvent[],
     effectiveConfig: EffectiveDiagnosisConfig,
     pathTerminal?: PathTerminalLagEvidence,
+    additionalRecallSourceTags: readonly string[] = [],
 ): DiagnosisCandidateOperation | null => {
     const measuredTailDraft = makeRecentTailWholeDraft(diagnosis, effectiveConfig);
     const rawTailDraft = measuredTailDraft
@@ -490,11 +499,18 @@ export const evaluatePathFixedSideWholeCandidate = (
             ],
         }
         : measuredTailDraft;
-    const pathDraft = makePathFixedSideWholeDraft(
+    const basePathDraft = makePathFixedSideWholeDraft(
         diagnosis,
         pathEvents,
         effectiveConfig,
     );
+    const pathDraft = basePathDraft ? {
+        ...basePathDraft,
+        recallSourceTags: Array.from(new Set([
+            ...(basePathDraft.recallSourceTags ?? []),
+            ...additionalRecallSourceTags,
+        ])),
+    } : null;
     const pathComposition = pathDraft ? measurePathFixedSideComposition(
         siteData,
         diagnosis,

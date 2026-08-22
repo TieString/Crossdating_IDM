@@ -21,6 +21,7 @@ import {
     terminalResidualPatternSupport,
 } from "../drafts";
 import {
+    boundedUnobservedFixedSideGatePassed,
     pathFixedSideWholeCompositionGatePassed,
     recentTailGlobalAgreementGatePassed,
     recentTailResidualPartialGatePassed,
@@ -390,6 +391,29 @@ describe("path fixed-side whole baseline", () => {
             wholeSeriesRDelta: 0,
             meanSegmentRDelta: 0,
             problemReduction: 0,
+        })).toBe(false);
+    });
+
+    it("accepts a cross-penalty unobserved fixed-side frame", () => {
+        const evidence = {
+            wholeShift: -20,
+            fixedSideLag: -20,
+            newerContextYears: 249,
+            strongerGain: 31,
+            weakerGain: 33,
+            strongerPairs: 492,
+            weakerPairs: 492,
+            boundaryDriftYears: 0,
+        };
+
+        expect(boundedUnobservedFixedSideGatePassed(evidence)).toBe(true);
+        expect(boundedUnobservedFixedSideGatePassed({
+            ...evidence,
+            wholeShift: -39,
+        })).toBe(false);
+        expect(boundedUnobservedFixedSideGatePassed({
+            ...evidence,
+            boundaryDriftYears: 3,
         })).toBe(false);
     });
 
