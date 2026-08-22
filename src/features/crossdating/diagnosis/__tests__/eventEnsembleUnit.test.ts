@@ -50,6 +50,7 @@ import {
     selectStableBoundedLagPathFrontier,
     selectConservativeStableBoundedLagPathFrontier,
     selectParsimoniousPartialOperationCheckpoint,
+    selectCrossPenaltyTerminalNegativeClusterCheckpoint,
     selectSeparatedPartialComponentCheckpoint,
     selectRegularizedPartialOperationConsensus,
     selectRegularizedPartialConsensusCheckpoint,
@@ -3687,6 +3688,69 @@ describe("selectCumulativePartialFrontier", () => {
         });
         expect(selected?.startYear).toBeLessThanOrEqual(1822);
         expect(selected?.endYear).toBeGreaterThanOrEqual(1823);
+    });
+
+    it("removes a separated older false ring from a net partial operation", () => {
+        const olderFalse = pathEvent(1, -19, -20, 1776);
+        olderFalse.eventType = "falseRing";
+        olderFalse.shiftYears = undefined;
+        olderFalse.shiftSide = undefined;
+        const newerPartial = pathEvent(-20, -20, 0, 1805);
+
+        expect(selectCrossPenaltyTerminalNegativeClusterCheckpoint(
+            boundedPath([olderFalse, newerPartial]),
+            boundedPath([olderFalse, newerPartial]),
+            operation(-19, 1784),
+            { startYear: 1500, endYear: 2000 },
+        )).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -20,
+            startYear: 1799,
+            endYear: 1811,
+            evidence: {
+                lagBefore: -20,
+                lagAfter: 0,
+                algorithmSources: expect.arrayContaining([
+                    "cross_penalty_terminal_negative_cluster",
+                ]),
+            },
+        });
+    });
+
+    it("aggregates a nearby split partial before a separated older false ring", () => {
+        const olderFalse = pathEvent(1, -5, -6, 1826);
+        olderFalse.eventType = "falseRing";
+        olderFalse.shiftYears = undefined;
+        olderFalse.shiftSide = undefined;
+        const olderPartial = pathEvent(-2, -6, -4, 1851);
+        const newerPartial = pathEvent(-4, -4, 0, 1857);
+
+        expect(selectCrossPenaltyTerminalNegativeClusterCheckpoint(
+            boundedPath([olderFalse, olderPartial, newerPartial]),
+            boundedPath([olderFalse, olderPartial, newerPartial]),
+            operation(-5, 1848),
+            { startYear: 1500, endYear: 2000 },
+        )).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -6,
+            startYear: 1848,
+            endYear: 1860,
+        });
+    });
+
+    it("does not enlarge an operation without the exact separated +1 net relation", () => {
+        const olderFalse = pathEvent(1, -19, -20, 1776);
+        olderFalse.eventType = "falseRing";
+        olderFalse.shiftYears = undefined;
+        olderFalse.shiftSide = undefined;
+        const newerPartial = pathEvent(-20, -20, 0, 1805);
+
+        expect(selectCrossPenaltyTerminalNegativeClusterCheckpoint(
+            boundedPath([olderFalse, newerPartial]),
+            boundedPath([olderFalse, newerPartial]),
+            operation(-20, 1805),
+            { startYear: 1500, endYear: 2000 },
+        )).toBeNull();
     });
 
     it("keeps a direct operation over a two-component irregular decomposition", () => {

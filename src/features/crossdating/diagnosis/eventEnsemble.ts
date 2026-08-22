@@ -6735,6 +6735,233 @@ export const selectStableUnitPathLocationCheckpoints = (
     });
 };
 
+type CrossPenaltyTerminalNegativeCluster = {
+    transitions: readonly ExactLagPathTransition[];
+    aggregateShiftYears: number;
+    centerYear: number;
+    hasSeparatedOlderFalseRing: boolean;
+};
+
+const selectTerminalNegativeCluster = (
+    path: BoundedLagStateEventSet,
+    baselineLag: number,
+    maximumAdjacentGapYears: number,
+    minimumOlderEventSeparationYears: number,
+): CrossPenaltyTerminalNegativeCluster | null => {
+    const transitions = exactLagPathTransitions(
+        path.events,
+        Number.NEGATIVE_INFINITY,
+    ).sort((left, right) => left.topYear - right.topYear);
+    if (transitions.length < 2) return null;
+    let clusterStart = transitions.length - 1;
+    while (clusterStart > 0
+        && transitions[clusterStart].topYear - transitions[clusterStart - 1].topYear
+            <= maximumAdjacentGapYears) {
+        clusterStart -= 1;
+    }
+    const cluster = transitions.slice(clusterStart);
+    if (!cluster.some(({ event }) => event.eventType === "partialMove")) return null;
+    if (cluster.some((transition, index) => {
+        const newer = cluster[index + 1];
+        return newer !== undefined
+            && transition.event.evidence.lagAfter !== newer.event.evidence.lagBefore;
+    })) return null;
+    const oldestLag = cluster[0].event.evidence.lagBefore;
+    const newestLag = cluster[cluster.length - 1].event.evidence.lagAfter;
+    if (oldestLag === null || newestLag !== baselineLag) return null;
+    const aggregateShiftYears = oldestLag - newestLag;
+    if (aggregateShiftYears >= -1) return null;
+    const clusterYears = cluster.map(({ topYear }) => topYear);
+    const middle = Math.floor(clusterYears.length / 2);
+    const centerYear = clusterYears.length % 2 === 1
+        ? clusterYears[middle]!
+        : Math.round((clusterYears[middle - 1]! + clusterYears[middle]!) / 2);
+    const firstClusterYear = clusterYears[0]!;
+    const hasSeparatedOlderFalseRing = transitions.slice(0, clusterStart).some(
+        (transition) => transition.event.eventType === "falseRing"
+            && transition.shiftYears === 1
+            && firstClusterYear - transition.topYear >= minimumOlderEventSeparationYears,
+    );
+    return {
+        transitions: cluster,
+        aggregateShiftYears,
+        centerYear,
+        hasSeparatedOlderFalseRing,
+    };
+};
+
+const terminalClusterSequenceMatches = (
+    left: CrossPenaltyTerminalNegativeCluster,
+    right: CrossPenaltyTerminalNegativeCluster,
+    maximumYearDrift: number,
+): boolean => left.transitions.length === right.transitions.length
+    && left.transitions.every((transition, index) => {
+        const other = right.transitions[index];
+        return other !== undefined
+            && transition.event.eventType === other.event.eventType
+            && transition.shiftYears === other.shiftYears
+            && Math.abs(transition.topYear - other.topYear) <= maximumYearDrift;
+    });
+
+/**
+ * Removes a separated older +1 event from a net partial score. Both near-lag regularizations
+ * must recover the same newer negative cluster; this never infers a larger gap from score
+ * proximity alone.
+ */
+export const selectCrossPenaltyTerminalNegativeClusterCheckpoint = (
+    strongerPath: BoundedLagStateEventSet | null,
+    regularizedPath: BoundedLagStateEventSet | null,
+    operation: JointCounterfactualOperationScore | null,
+    targetRange: { startYear: number; endYear: number },
+    baselineLag = 0,
+    maximumAdjacentGapYears = 13,
+    minimumOlderEventSeparationYears = 14,
+    maximumYearDrift = 3,
+): DiagnosisEvent | null => {
+    if (!strongerPath
+        || !regularizedPath
+        || operation?.eventType !== "partialMove"
+        || operation.shiftYears >= -1
+        || !boundedLagPathHasObservedFixedSide(strongerPath)
+        || !boundedLagPathHasObservedFixedSide(regularizedPath)
+        || strongerPath.path.transitionGain < 20
+        || regularizedPath.path.transitionGain < 20) return null;
+    const stronger = selectTerminalNegativeCluster(
+        strongerPath,
+        baselineLag,
+        maximumAdjacentGapYears,
+        minimumOlderEventSeparationYears,
+    );
+    const regularized = selectTerminalNegativeCluster(
+        regularizedPath,
+        baselineLag,
+        maximumAdjacentGapYears,
+        minimumOlderEventSeparationYears,
+    );
+    if (!stronger
+        || !regularized
+        || !stronger.hasSeparatedOlderFalseRing
+        || !regularized.hasSeparatedOlderFalseRing
+        || stronger.aggregateShiftYears !== regularized.aggregateShiftYears
+        || operation.shiftYears !== stronger.aggregateShiftYears + 1
+        || Math.abs(stronger.centerYear - regularized.centerYear) > maximumYearDrift) {
+        return null;
+    }
+    const exactSequence = terminalClusterSequenceMatches(
+        stronger,
+        regularized,
+        maximumYearDrift,
+    );
+    if (!exactSequence && Math.max(
+        strongerPath.path.runnerUpMargin,
+        regularizedPath.path.runnerUpMargin,
+    ) < 0.3) return null;
+
+    const centerYear = Math.round((stronger.centerYear + regularized.centerYear) / 2);
+    const window = boundedSequentialWindow(centerYear, 13, targetRange);
+    const template = [...stronger.transitions].sort((left, right) => (
+        Math.abs(left.topYear - centerYear) - Math.abs(right.topYear - centerYear)
+        || right.topYear - left.topYear
+    ))[0]!.event;
+    const priorRows = new Map(stronger.transitions.flatMap(({ event }) => (
+        event.rankedYears.map((row) => [row.year, row] as const)
+    )));
+    const maximumScore = Math.max(
+        0,
+        ...stronger.transitions.flatMap(({ event }) => (
+            event.rankedYears.map((row) => row.score)
+        )),
+    );
+    const rankedYears = Array.from(
+        { length: window.endYear - window.startYear + 1 },
+        (_, offset) => window.startYear + offset,
+    ).map((year) => {
+        const prior = priorRows.get(year);
+        return {
+            year,
+            rank: 0,
+            score: year === centerYear
+                ? maximumScore + Math.max(1e-9, Math.abs(maximumScore) * 1e-12)
+                : prior?.score ?? 0,
+            evidenceTags: Array.from(new Set([
+                ...(prior?.evidenceTags ?? []),
+                "cross_penalty_terminal_negative_cluster",
+            ])).sort(),
+        };
+    }).sort((left, right) => (
+        right.score - left.score || right.year - left.year
+    )).map((row, index) => ({ ...row, rank: index + 1 }));
+    const aggregateShiftYears = stronger.aggregateShiftYears;
+    return withEvidenceLedger({
+        ...template,
+        id: `${template.id}-cross-penalty-terminal-cluster-${aggregateShiftYears}`,
+        eventType: "partialMove",
+        shiftYears: aggregateShiftYears,
+        shiftSide: "older",
+        ...window,
+        rankedYears,
+        confidenceLevel: Math.min(
+            strongerPath.path.transitionGain,
+            regularizedPath.path.transitionGain,
+        ) >= 30 ? "high" : "medium",
+        alternativeTypes: [],
+        locationAlternatives: undefined,
+        operationAlternatives: undefined,
+        evidence: {
+            ...template.evidence,
+            algorithmSources: Array.from(new Set([
+                ...template.evidence.algorithmSources,
+                "cross_penalty_terminal_negative_cluster",
+                "stable_multiscale_bounded_path_frontier",
+            ])).sort(),
+            score: Math.min(
+                strongerPath.path.transitionGain,
+                regularizedPath.path.transitionGain,
+            ),
+            scoreMargin: Math.min(
+                strongerPath.path.runnerUpMargin,
+                regularizedPath.path.runnerUpMargin,
+            ),
+            lagBefore: baselineLag + aggregateShiftYears,
+            lagAfter: baselineLag,
+            locationEvidence: [
+                ...(template.evidence.locationEvidence ?? []),
+                {
+                    source: "cross_penalty_terminal_negative_cluster",
+                    ...window,
+                    topYear: centerYear,
+                    referenceCount: 0,
+                    concentration: Math.max(
+                        0,
+                        1 - Math.abs(stronger.centerYear - regularized.centerYear)
+                            / (maximumYearDrift + 1),
+                    ),
+                    remoteMargin: Math.min(
+                        strongerPath.path.runnerUpMargin,
+                        regularizedPath.path.runnerUpMargin,
+                    ),
+                    calibrated: true,
+                },
+            ],
+            notes: Array.from(new Set([
+                ...template.evidence.notes,
+                `terminal_negative_cluster_shift=${aggregateShiftYears}`,
+                `terminal_negative_cluster_stronger_years=${stronger.transitions.map(
+                    ({ topYear }) => topYear,
+                ).join(",")}`,
+                `terminal_negative_cluster_regularized_years=${regularized.transitions.map(
+                    ({ topYear }) => topYear,
+                ).join(",")}`,
+                `terminal_negative_cluster_center_year=${centerYear}`,
+                `terminal_negative_cluster_net_operation=${operation.shiftYears}`,
+                `terminal_negative_cluster_baseline_lag=${baselineLag}`,
+                `terminal_negative_cluster_exact_sequence=${exactSequence}`,
+                "terminal_negative_cluster_removed_separated_false_ring=true",
+            ])),
+        },
+    });
+};
+
 export const selectCorroboratedUnitPathLocationCheckpoint = (
     pathEvents: readonly DiagnosisEvent[],
     independentEvents: readonly DiagnosisEvent[],
@@ -12945,6 +13172,14 @@ export const makeDiagnosisEvents = (
                 diagnosis.targetRange,
                 terminalBaselineIsUnsupportedAlias ? 0 : terminalBaselineLag,
             );
+        const crossPenaltyTerminalNegativeClusterCheckpoint =
+            selectCrossPenaltyTerminalNegativeClusterCheckpoint(
+                rawNearPenaltyTwoPath,
+                rawNearPenaltyOnePath,
+                parsimoniousPartialOperation,
+                diagnosis.targetRange,
+                terminalBaselineIsUnsupportedAlias ? 0 : terminalBaselineLag,
+            );
         const regularizedPartialConsensusCheckpoint =
             selectRegularizedPartialConsensusCheckpoint(
                 stableMultiscaleBoundedFrontier,
@@ -12980,6 +13215,7 @@ export const makeDiagnosisEvents = (
             ?? crossPenaltyExactPartialCheckpoint
             ?? terminalOperationAnchoredPartialCheckpoint
             ?? regularizedPartialConsensusCheckpoint
+            ?? crossPenaltyTerminalNegativeClusterCheckpoint
             ?? terminalCompatibleParsimoniousPartialCheckpoint
             ?? zeroTerminalUnitWholeAliasEvent
             ?? cumulativeMissingWholeAliasFrontier?.event
@@ -13045,6 +13281,9 @@ export const makeDiagnosisEvents = (
                 )
                 || stableBoundedPathFrontier.evidence.algorithmSources.includes(
                     "collapsed_missing_false_partial_checkpoint",
+                )
+                || stableBoundedPathFrontier.evidence.algorithmSources.includes(
+                    "cross_penalty_terminal_negative_cluster",
                 )
                 ||
                 terminalCompatibleParsimoniousPartialCheckpoint !== null
