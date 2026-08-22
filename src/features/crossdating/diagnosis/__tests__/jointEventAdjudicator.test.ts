@@ -1425,6 +1425,52 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("does not let supplemental bounded evidence rewrite an independent partial checkpoint", () => {
+        const selected = event("independent", "partialMove", 1775, 1783, 1779);
+        selected.shiftYears = -6;
+        selected.shiftSide = "older";
+        selected.evidence.algorithmSources = [
+            "decisive_joint_operation_fusion",
+            "independent_partial_location_checkpoint",
+        ];
+        selected.evidence.locationEvidence = [{
+            source: "independent_partial_location_checkpoint",
+            startYear: 1775,
+            endYear: 1783,
+            topYear: 1779,
+            referenceCount: 0,
+            concentration: 0.61,
+            remoteMargin: 0.56,
+            calibrated: true,
+        }];
+        const bounded = event("bounded", "partialMove", 1794, 1806, 1800);
+        bounded.shiftYears = -6;
+        bounded.shiftSide = "older";
+        bounded.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        bounded.evidence.notes = ["bounded_path_complete_hypothesis=true"];
+        bounded.evidence.locationEvidence = [{
+            source: "bounded_complete_lag_path",
+            startYear: 1794,
+            endYear: 1806,
+            topYear: 1800,
+            referenceCount: 34,
+            concentration: 0.73,
+            remoteMargin: 3.05,
+            calibrated: false,
+        }];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            { stage: "final", authority: "selected", event: selected },
+            { stage: "final", authority: "supplemental", event: bounded },
+        ]);
+
+        expect(decision.event).toMatchObject({
+            id: "independent",
+            startYear: 1775,
+            endYear: 1783,
+        });
+    });
+
     it("keeps a strong selected bounded-path window over an earlier survival plateau", () => {
         const persisted = event("persisted", "missingRing", 1852, 1858, 1853);
         const bounded = event("selected-bounded", "missingRing", 1856, 1868, 1862);

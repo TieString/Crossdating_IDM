@@ -56,6 +56,7 @@ import {
     selectRegularizedPartialConsensusCheckpoint,
     selectRepeatedPartialComponentCheckpoint,
     selectCrossPenaltyExactPartialCheckpoint,
+    selectIndependentPartialLocationCheckpoint,
     selectTerminalOperationAnchoredPartialCheckpoint,
     selectCollapsedMissingFalsePartialCheckpoint,
     selectCrossPenaltyFalseRingFrontier,
@@ -3688,6 +3689,59 @@ describe("selectCumulativePartialFrontier", () => {
         });
         expect(selected?.startYear).toBeLessThanOrEqual(1822);
         expect(selected?.endYear).toBeGreaterThanOrEqual(1823);
+    });
+
+    it("preserves a decisive independent partial location over a broad path peak", () => {
+        const broadPath = pathEvent(-6, -6, 0, 1798, 60);
+        broadPath.evidence.algorithmSources = ["cross_penalty_exact_partial_frontier"];
+        broadPath.evidence.notes.push("bounded_path_location_concentration=0.47");
+        const proposal = candidate("joint-location", -6, -6, 0, 1779);
+        proposal.startYear = 1775;
+        proposal.endYear = 1783;
+        proposal.evidence.algorithmSources = [
+            "decisive_joint_operation_fusion",
+            "full_interval_counterfactual_scan",
+            "joint_year_operation_evidence",
+        ];
+        proposal.evidence.scoreMargin = 0.56;
+        proposal.evidence.correlationGain = 0.61;
+        proposal.evidence.samplePairs = 464;
+
+        expect(selectIndependentPartialLocationCheckpoint(
+            broadPath,
+            [proposal],
+        )).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -6,
+            startYear: 1775,
+            endYear: 1783,
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "independent_partial_location_checkpoint",
+                ]),
+            },
+        });
+    });
+
+    it("keeps a concentrated exact path over a detached partial proposal", () => {
+        const concentratedPath = pathEvent(-6, -6, 0, 1798, 60);
+        concentratedPath.evidence.algorithmSources = [
+            "cross_penalty_exact_partial_frontier",
+        ];
+        concentratedPath.evidence.notes.push("bounded_path_location_concentration=0.92");
+        const proposal = candidate("joint-location", -6, -6, 0, 1779);
+        proposal.evidence.algorithmSources = [
+            "decisive_joint_operation_fusion",
+            "full_interval_counterfactual_scan",
+        ];
+        proposal.evidence.scoreMargin = 0.8;
+        proposal.evidence.correlationGain = 0.8;
+        proposal.evidence.samplePairs = 400;
+
+        expect(selectIndependentPartialLocationCheckpoint(
+            concentratedPath,
+            [proposal],
+        )).toBeNull();
     });
 
     it("removes a separated older false ring from a net partial operation", () => {

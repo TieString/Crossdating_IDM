@@ -8305,6 +8305,102 @@ export const selectDirectTerminalUnitBeforeDerivedStablePartial = (
     };
 };
 
+/** Preserves a strong independent location mode when the exact path peak is broad. */
+export const selectIndependentPartialLocationCheckpoint = (
+    pathEvent: DiagnosisEvent | null,
+    proposals: readonly DiagnosisEvent[],
+    maximumPathConcentration = 0.7,
+): DiagnosisEvent | null => {
+    if (pathEvent?.eventType !== "partialMove"
+        || pathEvent.shiftYears === undefined
+        || !pathEvent.evidence.algorithmSources.some((source) => (
+            source === "cross_penalty_exact_partial_frontier"
+            || source === "cross_penalty_terminal_negative_cluster"
+        ))) return null;
+    const pathConcentration = latestEventNoteNumber(
+        pathEvent,
+        "bounded_path_location_concentration=",
+    );
+    if (pathConcentration === null || pathConcentration >= maximumPathConcentration) {
+        return null;
+    }
+    const proposalPriority = (event: DiagnosisEvent): number => {
+        const decisiveJoint = event.evidence.algorithmSources.includes(
+            "decisive_joint_operation_fusion",
+        )
+            && event.evidence.algorithmSources.includes(
+                "full_interval_counterfactual_scan",
+            )
+            && event.evidence.scoreMargin >= 0.5
+            && (event.evidence.correlationGain ?? 0) >= 0.5
+            && event.evidence.samplePairs >= 100;
+        if (decisiveJoint) return 2;
+        const regularizedConsensus = event.evidence.algorithmSources.includes(
+            "regularized_partial_operation_consensus",
+        )
+            && event.evidence.score >= 20
+            && (event.evidence.correlationGain ?? 0) >= 0.08;
+        return regularizedConsensus ? 1 : 0;
+    };
+    const selected = proposals.filter((event) => (
+        event.eventType === "partialMove"
+        && event.shiftYears === pathEvent.shiftYears
+        && proposalPriority(event) > 0
+        && Math.max(event.startYear, pathEvent.startYear)
+            > Math.min(event.endYear, pathEvent.endYear)
+    )).sort((left, right) => (
+        proposalPriority(right) - proposalPriority(left)
+        || right.evidence.scoreMargin - left.evidence.scoreMargin
+        || right.evidence.score - left.evidence.score
+    ))[0] ?? null;
+    if (!selected) return null;
+    const referenceCount = Math.max(
+        0,
+        ...selected.evidence.locationEvidence?.map((entry) => entry.referenceCount) ?? [],
+    );
+    return withEvidenceLedger({
+        ...selected,
+        id: `${selected.id}-independent-partial-location-checkpoint`,
+        alternativeTypes: [],
+        locationAlternatives: undefined,
+        operationAlternatives: undefined,
+        evidence: {
+            ...selected.evidence,
+            algorithmSources: Array.from(new Set([
+                ...selected.evidence.algorithmSources,
+                "independent_partial_location_checkpoint",
+            ])).sort(),
+            candidateIds: Array.from(new Set([
+                ...selected.evidence.candidateIds,
+                ...pathEvent.evidence.candidateIds,
+            ])),
+            locationEvidence: [
+                ...(selected.evidence.locationEvidence ?? []),
+                {
+                    source: "independent_partial_location_checkpoint",
+                    startYear: selected.startYear,
+                    endYear: selected.endYear,
+                    topYear: rankedEventYear(selected),
+                    referenceCount,
+                    concentration: Math.min(1, Math.max(
+                        selected.evidence.scoreMargin,
+                        selected.evidence.correlationGain ?? 0,
+                    )),
+                    remoteMargin: selected.evidence.scoreMargin,
+                    calibrated: true,
+                },
+            ],
+            notes: Array.from(new Set([
+                ...selected.evidence.notes,
+                `independent_partial_rejected_path_year=${rankedEventYear(pathEvent)}`,
+                `independent_partial_rejected_path_concentration=${pathConcentration}`,
+                `independent_partial_selected_year=${rankedEventYear(selected)}`,
+                `independent_partial_selected_source_priority=${proposalPriority(selected)}`,
+            ])),
+        },
+    });
+};
+
 /**
  * Keeps an independently proposed unit event when two complete near-lag paths reproduce it as
  * the bark-side transition. Older mixed events may change the net lag and the parsimonious
@@ -13203,6 +13299,17 @@ export const makeDiagnosisEvents = (
                         ? lagPathTransitionShift(stableMultiscaleBoundedFrontier.event)
                         : null,
             );
+        const independentPartialLocationCheckpoint =
+            selectIndependentPartialLocationCheckpoint(
+                crossPenaltyTerminalNegativeClusterCheckpoint
+                    ?? crossPenaltyExactPartialCheckpoint,
+                [
+                    ...displayed,
+                    ...(regularizedPartialOperationConsensus
+                        ? [regularizedPartialOperationConsensus]
+                        : []),
+                ],
+            );
         const regularizedPartialConsensusCheckpoint =
             selectRegularizedPartialConsensusCheckpoint(
                 stableMultiscaleBoundedFrontier,
@@ -13235,6 +13342,7 @@ export const makeDiagnosisEvents = (
             ?? splitRepeatedPartialComponentCheckpoint
             ?? separatedPartialComponentCheckpoint
             ?? collapsedMissingFalsePartialCheckpoint
+            ?? independentPartialLocationCheckpoint
             ?? crossPenaltyTerminalNegativeClusterCheckpoint
             ?? crossPenaltyExactPartialCheckpoint
             ?? terminalOperationAnchoredPartialCheckpoint
@@ -13307,6 +13415,9 @@ export const makeDiagnosisEvents = (
                 )
                 || stableBoundedPathFrontier.evidence.algorithmSources.includes(
                     "cross_penalty_terminal_negative_cluster",
+                )
+                || stableBoundedPathFrontier.evidence.algorithmSources.includes(
+                    "independent_partial_location_checkpoint",
                 )
                 || (
                     crossPenaltyTerminalNegativeClusterCheckpoint !== null
