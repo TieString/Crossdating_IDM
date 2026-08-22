@@ -1139,17 +1139,32 @@ export const locateBoundedLagStateEvents = (
             );
             const top = rows[0];
             if (!top) continue;
+            // A partial move is the boundary between two lag states. Its user-facing
+            // firstFixedYear is therefore the first year of the newer run. The local
+            // profile remains useful supporting evidence, but must not move the
+            // breakpoint away from the state path it is supposed to describe.
+            const stateBoundaryYear = eventType === "partialMove"
+                ? newer.startYear
+                : top.year;
+            const eventRows = eventType === "partialMove" && top.year !== stateBoundaryYear
+                ? rows.map((row) => row.year === stateBoundaryYear
+                    ? {
+                        ...row,
+                        score: top.score + Math.max(1e-9, Math.abs(top.score) * 1e-12),
+                    }
+                    : row)
+                : rows;
             const window = boundedReviewWindow(
-                top.year,
+                stateBoundaryYear,
                 pathConfig.windowWidth,
                 diagnosis.targetRange.startYear,
                 diagnosis.targetRange.endYear,
             );
-            const remote = rows.find((row) => (
-                Math.abs(row.year - top.year) > pathConfig.windowWidth
+            const remote = eventRows.find((row) => (
+                Math.abs(row.year - stateBoundaryYear) > pathConfig.windowWidth
             ));
             const concentration = boundedLocationConcentration(
-                rows,
+                eventRows,
                 window.startYear,
                 window.endYear,
             );
@@ -1160,7 +1175,11 @@ export const locateBoundedLagStateEvents = (
                 seriesId: diagnosis.targetTree,
                 eventType,
                 ...window,
-                rankedYears: boundedRankedYears(rows, window.startYear, window.endYear),
+                rankedYears: boundedRankedYears(
+                    eventRows,
+                    window.startYear,
+                    window.endYear,
+                ),
                 confidenceLevel: path.transitionGain >= 12
                     ? "high"
                     : path.transitionGain >= 5 ? "medium" : "low",
@@ -1179,7 +1198,7 @@ export const locateBoundedLagStateEvents = (
                     locationEvidence: [{
                         source: "bounded_complete_lag_path",
                         ...window,
-                        topYear: top.year,
+                        topYear: stateBoundaryYear,
                         referenceCount: diagnosis.master.sourceTrees.length,
                         concentration,
                         remoteMargin: remote ? top.score - remote.score : null,
@@ -1187,6 +1206,8 @@ export const locateBoundedLagStateEvents = (
                     }],
                     notes: [
                         `bounded_path_transition=${older.lag}->${newer.lag}`,
+                        `bounded_path_state_boundary_year=${stateBoundaryYear}`,
+                        `bounded_path_profile_top_year=${top.year}`,
                         `bounded_path_transition_gain=${path.transitionGain.toFixed(6)}`,
                         `bounded_path_runner_up_margin=${path.runnerUpMargin.toFixed(6)}`,
                         `bounded_path_location_concentration=${concentration.toFixed(6)}`,

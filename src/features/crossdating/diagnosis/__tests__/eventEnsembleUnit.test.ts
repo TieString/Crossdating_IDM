@@ -5891,6 +5891,73 @@ describe("selectCumulativePartialFrontier", () => {
         )).toBe(missing);
     });
 
+    it("replaces a detached unsupported false mode with a terminal partial consensus", () => {
+        const falseEvent = falseRingEvent(997, false);
+        falseEvent.rankedYears = [{
+            year: 1000,
+            rank: 1,
+            score: 2,
+            evidenceTags: [],
+        }];
+        const variants = Array.from({ length: 7 }, (_, index) => {
+            const partial = partialMoveEvent(-20);
+            partial.rankedYears = [{
+                year: 1050 + index % 2,
+                rank: 1,
+                score: 2,
+                evidenceTags: [],
+            }];
+            return { source: `path-${index}`, events: [partial] };
+        });
+
+        expect(projectMissingToPartialPathOperationConsensus(
+            falseEvent,
+            variants,
+            { startYear: 800, endYear: 1200 },
+        )).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -20,
+            startYear: 1044,
+            endYear: 1056,
+        });
+    });
+
+    it("keeps a false mode when independent paths support its current location", () => {
+        const falseEvent = falseRingEvent(997, false);
+        falseEvent.rankedYears = [{
+            year: 1000,
+            rank: 1,
+            score: 2,
+            evidenceTags: [],
+        }];
+        const variants = Array.from({ length: 7 }, (_, index) => {
+            const partial = partialMoveEvent(-20);
+            partial.rankedYears = [{
+                year: 1050,
+                rank: 1,
+                score: 2,
+                evidenceTags: [],
+            }];
+            const supportedFalse = falseRingEvent(997, false);
+            supportedFalse.rankedYears = [{
+                year: 1000,
+                rank: 1,
+                score: 2,
+                evidenceTags: [],
+            }];
+            return {
+                source: `path-${index}`,
+                events: index < 3 ? [partial, supportedFalse] : [partial],
+            };
+        });
+
+        expect(projectMissingToPartialPathOperationConsensus(
+            falseEvent,
+            variants,
+            { startYear: 800, endYear: 1200 },
+        )).toBe(falseEvent);
+    });
+
     it("decomposes a non-authoritative whole alias into stable partial components", () => {
         const selected = selectStableBoundedLagPathFrontier(
             boundedPath([

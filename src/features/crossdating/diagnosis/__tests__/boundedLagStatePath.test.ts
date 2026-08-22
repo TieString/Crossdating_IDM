@@ -131,6 +131,20 @@ describe("bounded complete lag-state path", () => {
             ["partialMove", -6],
             ["partialMove", -20],
         ]);
+        result?.events.forEach((event) => {
+            const transition = result.path.runs.find((older, index, runs) => {
+                const newer = runs[index + 1];
+                return newer !== undefined
+                    && older.lag - newer.lag === event.shiftYears;
+            });
+            const transitionIndex = transition
+                ? result.path.runs.indexOf(transition)
+                : -1;
+            const firstFixedYear = result.path.runs[transitionIndex + 1]?.startYear;
+            expect(event.rankedYears[0]?.year).toBe(firstFixedYear);
+            expect(event.startYear).toBe((firstFixedYear ?? 0) - 6);
+            expect(event.endYear).toBe((firstFixedYear ?? 0) + 6);
+        });
     });
 
     it("retains a non-zero newest run as an independent whole baseline", () => {
@@ -174,6 +188,9 @@ describe("bounded complete lag-state path", () => {
             shiftYears: -100,
             shiftSide: "older",
         });
+        expect(result?.events[0]?.rankedYears[0]?.year).toBe(
+            result?.path.runs[1]?.startYear,
+        );
     });
 
     it("keeps an independently supplied whole lag as the newest terminal state", () => {

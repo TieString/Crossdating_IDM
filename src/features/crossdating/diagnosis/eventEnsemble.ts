@@ -6315,12 +6315,25 @@ export const projectMissingToPartialPathOperationConsensus = (
     minimumGapYears = 3,
     maximumModeDistance = 7,
 ): DiagnosisEvent => {
-    if (event.eventType !== "missingRing") return event;
+    if (event.eventType !== "missingRing" && event.eventType !== "falseRing") {
+        return event;
+    }
+    const currentYear = rankedEventYear(event);
+    const falsePathSupport = new Set(variants.flatMap((variant) => (
+        variant.events.some((candidate) => (
+            candidate.eventType === "falseRing"
+            && Math.abs(rankedEventYear(candidate) - currentYear) <= 4
+        )) ? [variant.source] : []
+    ))).size;
     const observations = variants.flatMap((variant) => variant.events
         .filter((candidate) => (
             candidate.eventType === "partialMove"
             && candidate.shiftSide === "older"
             && (candidate.shiftYears ?? 0) <= -minimumGapYears
+            && (
+                event.eventType !== "falseRing"
+                || candidate.evidence.lagAfter === 0
+            )
         ))
         .map((candidate) => ({
             source: variant.source,
@@ -6357,11 +6370,24 @@ export const projectMissingToPartialPathOperationConsensus = (
         || Math.abs(left.shiftYears) - Math.abs(right.shiftYears)
         || right.centerYear - left.centerYear
     ));
-    const selected = modes[0];
-    if (!selected || selected.sourceCount < minimumSupport) return event;
-    const currentYear = rankedEventYear(event);
+    const selected = event.eventType === "falseRing"
+        ? modes.filter((mode) => (
+            mode.sourceCount >= Math.max(7, minimumSupport)
+            && Math.abs(mode.centerYear - currentYear) >= 30
+        )).sort((left, right) => (
+            right.centerYear - left.centerYear
+            || right.sourceCount - left.sourceCount
+            || left.meanDistance - right.meanDistance
+            || Math.abs(left.shiftYears) - Math.abs(right.shiftYears)
+        ))[0]
+        : modes[0];
+    if (!selected
+        || selected.sourceCount < minimumSupport
+        || (event.eventType === "falseRing" && falsePathSupport > 2)) return event;
     const modeDistance = Math.abs(selected.centerYear - currentYear);
-    if (modeDistance > maximumModeDistance) return event;
+    if (event.eventType === "missingRing" && modeDistance > maximumModeDistance) {
+        return event;
+    }
     const representative = selected.support.slice().sort((left, right) => (
         Math.abs(left.topYear - selected.centerYear)
             - Math.abs(right.topYear - selected.centerYear)
@@ -6439,6 +6465,7 @@ export const projectMissingToPartialPathOperationConsensus = (
                 `partial_path_previous_year=${currentYear}`,
                 `partial_path_selected_year=${selected.centerYear}`,
                 `partial_path_mode_distance=${modeDistance}`,
+                `partial_path_competing_false_support=${falsePathSupport}`,
             ])),
         },
     });
