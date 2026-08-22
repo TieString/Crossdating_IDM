@@ -1,4 +1,4 @@
-# Crossdating IDM _(Crossdating_IDM / Crossdating_Tauri)_
+# Crossdating IDM _(Crossdating_IDM)_
 
 <p align="center">
   <img src="./app-icon.png" width="112" alt="Crossdating IDM">
@@ -13,7 +13,6 @@
 
 Crossdating IDM 把树轮宽度编辑、样芯图像、折线对照、COFECHA 报告和自动定年建议放在同一个工作区中。用户可以从唯一的窄年份窗口快速定位缺轮、伪轮、局部移动或整体移动，再回到曲线和实体样芯完成复核。
 
-产品名为 **Crossdating IDM**；GitHub 仓库名保留为 `Crossdating_IDM`，本地工程目录名 `Crossdating_Tauri` 用于体现桌面技术栈。
 
 ## 内容列表
 
