@@ -6433,6 +6433,104 @@ export const recoverPersistedExactUnitLocationFromRemoteSequentialHead = (
     });
 };
 
+export const projectUnitToNearbyNewestHardCandidateMode = (
+    event: DiagnosisEvent,
+    candidateEvents: readonly DiagnosisEvent[],
+    targetRange: { startYear: number; endYear: number },
+): DiagnosisEvent => {
+    if (event.eventType !== "missingRing" && event.eventType !== "falseRing") return event;
+    const currentYear = rankedEventYear(event);
+    const sourceRegion = (candidate: DiagnosisEvent): string | null => {
+        const start = latestEventNoteNumber(candidate, "candidate_source_segment_start=");
+        const end = latestEventNoteNumber(candidate, "candidate_source_segment_end=");
+        return start !== null && end !== null ? `${start}:${end}` : null;
+    };
+    const groups = candidateEvents.filter((candidate) => (
+        candidate.eventType === event.eventType
+        && candidate.evidence.algorithmSources.includes("candidate_ranking")
+        && candidate.evidence.notes.includes("candidate_hard_gate_passed")
+        && sourceRegion(candidate) !== null
+    )).reduce((selected, candidate) => {
+        const key = sourceRegion(candidate)!;
+        selected.set(key, [...(selected.get(key) ?? []), candidate]);
+        return selected;
+    }, new Map<string, DiagnosisEvent[]>());
+    const newest = [...groups.values()].filter((group) => group.length >= 2)
+        .map((group) => group.slice().sort((left, right) => (
+            rankedEventYear(right) - rankedEventYear(left)
+            || right.evidence.score - left.evidence.score
+        ))[0]!)
+        .filter((candidate) => {
+            const distance = rankedEventYear(candidate) - currentYear;
+            return distance >= 14
+                && distance <= 20
+                && candidate.evidence.score >= 20
+                && (candidate.evidence.correlationGain
+                    ?? Number.NEGATIVE_INFINITY) >= 0.1
+                && candidate.evidence.samplePairs >= 50;
+        }).sort((left, right) => (
+            rankedEventYear(right) - rankedEventYear(left)
+            || right.evidence.score - left.evidence.score
+        ))[0] ?? null;
+    if (!newest) return event;
+    const selectedYear = rankedEventYear(newest);
+    const window = boundedSequentialWindow(selectedYear, 13, targetRange);
+    const prior = new Map(newest.rankedYears.map((row) => [row.year, row]));
+    const maximumScore = Math.max(0, ...newest.rankedYears.map((row) => row.score));
+    const minimumScore = Math.min(0, ...newest.rankedYears.map((row) => row.score));
+    const rankedYears = Array.from(
+        { length: window.endYear - window.startYear + 1 },
+        (_, index) => window.startYear + index,
+    ).map((year) => {
+        const existing = prior.get(year);
+        return {
+            year,
+            rank: 0,
+            score: year === selectedYear
+                ? maximumScore + Math.max(1e-9, Math.abs(maximumScore) * 1e-12)
+                : existing?.score ?? minimumScore - 1,
+            evidenceTags: Array.from(new Set([
+                ...(existing?.evidenceTags ?? []),
+                "nearby_newest_hard_candidate_mode",
+            ])).sort(),
+        };
+    }).sort((left, right) => (
+        right.score - left.score || right.year - left.year
+    )).map((row, index) => ({ ...row, rank: index + 1 }));
+    return withEvidenceLedger({
+        ...newest,
+        id: `${newest.id}-nearby-newest-mode-${window.startYear}-${window.endYear}`,
+        ...window,
+        rankedYears,
+        reviewCoreRange: { ...window },
+        seriesRange: event.seriesRange ?? newest.seriesRange,
+        evidence: {
+            ...newest.evidence,
+            algorithmSources: Array.from(new Set([
+                ...newest.evidence.algorithmSources,
+                "nearby_newest_hard_candidate_mode",
+            ])).sort(),
+            locationEvidence: [
+                ...(newest.evidence.locationEvidence ?? []),
+                {
+                    source: "nearby_newest_hard_candidate_mode",
+                    ...window,
+                    topYear: selectedYear,
+                    referenceCount: 0,
+                    concentration: 1,
+                    remoteMargin: newest.evidence.scoreMargin,
+                    calibrated: true,
+                },
+            ],
+            notes: Array.from(new Set([
+                ...newest.evidence.notes,
+                `nearby_newest_previous_year=${currentYear}`,
+                `nearby_newest_selected_year=${selectedYear}`,
+            ])),
+        },
+    });
+};
+
 /**
  * Keeps the bark-side component of a stable distant negative chain. A two-state aggregate can
  * improve more total years, but applying it would skip every independently sustained state
@@ -14453,7 +14551,14 @@ export const makeDiagnosisEvents = (
                     diagnosis.targetRange,
                 )
             ));
-            const dynamicPathOperationEvents = strongDynamicLocatedEvents.map((event) => (
+            const nearbyNewestCandidateEvents = strongDynamicLocatedEvents.map((event) => (
+                projectUnitToNearbyNewestHardCandidateMode(
+                    event,
+                    candidateEvents,
+                    diagnosis.targetRange,
+                )
+            ));
+            const dynamicPathOperationEvents = nearbyNewestCandidateEvents.map((event) => (
                 projectCrossPenaltyPartialToDynamicPathConsensus(
                     event,
                     boundedOperationSelection,

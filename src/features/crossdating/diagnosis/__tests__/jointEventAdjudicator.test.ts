@@ -278,6 +278,35 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("keeps a nearby newer hard-candidate mode ahead of an older bounded mode", () => {
+        const older = event("older-bounded", "missingRing", 1770, 1782, 1773, 20);
+        older.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        const newer = event("newer-hard-mode", "missingRing", 1784, 1796, 1790, 10);
+        newer.evidence.algorithmSources = [
+            "candidate_ranking",
+            "nearby_newest_hard_candidate_mode",
+        ];
+        newer.evidence.notes = ["candidate_hard_gate_passed"];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", newer),
+            checkpoint("displayed", older),
+            { stage: "final", authority: "supplemental", event: older },
+            { stage: "final", authority: "selected", event: newer },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "final",
+            event: {
+                id: "newer-hard-mode",
+                eventType: "missingRing",
+                startYear: 1784,
+                endYear: 1796,
+            },
+        });
+    });
+
     it("keeps a verified terminal unit frontier ahead of an older bounded transition", () => {
         const whole = {
             ...event("terminal-whole", "wholeSeriesMove", 1610, 2002, 2002),

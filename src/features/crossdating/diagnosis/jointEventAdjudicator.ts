@@ -2472,8 +2472,16 @@ const finalFrontierClusters = (
         cluster.checkpoints.some((checkpoint) => (
             checkpoint.stage === "final"
             && checkpoint.authority !== "supplemental"
-            && checkpoint.event.evidence.algorithmSources.includes(
-                "validated_newer_unit_frontier_location",
+            && (
+                checkpoint.event.evidence.algorithmSources.includes(
+                    "validated_newer_unit_frontier_location",
+                )
+                || checkpoint.event.evidence.algorithmSources.includes(
+                    "nearby_newest_hard_candidate_mode",
+                )
+                || checkpoint.event.evidence.algorithmSources.includes(
+                    "persisted_exact_unit_location_checkpoint",
+                )
             )
         ))
     )).sort((left, right) => (

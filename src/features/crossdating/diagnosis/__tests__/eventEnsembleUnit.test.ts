@@ -38,6 +38,7 @@ import {
     projectUnitToStrongDynamicLocation,
     projectCrossPenaltyPartialToDynamicPathConsensus,
     recoverPersistedExactUnitLocationFromRemoteSequentialHead,
+    projectUnitToNearbyNewestHardCandidateMode,
     recoverStableBoundedLagPathFrontier,
     selectDirectTerminalUnitBeforeDerivedStablePartial,
     selectStaleReferenceNewestFixedSidePathFrontier,
@@ -5920,6 +5921,67 @@ describe("selectCumulativePartialFrontier", () => {
             [draft],
             { startYear: 1300, endYear: 2024 },
         )).toBe(remote);
+    });
+
+    it("selects a nearby newer hard-candidate mode for the same unit operation", () => {
+        const current = pathEvent(-1, -1, 0, 1773);
+        current.eventType = "missingRing";
+        current.shiftYears = undefined;
+        current.shiftSide = undefined;
+        const candidate = (year: number, score: number): DiagnosisEvent => {
+            const value = pathEvent(-1, -1, 0, year);
+            value.eventType = "missingRing";
+            value.shiftYears = undefined;
+            value.shiftSide = undefined;
+            value.evidence.algorithmSources = ["candidate_ranking"];
+            value.evidence.notes = [
+                "candidate_hard_gate_passed",
+                "candidate_source_segment_start=1725",
+                "candidate_source_segment_end=1774",
+            ];
+            value.evidence.score = score;
+            value.evidence.correlationGain = 0.16;
+            value.evidence.samplePairs = 50;
+            return value;
+        };
+
+        const projected = projectUnitToNearbyNewestHardCandidateMode(
+            current,
+            [candidate(1773, 28), candidate(1782, 26), candidate(1790, 25)],
+            { startYear: 1500, endYear: 2000 },
+        );
+        expect(projected).toMatchObject({
+            eventType: "missingRing",
+            startYear: 1784,
+            endYear: 1796,
+        });
+        expect(projected.rankedYears[0]).toMatchObject({ year: 1790, rank: 1 });
+    });
+
+    it("does not chase a detached newer hard-candidate mode", () => {
+        const current = pathEvent(-1, -1, 0, 1773);
+        current.eventType = "missingRing";
+        current.shiftYears = undefined;
+        current.shiftSide = undefined;
+        const candidate = pathEvent(-1, -1, 0, 1812);
+        candidate.eventType = "missingRing";
+        candidate.shiftYears = undefined;
+        candidate.shiftSide = undefined;
+        candidate.evidence.algorithmSources = ["candidate_ranking"];
+        candidate.evidence.notes = [
+            "candidate_hard_gate_passed",
+            "candidate_source_segment_start=1725",
+            "candidate_source_segment_end=1774",
+        ];
+        candidate.evidence.score = 30;
+        candidate.evidence.correlationGain = 0.2;
+        candidate.evidence.samplePairs = 50;
+
+        expect(projectUnitToNearbyNewestHardCandidateMode(
+            current,
+            [candidate, { ...candidate, id: "second" }],
+            { startYear: 1500, endYear: 2000 },
+        )).toBe(current);
     });
 
     it("decomposes a non-authoritative whole alias into stable partial components", () => {
