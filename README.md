@@ -1,4 +1,4 @@
-# Crossdating IDM _(Crossdating_IDM / Crossdating_Tauri)_
+# Crossdating IDM _(Crossdating_IDM)_
 
 <p align="center">
   <img src="./app-icon.png" width="112" alt="Crossdating IDM">
