@@ -149,7 +149,11 @@ import {
 } from "./endpointOperationContrast";
 import { refineEventWithCounterfactualLocator } from "./counterfactualEventLocator";
 import { adjudicateLocatorProposal } from "./eventAdjudicator";
-import { evidenceClaimsFor, withEvidenceLedger } from "./evidenceLedger";
+import {
+    evidenceClaimsFor,
+    locationEvidenceFor,
+    withEvidenceLedger,
+} from "./evidenceLedger";
 import {
     calibrateTerminalUnitBoundaryFromCadence,
     hasNearLagClusterCandidate,
@@ -6000,6 +6004,7 @@ export const projectUnitToDistantDynamicConsensus = (
     event: DiagnosisEvent,
     selection: DynamicJointOperationSelection | null,
     targetRange: { startYear: number; endYear: number },
+    corroboratingEvents: readonly DiagnosisEvent[] = [],
     minimumCenterDistance = 14,
 ): DiagnosisEvent => {
     if ((event.eventType !== "missingRing" && event.eventType !== "falseRing")
@@ -6010,6 +6015,38 @@ export const projectUnitToDistantDynamicConsensus = (
     const currentYear = rankedEventYear(event);
     const selectedYear = selection.operation.bestYear;
     if (Math.abs(selectedYear - currentYear) < minimumCenterDistance) return event;
+    const boundedCorroboration = locationEvidenceFor(event).some((entry) => (
+        entry.source === "bounded_complete_lag_path"
+        && entry.topYear !== null
+        && Math.abs(entry.topYear - selectedYear) <= 3
+        && (entry.concentration ?? 0) >= 0.5
+        && (entry.remoteMargin ?? 0) >= 0.1
+    ));
+    const candidateCorroboration = event.evidence.candidateIds.some((candidateId) => (
+        candidateId.split(":").some((part) => Number(part) === selectedYear)
+    ));
+    const acceptsExternalCorroboration = event.evidence.algorithmSources.some((source) => (
+        source === "sequential_missing_staircase_head"
+        || source === "cross_penalty_false_ring_frontier"
+    ));
+    const eventCorroboration = acceptsExternalCorroboration
+        && corroboratingEvents.some((candidate) => {
+            if (candidate.eventType !== event.eventType
+                || Math.abs(rankedEventYear(candidate) - selectedYear) > 3) return false;
+            if (candidate.evidence.notes.includes("candidate_hard_gate_passed")) return true;
+            const concentration = latestEventNoteNumber(
+                candidate,
+                "bounded_path_location_concentration=",
+            ) ?? 0;
+            return candidate.evidence.algorithmSources.includes(
+                "bounded_complete_lag_path",
+            )
+                && concentration >= 0.5
+                && candidate.evidence.scoreMargin >= 0.1;
+        });
+    if (!boundedCorroboration && !candidateCorroboration && !eventCorroboration) {
+        return event;
+    }
     const window = boundedSequentialWindow(selectedYear, 13, targetRange);
     const prior = new Map(event.rankedYears.map((row) => [row.year, row]));
     const maximumScore = Math.max(0, ...event.rankedYears.map((row) => row.score));
@@ -6060,6 +6097,9 @@ export const projectUnitToDistantDynamicConsensus = (
                 `distant_dynamic_unit_selected_year=${selectedYear}`,
                 `distant_dynamic_unit_score=${selection.score}`,
                 `distant_dynamic_unit_margin=${selection.scoreMargin}`,
+                `distant_dynamic_unit_bounded_corroboration=${boundedCorroboration}`,
+                `distant_dynamic_unit_candidate_corroboration=${candidateCorroboration}`,
+                `distant_dynamic_unit_event_corroboration=${eventCorroboration}`,
             ])),
         },
     });
@@ -13875,6 +13915,12 @@ export const makeDiagnosisEvents = (
                     event,
                     boundedUnitSelection,
                     diagnosis.targetRange,
+                    [
+                        ...candidateEvents,
+                        ...boundedPathEvents,
+                        ...passRawPathEvents.events,
+                        ...(rawNearPenaltyTwoPath?.events ?? []),
+                    ],
                 )
             ));
             const crossPenaltyLocatedEvents = dynamicUnitLocatedEvents.map((event) => (

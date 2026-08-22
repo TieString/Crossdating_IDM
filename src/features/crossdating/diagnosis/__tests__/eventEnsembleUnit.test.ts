@@ -5524,6 +5524,16 @@ describe("selectCumulativePartialFrontier", () => {
         missing.eventType = "missingRing";
         missing.shiftYears = undefined;
         missing.shiftSide = undefined;
+        missing.evidence.locationEvidence = [{
+            source: "bounded_complete_lag_path",
+            startYear: 1852,
+            endYear: 1864,
+            topYear: 1858,
+            referenceCount: 38,
+            concentration: 0.8,
+            remoteMargin: 2.6,
+            calibrated: false,
+        }];
         const selectedOperation = operation(-1, 1857);
         selectedOperation.eventType = "missingRing";
 
@@ -5547,6 +5557,128 @@ describe("selectCumulativePartialFrontier", () => {
                 ]),
             },
         });
+    });
+
+    it("does not move a unit window to an uncorroborated distant dynamic mode", () => {
+        const missing = pathEvent(-1, -1, 0, 1872);
+        missing.eventType = "missingRing";
+        missing.shiftYears = undefined;
+        missing.shiftSide = undefined;
+        missing.evidence.locationEvidence = [{
+            source: "bounded_complete_lag_path",
+            startYear: 1866,
+            endYear: 1878,
+            topYear: 1872,
+            referenceCount: 24,
+            concentration: 0.9,
+            remoteMargin: 1,
+            calibrated: false,
+        }];
+        const selectedOperation = operation(-1, 1750);
+        selectedOperation.eventType = "missingRing";
+
+        expect(projectUnitToDistantDynamicConsensus(
+            missing,
+            {
+                operation: selectedOperation,
+                score: 0.8,
+                scoreMargin: 0.6,
+                shiftScoreMargin: null,
+                probabilityLike: 0.95,
+            },
+            { startYear: 1500, endYear: 2000 },
+            [],
+        )).toBe(missing);
+    });
+
+    it("accepts a distant dynamic mode anchored by an executable candidate year", () => {
+        const missing = pathEvent(-1, -1, 0, 1872);
+        missing.eventType = "missingRing";
+        missing.shiftYears = undefined;
+        missing.shiftSide = undefined;
+        missing.evidence.candidateIds = [
+            "TARGET:insertMissingYear::1857:1857:1600:1857::right",
+        ];
+        const selectedOperation = operation(-1, 1857);
+        selectedOperation.eventType = "missingRing";
+
+        expect(projectUnitToDistantDynamicConsensus(
+            missing,
+            {
+                operation: selectedOperation,
+                score: 0.56,
+                scoreMargin: 0.44,
+                shiftScoreMargin: null,
+                probabilityLike: 0.9,
+            },
+            { startYear: 1500, endYear: 2000 },
+        )).toMatchObject({
+            startYear: 1851,
+            endYear: 1863,
+        });
+    });
+
+    it("accepts corroboration from a separate bounded event table", () => {
+        const missing = pathEvent(-1, -1, 0, 1872);
+        missing.eventType = "missingRing";
+        missing.shiftYears = undefined;
+        missing.shiftSide = undefined;
+        missing.evidence.algorithmSources = ["sequential_missing_staircase_head"];
+        const bounded = pathEvent(-1, -1, 0, 1858);
+        bounded.eventType = "missingRing";
+        bounded.shiftYears = undefined;
+        bounded.shiftSide = undefined;
+        bounded.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        bounded.evidence.scoreMargin = 0.5;
+        bounded.evidence.notes = ["bounded_path_location_concentration=0.8"];
+        const selectedOperation = operation(-1, 1857);
+        selectedOperation.eventType = "missingRing";
+
+        expect(projectUnitToDistantDynamicConsensus(
+            missing,
+            {
+                operation: selectedOperation,
+                score: 0.56,
+                scoreMargin: 0.44,
+                shiftScoreMargin: null,
+                probabilityLike: 0.9,
+            },
+            { startYear: 1500, endYear: 2000 },
+            [bounded],
+        )).toMatchObject({
+            startYear: 1851,
+            endYear: 1863,
+        });
+    });
+
+    it("does not let an ordinary unit event borrow external corroboration", () => {
+        const missing = pathEvent(-1, -1, 0, 1872);
+        missing.eventType = "missingRing";
+        missing.shiftYears = undefined;
+        missing.shiftSide = undefined;
+        missing.evidence.algorithmSources = ["segmented_diagnosis"];
+        const bounded = pathEvent(-1, -1, 0, 1858);
+        bounded.eventType = "missingRing";
+        bounded.shiftYears = undefined;
+        bounded.shiftSide = undefined;
+        bounded.evidence.algorithmSources = ["bounded_complete_lag_path"];
+        bounded.evidence.scoreMargin = 0.5;
+        bounded.evidence.notes = ["bounded_path_location_concentration=0.8"];
+        const selectedOperation = operation(-1, 1857);
+        selectedOperation.eventType = "missingRing";
+
+        expect(projectUnitToDistantDynamicConsensus(
+            missing,
+            {
+                operation: selectedOperation,
+                score: 0.56,
+                scoreMargin: 0.44,
+                shiftScoreMargin: null,
+                probabilityLike: 0.9,
+            },
+            { startYear: 1500, endYear: 2000 },
+            [bounded],
+        )).toBe(missing);
     });
 
     it("decomposes a non-authoritative whole alias into stable partial components", () => {
