@@ -2790,6 +2790,9 @@ const recenterSequentialMissingHeadWindow = (
     event: DiagnosisEvent,
 ): DiagnosisEvent => {
     if (event.eventType !== "missingRing"
+        || event.evidence.algorithmSources.includes(
+            "distant_dynamic_unit_consensus",
+        )
         || !event.evidence.algorithmSources.includes(
             "sequential_missing_staircase_head",
         )) return event;

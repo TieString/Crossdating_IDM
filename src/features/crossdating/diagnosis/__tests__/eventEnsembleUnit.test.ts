@@ -33,6 +33,7 @@ import {
     recoverCandidateBackedPartialConsensus,
     recoverCandidateAnchoredRawPartialFrontier,
     recoverAggregatePartialUnitFrontier,
+    projectUnitToDistantDynamicConsensus,
     recoverStableBoundedLagPathFrontier,
     selectDirectTerminalUnitBeforeDerivedStablePartial,
     selectStaleReferenceNewestFixedSidePathFrontier,
@@ -5516,6 +5517,36 @@ describe("selectCumulativePartialFrontier", () => {
             [aggregateOperation, unitOperation],
             { startYear: 1500, endYear: 1950 },
         )).toBeNull();
+    });
+
+    it("re-centers a detached unit window from decisive same-operation evidence", () => {
+        const missing = pathEvent(-1, -1, 0, 1872);
+        missing.eventType = "missingRing";
+        missing.shiftYears = undefined;
+        missing.shiftSide = undefined;
+        const selectedOperation = operation(-1, 1857);
+        selectedOperation.eventType = "missingRing";
+
+        expect(projectUnitToDistantDynamicConsensus(
+            missing,
+            {
+                operation: selectedOperation,
+                score: 0.56,
+                scoreMargin: 0.44,
+                shiftScoreMargin: null,
+                probabilityLike: 0.9,
+            },
+            { startYear: 1500, endYear: 2000 },
+        )).toMatchObject({
+            eventType: "missingRing",
+            startYear: 1851,
+            endYear: 1863,
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "distant_dynamic_unit_consensus",
+                ]),
+            },
+        });
     });
 
     it("decomposes a non-authoritative whole alias into stable partial components", () => {

@@ -5995,6 +5995,76 @@ export const stableFrontierHasRepeatedOperationSupport = (
     )).length >= 2;
 };
 
+/** Re-centers only a detached unit window when the operation-specific scan is decisive. */
+export const projectUnitToDistantDynamicConsensus = (
+    event: DiagnosisEvent,
+    selection: DynamicJointOperationSelection | null,
+    targetRange: { startYear: number; endYear: number },
+    minimumCenterDistance = 14,
+): DiagnosisEvent => {
+    if ((event.eventType !== "missingRing" && event.eventType !== "falseRing")
+        || !selection
+        || selection.operation.eventType !== event.eventType
+        || selection.score < 0.1
+        || selection.scoreMargin < 0.04) return event;
+    const currentYear = rankedEventYear(event);
+    const selectedYear = selection.operation.bestYear;
+    if (Math.abs(selectedYear - currentYear) < minimumCenterDistance) return event;
+    const window = boundedSequentialWindow(selectedYear, 13, targetRange);
+    const prior = new Map(event.rankedYears.map((row) => [row.year, row]));
+    const maximumScore = Math.max(0, ...event.rankedYears.map((row) => row.score));
+    const minimumScore = Math.min(0, ...event.rankedYears.map((row) => row.score));
+    const rankedYears = Array.from(
+        { length: window.endYear - window.startYear + 1 },
+        (_, offset) => window.startYear + offset,
+    ).map((year) => ({
+        year,
+        rank: 0,
+        score: year === selectedYear
+            ? maximumScore + Math.max(1e-9, Math.abs(maximumScore) * 1e-12)
+            : prior.get(year)?.score ?? minimumScore - 1,
+        evidenceTags: Array.from(new Set([
+            ...(prior.get(year)?.evidenceTags ?? []),
+            "distant_dynamic_unit_consensus",
+        ])).sort(),
+    })).sort((left, right) => (
+        right.score - left.score || right.year - left.year
+    )).map((row, index) => ({ ...row, rank: index + 1 }));
+    return withEvidenceLedger({
+        ...event,
+        id: `${event.id}-distant-dynamic-unit-${selectedYear}`,
+        ...window,
+        rankedYears,
+        evidence: {
+            ...event.evidence,
+            algorithmSources: Array.from(new Set([
+                ...event.evidence.algorithmSources,
+                "distant_dynamic_unit_consensus",
+                "joint_year_operation_evidence",
+            ])).sort(),
+            locationEvidence: [
+                ...(event.evidence.locationEvidence ?? []),
+                {
+                    source: "distant_dynamic_unit_consensus",
+                    ...window,
+                    topYear: selectedYear,
+                    referenceCount: 0,
+                    concentration: Math.min(1, selection.score),
+                    remoteMargin: selection.scoreMargin,
+                    calibrated: true,
+                },
+            ],
+            notes: Array.from(new Set([
+                ...event.evidence.notes,
+                `distant_dynamic_unit_previous_year=${currentYear}`,
+                `distant_dynamic_unit_selected_year=${selectedYear}`,
+                `distant_dynamic_unit_score=${selection.score}`,
+                `distant_dynamic_unit_margin=${selection.scoreMargin}`,
+            ])),
+        },
+    });
+};
+
 /**
  * Keeps the bark-side component of a stable distant negative chain. A two-state aggregate can
  * improve more total years, but applying it would skip every independently sustained state
@@ -13800,7 +13870,14 @@ export const makeDiagnosisEvents = (
                     localLagTransitionEvidence,
                 )
             );
-            const crossPenaltyLocatedEvents = sourceEvents.map((event) => (
+            const dynamicUnitLocatedEvents = sourceEvents.map((event) => (
+                projectUnitToDistantDynamicConsensus(
+                    event,
+                    boundedUnitSelection,
+                    diagnosis.targetRange,
+                )
+            ));
+            const crossPenaltyLocatedEvents = dynamicUnitLocatedEvents.map((event) => (
                 projectNegativeEventToCrossPenaltyEquivalentFrontier(
                     event,
                     rawNearPenaltyTwoPath ? {

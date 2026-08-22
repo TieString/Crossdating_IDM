@@ -3277,6 +3277,41 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("does not re-center a dynamically calibrated unit window to an obsolete staircase head", () => {
+        const located = event("dynamic-unit", "missingRing", 1851, 1863, 1857);
+        located.seriesRange = { startYear: 1600, endYear: 2000 };
+        located.evidence.algorithmSources = [
+            "distant_dynamic_unit_consensus",
+            "sequential_missing_staircase_head",
+        ];
+        located.evidence.notes = [
+            "sequential_missing_head_year=1866",
+            "distant_dynamic_unit_selected_year=1857",
+        ];
+        located.evidence.locationEvidence = [{
+            source: "distant_dynamic_unit_consensus",
+            startYear: 1851,
+            endYear: 1863,
+            topYear: 1857,
+            referenceCount: 0,
+            concentration: 0.56,
+            remoteMargin: 0.44,
+            calibrated: true,
+        }];
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("final", located),
+        ]);
+
+        expect(decision.event).toMatchObject({
+            startYear: 1851,
+            endYear: 1863,
+            rankedYears: expect.arrayContaining([
+                expect.objectContaining({ year: 1857, rank: 1 }),
+            ]),
+        });
+    });
+
     it("lets independent final location evidence supersede a protected candidate frontier", () => {
         const checkpointEvent = event(
             "candidate-frontier",
