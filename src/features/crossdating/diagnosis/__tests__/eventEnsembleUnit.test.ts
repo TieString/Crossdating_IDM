@@ -5796,6 +5796,34 @@ describe("selectCumulativePartialFrontier", () => {
         )).toBe(missing);
     });
 
+    it("lets only a bark-side positive consensus challenge a partial mode", () => {
+        const partial = partialMoveEvent(-6);
+        partial.rankedYears = [{
+            year: 1000,
+            rank: 1,
+            score: 2,
+            evidenceTags: [],
+        }];
+        const variants = (year: number) => Array.from({ length: 5 }, (_, index) => {
+            const event = pathEvent(1, 1, 0, year + index % 2);
+            event.eventType = "falseRing";
+            event.shiftYears = undefined;
+            event.shiftSide = undefined;
+            return { source: `path-${index}`, events: [event] };
+        });
+
+        expect(projectMissingToPositivePathOperationConsensus(
+            partial,
+            variants(1055),
+            { startYear: 800, endYear: 1200 },
+        )).toMatchObject({ eventType: "falseRing" });
+        expect(projectMissingToPositivePathOperationConsensus(
+            partial,
+            variants(970),
+            { startYear: 800, endYear: 1200 },
+        )).toBe(partial);
+    });
+
     it("selects a nearby multi-path continuous-gap operation", () => {
         const missing = pathEvent(-1, -1, 0, 1000);
         missing.eventType = "missingRing";

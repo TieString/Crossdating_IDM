@@ -6169,7 +6169,9 @@ export const projectMissingToPositivePathOperationConsensus = (
     minimumFalseSupport = 5,
     minimumDirectionMargin = 4,
 ): DiagnosisEvent => {
-    if (event.eventType !== "missingRing") return event;
+    if (event.eventType !== "missingRing" && event.eventType !== "partialMove") {
+        return event;
+    }
     const observations = variants.flatMap((variant) => variant.events
         .filter((candidate) => (
             candidate.eventType === "falseRing" || candidate.eventType === "missingRing"
@@ -6220,8 +6222,11 @@ export const projectMissingToPositivePathOperationConsensus = (
         || selected.falseSourceCount < minimumFalseSupport
         || selected.directionMargin < minimumDirectionMargin) return event;
     const currentYear = rankedEventYear(event);
-    const modeDistance = Math.abs(selected.centerYear - currentYear);
-    if (modeDistance < 5 || modeDistance > 50) return event;
+    const signedModeDistance = selected.centerYear - currentYear;
+    const modeDistance = Math.abs(signedModeDistance);
+    if (event.eventType === "missingRing"
+        ? modeDistance < 5 || modeDistance > 50
+        : signedModeDistance < 5 || signedModeDistance > 65) return event;
     const representative = selected.falseSupport.slice().sort((left, right) => (
         Math.abs(left.topYear - selected.centerYear)
             - Math.abs(right.topYear - selected.centerYear)
