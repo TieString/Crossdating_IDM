@@ -518,6 +518,24 @@ export const shouldTrimFalseRingNewerEdge = (
         );
 };
 
+const ALLOWED_REVIEW_WINDOW_WIDTHS = new Set([5, 7, 9, 13]);
+
+export const trimFalseRingNewerEdgeWindow = (
+    window: { startYear: number; endYear: number },
+    minimumStartYear: number,
+): { startYear: number; endYear: number } => {
+    const trimmed = {
+        startYear: window.startYear,
+        endYear: window.endYear - 1,
+    };
+    const trimmedWidth = trimmed.endYear - trimmed.startYear + 1;
+    if (ALLOWED_REVIEW_WINDOW_WIDTHS.has(trimmedWidth)) return trimmed;
+    const originalWidth = window.endYear - window.startYear + 1;
+    if (!ALLOWED_REVIEW_WINDOW_WIDTHS.has(originalWidth)) return trimmed;
+    const startYear = Math.max(minimumStartYear, window.startYear - 1);
+    return { startYear, endYear: startYear + originalWidth - 1 };
+};
+
 export const shouldPromoteFalseRingPosteriorYear = (
     event: DiagnosisEvent,
     window: { startYear: number; endYear: number },
@@ -897,14 +915,16 @@ export const refineUnitEventWithEndpointResidualWindow = (
             expandedRanking[0]?.year ?? expandedWindow.endYear,
             expandedPosteriorTop,
         );
-    const window = trimUnsupportedNewerEdge
+    const trimmedWindow = trimUnsupportedNewerEdge
+        ? trimFalseRingNewerEdgeWindow(expandedWindow, selectedCandidateStart)
+        : null;
+    const window = trimmedWindow
         ? {
-            startYear: expandedWindow.startYear,
-            endYear: expandedWindow.endYear - 1,
+            ...trimmedWindow,
             mass: posteriorMass(
                 posterior,
-                expandedWindow.startYear,
-                expandedWindow.endYear - 1,
+                trimmedWindow.startYear,
+                trimmedWindow.endYear,
             ),
         }
         : expandedWindow;

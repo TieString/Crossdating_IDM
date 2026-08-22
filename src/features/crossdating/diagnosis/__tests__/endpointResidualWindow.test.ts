@@ -9,6 +9,7 @@ import {
     shouldPromoteFalseRingPosteriorYear,
     shouldRejectFalseRingRemotePosterior,
     shouldTrimFalseRingNewerEdge,
+    trimFalseRingNewerEdgeWindow,
 } from "../endpointResidualWindow";
 import type {
     DiagnosisEvent,
@@ -215,6 +216,21 @@ describe("endpoint residual single-main-window refinement", () => {
             1900,
             1902,
         )).toBe(false);
+    });
+
+    it("keeps an allowed width when trimming the unsupported newer edge", () => {
+        expect(trimFalseRingNewerEdgeWindow(
+            { startYear: 1752, endYear: 1758 },
+            1700,
+        )).toEqual({ startYear: 1751, endYear: 1757 });
+        expect(trimFalseRingNewerEdgeWindow(
+            { startYear: 1752, endYear: 1759 },
+            1700,
+        )).toEqual({ startYear: 1752, endYear: 1758 });
+        expect(trimFalseRingNewerEdgeWindow(
+            { startYear: 1700, endYear: 1706 },
+            1700,
+        )).toEqual({ startYear: 1700, endYear: 1706 });
     });
 
     it("promotes the posterior year only under strong false-ring consensus", () => {
