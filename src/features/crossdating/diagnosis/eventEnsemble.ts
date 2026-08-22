@@ -6157,83 +6157,6 @@ export const projectUnitToDistantDynamicConsensus = (
     });
 };
 
-export const projectUnitToStrongDynamicLocation = (
-    event: DiagnosisEvent,
-    selection: DynamicJointOperationSelection | null,
-    targetRange: { startYear: number; endYear: number },
-): DiagnosisEvent => {
-    if ((event.eventType !== "missingRing" && event.eventType !== "falseRing")
-        || !selection
-        || selection.operation.eventType !== event.eventType
-        || selection.score < 0.25
-        || selection.scoreMargin < 0.15) return event;
-    const selectedYear = selection.operation.bestYear;
-    const currentYear = rankedEventYear(event);
-    if (selectedYear === currentYear
-        || selectedYear < targetRange.startYear
-        || selectedYear > targetRange.endYear) return event;
-    const window = boundedSequentialWindow(selectedYear, 13, targetRange);
-    const prior = new Map(event.rankedYears.map((row) => [row.year, row]));
-    const maximumScore = Math.max(0, ...event.rankedYears.map((row) => row.score));
-    const minimumScore = Math.min(0, ...event.rankedYears.map((row) => row.score));
-    const rankedYears = Array.from(
-        { length: window.endYear - window.startYear + 1 },
-        (_, index) => window.startYear + index,
-    ).map((year) => {
-        const existing = prior.get(year);
-        return {
-            year,
-            rank: 0,
-            score: year === selectedYear
-                ? maximumScore + Math.max(1e-9, Math.abs(maximumScore) * 1e-12)
-                : existing?.score ?? minimumScore - 1,
-            evidenceTags: Array.from(new Set([
-                ...(existing?.evidenceTags ?? []),
-                "strong_dynamic_same_operation_location",
-            ])).sort(),
-        };
-    }).sort((left, right) => (
-        right.score - left.score || right.year - left.year
-    )).map((row, index) => ({ ...row, rank: index + 1 }));
-    const referenceCount = Math.max(
-        0,
-        ...locationEvidenceFor(event).map((entry) => entry.referenceCount),
-    );
-    return withEvidenceLedger({
-        ...event,
-        id: `${event.id}-strong-dynamic-location-${window.startYear}-${window.endYear}`,
-        ...window,
-        rankedYears,
-        reviewCoreRange: { ...window },
-        evidence: {
-            ...event.evidence,
-            algorithmSources: Array.from(new Set([
-                ...event.evidence.algorithmSources,
-                "strong_dynamic_same_operation_location",
-            ])).sort(),
-            locationEvidence: [
-                ...(event.evidence.locationEvidence ?? []),
-                {
-                    source: "strong_dynamic_same_operation_location",
-                    ...window,
-                    topYear: selectedYear,
-                    referenceCount,
-                    concentration: selection.probabilityLike,
-                    remoteMargin: selection.scoreMargin,
-                    calibrated: false,
-                },
-            ],
-            notes: Array.from(new Set([
-                ...event.evidence.notes,
-                `strong_dynamic_previous_year=${currentYear}`,
-                `strong_dynamic_selected_year=${selectedYear}`,
-                `strong_dynamic_score=${selection.score}`,
-                `strong_dynamic_margin=${selection.scoreMargin}`,
-            ])),
-        },
-    });
-};
-
 /**
  * Keeps the bark-side component of a stable distant negative chain. A two-state aggregate can
  * improve more total years, but applying it would skip every independently sustained state
@@ -14237,14 +14160,7 @@ export const makeDiagnosisEvents = (
                     hasIndependentUnitLocation,
                 );
             };
-            const strongDynamicLocatedEvents = frontierConsensusEvents.map((event) => (
-                projectUnitToStrongDynamicLocation(
-                    event,
-                    boundedUnitSelection,
-                    diagnosis.targetRange,
-                )
-            ));
-            const finalEvents = validAutomaticEvents(strongDynamicLocatedEvents)
+            const finalEvents = validAutomaticEvents(frontierConsensusEvents)
                 .map(attachAndPrioritizeMissingWorkflow)
                 .map(withEvidenceLedger);
             const boundedFinalEvents = includeBoundedPathHypotheses

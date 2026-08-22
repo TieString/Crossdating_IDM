@@ -35,7 +35,6 @@ import {
     recoverCandidateAnchoredRawPartialFrontier,
     recoverAggregatePartialUnitFrontier,
     projectUnitToDistantDynamicConsensus,
-    projectUnitToStrongDynamicLocation,
     recoverStableBoundedLagPathFrontier,
     selectDirectTerminalUnitBeforeDerivedStablePartial,
     selectStaleReferenceNewestFixedSidePathFrontier,
@@ -5729,63 +5728,6 @@ describe("selectCumulativePartialFrontier", () => {
             },
             { startYear: 1500, endYear: 2000 },
             [bounded],
-        )).toBe(missing);
-    });
-
-    it("uses a decisive same-operation unit scan as the final location", () => {
-        const missing = pathEvent(-1, -1, 0, 1887);
-        missing.eventType = "missingRing";
-        missing.shiftYears = undefined;
-        missing.shiftSide = undefined;
-        const selectedOperation = operation(-1, 1883);
-        selectedOperation.eventType = "missingRing";
-
-        const projected = projectUnitToStrongDynamicLocation(
-            missing,
-            {
-                operation: selectedOperation,
-                score: 0.8,
-                scoreMargin: 0.43,
-                shiftScoreMargin: null,
-                probabilityLike: 0.9,
-            },
-            { startYear: 1500, endYear: 2000 },
-        );
-        expect(projected).toMatchObject({
-            eventType: "missingRing",
-            startYear: 1877,
-            endYear: 1889,
-        });
-        expect(projected.rankedYears[0]).toMatchObject({ year: 1883, rank: 1 });
-        expect(projected.rankedYears).toHaveLength(13);
-    });
-
-    it("does not use a weak or opposite-operation dynamic location", () => {
-        const missing = pathEvent(-1, -1, 0, 1887);
-        missing.eventType = "missingRing";
-        missing.shiftYears = undefined;
-        missing.shiftSide = undefined;
-        const selectedOperation = operation(-1, 1883);
-        selectedOperation.eventType = "missingRing";
-        const weak = {
-            operation: selectedOperation,
-            score: 0.24,
-            scoreMargin: 0.2,
-            shiftScoreMargin: null,
-            probabilityLike: 0.8,
-        };
-
-        expect(projectUnitToStrongDynamicLocation(
-            missing,
-            weak,
-            { startYear: 1500, endYear: 2000 },
-        )).toBe(missing);
-        weak.score = 0.3;
-        weak.operation.eventType = "falseRing";
-        expect(projectUnitToStrongDynamicLocation(
-            missing,
-            weak,
-            { startYear: 1500, endYear: 2000 },
         )).toBe(missing);
     });
 
