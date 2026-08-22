@@ -6169,6 +6169,7 @@ export const projectMissingToPositivePathOperationConsensus = (
     targetRange: { startYear: number; endYear: number },
     minimumFalseSupport = 5,
     minimumDirectionMargin = 4,
+    minimumPathScore = 6,
 ): DiagnosisEvent => {
     if (event.eventType !== "missingRing" && event.eventType !== "partialMove") {
         return event;
@@ -6233,7 +6234,7 @@ export const projectMissingToPositivePathOperationConsensus = (
             - Math.abs(right.topYear - selected.centerYear)
         || right.event.evidence.score - left.event.evidence.score
     ))[0]?.event ?? null;
-    if (!representative) return event;
+    if (!representative || representative.evidence.score < minimumPathScore) return event;
     const window = boundedSequentialWindow(selected.centerYear, 13, targetRange);
     const prior = new Map(representative.rankedYears.map((row) => [row.year, row]));
     const maximumScore = Math.max(

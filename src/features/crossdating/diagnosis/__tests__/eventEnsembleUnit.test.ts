@@ -5796,6 +5796,26 @@ describe("selectCumulativePartialFrontier", () => {
         )).toBe(missing);
     });
 
+    it("keeps a missing mode when the positive path transition is weak", () => {
+        const missing = pathEvent(-1, -1, 0, 1000);
+        missing.eventType = "missingRing";
+        missing.shiftYears = undefined;
+        missing.shiftSide = undefined;
+        const variants = Array.from({ length: 6 }, (_, index) => {
+            const event = pathEvent(1, 1, 0, 1030 + index % 2, 5);
+            event.eventType = "falseRing";
+            event.shiftYears = undefined;
+            event.shiftSide = undefined;
+            return { source: `weak-${index}`, events: [event] };
+        });
+
+        expect(projectMissingToPositivePathOperationConsensus(
+            missing,
+            variants,
+            { startYear: 800, endYear: 1200 },
+        )).toBe(missing);
+    });
+
     it("lets only a bark-side positive consensus challenge a partial mode", () => {
         const partial = partialMoveEvent(-6);
         partial.rankedYears = [{
