@@ -37,6 +37,7 @@ import {
     selectDirectTerminalUnitBeforeDerivedStablePartial,
     selectStaleReferenceNewestFixedSidePathFrontier,
     selectCandidateBackedStableTerminalUnit,
+    selectHighConfidenceSeparatedTerminalUnitFrontier,
     selectCandidateAnchoredDistantMissingFrontier,
     selectDistantSequentialMissingFrontier,
     selectEndpointAggregatePartialFrontier,
@@ -3689,6 +3690,55 @@ describe("selectCumulativePartialFrontier", () => {
         });
         expect(selected?.startYear).toBeLessThanOrEqual(1822);
         expect(selected?.endYear).toBeGreaterThanOrEqual(1823);
+    });
+
+    it("recovers a concentrated terminal unit from one separated complete path", () => {
+        const olderPartial = pathEvent(-21, -20, 1, 1650, 30);
+        const newestFalse = pathEvent(1, 1, 0, 1680, 30);
+        newestFalse.eventType = "falseRing";
+        newestFalse.shiftYears = undefined;
+        newestFalse.shiftSide = undefined;
+        newestFalse.evidence.notes = [
+            "bounded_path_location_concentration=0.94",
+            "bounded_path_older_sample_pairs=60",
+            "bounded_path_newer_sample_pairs=600",
+        ];
+        const completePath = boundedPath([olderPartial, newestFalse]);
+        completePath.path.transitionGain = 35;
+        completePath.path.runnerUpMargin = 0.75;
+
+        expect(selectHighConfidenceSeparatedTerminalUnitFrontier(
+            completePath,
+        )).toMatchObject({
+            eventType: "falseRing",
+            startYear: newestFalse.startYear,
+            endYear: newestFalse.endYear,
+            evidence: {
+                algorithmSources: expect.arrayContaining([
+                    "high_confidence_separated_terminal_unit_frontier",
+                ]),
+            },
+        });
+    });
+
+    it("rejects a concentrated unit that belongs to a nearby mixed cluster", () => {
+        const olderPartial = pathEvent(-21, -20, 1, 1672, 30);
+        const newestFalse = pathEvent(1, 1, 0, 1680, 30);
+        newestFalse.eventType = "falseRing";
+        newestFalse.shiftYears = undefined;
+        newestFalse.shiftSide = undefined;
+        newestFalse.evidence.notes = [
+            "bounded_path_location_concentration=0.99",
+            "bounded_path_older_sample_pairs=100",
+            "bounded_path_newer_sample_pairs=100",
+        ];
+        const completePath = boundedPath([olderPartial, newestFalse]);
+        completePath.path.transitionGain = 40;
+        completePath.path.runnerUpMargin = 1;
+
+        expect(selectHighConfidenceSeparatedTerminalUnitFrontier(
+            completePath,
+        )).toBeNull();
     });
 
     it("preserves a decisive independent partial location over a broad path peak", () => {

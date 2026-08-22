@@ -8847,6 +8847,91 @@ export const selectDistantSequentialMissingFrontier = (
 };
 
 /**
+ * Recovers a terminal unit event from one highly concentrated complete path when the second
+ * regularization cannot form a full model. A wide separation from the next older transition
+ * prevents a mixed local cluster from being split opportunistically.
+ */
+export const selectHighConfidenceSeparatedTerminalUnitFrontier = (
+    path: BoundedLagStateEventSet | null,
+    baselineLag = 0,
+    minimumTransitionGain = 20,
+    minimumRunnerUpMargin = 0.3,
+    minimumConcentration = 0.9,
+    minimumSidePairs = 40,
+    minimumSeparationYears = 14,
+): DiagnosisEvent | null => {
+    if (!path
+        || !boundedLagPathHasObservedFixedSide(path)
+        || path.path.transitionGain < minimumTransitionGain
+        || path.path.runnerUpMargin < minimumRunnerUpMargin) return null;
+    const transitions = exactLagPathTransitions(
+        path.events,
+        Number.NEGATIVE_INFINITY,
+    ).sort((left, right) => right.topYear - left.topYear);
+    const newest = transitions[0];
+    const next = transitions[1];
+    if (!newest
+        || (newest.event.eventType !== "missingRing"
+            && newest.event.eventType !== "falseRing")
+        || newest.event.evidence.lagAfter !== baselineLag
+        || (next && newest.topYear - next.topYear < minimumSeparationYears)) return null;
+    const concentration = latestEventNoteNumber(
+        newest.event,
+        "bounded_path_location_concentration=",
+    ) ?? 0;
+    const olderPairs = latestEventNoteNumber(
+        newest.event,
+        "bounded_path_older_sample_pairs=",
+    ) ?? 0;
+    const newerPairs = latestEventNoteNumber(
+        newest.event,
+        "bounded_path_newer_sample_pairs=",
+    ) ?? 0;
+    if (concentration < minimumConcentration
+        || olderPairs < minimumSidePairs
+        || newerPairs < minimumSidePairs) return null;
+    const event = newest.event;
+    return withEvidenceLedger({
+        ...event,
+        id: `${event.id}-high-confidence-separated-terminal-unit`,
+        alternativeTypes: [],
+        locationAlternatives: undefined,
+        operationAlternatives: undefined,
+        evidence: {
+            ...event.evidence,
+            algorithmSources: Array.from(new Set([
+                ...event.evidence.algorithmSources,
+                "high_confidence_separated_terminal_unit_frontier",
+            ])).sort(),
+            score: path.path.transitionGain,
+            scoreMargin: path.path.runnerUpMargin,
+            locationEvidence: [
+                ...(event.evidence.locationEvidence ?? []),
+                {
+                    source: "high_confidence_separated_terminal_unit_frontier",
+                    startYear: event.startYear,
+                    endYear: event.endYear,
+                    topYear: newest.topYear,
+                    referenceCount: 0,
+                    concentration,
+                    remoteMargin: path.path.runnerUpMargin,
+                    calibrated: true,
+                },
+            ],
+            notes: Array.from(new Set([
+                ...event.evidence.notes,
+                `single_path_terminal_unit_year=${newest.topYear}`,
+                `single_path_terminal_unit_concentration=${concentration}`,
+                `single_path_terminal_unit_older_pairs=${olderPairs}`,
+                `single_path_terminal_unit_newer_pairs=${newerPairs}`,
+                `single_path_terminal_unit_next_year=${next?.topYear ?? "none"}`,
+                "single_path_terminal_unit_review_recovery=true",
+            ])),
+        },
+    });
+};
+
+/**
  * Projects the first bark-side unit step when an accumulated missing-ring depth is masquerading
  * as one large whole-series shift. The whole candidate itself must say that its large lag has no
  * newer-edge support and that the newest observed state is only -1.
@@ -13624,6 +13709,10 @@ export const makeDiagnosisEvents = (
                 stableBoundedPathFrontier,
                 candidateEvents,
             );
+        const highConfidenceSeparatedTerminalUnitFrontier =
+            selectHighConfidenceSeparatedTerminalUnitFrontier(
+                rawNearPenaltyTwoPath,
+            );
         const cumulativeMissingAliasOwnsOperation = stableBoundedPathFrontier
             ?.evidence.algorithmSources.includes(
                 "cumulative_missing_whole_alias_frontier",
@@ -14397,6 +14486,10 @@ export const makeDiagnosisEvents = (
         if (candidateBackedCrossPenaltyUnitFrontier
             && dominantWholeSeriesBaseline === null) {
             return finalize([candidateBackedCrossPenaltyUnitFrontier], [], false);
+        }
+        if (highConfidenceSeparatedTerminalUnitFrontier
+            && dominantWholeSeriesBaseline === null) {
+            return finalize([highConfidenceSeparatedTerminalUnitFrontier], [], false);
         }
         const endpointAggregatePartialFrontier = selectEndpointAggregatePartialFrontier(
             displayed,
