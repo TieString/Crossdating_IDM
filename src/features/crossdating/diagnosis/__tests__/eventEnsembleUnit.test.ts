@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DiagnosisEvent, SeriesCoreDiagnosis } from "../types";
 import {
     allowStableBoundedPathFinalAuthority,
+    candidateOperationIdentityCheckpoints,
     candidateDepthTerminalUnitPreemptsSeparatedPartial,
     hasIndependentStableFrontierOperationSupport,
     hasCompletedMixedCompositionLocation,
@@ -1020,6 +1021,55 @@ describe("sequential missing hypothesis retention", () => {
         expect(retainDisplayedMissingHypothesesDuringSequentialRecovery(
             displayed,
             recovered,
+        )).toEqual([]);
+    });
+
+});
+
+describe("candidate operation identity checkpoints", () => {
+    it("submits a normalized hard-gated false ring beside an unanchored staircase", () => {
+        const selected = falseRingEvent(1800, false);
+        selected.eventType = "missingRing";
+        selected.evidence.algorithmSources = ["sequential_missing_staircase_head"];
+        const candidate = falseRingEvent(1870, false);
+        candidate.rankedYears = [{
+            year: 1873,
+            rank: 1,
+            score: 2,
+            evidenceTags: [],
+        }];
+        candidate.evidence.algorithmSources = ["candidate_ranking"];
+        candidate.evidence.notes = ["candidate_hard_gate_passed"];
+
+        expect(candidateOperationIdentityCheckpoints(
+            [selected],
+            [candidate],
+            { startYear: 1600, endYear: 2000 },
+        )).toEqual([
+            expect.objectContaining({
+                eventType: "falseRing",
+                startYear: 1867,
+                endYear: 1879,
+                evidence: expect.objectContaining({
+                    algorithmSources: expect.arrayContaining([
+                        "candidate_operation_identity_checkpoint",
+                    ]),
+                }),
+            }),
+        ]);
+    });
+
+    it("does not submit an opposite candidate without both operation gates", () => {
+        const selected = falseRingEvent(1800, false);
+        selected.eventType = "missingRing";
+        selected.evidence.algorithmSources = ["sequential_missing_staircase_head"];
+        const candidate = falseRingEvent(1870, false);
+        candidate.evidence.algorithmSources = ["candidate_ranking"];
+
+        expect(candidateOperationIdentityCheckpoints(
+            [selected],
+            [candidate],
+            { startYear: 1600, endYear: 2000 },
         )).toEqual([]);
     });
 });

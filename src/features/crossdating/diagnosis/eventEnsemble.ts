@@ -1985,6 +1985,58 @@ const boundedSequentialWindow = (
     return { startYear, endYear: startYear + actualWidth - 1 };
 };
 
+export const candidateOperationIdentityCheckpoints = (
+    selectedEvents: readonly DiagnosisEvent[],
+    candidateEvents: readonly DiagnosisEvent[],
+    range: { startYear: number; endYear: number },
+): DiagnosisEvent[] => {
+    const hasUnanchoredSequentialMissing = selectedEvents.some((event) => (
+        event.eventType === "missingRing"
+        && event.evidence.algorithmSources.includes("sequential_missing_staircase_head")
+        && !event.evidence.notes.includes("candidate_hard_gate_passed")
+    ));
+    if (!hasUnanchoredSequentialMissing) return [];
+    return candidateEvents.filter((event) => (
+        event.eventType === "falseRing"
+        && event.evidence.algorithmSources.includes("candidate_ranking")
+        && event.evidence.notes.includes("candidate_hard_gate_passed")
+    )).map((event) => {
+        const centerYear = rankedEventYear(event);
+        const window = boundedSequentialWindow(centerYear, 13, range);
+        const prior = new Map(event.rankedYears.map((row) => [row.year, row]));
+        const minimumScore = Math.min(0, ...event.rankedYears.map((row) => row.score));
+        const rankedYears = Array.from(
+            { length: window.endYear - window.startYear + 1 },
+            (_, index) => window.startYear + index,
+        ).map((year) => prior.get(year) ?? {
+            year,
+            rank: 0,
+            score: minimumScore - 1,
+            evidenceTags: ["candidate_operation_identity_checkpoint"],
+        }).sort((left, right) => (
+            right.score - left.score || right.year - left.year
+        )).map((row, index) => ({ ...row, rank: index + 1 }));
+        return withEvidenceLedger({
+            ...event,
+            id: `${event.id}-operation-identity-${window.startYear}-${window.endYear}`,
+            ...window,
+            rankedYears,
+            reviewCoreRange: { ...window },
+            evidence: {
+                ...event.evidence,
+                algorithmSources: Array.from(new Set([
+                    ...event.evidence.algorithmSources,
+                    "candidate_operation_identity_checkpoint",
+                ])).sort(),
+                notes: Array.from(new Set([
+                    ...event.evidence.notes,
+                    "candidate_operation_identity_preserved_against_sequential_missing",
+                ])),
+            },
+        });
+    });
+};
+
 export const sequentialFalseFrontierWindow = (
     presentationYear: number,
     pathStartLag: number,
@@ -14114,9 +14166,15 @@ export const makeDiagnosisEvents = (
             const boundedFinalEvents = includeBoundedPathHypotheses
                 ? boundedPathEvents.flatMap((event) => validAutomaticEvents([event]))
                 : [];
+            const operationIdentityCheckpoints = candidateOperationIdentityCheckpoints(
+                finalEvents,
+                candidateEvents,
+                diagnosis.targetRange,
+            );
             const supplementalFinalEvents = [
                 ...boundedFinalEvents,
                 ...validAutomaticEvents(supplementalFinalHypotheses),
+                ...operationIdentityCheckpoints,
             ].map(attachAndPrioritizeMissingWorkflow).map(withEvidenceLedger);
             let finalReason: DiagnosisEventDecisionReason = "post_location_rejected";
             if (finalEvents.length > 0) {

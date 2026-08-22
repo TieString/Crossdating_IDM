@@ -96,6 +96,26 @@ describe("diagnosis evidence ledger", () => {
         ]);
     });
 
+    it("records a hard-gated candidate operation identity checkpoint", () => {
+        const candidate = event();
+        candidate.eventType = "falseRing";
+        candidate.evidence.lagBefore = 1;
+        candidate.evidence.algorithmSources = [
+            "candidate_operation_identity_checkpoint",
+            "candidate_ranking",
+        ];
+        candidate.evidence.notes = ["candidate_hard_gate_passed"];
+
+        expect(evidenceClaimsFor(candidate)).toContain(
+            "candidate_operation_identity",
+        );
+
+        candidate.evidence.notes = [];
+        expect(evidenceClaimsFor(candidate)).not.toContain(
+            "candidate_operation_identity",
+        );
+    });
+
     it("records when a sequential staircase fully explains an earlier whole baseline", () => {
         const resolved = event();
         resolved.evidence.algorithmSources.push(

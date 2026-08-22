@@ -42,6 +42,7 @@ export type DiagnosisEventLocationEvidence = {
 
 export type DiagnosisEvidenceClaim =
     | "explicit_missing_staircase"
+    | "candidate_operation_identity"
     | "whole_baseline_exhausted_by_missing_staircase"
     | "independent_reference_staircase"
     | "fixed_side_resolution"

@@ -276,6 +276,7 @@ const acceptedStrongLocatorEvidence = (
 
 const claimWeight: Record<DiagnosisEvidenceClaim, number> = {
     explicit_missing_staircase: 1,
+    candidate_operation_identity: 1.1,
     whole_baseline_exhausted_by_missing_staircase: 1,
     independent_reference_staircase: 0.9,
     fixed_side_resolution: 1,
@@ -1221,6 +1222,7 @@ const operationContractValid = (
         return true;
     }
     const claims = evidenceClaimsFor(event);
+    if (claims.has("candidate_operation_identity")) return true;
     if (event.eventType === "missingRing"
         && (
             claims.has("fixed_side_resolution")
@@ -2378,6 +2380,51 @@ const finalFrontierClusters = (
             && checkpoint.authority !== "supplemental"
         ))
     ));
+    const selectedUnanchoredSequentialMissing = selectedFinalClusters.filter((cluster) => (
+        cluster.checkpoints.some((checkpoint) => (
+            checkpoint.stage === "final"
+            && checkpoint.authority !== "supplemental"
+            && checkpoint.event.eventType === "missingRing"
+            && checkpoint.event.evidence.algorithmSources.includes(
+                "sequential_missing_staircase_head",
+            )
+            && !checkpoint.event.evidence.notes.includes("candidate_hard_gate_passed")
+        ))
+    ));
+    const hardGatedOppositeUnitCheckpoints = allFinalClusters.filter((cluster) => (
+        cluster.checkpoints.some((checkpoint) => (
+            checkpoint.stage === "final"
+            && checkpoint.authority === "supplemental"
+            && checkpoint.event.eventType === "falseRing"
+            && checkpoint.event.evidence.algorithmSources.includes(
+                "candidate_operation_identity_checkpoint",
+            )
+            && isHardGatedUnitLocationCheckpoint(checkpoint.event)
+        ))
+    ));
+    const hasSelectedWholeFrame = selectedFinalClusters.some((cluster) => (
+        representative(cluster).event.eventType === "wholeSeriesMove"
+    ));
+    const hasTypedWholeFrame = clusters.some((cluster) => {
+        const event = representative(cluster).event;
+        if (event.eventType !== "wholeSeriesMove") return false;
+        const claims = evidenceClaimsFor(event);
+        return claims.has("whole_global_lag")
+            || claims.has("whole_terminal_baseline")
+            || claims.has("whole_path_fixed_baseline")
+            || claims.has("whole_recent_tail_baseline");
+    });
+    if (!hasSelectedWholeFrame
+        && !hasTypedWholeFrame
+        && selectedUnanchoredSequentialMissing.length > 0
+        && hardGatedOppositeUnitCheckpoints.length > 0) {
+        // The selected staircase remains a complete hypothesis, but it cannot remove an
+        // independently executable opposite operation before operation scoring has run.
+        return [
+            ...selectedUnanchoredSequentialMissing,
+            ...hardGatedOppositeUnitCheckpoints,
+        ];
+    }
     const terminalUnitFrame = selectVerifiedTerminalUnitFrame(
         clusters,
         evidenceClusters,

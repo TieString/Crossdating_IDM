@@ -1555,6 +1555,43 @@ describe("joint event adjudicator", () => {
         });
     });
 
+    it("lets a hard-gated opposite unit compete with an unanchored sequential missing", () => {
+        const sequential = event(
+            "sequential-missing",
+            "missingRing",
+            1051,
+            1063,
+            1059,
+        );
+        sequential.evidence.algorithmSources = ["sequential_missing_staircase_head"];
+        const candidate = event("candidate-false", "falseRing", 1045, 1057, 1051);
+        candidate.evidence.algorithmSources = [
+            "candidate_operation_identity_checkpoint",
+            "candidate_ranking",
+        ];
+        candidate.evidence.candidateIds = ["candidate-false"];
+        candidate.evidence.notes = ["candidate_hard_gate_passed"];
+        candidate.evidence.lagAfter = 9;
+
+        const decision = adjudicateJointEventHypotheses("TARGET", [
+            checkpoint("candidate", candidate),
+            checkpoint("detected", candidate),
+            checkpoint("displayed", candidate),
+            { stage: "final", authority: "selected", event: sequential },
+            { stage: "final", authority: "supplemental", event: candidate },
+        ]);
+
+        expect(decision).toMatchObject({
+            status: "selected",
+            sourceStage: "final",
+            event: {
+                eventType: "falseRing",
+                startYear: 1045,
+                endYear: 1057,
+            },
+        });
+    });
+
     it("does not let a supplemental bounded path change the selected final operation", () => {
         const selectedFalse = event("selected-false", "falseRing", 1156, 1164, 1160);
         selectedFalse.evidence.algorithmSources = [
