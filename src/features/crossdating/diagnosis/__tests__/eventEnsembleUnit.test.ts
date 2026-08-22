@@ -37,7 +37,6 @@ import {
     projectUnitToDistantDynamicConsensus,
     projectUnitToStrongDynamicLocation,
     projectCrossPenaltyPartialToDynamicPathConsensus,
-    recoverPersistedExactUnitLocationFromRemoteSequentialHead,
     recoverStableBoundedLagPathFrontier,
     selectDirectTerminalUnitBeforeDerivedStablePartial,
     selectStaleReferenceNewestFixedSidePathFrontier,
@@ -5858,68 +5857,6 @@ describe("selectCumulativePartialFrontier", () => {
             [],
             { startYear: 1300, endYear: 2000 },
         )).toBe(incumbent);
-    });
-
-    it("restores a persisted exact unit location from a remote sequential head", () => {
-        const remote = pathEvent(-1, -1, 0, 2003);
-        remote.eventType = "missingRing";
-        remote.shiftYears = undefined;
-        remote.shiftSide = undefined;
-        remote.evidence.algorithmSources = ["sequential_missing_staircase_head"];
-        const exact = pathEvent(-1, -21, -20, 1759);
-        exact.eventType = "missingRing";
-        exact.shiftYears = undefined;
-        exact.shiftSide = undefined;
-        exact.startYear = 1757;
-        exact.endYear = 1763;
-        exact.evidence.correlationGain = 0.14;
-        exact.evidence.samplePairs = 28;
-        exact.evidence.notes = [
-            "nominal_boundary_year=1762",
-            "profile_boundary_year=1762",
-        ];
-
-        const recovered = recoverPersistedExactUnitLocationFromRemoteSequentialHead(
-            remote,
-            [exact],
-            [exact],
-            [exact],
-            [exact],
-            { startYear: 1300, endYear: 2024 },
-        );
-        expect(recovered).toMatchObject({
-            eventType: "missingRing",
-            startYear: 1753,
-            endYear: 1765,
-            evidence: {
-                algorithmSources: expect.arrayContaining([
-                    "persisted_exact_unit_location_checkpoint",
-                ]),
-            },
-        });
-        expect(recovered.rankedYears[0]).toMatchObject({ year: 1759, rank: 1 });
-    });
-
-    it("keeps a remote sequential head without a persistent exact transition", () => {
-        const remote = pathEvent(-1, -1, 0, 2003);
-        remote.eventType = "missingRing";
-        remote.shiftYears = undefined;
-        remote.shiftSide = undefined;
-        remote.evidence.algorithmSources = ["sequential_missing_staircase_head"];
-        const draft = pathEvent(-1, -21, -20, 1759);
-        draft.eventType = "missingRing";
-        draft.shiftYears = undefined;
-        draft.shiftSide = undefined;
-        draft.evidence.correlationGain = 0.05;
-
-        expect(recoverPersistedExactUnitLocationFromRemoteSequentialHead(
-            remote,
-            [draft],
-            [draft],
-            [draft],
-            [draft],
-            { startYear: 1300, endYear: 2024 },
-        )).toBe(remote);
     });
 
     it("decomposes a non-authoritative whole alias into stable partial components", () => {

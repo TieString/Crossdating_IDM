@@ -6326,113 +6326,6 @@ export const projectCrossPenaltyPartialToDynamicPathConsensus = (
     });
 };
 
-export const recoverPersistedExactUnitLocationFromRemoteSequentialHead = (
-    event: DiagnosisEvent,
-    detectedEvents: readonly DiagnosisEvent[],
-    fusedEvents: readonly DiagnosisEvent[],
-    retainedEvents: readonly DiagnosisEvent[],
-    displayedEvents: readonly DiagnosisEvent[],
-    targetRange: { startYear: number; endYear: number },
-): DiagnosisEvent => {
-    if ((event.eventType !== "missingRing" && event.eventType !== "falseRing")
-        || !event.evidence.algorithmSources.includes(
-            "sequential_missing_staircase_head",
-        )) return event;
-    const currentYear = rankedEventYear(event);
-    const sameLocationMode = (left: DiagnosisEvent, right: DiagnosisEvent): boolean => (
-        left.eventType === right.eventType
-        && Math.max(left.startYear, right.startYear) <= Math.min(left.endYear, right.endYear)
-        && Math.abs(rankedEventYear(left) - rankedEventYear(right)) <= 2
-    );
-    const hasExactTransition = (candidate: DiagnosisEvent): boolean => {
-        const before = candidate.evidence.lagBefore;
-        const after = candidate.evidence.lagAfter;
-        if (before === null || after === null) return false;
-        return candidate.eventType === "missingRing"
-            ? after - before === 1
-            : before - after === 1;
-    };
-    const persisted = displayedEvents.filter((candidate) => {
-        if (candidate.eventType !== event.eventType
-            || !hasExactTransition(candidate)
-            || (candidate.evidence.correlationGain ?? Number.NEGATIVE_INFINITY) < 0.1
-            || candidate.evidence.samplePairs < 25
-            || Math.abs(rankedEventYear(candidate) - currentYear) <= 13) return false;
-        const nominal = latestEventNoteNumber(candidate, "nominal_boundary_year=");
-        const profile = latestEventNoteNumber(candidate, "profile_boundary_year=");
-        return nominal !== null
-            && nominal === profile
-            && [detectedEvents, fusedEvents, retainedEvents].every((stage) => (
-                stage.some((checkpoint) => sameLocationMode(candidate, checkpoint))
-            ));
-    }).sort((left, right) => (
-        right.evidence.score - left.evidence.score
-        || right.evidence.scoreMargin - left.evidence.scoreMargin
-        || rankedEventYear(right) - rankedEventYear(left)
-    ))[0] ?? null;
-    if (!persisted) return event;
-    const selectedYear = rankedEventYear(persisted);
-    const window = boundedSequentialWindow(selectedYear, 13, targetRange);
-    const prior = new Map(persisted.rankedYears.map((row) => [row.year, row]));
-    const maximumScore = Math.max(0, ...persisted.rankedYears.map((row) => row.score));
-    const minimumScore = Math.min(0, ...persisted.rankedYears.map((row) => row.score));
-    const rankedYears = Array.from(
-        { length: window.endYear - window.startYear + 1 },
-        (_, index) => window.startYear + index,
-    ).map((year) => {
-        const existing = prior.get(year);
-        return {
-            year,
-            rank: 0,
-            score: year === selectedYear
-                ? maximumScore + Math.max(1e-9, Math.abs(maximumScore) * 1e-12)
-                : existing?.score ?? minimumScore - 1,
-            evidenceTags: Array.from(new Set([
-                ...(existing?.evidenceTags ?? []),
-                "persisted_exact_unit_location_checkpoint",
-            ])).sort(),
-        };
-    }).sort((left, right) => (
-        right.score - left.score || right.year - left.year
-    )).map((row, index) => ({ ...row, rank: index + 1 }));
-    const referenceCount = Math.max(
-        0,
-        ...locationEvidenceFor(persisted).map((entry) => entry.referenceCount),
-    );
-    return withEvidenceLedger({
-        ...persisted,
-        id: `${persisted.id}-persisted-exact-location-${window.startYear}-${window.endYear}`,
-        ...window,
-        rankedYears,
-        reviewCoreRange: { ...window },
-        seriesRange: event.seriesRange ?? persisted.seriesRange,
-        evidence: {
-            ...persisted.evidence,
-            algorithmSources: Array.from(new Set([
-                ...persisted.evidence.algorithmSources,
-                "persisted_exact_unit_location_checkpoint",
-            ])).sort(),
-            locationEvidence: [
-                ...(persisted.evidence.locationEvidence ?? []),
-                {
-                    source: "persisted_exact_unit_location_checkpoint",
-                    ...window,
-                    topYear: selectedYear,
-                    referenceCount,
-                    concentration: 1,
-                    remoteMargin: persisted.evidence.scoreMargin,
-                    calibrated: true,
-                },
-            ],
-            notes: Array.from(new Set([
-                ...persisted.evidence.notes,
-                `persisted_exact_replaced_remote_year=${currentYear}`,
-                `persisted_exact_selected_year=${selectedYear}`,
-            ])),
-        },
-    });
-};
-
 /**
  * Keeps the bark-side component of a stable distant negative chain. A two-state aggregate can
  * improve more total years, but applying it would skip every independently sustained state
@@ -14436,17 +14329,7 @@ export const makeDiagnosisEvents = (
                     hasIndependentUnitLocation,
                 );
             };
-            const persistedExactLocatedEvents = frontierConsensusEvents.map((event) => (
-                recoverPersistedExactUnitLocationFromRemoteSequentialHead(
-                    event,
-                    detectedBeforeFusion,
-                    detected,
-                    retainedDetected,
-                    displayed,
-                    diagnosis.targetRange,
-                )
-            ));
-            const strongDynamicLocatedEvents = persistedExactLocatedEvents.map((event) => (
+            const strongDynamicLocatedEvents = frontierConsensusEvents.map((event) => (
                 projectUnitToStrongDynamicLocation(
                     event,
                     boundedUnitSelection,
