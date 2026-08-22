@@ -6739,7 +6739,7 @@ type CrossPenaltyTerminalNegativeCluster = {
     transitions: readonly ExactLagPathTransition[];
     aggregateShiftYears: number;
     centerYear: number;
-    hasSeparatedOlderFalseRing: boolean;
+    separatedOlderUnitShifts: readonly number[];
 };
 
 const selectTerminalNegativeCluster = (
@@ -6777,16 +6777,19 @@ const selectTerminalNegativeCluster = (
         ? clusterYears[middle]!
         : Math.round((clusterYears[middle - 1]! + clusterYears[middle]!) / 2);
     const firstClusterYear = clusterYears[0]!;
-    const hasSeparatedOlderFalseRing = transitions.slice(0, clusterStart).some(
-        (transition) => transition.event.eventType === "falseRing"
-            && transition.shiftYears === 1
-            && firstClusterYear - transition.topYear >= minimumOlderEventSeparationYears,
-    );
+    const separatedOlderUnitShifts = transitions.slice(0, clusterStart)
+        .filter((transition) => (
+            (transition.event.eventType === "missingRing"
+                || transition.event.eventType === "falseRing")
+            && Math.abs(transition.shiftYears) === 1
+            && firstClusterYear - transition.topYear >= minimumOlderEventSeparationYears
+        ))
+        .map(({ shiftYears }) => shiftYears);
     return {
         transitions: cluster,
         aggregateShiftYears,
         centerYear,
-        hasSeparatedOlderFalseRing,
+        separatedOlderUnitShifts,
     };
 };
 
@@ -6804,7 +6807,7 @@ const terminalClusterSequenceMatches = (
     });
 
 /**
- * Removes a separated older +1 event from a net partial score. Both near-lag regularizations
+ * Removes a separated older unit event from a net partial score. Both near-lag regularizations
  * must recover the same newer negative cluster; this never infers a larger gap from score
  * proximity alone.
  */
@@ -6814,6 +6817,7 @@ export const selectCrossPenaltyTerminalNegativeClusterCheckpoint = (
     operation: JointCounterfactualOperationScore | null,
     targetRange: { startYear: number; endYear: number },
     baselineLag = 0,
+    competingShiftYears: number | null = null,
     maximumAdjacentGapYears = 13,
     minimumOlderEventSeparationYears = 14,
     maximumYearDrift = 3,
@@ -6840,10 +6844,7 @@ export const selectCrossPenaltyTerminalNegativeClusterCheckpoint = (
     );
     if (!stronger
         || !regularized
-        || !stronger.hasSeparatedOlderFalseRing
-        || !regularized.hasSeparatedOlderFalseRing
         || stronger.aggregateShiftYears !== regularized.aggregateShiftYears
-        || operation.shiftYears !== stronger.aggregateShiftYears + 1
         || Math.abs(stronger.centerYear - regularized.centerYear) > maximumYearDrift) {
         return null;
     }
@@ -6856,6 +6857,14 @@ export const selectCrossPenaltyTerminalNegativeClusterCheckpoint = (
         strongerPath.path.runnerUpMargin,
         regularizedPath.path.runnerUpMargin,
     ) < 0.3) return null;
+    const separatedUnitShift = operation.shiftYears - stronger.aggregateShiftYears;
+    const removesSeparatedUnit = Math.abs(separatedUnitShift) === 1
+        && stronger.separatedOlderUnitShifts.includes(separatedUnitShift)
+        && regularized.separatedOlderUnitShifts.includes(separatedUnitShift);
+    const correctsCompetingComponent = separatedUnitShift === 0
+        && competingShiftYears !== null
+        && competingShiftYears !== stronger.aggregateShiftYears;
+    if (!removesSeparatedUnit && !correctsCompetingComponent) return null;
 
     const centerYear = Math.round((stronger.centerYear + regularized.centerYear) / 2);
     const window = boundedSequentialWindow(centerYear, 13, targetRange);
@@ -6954,9 +6963,18 @@ export const selectCrossPenaltyTerminalNegativeClusterCheckpoint = (
                 ).join(",")}`,
                 `terminal_negative_cluster_center_year=${centerYear}`,
                 `terminal_negative_cluster_net_operation=${operation.shiftYears}`,
+                `terminal_negative_cluster_separated_unit_shift=${separatedUnitShift}`,
                 `terminal_negative_cluster_baseline_lag=${baselineLag}`,
                 `terminal_negative_cluster_exact_sequence=${exactSequence}`,
-                "terminal_negative_cluster_removed_separated_false_ring=true",
+                ...(removesSeparatedUnit
+                    ? ["terminal_negative_cluster_removed_separated_unit=true"]
+                    : []),
+                ...(correctsCompetingComponent ? [
+                    `terminal_negative_cluster_rejected_component_shift=${
+                        competingShiftYears
+                    }`,
+                    "terminal_negative_cluster_corrected_competing_component=true",
+                ] : []),
             ])),
         },
     });
@@ -13179,6 +13197,11 @@ export const makeDiagnosisEvents = (
                 parsimoniousPartialOperation,
                 diagnosis.targetRange,
                 terminalBaselineIsUnsupportedAlias ? 0 : terminalBaselineLag,
+                crossPenaltyExactPartialCheckpoint
+                    ? lagPathTransitionShift(crossPenaltyExactPartialCheckpoint)
+                    : stableMultiscaleBoundedFrontier
+                        ? lagPathTransitionShift(stableMultiscaleBoundedFrontier.event)
+                        : null,
             );
         const regularizedPartialConsensusCheckpoint =
             selectRegularizedPartialConsensusCheckpoint(
@@ -13212,10 +13235,10 @@ export const makeDiagnosisEvents = (
             ?? splitRepeatedPartialComponentCheckpoint
             ?? separatedPartialComponentCheckpoint
             ?? collapsedMissingFalsePartialCheckpoint
+            ?? crossPenaltyTerminalNegativeClusterCheckpoint
             ?? crossPenaltyExactPartialCheckpoint
             ?? terminalOperationAnchoredPartialCheckpoint
             ?? regularizedPartialConsensusCheckpoint
-            ?? crossPenaltyTerminalNegativeClusterCheckpoint
             ?? terminalCompatibleParsimoniousPartialCheckpoint
             ?? zeroTerminalUnitWholeAliasEvent
             ?? cumulativeMissingWholeAliasFrontier?.event
@@ -13285,6 +13308,11 @@ export const makeDiagnosisEvents = (
                 || stableBoundedPathFrontier.evidence.algorithmSources.includes(
                     "cross_penalty_terminal_negative_cluster",
                 )
+                || (
+                    crossPenaltyTerminalNegativeClusterCheckpoint !== null
+                    && stableBoundedPathFrontier.shiftYears
+                        === crossPenaltyTerminalNegativeClusterCheckpoint.shiftYears
+                )
                 ||
                 terminalCompatibleParsimoniousPartialCheckpoint !== null
                 || regularizedPartialConsensusCheckpoint !== null
@@ -13294,6 +13322,11 @@ export const makeDiagnosisEvents = (
                 )
                 || stableFrontierHasIndependentOperationSupport
             );
+        const crossPenaltyTerminalClusterOwnsOperation =
+            crossPenaltyTerminalNegativeClusterCheckpoint !== null
+            && stableBoundedPathFrontier?.eventType === "partialMove"
+            && stableBoundedPathFrontier.shiftYears
+                === crossPenaltyTerminalNegativeClusterCheckpoint.shiftYears;
         const candidateBackedStableTerminalUnit =
             selectCandidateBackedStableTerminalUnit(
                 stableMultiscaleBoundedFrontier,
@@ -14203,6 +14236,7 @@ export const makeDiagnosisEvents = (
         }
         const cumulativeMissingFrontier = earlySequentialMissing
             && !earlySequentialMissing.preserveWholeBaseline
+            && !crossPenaltyTerminalClusterOwnsOperation
             && earlySequentialMissing.event.eventType === "missingRing"
             && maySequentialMissingPreemptStableJointFrontier(
                 stableBoundedPathFrontier,

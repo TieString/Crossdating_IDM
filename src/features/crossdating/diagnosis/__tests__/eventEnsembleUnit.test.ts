@@ -3738,6 +3738,34 @@ describe("selectCumulativePartialFrontier", () => {
         });
     });
 
+    it("removes a separated older missing ring from a net partial operation", () => {
+        const olderMissing = pathEvent(-1, -7, -6, 1816);
+        olderMissing.eventType = "missingRing";
+        olderMissing.shiftYears = undefined;
+        olderMissing.shiftSide = undefined;
+        const strongerPartial = pathEvent(-6, -6, 0, 1844);
+        const regularizedMissing = pathEvent(-1, -6, -5, 1841);
+        regularizedMissing.eventType = "missingRing";
+        regularizedMissing.shiftYears = undefined;
+        regularizedMissing.shiftSide = undefined;
+        const regularizedPartial = pathEvent(-5, -5, 0, 1844);
+
+        expect(selectCrossPenaltyTerminalNegativeClusterCheckpoint(
+            boundedPath([olderMissing, strongerPartial]),
+            boundedPath([olderMissing, regularizedMissing, regularizedPartial]),
+            operation(-7, 1829),
+            { startYear: 1500, endYear: 2000 },
+        )).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -6,
+            evidence: {
+                notes: expect.arrayContaining([
+                    "terminal_negative_cluster_separated_unit_shift=-1",
+                ]),
+            },
+        });
+    });
+
     it("does not enlarge an operation without the exact separated +1 net relation", () => {
         const olderFalse = pathEvent(1, -19, -20, 1776);
         olderFalse.eventType = "falseRing";
