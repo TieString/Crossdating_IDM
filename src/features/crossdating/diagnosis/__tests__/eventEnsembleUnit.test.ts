@@ -36,7 +36,6 @@ import {
     recoverAggregatePartialUnitFrontier,
     projectUnitToDistantDynamicConsensus,
     projectUnitToStrongDynamicLocation,
-    projectCrossPenaltyPartialToDynamicPathConsensus,
     recoverStableBoundedLagPathFrontier,
     selectDirectTerminalUnitBeforeDerivedStablePartial,
     selectStaleReferenceNewestFixedSidePathFrontier,
@@ -5788,75 +5787,6 @@ describe("selectCumulativePartialFrontier", () => {
             weak,
             { startYear: 1500, endYear: 2000 },
         )).toBe(missing);
-    });
-
-    it("uses dynamic and complete-path agreement over a one-year cross-penalty shift", () => {
-        const incumbent = partialMoveEvent(-19);
-        incumbent.evidence.algorithmSources = [
-            "bounded_complete_lag_path",
-            "cross_penalty_terminal_negative_cluster",
-        ];
-        incumbent.rankedYears = [{
-            year: 1543,
-            rank: 1,
-            score: 3,
-            evidenceTags: [],
-        }];
-        const path = partialMoveEvent(-20);
-        path.evidence.algorithmSources = ["bounded_complete_lag_path"];
-        path.rankedYears = [{
-            year: 1577,
-            rank: 1,
-            score: 4,
-            evidenceTags: [],
-        }];
-        const selectedOperation = operation(-20, 1578);
-        selectedOperation.eventType = "partialMove";
-
-        expect(projectCrossPenaltyPartialToDynamicPathConsensus(
-            incumbent,
-            {
-                operation: selectedOperation,
-                score: 0.16,
-                scoreMargin: 0.13,
-                shiftScoreMargin: 0.11,
-                probabilityLike: 0.8,
-            },
-            [path],
-            { startYear: 1300, endYear: 2000 },
-        )).toMatchObject({
-            eventType: "partialMove",
-            shiftYears: -20,
-            startYear: 1572,
-            endYear: 1584,
-            evidence: {
-                algorithmSources: expect.arrayContaining([
-                    "dynamic_path_partial_operation_identity",
-                ]),
-            },
-        });
-    });
-
-    it("keeps a cross-penalty partial without matching complete-path support", () => {
-        const incumbent = partialMoveEvent(-19);
-        incumbent.evidence.algorithmSources = [
-            "cross_penalty_terminal_negative_cluster",
-        ];
-        const selectedOperation = operation(-20, 1578);
-        selectedOperation.eventType = "partialMove";
-
-        expect(projectCrossPenaltyPartialToDynamicPathConsensus(
-            incumbent,
-            {
-                operation: selectedOperation,
-                score: 0.16,
-                scoreMargin: 0.13,
-                shiftScoreMargin: 0.11,
-                probabilityLike: 0.8,
-            },
-            [],
-            { startYear: 1300, endYear: 2000 },
-        )).toBe(incumbent);
     });
 
     it("decomposes a non-authoritative whole alias into stable partial components", () => {

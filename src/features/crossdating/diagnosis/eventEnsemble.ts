@@ -6234,98 +6234,6 @@ export const projectUnitToStrongDynamicLocation = (
     });
 };
 
-export const projectCrossPenaltyPartialToDynamicPathConsensus = (
-    event: DiagnosisEvent,
-    selection: DynamicJointOperationSelection | null,
-    pathEvents: readonly DiagnosisEvent[],
-    targetRange: { startYear: number; endYear: number },
-): DiagnosisEvent => {
-    if (event.eventType !== "partialMove"
-        || event.shiftSide !== "older"
-        || !event.evidence.algorithmSources.includes(
-            "cross_penalty_terminal_negative_cluster",
-        )
-        || selection?.operation.eventType !== "partialMove"
-        || selection.score < 0.1
-        || selection.scoreMargin < 0.1
-        || (selection.shiftScoreMargin ?? 0) < 0.1
-        || selection.operation.shiftYears === event.shiftYears
-        || Math.abs(selection.operation.shiftYears - (event.shiftYears ?? 0)) !== 1) {
-        return event;
-    }
-    const selectedYear = selection.operation.bestYear;
-    const pathSupport = pathEvents.some((candidate) => (
-        candidate.eventType === "partialMove"
-        && candidate.shiftYears === selection.operation.shiftYears
-        && Math.abs(rankedEventYear(candidate) - selectedYear) <= 13
-        && candidate.evidence.algorithmSources.includes("bounded_complete_lag_path")
-    ));
-    if (!pathSupport) return event;
-    const window = boundedSequentialWindow(selectedYear, 13, targetRange);
-    const maximumScore = Math.max(0, ...event.rankedYears.map((row) => row.score));
-    const minimumScore = Math.min(0, ...event.rankedYears.map((row) => row.score));
-    const prior = new Map(event.rankedYears.map((row) => [row.year, row]));
-    const rankedYears = Array.from(
-        { length: window.endYear - window.startYear + 1 },
-        (_, index) => window.startYear + index,
-    ).map((year) => {
-        const existing = prior.get(year);
-        return {
-            year,
-            rank: 0,
-            score: year === selectedYear
-                ? maximumScore + Math.max(1e-9, Math.abs(maximumScore) * 1e-12)
-                : existing?.score ?? minimumScore - 1,
-            evidenceTags: Array.from(new Set([
-                ...(existing?.evidenceTags ?? []),
-                "dynamic_path_partial_operation_identity",
-            ])).sort(),
-        };
-    }).sort((left, right) => (
-        right.score - left.score || right.year - left.year
-    )).map((row, index) => ({ ...row, rank: index + 1 }));
-    const lagAfter = event.evidence.lagAfter ?? 0;
-    const referenceCount = Math.max(
-        0,
-        ...locationEvidenceFor(event).map((entry) => entry.referenceCount),
-    );
-    return withEvidenceLedger({
-        ...event,
-        id: `${event.id}-dynamic-path-operation-${selection.operation.shiftYears}`,
-        shiftYears: selection.operation.shiftYears,
-        ...window,
-        rankedYears,
-        reviewCoreRange: { ...window },
-        evidence: {
-            ...event.evidence,
-            lagBefore: lagAfter + selection.operation.shiftYears,
-            lagAfter,
-            algorithmSources: Array.from(new Set([
-                ...event.evidence.algorithmSources,
-                "dynamic_path_partial_operation_identity",
-            ])).sort(),
-            locationEvidence: [
-                ...(event.evidence.locationEvidence ?? []),
-                {
-                    source: "dynamic_path_partial_operation_identity",
-                    ...window,
-                    topYear: selectedYear,
-                    referenceCount,
-                    concentration: selection.probabilityLike,
-                    remoteMargin: selection.scoreMargin,
-                    calibrated: true,
-                },
-            ],
-            notes: Array.from(new Set([
-                ...event.evidence.notes,
-                `dynamic_path_previous_shift=${event.shiftYears}`,
-                `dynamic_path_selected_shift=${selection.operation.shiftYears}`,
-                `dynamic_path_selected_year=${selectedYear}`,
-            ])),
-        },
-    });
-};
-
 /**
  * Keeps the bark-side component of a stable distant negative chain. A two-state aggregate can
  * improve more total years, but applying it would skip every independently sustained state
@@ -14336,22 +14244,7 @@ export const makeDiagnosisEvents = (
                     diagnosis.targetRange,
                 )
             ));
-            const dynamicPathOperationEvents = strongDynamicLocatedEvents.map((event) => (
-                projectCrossPenaltyPartialToDynamicPathConsensus(
-                    event,
-                    boundedOperationSelection,
-                    [
-                        ...boundedPathEvents,
-                        ...(rawNearPenaltyTwoPath?.events ?? []),
-                        ...(rawNearPenaltyOnePath?.events ?? []),
-                        ...(rawPenaltyOneStablePath?.events ?? []),
-                        ...(rawPenaltyHalfStablePath?.events ?? []),
-                        ...(rawPenaltyQuarterStablePath?.events ?? []),
-                    ],
-                    diagnosis.targetRange,
-                )
-            ));
-            const finalEvents = validAutomaticEvents(dynamicPathOperationEvents)
+            const finalEvents = validAutomaticEvents(strongDynamicLocatedEvents)
                 .map(attachAndPrioritizeMissingWorkflow)
                 .map(withEvidenceLedger);
             const boundedFinalEvents = includeBoundedPathHypotheses
