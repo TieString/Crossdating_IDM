@@ -80,6 +80,58 @@ The first 10-file calibration was consumed by architecture diagnosis. All 12 unt
 
 The replacement calibration ceiling is below the requested 95.5%. The final 17-file holdout was therefore not opened, and no production or shadow replacement threshold was approved.
 
+## Direct operation x year and immutable-package experiments
+
+The previous yearly experiment expanded only the operation head's Top1 identity. A
+truth-blind batch extractor now expands a fixed set consisting of operation Top8,
+the immutable product-package identities, and the best identity of each local
+operation type. One diagnosis computes the complete counterfactual grid once; the
+extractor only projects selected identities from that shared grid.
+
+On development failures, the correct operation identity is in Top1 for 65/81
+recoverable attempts, Top5 for 80/81, and Top10 for 81/81. On replacement
+calibration the corresponding counts are 44/65, 64/65, and 64/65. Thus Top1
+truncation loses real evidence, but merely exposing more identities is not enough.
+
+The file-OOF direct operation-year ranker used 1,262,632 development rows and 77
+truth-free features:
+
+- Direct proposal corrected 43 product failures, giving a product/proposal Oracle
+  union of 999/1,042 = 95.87%.
+- A development-frozen blend of within-attempt yearly z-score and operation
+  percentile (`joint_z + 0.75 * operation_percentile`) exposed 41 failures not
+  already corrected by the safe structured checkpoint. Its safe-base/proposal
+  Oracle union is 1,009/1,042 = 96.83%; this is a proposal ceiling, not a deployable
+  result.
+- A post-hoc package selector using both yearly and 261-dimensional package
+  evidence achieved benefit/harm AUC 0.92 on discordant proposals. Requiring zero
+  correct-to-incorrect changes and zero Clean false positives released only seven
+  additions, for 975/1,042 = 93.57%.
+- A single listwise immutable-package table reduced unconditional harmful choices
+  from 135 to 13, but its zero-harm margin gate released only one correction.
+  Asymmetric group weights and a direct package-pair classifier did not improve
+  this boundary.
+
+The same frozen development models were then applied once to replacement
+calibration v2. No calibration outcome was used to alter features, weights, or the
+development-frozen blend:
+
+| Calibration proposal | Corrections | Product/proposal Oracle union |
+| --- | ---: | ---: |
+| Direct joint operation-year Top1 | 31/68 | **649/686 = 94.61%** |
+| Development-frozen score blend | 30/68 | 648/686 = 94.46% |
+
+For the direct joint model's 68 product failures, 48 selected the correct operation
+identity and 31 also selected a covering window. The remaining failures split into
+20 wrong operation identities and 17 correct-operation/wrong-window cases. The
+independent perfect-selection ceiling therefore remains below 95.5% before any
+safety gate is applied.
+
+This rejects the hypothesis that one more downstream selector can reach the target.
+The next useful experiment must improve the generated operation identities and
+yearly location distributions themselves. The 17-file final holdout remains sealed,
+and these models are not approved for shadow or production integration.
+
 No production diagnosis module was changed in this experiment. The historical `validate-co612-recovery-regression.mjs` entry point is no longer present after the repository cleanup, so that removed command could not be rerun; Python model tests, Oracle tests, split tests, capability TypeScript compilation, and the production build all pass.
 
 ## Negative-result boundary
@@ -98,3 +150,8 @@ Replacement calibration is now frozen and completed, but its 94.46% perfect-sele
 - Replacement calibration run: `reserve-calibration-v2`
 - Replacement calibration operation model: `reserve-calibration-all-identity-operation-v3-fixed`
 - Replacement calibration yearly models: `reserve-calibration-yearly-location-v1` and `reserve-calibration-yearly-location-by-type-v2`
+- Development Top-K yearly rows: `development-joint-identity-rows-v21`
+- Development direct joint OOF: `development-joint-operation-year-oof-v22-stride5`
+- Development immutable-package experiments: `development-joint-package-selector-oof-v24-candidate-pairs`, `development-joint-blended-package-selector-oof-v26`, and `development-immutable-package-pair-oof-v30`
+- Replacement calibration Top-K rows: `reserve-calibration-joint-identity-rows-v31`
+- Replacement calibration direct joint result: `reserve-calibration-joint-operation-year-v32`
