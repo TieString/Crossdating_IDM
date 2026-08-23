@@ -28,6 +28,8 @@ No injected event, diagnosis output, model probability, target year, or benchmar
 | Calibration | 10 | 60 | 60 | May be used only after development architecture is fixed |
 | Final holdout | 17 | 102 | 102 | Sealed until architecture and thresholds are frozen |
 
+Calibration v1 was later consumed by architecture diagnosis and is not reused for final threshold claims. Before inspecting any reserve outcomes, all 12 pre-frozen reserve files were promoted together to `reserve-calibration-v2` (72 targets/cases per family). The original 17-file final holdout remains unchanged and sealed.
+
 Every target is used once per Clean/A/B/C/D family. Scenario generator v5 retains negative whole-series shifts, 5/7/9/13-year windows, distant multi-event chains, and near same-direction unit chains.
 
 ## Quality range

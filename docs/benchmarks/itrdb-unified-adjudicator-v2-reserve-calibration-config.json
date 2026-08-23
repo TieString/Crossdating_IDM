@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": "itrdb-unified-adjudicator-v2",
+  "scenarioGeneratorVersion": 5,
+  "frozenDate": "2026-08-24",
+  "seed": "unified-adjudicator-reserve-calibration-v2-2026-08-24",
+  "itrdbRoot": "D:/\u8f6f\u4ef6\u6d4b\u8bd5/\u6570\u636e/ITRDB/itrdb_download/measurements",
+  "fileIds": [
+    "nm566",
+    "cana026",
+    "az088",
+    "co639",
+    "mexi108",
+    "az537",
+    "nm612",
+    "nm112",
+    "russ142x",
+    "az568",
+    "nm611",
+    "ca647"
+  ],
+  "selection": {
+    "minimumSeriesYears": 200,
+    "minimumMasterCorrelation": 0.8,
+    "maximumProblemSegments": 0,
+    "minimumFileIntercorrelation": 0.8,
+    "maximumFileProblemSegments": 0,
+    "minimumOlderContextYears": 45,
+    "minimumNewerContextYears": 35,
+    "maximumTargetsPerFile": 6,
+    "targetSelectionSeed": "unified-adjudicator-unseen-targets-2026-08-23-v1",
+    "excludeFilesWithoutEligibleTargets": true,
+    "usesSignalStrength": false,
+    "usesDiagnosisOutput": false
+  },
+  "injection": {
+    "falseRingMode": "moderate",
+    "partialShiftYears": [
+      -6,
+      -20
+    ],
+    "wholeShiftYears": [
+      -4,
+      -11,
+      -20,
+      -50
+    ],
+    "distantSpacingYears": 30,
+    "distantEventCounts": [
+      2,
+      3,
+      4
+    ],
+    "nearSpacingYears": [
+      2,
+      5,
+      9,
+      13
+    ],
+    "nearUnitEventCounts": [
+      2,
+      3,
+      4
+    ],
+    "includeAdjacentOptionalSuccess": false,
+    "allowedWindowWidths": [
+      5,
+      7,
+      9,
+      13
+    ]
+  },
+  "families": {
+    "Clean": "one untouched control per frozen target",
+    "A": "one balanced single event per frozen target",
+    "B": "one distant same-type multi-event chain per frozen target",
+    "C": "one 2-13 year same-direction unit chain per frozen target",
+    "D": "one distant mixed-operation composition per frozen target"
+  },
+  "design": {
+    "scenarioSampling": "balancedOnePerFamily",
+    "splitId": "unified-adjudicator-pre-frozen-reserve-calibration-v2-2026-08-24",
+    "datasetRole": "calibration",
+    "casesPerTargetPerFamily": 1
+  },
+  "statistics": {
+    "clusterUnit": "file",
+    "bootstrapReplicates": 20000,
+    "confidenceLevel": 0.95,
+    "targetCoverage": 0.9,
+    "seed": "unified-adjudicator-reserve-calibration-v2-bootstrap-2026-08-24"
+  },
+  "runtime": {
+    "workers": 12,
+    "cofechaTimeoutSeconds": 60
+  },
+  "evaluationProtocol": {
+    "version": "frontier-workflow-suggestion-v1",
+    "mainMetric": "workflowSuggestionAccuracy",
+    "denominator": "actualFrontierDiagnosisAttempts",
+    "unreachedEvents": "serialRecoveryOnly",
+    "wholeSeriesMoveSuccess": "negativeExactShiftNoWindow"
+  }
+}

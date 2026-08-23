@@ -53,4 +53,40 @@ test("freezes disjoint unseen high-quality RWL files before final evaluation", (
             assert.deepEqual(overlap, []);
         }
     }
+
+    const frozen = JSON.parse(readFileSync(resolve(
+        root,
+        "docs/benchmarks/itrdb-unified-adjudicator-v2-frozen-split.json",
+    ), "utf8"));
+    const reserveIds = new Set(frozen.files
+        .filter((file) => file.role === "reserve")
+        .map((file) => file.fileId.toLowerCase()));
+    const reserveConfigPath = resolve(
+        root,
+        "docs/benchmarks/itrdb-unified-adjudicator-v2-reserve-calibration-config.json",
+    );
+    const reserveManifestPath = resolve(
+        root,
+        "docs/benchmarks/itrdb-unified-adjudicator-v2-reserve-calibration-manifest.json",
+    );
+    const reserveConfigBytes = readFileSync(reserveConfigPath);
+    const reserveConfig = JSON.parse(reserveConfigBytes.toString("utf8"));
+    const reserveManifest = JSON.parse(readFileSync(reserveManifestPath, "utf8"));
+    assert.deepEqual(
+        new Set(reserveConfig.fileIds.map((fileId) => fileId.toLowerCase())),
+        reserveIds,
+    );
+    assert.equal(reserveIds.size, 12);
+    assert.equal(reserveManifest.configSha256, digest(reserveConfigBytes));
+    assert.equal(
+        reserveManifest.files.reduce(
+            (sum, file) => sum + file.eligibleTargets.length,
+            0,
+        ),
+        72,
+    );
+    reserveManifest.files.forEach((file) => {
+        assert.ok(file.seriesIntercorrelation >= 0.8);
+        assert.equal(file.possibleProblemSegments, 0);
+    });
 });
