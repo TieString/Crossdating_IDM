@@ -719,6 +719,64 @@ export const diagnoseTruthBlind = (input: {
     }
 };
 
+/** Recomputes the full yearly counterfactual profile for one externally selected operation. */
+export const scoreSelectedOperationRowsForEvaluation = (input: {
+    siteData: RwlSiteData;
+    targetId: string;
+    context: CofechaContext;
+    runId: string;
+    eventType: "missingRing" | "falseRing" | "partialMove";
+    shiftYears: number;
+}) => {
+    const { referenceConfig } = createProductionReferenceForEvaluation({
+        siteData: input.siteData,
+        targetId: input.targetId,
+        flaggedAIds: input.context.flaggedIds,
+        cofechaRunId: input.runId,
+        rwlHash: input.context.rwlHash,
+        masterDatingSeries: parseCofechaResult(input.context.outText).masterDatingSeries,
+    });
+    const diagnosis = diagnoseCrossdating(input.siteData, {
+        referenceConfig,
+        targetTrees: [input.targetId],
+        cofechaText: input.context.outText,
+        includeEventDecisionAudits: true,
+        reviewWindowDisplayMode: "review",
+    });
+    const core = diagnoseSeriesCore(
+        input.siteData,
+        input.targetId,
+        getConfig({ referenceConfig }),
+        preprocessSeries,
+    );
+    if (!core) return null;
+    const beforeFusion = diagnosis.eventDecisionAudits?.[0]?.detectedBeforeFusion ?? [];
+    const wholeLags = [...new Set(beforeFusion.flatMap((event) => (
+        event.eventType === "wholeSeriesMove" && typeof event.shiftYears === "number"
+            ? [event.shiftYears]
+            : []
+    )))];
+    const baselineLag = wholeLags.length === 1 ? wholeLags[0]! : 0;
+    const operation = getJointCounterfactualOperationScores(
+        core,
+        15,
+        DEFAULT_MAX_PARTIAL_GAP_YEARS,
+        baselineLag,
+    ).find((candidate) => (
+        candidate.eventType === input.eventType
+        && candidate.shiftYears === input.shiftYears
+    ));
+    if (!operation) return null;
+    return {
+        eventType: operation.eventType,
+        shiftYears: operation.shiftYears,
+        baselineLag: operation.baselineLag,
+        bestYear: operation.bestYear,
+        sideStepBestYear: operation.sideStepBestYear,
+        rows: operation.rows,
+    };
+};
+
 const treeRange = (tree: RwlTreeData): { startYear: number; endYear: number } => {
     const years = Array.from(tree.keys());
     return { startYear: Math.min(...years), endYear: Math.max(...years) };

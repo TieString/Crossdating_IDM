@@ -415,11 +415,13 @@ def make_candidate_rows(
             "terminalUnitStaircaseEvidence": audit.get("terminalUnitStaircaseEvidence"),
         }))
         primary = step.get("primary")
+        product: Candidate | None = None
         if isinstance(primary, dict):
             product = normalize_candidate(primary, "product.primary")
             if product:
                 raw.append(product)
         alternative = step.get("alternative")
+        product_alt: Candidate | None = None
         if isinstance(alternative, dict):
             product_alt = normalize_candidate(alternative, "product.alternative")
             if product_alt:
@@ -445,6 +447,11 @@ def make_candidate_rows(
         primary_top = ranked_year(primary) if isinstance(primary, dict) else None
         primary_start = integer(primary.get("startYear")) if isinstance(primary, dict) else None
         primary_end = integer(primary.get("endYear")) if isinstance(primary, dict) else None
+        package_alternative_type = product_alt.event_type if product_alt else "none"
+        package_alternative_shift = product_alt.shift_years if product_alt else 0
+        package_alternative_top = product_alt.center if product_alt else None
+        package_alternative_start = product_alt.start_year if product_alt else None
+        package_alternative_end = product_alt.end_year if product_alt else None
         context_counts = Counter(candidate.event_type for candidate in raw)
         operation_candidates = [
             candidate for candidate in raw if "operation_grid" in candidate.flags
@@ -522,6 +529,61 @@ def make_candidate_rows(
                     0,
                     min(representative.end_year, primary_end) - max(representative.start_year, primary_start) + 1,
                 ) if None not in (representative.start_year, representative.end_year, primary_start, primary_end) else 0,
+                "package_has_alternative": int(product_alt is not None),
+                "package_identity_count": len({
+                    (candidate.event_type, candidate.shift_years)
+                    for candidate in (product, product_alt)
+                    if candidate is not None
+                }),
+                "package_alternative_event_type": package_alternative_type,
+                "package_alternative_shift_years": package_alternative_shift or 0,
+                "package_alternative_shift_abs": abs(package_alternative_shift or 0),
+                "package_alternative_confidence": product_alt.confidence if product_alt else "none",
+                "package_alternative_score": product_alt.score or 0 if product_alt else 0,
+                "package_alternative_score_margin": product_alt.score_margin or 0 if product_alt else 0,
+                "package_alternative_correlation_gain": product_alt.correlation_gain or 0 if product_alt else 0,
+                "package_alternative_sample_pairs": product_alt.sample_pairs or 0 if product_alt else 0,
+                "package_alternative_lag_before": product_alt.lag_before or 0 if product_alt else 0,
+                "package_alternative_lag_after": product_alt.lag_after or 0 if product_alt else 0,
+                "same_package_alternative_type": int(
+                    representative.event_type == package_alternative_type
+                ),
+                "same_package_alternative_shift": int(
+                    representative.event_type == package_alternative_type
+                    and representative.shift_years == package_alternative_shift
+                ),
+                "package_alternative_top_distance": (
+                    abs(center - package_alternative_top)
+                    if center is not None and package_alternative_top is not None
+                    else -1
+                ),
+                "package_alternative_window_overlap": max(
+                    0,
+                    min(representative.end_year, package_alternative_end)
+                    - max(representative.start_year, package_alternative_start)
+                    + 1,
+                ) if None not in (
+                    representative.start_year,
+                    representative.end_year,
+                    package_alternative_start,
+                    package_alternative_end,
+                ) else 0,
+                "package_primary_alternative_top_distance": (
+                    abs(primary_top - package_alternative_top)
+                    if primary_top is not None and package_alternative_top is not None
+                    else -1
+                ),
+                "package_primary_alternative_window_overlap": max(
+                    0,
+                    min(primary_end, package_alternative_end)
+                    - max(primary_start, package_alternative_start)
+                    + 1,
+                ) if None not in (
+                    primary_start,
+                    primary_end,
+                    package_alternative_start,
+                    package_alternative_end,
+                ) else 0,
                 "target_length": target_length or 0,
                 "center_from_start": center - target_start if center is not None and target_start is not None else -1,
                 "center_to_end": target_end - center if center is not None and target_end is not None else -1,
@@ -615,6 +677,9 @@ def make_candidate_rows(
             for flag in SOURCE_FLAGS:
                 row[f"source_{flag}"] = flags[flag]
                 row[f"exact_{flag}"] = exact_flags[flag]
+                row[f"package_alternative_{flag}"] = int(
+                    product_alt is not None and flag in product_alt.flags
+                )
             row["label_workflow"] = int(
                 row["label_relaxed"] == 1
                 or (
@@ -654,6 +719,8 @@ CATEGORICAL_FEATURES = {
     "primary_event_type",
     "final_reason",
     "confidence",
+    "package_alternative_event_type",
+    "package_alternative_confidence",
 }
 
 
@@ -1584,7 +1651,7 @@ STACKED_SCORE_NAMES = (
     "all_product",
     "all_minimum",
 )
-PAIR_PROBABILITY_FLOORS = (0.0, 0.1, 0.25, 0.4)
+PAIR_PROBABILITY_FLOORS = (0.001, 0.01, 0.1, 0.25, 0.4)
 
 
 def stacked_override_scores(
@@ -1659,10 +1726,13 @@ def choose_stacked_gate(
     candidate_probabilities: np.ndarray,
     risk_policy: str,
     pair_scope: str,
+    selector_policy: str,
 ) -> tuple[dict[str, Any], dict[str, float]]:
     options: list[tuple[tuple[Any, ...], dict[str, Any], dict[str, float]]] = []
-    for score_name in STACKED_SCORE_NAMES:
-        for pair_floor in PAIR_PROBABILITY_FLOORS:
+    score_names = ("pair",) if selector_policy == "direct_pair" else STACKED_SCORE_NAMES
+    pair_floors = (0.0,) if selector_policy == "direct_pair" else PAIR_PROBABILITY_FLOORS
+    for score_name in score_names:
+        for pair_floor in pair_floors:
             top = top_stacked_predictions(
                 pairs,
                 pair_probabilities,
@@ -1746,6 +1816,7 @@ def augmented_stacked_cross_validated_predictions(
     candidate_features: pd.DataFrame,
     risk_policy: str,
     pair_scope: str,
+    selector_policy: str,
 ) -> tuple[np.ndarray, np.ndarray, list[dict[str, Any]], np.ndarray]:
     evaluation_pair_indices = np.flatnonzero(
         pairs["dataset_role"].to_numpy() == "evaluation"
@@ -1850,6 +1921,7 @@ def augmented_stacked_cross_validated_predictions(
             inner_candidate_predictions,
             risk_policy,
             pair_scope,
+            selector_policy,
         )
         inner_recovery_candidates = candidates[
             candidates["file_id"].isin(outer_train_files)
@@ -2126,6 +2198,16 @@ def main() -> None:
         choices=("all", "operation"),
         default="all",
     )
+    parser.add_argument(
+        "--operation-selector",
+        choices=("adaptive", "direct_pair"),
+        default="adaptive",
+    )
+    parser.add_argument(
+        "--location-head",
+        choices=("enabled", "stacked", "disabled"),
+        default="enabled",
+    )
     args = parser.parse_args()
     run_dir = Path(args.run_dir).resolve()
     development_run_dirs = [Path(path).resolve() for path in args.development_run_dir]
@@ -2135,7 +2217,7 @@ def main() -> None:
     cache_metadata_path = cache_path.with_suffix(".json") if cache_path else None
     cache_attempts_path = cache_path.with_name(f"{cache_path.stem}-attempts.pkl") if cache_path else None
     cache_identity = {
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "runDirectories": [str(run_dir), *map(str, development_run_dirs)],
     }
     use_cache = bool(
@@ -2227,8 +2309,6 @@ def main() -> None:
             feature_names,
         )
         if args.strategy == "structured":
-            if development_candidates.empty:
-                raise ValueError("structured strategy requires development runs")
             (
                 operation_predictions,
                 candidate_predictions,
@@ -2241,6 +2321,7 @@ def main() -> None:
                 features,
                 args.risk_policy,
                 "operation",
+                args.operation_selector,
             )
             evaluation_pairs = pairs.iloc[evaluation_pair_indices].reset_index(drop=True)
             operation_decisions = apply_stacked_gates(
@@ -2250,32 +2331,78 @@ def main() -> None:
                 operation_fold_gates,
                 "operation",
             )
-            location_pairs, location_values, location_feature_names = make_location_pair_table(
-                pairs,
-                features,
-                feature_names,
-            )
-            (
-                location_predictions,
-                location_fold_gates,
-                evaluation_location_indices,
-            ) = augmented_pairwise_cross_validated_predictions(
-                location_pairs,
-                location_values,
-                require_zero_harm=True,
-            )
-            evaluation_location_pairs = location_pairs.iloc[
-                evaluation_location_indices
-            ].reset_index(drop=True)
-            location_decisions = apply_pair_gates(
-                evaluation_location_pairs,
-                location_predictions,
-                location_fold_gates,
-            )
-            product_decisions = combine_structured_decisions(
-                operation_decisions,
-                location_decisions,
-            )
+            location_feature_names = pair_feature_names
+            if args.location_head in {"enabled", "stacked"}:
+                location_pairs, location_values, location_feature_names = make_location_pair_table(
+                    pairs,
+                    features,
+                    feature_names,
+                )
+                if args.location_head == "stacked":
+                    (
+                        location_predictions,
+                        location_candidate_predictions,
+                        location_fold_gates,
+                        evaluation_location_indices,
+                    ) = augmented_stacked_cross_validated_predictions(
+                        location_pairs,
+                        location_values,
+                        candidates,
+                        features,
+                        args.risk_policy,
+                        "all",
+                        "adaptive",
+                    )
+                else:
+                    (
+                        location_predictions,
+                        location_fold_gates,
+                        evaluation_location_indices,
+                    ) = augmented_pairwise_cross_validated_predictions(
+                        location_pairs,
+                        location_values,
+                        require_zero_harm=True,
+                    )
+                evaluation_location_pairs = location_pairs.iloc[
+                    evaluation_location_indices
+                ].reset_index(drop=True)
+                if args.location_head == "stacked":
+                    location_decisions = apply_stacked_gates(
+                        evaluation_location_pairs,
+                        location_predictions,
+                        location_candidate_predictions,
+                        location_fold_gates,
+                        "all",
+                    )
+                else:
+                    location_decisions = apply_pair_gates(
+                        evaluation_location_pairs,
+                        location_predictions,
+                        location_fold_gates,
+                    )
+                product_decisions = combine_structured_decisions(
+                    operation_decisions,
+                    location_decisions,
+                )
+                evaluation_location_pairs.assign(
+                    oof_pair_probability=location_predictions,
+                ).to_csv(output_dir / "location-pairs.csv", index=False)
+                location_decisions.to_csv(
+                    output_dir / "location-decisions.csv",
+                    index=False,
+                )
+            else:
+                location_fold_gates = []
+                product_decisions = operation_decisions.copy()
+                product_decisions["operation_overridden"] = (
+                    product_decisions["overridden"].astype(bool)
+                )
+                product_decisions["location_overridden"] = False
+                product_decisions["decision_head"] = np.where(
+                    product_decisions["operation_overridden"],
+                    "operation",
+                    "product",
+                )
             recovery_decisions = apply_recovery_gates(
                 candidates,
                 candidate_predictions,
@@ -2288,15 +2415,8 @@ def main() -> None:
             evaluation_pairs.assign(
                 oof_pair_probability=operation_predictions,
             ).to_csv(output_dir / "operation-pairs.csv", index=False)
-            evaluation_location_pairs.assign(
-                oof_pair_probability=location_predictions,
-            ).to_csv(output_dir / "location-pairs.csv", index=False)
             operation_decisions.to_csv(
                 output_dir / "operation-decisions.csv",
-                index=False,
-            )
-            location_decisions.to_csv(
-                output_dir / "location-decisions.csv",
                 index=False,
             )
             recovery_decisions.to_csv(
@@ -2316,8 +2436,6 @@ def main() -> None:
                 encoding="utf8",
             )
         elif args.strategy == "stacked":
-            if development_candidates.empty:
-                raise ValueError("stacked strategy requires development runs")
             (
                 predictions,
                 candidate_predictions,
@@ -2330,6 +2448,7 @@ def main() -> None:
                 features,
                 args.risk_policy,
                 args.pair_scope,
+                args.operation_selector,
             )
             evaluation_pairs = pairs.iloc[evaluation_pair_indices].reset_index(drop=True)
             decisions = apply_stacked_gates(
@@ -2400,6 +2519,8 @@ def main() -> None:
         "strategy": args.strategy,
         "riskPolicy": args.risk_policy,
         "pairScope": args.pair_scope,
+        "operationSelector": args.operation_selector,
+        "locationHead": args.location_head,
         "runDir": str(run_dir),
         "candidateRows": len(candidates),
         "evaluationCandidateRows": len(evaluation_candidates),
