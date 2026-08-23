@@ -76,8 +76,6 @@ def build_identities(
             indices = group.index.to_numpy(dtype=int)
             key = (attempt_id, str(event_type), int(shift_years))
             members[key] = indices
-            if (event_type, int(shift_years)) in package_identities:
-                continue
             representative_index = int(group.sort_values(
                 [
                     "operation_dynamic_score_max",
@@ -98,6 +96,9 @@ def build_identities(
                 "event_type": event_type,
                 "shift_years": int(shift_years),
                 "product_correct": int(first["product_correct"]),
+                "package_identity": int(
+                    (event_type, int(shift_years)) in package_identities
+                ),
                 "operation_correct": int(any(
                     workflow_operation_correct(row)
                     for _, row in group.iterrows()
@@ -203,15 +204,26 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--candidate-cache", required=True)
     parser.add_argument("--output-dir", required=True)
+    parser.add_argument(
+        "--operation-model",
+        choices=("classifier", "ranker"),
+        default="classifier",
+    )
     args = parser.parse_args()
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     candidates = pd.read_pickle(Path(args.candidate_cache).resolve())
     features, feature_names = TRAINER.encoded_features(candidates)
     identities, identity_values, members = build_identities(candidates, features)
-    identity_probability = operation_ranker_oof(
-        identities,
-        identity_values,
+    identity_probability = (
+        operation_ranker_oof(identities, identity_values)
+        if args.operation_model == "ranker"
+        else file_oof(
+            identities,
+            identity_values,
+            "operation_correct",
+            22000,
+        )
     )
     identities["operation_probability"] = identity_probability
 

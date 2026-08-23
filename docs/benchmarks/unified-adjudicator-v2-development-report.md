@@ -30,6 +30,8 @@ The strongest zero-regression development result is `development-augmented-struc
 
 By family, the unified result is A 98.15%, B 90.21%, C 92.59%, and D 94.35%. A minimum pair-consistency floor of 0.001 removed the only development regression while retaining all useful overrides.
 
+The overall model one-sided 95% file-clustered lower bound is 91.43%. The gain over product has a one-sided 95% lower bound of +0.58 percentage points. Family lower bounds are A 96.30%, B 86.98%, C 89.81%, and D 92.15%.
+
 ## Calibration result
 
 Three models fitted on all development scenarios and gated on calibration v1 reached 526/567 = 92.77%, with nine corrections, zero correct-to-incorrect changes, 99.12% response, and 0/60 Clean false positives. This is safe but far below the requested 95.5% target. Calibration v1 is therefore considered consumed and must not be reused as an independent final evaluation.
@@ -59,11 +61,32 @@ Separating operation identity from location changes the diagnosis ceiling materi
 
 The full yearly result confirms that operation evidence and location evidence are both present but were compressed into incompatible summaries. The evaluation audit previously discarded the yearly `JointCounterfactualOperationScore.rows`; a read-only extractor now recomputes those rows only for the selected operation identity from existing `state.rwl` and `VERYCOF.OUT` files.
 
+Allowing the immutable product-package identities to participate in the operation table raised development operation Top1 to 65/81 recoverable failures. The corresponding full-year ranker produced 43 complete workflow-correct proposals. This is a raw proposal ceiling of 999/1,042 = 95.87% before selective safety gating; it is not a deployable accuracy claim.
+
 The remaining blocker is selective override. A package-error classifier reached AUC 0.83, but zero-harm selection safely released only 2-3 of 28 correct hierarchical proposals. An OOF benefit/harm meta-selector also released only two. Thus the 95.5% target cannot be claimed under the required zero-regression contract yet.
+
+## Replacement calibration v2
+
+The first 10-file calibration was consumed by architecture diagnosis. All 12 untouched pre-frozen reserve files were therefore committed as replacement calibration v2 before running them.
+
+- Product baseline: 618/686 = 90.09%.
+- Strict/relaxed Oracle: 97.52% / 98.25%.
+- Product Clean false positives: 1/72.
+- All-identity operation Top1 after fixing run-tag namespace isolation: 44/65 recoverable failures.
+- Global full-year location Top1: 28/44.
+- Event-type-specific full-year location Top1: 30/44.
+- Global/type-specific union: 30/44; probability-mass 13-year windows did not improve it.
+- Even if all 30 correct complete proposals were applied with perfect safety, the ceiling would be 648/686 = 94.46%.
+
+The replacement calibration ceiling is below the requested 95.5%. The final 17-file holdout was therefore not opened, and no production or shadow replacement threshold was approved.
+
+No production diagnosis module was changed in this experiment. The historical `validate-co612-recovery-regression.mjs` entry point is no longer present after the repository cleanup, so that removed command could not be rerun; Python model tests, Oracle tests, split tests, capability TypeScript compilation, and the production build all pass.
 
 ## Negative-result boundary
 
 The experiments show that adding more generic downstream models is no longer useful. Further work should focus on calibrated package reliability and the direct yearly operation-location joint hypothesis, not on another candidate-list ranker. The final holdout remains sealed until a development model reaches the safety gate and the replacement calibration set is frozen.
+
+Replacement calibration is now frozen and completed, but its 94.46% perfect-selection proposal ceiling still misses the target. Reaching 95.5% requires improving the operation identity and yearly location generators themselves on unseen files, not relaxing the zero-regression selector.
 
 ## External artifacts
 
@@ -72,3 +95,6 @@ The experiments show that adding more generic downstream models is no longer use
 - Safe checkpoint: `development-augmented-structured-oof-v4-pair-floor`
 - Yearly evidence experiment: `development-yearly-location-oof-v12`
 - Calibration shadow: `calibrated-shadow-v1`
+- Replacement calibration run: `reserve-calibration-v2`
+- Replacement calibration operation model: `reserve-calibration-all-identity-operation-v3-fixed`
+- Replacement calibration yearly models: `reserve-calibration-yearly-location-v1` and `reserve-calibration-yearly-location-by-type-v2`
