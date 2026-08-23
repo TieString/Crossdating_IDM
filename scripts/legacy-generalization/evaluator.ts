@@ -719,14 +719,18 @@ export const diagnoseTruthBlind = (input: {
     }
 };
 
-/** Recomputes the full yearly counterfactual profile for one externally selected operation. */
-export const scoreSelectedOperationRowsForEvaluation = (input: {
+type EvaluationOperationIdentity = {
+    eventType: "missingRing" | "falseRing" | "partialMove";
+    shiftYears: number;
+};
+
+/** Recomputes full yearly profiles for externally selected operation identities in one pass. */
+export const scoreOperationIdentityRowsForEvaluation = (input: {
     siteData: RwlSiteData;
     targetId: string;
     context: CofechaContext;
     runId: string;
-    eventType: "missingRing" | "falseRing" | "partialMove";
-    shiftYears: number;
+    operations: readonly EvaluationOperationIdentity[];
 }) => {
     const { referenceConfig } = createProductionReferenceForEvaluation({
         siteData: input.siteData,
@@ -749,7 +753,7 @@ export const scoreSelectedOperationRowsForEvaluation = (input: {
         getConfig({ referenceConfig }),
         preprocessSeries,
     );
-    if (!core) return null;
+    if (!core) return [];
     const beforeFusion = diagnosis.eventDecisionAudits?.[0]?.detectedBeforeFusion ?? [];
     const wholeLags = [...new Set(beforeFusion.flatMap((event) => (
         event.eventType === "wholeSeriesMove" && typeof event.shiftYears === "number"
@@ -757,24 +761,44 @@ export const scoreSelectedOperationRowsForEvaluation = (input: {
             : []
     )))];
     const baselineLag = wholeLags.length === 1 ? wholeLags[0]! : 0;
-    const operation = getJointCounterfactualOperationScores(
+    const operationScores = getJointCounterfactualOperationScores(
         core,
         15,
         DEFAULT_MAX_PARTIAL_GAP_YEARS,
         baselineLag,
-    ).find((candidate) => (
-        candidate.eventType === input.eventType
-        && candidate.shiftYears === input.shiftYears
-    ));
-    if (!operation) return null;
-    return {
+    );
+    const selected = new Set(input.operations.map((operation) => (
+        `${operation.eventType}:${operation.shiftYears}`
+    )));
+    return operationScores.filter((operation) => selected.has(
+        `${operation.eventType}:${operation.shiftYears}`,
+    )).map((operation) => ({
         eventType: operation.eventType,
         shiftYears: operation.shiftYears,
         baselineLag: operation.baselineLag,
         bestYear: operation.bestYear,
         sideStepBestYear: operation.sideStepBestYear,
         rows: operation.rows,
-    };
+    }));
+};
+
+/** Recomputes the full yearly counterfactual profile for one externally selected operation. */
+export const scoreSelectedOperationRowsForEvaluation = (input: {
+    siteData: RwlSiteData;
+    targetId: string;
+    context: CofechaContext;
+    runId: string;
+    eventType: EvaluationOperationIdentity["eventType"];
+    shiftYears: number;
+}) => {
+    const [selected] = scoreOperationIdentityRowsForEvaluation({
+        ...input,
+        operations: [{
+            eventType: input.eventType,
+            shiftYears: input.shiftYears,
+        }],
+    });
+    return selected ?? null;
 };
 
 const treeRange = (tree: RwlTreeData): { startYear: number; endYear: number } => {
