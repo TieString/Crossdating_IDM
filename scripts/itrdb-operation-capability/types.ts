@@ -14,7 +14,8 @@ export type CapabilityConfig = {
         | "itrdb-operation-capability-v1"
         | "itrdb-operation-capability-v2"
         | "itrdb-operation-capability-v3"
-        | "itrdb-operation-capability-v4-1000";
+        | "itrdb-operation-capability-v4-1000"
+        | "itrdb-unified-adjudicator-v2";
     frozenDate: string;
     seed: string;
     scenarioGeneratorVersion: 3 | 4 | 5;
@@ -59,7 +60,11 @@ export type CapabilityConfig = {
     design?: {
         scenarioSampling: "exhaustivePerTarget" | "balancedOnePerFamily";
         splitId: string;
-        datasetRole: "development" | "finalHoldout" | "expandedFrozenHoldoutReuse";
+        datasetRole:
+            | "development"
+            | "calibration"
+            | "finalHoldout"
+            | "expandedFrozenHoldoutReuse";
         casesPerTargetPerFamily: number;
         priorProtocolVersion?: string;
         targetExpansion?: "retainPrior500PlusDeterministic500";

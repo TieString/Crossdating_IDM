@@ -1,0 +1,3330 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": "itrdb-unified-adjudicator-v2",
+  "createdAt": "2026-08-23T11:30:52.259Z",
+  "gitCommit": "ac40bc4b0ea1c49438af813df8ee7959784124ce",
+  "poolPath": "D:/软件测试/itrdb-unified-model-v2/unseen-structural-pool-v1.json",
+  "poolSha256": "1ab8883f44e918fa72ed3c1c8844eacbaec35038950b50ed1ecd592adeb0cb8d",
+  "cofechaExe": "D:/软件测试/cofecha-x86_64-pc-windows-msvc.exe",
+  "cofechaSha256": "3b898012c417ed06b3a1d88c0a4f86a677e276eadfe30a04fd5798542c63372b",
+  "splitSeed": "unified-adjudicator-unseen-file-split-2026-08-23-v1",
+  "targetSeed": "unified-adjudicator-unseen-targets-2026-08-23-v1",
+  "scenarioSeed": "unified-adjudicator-unseen-scenarios-2026-08-23-v1",
+  "historicalFileIdsExcluded": 300,
+  "quality": {
+    "minimumFileIntercorrelation": 0.8,
+    "maximumFileProblemSegments": 0,
+    "minimumSeriesYears": 200,
+    "minimumMasterCorrelation": 0.8,
+    "maximumSeriesProblemSegments": 0,
+    "targetsPerFile": 6
+  },
+  "counts": {
+    "qualifiedFiles": 57,
+    "developmentFiles": 18,
+    "calibrationFiles": 10,
+    "finalFiles": 17,
+    "casesPerFamily": {
+      "development": 108,
+      "calibration": 60,
+      "finalHoldout": 102
+    }
+  },
+  "files": [
+    {
+      "fileId": "az514",
+      "relativePath": "northamerica/usa/az514.rwl",
+      "sourceSha256": "956391915adc8b884d95ab63b8ef48c6ef8e2c84b37a713878657d3acf526968",
+      "role": "development",
+      "seriesIntercorrelation": 0.814,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "nm582",
+      "relativePath": "northamerica/usa/nm582.rwl",
+      "sourceSha256": "2a14e4a7e8280d55e0a3823c8950b93cd38e9bcda98b201bdde6fa8b1a9d7634",
+      "role": "development",
+      "seriesIntercorrelation": 0.837,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "az091",
+      "relativePath": "northamerica/usa/az091.rwl",
+      "sourceSha256": "73b46df8a8949ab532e67345f9fddfa47d846d5e7bf62ee14f971c99dde186ed",
+      "role": "development",
+      "seriesIntercorrelation": 0.839,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "cana408",
+      "relativePath": "northamerica/canada/cana408.rwl",
+      "sourceSha256": "957c8e73297fad8c8797f784b73e2ab81b5b011537e2211b5a450ebe024099a2",
+      "role": "development",
+      "seriesIntercorrelation": 0.825,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "co648",
+      "relativePath": "northamerica/usa/co648.rwl",
+      "sourceSha256": "353b548250c5ca50e0e92a5d21bad1f559ae8427c0a0c01bc1906a5e1ef9eb1b",
+      "role": "development",
+      "seriesIntercorrelation": 0.821,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "az102",
+      "relativePath": "northamerica/usa/az102.rwl",
+      "sourceSha256": "a77306bf3292426470512d993a79cb56280a105a3df20dff2f469e0c9eea3a27",
+      "role": "development",
+      "seriesIntercorrelation": 0.877,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "russ092x",
+      "relativePath": "russ092x.rwl",
+      "sourceSha256": "feac1fc5b5643434653d253d459204c862f33fdafde187f4c96903caa5a6f051",
+      "role": "development",
+      "seriesIntercorrelation": 0.814,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "co626",
+      "relativePath": "northamerica/usa/co626.rwl",
+      "sourceSha256": "9b98aad5e03e50b5b7373f1307e3b361ea05a4a261d415b4ba9296f12ddd8fa2",
+      "role": "development",
+      "seriesIntercorrelation": 0.857,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "az052",
+      "relativePath": "northamerica/usa/az052.rwl",
+      "sourceSha256": "9a8aaf6077013b4fecc0b111655c5bf6d43de93527aac6bbb10a4510ece9c4a5",
+      "role": "development",
+      "seriesIntercorrelation": 0.825,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "paki028",
+      "relativePath": "paki028.rwl",
+      "sourceSha256": "7bdf5a5fa83b6c20fa017679f95acf2805adf6436e0cb4d989beb7f0f228d17d",
+      "role": "development",
+      "seriesIntercorrelation": 0.832,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "co600",
+      "relativePath": "northamerica/usa/co600.rwl",
+      "sourceSha256": "041087c6ac81346a3d0dd7669554bd96ca67397bcab66c9497d90638b346d7f7",
+      "role": "development",
+      "seriesIntercorrelation": 0.862,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "nm111",
+      "relativePath": "northamerica/usa/nm111.rwl",
+      "sourceSha256": "75ef1cf8155666dd12a58e7a4b8508bb0579f42fa330467f8ee4899df9257f8d",
+      "role": "development",
+      "seriesIntercorrelation": 0.858,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "co638",
+      "relativePath": "northamerica/usa/co638.rwl",
+      "sourceSha256": "2ee6348cf9ad4897031b2a52393aa4f8974d89049946bb5f579acd4f1e4bf7c9",
+      "role": "development",
+      "seriesIntercorrelation": 0.826,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "ut560",
+      "relativePath": "northamerica/usa/ut560.rwl",
+      "sourceSha256": "05300e330610cea1c992e0b0d554b20191cc73d82e1bd40f9482458387f1dd67",
+      "role": "development",
+      "seriesIntercorrelation": 0.822,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "ut524",
+      "relativePath": "northamerica/usa/ut524.rwl",
+      "sourceSha256": "d3ff15d2ea5f7600376ee098efdd20cae2f7b18567935c2fbc2a3bb833e47dda",
+      "role": "development",
+      "seriesIntercorrelation": 0.828,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "mong023",
+      "relativePath": "mong023.rwl",
+      "sourceSha256": "78114517261a3f8d0b9038599bb526d24f198a0b49547bff13be2adc68e95d5f",
+      "role": "development",
+      "seriesIntercorrelation": 0.84,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "co602",
+      "relativePath": "northamerica/usa/co602.rwl",
+      "sourceSha256": "aafe438433b5d6d2a9b21129badaf8184e91beef30c35507e56147196cfd2dc2",
+      "role": "development",
+      "seriesIntercorrelation": 0.802,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "az077",
+      "relativePath": "northamerica/usa/az077.rwl",
+      "sourceSha256": "57cdda45cae991d0a20f1bc28caf297876c9f8888e2b7dcb6c0a00744ce55e5e",
+      "role": "development",
+      "seriesIntercorrelation": 0.835,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "ut518",
+      "relativePath": "northamerica/usa/ut518.rwl",
+      "sourceSha256": "bfea5a88622b983301d25ffda710cd06a8e01819e1c16c949e14440fa2794360",
+      "role": "calibration",
+      "seriesIntercorrelation": 0.828,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "az559",
+      "relativePath": "northamerica/usa/az559.rwl",
+      "sourceSha256": "1fa8edcf70ec77ae994ef8b4666ddd7a231a6a2d021583c69b8b32d10f9083ba",
+      "role": "calibration",
+      "seriesIntercorrelation": 0.807,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "russ303",
+      "relativePath": "russ303.rwl",
+      "sourceSha256": "735c1d8f5be0024445508cdcf70b5be4068e146c9db5912e2168709fcb22a39b",
+      "role": "calibration",
+      "seriesIntercorrelation": 0.805,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "russ029x",
+      "relativePath": "russ029x.rwl",
+      "sourceSha256": "951714e0c6ae51902a0ea36f1c7cadb6fbc2bc73449c36a81c8eb086536d5975",
+      "role": "calibration",
+      "seriesIntercorrelation": 0.805,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "co610",
+      "relativePath": "northamerica/usa/co610.rwl",
+      "sourceSha256": "1d606bfb38ab059c98708611f744d8ac0619187ef3d34489ab0f08d566fc6078",
+      "role": "calibration",
+      "seriesIntercorrelation": 0.83,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "co637",
+      "relativePath": "northamerica/usa/co637.rwl",
+      "sourceSha256": "3cd48d0785c0b47643e1e9011c1387ddc405d8c234a8feba3b8117b792d998cc",
+      "role": "calibration",
+      "seriesIntercorrelation": 0.849,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "chin075",
+      "relativePath": "chin075.rwl",
+      "sourceSha256": "aaf77be3fc478794e8674e964845174837ea894289bb6f2079a4061d7a4685af",
+      "role": "calibration",
+      "seriesIntercorrelation": 0.82,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "cana416",
+      "relativePath": "northamerica/canada/cana416.rwl",
+      "sourceSha256": "64798aa068df261ff2c6da0935e0d65d1c4943de6a51124010dff9ab8a56d6ea",
+      "role": "calibration",
+      "seriesIntercorrelation": 0.821,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "ca627",
+      "relativePath": "northamerica/usa/ca627.rwl",
+      "sourceSha256": "63bccad54aeb0318668d5cac1f7f7c5faee23d3acd68b2471e9e2874980c9cb3",
+      "role": "calibration",
+      "seriesIntercorrelation": 0.811,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "co590",
+      "relativePath": "northamerica/usa/co590.rwl",
+      "sourceSha256": "fc4605a8397d56513577e5e812863b551584540dd9fac4069ae9c5830230a9a4",
+      "role": "calibration",
+      "seriesIntercorrelation": 0.809,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "russ027x",
+      "relativePath": "russ027x.rwl",
+      "sourceSha256": "52c903a8bb1b5d9b6dda6d5519df9ea9e889377705b364f48a79ce9b4ec2cb17",
+      "role": "finalHoldout",
+      "seriesIntercorrelation": 0.812,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "russ094x",
+      "relativePath": "russ094x.rwl",
+      "sourceSha256": "a055889937a56a90c4310c4b9d858ec4fc0c7c927090c6e3961931a8a6491401",
+      "role": "finalHoldout",
+      "seriesIntercorrelation": 0.823,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "az522",
+      "relativePath": "northamerica/usa/az522.rwl",
+      "sourceSha256": "c310dc0f06aef499976d5e3345e48398b25de3ba0ed4e6d82640d6f381157f20",
+      "role": "finalHoldout",
+      "seriesIntercorrelation": 0.841,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "mong022",
+      "relativePath": "mong022.rwl",
+      "sourceSha256": "cde7135a520e5009bac3f254fe9e9dfb3f84e78285a9dee26266129cd18e6d54",
+      "role": "finalHoldout",
+      "seriesIntercorrelation": 0.814,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "mt100",
+      "relativePath": "northamerica/usa/mt100.rwl",
+      "sourceSha256": "8afd58b89af82fdd78cb348270291ed04fa7bcf59aaa8201510516c723c36ad5",
+      "role": "finalHoldout",
+      "seriesIntercorrelation": 0.877,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "az544",
+      "relativePath": "northamerica/usa/az544.rwl",
+      "sourceSha256": "f2b4c0790e8ca49c0df0df3180bf4e3fe359e14bab218207f1537f315ac89cf7",
+      "role": "finalHoldout",
+      "seriesIntercorrelation": 0.801,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "wy031",
+      "relativePath": "northamerica/usa/wy031.rwl",
+      "sourceSha256": "f058f0989826312eefed06e03669d76a9d2ebda3f213a547af578be2de2c07c8",
+      "role": "finalHoldout",
+      "seriesIntercorrelation": 0.843,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "cana333",
+      "relativePath": "northamerica/canada/cana333.rwl",
+      "sourceSha256": "e9181d38149346190bec07d73c5f2dbeb334838b91e5453d818f9618b2046924",
+      "role": "finalHoldout",
+      "seriesIntercorrelation": 0.804,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "az592",
+      "relativePath": "northamerica/usa/az592.rwl",
+      "sourceSha256": "145c9a938c4ab869b970b37b577ab7bd4759bbd94e150824e00951f8e3e1c38f",
+      "role": "finalHoldout",
+      "seriesIntercorrelation": 0.807,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "nv506",
+      "relativePath": "northamerica/usa/nv506.rwl",
+      "sourceSha256": "9c937025d3b39a9d04af1cf4bab2cab9f6cba20c511a8990da1691e0fe8d8559",
+      "role": "finalHoldout",
+      "seriesIntercorrelation": 0.887,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "nm581",
+      "relativePath": "northamerica/usa/nm581.rwl",
+      "sourceSha256": "45ee7abed9700d66dede744f571a3f0df6c1a0d8d661c3e498f5a7b96ca3aa5e",
+      "role": "finalHoldout",
+      "seriesIntercorrelation": 0.864,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "co640",
+      "relativePath": "northamerica/usa/co640.rwl",
+      "sourceSha256": "ff9ca37a2f67aa7e5735e234fc5f0cbcdec68659846430d1165911a2f826f30b",
+      "role": "finalHoldout",
+      "seriesIntercorrelation": 0.86,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "co558",
+      "relativePath": "northamerica/usa/co558.rwl",
+      "sourceSha256": "13df56684cf1d6439a4ca6bd44ba2515b651d5cbcdd72840376b50105f113338",
+      "role": "finalHoldout",
+      "seriesIntercorrelation": 0.863,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "nm036",
+      "relativePath": "northamerica/usa/nm036.rwl",
+      "sourceSha256": "54c65f9694a8f47595237dabc2234d611ee2227dd06e734fa1b3236a280dc4d6",
+      "role": "finalHoldout",
+      "seriesIntercorrelation": 0.86,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "az090",
+      "relativePath": "northamerica/usa/az090.rwl",
+      "sourceSha256": "3a74d242f1125b6ffb450846c9b2331bc4e45990e91fa5e1de9e5ada86b0cc31",
+      "role": "finalHoldout",
+      "seriesIntercorrelation": 0.802,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "nv503",
+      "relativePath": "northamerica/usa/nv503.rwl",
+      "sourceSha256": "8b37ceeff7a4938f82b57b8d9b3afe3766a6e722ee70164d6fc7bb8192feaa4c",
+      "role": "finalHoldout",
+      "seriesIntercorrelation": 0.84,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "russ170w",
+      "relativePath": "russ170w.rwl",
+      "sourceSha256": "c5476aa667ce9fb2ab5907483ed61bc635bef06b7ea84a35518fe2801b132aeb",
+      "role": "finalHoldout",
+      "seriesIntercorrelation": 0.808,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "nm566",
+      "relativePath": "northamerica/usa/nm566.rwl",
+      "sourceSha256": "66f1228815ee8a6d0071af09ec0822581527cc7376edb865d80306b0e00e0348",
+      "role": "reserve",
+      "seriesIntercorrelation": 0.839,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "cana026",
+      "relativePath": "northamerica/canada/cana026.rwl",
+      "sourceSha256": "39e22321452fea3a534e02784564de133563a13625fd159e7c01173efbb043a6",
+      "role": "reserve",
+      "seriesIntercorrelation": 0.804,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "az088",
+      "relativePath": "northamerica/usa/az088.rwl",
+      "sourceSha256": "789fa1444a72ef0aab4aa7eb4bacff03acc005b24c53b8376e7c7e93e23dd1b4",
+      "role": "reserve",
+      "seriesIntercorrelation": 0.844,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "co639",
+      "relativePath": "northamerica/usa/co639.rwl",
+      "sourceSha256": "ec47843518f5ce4c6d43e07449c98f16d4e45a485b2e531afda4010b6f76eaa6",
+      "role": "reserve",
+      "seriesIntercorrelation": 0.82,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "mexi108",
+      "relativePath": "northamerica/mexico/mexi108.rwl",
+      "sourceSha256": "0637f580981733d0bda7d744e452163b8a8293ce8d938f5f6b30e922325f6894",
+      "role": "reserve",
+      "seriesIntercorrelation": 0.86,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "az537",
+      "relativePath": "northamerica/usa/az537.rwl",
+      "sourceSha256": "96febfa5edcb48883c8a03cbc997d8dd829078c2085ab84417008e9740c091e8",
+      "role": "reserve",
+      "seriesIntercorrelation": 0.85,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "nm612",
+      "relativePath": "northamerica/usa/nm612.rwl",
+      "sourceSha256": "43cb13b79e93dc5fd676e50a8e28449e423cc42148a5e6811f8dff12a59622ac",
+      "role": "reserve",
+      "seriesIntercorrelation": 0.839,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "nm112",
+      "relativePath": "northamerica/usa/nm112.rwl",
+      "sourceSha256": "b2519f0d0474c1c44f27e634ee1fe7a3ef8737d9b2d0c0ac3aec6804f44f7e66",
+      "role": "reserve",
+      "seriesIntercorrelation": 0.808,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "russ142x",
+      "relativePath": "russ142x.rwl",
+      "sourceSha256": "9d0fc9b88f20b5c0109006424442819dd0d04874cc778d1e18e7a21dd0006d96",
+      "role": "reserve",
+      "seriesIntercorrelation": 0.82,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "az568",
+      "relativePath": "northamerica/usa/az568.rwl",
+      "sourceSha256": "763a0b21f09ad44b9b13dadd59d4b7f6a3206ec77bd6742e4f54be8696e4cb58",
+      "role": "reserve",
+      "seriesIntercorrelation": 0.81,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "nm611",
+      "relativePath": "northamerica/usa/nm611.rwl",
+      "sourceSha256": "6286bf675806108cededa7b3906d08fa51a291e35d3f450aa767de8623772342",
+      "role": "reserve",
+      "seriesIntercorrelation": 0.854,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    },
+    {
+      "fileId": "ca647",
+      "relativePath": "northamerica/usa/ca647.rwl",
+      "sourceSha256": "493629b4cee92d7a7141e2f66e50464acb0bb56746402ab51c8bc71ee2837df9",
+      "role": "reserve",
+      "seriesIntercorrelation": 0.814,
+      "possibleProblemSegments": 0,
+      "eligibleTargets": 6
+    }
+  ],
+  "excluded": [
+    {
+      "fileId": "russ058w",
+      "relativePath": "russ058w.rwl",
+      "reason": "Command failed: D:\\软件测试\\cofecha-x86_64-pc-windows-msvc.exe\n\r\nrun-time error M6101: MATH\r\n- floating-point error: invalid\r\n"
+    },
+    {
+      "fileId": "svk019",
+      "relativePath": "svk019.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.733"
+    },
+    {
+      "fileId": "az545",
+      "relativePath": "northamerica/usa/az545.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.681"
+    },
+    {
+      "fileId": "pola035",
+      "relativePath": "pola035.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.577"
+    },
+    {
+      "fileId": "mexi004",
+      "relativePath": "northamerica/mexico/mexi004.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.695"
+    },
+    {
+      "fileId": "nm014",
+      "relativePath": "northamerica/usa/nm014.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "finl010x",
+      "relativePath": "finl010x.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "russ081i",
+      "relativePath": "russ081i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.471"
+    },
+    {
+      "fileId": "russ093n",
+      "relativePath": "russ093n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.559"
+    },
+    {
+      "fileId": "ar009",
+      "relativePath": "northamerica/usa/ar009.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.567"
+    },
+    {
+      "fileId": "russ099i",
+      "relativePath": "russ099i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.598"
+    },
+    {
+      "fileId": "id039",
+      "relativePath": "northamerica/usa/id039.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.604"
+    },
+    {
+      "fileId": "russ259",
+      "relativePath": "russ259.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.727"
+    },
+    {
+      "fileId": "nm004",
+      "relativePath": "northamerica/usa/nm004.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.751"
+    },
+    {
+      "fileId": "russ077i",
+      "relativePath": "russ077i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.639"
+    },
+    {
+      "fileId": "ca626",
+      "relativePath": "northamerica/usa/ca626.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.797"
+    },
+    {
+      "fileId": "russ078t",
+      "relativePath": "russ078t.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.793"
+    },
+    {
+      "fileId": "swit394",
+      "relativePath": "swit394.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.597"
+    },
+    {
+      "fileId": "nv049",
+      "relativePath": "northamerica/usa/nv049.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.744"
+    },
+    {
+      "fileId": "russ099x",
+      "relativePath": "russ099x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.771"
+    },
+    {
+      "fileId": "russ124x",
+      "relativePath": "russ124x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.776"
+    },
+    {
+      "fileId": "russ142i",
+      "relativePath": "russ142i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.524"
+    },
+    {
+      "fileId": "russ121x",
+      "relativePath": "russ121x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.693"
+    },
+    {
+      "fileId": "co588",
+      "relativePath": "northamerica/usa/co588.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.785"
+    },
+    {
+      "fileId": "russ028i",
+      "relativePath": "russ028i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.527"
+    },
+    {
+      "fileId": "arge096",
+      "relativePath": "southamerica/arge096.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.669"
+    },
+    {
+      "fileId": "russ041l",
+      "relativePath": "russ041l.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.531"
+    },
+    {
+      "fileId": "russ078i",
+      "relativePath": "russ078i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.495"
+    },
+    {
+      "fileId": "russ085x",
+      "relativePath": "russ085x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.479"
+    },
+    {
+      "fileId": "finl071x",
+      "relativePath": "finl071x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.681"
+    },
+    {
+      "fileId": "russ023x",
+      "relativePath": "russ023x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.777"
+    },
+    {
+      "fileId": "russ137w",
+      "relativePath": "russ137w.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.737"
+    },
+    {
+      "fileId": "russ138i",
+      "relativePath": "russ138i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.286"
+    },
+    {
+      "fileId": "fran028x",
+      "relativePath": "fran028x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.738"
+    },
+    {
+      "fileId": "nm118",
+      "relativePath": "northamerica/usa/nm118.rwl",
+      "reason": "file_problem_segments_above_maximum:1"
+    },
+    {
+      "fileId": "russ119i",
+      "relativePath": "russ119i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.485"
+    },
+    {
+      "fileId": "aut120",
+      "relativePath": "aut120.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.644"
+    },
+    {
+      "fileId": "wa023",
+      "relativePath": "northamerica/usa/wa023.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.651"
+    },
+    {
+      "fileId": "az571",
+      "relativePath": "northamerica/usa/az571.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.781"
+    },
+    {
+      "fileId": "russ175l",
+      "relativePath": "russ175l.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.379"
+    },
+    {
+      "fileId": "russ136x",
+      "relativePath": "russ136x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.674"
+    },
+    {
+      "fileId": "russ066x",
+      "relativePath": "russ066x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.702"
+    },
+    {
+      "fileId": "ca692",
+      "relativePath": "northamerica/usa/ca692.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.732"
+    },
+    {
+      "fileId": "russ093w",
+      "relativePath": "russ093w.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.708"
+    },
+    {
+      "fileId": "russ055n",
+      "relativePath": "russ055n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.568"
+    },
+    {
+      "fileId": "finl018",
+      "relativePath": "finl018.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "or085",
+      "relativePath": "northamerica/usa/or085.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.677"
+    },
+    {
+      "fileId": "co509x",
+      "relativePath": "northamerica/usa/co509x.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "russ062n",
+      "relativePath": "russ062n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.537"
+    },
+    {
+      "fileId": "finl011e",
+      "relativePath": "finl011e.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.549"
+    },
+    {
+      "fileId": "nm503l",
+      "relativePath": "northamerica/usa/nm503l.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "russ085n",
+      "relativePath": "russ085n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.419"
+    },
+    {
+      "fileId": "nm520i",
+      "relativePath": "northamerica/usa/nm520i.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "ut549",
+      "relativePath": "northamerica/usa/ut549.rwl",
+      "reason": "file_problem_segments_above_maximum:1"
+    },
+    {
+      "fileId": "finl011l",
+      "relativePath": "finl011l.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.605"
+    },
+    {
+      "fileId": "nm601",
+      "relativePath": "northamerica/usa/nm601.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.782"
+    },
+    {
+      "fileId": "co037",
+      "relativePath": "northamerica/usa/co037.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.764"
+    },
+    {
+      "fileId": "russ084x",
+      "relativePath": "russ084x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.76"
+    },
+    {
+      "fileId": "wa024",
+      "relativePath": "northamerica/usa/wa024.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.699"
+    },
+    {
+      "fileId": "swed017n",
+      "relativePath": "swed017n.rwl",
+      "reason": "Command failed: D:\\软件测试\\cofecha-x86_64-pc-windows-msvc.exe\n\r\nrun-time error M6101: MATH\r\n- floating-point error: invalid\r\n"
+    },
+    {
+      "fileId": "fran021n",
+      "relativePath": "fran021n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.332"
+    },
+    {
+      "fileId": "ital015x",
+      "relativePath": "ital015x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.563"
+    },
+    {
+      "fileId": "fran044",
+      "relativePath": "fran044.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.731"
+    },
+    {
+      "fileId": "russ065n",
+      "relativePath": "russ065n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.463"
+    },
+    {
+      "fileId": "russ072i",
+      "relativePath": "russ072i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.631"
+    },
+    {
+      "fileId": "russ084i",
+      "relativePath": "russ084i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.586"
+    },
+    {
+      "fileId": "germ191",
+      "relativePath": "germ191.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.687"
+    },
+    {
+      "fileId": "sd004",
+      "relativePath": "northamerica/usa/sd004.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.749"
+    },
+    {
+      "fileId": "cana230e",
+      "relativePath": "northamerica/canada/cana230e.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.65"
+    },
+    {
+      "fileId": "russ164t",
+      "relativePath": "russ164t.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.727"
+    },
+    {
+      "fileId": "chin045",
+      "relativePath": "chin045.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.412"
+    },
+    {
+      "fileId": "swit170x",
+      "relativePath": "swit170x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.584"
+    },
+    {
+      "fileId": "swit160e",
+      "relativePath": "swit160e.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.604"
+    },
+    {
+      "fileId": "germ052n",
+      "relativePath": "germ052n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.561"
+    },
+    {
+      "fileId": "nm577",
+      "relativePath": "northamerica/usa/nm577.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.783"
+    },
+    {
+      "fileId": "ut533",
+      "relativePath": "northamerica/usa/ut533.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.753"
+    },
+    {
+      "fileId": "dza013",
+      "relativePath": "dza013.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.734"
+    },
+    {
+      "fileId": "russ232",
+      "relativePath": "russ232.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.736"
+    },
+    {
+      "fileId": "russ088l",
+      "relativePath": "russ088l.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.558"
+    },
+    {
+      "fileId": "russ152n",
+      "relativePath": "russ152n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.56"
+    },
+    {
+      "fileId": "ita074bl75",
+      "relativePath": "ita074bl75.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.585"
+    },
+    {
+      "fileId": "cana566",
+      "relativePath": "northamerica/canada/cana566.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.751"
+    },
+    {
+      "fileId": "russ073n",
+      "relativePath": "russ073n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.529"
+    },
+    {
+      "fileId": "russ126t",
+      "relativePath": "russ126t.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.709"
+    },
+    {
+      "fileId": "mi009",
+      "relativePath": "northamerica/usa/mi009.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.723"
+    },
+    {
+      "fileId": "newz058",
+      "relativePath": "newz058.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.668"
+    },
+    {
+      "fileId": "nm061",
+      "relativePath": "northamerica/usa/nm061.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.745"
+    },
+    {
+      "fileId": "russ081n",
+      "relativePath": "russ081n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.32"
+    },
+    {
+      "fileId": "russ095w",
+      "relativePath": "russ095w.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.652"
+    },
+    {
+      "fileId": "wa079",
+      "relativePath": "northamerica/usa/wa079.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.752"
+    },
+    {
+      "fileId": "swit173x",
+      "relativePath": "swit173x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.667"
+    },
+    {
+      "fileId": "pa003",
+      "relativePath": "northamerica/usa/pa003.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.681"
+    },
+    {
+      "fileId": "or018",
+      "relativePath": "northamerica/usa/or018.rwl",
+      "reason": "file_problem_segments_above_maximum:1"
+    },
+    {
+      "fileId": "russ093t",
+      "relativePath": "russ093t.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.765"
+    },
+    {
+      "fileId": "co630",
+      "relativePath": "northamerica/usa/co630.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.78"
+    },
+    {
+      "fileId": "chin019",
+      "relativePath": "chin019.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.796"
+    },
+    {
+      "fileId": "tur064",
+      "relativePath": "tur064.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.666"
+    },
+    {
+      "fileId": "swit192",
+      "relativePath": "swit192.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "fran021x",
+      "relativePath": "fran021x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.565"
+    },
+    {
+      "fileId": "va011",
+      "relativePath": "northamerica/usa/va011.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.602"
+    },
+    {
+      "fileId": "co651e",
+      "relativePath": "northamerica/usa/co651e.rwl",
+      "reason": "file_problem_segments_above_maximum:1"
+    },
+    {
+      "fileId": "az556",
+      "relativePath": "northamerica/usa/az556.rwl",
+      "reason": "eligible_targets_below_minimum:0"
+    },
+    {
+      "fileId": "newz056",
+      "relativePath": "newz056.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.664"
+    },
+    {
+      "fileId": "mi004",
+      "relativePath": "northamerica/usa/mi004.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.763"
+    },
+    {
+      "fileId": "paki024",
+      "relativePath": "paki024.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.72"
+    },
+    {
+      "fileId": "russ119n",
+      "relativePath": "russ119n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.269"
+    },
+    {
+      "fileId": "russ049n",
+      "relativePath": "russ049n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.538"
+    },
+    {
+      "fileId": "swit167i",
+      "relativePath": "swit167i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.431"
+    },
+    {
+      "fileId": "co596",
+      "relativePath": "northamerica/usa/co596.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.761"
+    },
+    {
+      "fileId": "wy069",
+      "relativePath": "northamerica/usa/wy069.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.76"
+    },
+    {
+      "fileId": "co550",
+      "relativePath": "northamerica/usa/co550.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.766"
+    },
+    {
+      "fileId": "co030",
+      "relativePath": "northamerica/usa/co030.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.782"
+    },
+    {
+      "fileId": "ca511",
+      "relativePath": "northamerica/usa/ca511.rwl",
+      "reason": "file_problem_segments_above_maximum:2"
+    },
+    {
+      "fileId": "ar030",
+      "relativePath": "northamerica/usa/ar030.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.632"
+    },
+    {
+      "fileId": "arge063",
+      "relativePath": "southamerica/arge063.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.667"
+    },
+    {
+      "fileId": "or106e",
+      "relativePath": "northamerica/usa/or106e.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.796"
+    },
+    {
+      "fileId": "mexi031e",
+      "relativePath": "northamerica/mexico/mexi031e.rwl",
+      "reason": "file_problem_segments_above_maximum:1"
+    },
+    {
+      "fileId": "russ095i",
+      "relativePath": "russ095i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.565"
+    },
+    {
+      "fileId": "brit024x",
+      "relativePath": "brit024x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.462"
+    },
+    {
+      "fileId": "ca692e",
+      "relativePath": "northamerica/usa/ca692e.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.747"
+    },
+    {
+      "fileId": "fin111x",
+      "relativePath": "fin111x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.643"
+    },
+    {
+      "fileId": "spai016",
+      "relativePath": "spai016.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "newz050",
+      "relativePath": "newz050.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.754"
+    },
+    {
+      "fileId": "russ123t",
+      "relativePath": "russ123t.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.791"
+    },
+    {
+      "fileId": "finl076",
+      "relativePath": "finl076.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.651"
+    },
+    {
+      "fileId": "russ083i",
+      "relativePath": "russ083i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.518"
+    },
+    {
+      "fileId": "russ141t",
+      "relativePath": "russ141t.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.723"
+    },
+    {
+      "fileId": "russ150t",
+      "relativePath": "russ150t.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.664"
+    },
+    {
+      "fileId": "nm615",
+      "relativePath": "northamerica/usa/nm615.rwl",
+      "reason": "file_problem_segments_above_maximum:62"
+    },
+    {
+      "fileId": "russ092n",
+      "relativePath": "russ092n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.421"
+    },
+    {
+      "fileId": "esp099x",
+      "relativePath": "esp099x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.518"
+    },
+    {
+      "fileId": "deu360",
+      "relativePath": "deu360.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "russ076n",
+      "relativePath": "russ076n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.447"
+    },
+    {
+      "fileId": "newz077",
+      "relativePath": "newz077.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.543"
+    },
+    {
+      "fileId": "russ111n",
+      "relativePath": "russ111n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.389"
+    },
+    {
+      "fileId": "russ111i",
+      "relativePath": "russ111i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.485"
+    },
+    {
+      "fileId": "id047",
+      "relativePath": "northamerica/usa/id047.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.715"
+    },
+    {
+      "fileId": "swit230",
+      "relativePath": "swit230.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.593"
+    },
+    {
+      "fileId": "nm520t",
+      "relativePath": "northamerica/usa/nm520t.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "nv036",
+      "relativePath": "northamerica/usa/nv036.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "russ040x",
+      "relativePath": "russ040x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.599"
+    },
+    {
+      "fileId": "co543",
+      "relativePath": "northamerica/usa/co543.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.617"
+    },
+    {
+      "fileId": "chin068",
+      "relativePath": "chin068.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.702"
+    },
+    {
+      "fileId": "russ157x",
+      "relativePath": "russ157x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.325"
+    },
+    {
+      "fileId": "russ150x",
+      "relativePath": "russ150x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.674"
+    },
+    {
+      "fileId": "russ143x",
+      "relativePath": "russ143x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.696"
+    },
+    {
+      "fileId": "che611",
+      "relativePath": "che611.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "deu348",
+      "relativePath": "deu348.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "russ238x",
+      "relativePath": "russ238x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.718"
+    },
+    {
+      "fileId": "fran028",
+      "relativePath": "fran028.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.629"
+    },
+    {
+      "fileId": "russ087x",
+      "relativePath": "russ087x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.778"
+    },
+    {
+      "fileId": "chin034",
+      "relativePath": "chin034.rwl",
+      "reason": "file_problem_segments_above_maximum:1"
+    },
+    {
+      "fileId": "aut142",
+      "relativePath": "aut142.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.732"
+    },
+    {
+      "fileId": "co666",
+      "relativePath": "northamerica/usa/co666.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.74"
+    },
+    {
+      "fileId": "russ120i",
+      "relativePath": "russ120i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.638"
+    },
+    {
+      "fileId": "az045",
+      "relativePath": "northamerica/usa/az045.rwl",
+      "reason": "file_problem_segments_above_maximum:3"
+    },
+    {
+      "fileId": "russ137x",
+      "relativePath": "russ137x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.664"
+    },
+    {
+      "fileId": "norw006",
+      "relativePath": "norw006.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "russ167i",
+      "relativePath": "russ167i.rwl",
+      "reason": "Command failed: D:\\软件测试\\cofecha-x86_64-pc-windows-msvc.exe\n\r\nrun-time error M6101: MATH\r\n- floating-point error: invalid\r\n"
+    },
+    {
+      "fileId": "deu395",
+      "relativePath": "deu395.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "az513",
+      "relativePath": "northamerica/usa/az513.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.741"
+    },
+    {
+      "fileId": "russ169i",
+      "relativePath": "russ169i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.645"
+    },
+    {
+      "fileId": "russ076x",
+      "relativePath": "russ076x.rwl",
+      "reason": "file_problem_segments_above_maximum:1"
+    },
+    {
+      "fileId": "finl018n",
+      "relativePath": "finl018n.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "tur056",
+      "relativePath": "tur056.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.565"
+    },
+    {
+      "fileId": "russ128n",
+      "relativePath": "russ128n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.438"
+    },
+    {
+      "fileId": "fran027x",
+      "relativePath": "fran027x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.596"
+    },
+    {
+      "fileId": "aut141",
+      "relativePath": "aut141.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.623"
+    },
+    {
+      "fileId": "mexi028e",
+      "relativePath": "northamerica/mexico/mexi028e.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.717"
+    },
+    {
+      "fileId": "che417x",
+      "relativePath": "che417x.rwl",
+      "reason": "Command failed: D:\\软件测试\\cofecha-x86_64-pc-windows-msvc.exe\n\r\nrun-time error M6101: MATH\r\n- floating-point error: invalid\r\n"
+    },
+    {
+      "fileId": "russ140x",
+      "relativePath": "russ140x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.665"
+    },
+    {
+      "fileId": "mn027",
+      "relativePath": "northamerica/usa/mn027.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "deu354",
+      "relativePath": "deu354.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "cypr015",
+      "relativePath": "cypr015.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.574"
+    },
+    {
+      "fileId": "co050",
+      "relativePath": "northamerica/usa/co050.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.777"
+    },
+    {
+      "fileId": "russ106x",
+      "relativePath": "russ106x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.755"
+    },
+    {
+      "fileId": "pola027x",
+      "relativePath": "pola027x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.699"
+    },
+    {
+      "fileId": "russ149i",
+      "relativePath": "russ149i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.544"
+    },
+    {
+      "fileId": "russ057i",
+      "relativePath": "russ057i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.579"
+    },
+    {
+      "fileId": "ital050e",
+      "relativePath": "ital050e.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.747"
+    },
+    {
+      "fileId": "nm033",
+      "relativePath": "northamerica/usa/nm033.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.795"
+    },
+    {
+      "fileId": "swit175x",
+      "relativePath": "swit175x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.757"
+    },
+    {
+      "fileId": "russ070i",
+      "relativePath": "russ070i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.551"
+    },
+    {
+      "fileId": "co607",
+      "relativePath": "northamerica/usa/co607.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.785"
+    },
+    {
+      "fileId": "gree005",
+      "relativePath": "gree005.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.655"
+    },
+    {
+      "fileId": "az139",
+      "relativePath": "northamerica/usa/az139.rwl",
+      "reason": "file_problem_segments_above_maximum:1"
+    },
+    {
+      "fileId": "az044",
+      "relativePath": "northamerica/usa/az044.rwl",
+      "reason": "file_problem_segments_above_maximum:1"
+    },
+    {
+      "fileId": "tur060",
+      "relativePath": "tur060.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.564"
+    },
+    {
+      "fileId": "russ039t",
+      "relativePath": "russ039t.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.657"
+    },
+    {
+      "fileId": "russ134i",
+      "relativePath": "russ134i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.547"
+    },
+    {
+      "fileId": "rus366",
+      "relativePath": "rus366.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.645"
+    },
+    {
+      "fileId": "co619",
+      "relativePath": "northamerica/usa/co619.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.759"
+    },
+    {
+      "fileId": "russ043x",
+      "relativePath": "russ043x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.445"
+    },
+    {
+      "fileId": "mexi023e",
+      "relativePath": "northamerica/mexico/mexi023e.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.712"
+    },
+    {
+      "fileId": "az501",
+      "relativePath": "northamerica/usa/az501.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.785"
+    },
+    {
+      "fileId": "co625",
+      "relativePath": "northamerica/usa/co625.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.792"
+    },
+    {
+      "fileId": "co526",
+      "relativePath": "northamerica/usa/co526.rwl",
+      "reason": "eligible_targets_below_minimum:5"
+    },
+    {
+      "fileId": "az032",
+      "relativePath": "northamerica/usa/az032.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.738"
+    },
+    {
+      "fileId": "nm628",
+      "relativePath": "northamerica/usa/nm628.rwl",
+      "reason": "Command failed: D:\\软件测试\\cofecha-x86_64-pc-windows-msvc.exe\n\r\nrun-time error M6101: MATH\r\n- floating-point error: invalid\r\n"
+    },
+    {
+      "fileId": "fran039",
+      "relativePath": "fran039.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.519"
+    },
+    {
+      "fileId": "russ109i",
+      "relativePath": "russ109i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.579"
+    },
+    {
+      "fileId": "brit015x",
+      "relativePath": "brit015x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.612"
+    },
+    {
+      "fileId": "ita072bl75",
+      "relativePath": "ita072bl75.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.54"
+    },
+    {
+      "fileId": "az574",
+      "relativePath": "northamerica/usa/az574.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.753"
+    },
+    {
+      "fileId": "russ224x",
+      "relativePath": "russ224x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.734"
+    },
+    {
+      "fileId": "russ086l",
+      "relativePath": "russ086l.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.465"
+    },
+    {
+      "fileId": "russ110x",
+      "relativePath": "russ110x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.776"
+    },
+    {
+      "fileId": "wa067",
+      "relativePath": "northamerica/usa/wa067.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.729"
+    },
+    {
+      "fileId": "co606",
+      "relativePath": "northamerica/usa/co606.rwl",
+      "reason": "file_problem_segments_above_maximum:1"
+    },
+    {
+      "fileId": "swed017",
+      "relativePath": "swed017.rwl",
+      "reason": "Command failed: D:\\软件测试\\cofecha-x86_64-pc-windows-msvc.exe\n\r\nrun-time error M6101: MATH\r\n- floating-point error: invalid\r\n"
+    },
+    {
+      "fileId": "russ141x",
+      "relativePath": "russ141x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.763"
+    },
+    {
+      "fileId": "russ136i",
+      "relativePath": "russ136i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.579"
+    },
+    {
+      "fileId": "russ127e",
+      "relativePath": "russ127e.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.744"
+    },
+    {
+      "fileId": "brit015n",
+      "relativePath": "brit015n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.467"
+    },
+    {
+      "fileId": "russ120x",
+      "relativePath": "russ120x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.744"
+    },
+    {
+      "fileId": "newz030",
+      "relativePath": "newz030.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.738"
+    },
+    {
+      "fileId": "norw006e",
+      "relativePath": "norw006e.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "russ066n",
+      "relativePath": "russ066n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.398"
+    },
+    {
+      "fileId": "wy053",
+      "relativePath": "northamerica/usa/wy053.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.781"
+    },
+    {
+      "fileId": "russ081x",
+      "relativePath": "russ081x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.731"
+    },
+    {
+      "fileId": "aut125",
+      "relativePath": "aut125.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.628"
+    },
+    {
+      "fileId": "wa055",
+      "relativePath": "northamerica/usa/wa055.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.629"
+    },
+    {
+      "fileId": "che547",
+      "relativePath": "che547.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.683"
+    },
+    {
+      "fileId": "russ121i",
+      "relativePath": "russ121i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.532"
+    },
+    {
+      "fileId": "newz009",
+      "relativePath": "newz009.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.753"
+    },
+    {
+      "fileId": "russ066i",
+      "relativePath": "russ066i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.587"
+    },
+    {
+      "fileId": "me010x",
+      "relativePath": "northamerica/usa/me010x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.691"
+    },
+    {
+      "fileId": "russ118n",
+      "relativePath": "russ118n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.449"
+    },
+    {
+      "fileId": "russ111x",
+      "relativePath": "russ111x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.758"
+    },
+    {
+      "fileId": "ut505",
+      "relativePath": "northamerica/usa/ut505.rwl",
+      "reason": "file_problem_segments_above_maximum:5"
+    },
+    {
+      "fileId": "co570",
+      "relativePath": "northamerica/usa/co570.rwl",
+      "reason": "file_problem_segments_above_maximum:1"
+    },
+    {
+      "fileId": "cyp020",
+      "relativePath": "cyp020.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.607"
+    },
+    {
+      "fileId": "russ094l",
+      "relativePath": "russ094l.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.708"
+    },
+    {
+      "fileId": "morc017",
+      "relativePath": "morc017.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.758"
+    },
+    {
+      "fileId": "az590",
+      "relativePath": "northamerica/usa/az590.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.725"
+    },
+    {
+      "fileId": "fran049",
+      "relativePath": "fran049.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.548"
+    },
+    {
+      "fileId": "swit128n",
+      "relativePath": "swit128n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.577"
+    },
+    {
+      "fileId": "russ049x",
+      "relativePath": "russ049x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.575"
+    },
+    {
+      "fileId": "germ052e",
+      "relativePath": "germ052e.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.693"
+    },
+    {
+      "fileId": "az583",
+      "relativePath": "northamerica/usa/az583.rwl",
+      "reason": "file_problem_segments_above_maximum:1"
+    },
+    {
+      "fileId": "russ088t",
+      "relativePath": "russ088t.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.733"
+    },
+    {
+      "fileId": "russ115e",
+      "relativePath": "russ115e.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.604"
+    },
+    {
+      "fileId": "co671",
+      "relativePath": "northamerica/usa/co671.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.785"
+    },
+    {
+      "fileId": "norw019",
+      "relativePath": "norw019.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.53"
+    },
+    {
+      "fileId": "wi004",
+      "relativePath": "northamerica/usa/wi004.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.71"
+    },
+    {
+      "fileId": "russ058n",
+      "relativePath": "russ058n.rwl",
+      "reason": "Command failed: D:\\软件测试\\cofecha-x86_64-pc-windows-msvc.exe\n\r\nrun-time error M6101: MATH\r\n- floating-point error: invalid\r\n"
+    },
+    {
+      "fileId": "russ118i",
+      "relativePath": "russ118i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.556"
+    },
+    {
+      "fileId": "id014",
+      "relativePath": "northamerica/usa/id014.rwl",
+      "reason": "file_problem_segments_above_maximum:1"
+    },
+    {
+      "fileId": "russ034i",
+      "relativePath": "russ034i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.508"
+    },
+    {
+      "fileId": "az541",
+      "relativePath": "northamerica/usa/az541.rwl",
+      "reason": "file_problem_segments_above_maximum:3"
+    },
+    {
+      "fileId": "bulg001n",
+      "relativePath": "bulg001n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.467"
+    },
+    {
+      "fileId": "russ048i",
+      "relativePath": "russ048i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.564"
+    },
+    {
+      "fileId": "russ075x",
+      "relativePath": "russ075x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.689"
+    },
+    {
+      "fileId": "russ140i",
+      "relativePath": "russ140i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.512"
+    },
+    {
+      "fileId": "russ157i",
+      "relativePath": "russ157i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.353"
+    },
+    {
+      "fileId": "ita073be25",
+      "relativePath": "ita073be25.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.242"
+    },
+    {
+      "fileId": "nm632bl",
+      "relativePath": "northamerica/usa/nm632bl.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.447"
+    },
+    {
+      "fileId": "az581",
+      "relativePath": "northamerica/usa/az581.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.735"
+    },
+    {
+      "fileId": "wy075bl",
+      "relativePath": "northamerica/usa/wy075bl.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.45"
+    },
+    {
+      "fileId": "russ117n",
+      "relativePath": "russ117n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.213"
+    },
+    {
+      "fileId": "russ094i",
+      "relativePath": "russ094i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.529"
+    },
+    {
+      "fileId": "mong034",
+      "relativePath": "mong034.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.713"
+    },
+    {
+      "fileId": "az040",
+      "relativePath": "northamerica/usa/az040.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.787"
+    },
+    {
+      "fileId": "newz020",
+      "relativePath": "newz020.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.738"
+    },
+    {
+      "fileId": "nm520d",
+      "relativePath": "northamerica/usa/nm520d.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.443"
+    },
+    {
+      "fileId": "russ094t",
+      "relativePath": "russ094t.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.769"
+    },
+    {
+      "fileId": "grc054x",
+      "relativePath": "grc054x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.545"
+    },
+    {
+      "fileId": "russ049i",
+      "relativePath": "russ049i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.635"
+    },
+    {
+      "fileId": "newz042",
+      "relativePath": "newz042.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.705"
+    },
+    {
+      "fileId": "russ169n",
+      "relativePath": "russ169n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.57"
+    },
+    {
+      "fileId": "russ104i",
+      "relativePath": "russ104i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.602"
+    },
+    {
+      "fileId": "finl011x",
+      "relativePath": "finl011x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.628"
+    },
+    {
+      "fileId": "cana427",
+      "relativePath": "northamerica/canada/cana427.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.756"
+    },
+    {
+      "fileId": "dza005",
+      "relativePath": "dza005.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.795"
+    },
+    {
+      "fileId": "wy079",
+      "relativePath": "northamerica/usa/wy079.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.71"
+    },
+    {
+      "fileId": "co672",
+      "relativePath": "northamerica/usa/co672.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.732"
+    },
+    {
+      "fileId": "russ130x",
+      "relativePath": "russ130x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.654"
+    },
+    {
+      "fileId": "ak074",
+      "relativePath": "northamerica/usa/ak074.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.595"
+    },
+    {
+      "fileId": "russ135x",
+      "relativePath": "russ135x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.653"
+    },
+    {
+      "fileId": "wy061",
+      "relativePath": "northamerica/usa/wy061.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.769"
+    },
+    {
+      "fileId": "mt143",
+      "relativePath": "northamerica/usa/mt143.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.748"
+    },
+    {
+      "fileId": "or098",
+      "relativePath": "northamerica/usa/or098.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.702"
+    },
+    {
+      "fileId": "co693e",
+      "relativePath": "northamerica/usa/co693e.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.794"
+    },
+    {
+      "fileId": "che612",
+      "relativePath": "che612.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "az606",
+      "relativePath": "northamerica/usa/az606.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.769"
+    },
+    {
+      "fileId": "russ115w",
+      "relativePath": "russ115w.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.579"
+    },
+    {
+      "fileId": "russ053n",
+      "relativePath": "russ053n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.319"
+    },
+    {
+      "fileId": "ut578",
+      "relativePath": "northamerica/usa/ut578.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "russ132t",
+      "relativePath": "russ132t.rwl",
+      "reason": "file_problem_segments_above_maximum:47"
+    },
+    {
+      "fileId": "russ138x",
+      "relativePath": "russ138x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.577"
+    },
+    {
+      "fileId": "dza022",
+      "relativePath": "dza022.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.743"
+    },
+    {
+      "fileId": "russ107l",
+      "relativePath": "russ107l.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.603"
+    },
+    {
+      "fileId": "swed011x",
+      "relativePath": "swed011x.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "russ156i",
+      "relativePath": "russ156i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.552"
+    },
+    {
+      "fileId": "che609",
+      "relativePath": "che609.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "co509i",
+      "relativePath": "northamerica/usa/co509i.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "russ132i",
+      "relativePath": "russ132i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.602"
+    },
+    {
+      "fileId": "russ145x",
+      "relativePath": "russ145x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.664"
+    },
+    {
+      "fileId": "nm053",
+      "relativePath": "northamerica/usa/nm053.rwl",
+      "reason": "file_problem_segments_above_maximum:4"
+    },
+    {
+      "fileId": "swit128",
+      "relativePath": "swit128.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.664"
+    },
+    {
+      "fileId": "russ224",
+      "relativePath": "russ224.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.793"
+    },
+    {
+      "fileId": "russ034n",
+      "relativePath": "russ034n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.504"
+    },
+    {
+      "fileId": "russ149t",
+      "relativePath": "russ149t.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.705"
+    },
+    {
+      "fileId": "russ027t",
+      "relativePath": "russ027t.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.799"
+    },
+    {
+      "fileId": "russ113n",
+      "relativePath": "russ113n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.368"
+    },
+    {
+      "fileId": "finl072x",
+      "relativePath": "finl072x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.724"
+    },
+    {
+      "fileId": "russ164x",
+      "relativePath": "russ164x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.717"
+    },
+    {
+      "fileId": "wy056",
+      "relativePath": "northamerica/usa/wy056.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.747"
+    },
+    {
+      "fileId": "mong012",
+      "relativePath": "mong012.rwl",
+      "reason": "file_problem_segments_above_maximum:2"
+    },
+    {
+      "fileId": "russ099t",
+      "relativePath": "russ099t.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.763"
+    },
+    {
+      "fileId": "co676",
+      "relativePath": "northamerica/usa/co676.rwl",
+      "reason": "file_problem_segments_above_maximum:4"
+    },
+    {
+      "fileId": "russ065x",
+      "relativePath": "russ065x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.788"
+    },
+    {
+      "fileId": "aut150",
+      "relativePath": "aut150.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.623"
+    },
+    {
+      "fileId": "mong030",
+      "relativePath": "mong030.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.749"
+    },
+    {
+      "fileId": "co572",
+      "relativePath": "northamerica/usa/co572.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.727"
+    },
+    {
+      "fileId": "sd002",
+      "relativePath": "northamerica/usa/sd002.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.711"
+    },
+    {
+      "fileId": "wa022",
+      "relativePath": "northamerica/usa/wa022.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.666"
+    },
+    {
+      "fileId": "swed022n",
+      "relativePath": "swed022n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.144"
+    },
+    {
+      "fileId": "nm614",
+      "relativePath": "northamerica/usa/nm614.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.7"
+    },
+    {
+      "fileId": "russ098x",
+      "relativePath": "russ098x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.62"
+    },
+    {
+      "fileId": "ut584",
+      "relativePath": "northamerica/usa/ut584.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.778"
+    },
+    {
+      "fileId": "wy078",
+      "relativePath": "northamerica/usa/wy078.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.737"
+    },
+    {
+      "fileId": "russ174w",
+      "relativePath": "russ174w.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.707"
+    },
+    {
+      "fileId": "co660",
+      "relativePath": "northamerica/usa/co660.rwl",
+      "reason": "file_problem_segments_above_maximum:10"
+    },
+    {
+      "fileId": "nm037",
+      "relativePath": "northamerica/usa/nm037.rwl",
+      "reason": "file_problem_segments_above_maximum:1"
+    },
+    {
+      "fileId": "russ228",
+      "relativePath": "russ228.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.726"
+    },
+    {
+      "fileId": "az536",
+      "relativePath": "northamerica/usa/az536.rwl",
+      "reason": "file_problem_segments_above_maximum:3"
+    },
+    {
+      "fileId": "russ156x",
+      "relativePath": "russ156x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.657"
+    },
+    {
+      "fileId": "russ126x",
+      "relativePath": "russ126x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.748"
+    },
+    {
+      "fileId": "cana230l",
+      "relativePath": "northamerica/canada/cana230l.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.414"
+    },
+    {
+      "fileId": "swit171x",
+      "relativePath": "swit171x.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "turk013",
+      "relativePath": "turk013.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.519"
+    },
+    {
+      "fileId": "or101",
+      "relativePath": "northamerica/usa/or101.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.773"
+    },
+    {
+      "fileId": "mt164",
+      "relativePath": "northamerica/usa/mt164.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.648"
+    },
+    {
+      "fileId": "az050",
+      "relativePath": "northamerica/usa/az050.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.785"
+    },
+    {
+      "fileId": "russ087n",
+      "relativePath": "russ087n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.32"
+    },
+    {
+      "fileId": "ita073bl75",
+      "relativePath": "ita073bl75.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.483"
+    },
+    {
+      "fileId": "az144",
+      "relativePath": "northamerica/usa/az144.rwl",
+      "reason": "file_problem_segments_above_maximum:1"
+    },
+    {
+      "fileId": "co693",
+      "relativePath": "northamerica/usa/co693.rwl",
+      "reason": "file_problem_segments_above_maximum:2"
+    },
+    {
+      "fileId": "cana234x",
+      "relativePath": "northamerica/canada/cana234x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.689"
+    },
+    {
+      "fileId": "ut521",
+      "relativePath": "northamerica/usa/ut521.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.794"
+    },
+    {
+      "fileId": "co641",
+      "relativePath": "northamerica/usa/co641.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.767"
+    },
+    {
+      "fileId": "russ140w",
+      "relativePath": "russ140w.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.711"
+    },
+    {
+      "fileId": "mong042",
+      "relativePath": "mong042.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.771"
+    },
+    {
+      "fileId": "nm586",
+      "relativePath": "northamerica/usa/nm586.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.748"
+    },
+    {
+      "fileId": "can708",
+      "relativePath": "northamerica/canada/can708.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.75"
+    },
+    {
+      "fileId": "russ142t",
+      "relativePath": "russ142t.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.681"
+    },
+    {
+      "fileId": "russ150i",
+      "relativePath": "russ150i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.563"
+    },
+    {
+      "fileId": "spai009",
+      "relativePath": "spai009.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "japa012x",
+      "relativePath": "japa012x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.33"
+    },
+    {
+      "fileId": "ia026",
+      "relativePath": "northamerica/usa/ia026.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.684"
+    },
+    {
+      "fileId": "che603x",
+      "relativePath": "che603x.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "ak2",
+      "relativePath": "northamerica/usa/ak2.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.674"
+    },
+    {
+      "fileId": "russ239n",
+      "relativePath": "russ239n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.781"
+    },
+    {
+      "fileId": "mexi022",
+      "relativePath": "northamerica/mexico/mexi022.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.728"
+    },
+    {
+      "fileId": "russ095t",
+      "relativePath": "russ095t.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.764"
+    },
+    {
+      "fileId": "russ264",
+      "relativePath": "russ264.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.736"
+    },
+    {
+      "fileId": "russ022n",
+      "relativePath": "russ022n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.485"
+    },
+    {
+      "fileId": "russ048x",
+      "relativePath": "russ048x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.685"
+    },
+    {
+      "fileId": "russ131x",
+      "relativePath": "russ131x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.477"
+    },
+    {
+      "fileId": "ia025",
+      "relativePath": "northamerica/usa/ia025.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.752"
+    },
+    {
+      "fileId": "russ099n",
+      "relativePath": "russ099n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.457"
+    },
+    {
+      "fileId": "russ137i",
+      "relativePath": "russ137i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.446"
+    },
+    {
+      "fileId": "russ023i",
+      "relativePath": "russ023i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.544"
+    },
+    {
+      "fileId": "fra059",
+      "relativePath": "fra059.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.702"
+    },
+    {
+      "fileId": "swit173i",
+      "relativePath": "swit173i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.518"
+    },
+    {
+      "fileId": "pola019x",
+      "relativePath": "pola019x.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "russ041n",
+      "relativePath": "russ041n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.52"
+    },
+    {
+      "fileId": "ut516",
+      "relativePath": "northamerica/usa/ut516.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.798"
+    },
+    {
+      "fileId": "germ052t",
+      "relativePath": "germ052t.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.799"
+    },
+    {
+      "fileId": "russ105l",
+      "relativePath": "russ105l.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.586"
+    },
+    {
+      "fileId": "pola019n",
+      "relativePath": "pola019n.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "russ064n",
+      "relativePath": "russ064n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.425"
+    },
+    {
+      "fileId": "japa008x",
+      "relativePath": "japa008x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.396"
+    },
+    {
+      "fileId": "russ057n",
+      "relativePath": "russ057n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.469"
+    },
+    {
+      "fileId": "russ106t",
+      "relativePath": "russ106t.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.759"
+    },
+    {
+      "fileId": "russ089n",
+      "relativePath": "russ089n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.45"
+    },
+    {
+      "fileId": "or100",
+      "relativePath": "northamerica/usa/or100.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.739"
+    },
+    {
+      "fileId": "russ239x",
+      "relativePath": "russ239x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.771"
+    },
+    {
+      "fileId": "ital012n",
+      "relativePath": "ital012n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.364"
+    },
+    {
+      "fileId": "id044",
+      "relativePath": "northamerica/usa/id044.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.71"
+    },
+    {
+      "fileId": "co665",
+      "relativePath": "northamerica/usa/co665.rwl",
+      "reason": "eligible_targets_below_minimum:4"
+    },
+    {
+      "fileId": "mexi074",
+      "relativePath": "northamerica/mexico/mexi074.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.7"
+    },
+    {
+      "fileId": "mexi031",
+      "relativePath": "northamerica/mexico/mexi031.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.779"
+    },
+    {
+      "fileId": "russ110n",
+      "relativePath": "russ110n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.404"
+    },
+    {
+      "fileId": "russ023t",
+      "relativePath": "russ023t.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.772"
+    },
+    {
+      "fileId": "id036",
+      "relativePath": "northamerica/usa/id036.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.757"
+    },
+    {
+      "fileId": "russ025x",
+      "relativePath": "russ025x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.695"
+    },
+    {
+      "fileId": "russ090n",
+      "relativePath": "russ090n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.421"
+    },
+    {
+      "fileId": "paki031",
+      "relativePath": "paki031.rwl",
+      "reason": "file_problem_segments_above_maximum:1"
+    },
+    {
+      "fileId": "ia024",
+      "relativePath": "northamerica/usa/ia024.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.728"
+    },
+    {
+      "fileId": "swit128x",
+      "relativePath": "swit128x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.7"
+    },
+    {
+      "fileId": "svk001",
+      "relativePath": "svk001.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.75"
+    },
+    {
+      "fileId": "nm520x",
+      "relativePath": "northamerica/usa/nm520x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.396"
+    },
+    {
+      "fileId": "russ023l",
+      "relativePath": "russ023l.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.651"
+    },
+    {
+      "fileId": "russ128t",
+      "relativePath": "russ128t.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.738"
+    },
+    {
+      "fileId": "paki030",
+      "relativePath": "paki030.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "swit112e",
+      "relativePath": "swit112e.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.597"
+    },
+    {
+      "fileId": "russ124t",
+      "relativePath": "russ124t.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.751"
+    },
+    {
+      "fileId": "russ073t",
+      "relativePath": "russ073t.rwl",
+      "reason": "eligible_targets_below_minimum:4"
+    },
+    {
+      "fileId": "svk023x",
+      "relativePath": "svk023x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.575"
+    },
+    {
+      "fileId": "fra057",
+      "relativePath": "fra057.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.671"
+    },
+    {
+      "fileId": "russ123n",
+      "relativePath": "russ123n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.45"
+    },
+    {
+      "fileId": "russ102n",
+      "relativePath": "russ102n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.319"
+    },
+    {
+      "fileId": "russ131i",
+      "relativePath": "russ131i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.589"
+    },
+    {
+      "fileId": "swit167x",
+      "relativePath": "swit167x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.58"
+    },
+    {
+      "fileId": "cyp022",
+      "relativePath": "cyp022.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.634"
+    },
+    {
+      "fileId": "ita074",
+      "relativePath": "ita074.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.749"
+    },
+    {
+      "fileId": "cana334",
+      "relativePath": "northamerica/canada/cana334.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.757"
+    },
+    {
+      "fileId": "mexi058",
+      "relativePath": "northamerica/mexico/mexi058.rwl",
+      "reason": "file_problem_segments_above_maximum:1"
+    },
+    {
+      "fileId": "finl019n",
+      "relativePath": "finl019n.rwl",
+      "reason": "Command failed: D:\\软件测试\\cofecha-x86_64-pc-windows-msvc.exe\n\r\nrun-time error M6101: MATH\r\n- floating-point error: invalid\r\n"
+    },
+    {
+      "fileId": "brit017x",
+      "relativePath": "brit017x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.557"
+    },
+    {
+      "fileId": "russ221",
+      "relativePath": "russ221.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.706"
+    },
+    {
+      "fileId": "cana336",
+      "relativePath": "northamerica/canada/cana336.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.709"
+    },
+    {
+      "fileId": "ca079",
+      "relativePath": "northamerica/usa/ca079.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.602"
+    },
+    {
+      "fileId": "co608",
+      "relativePath": "northamerica/usa/co608.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.757"
+    },
+    {
+      "fileId": "co509t",
+      "relativePath": "northamerica/usa/co509t.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "nm579",
+      "relativePath": "northamerica/usa/nm579.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.766"
+    },
+    {
+      "fileId": "ak12",
+      "relativePath": "northamerica/usa/ak12.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.75"
+    },
+    {
+      "fileId": "swed017x",
+      "relativePath": "swed017x.rwl",
+      "reason": "Command failed: D:\\软件测试\\cofecha-x86_64-pc-windows-msvc.exe\n\r\nrun-time error M6101: MATH\r\n- floating-point error: invalid\r\n"
+    },
+    {
+      "fileId": "pola025",
+      "relativePath": "pola025.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.596"
+    },
+    {
+      "fileId": "russ124n",
+      "relativePath": "russ124n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.258"
+    },
+    {
+      "fileId": "russ117i",
+      "relativePath": "russ117i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.403"
+    },
+    {
+      "fileId": "or092",
+      "relativePath": "northamerica/usa/or092.rwl",
+      "reason": "file_problem_segments_above_maximum:1"
+    },
+    {
+      "fileId": "finl046",
+      "relativePath": "finl046.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.585"
+    },
+    {
+      "fileId": "russ131l",
+      "relativePath": "russ131l.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.518"
+    },
+    {
+      "fileId": "russ127i",
+      "relativePath": "russ127i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.558"
+    },
+    {
+      "fileId": "russ058i",
+      "relativePath": "russ058i.rwl",
+      "reason": "Command failed: D:\\软件测试\\cofecha-x86_64-pc-windows-msvc.exe\n\r\nrun-time error M6101: MATH\r\n- floating-point error: invalid\r\n"
+    },
+    {
+      "fileId": "russ070x",
+      "relativePath": "russ070x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.695"
+    },
+    {
+      "fileId": "russ109w",
+      "relativePath": "russ109w.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.618"
+    },
+    {
+      "fileId": "russ147x",
+      "relativePath": "russ147x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.732"
+    },
+    {
+      "fileId": "cypr001",
+      "relativePath": "cypr001.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.585"
+    },
+    {
+      "fileId": "brit017n",
+      "relativePath": "brit017n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.28"
+    },
+    {
+      "fileId": "russ040l",
+      "relativePath": "russ040l.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.41"
+    },
+    {
+      "fileId": "az586",
+      "relativePath": "northamerica/usa/az586.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.779"
+    },
+    {
+      "fileId": "or030",
+      "relativePath": "northamerica/usa/or030.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.637"
+    },
+    {
+      "fileId": "tx056",
+      "relativePath": "northamerica/usa/tx056.rwl",
+      "reason": "file_problem_segments_above_maximum:1"
+    },
+    {
+      "fileId": "russ134x",
+      "relativePath": "russ134x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.703"
+    },
+    {
+      "fileId": "russ129x",
+      "relativePath": "russ129x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.605"
+    },
+    {
+      "fileId": "tx039l",
+      "relativePath": "northamerica/usa/tx039l.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.714"
+    },
+    {
+      "fileId": "paki010",
+      "relativePath": "paki010.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.743"
+    },
+    {
+      "fileId": "mi010",
+      "relativePath": "northamerica/usa/mi010.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.764"
+    },
+    {
+      "fileId": "wy019",
+      "relativePath": "northamerica/usa/wy019.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.798"
+    },
+    {
+      "fileId": "newz044",
+      "relativePath": "newz044.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.731"
+    },
+    {
+      "fileId": "mt120",
+      "relativePath": "northamerica/usa/mt120.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.77"
+    },
+    {
+      "fileId": "co615",
+      "relativePath": "northamerica/usa/co615.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.744"
+    },
+    {
+      "fileId": "swit170n",
+      "relativePath": "swit170n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.434"
+    },
+    {
+      "fileId": "ut550",
+      "relativePath": "northamerica/usa/ut550.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.765"
+    },
+    {
+      "fileId": "swit124e",
+      "relativePath": "swit124e.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.625"
+    },
+    {
+      "fileId": "nm600",
+      "relativePath": "northamerica/usa/nm600.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.767"
+    },
+    {
+      "fileId": "russ141i",
+      "relativePath": "russ141i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.518"
+    },
+    {
+      "fileId": "nm024",
+      "relativePath": "northamerica/usa/nm024.rwl",
+      "reason": "file_problem_segments_above_maximum:1"
+    },
+    {
+      "fileId": "russ028x",
+      "relativePath": "russ028x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.723"
+    },
+    {
+      "fileId": "swit279",
+      "relativePath": "swit279.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.656"
+    },
+    {
+      "fileId": "swed330x",
+      "relativePath": "swed330x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.741"
+    },
+    {
+      "fileId": "finl019e",
+      "relativePath": "finl019e.rwl",
+      "reason": "Command failed: D:\\软件测试\\cofecha-x86_64-pc-windows-msvc.exe\n\r\nrun-time error M6101: MATH\r\n- floating-point error: invalid\r\n"
+    },
+    {
+      "fileId": "russ039x",
+      "relativePath": "russ039x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.666"
+    },
+    {
+      "fileId": "tur067",
+      "relativePath": "tur067.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.599"
+    },
+    {
+      "fileId": "norw006x",
+      "relativePath": "norw006x.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "co517n",
+      "relativePath": "northamerica/usa/co517n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.468"
+    },
+    {
+      "fileId": "ita072be25",
+      "relativePath": "ita072be25.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.234"
+    },
+    {
+      "fileId": "che619",
+      "relativePath": "che619.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.741"
+    },
+    {
+      "fileId": "swit112x",
+      "relativePath": "swit112x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.75"
+    },
+    {
+      "fileId": "russ034x",
+      "relativePath": "russ034x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.578"
+    },
+    {
+      "fileId": "ital007n",
+      "relativePath": "ital007n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.491"
+    },
+    {
+      "fileId": "co067",
+      "relativePath": "northamerica/usa/co067.rwl",
+      "reason": "Command failed: D:\\软件测试\\cofecha-x86_64-pc-windows-msvc.exe\n\r\nrun-time error M6101: MATH\r\n- floating-point error: invalid\r\n"
+    },
+    {
+      "fileId": "co673",
+      "relativePath": "northamerica/usa/co673.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.73"
+    },
+    {
+      "fileId": "co652",
+      "relativePath": "northamerica/usa/co652.rwl",
+      "reason": "file_problem_segments_above_maximum:7"
+    },
+    {
+      "fileId": "russ147n",
+      "relativePath": "russ147n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.317"
+    },
+    {
+      "fileId": "russ114t",
+      "relativePath": "russ114t.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.721"
+    },
+    {
+      "fileId": "or021",
+      "relativePath": "northamerica/usa/or021.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.72"
+    },
+    {
+      "fileId": "nv057",
+      "relativePath": "northamerica/usa/nv057.rwl",
+      "reason": "file_problem_segments_above_maximum:1"
+    },
+    {
+      "fileId": "russ111t",
+      "relativePath": "russ111t.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.761"
+    },
+    {
+      "fileId": "mexi044",
+      "relativePath": "northamerica/mexico/mexi044.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.735"
+    },
+    {
+      "fileId": "russ145n",
+      "relativePath": "russ145n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.402"
+    },
+    {
+      "fileId": "ut501",
+      "relativePath": "northamerica/usa/ut501.rwl",
+      "reason": "file_problem_segments_above_maximum:2"
+    },
+    {
+      "fileId": "ia046",
+      "relativePath": "northamerica/usa/ia046.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.705"
+    },
+    {
+      "fileId": "russ164i",
+      "relativePath": "russ164i.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.617"
+    },
+    {
+      "fileId": "russ149x",
+      "relativePath": "russ149x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.711"
+    },
+    {
+      "fileId": "turk034",
+      "relativePath": "turk034.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.49"
+    },
+    {
+      "fileId": "russ034l",
+      "relativePath": "russ034l.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.354"
+    },
+    {
+      "fileId": "russ098n",
+      "relativePath": "russ098n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.366"
+    },
+    {
+      "fileId": "az580",
+      "relativePath": "northamerica/usa/az580.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.798"
+    },
+    {
+      "fileId": "cana354",
+      "relativePath": "northamerica/canada/cana354.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.708"
+    },
+    {
+      "fileId": "co509d",
+      "relativePath": "northamerica/usa/co509d.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "nm609",
+      "relativePath": "northamerica/usa/nm609.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.776"
+    },
+    {
+      "fileId": "russ078l",
+      "relativePath": "russ078l.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.725"
+    },
+    {
+      "fileId": "russ104x",
+      "relativePath": "russ104x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.549"
+    },
+    {
+      "fileId": "arge018",
+      "relativePath": "southamerica/arge018.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.526"
+    },
+    {
+      "fileId": "russ048n",
+      "relativePath": "russ048n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.5"
+    },
+    {
+      "fileId": "paki038",
+      "relativePath": "paki038.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.778"
+    },
+    {
+      "fileId": "russ080x",
+      "relativePath": "russ080x.rwl",
+      "reason": "file_problem_segments_above_maximum:2"
+    },
+    {
+      "fileId": "finl073x",
+      "relativePath": "finl073x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.67"
+    },
+    {
+      "fileId": "che418x",
+      "relativePath": "che418x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.583"
+    },
+    {
+      "fileId": "russ095n",
+      "relativePath": "russ095n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.467"
+    },
+    {
+      "fileId": "russ174n",
+      "relativePath": "russ174n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.542"
+    },
+    {
+      "fileId": "russ170e",
+      "relativePath": "russ170e.rwl",
+      "reason": "file_problem_segments_above_maximum:1"
+    },
+    {
+      "fileId": "aut140",
+      "relativePath": "aut140.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.604"
+    },
+    {
+      "fileId": "chn098",
+      "relativePath": "chn098.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.669"
+    },
+    {
+      "fileId": "ut526",
+      "relativePath": "northamerica/usa/ut526.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.791"
+    },
+    {
+      "fileId": "cana413",
+      "relativePath": "northamerica/canada/cana413.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.796"
+    },
+    {
+      "fileId": "russ015",
+      "relativePath": "russ015.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.735"
+    },
+    {
+      "fileId": "cana567",
+      "relativePath": "northamerica/canada/cana567.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.697"
+    },
+    {
+      "fileId": "nh002",
+      "relativePath": "northamerica/usa/nh002.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.611"
+    },
+    {
+      "fileId": "russ041x",
+      "relativePath": "russ041x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.753"
+    },
+    {
+      "fileId": "nm520n",
+      "relativePath": "northamerica/usa/nm520n.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "swit124x",
+      "relativePath": "swit124x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.71"
+    },
+    {
+      "fileId": "co509n",
+      "relativePath": "northamerica/usa/co509n.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "finl061",
+      "relativePath": "finl061.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.732"
+    },
+    {
+      "fileId": "ky003",
+      "relativePath": "northamerica/usa/ky003.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.625"
+    },
+    {
+      "fileId": "fran011",
+      "relativePath": "fran011.rwl",
+      "reason": "Command failed: D:\\软件测试\\cofecha-x86_64-pc-windows-msvc.exe\n\r\nrun-time error M6101: MATH\r\n- floating-point error: invalid\r\n"
+    },
+    {
+      "fileId": "russ030n",
+      "relativePath": "russ030n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.618"
+    },
+    {
+      "fileId": "russ175x",
+      "relativePath": "russ175x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.43"
+    },
+    {
+      "fileId": "rus374",
+      "relativePath": "rus374.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.601"
+    },
+    {
+      "fileId": "russ097n",
+      "relativePath": "russ097n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.527"
+    },
+    {
+      "fileId": "russ150w",
+      "relativePath": "russ150w.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.766"
+    },
+    {
+      "fileId": "finl010n",
+      "relativePath": "finl010n.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "ita074bl50",
+      "relativePath": "ita074bl50.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.58"
+    },
+    {
+      "fileId": "russ077n",
+      "relativePath": "russ077n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.51"
+    },
+    {
+      "fileId": "ca094",
+      "relativePath": "northamerica/usa/ca094.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.657"
+    },
+    {
+      "fileId": "russ135n",
+      "relativePath": "russ135n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.259"
+    },
+    {
+      "fileId": "swit167n",
+      "relativePath": "swit167n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.352"
+    },
+    {
+      "fileId": "deu316",
+      "relativePath": "deu316.rwl",
+      "reason": "file_intercorrelation_below_minimum:-1"
+    },
+    {
+      "fileId": "wa072",
+      "relativePath": "northamerica/usa/wa072.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.745"
+    },
+    {
+      "fileId": "ia020",
+      "relativePath": "northamerica/usa/ia020.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.784"
+    },
+    {
+      "fileId": "czec016",
+      "relativePath": "czec016.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.665"
+    },
+    {
+      "fileId": "ca517",
+      "relativePath": "northamerica/usa/ca517.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.653"
+    },
+    {
+      "fileId": "nm599",
+      "relativePath": "northamerica/usa/nm599.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.798"
+    },
+    {
+      "fileId": "russ030x",
+      "relativePath": "russ030x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.595"
+    },
+    {
+      "fileId": "russ238n",
+      "relativePath": "russ238n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.67"
+    },
+    {
+      "fileId": "ut541",
+      "relativePath": "northamerica/usa/ut541.rwl",
+      "reason": "file_problem_segments_above_maximum:3"
+    },
+    {
+      "fileId": "fran028p",
+      "relativePath": "fran028p.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.635"
+    },
+    {
+      "fileId": "russ039n",
+      "relativePath": "russ039n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.502"
+    },
+    {
+      "fileId": "russ133n",
+      "relativePath": "russ133n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.276"
+    },
+    {
+      "fileId": "russ117x",
+      "relativePath": "russ117x.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.55"
+    },
+    {
+      "fileId": "mt131",
+      "relativePath": "northamerica/usa/mt131.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.744"
+    },
+    {
+      "fileId": "az587",
+      "relativePath": "northamerica/usa/az587.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.736"
+    },
+    {
+      "fileId": "che618",
+      "relativePath": "che618.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.641"
+    },
+    {
+      "fileId": "cypr003n",
+      "relativePath": "cypr003n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.265"
+    },
+    {
+      "fileId": "cypr009n",
+      "relativePath": "cypr009n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.575"
+    },
+    {
+      "fileId": "tx046l",
+      "relativePath": "northamerica/usa/tx046l.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.653"
+    },
+    {
+      "fileId": "swit175n",
+      "relativePath": "swit175n.rwl",
+      "reason": "file_intercorrelation_below_minimum:0.564"
+    },
+    {
+      "fileId": "russ164w",
+      "relativePath": "russ164w.rwl",
+      "reason": "file_problem_segments_above_maximum:1"
+    }
+  ],
+  "roleArtifacts": {
+    "development": {
+      "configPath": "D:/软件测试/itrdb-unified-model-v2/protocol-v1/development-config.json",
+      "manifestPath": "D:/软件测试/itrdb-unified-model-v2/protocol-v1/development-manifest.json",
+      "fileIds": [
+        "az514",
+        "nm582",
+        "az091",
+        "cana408",
+        "co648",
+        "az102",
+        "russ092x",
+        "co626",
+        "az052",
+        "paki028",
+        "co600",
+        "nm111",
+        "co638",
+        "ut560",
+        "ut524",
+        "mong023",
+        "co602",
+        "az077"
+      ]
+    },
+    "calibration": {
+      "configPath": "D:/软件测试/itrdb-unified-model-v2/protocol-v1/calibration-config.json",
+      "manifestPath": "D:/软件测试/itrdb-unified-model-v2/protocol-v1/calibration-manifest.json",
+      "fileIds": [
+        "ut518",
+        "az559",
+        "russ303",
+        "russ029x",
+        "co610",
+        "co637",
+        "chin075",
+        "cana416",
+        "ca627",
+        "co590"
+      ]
+    },
+    "finalHoldout": {
+      "configPath": "D:/软件测试/itrdb-unified-model-v2/protocol-v1/finalHoldout-config.json",
+      "manifestPath": "D:/软件测试/itrdb-unified-model-v2/protocol-v1/finalHoldout-manifest.json",
+      "fileIds": [
+        "russ027x",
+        "russ094x",
+        "az522",
+        "mong022",
+        "mt100",
+        "az544",
+        "wy031",
+        "cana333",
+        "az592",
+        "nv506",
+        "nm581",
+        "co640",
+        "co558",
+        "nm036",
+        "az090",
+        "nv503",
+        "russ170w"
+      ]
+    }
+  }
+}
