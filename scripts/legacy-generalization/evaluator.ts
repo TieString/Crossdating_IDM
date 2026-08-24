@@ -16,8 +16,10 @@ import { diagnoseCrossdating } from "@/features/crossdating/diagnosis/engine";
 import { getConfig } from "@/features/crossdating/diagnosis/config";
 import { INTERNAL_EVENT_PATH_CONFIG } from "@/features/crossdating/diagnosis/eventEnsemble";
 import {
+    createLagPathCache,
     diagnoseLagPath,
     locateBoundedLagStateEvents,
+    scoreLagTransitionHypotheses,
 } from "@/features/crossdating/diagnosis/eventPath";
 import { getJointCounterfactualOperationScores } from "@/features/crossdating/diagnosis/jointCounterfactualOperation";
 import { DEFAULT_MAX_PARTIAL_GAP_YEARS } from "@/features/crossdating/diagnosis/partialMoveSemantics";
@@ -28,6 +30,12 @@ import {
 import { scoreBoundaryLocalCounterfactual } from "@/features/crossdating/diagnosis/boundaryLocalCounterfactual";
 import { scoreNegativePartialMoveBoundaries } from "@/features/crossdating/diagnosis/partialBreakpointRefinement";
 import { scoreUnitBoundaries } from "@/features/crossdating/diagnosis/unitBreakpointRefinement";
+import { scoreCumulativeLagChangePoints } from "@/features/crossdating/diagnosis/cumulativeLagChangePoint";
+import {
+    scorePiecewiseChangePoints,
+    scoreReferenceConsensusChangePoints,
+} from "@/features/crossdating/diagnosis/piecewiseChangePoint";
+import { scoreReferenceTransitionConsensus } from "@/features/crossdating/diagnosis/referenceTransitionConsensus";
 import {
     scoreDynamicJointOperation,
     selectDynamicJointOperation,
@@ -770,16 +778,141 @@ export const scoreOperationIdentityRowsForEvaluation = (input: {
     const selected = new Set(input.operations.map((operation) => (
         `${operation.eventType}:${operation.shiftYears}`
     )));
+    const selectedShifts = [...new Set(input.operations.map(
+        (operation) => operation.shiftYears,
+    ))];
+    const cofechaCore = diagnoseSeriesCore(
+        input.siteData,
+        input.targetId,
+        getConfig({ referenceConfig }),
+        (series) => new Map(cofechaStyleStandardize(series).map((point) => (
+            [point.year, point.value]
+        ))),
+    );
+    const pathCache = createLagPathCache();
+    const transitionConfig = {
+        ...INTERNAL_EVENT_PATH_CONFIG,
+        maxPartialGapYears: DEFAULT_MAX_PARTIAL_GAP_YEARS,
+    };
+    const rawTransitions = scoreLagTransitionHypotheses(
+        core,
+        input.siteData,
+        { ...transitionConfig, useCofechaStandardization: false },
+        pathCache,
+    );
+    const cofechaTransitions = scoreLagTransitionHypotheses(
+        cofechaCore ?? core,
+        input.siteData,
+        transitionConfig,
+        pathCache,
+    );
+    const cumulativeRows = scoreCumulativeLagChangePoints(
+        core,
+        cofechaCore,
+        { lags: selectedShifts, siteData: input.siteData },
+    );
+    const piecewiseRows = scorePiecewiseChangePoints(
+        core,
+        cofechaCore,
+        { lags: selectedShifts },
+    );
+    const referenceChangeRows = scoreReferenceConsensusChangePoints(
+        core,
+        input.siteData,
+        { lags: selectedShifts },
+    );
+    const referenceTransitionRows = scoreReferenceTransitionConsensus(
+        core,
+        input.siteData,
+        { correctionYears: selectedShifts },
+    );
+    const publicYear = (
+        eventType: EvaluationOperationIdentity["eventType"],
+        year: number,
+    ): number => eventType === "partialMove" ? year + 1 : year;
+    const rowsFor = <Row extends { year: number }>(
+        rows: readonly Row[],
+        eventType: EvaluationOperationIdentity["eventType"],
+    ): Map<number, Row> => new Map(rows.map((row) => [
+        publicYear(eventType, row.year),
+        row,
+    ]));
     return operationScores.filter((operation) => selected.has(
         `${operation.eventType}:${operation.shiftYears}`,
-    )).map((operation) => ({
-        eventType: operation.eventType,
-        shiftYears: operation.shiftYears,
-        baselineLag: operation.baselineLag,
-        bestYear: operation.bestYear,
-        sideStepBestYear: operation.sideStepBestYear,
-        rows: operation.rows,
-    }));
+    )).map((operation) => {
+        const eventType = operation.eventType;
+        const shiftYears = operation.shiftYears;
+        const rawTransition = rowsFor(
+            rawTransitions.hypotheses.find(
+                (hypothesis) => hypothesis.correctionYears === shiftYears,
+            )?.rows ?? [],
+            eventType,
+        );
+        const cofechaTransition = rowsFor(
+            cofechaTransitions.hypotheses.find(
+                (hypothesis) => hypothesis.correctionYears === shiftYears,
+            )?.rows ?? [],
+            eventType,
+        );
+        const cumulative = rowsFor(
+            cumulativeRows.filter((row) => row.olderLag === shiftYears),
+            eventType,
+        );
+        const piecewise = rowsFor(
+            piecewiseRows.filter((row) => row.olderLag === shiftYears),
+            eventType,
+        );
+        const referenceChange = rowsFor(
+            referenceChangeRows.filter((row) => row.olderLag === shiftYears),
+            eventType,
+        );
+        const referenceTransition = rowsFor(
+            referenceTransitionRows.filter(
+                (row) => row.correctionYears === shiftYears,
+            ),
+            eventType,
+        );
+        const perReference = rowsFor(
+            scorePerReferenceCounterfactualEvidence(
+                core,
+                input.siteData,
+                shiftYears,
+                { baselineLagCenter: operation.baselineLag },
+            ),
+            eventType,
+        );
+        const boundaryLocal = eventType === "partialMove"
+            ? new Map(scoreBoundaryLocalCounterfactual(
+                core,
+                shiftYears,
+            ).map((row) => [row.year, row]))
+            : new Map();
+        const partialLocal = eventType === "partialMove"
+            ? new Map(scoreNegativePartialMoveBoundaries(
+                core,
+                shiftYears,
+            ).map((row) => [row.year, row]))
+            : new Map();
+        return {
+            eventType,
+            shiftYears,
+            baselineLag: operation.baselineLag,
+            bestYear: operation.bestYear,
+            sideStepBestYear: operation.sideStepBestYear,
+            rows: operation.rows.map((row) => ({
+                ...row,
+                rawTransition: rawTransition.get(row.year) ?? null,
+                cofechaTransition: cofechaTransition.get(row.year) ?? null,
+                cumulative: cumulative.get(row.year) ?? null,
+                piecewise: piecewise.get(row.year) ?? null,
+                referenceChange: referenceChange.get(row.year) ?? null,
+                referenceTransition: referenceTransition.get(row.year) ?? null,
+                perReference: perReference.get(row.year) ?? null,
+                boundaryLocal: boundaryLocal.get(row.year) ?? null,
+                partialLocal: partialLocal.get(row.year) ?? null,
+            })),
+        };
+    });
 };
 
 /** Recomputes the full yearly counterfactual profile for one externally selected operation. */

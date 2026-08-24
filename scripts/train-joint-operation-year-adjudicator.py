@@ -14,7 +14,7 @@ import pandas as pd
 from sklearn.model_selection import GroupKFold
 
 
-PROFILE_FIELDS = (
+BASE_PROFILE_FIELDS = (
     "rawCorrelation",
     "differenceCorrelation",
     "combinedCorrelation",
@@ -42,6 +42,77 @@ PROFILE_FIELDS = (
     "differenceGain",
     "combinedGain",
 )
+NESTED_PROFILE_FIELDS = {
+    "rawTransition": (
+        "olderLag", "newerLag", "localOlderLag", "localNewerLag",
+        "splitGain", "normalizedSplitGain", "balancedAdvantage",
+        "olderMeanAdvantage", "newerMeanAdvantage", "localGain31",
+        "localBalancedAdvantage31", "samplePairs",
+    ),
+    "cofechaTransition": (
+        "olderLag", "newerLag", "localOlderLag", "localNewerLag",
+        "splitGain", "normalizedSplitGain", "balancedAdvantage",
+        "olderMeanAdvantage", "newerMeanAdvantage", "localGain31",
+        "localBalancedAdvantage31", "samplePairs",
+    ),
+    "cumulative": (
+        "combinedCumulative", "combinedCusum", "combinedContrast",
+        "combinedLocal31", "combinedLocal61", "rawCumulative", "rawCusum",
+        "rawContrast", "differenceCumulative", "differenceCusum",
+        "differenceContrast", "whitenedCumulative", "whitenedCusum",
+        "whitenedContrast", "cofechaCumulative", "cofechaCusum",
+        "cofechaContrast", "referenceMedianCumulative",
+        "referenceMedianCusum", "referenceMedianContrast",
+        "referenceMeanCumulative", "referenceMeanCusum",
+        "referenceMeanContrast", "referenceVoteCumulative",
+        "referenceVoteCusum", "referenceVoteContrast",
+    ),
+    "piecewise": (
+        "combinedObjective", "combinedGain", "rawObjective",
+        "cofechaObjective", "whitenedObjective", "differenceObjective",
+        "rawGain", "cofechaGain", "whitenedGain", "differenceGain",
+        "olderPairs", "newerPairs",
+    ),
+    "referenceChange": (
+        "referenceCount", "meanPercentile", "medianPercentile",
+        "meanStandardizedObjective", "supportFraction", "weightedSupport",
+        "meanGain", "positiveGainFraction",
+    ),
+    "referenceTransition": (
+        "referenceCount", "rankMean", "rankMedian", "weightedRankMean",
+        "peakKernel5", "peakKernel9", "peakKernel13", "windowVote25",
+        "weightedWindowVote25", "positiveGainFraction",
+        "baselineModeFraction",
+    ),
+    "perReference": (
+        "referenceCount", "differenceWeighted", "differenceGainWeighted",
+        "whitenedMean", "whitenedGainMean", "positiveDifferenceGainFraction",
+        "positiveWhitenedGainFraction", "positiveSideStepFraction",
+        "peakKernel5", "peakKernel9", "lagStepWeighted", "lagStepMedian",
+        "lagStepPositiveFraction", "lagStepPeakKernel5", "lagStepPeakKernel9",
+        "fixedLagStepWeighted", "fixedLagStepMedian",
+        "fixedLagStepPositiveFraction", "fixedLagStepPeakKernel5",
+        "fixedLagStepPeakKernel9",
+    ),
+    "boundaryLocal": (
+        "olderAdvantage3", "newerAdvantage3", "stepMinimum3", "stepMean3",
+        "olderAdvantage5", "newerAdvantage5", "stepMinimum5", "stepMean5",
+        "olderAdvantage9", "newerAdvantage9", "stepMinimum9", "stepMean9",
+    ),
+    "partialLocal": (
+        "raw31", "difference31", "whitened31", "combo31", "combo41",
+        "combo61", "multiScale",
+    ),
+}
+PROFILE_FIELDS = (
+    *BASE_PROFILE_FIELDS,
+    *(f"{prefix}_available" for prefix in NESTED_PROFILE_FIELDS),
+    *(
+        f"{prefix}_{field}"
+        for prefix, fields in NESTED_PROFILE_FIELDS.items()
+        for field in fields
+    ),
+)
 RANK_FIELDS = (
     "rawGain",
     "differenceGain",
@@ -52,6 +123,31 @@ RANK_FIELDS = (
     "localSideStepScore11",
     "localSideStepScore21",
     "localSideStepScore31",
+    "rawTransition_splitGain",
+    "rawTransition_normalizedSplitGain",
+    "rawTransition_balancedAdvantage",
+    "rawTransition_localGain31",
+    "cofechaTransition_splitGain",
+    "cofechaTransition_normalizedSplitGain",
+    "cofechaTransition_balancedAdvantage",
+    "cofechaTransition_localGain31",
+    "cumulative_combinedCusum",
+    "cumulative_combinedContrast",
+    "cumulative_referenceMedianCusum",
+    "cumulative_referenceVoteCusum",
+    "piecewise_combinedObjective",
+    "piecewise_combinedGain",
+    "referenceChange_weightedSupport",
+    "referenceChange_positiveGainFraction",
+    "referenceTransition_weightedRankMean",
+    "referenceTransition_peakKernel9",
+    "referenceTransition_weightedWindowVote25",
+    "perReference_differenceGainWeighted",
+    "perReference_fixedLagStepWeighted",
+    "perReference_fixedLagStepPeakKernel9",
+    "boundaryLocal_stepMinimum5",
+    "boundaryLocal_stepMean5",
+    "partialLocal_multiScale",
 )
 
 
@@ -100,6 +196,21 @@ def numeric(value: Any, fallback: float = 0.0) -> float:
     return result if np.isfinite(result) else fallback
 
 
+def flatten_profile_row(row: dict[str, Any]) -> dict[str, Any]:
+    output = {
+        "year": int(row["year"]),
+        **{field: numeric(row.get(field)) for field in BASE_PROFILE_FIELDS},
+    }
+    for prefix, fields in NESTED_PROFILE_FIELDS.items():
+        nested = row.get(prefix)
+        output[f"{prefix}_available"] = int(isinstance(nested, dict))
+        for field in fields:
+            output[f"{prefix}_{field}"] = numeric(
+                nested.get(field) if isinstance(nested, dict) else None
+            )
+    return output
+
+
 def selected_profile_rows(
     rows: list[dict[str, Any]],
     best_year: int,
@@ -120,10 +231,9 @@ def selected_profile_rows(
             rows,
             key=lambda row: numeric(row.get(field), float("-inf")),
             reverse=True,
-        )[:20]
+        )[:1]
         for row in strongest:
-            year = int(row["year"])
-            selected_years.update(range(year - 2, year + 3))
+            selected_years.add(int(row["year"]))
     return [row for row in rows if int(row["year"]) in selected_years]
 
 
@@ -195,8 +305,11 @@ def build_table(
                     "operation_correct": 0,
                     "strict_operation_correct": 0,
                 })
+                flattened_rows = [
+                    flatten_profile_row(row) for row in scored["rows"]
+                ]
                 profile = selected_profile_rows(
-                    scored["rows"],
+                    flattened_rows,
                     int(scored["bestYear"]),
                     int(scored["sideStepBestYear"]),
                     stride,
@@ -272,24 +385,33 @@ def build_table(
                     records.append(record)
     table = pd.DataFrame(records)
     attempt_table = pd.DataFrame(attempts).drop_duplicates("attempt_id")
+    rank_feature_data = {}
     for field in RANK_FIELDS:
         identity_groups = table.groupby(
             ["attempt_id", "event_type", "shift_years"],
             sort=False,
         )[field]
-        table[f"identity_{field}_percentile"] = identity_groups.rank(
+        rank_feature_data[f"identity_{field}_percentile"] = identity_groups.rank(
             method="average", pct=True, ascending=True
         )
-        table[f"identity_{field}_deficit"] = identity_groups.transform("max") - table[field]
+        rank_feature_data[f"identity_{field}_deficit"] = (
+            identity_groups.transform("max") - table[field]
+        )
         same_year_groups = table.groupby(["attempt_id", "year"], sort=False)[field]
-        table[f"cross_{field}_percentile"] = same_year_groups.rank(
+        rank_feature_data[f"cross_{field}_percentile"] = same_year_groups.rank(
             method="average", pct=True, ascending=True
         )
-        table[f"cross_{field}_deficit"] = same_year_groups.transform("max") - table[field]
+        rank_feature_data[f"cross_{field}_deficit"] = (
+            same_year_groups.transform("max") - table[field]
+        )
     operation_groups = table.groupby("attempt_id", sort=False)["operation_probability"]
-    table["operation_probability_deficit"] = (
+    rank_feature_data["operation_probability_deficit"] = (
         operation_groups.transform("max") - table["operation_probability"]
     )
+    table = pd.concat([
+        table,
+        pd.DataFrame(rank_feature_data, index=table.index),
+    ], axis=1)
     return table, attempt_table
 
 
