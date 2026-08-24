@@ -77,9 +77,6 @@ BASE_RUNTIME_COLUMNS = (
     "overridden",
     "selected_event_type",
     "selected_shift_years",
-    "selected_start_year",
-    "selected_end_year",
-    "selected_top_year",
     "operation_overridden",
     "location_overridden",
     "decision_head",
@@ -157,12 +154,34 @@ def main() -> None:
     parser.add_argument("--joint-top", required=True)
     parser.add_argument("--safe-dir", required=True)
     parser.add_argument("--candidate-cache")
+    parser.add_argument("--operation-identities")
     parser.add_argument("--output-dir", required=True)
     args = parser.parse_args()
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     joint = pd.read_csv(Path(args.joint_top).resolve())
+    if args.operation_identities:
+        operation_identities = pd.read_csv(
+            Path(args.operation_identities).resolve()
+        )
+        operation_columns = [
+            column for column in (
+                "identity_key",
+                "enriched_operation_probability",
+                "enriched_operation_rank_score",
+                "operation_classifier_percentile",
+                "operation_ranker_percentile",
+            )
+            if column in operation_identities.columns
+        ]
+        if "identity_key" in operation_columns and "identity_key" in joint.columns:
+            joint = joint.merge(
+                operation_identities[operation_columns],
+                on="identity_key",
+                how="left",
+                validate="many_to_one",
+            )
     safe_dir = Path(args.safe_dir).resolve()
     attempts = pd.read_csv(safe_dir / "attempts.csv")
     decisions = pd.read_csv(safe_dir / "decisions.csv")
@@ -171,6 +190,7 @@ def main() -> None:
         *BASE_RUNTIME_COLUMNS,
         "alternative_candidate_index",
         "product_candidate_index",
+        "selected_top_year",
         "model_workflow_correct",
     ]
     table = joint.merge(
@@ -190,7 +210,12 @@ def main() -> None:
         True,
         boolean_series(table["model_workflow_correct"]),
     )
-    table["proposal_correct"] = boolean_series(table["proposal_correct"])
+    proposal_label = (
+        table["proposal_correct"]
+        if "proposal_correct" in table.columns
+        else table["window_correct"]
+    )
+    table["proposal_correct"] = boolean_series(proposal_label)
     table["benefit"] = ~table["base_correct"] & table["proposal_correct"]
     table["harm"] = table["base_correct"] & ~table["proposal_correct"]
     table["discordant"] = table["benefit"] | table["harm"]
@@ -200,6 +225,27 @@ def main() -> None:
         column for column in (*JOINT_RUNTIME_COLUMNS, *BASE_RUNTIME_COLUMNS)
         if column in table.columns
     ]
+    dynamic_forbidden = {
+        "attempt_id", "identity_key", "file_id", "family", "is_clean",
+        "truth_type", "truth_year", "truth_shift_years", "product_correct",
+        "product_strict_correct", "operation_correct",
+        "strict_operation_correct", "window_correct", "strict_correct",
+        "top_exact", "proposal_correct", "proposal_strict_correct",
+        "benefit", "harm", "discordant", "base_correct", "base_incorrect",
+        "model_workflow_correct", "year",
+        "alternative_candidate_index", "product_candidate_index",
+        "identity_product_candidate_index", "selected_start_year",
+        "selected_end_year", "selected_top_year", "candidate_start_year",
+        "candidate_end_year", "candidate_top_year",
+    }
+    runtime_columns.extend(
+        column for column in table.columns
+        if column not in dynamic_forbidden
+        and column not in runtime_columns
+        and not column.endswith((
+            "_workflow", "_strict", "_relaxed", "_operation", "_location",
+        ))
+    )
     features = table[runtime_columns].copy()
     features["same_selected_operation"] = (
         table["event_type"].astype(str)

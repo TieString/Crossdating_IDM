@@ -34,6 +34,7 @@ SAFE_RUNTIME_COLUMNS = (
 )
 SCORE_FORBIDDEN = {
     "attempt_id",
+    "identity_key",
     "file_id",
     "family",
     "product_correct",
@@ -110,18 +111,41 @@ def pair_classifier(labels: pd.Series, seed: int) -> lgb.LGBMClassifier:
     )
 
 
+def package_classifier(labels: pd.Series, seed: int) -> lgb.LGBMClassifier:
+    positives = max(1, int(labels.sum()))
+    negatives = max(1, len(labels) - positives)
+    return lgb.LGBMClassifier(
+        objective="binary",
+        n_estimators=600,
+        learning_rate=0.02,
+        num_leaves=15,
+        min_child_samples=30,
+        subsample=0.85,
+        colsample_bytree=0.8,
+        reg_alpha=1.5,
+        reg_lambda=5.0,
+        scale_pos_weight=min(40.0, negatives / positives),
+        random_state=seed,
+        n_jobs=8,
+        verbosity=-1,
+        deterministic=True,
+        force_col_wise=True,
+    )
+
+
 def nearest_profile(
     score_groups: dict[tuple[str, str, int], pd.DataFrame],
     attempt_id: str,
     event_type: str,
     shift_years: int,
     year: float | int | None,
+    score_column: str,
 ) -> pd.Series | None:
     group = score_groups.get((attempt_id, event_type, int(shift_years)))
     if group is None or group.empty:
         return None
     if year is None or pd.isna(year):
-        return group.sort_values("joint_score", ascending=False).iloc[0]
+        return group.sort_values(score_column, ascending=False).iloc[0]
     distance = (group["year"] - float(year)).abs()
     return group.loc[distance.idxmin()]
 
@@ -149,14 +173,42 @@ def main() -> None:
     parser.add_argument("--scores", required=True)
     parser.add_argument("--safe-dir", required=True)
     parser.add_argument("--candidate-cache", required=True)
+    parser.add_argument("--operation-identities")
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--base-correct-weight", type=float, default=1.0)
     parser.add_argument("--clean-weight", type=float, default=1.0)
+    parser.add_argument("--location-score-column", default="joint_score")
     args = parser.parse_args()
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     scores = pd.read_pickle(Path(args.scores).resolve())
+    if args.operation_identities:
+        operation_identities = pd.read_csv(
+            Path(args.operation_identities).resolve()
+        )
+        identity_forbidden = {
+            "identity_key", "attempt_id", "file_id", "family", "event_type",
+            "shift_years", "operation_correct", "strict_operation_correct",
+            "product_correct", "product_strict_correct",
+        }
+        identity_features = operation_identities[[
+            "identity_key",
+            *(
+                column for column in operation_identities.columns
+                if column not in identity_forbidden
+            ),
+        ]].rename(columns={
+            column: f"identity_aggregate_{column}"
+            for column in operation_identities.columns
+            if column not in identity_forbidden and column != "identity_key"
+        })
+        scores = scores.merge(
+            identity_features,
+            on="identity_key",
+            how="left",
+            validate="many_to_one",
+        )
     safe_dir = Path(args.safe_dir).resolve()
     attempts = pd.read_csv(safe_dir / "attempts.csv").set_index("attempt_id")
     decisions = pd.read_csv(safe_dir / "decisions.csv").set_index("attempt_id")
@@ -176,7 +228,7 @@ def main() -> None:
         )
     }
     identity_top = scores.sort_values(
-        ["attempt_id", "event_type", "shift_years", "joint_score"],
+        ["attempt_id", "event_type", "shift_years", args.location_score_column],
         ascending=[True, True, True, False],
     ).groupby(
         ["attempt_id", "event_type", "shift_years"], as_index=False
@@ -220,7 +272,12 @@ def main() -> None:
             if index in candidates.index:
                 base_candidate = candidates.loc[index]
         base_profile = nearest_profile(
-            score_groups, attempt_id, base_event_type, base_shift, base_year
+            score_groups,
+            attempt_id,
+            base_event_type,
+            base_shift,
+            base_year,
+            args.location_score_column,
         )
         attempt_context = {
             f"context_{column}": decision[column]
@@ -339,6 +396,7 @@ def main() -> None:
 
     files = np.array(sorted(table["file_id"].unique()))
     predictions = np.full(len(table), np.nan)
+    classifier_predictions = np.full(len(table), np.nan)
     splitter = GroupKFold(n_splits=5)
     for fold, (_, test_file_indices) in enumerate(splitter.split(
         np.zeros(len(files)), groups=files
@@ -367,9 +425,77 @@ def main() -> None:
             ),
         )
         predictions[test] = estimator.predict(values.iloc[test])
-    if np.isnan(predictions).any():
+        fold_classifier_predictions = []
+        for seed in (35500 + fold * 10, 35501 + fold * 10, 35502 + fold * 10):
+            classifier = package_classifier(
+                table.loc[train, "workflow_correct"], seed
+            )
+            classifier.fit(
+                values.iloc[train],
+                table.loc[train, "workflow_correct"],
+                sample_weight=(
+                    np.where(
+                        table.loc[train, "base_correct"].eq(1),
+                        args.base_correct_weight,
+                        1.0,
+                    )
+                    * np.where(
+                        table.loc[train, "is_clean"].eq(1),
+                        args.clean_weight,
+                        1.0,
+                    )
+                ),
+            )
+            fold_classifier_predictions.append(
+                classifier.predict_proba(values.iloc[test])[:, 1]
+            )
+        classifier_predictions[test] = np.mean(
+            np.stack(fold_classifier_predictions), axis=0
+        )
+    if np.isnan(predictions).any() or np.isnan(classifier_predictions).any():
         raise RuntimeError("missing immutable package OOF predictions")
     table["package_score"] = predictions
+    table["package_classifier_probability"] = classifier_predictions
+    package_groups = table.groupby("attempt_id", sort=False)
+    table["package_ranker_percentile"] = package_groups["package_score"].rank(
+        pct=True
+    )
+    table["package_classifier_percentile"] = package_groups[
+        "package_classifier_probability"
+    ].rank(pct=True)
+    package_selections = []
+    selected_by_weight = {}
+    for classifier_weight in (0.0, 0.25, 0.5, 0.75, 1.0):
+        blended_score = (
+            table["package_ranker_percentile"] * (1 - classifier_weight)
+            + table["package_classifier_percentile"] * classifier_weight
+        )
+        selected = table.assign(package_blend_score=blended_score).sort_values(
+            ["attempt_id", "package_blend_score"], ascending=[True, False]
+        ).groupby("attempt_id", sort=False).head(1)
+        event_selected = selected[selected["family"] != "Clean"]
+        clean_selected = selected[selected["family"] == "Clean"]
+        package_selections.append({
+            "classifierWeight": classifier_weight,
+            "eventCorrect": int(event_selected["workflow_correct"].sum()),
+            "eventStrictCorrect": int(event_selected["strict_correct"].sum()),
+            "cleanFalsePositives": int((
+                clean_selected["candidate_is_base"].eq(0)
+                & clean_selected["candidate_has_response"].eq(1)
+            ).sum()),
+        })
+        selected_by_weight[classifier_weight] = selected
+    package_grid = pd.DataFrame(package_selections)
+    eligible_grid = package_grid[package_grid["cleanFalsePositives"].eq(0)]
+    best_package = (eligible_grid if not eligible_grid.empty else package_grid).sort_values(
+        ["eventCorrect", "eventStrictCorrect", "cleanFalsePositives"],
+        ascending=[False, False, True],
+    ).iloc[0]
+    package_classifier_weight = float(best_package["classifierWeight"])
+    table["package_score"] = (
+        table["package_ranker_percentile"] * (1 - package_classifier_weight)
+        + table["package_classifier_percentile"] * package_classifier_weight
+    )
 
     proposal_mask = table["candidate_is_base"].eq(0)
     pair_benefit = table["base_correct"].eq(0) & table["workflow_correct"].eq(1)
@@ -526,6 +652,7 @@ def main() -> None:
         "attempts": int(table["attempt_id"].nunique()),
         "packageRows": len(table),
         "features": len(feature_names),
+        "packageClassifierWeight": package_classifier_weight,
         "baseCorrectWeight": args.base_correct_weight,
         "cleanWeight": args.clean_weight,
         "baseEventCorrect": base_event_correct,
@@ -560,6 +687,7 @@ def main() -> None:
         ).sum()),
     }
     top.to_csv(output_dir / "immutable-package-top.csv", index=False)
+    package_grid.to_csv(output_dir / "immutable-package-score-grid.csv", index=False)
     evaluation.to_csv(output_dir / "immutable-package-overrides.csv", index=False)
     pair_evaluation.to_csv(output_dir / "immutable-package-pair-overrides.csv", index=False)
     (output_dir / "feature-names.json").write_text(
