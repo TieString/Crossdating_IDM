@@ -934,6 +934,204 @@ export const scoreSelectedOperationRowsForEvaluation = (input: {
     return selected ?? null;
 };
 
+type ResidualEvaluationOperation = EvaluationOperationIdentity & {
+    year: number;
+};
+
+const meanFinite = (values: Array<number | null | undefined>): number => {
+    const finite = values.filter(
+        (value): value is number => value !== null
+            && value !== undefined
+            && Number.isFinite(value),
+    );
+    return finite.length > 0
+        ? finite.reduce((sum, value) => sum + value, 0) / finite.length
+        : 0;
+};
+
+const residualCoreSummary = (core: SeriesCoreDiagnosis) => ({
+    globalLag: core.globalSlidingMatch.bestGlobalLag,
+    globalBestR: core.globalSlidingMatch.bestGlobalR ?? 0,
+    globalCurrentR: core.globalSlidingMatch.currentR ?? 0,
+    globalGain: (core.globalSlidingMatch.bestGlobalR ?? 0)
+        - (core.globalSlidingMatch.currentR ?? 0),
+    meanSegmentR0: meanFinite(core.segments.map((segment) => segment.r0)),
+    meanSegmentBestR: meanFinite(core.segments.map((segment) => segment.bestR)),
+    flaggedSegments: core.segments.filter((segment) => segment.flagged).length,
+    nonzeroLagSegments: core.segments.filter((segment) => segment.bestLag !== 0).length,
+    unresolvedA: core.unresolvedA,
+    unresolvedB: core.unresolvedB,
+});
+
+/** Applies one proposal in memory and measures the residual chronology without hidden truth. */
+export const scoreAppliedOperationResidualForEvaluation = (input: {
+    siteData: RwlSiteData;
+    targetId: string;
+    context: CofechaContext;
+    runId: string;
+    operation: ResidualEvaluationOperation;
+}) => {
+    const { referenceConfig } = createProductionReferenceForEvaluation({
+        siteData: input.siteData,
+        targetId: input.targetId,
+        flaggedAIds: input.context.flaggedIds,
+        cofechaRunId: input.runId,
+        rwlHash: input.context.rwlHash,
+        masterDatingSeries: parseCofechaResult(input.context.outText).masterDatingSeries,
+    });
+    const config = getConfig({ referenceConfig });
+    const before = diagnoseSeriesCore(
+        input.siteData,
+        input.targetId,
+        config,
+        preprocessSeries,
+    );
+    const current = input.siteData.get(input.targetId);
+    if (!before || !current) return null;
+    let corrected: RwlTreeData;
+    try {
+        if (input.operation.eventType === "missingRing") {
+            corrected = insertMissingYearAtSide(
+                current,
+                input.operation.year,
+                "right",
+            );
+        } else if (input.operation.eventType === "falseRing") {
+            corrected = deleteYearWithMode(
+                current,
+                input.operation.year,
+                "direct",
+                "right",
+            );
+        } else {
+            const years = [...current.keys()];
+            corrected = moveSeriesTailByOffset(
+                current,
+                Math.min(...years),
+                input.operation.year - 1,
+                input.operation.shiftYears,
+            );
+        }
+    } catch {
+        return { applied: false };
+    }
+    const correctedSite = new Map(input.siteData);
+    correctedSite.set(input.targetId, corrected);
+    const after = diagnoseSeriesCore(
+        correctedSite,
+        input.targetId,
+        config,
+        preprocessSeries,
+    );
+    if (!after) return { applied: false };
+
+    const pathConfig = {
+        ...INTERNAL_EVENT_PATH_CONFIG,
+        maxPartialGapYears: DEFAULT_MAX_PARTIAL_GAP_YEARS,
+    };
+    const beforeCache = createLagPathCache();
+    const afterCache = createLagPathCache();
+    const beforePath = diagnoseLagPath(
+        before,
+        input.siteData,
+        pathConfig,
+        beforeCache,
+    );
+    const afterPath = diagnoseLagPath(
+        after,
+        correctedSite,
+        pathConfig,
+        afterCache,
+    );
+    const beforeTransitions = scoreLagTransitionHypotheses(
+        before,
+        input.siteData,
+        pathConfig,
+        beforeCache,
+    );
+    const afterTransitions = scoreLagTransitionHypotheses(
+        after,
+        correctedSite,
+        pathConfig,
+        afterCache,
+    );
+    const transitionSummary = (
+        scan: ReturnType<typeof scoreLagTransitionHypotheses>,
+    ) => {
+        const hypothesis = scan.hypotheses.find(
+            (candidate) => candidate.correctionYears === input.operation.shiftYears,
+        );
+        const publicYear = input.operation.eventType === "partialMove"
+            ? input.operation.year - 1
+            : input.operation.year;
+        const local = hypothesis?.rows.slice().sort((left, right) => (
+            Math.abs(left.year - publicYear) - Math.abs(right.year - publicYear)
+        ))[0] ?? null;
+        const strongest = hypothesis?.rows.slice().sort((left, right) => (
+            right.normalizedSplitGain - left.normalizedSplitGain
+            || right.localGain31 - left.localGain31
+        ))[0] ?? null;
+        const strongestAny = scan.hypotheses.flatMap(
+            (candidate) => candidate.rows,
+        ).sort((left, right) => (
+            right.normalizedSplitGain - left.normalizedSplitGain
+            || right.localGain31 - left.localGain31
+        ))[0] ?? null;
+        return {
+            localSplitGain: local?.splitGain ?? 0,
+            localNormalizedSplitGain: local?.normalizedSplitGain ?? 0,
+            localBalancedAdvantage: local?.balancedAdvantage ?? 0,
+            localGain31: local?.localGain31 ?? 0,
+            strongestYear: strongest?.year ?? 0,
+            strongestNormalizedSplitGain: strongest?.normalizedSplitGain ?? 0,
+            strongestLocalGain31: strongest?.localGain31 ?? 0,
+            strongestAnyCorrection: strongestAny?.correctionYears ?? 0,
+            strongestAnyYear: strongestAny?.year ?? 0,
+            strongestAnyNormalizedSplitGain:
+                strongestAny?.normalizedSplitGain ?? 0,
+        };
+    };
+    const beforeCore = residualCoreSummary(before);
+    const afterCore = residualCoreSummary(after);
+    const beforeTransition = transitionSummary(beforeTransitions);
+    const afterTransition = transitionSummary(afterTransitions);
+    const newestAfterEvent = afterPath.events.slice().sort((left, right) => (
+        right.endYear - left.endYear
+    ))[0] ?? null;
+    return {
+        applied: true,
+        beforeCore,
+        afterCore,
+        coreDelta: Object.fromEntries(Object.keys(beforeCore).map((key) => [
+            key,
+            Number(afterCore[key as keyof typeof afterCore])
+                - Number(beforeCore[key as keyof typeof beforeCore]),
+        ])),
+        beforePath: {
+            eventCount: beforePath.events.length,
+            newestLag: beforePath.newestLag,
+            newestLagMargin: beforePath.newestLagMargin,
+        },
+        afterPath: {
+            eventCount: afterPath.events.length,
+            newestLag: afterPath.newestLag,
+            newestLagMargin: afterPath.newestLagMargin,
+            newestEventYear: newestAfterEvent?.rankedYears[0]?.year ?? 0,
+            newestEventShift: newestAfterEvent
+                ? effectiveShift(newestAfterEvent) ?? 0
+                : 0,
+        },
+        pathEventReduction: beforePath.events.length - afterPath.events.length,
+        beforeTransition,
+        afterTransition,
+        transitionDelta: Object.fromEntries(Object.keys(beforeTransition).map((key) => [
+            key,
+            Number(afterTransition[key as keyof typeof afterTransition])
+                - Number(beforeTransition[key as keyof typeof beforeTransition]),
+        ])),
+    };
+};
+
 const treeRange = (tree: RwlTreeData): { startYear: number; endYear: number } => {
     const years = Array.from(tree.keys());
     return { startYear: Math.min(...years), endYear: Math.max(...years) };

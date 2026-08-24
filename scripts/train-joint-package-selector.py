@@ -155,6 +155,7 @@ def main() -> None:
     parser.add_argument("--safe-dir", required=True)
     parser.add_argument("--candidate-cache")
     parser.add_argument("--operation-identities")
+    parser.add_argument("--residual-evidence")
     parser.add_argument("--output-dir", required=True)
     args = parser.parse_args()
     output_dir = Path(args.output_dir).resolve()
@@ -182,6 +183,21 @@ def main() -> None:
                 how="left",
                 validate="many_to_one",
             )
+    if args.residual_evidence:
+        residual_payload = json.loads(
+            Path(args.residual_evidence).resolve().read_text(encoding="utf8")
+        )
+        residual = pd.DataFrame(residual_payload["rows"])
+        residual_columns = [
+            column for column in residual.columns
+            if column == "attempt_id" or column.startswith("residual_")
+        ]
+        joint = joint.merge(
+            residual[residual_columns],
+            on="attempt_id",
+            how="left",
+            validate="one_to_one",
+        )
     safe_dir = Path(args.safe_dir).resolve()
     attempts = pd.read_csv(safe_dir / "attempts.csv")
     decisions = pd.read_csv(safe_dir / "decisions.csv")

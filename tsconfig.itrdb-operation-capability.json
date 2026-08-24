@@ -8,6 +8,7 @@
   },
   "include": [
     "scripts/benchmark-itrdb-operation-capability.ts",
+    "scripts/extract-applied-residual-evidence.ts",
     "scripts/extract-operation-identity-rows.ts",
     "scripts/prepare-itrdb-operation-capability.ts",
     "scripts/itrdb-operation-capability/**/*.ts"
