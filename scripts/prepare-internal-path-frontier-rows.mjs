@@ -54,9 +54,16 @@ const eventLocationMatches = (event, truth) => {
 
 const stableCorrect = (event, row) => {
     if (!event || !row.truthId) return false;
-    return (event.eventType ?? event.operationType) === row.truthType
-        && eventShift(event) === Number(row.truthShiftYears)
-        && eventLocationMatches(event, row);
+    if (!eventLocationMatches(event, row)) return false;
+    const eventType = event.eventType ?? event.operationType;
+    const shift = eventShift(event);
+    if (eventType === row.truthType && shift === Number(row.truthShiftYears)) {
+        return true;
+    }
+    return eventType === "partialMove"
+        && shift !== null
+        && shift < -1
+        && row.truthType === "missingRing";
 };
 
 const pathCollections = (grid) => Object.entries(grid ?? {}).flatMap(([name, value]) => {

@@ -39,13 +39,17 @@ const predictions = source.rows.filter((row) => row.eligibleOverride).map((row) 
     productResponse: row.productResponse,
     probability: predict(row),
     selected: false,
+    vetoedByDirectionConflict: row.features.productTypeCode === 1
+        && row.features.stableTypeCode === -2
+        && row.features.stableJointSupport === 0,
     beneficial: row.beneficialOverride,
     harmful: row.harmfulOverride,
     neutralBoth: row.neutralBoth,
     neutralNeither: row.neutralNeither,
 }));
 predictions.forEach((row) => {
-    row.selected = row.probability >= artifact.threshold;
+    row.selected = row.probability >= artifact.threshold
+        && !row.vetoedByDirectionConflict;
 });
 
 const summarize = (selectedRows, allRows) => {

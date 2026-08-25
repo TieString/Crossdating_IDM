@@ -10,14 +10,19 @@ const valueFor = (name, fallback = "") => {
 };
 const rowsPath = resolve(valueFor("--rows"));
 const calibrationPath = valueFor("--calibration-rows");
+const safetyPath = valueFor("--safety-rows");
 const outputPath = resolve(valueFor("--output"));
 const source = JSON.parse(readFileSync(rowsPath, "utf8"));
 const calibrationSource = calibrationPath
     ? JSON.parse(readFileSync(resolve(calibrationPath), "utf8"))
     : null;
+const safetySource = safetyPath
+    ? JSON.parse(readFileSync(resolve(safetyPath), "utf8"))
+    : null;
 const featureNames = source.featureNames;
 const trainingRows = source.rows.filter((row) => row.eligibleOverride);
 const calibrationRows = calibrationSource?.rows.filter((row) => row.eligibleOverride) ?? [];
+const safetyRows = safetySource?.rows.filter((row) => row.eligibleOverride) ?? [];
 
 const vectorFor = (row) => featureNames.map((name) => Number(row.features[name]) || 0);
 const labelFor = (row) => row.beneficialOverride ? 1 : 0;
@@ -98,6 +103,9 @@ const classify = (rows, model) => rows.map((row) => ({
     attemptId: row.attemptId,
     fileId: row.fileId,
     probability: predict(model, row),
+    vetoedByDirectionConflict: row.features.productTypeCode === 1
+        && row.features.stableTypeCode === -2
+        && row.features.stableJointSupport === 0,
     beneficial: row.beneficialOverride,
     harmful: row.harmfulOverride,
     neutralBoth: row.neutralBoth,
@@ -106,7 +114,7 @@ const classify = (rows, model) => rows.map((row) => ({
 
 const chooseZeroHarmThreshold = (predictions) => {
     const harmfulProbabilities = predictions
-        .filter((row) => row.harmful)
+        .filter((row) => row.harmful || row.neutralNeither)
         .map((row) => row.probability);
     const maximumHarmful = harmfulProbabilities.length > 0
         ? Math.max(...harmfulProbabilities)
@@ -115,7 +123,9 @@ const chooseZeroHarmThreshold = (predictions) => {
 };
 
 const summarize = (predictions, threshold) => {
-    const selected = predictions.filter((row) => row.probability >= threshold);
+    const selected = predictions.filter((row) => (
+        row.probability >= threshold && !row.vetoedByDirectionConflict
+    ));
     return {
         eligible: predictions.length,
         selected: selected.length,
@@ -137,31 +147,44 @@ const fittedModel = fit(trainingRows);
 const calibrationPredictions = calibrationRows.length > 0
     ? classify(calibrationRows, fittedModel)
     : [];
+const safetyPredictions = safetyRows.length > 0
+    ? classify(safetyRows, fittedModel)
+    : [];
 const oofThreshold = chooseZeroHarmThreshold(oofPredictions);
 const calibrationThreshold = calibrationPredictions.length > 0
     ? chooseZeroHarmThreshold(calibrationPredictions)
     : 0;
-const threshold = Math.max(oofThreshold, calibrationThreshold);
+const safetyThreshold = safetyPredictions.length > 0
+    ? chooseZeroHarmThreshold(safetyPredictions)
+    : 0;
+const threshold = Math.max(oofThreshold, calibrationThreshold, safetyThreshold);
 const output = {
     schemaVersion: 1,
     rowsPath,
     calibrationPath: calibrationPath ? resolve(calibrationPath) : null,
+    safetyPath: safetyPath ? resolve(safetyPath) : null,
     featureNames,
     forbiddenFeatures: source.forbiddenFeatures,
+    vetoPolicy: "reject_falseRing_to_negative_partial_without_joint_support",
     model: fittedModel,
     threshold,
     oof: summarize(oofPredictions, threshold),
     calibration: calibrationPredictions.length > 0
         ? summarize(calibrationPredictions, threshold)
         : null,
+    safety: safetyPredictions.length > 0
+        ? summarize(safetyPredictions, threshold)
+        : null,
     oofPredictions,
     calibrationPredictions: calibrationPredictions.length > 0
         ? calibrationPredictions
         : null,
+    safetyPredictions: safetyPredictions.length > 0 ? safetyPredictions : null,
 };
 writeFileSync(outputPath, `${JSON.stringify(output, null, 2)}\n`);
 console.log(`INTERNAL_PATH_FRONTIER_MODEL_COMPLETE ${JSON.stringify({
     outputPath,
     oof: output.oof,
     calibration: output.calibration,
+    safety: output.safety,
 })}`);

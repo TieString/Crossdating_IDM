@@ -22,26 +22,59 @@ Training and OOF folds are split by complete RWL file.
 
 ## Development and calibration
 
-On 18 development files, 263 stable overrides differed materially from the current
-package: 57 were beneficial, 107 harmful, 66 correct under both interpretations,
-and 33 wrong under both. The file-OOF zero-harm threshold selected seven overrides,
-all beneficial.
+After applying the product's existing `partialMove -> missingRing` workflow
+equivalence, 263 development overrides differed materially from the current
+package: 62 were beneficial, 85 harmful, 88 correct under both interpretations,
+and 28 wrong under both. The final file-OOF selector chose eight overrides: five
+beneficial and three correct under both, with no harmful or wrong-to-wrong choice.
 
 The fitted development model was then applied to ten separate calibration files.
 Among 137 eligible overrides, the frozen safety threshold selected twelve:
 
-- 9 beneficial;
+- 8 beneficial;
 - 0 harmful;
-- 1 correct under both;
-- 2 wrong under both;
+- 3 correct under both;
+- 1 wrong under both;
 - 1 replacement of an existing Clean false positive;
 - 0 new Clean false positives.
 
-The final threshold is the stricter of the development-OOF and calibration harmful
-probability bounds. No family label or final-holdout result affects it.
+The twelve-file reserve set was subsequently promoted to a third safety-calibration
+layer after its first frozen evaluation found one harmful selection. The stricter
+threshold retained three beneficial overrides, one correct-under-both choice, and
+two wrong-under-both choices with zero harmful selections.
 
-The selector remains shadow-only until it passes the twelve-file reserve set and a
-new independent holdout without any correct-to-wrong regression.
+One operation compatibility veto is applied: a current positive `falseRing` package
+cannot be replaced by a negative `partialMove` path unless at least one joint
+hypothesis supports that path. The pre-veto development, calibration, and reserve
+selector had never selected this unsupported direction conflict; the veto blocks
+the corresponding regression observed in the later fifteen-file audit.
+
+No family label or file identity enters either the probability model or veto.
+
+## Regression results
+
+The direction-safe v5 selector produced:
+
+| Set | Baseline correct | Beneficial | Harmful | Wrong -> wrong | Result |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Development file-OOF | 912/1042 | +5 | 0 | 0 | 917/1042 |
+| Calibration | 489/567 | +8 | 0 | 1 | 497/567 |
+| Reserve safety calibration | 600/686 | +3 | 0 | 2 | 603/686 |
+| Fifteen-file second-holdout regression | 748/873 | +2 | 0 | 0 | 750/873 |
+| Seventeen-file historical regression | 849/976 | +4 | 0 | 3 | 853/976 |
+
+No set gained a new Clean false positive. The fifteen- and seventeen-file sets are
+regression checks, not untouched final claims: their outcomes or failure audits had
+already been inspected before the final direction veto was frozen.
+
+A stricter experiment treated every wrong-to-wrong replacement as a hard calibration
+failure. One high-confidence calibration outlier raised the threshold to 0.9917,
+eliminating all development, reserve, and regression selections. That version is
+rejected as non-responsive; v5 keeps wrong-to-wrong changes visible in shadow audit
+but never promotes them as accuracy gains.
+
+The selector remains shadow-only. It still needs a newly constructed, complete-file
+holdout that has never participated in architecture diagnosis or threshold selection.
 
 Artifacts:
 
@@ -50,3 +83,7 @@ Artifacts:
 `D:\软件测试\itrdb-unified-model-v2\models\internal-zscore-cal10-rich-grid-v17`
 
 `D:\软件测试\itrdb-unified-model-v2\models\internal-path-frontier-dev18-cal10-v2.json`
+
+`D:\软件测试\itrdb-unified-model-v2\models\internal-path-frontier-direction-safe-v5.json`
+
+`D:\软件测试\itrdb-unified-model-v2\models\internal-zscore-final17-rich-grid-v20`
