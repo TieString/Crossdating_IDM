@@ -11,6 +11,7 @@
     "scripts/extract-applied-residual-evidence.ts",
     "scripts/extract-operation-identity-rows.ts",
     "scripts/prepare-itrdb-operation-capability.ts",
+    "scripts/replay-pairwise-only-diagnosis.ts",
     "scripts/itrdb-operation-capability/**/*.ts"
   ],
   "references": []

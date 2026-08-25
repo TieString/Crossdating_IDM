@@ -61,6 +61,7 @@ import {
 import {
     createPairwiseBootstrapReferenceConfig,
     createPairwiseBootstrapTargetReferenceConfig,
+    selectPairwiseBootstrapCluster,
 } from "@/features/crossdating/pairwiseBootstrap";
 import {
     createEndAnchoredFalseRingCase,
@@ -310,27 +311,85 @@ export const createProductionReferenceForEvaluation = (input: {
     };
 };
 
+/** Builds a target-independent internal reference without reading any COFECHA output. */
+export const createInternalReferenceForEvaluation = (input: {
+    siteData: RwlSiteData;
+    targetId: string;
+    runId: string;
+    rwlHash: string;
+}): ReferenceSeriesConfig | null => {
+    const targetExcludedSite = new Map(input.siteData);
+    targetExcludedSite.delete(input.targetId);
+    const clusterIds = selectPairwiseBootstrapCluster(targetExcludedSite);
+    if (clusterIds.length < 3) return null;
+    const clusterSet = new Set(clusterIds);
+    const internallyFlaggedIds = Array.from(input.siteData.keys()).filter(
+        (seriesId) => !clusterSet.has(seriesId),
+    );
+    const referenceConfig = createPairwiseBootstrapReferenceConfig({
+        siteData: input.siteData,
+        flaggedAIds: internallyFlaggedIds,
+        cofechaRunId: `internal-pairwise-${input.runId}`,
+        rwlHash: input.rwlHash,
+        clusterIds,
+    });
+    if (referenceConfig?.selectedTrees.includes(input.targetId)) {
+        throw new Error(`target leaked into internal reference: ${input.targetId}`);
+    }
+    return referenceConfig;
+};
+
+export type EvaluationReferenceStrategy =
+    | "production"
+    | "pairwise-only"
+    | "pairwise-with-cofecha-evidence"
+    | "cofecha-master-without-diagnosis-evidence";
+
 export const diagnoseTruthBlind = (input: {
     siteData: RwlSiteData;
     targetId: string;
     context: CofechaContext;
     runId: string;
     includeOperationGrid?: boolean;
+    referenceStrategy?: EvaluationReferenceStrategy;
 }): LegacyDiagnosisSnapshot => {
     const started = performance.now();
     try {
-        const { referenceConfig, referenceMode } = createProductionReferenceForEvaluation({
-            siteData: input.siteData,
-            targetId: input.targetId,
-            flaggedAIds: input.context.flaggedIds,
-            cofechaRunId: input.runId,
-            rwlHash: input.context.rwlHash,
-            masterDatingSeries: parseCofechaResult(input.context.outText).masterDatingSeries,
-        });
+        const referenceStrategy = input.referenceStrategy ?? "production";
+        const usesProductionReference = referenceStrategy === "production"
+            || referenceStrategy === "cofecha-master-without-diagnosis-evidence";
+        const passesCofechaText = referenceStrategy === "production"
+            || referenceStrategy === "pairwise-with-cofecha-evidence";
+        const productionReference = usesProductionReference
+            ? createProductionReferenceForEvaluation({
+                siteData: input.siteData,
+                targetId: input.targetId,
+                flaggedAIds: input.context.flaggedIds,
+                cofechaRunId: input.runId,
+                rwlHash: input.context.rwlHash,
+                masterDatingSeries: parseCofechaResult(
+                    input.context.outText,
+                ).masterDatingSeries,
+            })
+            : null;
+        const referenceConfig = productionReference?.referenceConfig
+            ?? createInternalReferenceForEvaluation({
+                siteData: input.siteData,
+                targetId: input.targetId,
+                runId: input.runId,
+                rwlHash: input.context.rwlHash,
+            });
+        if (!referenceConfig) {
+            throw new Error(`internal reference unavailable: ${input.targetId}`);
+        }
+        const referenceMode = productionReference?.referenceMode
+            ?? "pairwise-bootstrap-target-excluded";
         const diagnosis = diagnoseCrossdating(input.siteData, {
             referenceConfig,
             targetTrees: [input.targetId],
-            cofechaText: input.context.outText,
+            cofechaText: passesCofechaText
+                ? input.context.outText
+                : undefined,
             includeEventDecisionAudits: true,
             reviewWindowDisplayMode: "review",
         });
