@@ -26,9 +26,14 @@ import {
 } from "./itrdb-operation-capability/workflowSuggestionMetric";
 import type { CapabilityTruth } from "./itrdb-operation-capability/types";
 import type {
+    InternalCompatibilityLinearModel,
     InternalMasterMethod,
     InternalTargetContribution,
 } from "@/features/crossdating/internalReferenceModel";
+import type {
+    CofechaArImplementation,
+    CofechaSplineImplementation,
+} from "@/features/crossdating/reference";
 
 type Step = {
     caseIndex: number;
@@ -80,10 +85,36 @@ const internalCompatibilityThreshold = Number(valueFor(
     "--internal-compatibility-threshold",
     "0.16239316239316237",
 ));
+const internalCompatibilityModelPath = valueFor("--internal-compatibility-model");
+const internalCompatibilityModel = internalCompatibilityModelPath
+    ? (() => {
+        const artifact = JSON.parse(readFileSync(resolve(
+            internalCompatibilityModelPath,
+        ), "utf8"));
+        return {
+            featureNames: artifact.featureNames,
+            means: artifact.model.means,
+            scales: artifact.model.scales,
+            coefficients: artifact.model.coefficients,
+            intercept: artifact.model.intercept,
+            threshold: artifact.recommendedThreshold,
+            safeStrictSuppressionThreshold:
+                artifact.safeStrictSuppressionThreshold ?? null,
+        } satisfies InternalCompatibilityLinearModel;
+    })()
+    : undefined;
 const normalizeInternalSourceResiduals = valueFor(
     "--normalize-internal-source-residuals",
     "false",
 ) === "true";
+const internalSplineImplementation = valueFor(
+    "--internal-spline-implementation",
+    "discrete-penalty",
+) as CofechaSplineImplementation;
+const internalArImplementation = valueFor(
+    "--internal-ar-implementation",
+    "current-aic",
+) as CofechaArImplementation;
 const usesStoredCofecha = referenceStrategy === "production"
     || referenceStrategy === "pairwise-with-cofecha-evidence"
     || referenceStrategy === "cofecha-master-without-diagnosis-evidence";
@@ -206,7 +237,10 @@ if (workerIndex === null) {
         usesCofechaForEvaluationLabels: includeEvaluationLabels,
         selectedFileIds: [...selectedFileIds],
         internalCompatibilityThreshold,
+        internalCompatibilityModelPath: internalCompatibilityModelPath || null,
         normalizeInternalSourceResiduals,
+        internalSplineImplementation,
+        internalArImplementation,
         usesCofechaMaster: referenceStrategy === "production"
             || referenceStrategy === "cofecha-master-without-diagnosis-evidence",
         usesCofechaPart6: usesStoredCofecha,
@@ -297,6 +331,9 @@ if (workerIndex === null) {
             internalTargetContribution,
             internalCompatibilityThreshold,
             normalizeInternalSourceResiduals,
+            internalSplineImplementation,
+            internalArImplementation,
+            internalCompatibilityModel,
         });
         const primary = snapshot.reviewEvent;
         const alternative = primary?.interpretationAmbiguity?.alternative ?? null;
@@ -340,6 +377,8 @@ if (workerIndex === null) {
             internalTargetCompatibility: snapshot.internalTargetCompatibility ?? null,
             internalTargetIncompatibilityScore:
                 snapshot.internalTargetIncompatibilityScore ?? null,
+            internalTargetIncompatibilityProbability:
+                snapshot.internalTargetIncompatibilityProbability ?? null,
             evaluationCofechaFlagged: includeEvaluationLabels
                 ? evaluationFlaggedIds.includes(step.targetId)
                 : null,

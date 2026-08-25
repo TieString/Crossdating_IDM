@@ -12,6 +12,10 @@ import {
     type InternalTargetContribution,
 } from "@/features/crossdating/internalReferenceModel";
 import { loadRwl } from "./legacy-generalization/evaluator";
+import type {
+    CofechaArImplementation,
+    CofechaSplineImplementation,
+} from "@/features/crossdating/reference";
 
 type Step = {
     caseIndex: number;
@@ -36,6 +40,14 @@ const targetContribution = valueFor(
     "include",
 ) as InternalTargetContribution;
 const normalizeSourceResiduals = valueFor("--normalize-source-residuals", "false") === "true";
+const splineImplementation = valueFor(
+    "--spline-implementation",
+    "discrete-penalty",
+) as CofechaSplineImplementation;
+const arImplementation = valueFor(
+    "--ar-implementation",
+    "current-aic",
+) as CofechaArImplementation;
 const selectedFileIds = new Set(valueFor("--file-ids")
     .split(",")
     .map((value) => value.trim())
@@ -112,6 +124,9 @@ for (const [index, step] of selected.entries()) {
         method,
         targetContribution,
         normalizeSourceResiduals,
+        splineImplementation,
+        arImplementation,
+        computeSourceCompatibility: false,
     });
     if (!model?.referenceConfig.cofechaPassReference) continue;
     const cofechaMaster = parseCofechaResult(outText).masterDatingSeries;
@@ -147,6 +162,16 @@ for (const [index, step] of selected.entries()) {
         cofechaFlagged: flaggedIds.includes(step.targetId),
         incompatibilityScore: scoreInternalTargetIncompatibility(model.targetCompatibility),
         targetCompatibility: model.targetCompatibility,
+        sourceZeroCorrelationMean: model.sourceCompatibility.length > 0
+            ? model.sourceCompatibility.reduce((sum, row) => (
+                sum + (row.zeroCorrelation ?? -0.2)
+            ), 0) / model.sourceCompatibility.length
+            : null,
+        sourceSegmentIncompatibleMean: model.sourceCompatibility.length > 0
+            ? model.sourceCompatibility.reduce((sum, row) => (
+                sum + (row.segmentIncompatibleFraction ?? 1)
+            ), 0) / model.sourceCompatibility.length
+            : null,
     });
     if ((index + 1) % 25 === 0) {
         console.log(`INTERNAL_MASTER_AUDIT ${index + 1}/${selected.length}`);
@@ -162,6 +187,8 @@ const summary = {
     method,
     targetContribution,
     normalizeSourceResiduals,
+    splineImplementation,
+    arImplementation,
     attempts: rows.length,
     files: [...new Set(rows.map((row) => row.fileId))],
     masterCorrelation: {

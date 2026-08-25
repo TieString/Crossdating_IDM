@@ -38,6 +38,16 @@ export type IndexedPoint = {
     value: number;
 };
 
+export type CofechaSplineImplementation = "discrete-penalty" | "ltrr-cook-holmes";
+export type CofechaArImplementation =
+    | "current-aic"
+    | "none"
+    | "fixed-1"
+    | "fixed-2"
+    | "fixed-3"
+    | "fixed-4"
+    | "fixed-5";
+
 export type CofechaReferencePoint = {
     year: number;
     value: number;
@@ -367,6 +377,107 @@ const solveCubicSmoothingSplineTrend = (
     return estimate.map((value) => Math.max(1e-6, value));
 };
 
+const solveSymmetricPentadiagonal = (
+    diagonal: readonly number[],
+    lowerOne: readonly number[],
+    lowerTwo: readonly number[],
+    rhs: readonly number[],
+): number[] | null => {
+    const length = diagonal.length;
+    const factorDiagonal = new Array<number>(length).fill(0);
+    const factorLowerOne = new Array<number>(length).fill(0);
+    const factorLowerTwo = new Array<number>(length).fill(0);
+    for (let row = 0; row < length; row += 1) {
+        if (row >= 2) {
+            factorLowerTwo[row] = lowerTwo[row] / factorDiagonal[row - 2];
+        }
+        if (row >= 1) {
+            const overlap = row >= 2
+                ? factorLowerTwo[row] * factorLowerOne[row - 1]
+                : 0;
+            factorLowerOne[row] = (lowerOne[row] - overlap) / factorDiagonal[row - 1];
+        }
+        const pivot = diagonal[row]
+            - factorLowerOne[row] ** 2
+            - factorLowerTwo[row] ** 2;
+        if (!Number.isFinite(pivot) || pivot <= 1e-18) return null;
+        factorDiagonal[row] = Math.sqrt(pivot);
+    }
+    const forward = new Array<number>(length).fill(0);
+    for (let row = 0; row < length; row += 1) {
+        forward[row] = (
+            rhs[row]
+            - (row >= 1 ? factorLowerOne[row] * forward[row - 1] : 0)
+            - (row >= 2 ? factorLowerTwo[row] * forward[row - 2] : 0)
+        ) / factorDiagonal[row];
+    }
+    const result = new Array<number>(length).fill(0);
+    for (let row = length - 1; row >= 0; row -= 1) {
+        result[row] = (
+            forward[row]
+            - (row + 1 < length ? factorLowerOne[row + 1] * result[row + 1] : 0)
+            - (row + 2 < length ? factorLowerTwo[row + 2] * result[row + 2] : 0)
+        ) / factorDiagonal[row];
+    }
+    return result;
+};
+
+/** Cook-Holmes/LTRR cubic spline equations used by the public CROSSDATE source. */
+export const solveLtrrCubicSmoothingSplineTrend = (
+    values: readonly number[],
+    rigidityYears: number,
+    frequencyResponse: number,
+): number[] => {
+    if (values.length < 4) {
+        const average = values.length > 0 ? mean(values) : 0;
+        return values.map(() => average);
+    }
+    const period = Math.max(3, rigidityYears);
+    const response = Math.min(0.99, Math.max(0.01, frequencyResponse));
+    const cosine = Math.cos(2 * Math.PI / period);
+    const multiplier = (
+        ((1 / (1 - response)) - 1)
+        * 6
+        * (cosine - 1) ** 2
+    ) / (cosine + 2);
+    const systemSize = values.length - 2;
+    const diagonal = new Array<number>(systemSize).fill(
+        6 + multiplier * 4 / 3,
+    );
+    const lowerOne = new Array<number>(systemSize).fill(
+        -4 + multiplier / 3,
+    );
+    const lowerTwo = new Array<number>(systemSize).fill(1);
+    lowerOne[0] = 0;
+    lowerTwo[0] = 0;
+    if (systemSize > 1) lowerTwo[1] = 0;
+    const rhs = Array.from({ length: systemSize }, (_, index) => (
+        values[index] - 2 * values[index + 1] + values[index + 2]
+    ));
+    const coefficients = solveSymmetricPentadiagonal(
+        diagonal,
+        lowerOne,
+        lowerTwo,
+        rhs,
+    );
+    if (!coefficients) {
+        const average = mean(values);
+        return values.map(() => average);
+    }
+    const correction = new Array<number>(values.length).fill(0);
+    correction[0] = coefficients[0];
+    correction[1] = -2 * coefficients[0] + coefficients[1];
+    for (let index = 2; index <= values.length - 3; index += 1) {
+        correction[index] = coefficients[index - 2]
+            - 2 * coefficients[index - 1]
+            + coefficients[index];
+    }
+    correction[values.length - 2] = coefficients[systemSize - 2]
+        - 2 * coefficients[systemSize - 1];
+    correction[values.length - 1] = coefficients[systemSize - 1];
+    return values.map((value, index) => Math.max(1e-6, value - correction[index]));
+};
+
 const solveLinearSystem = (matrix: number[][], rhs: number[]) => {
     const size = rhs.length;
     const a = matrix.map((row) => row.slice());
@@ -410,7 +521,11 @@ const solveLinearSystem = (matrix: number[][], rhs: number[]) => {
     return solution;
 };
 
-const fitAutoregressiveModel = (values: readonly number[], maxOrder: number) => {
+const fitAutoregressiveModel = (
+    values: readonly number[],
+    maxOrder: number,
+    forcedOrder?: number,
+) => {
     if (values.length < 8 || maxOrder < 1) {
         return { order: 0, coefficients: [] as number[], meanValue: mean(values) };
     }
@@ -423,7 +538,9 @@ const fitAutoregressiveModel = (values: readonly number[], maxOrder: number) => 
     // COFECHA 会用 AR modeling 去掉 spline 之后仍残留的自相关。
     // 这里用 Yule-Walker 方程拟合 AR(p)，并用 AIC 在 1..5 阶中选阶；
     // p=0 等价于关闭预白化。这样后续相关检查更偏向同步的年际高频信号。
-    for (let order = 1; order <= maxUsableOrder; order += 1) {
+    const minimumOrder = forcedOrder ?? 1;
+    const maximumOrder = forcedOrder ?? maxUsableOrder;
+    for (let order = minimumOrder; order <= Math.min(maximumOrder, maxUsableOrder); order += 1) {
         const autocovariances = Array(order + 1).fill(0);
         for (let lag = 0; lag <= order; lag += 1) {
             for (let index = lag; index < centered.length; index += 1) {
@@ -465,6 +582,8 @@ const fitAutoregressiveModel = (values: readonly number[], maxOrder: number) => 
 export function cofechaStyleStandardize(
     series: RwlTreeData,
     options: CofechaReferenceOptions = COFECHA_REFERENCE_DEFAULT_OPTIONS,
+    splineImplementation: CofechaSplineImplementation = "discrete-penalty",
+    arImplementation: CofechaArImplementation = "current-aic",
 ): IndexedPoint[] {
     const rawPoints = Array.from(series.entries())
         .filter((entry): entry is [number, number] => isUsableWidth(entry[1], options))
@@ -474,7 +593,13 @@ export function cofechaStyleStandardize(
     if (rawPoints.length === 0) return [];
 
     const rawWidths = rawPoints.map((point) => point.value);
-    const trend = solveCubicSmoothingSplineTrend(rawWidths, options);
+    const trend = splineImplementation === "ltrr-cook-holmes"
+        ? solveLtrrCubicSmoothingSplineTrend(
+            rawWidths,
+            options.splineRigidityYears,
+            options.splineFrequencyResponse,
+        )
+        : solveCubicSmoothingSplineTrend(rawWidths, options);
 
     // Step 1: spline detrending
     // 原始宽度除以趋势宽度，得到 mean 约为 1 的 dimensionless index。
@@ -489,9 +614,14 @@ export function cofechaStyleStandardize(
         };
     });
 
-    if (options.useAutoregressiveModel && transformed.length >= 8) {
+    if (options.useAutoregressiveModel
+        && arImplementation !== "none"
+        && transformed.length >= 8) {
         const values = transformed.map((point) => point.value);
-        const model = fitAutoregressiveModel(values, 5);
+        const forcedOrder = arImplementation.startsWith("fixed-")
+            ? Number(arImplementation.slice("fixed-".length))
+            : undefined;
+        const model = fitAutoregressiveModel(values, 5, forcedOrder);
 
         // Step 2: AR prewhitening
         // 每条样芯单独预白化，避免一条序列自己的生长惯性被误当成

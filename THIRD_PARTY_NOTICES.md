@@ -10,6 +10,13 @@ Crossdating IDM 不包含、复制或分发 COFECHA 可执行程序。用户可�
 
 COFECHA 由 Richard L. Holmes 创建。推荐引用：Holmes, R. L. (1983). Computer-assisted quality control in tree-ring dating and measurement. *Tree-Ring Bulletin*, 43, 69-78。
 
+## TREES / CROSSDATE spline equations
+
+实验性 JS 内部参考模型包含对 LTRR 公开 Cook-Holmes cubic smoothing spline 带状方程的 TypeScript 实现。原始 `spline.c` 由 Edward R. Cook 的 IMSL 例程发展而来，并由 Richard L. Holmes 整合；LTRR 的 TREES/CROSSDATE 源码按 GNU GPL version 2 or later 发布。来源与许可说明：
+
+- https://www.ltrr.arizona.edu/pub/trees/doc/old_html/spline_8c-source.html
+- https://www.ltrr.arizona.edu/pub/trees/index.html
+
 ## ITRDB 示例数据
 
 根目录 `test-data` 中的 RWL 示例来自 NOAA National Centers for Environmental Information, World Data Service for Paleoclimatology 管理的 International Tree-Ring Data Bank (ITRDB)。数据继续适用 ITRDB 及原始调查者的归属和引用要求；来源链接、文件校验值和逐站点说明见 `test-data/README.md` 与 `test-data/SHA256SUMS.txt`。

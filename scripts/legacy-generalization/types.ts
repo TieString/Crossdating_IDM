@@ -220,6 +220,7 @@ export type LegacyDiagnosisSnapshot = {
     referenceAnchorCount: number;
     internalTargetCompatibility?: InternalTargetCompatibilityFeatures | null;
     internalTargetIncompatibilityScore?: number | null;
+    internalTargetIncompatibilityProbability?: number | null;
     durationMs: number;
     error: string | null;
 };

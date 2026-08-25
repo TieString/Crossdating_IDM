@@ -5,6 +5,8 @@ import {
     cofechaStyleStandardize,
     type CofechaPassReference,
     type CofechaReferencePoint,
+    type CofechaArImplementation,
+    type CofechaSplineImplementation,
     type ReferenceSeriesConfig,
 } from "./reference";
 
@@ -52,6 +54,92 @@ export type InternalReferenceModel = {
     referenceConfig: ReferenceSeriesConfig;
     sourceCompatibility: InternalSeriesCompatibility[];
     targetCompatibility: InternalTargetCompatibilityFeatures;
+};
+
+export const INTERNAL_COMPATIBILITY_FEATURE_NAMES = [
+    "zeroCorrelation",
+    "bestCorrelation",
+    "absoluteBestLag",
+    "zeroLagDeficit",
+    "segmentZeroCorrelationMedian",
+    "segmentZeroCorrelationMinimum",
+    "segmentIncompatibleFraction",
+    "segmentNonzeroLagFraction",
+    "perReferenceZeroCorrelationMedian",
+    "perReferenceZeroCorrelationQ25",
+    "perReferenceIncompatibleFraction",
+    "perReferenceNonzeroLagFraction",
+    "logReferenceCount",
+    "meanReferenceWeight",
+] as const;
+
+export type InternalCompatibilityLinearModel = {
+    featureNames: readonly string[];
+    means: readonly number[];
+    scales: readonly number[];
+    coefficients: readonly number[];
+    intercept: number;
+    threshold: number;
+    safeStrictSuppressionThreshold?: number | null;
+};
+
+export const shouldSuppressInternalStrictSuggestion = (
+    probability: number | null,
+    hasStrictSuggestion: boolean,
+    model: InternalCompatibilityLinearModel | undefined,
+) => Boolean(
+    hasStrictSuggestion
+    && probability !== null
+    && model?.safeStrictSuppressionThreshold !== null
+    && model?.safeStrictSuppressionThreshold !== undefined
+    && probability < model.safeStrictSuppressionThreshold
+);
+
+export const internalCompatibilityFeatureVector = (
+    features: InternalTargetCompatibilityFeatures,
+): number[] => {
+    const finite = (value: number | null, fallback: number) => (
+        value !== null && Number.isFinite(value) ? value : fallback
+    );
+    return [
+        finite(features.zeroCorrelation, -0.2),
+        finite(features.bestCorrelation, -0.2),
+        Math.abs(finite(features.bestLag, 10)),
+        finite(features.zeroLagDeficit, 1),
+        finite(features.segmentZeroCorrelationMedian, -0.2),
+        finite(features.segmentZeroCorrelationMinimum, -0.5),
+        finite(features.segmentIncompatibleFraction, 1),
+        finite(features.segmentNonzeroLagFraction, 1),
+        finite(features.perReferenceZeroCorrelationMedian, -0.2),
+        finite(features.perReferenceZeroCorrelationQ25, -0.3),
+        finite(features.perReferenceIncompatibleFraction, 1),
+        finite(features.perReferenceNonzeroLagFraction, 1),
+        Math.log1p(Math.max(0, finite(features.referenceCount, 0))),
+        finite(features.meanReferenceWeight, 0),
+    ];
+};
+
+export const predictInternalTargetIncompatibility = (
+    features: InternalTargetCompatibilityFeatures,
+    model: InternalCompatibilityLinearModel,
+): number => {
+    if (model.featureNames.length !== INTERNAL_COMPATIBILITY_FEATURE_NAMES.length
+        || !model.featureNames.every((name, index) => (
+            name === INTERNAL_COMPATIBILITY_FEATURE_NAMES[index]
+        ))
+        || model.means.length !== model.featureNames.length
+        || model.scales.length !== model.featureNames.length
+        || model.coefficients.length !== model.featureNames.length) {
+        throw new Error("internal compatibility model feature contract mismatch");
+    }
+    const vector = internalCompatibilityFeatureVector(features);
+    const linear = model.intercept + vector.reduce((sum, value, index) => (
+        sum + ((value - model.means[index]) / Math.max(1e-12, model.scales[index]))
+            * model.coefficients[index]
+    ), 0);
+    return linear >= 0
+        ? 1 / (1 + Math.exp(-linear))
+        : Math.exp(linear) / (1 + Math.exp(linear));
 };
 
 export const scoreInternalTargetIncompatibility = (
@@ -208,8 +296,15 @@ const lagProfile = (
 const standardizeTree = (
     tree: RwlTreeData,
     normalizeResidual: boolean,
+    splineImplementation: CofechaSplineImplementation,
+    arImplementation: CofechaArImplementation,
 ): Map<number, number> => {
-    const points = cofechaStyleStandardize(tree);
+    const points = cofechaStyleStandardize(
+        tree,
+        COFECHA_REFERENCE_DEFAULT_OPTIONS,
+        splineImplementation,
+        arImplementation,
+    );
     if (!normalizeResidual || points.length === 0) {
         return new Map(points.map((point) => [point.year, point.value]));
     }
@@ -422,6 +517,9 @@ export const buildInternalReferenceModel = (input: {
     candidateTarget?: boolean;
     targetContribution?: InternalTargetContribution;
     normalizeSourceResiduals?: boolean;
+    splineImplementation?: CofechaSplineImplementation;
+    arImplementation?: CofechaArImplementation;
+    computeSourceCompatibility?: boolean;
 }): InternalReferenceModel | null => {
     const targetTree = input.siteData.get(input.targetId);
     if (!targetTree) return null;
@@ -429,12 +527,19 @@ export const buildInternalReferenceModel = (input: {
         .filter(([seriesId]) => seriesId !== input.targetId)
         .map(([seriesId, tree]) => ({
             seriesId,
-            values: standardizeTree(tree, input.normalizeSourceResiduals === true),
+            values: standardizeTree(
+                tree,
+                input.normalizeSourceResiduals === true,
+                input.splineImplementation ?? "discrete-penalty",
+                input.arImplementation ?? "current-aic",
+            ),
         }))
         .filter((row) => row.values.size >= 30);
     if (references.length < 3) return null;
     const preliminaryMaster = aggregateUnweightedMedian(references);
-    const redundancy = redundancyCounts(references);
+    const redundancy = input.computeSourceCompatibility === false
+        ? new Map(references.map((row) => [row.seriesId, 1]))
+        : redundancyCounts(references);
     const sourceCompatibility = references.map((row) => summarizeCompatibility(
         row.seriesId,
         row.values,
@@ -445,6 +550,8 @@ export const buildInternalReferenceModel = (input: {
     const targetResidual = standardizeTree(
         targetTree,
         input.normalizeSourceResiduals === true,
+        input.splineImplementation ?? "discrete-penalty",
+        input.arImplementation ?? "current-aic",
     );
     const targetSourceCompatibility = summarizeCompatibility(
         input.targetId,

@@ -57,6 +57,8 @@ import {
     createCofechaMasterReferenceConfig,
     createCofechaPassReferenceConfig,
     type ReferenceSeriesConfig,
+    type CofechaArImplementation,
+    type CofechaSplineImplementation,
 } from "@/features/crossdating/reference";
 import {
     createPairwiseBootstrapReferenceConfig,
@@ -65,9 +67,12 @@ import {
 } from "@/features/crossdating/pairwiseBootstrap";
 import {
     buildInternalReferenceModel,
+    predictInternalTargetIncompatibility,
     scoreInternalTargetIncompatibility,
     setInternalTargetCandidate,
+    shouldSuppressInternalStrictSuggestion,
     type InternalMasterMethod,
+    type InternalCompatibilityLinearModel,
     type InternalTargetContribution,
 } from "@/features/crossdating/internalReferenceModel";
 import {
@@ -360,7 +365,8 @@ export type EvaluationReferenceStrategy =
     | "all-other-internal-flags"
     | "internal-model-unflagged"
     | "internal-model-flagged"
-    | "internal-model-classifier";
+    | "internal-model-classifier"
+    | "internal-model-safe-clean-gate";
 
 export const diagnoseTruthBlind = (input: {
     siteData: RwlSiteData;
@@ -373,6 +379,9 @@ export const diagnoseTruthBlind = (input: {
     internalTargetContribution?: InternalTargetContribution;
     internalCompatibilityThreshold?: number;
     normalizeInternalSourceResiduals?: boolean;
+    internalSplineImplementation?: CofechaSplineImplementation;
+    internalArImplementation?: CofechaArImplementation;
+    internalCompatibilityModel?: InternalCompatibilityLinearModel;
 }): LegacyDiagnosisSnapshot => {
     const started = performance.now();
     try {
@@ -403,21 +412,34 @@ export const diagnoseTruthBlind = (input: {
                 candidateTarget: referenceStrategy === "internal-model-flagged",
                 targetContribution: input.internalTargetContribution,
                 normalizeSourceResiduals: input.normalizeInternalSourceResiduals,
+                splineImplementation: input.internalSplineImplementation,
+                arImplementation: input.internalArImplementation,
             })
             : null;
         const internalIncompatibilityScore = rawInternalModel
             ? scoreInternalTargetIncompatibility(rawInternalModel.targetCompatibility)
+            : null;
+        const internalIncompatibilityProbability = rawInternalModel
+            && input.internalCompatibilityModel
+            ? predictInternalTargetIncompatibility(
+                rawInternalModel.targetCompatibility,
+                input.internalCompatibilityModel,
+            )
             : null;
         const internalModel = rawInternalModel
             ? setInternalTargetCandidate(
                 rawInternalModel,
                 input.targetId,
                 referenceStrategy === "internal-model-flagged"
+                    || referenceStrategy === "internal-model-safe-clean-gate"
                     || (referenceStrategy === "internal-model-classifier"
-                        && internalIncompatibilityScore !== null
-                        && internalIncompatibilityScore >= (
-                            input.internalCompatibilityThreshold ?? 0.16239316239316237
-                        )),
+                        && (internalIncompatibilityProbability !== null
+                            ? internalIncompatibilityProbability
+                                >= input.internalCompatibilityModel!.threshold
+                            : internalIncompatibilityScore !== null
+                                && internalIncompatibilityScore >= (
+                                    input.internalCompatibilityThreshold ?? 0.16239316239316237
+                                ))),
             )
             : null;
         const referenceConfig = productionReference?.referenceConfig
@@ -809,9 +831,15 @@ export const diagnoseTruthBlind = (input: {
                 };
             })()
             : null;
+        const suppressStrictSuggestion = referenceStrategy === "internal-model-safe-clean-gate"
+            && shouldSuppressInternalStrictSuggestion(
+                internalIncompatibilityProbability,
+                diagnosis.events[0] !== undefined,
+                input.internalCompatibilityModel,
+            );
         return {
-            strictEvent: diagnosis.events[0] ?? null,
-            reviewEvent: diagnosis.reviewEvents?.[0] ?? null,
+            strictEvent: suppressStrictSuggestion ? null : diagnosis.events[0] ?? null,
+            reviewEvent: suppressStrictSuggestion ? null : diagnosis.reviewEvents?.[0] ?? null,
             candidates: diagnosis.candidates.map((candidate) => candidateAudit(
                 candidate as unknown as Record<string, unknown>,
             )),
@@ -824,6 +852,7 @@ export const diagnoseTruthBlind = (input: {
                 ?? 0,
             internalTargetCompatibility: internalModel?.targetCompatibility ?? null,
             internalTargetIncompatibilityScore: internalIncompatibilityScore,
+            internalTargetIncompatibilityProbability: internalIncompatibilityProbability,
             durationMs: Math.round(performance.now() - started),
             error: null,
         };
@@ -839,6 +868,7 @@ export const diagnoseTruthBlind = (input: {
             referenceAnchorCount: 0,
             internalTargetCompatibility: null,
             internalTargetIncompatibilityScore: null,
+            internalTargetIncompatibilityProbability: null,
             durationMs: Math.round(performance.now() - started),
             error: error instanceof Error ? error.stack ?? error.message : String(error),
         };

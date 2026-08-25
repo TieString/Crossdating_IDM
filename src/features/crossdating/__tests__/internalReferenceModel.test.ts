@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
     buildInternalReferenceModel,
+    INTERNAL_COMPATIBILITY_FEATURE_NAMES,
+    predictInternalTargetIncompatibility,
     scoreInternalTargetIncompatibility,
     setInternalTargetCandidate,
+    shouldSuppressInternalStrictSuggestion,
 } from "../internalReferenceModel";
 import type { RwlSiteData, RwlTreeData } from "@/features/rwl/types";
 
@@ -75,5 +78,41 @@ describe("internal reference model", () => {
             .toContain("TARGET");
         expect(candidate.referenceConfig.classification?.anchorPassIds)
             .not.toContain("TARGET");
+    });
+
+    it("validates and applies the frozen compatibility feature contract", () => {
+        const model = buildInternalReferenceModel({
+            siteData: cleanSite(),
+            targetId: "TARGET",
+            runId: "contract",
+            rwlHash: "hash",
+        })!;
+        const linearModel = {
+            featureNames: INTERNAL_COMPATIBILITY_FEATURE_NAMES,
+            means: INTERNAL_COMPATIBILITY_FEATURE_NAMES.map(() => 0),
+            scales: INTERNAL_COMPATIBILITY_FEATURE_NAMES.map(() => 1),
+            coefficients: INTERNAL_COMPATIBILITY_FEATURE_NAMES.map(() => 0),
+            intercept: 0,
+            threshold: 0.5,
+        };
+
+        expect(predictInternalTargetIncompatibility(
+            model.targetCompatibility,
+            linearModel,
+        )).toBe(0.5);
+        expect(() => predictInternalTargetIncompatibility(
+            model.targetCompatibility,
+            { ...linearModel, featureNames: ["wrong"] },
+        )).toThrow("feature contract mismatch");
+        expect(shouldSuppressInternalStrictSuggestion(
+            0.1,
+            true,
+            { ...linearModel, safeStrictSuppressionThreshold: 0.2 },
+        )).toBe(true);
+        expect(shouldSuppressInternalStrictSuggestion(
+            0.1,
+            false,
+            { ...linearModel, safeStrictSuppressionThreshold: 0.2 },
+        )).toBe(false);
     });
 });
