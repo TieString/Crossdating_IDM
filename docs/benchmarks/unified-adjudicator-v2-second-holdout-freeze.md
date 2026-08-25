@@ -43,3 +43,14 @@ Acceptance remains, independently for A/B/C/D:
 
 Strict accuracy, response, refusal, Clean false positives, and the failed first
 holdout result remain separately reported.
+
+## Frozen files
+
+The deterministic clean qualification selected exactly 15 files:
+
+`az080, az087, az089, az100, az534, ca656, co566, co585, co621, mong005,
+mong006, mong011, mt103, nm548, nm596`.
+
+The set has zero overlap with every tracked historical benchmark file ID and zero
+overlap with the 34 explicitly known early high-quality files. Event injection has
+not been run at the time of this freeze.

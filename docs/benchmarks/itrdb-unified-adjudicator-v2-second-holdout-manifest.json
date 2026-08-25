@@ -1,0 +1,1012 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": "itrdb-unified-adjudicator-v2",
+  "scenarioGeneratorVersion": 5,
+  "createdAt": "2026-08-25T00:57:57.453Z",
+  "gitCommit": "f4e83b84c958da5180ac739c0ab32cc21132e8ff",
+  "configPath": "../../软件测试/itrdb-unified-model-v2/second-holdout/protocol-v2/finalHoldout-config.json",
+  "configSha256": "b887825ba6f47ba43ea9eeb7585c897c0f99e8835ff96310af795f24ab4ef7d1",
+  "itrdbRoot": "D:/软件测试/数据/ITRDB/itrdb_download/measurements",
+  "cofechaSha256": "3b898012c417ed06b3a1d88c0a4f86a677e276eadfe30a04fd5798542c63372b",
+  "files": [
+    {
+      "fileId": "az534",
+      "relativePath": "northamerica/usa/az534.rwl",
+      "sourceSha256": "1f5ab90e1a9d8fcd96b22ae206404735fdbd410fdd9a404b08fbe9ad822f5b96",
+      "cleanCofechaSha256": "2d586cec0922ccce03a3a4efa014d8ed325b1ebed96f8772955be29871f0a5e8",
+      "seriesIntercorrelation": 0.832,
+      "possibleProblemSegments": 0,
+      "totalSeries": 23,
+      "eligibleTargetsBeforeLimit": 17,
+      "eligibleTargets": [
+        {
+          "targetId": "PCD011",
+          "startYear": 1665,
+          "endYear": 1987,
+          "seriesYears": 323,
+          "zeroCount": 1,
+          "masterCorrelation": 0.818,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "PCD041",
+          "startYear": 1706,
+          "endYear": 1961,
+          "seriesYears": 256,
+          "zeroCount": 0,
+          "masterCorrelation": 0.82,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "PCD062",
+          "startYear": 1658,
+          "endYear": 1987,
+          "seriesYears": 330,
+          "zeroCount": 0,
+          "masterCorrelation": 0.878,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "PCD082",
+          "startYear": 1669,
+          "endYear": 1987,
+          "seriesYears": 319,
+          "zeroCount": 0,
+          "masterCorrelation": 0.813,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "PCD091",
+          "startYear": 1772,
+          "endYear": 1987,
+          "seriesYears": 216,
+          "zeroCount": 0,
+          "masterCorrelation": 0.852,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "PCD111",
+          "startYear": 1658,
+          "endYear": 1987,
+          "seriesYears": 330,
+          "zeroCount": 0,
+          "masterCorrelation": 0.806,
+          "problemSegments": 0
+        }
+      ]
+    },
+    {
+      "fileId": "mt103",
+      "relativePath": "northamerica/usa/mt103.rwl",
+      "sourceSha256": "0193007c48559ae2230183a7de3b2a34626d59529338dec2e568a2b5a9a5d2bc",
+      "cleanCofechaSha256": "dcb5810079d33aa6763d42f40833e24b29e03ffc3c82618797619f452b030238",
+      "seriesIntercorrelation": 0.849,
+      "possibleProblemSegments": 0,
+      "totalSeries": 14,
+      "eligibleTargetsBeforeLimit": 6,
+      "eligibleTargets": [
+        {
+          "targetId": "021011",
+          "startYear": 1743,
+          "endYear": 1966,
+          "seriesYears": 224,
+          "zeroCount": 0,
+          "masterCorrelation": 0.869,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "021012",
+          "startYear": 1706,
+          "endYear": 1966,
+          "seriesYears": 261,
+          "zeroCount": 0,
+          "masterCorrelation": 0.868,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "021021",
+          "startYear": 1710,
+          "endYear": 1966,
+          "seriesYears": 257,
+          "zeroCount": 1,
+          "masterCorrelation": 0.85,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "021022",
+          "startYear": 1688,
+          "endYear": 1966,
+          "seriesYears": 279,
+          "zeroCount": 0,
+          "masterCorrelation": 0.858,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "021061",
+          "startYear": 1742,
+          "endYear": 1966,
+          "seriesYears": 225,
+          "zeroCount": 0,
+          "masterCorrelation": 0.865,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "021062",
+          "startYear": 1742,
+          "endYear": 1966,
+          "seriesYears": 225,
+          "zeroCount": 0,
+          "masterCorrelation": 0.834,
+          "problemSegments": 0
+        }
+      ]
+    },
+    {
+      "fileId": "az100",
+      "relativePath": "northamerica/usa/az100.rwl",
+      "sourceSha256": "7a0f210ece6b058d94873b7b2369236fb5b2a06a6f71076c3494f20d35e2484a",
+      "cleanCofechaSha256": "af2078967877a679d9fe3f09230f73cdd4359b1e22417165f4b251e3cbbd0714",
+      "seriesIntercorrelation": 0.822,
+      "possibleProblemSegments": 0,
+      "totalSeries": 26,
+      "eligibleTargetsBeforeLimit": 6,
+      "eligibleTargets": [
+        {
+          "targetId": "402011",
+          "startYear": 1723,
+          "endYear": 1972,
+          "seriesYears": 250,
+          "zeroCount": 9,
+          "masterCorrelation": 0.821,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "402022",
+          "startYear": 1711,
+          "endYear": 1973,
+          "seriesYears": 263,
+          "zeroCount": 13,
+          "masterCorrelation": 0.806,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "402052",
+          "startYear": 1659,
+          "endYear": 1972,
+          "seriesYears": 314,
+          "zeroCount": 17,
+          "masterCorrelation": 0.818,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "402061",
+          "startYear": 1696,
+          "endYear": 1972,
+          "seriesYears": 277,
+          "zeroCount": 11,
+          "masterCorrelation": 0.849,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "402062",
+          "startYear": 1679,
+          "endYear": 1972,
+          "seriesYears": 294,
+          "zeroCount": 13,
+          "masterCorrelation": 0.858,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "402081",
+          "startYear": 1727,
+          "endYear": 1969,
+          "seriesYears": 243,
+          "zeroCount": 9,
+          "masterCorrelation": 0.83,
+          "problemSegments": 0
+        }
+      ]
+    },
+    {
+      "fileId": "co566",
+      "relativePath": "northamerica/usa/co566.rwl",
+      "sourceSha256": "f2062404865ca08296d9651ac803e364bc0ed173bf6fac35eaed5ed795a896e3",
+      "cleanCofechaSha256": "7063490964ffbdf396ada2b76b2b8cc1e21d1842d4ac019a753453f2f1790730",
+      "seriesIntercorrelation": 0.822,
+      "possibleProblemSegments": 0,
+      "totalSeries": 23,
+      "eligibleTargetsBeforeLimit": 11,
+      "eligibleTargets": [
+        {
+          "targetId": "vvr051",
+          "startYear": 1648,
+          "endYear": 1998,
+          "seriesYears": 351,
+          "zeroCount": 4,
+          "masterCorrelation": 0.811,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "vvr062",
+          "startYear": 1797,
+          "endYear": 1998,
+          "seriesYears": 202,
+          "zeroCount": 0,
+          "masterCorrelation": 0.897,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "vvr131",
+          "startYear": 1749,
+          "endYear": 1998,
+          "seriesYears": 250,
+          "zeroCount": 0,
+          "masterCorrelation": 0.824,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "vvr151t",
+          "startYear": 1646,
+          "endYear": 1998,
+          "seriesYears": 353,
+          "zeroCount": 9,
+          "masterCorrelation": 0.906,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "vvr152",
+          "startYear": 1645,
+          "endYear": 1997,
+          "seriesYears": 353,
+          "zeroCount": 9,
+          "masterCorrelation": 0.889,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "vvx012",
+          "startYear": 1641,
+          "endYear": 1846,
+          "seriesYears": 206,
+          "zeroCount": 3,
+          "masterCorrelation": 0.815,
+          "problemSegments": 0
+        }
+      ]
+    },
+    {
+      "fileId": "az087",
+      "relativePath": "northamerica/usa/az087.rwl",
+      "sourceSha256": "6c6b36a57ca6d1ba79b6c58aebe4e2afb7d4ea2b31125848ff30e82db72e8c1b",
+      "cleanCofechaSha256": "8f2eac42c207cf406c9ce539e609c2e07ab691c15d69b87fe9cc63ce9eec22be",
+      "seriesIntercorrelation": 0.845,
+      "possibleProblemSegments": 0,
+      "totalSeries": 28,
+      "eligibleTargetsBeforeLimit": 24,
+      "eligibleTargets": [
+        {
+          "targetId": "212011",
+          "startYear": 1732,
+          "endYear": 1972,
+          "seriesYears": 241,
+          "zeroCount": 4,
+          "masterCorrelation": 0.853,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "212021",
+          "startYear": 1750,
+          "endYear": 1972,
+          "seriesYears": 223,
+          "zeroCount": 5,
+          "masterCorrelation": 0.855,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "212041",
+          "startYear": 1755,
+          "endYear": 1972,
+          "seriesYears": 218,
+          "zeroCount": 7,
+          "masterCorrelation": 0.88,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "212052",
+          "startYear": 1684,
+          "endYear": 1973,
+          "seriesYears": 290,
+          "zeroCount": 8,
+          "masterCorrelation": 0.885,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "212081",
+          "startYear": 1721,
+          "endYear": 1972,
+          "seriesYears": 252,
+          "zeroCount": 4,
+          "masterCorrelation": 0.831,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "212142",
+          "startYear": 1611,
+          "endYear": 1972,
+          "seriesYears": 362,
+          "zeroCount": 15,
+          "masterCorrelation": 0.842,
+          "problemSegments": 0
+        }
+      ]
+    },
+    {
+      "fileId": "az080",
+      "relativePath": "northamerica/usa/az080.rwl",
+      "sourceSha256": "bae239b0049aacb61f8e6a72275c9aca54d6796d11e4eaba0f880712b1264e48",
+      "cleanCofechaSha256": "bc8929276a2c9f40b9c41963b1ddd443224ca75dd89812ccaa2820adb29a497e",
+      "seriesIntercorrelation": 0.869,
+      "possibleProblemSegments": 0,
+      "totalSeries": 32,
+      "eligibleTargetsBeforeLimit": 24,
+      "eligibleTargets": [
+        {
+          "targetId": "081012",
+          "startYear": 1652,
+          "endYear": 1972,
+          "seriesYears": 321,
+          "zeroCount": 0,
+          "masterCorrelation": 0.891,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "081041",
+          "startYear": 1730,
+          "endYear": 1972,
+          "seriesYears": 243,
+          "zeroCount": 0,
+          "masterCorrelation": 0.935,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "081052",
+          "startYear": 1747,
+          "endYear": 1972,
+          "seriesYears": 226,
+          "zeroCount": 0,
+          "masterCorrelation": 0.881,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "081101",
+          "startYear": 1744,
+          "endYear": 1972,
+          "seriesYears": 229,
+          "zeroCount": 1,
+          "masterCorrelation": 0.82,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "081111",
+          "startYear": 1606,
+          "endYear": 1972,
+          "seriesYears": 367,
+          "zeroCount": 5,
+          "masterCorrelation": 0.879,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "081131",
+          "startYear": 1702,
+          "endYear": 1972,
+          "seriesYears": 271,
+          "zeroCount": 2,
+          "masterCorrelation": 0.882,
+          "problemSegments": 0
+        }
+      ]
+    },
+    {
+      "fileId": "co585",
+      "relativePath": "northamerica/usa/co585.rwl",
+      "sourceSha256": "f058f0989826312eefed06e03669d76a9d2ebda3f213a547af578be2de2c07c8",
+      "cleanCofechaSha256": "b137563310465fd814b3a94f4e3d14fb56496c4c6645122706078a5847352ad1",
+      "seriesIntercorrelation": 0.843,
+      "possibleProblemSegments": 0,
+      "totalSeries": 38,
+      "eligibleTargetsBeforeLimit": 28,
+      "eligibleTargets": [
+        {
+          "targetId": "enc052",
+          "startYear": 1591,
+          "endYear": 2001,
+          "seriesYears": 411,
+          "zeroCount": 3,
+          "masterCorrelation": 0.836,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "enc072",
+          "startYear": 1638,
+          "endYear": 2001,
+          "seriesYears": 364,
+          "zeroCount": 1,
+          "masterCorrelation": 0.866,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "enc081",
+          "startYear": 1630,
+          "endYear": 2001,
+          "seriesYears": 372,
+          "zeroCount": 1,
+          "masterCorrelation": 0.879,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "enc141",
+          "startYear": 1592,
+          "endYear": 2000,
+          "seriesYears": 409,
+          "zeroCount": 2,
+          "masterCorrelation": 0.848,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "enc211",
+          "startYear": 1613,
+          "endYear": 2001,
+          "seriesYears": 389,
+          "zeroCount": 5,
+          "masterCorrelation": 0.853,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "enc212",
+          "startYear": 1625,
+          "endYear": 2001,
+          "seriesYears": 377,
+          "zeroCount": 5,
+          "masterCorrelation": 0.859,
+          "problemSegments": 0
+        }
+      ]
+    },
+    {
+      "fileId": "nm596",
+      "relativePath": "northamerica/usa/nm596.rwl",
+      "sourceSha256": "6f64ba631757c8b6bf798ee098d1e33101f16eb7f465e161e63cd754b50fc94e",
+      "cleanCofechaSha256": "857b20735dac76db64ddc24ee86218029d3fc8ae6ec33f2b1c723be09b65edd5",
+      "seriesIntercorrelation": 0.848,
+      "possibleProblemSegments": 0,
+      "totalSeries": 56,
+      "eligibleTargetsBeforeLimit": 28,
+      "eligibleTargets": [
+        {
+          "targetId": "FM03E",
+          "startYear": 1622,
+          "endYear": 1968,
+          "seriesYears": 347,
+          "zeroCount": 2,
+          "masterCorrelation": 0.9,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "FM03W",
+          "startYear": 1591,
+          "endYear": 1860,
+          "seriesYears": 270,
+          "zeroCount": 0,
+          "masterCorrelation": 0.832,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "FM05W",
+          "startYear": 1754,
+          "endYear": 1968,
+          "seriesYears": 215,
+          "zeroCount": 2,
+          "masterCorrelation": 0.848,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "FM10S",
+          "startYear": 1699,
+          "endYear": 1968,
+          "seriesYears": 270,
+          "zeroCount": 2,
+          "masterCorrelation": 0.834,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "FMM01A",
+          "startYear": 1608,
+          "endYear": 2009,
+          "seriesYears": 402,
+          "zeroCount": 2,
+          "masterCorrelation": 0.92,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "FMM09A",
+          "startYear": 1769,
+          "endYear": 2009,
+          "seriesYears": 241,
+          "zeroCount": 1,
+          "masterCorrelation": 0.875,
+          "problemSegments": 0
+        }
+      ]
+    },
+    {
+      "fileId": "nm548",
+      "relativePath": "northamerica/usa/nm548.rwl",
+      "sourceSha256": "ec007741bf2e3cf2c7a99e04d7965c0a9d2b6f89373cfbc416c22e4b9d455ee7",
+      "cleanCofechaSha256": "b18b410b436caaa167feb665873049d36800fef138dfb104abdeac18807560de",
+      "seriesIntercorrelation": 0.825,
+      "possibleProblemSegments": 0,
+      "totalSeries": 22,
+      "eligibleTargetsBeforeLimit": 13,
+      "eligibleTargets": [
+        {
+          "targetId": "CCN031",
+          "startYear": 1650,
+          "endYear": 1982,
+          "seriesYears": 333,
+          "zeroCount": 7,
+          "masterCorrelation": 0.872,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "CCN071",
+          "startYear": 1762,
+          "endYear": 1982,
+          "seriesYears": 221,
+          "zeroCount": 5,
+          "masterCorrelation": 0.888,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "CCN121",
+          "startYear": 1687,
+          "endYear": 1982,
+          "seriesYears": 296,
+          "zeroCount": 10,
+          "masterCorrelation": 0.833,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "CCN131",
+          "startYear": 1771,
+          "endYear": 1982,
+          "seriesYears": 212,
+          "zeroCount": 1,
+          "masterCorrelation": 0.864,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "CCN141",
+          "startYear": 1750,
+          "endYear": 1982,
+          "seriesYears": 233,
+          "zeroCount": 4,
+          "masterCorrelation": 0.879,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "CCN152",
+          "startYear": 1593,
+          "endYear": 1980,
+          "seriesYears": 388,
+          "zeroCount": 7,
+          "masterCorrelation": 0.825,
+          "problemSegments": 0
+        }
+      ]
+    },
+    {
+      "fileId": "ca656",
+      "relativePath": "northamerica/usa/ca656.rwl",
+      "sourceSha256": "eb3aee8898316855bd79ba4670e3846fab037536bceff818cddb87119be4ac2d",
+      "cleanCofechaSha256": "0262fae72bfbe9d195704c98c3c3bfa6141469634560afe87ce2ad949363a408",
+      "seriesIntercorrelation": 0.827,
+      "possibleProblemSegments": 0,
+      "totalSeries": 85,
+      "eligibleTargetsBeforeLimit": 21,
+      "eligibleTargets": [
+        {
+          "targetId": "FIG101A",
+          "startYear": 1546,
+          "endYear": 1830,
+          "seriesYears": 285,
+          "zeroCount": 0,
+          "masterCorrelation": 0.822,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "FIG105B",
+          "startYear": 1293,
+          "endYear": 1623,
+          "seriesYears": 331,
+          "zeroCount": 0,
+          "masterCorrelation": 0.828,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "FIG73A",
+          "startYear": 1779,
+          "endYear": 2003,
+          "seriesYears": 225,
+          "zeroCount": 0,
+          "masterCorrelation": 0.88,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "FIG78A",
+          "startYear": 1775,
+          "endYear": 1998,
+          "seriesYears": 224,
+          "zeroCount": 0,
+          "masterCorrelation": 0.883,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "FIG78B",
+          "startYear": 1680,
+          "endYear": 2003,
+          "seriesYears": 324,
+          "zeroCount": 1,
+          "masterCorrelation": 0.841,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "FIG91B",
+          "startYear": 1710,
+          "endYear": 2003,
+          "seriesYears": 294,
+          "zeroCount": 5,
+          "masterCorrelation": 0.883,
+          "problemSegments": 0
+        }
+      ]
+    },
+    {
+      "fileId": "mong006",
+      "relativePath": "mong006.rwl",
+      "sourceSha256": "3b275ec80b0d16ac36436692dcf08cce07b58c6ac89975261d2c53e54c741b2c",
+      "cleanCofechaSha256": "62853e18407a25870f418d559ec284f24098cd2c9708e6e7bf05d097952cf32c",
+      "seriesIntercorrelation": 0.88,
+      "possibleProblemSegments": 0,
+      "totalSeries": 55,
+      "eligibleTargetsBeforeLimit": 37,
+      "eligibleTargets": [
+        {
+          "targetId": "OT17E",
+          "startYear": 1598,
+          "endYear": 1996,
+          "seriesYears": 399,
+          "zeroCount": 1,
+          "masterCorrelation": 0.921,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "OT4W",
+          "startYear": 1596,
+          "endYear": 1996,
+          "seriesYears": 401,
+          "zeroCount": 2,
+          "masterCorrelation": 0.914,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "ZM05NW",
+          "startYear": 1786,
+          "endYear": 2001,
+          "seriesYears": 216,
+          "zeroCount": 0,
+          "masterCorrelation": 0.929,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "ZM06S",
+          "startYear": 1800,
+          "endYear": 2001,
+          "seriesYears": 202,
+          "zeroCount": 0,
+          "masterCorrelation": 0.9,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "ZM08W",
+          "startYear": 1600,
+          "endYear": 2001,
+          "seriesYears": 402,
+          "zeroCount": 0,
+          "masterCorrelation": 0.923,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "ZM09N",
+          "startYear": 1593,
+          "endYear": 2001,
+          "seriesYears": 409,
+          "zeroCount": 0,
+          "masterCorrelation": 0.865,
+          "problemSegments": 0
+        }
+      ]
+    },
+    {
+      "fileId": "mong005",
+      "relativePath": "mong005.rwl",
+      "sourceSha256": "9ab3e3421b67cbb7e6e8630ab0fbfbe5cdae201c4e6fbd88eadb61d11797724e",
+      "cleanCofechaSha256": "0388585c480ba4f0b824e8277867980a6b33fc26ba095e01fff5d37d49baa27b",
+      "seriesIntercorrelation": 0.843,
+      "possibleProblemSegments": 0,
+      "totalSeries": 32,
+      "eligibleTargetsBeforeLimit": 14,
+      "eligibleTargets": [
+        {
+          "targetId": "UN14NE",
+          "startYear": 1659,
+          "endYear": 1994,
+          "seriesYears": 336,
+          "zeroCount": 0,
+          "masterCorrelation": 0.857,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "UN14NE'",
+          "startYear": 1665,
+          "endYear": 1994,
+          "seriesYears": 330,
+          "zeroCount": 0,
+          "masterCorrelation": 0.878,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "UN14SW",
+          "startYear": 1658,
+          "endYear": 1994,
+          "seriesYears": 337,
+          "zeroCount": 0,
+          "masterCorrelation": 0.883,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "UN19W",
+          "startYear": 1770,
+          "endYear": 1996,
+          "seriesYears": 227,
+          "zeroCount": 0,
+          "masterCorrelation": 0.852,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "UN24N",
+          "startYear": 1661,
+          "endYear": 1996,
+          "seriesYears": 336,
+          "zeroCount": 0,
+          "masterCorrelation": 0.866,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "UN24S",
+          "startYear": 1685,
+          "endYear": 1996,
+          "seriesYears": 312,
+          "zeroCount": 1,
+          "masterCorrelation": 0.843,
+          "problemSegments": 0
+        }
+      ]
+    },
+    {
+      "fileId": "az089",
+      "relativePath": "northamerica/usa/az089.rwl",
+      "sourceSha256": "98c74676a57743362bf723d606473a49cea59f7987f59a83cca61a6839d2506f",
+      "cleanCofechaSha256": "6f17ac16e6df9360050095097906b5eca100a7c76a5885ab343e6619fdc3f59c",
+      "seriesIntercorrelation": 0.834,
+      "possibleProblemSegments": 0,
+      "totalSeries": 28,
+      "eligibleTargetsBeforeLimit": 21,
+      "eligibleTargets": [
+        {
+          "targetId": "232051",
+          "startYear": 1654,
+          "endYear": 1973,
+          "seriesYears": 320,
+          "zeroCount": 19,
+          "masterCorrelation": 0.834,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "232061",
+          "startYear": 1638,
+          "endYear": 1972,
+          "seriesYears": 335,
+          "zeroCount": 27,
+          "masterCorrelation": 0.84,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "232062",
+          "startYear": 1630,
+          "endYear": 1972,
+          "seriesYears": 343,
+          "zeroCount": 31,
+          "masterCorrelation": 0.805,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "232072",
+          "startYear": 1664,
+          "endYear": 1972,
+          "seriesYears": 309,
+          "zeroCount": 10,
+          "masterCorrelation": 0.862,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "232081",
+          "startYear": 1669,
+          "endYear": 1973,
+          "seriesYears": 305,
+          "zeroCount": 14,
+          "masterCorrelation": 0.824,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "232141",
+          "startYear": 1672,
+          "endYear": 1972,
+          "seriesYears": 301,
+          "zeroCount": 13,
+          "masterCorrelation": 0.872,
+          "problemSegments": 0
+        }
+      ]
+    },
+    {
+      "fileId": "mong011",
+      "relativePath": "mong011.rwl",
+      "sourceSha256": "d54e3ec64d2c1fb6608c6a7817d83335ee70b419f3219d17304892a2044dab18",
+      "cleanCofechaSha256": "b2ee4decd4b0c2a91b86d5c58af7a95a2a8a0baf59b46bc1e41139a0fea3008b",
+      "seriesIntercorrelation": 0.807,
+      "possibleProblemSegments": 0,
+      "totalSeries": 36,
+      "eligibleTargetsBeforeLimit": 23,
+      "eligibleTargets": [
+        {
+          "targetId": "ZS01SE",
+          "startYear": 1738,
+          "endYear": 2001,
+          "seriesYears": 264,
+          "zeroCount": 0,
+          "masterCorrelation": 0.874,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "ZS10N",
+          "startYear": 1705,
+          "endYear": 2001,
+          "seriesYears": 297,
+          "zeroCount": 0,
+          "masterCorrelation": 0.809,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "ZS15W",
+          "startYear": 1775,
+          "endYear": 2001,
+          "seriesYears": 227,
+          "zeroCount": 0,
+          "masterCorrelation": 0.82,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "ZS20N",
+          "startYear": 1743,
+          "endYear": 2001,
+          "seriesYears": 259,
+          "zeroCount": 0,
+          "masterCorrelation": 0.851,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "ZS22N",
+          "startYear": 1596,
+          "endYear": 2001,
+          "seriesYears": 406,
+          "zeroCount": 0,
+          "masterCorrelation": 0.854,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "ZS25S'",
+          "startYear": 1660,
+          "endYear": 2001,
+          "seriesYears": 342,
+          "zeroCount": 0,
+          "masterCorrelation": 0.82,
+          "problemSegments": 0
+        }
+      ]
+    },
+    {
+      "fileId": "co621",
+      "relativePath": "northamerica/usa/co621.rwl",
+      "sourceSha256": "b170c42883877ae46a0ac1ab46189f2cb6e38459a0c316274994befbc727e56b",
+      "cleanCofechaSha256": "7afaf62c3fd258c8091b8d421cab3a13d839019b3aef6777cc43cbbd63cfdb0e",
+      "seriesIntercorrelation": 0.831,
+      "possibleProblemSegments": 0,
+      "totalSeries": 31,
+      "eligibleTargetsBeforeLimit": 22,
+      "eligibleTargets": [
+        {
+          "targetId": "rif021",
+          "startYear": 1455,
+          "endYear": 2000,
+          "seriesYears": 546,
+          "zeroCount": 22,
+          "masterCorrelation": 0.893,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "rif121",
+          "startYear": 1485,
+          "endYear": 2000,
+          "seriesYears": 516,
+          "zeroCount": 0,
+          "masterCorrelation": 0.814,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "rif132",
+          "startYear": 1560,
+          "endYear": 2000,
+          "seriesYears": 441,
+          "zeroCount": 8,
+          "masterCorrelation": 0.874,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "rif152",
+          "startYear": 1434,
+          "endYear": 2000,
+          "seriesYears": 518,
+          "zeroCount": 3,
+          "masterCorrelation": 0.835,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "rif162",
+          "startYear": 1386,
+          "endYear": 2000,
+          "seriesYears": 615,
+          "zeroCount": 8,
+          "masterCorrelation": 0.835,
+          "problemSegments": 0
+        },
+        {
+          "targetId": "rif212",
+          "startYear": 1532,
+          "endYear": 1857,
+          "seriesYears": 326,
+          "zeroCount": 5,
+          "masterCorrelation": 0.829,
+          "problemSegments": 0
+        }
+      ]
+    }
+  ],
+  "excludedFiles": [],
+  "counts": {
+    "requestedFiles": 15,
+    "includedFiles": 15,
+    "excludedFiles": 0,
+    "totalSeries": 529,
+    "eligibleTargetsBeforeLimit": 295,
+    "eligibleTargets": 90
+  }
+}

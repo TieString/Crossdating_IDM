@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": "itrdb-unified-adjudicator-v2",
+  "scenarioGeneratorVersion": 5,
+  "frozenDate": "2026-08-23",
+  "seed": "unified-adjudicator-second-holdout-scenarios-2026-08-25-v1",
+  "itrdbRoot": "D:/软件测试/数据/ITRDB/itrdb_download/measurements",
+  "fileIds": [
+    "az534",
+    "mt103",
+    "az100",
+    "co566",
+    "az087",
+    "az080",
+    "co585",
+    "nm596",
+    "nm548",
+    "ca656",
+    "mong006",
+    "mong005",
+    "az089",
+    "mong011",
+    "co621"
+  ],
+  "selection": {
+    "minimumSeriesYears": 200,
+    "minimumMasterCorrelation": 0.8,
+    "maximumProblemSegments": 0,
+    "minimumFileIntercorrelation": 0.8,
+    "maximumFileProblemSegments": 0,
+    "minimumOlderContextYears": 45,
+    "minimumNewerContextYears": 35,
+    "maximumTargetsPerFile": 6,
+    "targetSelectionSeed": "unified-adjudicator-second-holdout-targets-2026-08-25-v1",
+    "excludeFilesWithoutEligibleTargets": true,
+    "usesSignalStrength": false,
+    "usesDiagnosisOutput": false
+  },
+  "injection": {
+    "falseRingMode": "moderate",
+    "partialShiftYears": [
+      -6,
+      -20
+    ],
+    "wholeShiftYears": [
+      -4,
+      -11,
+      -20,
+      -50
+    ],
+    "distantSpacingYears": 30,
+    "distantEventCounts": [
+      2,
+      3,
+      4
+    ],
+    "nearSpacingYears": [
+      2,
+      5,
+      9,
+      13
+    ],
+    "nearUnitEventCounts": [
+      2,
+      3,
+      4
+    ],
+    "includeAdjacentOptionalSuccess": false,
+    "allowedWindowWidths": [
+      5,
+      7,
+      9,
+      13
+    ]
+  },
+  "families": {
+    "Clean": "one untouched control per frozen target",
+    "A": "one balanced single event per frozen target",
+    "B": "one distant same-type multi-event chain per frozen target",
+    "C": "one 2-13 year same-direction unit chain per frozen target",
+    "D": "one distant mixed-operation composition per frozen target"
+  },
+  "design": {
+    "scenarioSampling": "balancedOnePerFamily",
+    "splitId": "unified-adjudicator-second-holdout-split-2026-08-25-v1",
+    "datasetRole": "finalHoldout",
+    "casesPerTargetPerFamily": 1
+  },
+  "statistics": {
+    "clusterUnit": "file",
+    "bootstrapReplicates": 20000,
+    "confidenceLevel": 0.95,
+    "targetCoverage": 0.9,
+    "seed": "unified-adjudicator-second-holdout-split-2026-08-25-v1:finalHoldout:bootstrap"
+  },
+  "runtime": {
+    "workers": 12,
+    "cofechaTimeoutSeconds": 60
+  },
+  "evaluationProtocol": {
+    "version": "frontier-workflow-suggestion-v1",
+    "mainMetric": "workflowSuggestionAccuracy",
+    "denominator": "actualFrontierDiagnosisAttempts",
+    "unreachedEvents": "serialRecoveryOnly",
+    "wholeSeriesMoveSuccess": "negativeExactShiftNoWindow"
+  }
+}
