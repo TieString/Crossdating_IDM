@@ -2,7 +2,10 @@
 
 ## Status
 
-The new-file protocol is active. The previous 25 files remain regression-only, and the 17-file final holdout has not been executed.
+The new-file protocol is complete. The previous 25 files remain regression-only.
+The first 17-file holdout and a separately frozen 15-file second holdout have now
+been executed. The enriched workflow package did not pass the final A/B/C/D
+generalization contract; see `unified-adjudicator-v2-enriched-final-report.md`.
 
 Development uses 18 previously unseen high-quality RWL files, 108 frozen targets, one baseline scenario seed, and two additional frozen development-only seeds. All OOF fitting and inner calibration exclude every scenario from the held-out RWL file.
 
@@ -78,7 +81,11 @@ The first 10-file calibration was consumed by architecture diagnosis. All 12 unt
 - Global/type-specific union: 30/44; probability-mass 13-year windows did not improve it.
 - Even if all 30 correct complete proposals were applied with perfect safety, the ceiling would be 648/686 = 94.46%.
 
-The replacement calibration ceiling is below the requested 95.5%. The final 17-file holdout was therefore not opened, and no production or shadow replacement threshold was approved.
+The replacement calibration result originally blocked the first downstream-only
+model. A later enriched evidence generator passed development and replacement
+calibration proposal gates and opened the first holdout. Neither the first frozen
+policy nor the subsequently frozen second-holdout classifier policy passed all
+final family requirements. No production or shadow replacement is approved.
 
 ## Direct operation x year and immutable-package experiments
 
@@ -129,16 +136,24 @@ safety gate is applied.
 
 This rejects the hypothesis that one more downstream selector can reach the target.
 The next useful experiment must improve the generated operation identities and
-yearly location distributions themselves. The 17-file final holdout remains sealed,
-and these models are not approved for shadow or production integration.
+yearly location distributions themselves. At this checkpoint the 17-file final
+holdout remained sealed. A later enriched generator opened it under a separately
+committed policy; that policy and a second independent holdout both ultimately
+failed the complete family contract.
 
 No production diagnosis module was changed in this experiment. The historical `validate-co612-recovery-regression.mjs` entry point is no longer present after the repository cleanup, so that removed command could not be rerun; Python model tests, Oracle tests, split tests, capability TypeScript compilation, and the production build all pass.
 
 ## Negative-result boundary
 
-The experiments show that adding more generic downstream models is no longer useful. Further work should focus on calibrated package reliability and the direct yearly operation-location joint hypothesis, not on another candidate-list ranker. The final holdout remains sealed until a development model reaches the safety gate and the replacement calibration set is frozen.
+The experiments show that adding more generic downstream models is no longer useful.
+The enriched follow-up confirmed that operation and location evidence can raise the
+proposal ceiling, but final cross-file errors remain concentrated in C location and
+D operation identity. Both holdouts are now closed.
 
-Replacement calibration is now frozen and completed, but its 94.46% perfect-selection proposal ceiling still misses the target. Reaching 95.5% requires improving the operation identity and yearly location generators themselves on unseen files, not relaxing the zero-regression selector.
+The earlier 94.46% replacement-calibration ceiling was improved by the enriched
+generator. The second independent holdout nevertheless reached only 94.27%
+overall, with C 92.96% and D 93.56%. Reaching the requested contract still requires
+new C location and D operation evidence trained on new files, not relaxed gates.
 
 ## External artifacts
 

@@ -27,6 +27,16 @@ policy.
 No feature, weight, threshold, or output semantic may be changed after selecting
 the new source files.
 
+## Final status
+
+The frozen classifier policy was executed without modification. A and B passed;
+C and D did not. Final workflow-package accuracies are A 96.67%, B 95.36%,
+C 92.96%, and D 93.56%. File-clustered one-sided 95% lower bounds are A 93.33%,
+B 92.34%, C 90.74%, and D 89.03%.
+
+The second holdout is closed. The target is not achieved and the model is not
+approved for integration. See `unified-adjudicator-v2-enriched-final-report.md`.
+
 ## New independent split
 
 A new deterministic seed must select whole RWL files that occur in none of the
