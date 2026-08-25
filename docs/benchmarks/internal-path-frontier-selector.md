@@ -98,6 +98,20 @@ overrides every earlier positive regression result. The path-frontier selector i
 therefore rejected and must not be connected even as a suggestion-changing shadow
 head. Stable path probabilities may remain diagnostic telemetry only.
 
+## Multi-path consensus negative result
+
+A separate deterministic experiment grouped eighteen bounded/direct path views into
+eight evidence families, selected each family's newest transition, and clustered
+matching operation/shift/year modes. On development it exposed 78 potentially
+beneficial replacements, but every non-empty support/margin threshold also selected
+at least one harmful event or created a new Clean false positive. Only empty
+selection satisfied both safety constraints.
+
+The path views therefore share correlated failure modes; counting their agreement
+does not provide independent confirmation. Further work must add new evidence from
+virtual application and residual-path simplification rather than another vote over
+the current paths.
+
 Artifacts:
 
 `D:\软件测试\itrdb-unified-model-v2\models\internal-zscore-dev18-rich-grid-v16`
@@ -113,3 +127,5 @@ Artifacts:
 `D:\软件测试\itrdb-unified-model-v2\third-holdout\protocol`
 
 `D:\软件测试\itrdb-unified-model-v2\third-holdout\models\internal-zscore-third8-rich-grid-v21`
+
+`D:\软件测试\itrdb-unified-model-v2\models\internal-zscore-dev18-rich-grid-v16\path-consensus-candidates.json`
