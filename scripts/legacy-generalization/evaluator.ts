@@ -317,14 +317,19 @@ export const createInternalReferenceForEvaluation = (input: {
     targetId: string;
     runId: string;
     rwlHash: string;
+    referenceSet?: "stable-cluster" | "all-other";
+    flagTarget?: boolean;
 }): ReferenceSeriesConfig | null => {
     const targetExcludedSite = new Map(input.siteData);
     targetExcludedSite.delete(input.targetId);
-    const clusterIds = selectPairwiseBootstrapCluster(targetExcludedSite);
+    const clusterIds = input.referenceSet === "all-other"
+        ? Array.from(targetExcludedSite.keys())
+        : selectPairwiseBootstrapCluster(targetExcludedSite);
     if (clusterIds.length < 3) return null;
     const clusterSet = new Set(clusterIds);
     const internallyFlaggedIds = Array.from(input.siteData.keys()).filter(
-        (seriesId) => !clusterSet.has(seriesId),
+        (seriesId) => !clusterSet.has(seriesId)
+            && (seriesId !== input.targetId || input.flagTarget !== false),
     );
     const referenceConfig = createPairwiseBootstrapReferenceConfig({
         siteData: input.siteData,
@@ -343,7 +348,9 @@ export type EvaluationReferenceStrategy =
     | "production"
     | "pairwise-only"
     | "pairwise-with-cofecha-evidence"
-    | "cofecha-master-without-diagnosis-evidence";
+    | "cofecha-master-without-diagnosis-evidence"
+    | "all-other-only"
+    | "all-other-internal-flags";
 
 export const diagnoseTruthBlind = (input: {
     siteData: RwlSiteData;
@@ -378,6 +385,10 @@ export const diagnoseTruthBlind = (input: {
                 targetId: input.targetId,
                 runId: input.runId,
                 rwlHash: input.context.rwlHash,
+                referenceSet: referenceStrategy.startsWith("all-other")
+                    ? "all-other"
+                    : "stable-cluster",
+                flagTarget: referenceStrategy !== "all-other-only",
             });
         if (!referenceConfig) {
             throw new Error(`internal reference unavailable: ${input.targetId}`);

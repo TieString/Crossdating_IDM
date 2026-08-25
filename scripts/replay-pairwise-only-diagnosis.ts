@@ -56,6 +56,9 @@ const referenceStrategy = valueFor(
     "--reference-strategy",
     "pairwise-only",
 ) as EvaluationReferenceStrategy;
+const usesStoredCofecha = referenceStrategy === "production"
+    || referenceStrategy === "pairwise-with-cofecha-evidence"
+    || referenceStrategy === "cofecha-master-without-diagnosis-evidence";
 const scriptPath = fileURLToPath(import.meta.url);
 const partPath = (index: number): string => join(outputDir, `part-${index}.ndjson`);
 
@@ -172,7 +175,7 @@ if (workerIndex === null) {
         referenceStrategy,
         usesCofechaMaster: referenceStrategy === "production"
             || referenceStrategy === "cofecha-master-without-diagnosis-evidence",
-        usesCofechaPart6: referenceStrategy !== "pairwise-only",
+        usesCofechaPart6: usesStoredCofecha,
         passesCofechaTextToDiagnosis: referenceStrategy === "production"
             || referenceStrategy === "pairwise-with-cofecha-evidence",
         runDir,
@@ -226,7 +229,7 @@ if (workerIndex === null) {
         const bytes = readFileSync(statePath);
         const loaded = await loadRwl(statePath, "tucson-auto");
         const outPath = join(directory, "VERYCOF.OUT");
-        const usesCofechaEvidence = referenceStrategy !== "pairwise-only";
+        const usesCofechaEvidence = usesStoredCofecha;
         const outText = usesCofechaEvidence
             ? readFileSync(outPath, "utf8")
             : "";
