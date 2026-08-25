@@ -97,6 +97,33 @@ const scenarioSeed = valueFor(
     "--scenario-seed",
     "unified-adjudicator-unseen-scenarios-2026-08-23-v1",
 );
+const exclusionManifestPaths = valueFor("--exclude-manifests", "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .map((value) => resolve(value));
+
+const excludedFileIds = new Set<string>();
+const collectExcludedIds = (value: unknown): void => {
+    if (Array.isArray(value)) {
+        value.forEach(collectExcludedIds);
+        return;
+    }
+    if (!value || typeof value !== "object") return;
+    const record = value as Record<string, unknown>;
+    if (typeof record.fileId === "string") {
+        excludedFileIds.add(record.fileId.toLowerCase());
+    }
+    if (Array.isArray(record.fileIds)) {
+        record.fileIds.forEach((fileId) => {
+            if (typeof fileId === "string") excludedFileIds.add(fileId.toLowerCase());
+        });
+    }
+    Object.values(record).forEach(collectExcludedIds);
+};
+exclusionManifestPaths.forEach((path) => {
+    collectExcludedIds(JSON.parse(readFileSync(path, "utf8")));
+});
 
 const digest = (value: Buffer | string): string => createHash("sha256")
     .update(value).digest("hex");
@@ -114,6 +141,7 @@ const qualified: CapabilityFile[] = [];
 const excluded: CapabilityManifest["excludedFiles"] = [];
 for (const [index, candidate] of pool.candidates.entries()) {
     if (qualified.length >= desiredQualifiedFiles) break;
+    if (excludedFileIds.has(candidate.fileId.toLowerCase())) continue;
     const inputPath = resolve(itrdbRoot, candidate.relativePath);
     try {
         const loaded = await loadRwl(inputPath, "tucson-auto");
@@ -350,6 +378,8 @@ const split = {
     splitSeed,
     targetSeed,
     scenarioSeed,
+    exclusionManifestPaths: exclusionManifestPaths.map(slash),
+    excludedFileIds: [...excludedFileIds].sort(),
     historicalFileIdsExcluded: pool.excludedHistoricalFileIds.length,
     quality: {
         minimumFileIntercorrelation,
