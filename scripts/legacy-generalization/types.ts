@@ -7,6 +7,7 @@ import type {
     PerReferenceCounterfactualRow,
     PerReferenceCounterfactualSummary,
 } from "@/features/crossdating/diagnosis/perReferenceCounterfactualEvidence";
+import type { InternalTargetCompatibilityFeatures } from "@/features/crossdating/internalReferenceModel";
 
 export type LegacyTruthQuality =
     | "exact-injected"
@@ -214,8 +215,11 @@ export type LegacyDiagnosisSnapshot = {
         | "cofecha-pass-leave-one-out"
         | "cofecha-master-leave-one-out"
         | "cofecha-master"
-        | "pairwise-bootstrap-target-excluded";
+        | "pairwise-bootstrap-target-excluded"
+        | "internal-model-target-excluded";
     referenceAnchorCount: number;
+    internalTargetCompatibility?: InternalTargetCompatibilityFeatures | null;
+    internalTargetIncompatibilityScore?: number | null;
     durationMs: number;
     error: string | null;
 };

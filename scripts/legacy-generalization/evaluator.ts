@@ -64,6 +64,13 @@ import {
     selectPairwiseBootstrapCluster,
 } from "@/features/crossdating/pairwiseBootstrap";
 import {
+    buildInternalReferenceModel,
+    scoreInternalTargetIncompatibility,
+    setInternalTargetCandidate,
+    type InternalMasterMethod,
+    type InternalTargetContribution,
+} from "@/features/crossdating/internalReferenceModel";
+import {
     createEndAnchoredFalseRingCase,
     createEndAnchoredMissingRingCase,
     createPartialRangeMoveCase,
@@ -350,7 +357,10 @@ export type EvaluationReferenceStrategy =
     | "pairwise-with-cofecha-evidence"
     | "cofecha-master-without-diagnosis-evidence"
     | "all-other-only"
-    | "all-other-internal-flags";
+    | "all-other-internal-flags"
+    | "internal-model-unflagged"
+    | "internal-model-flagged"
+    | "internal-model-classifier";
 
 export const diagnoseTruthBlind = (input: {
     siteData: RwlSiteData;
@@ -359,6 +369,10 @@ export const diagnoseTruthBlind = (input: {
     runId: string;
     includeOperationGrid?: boolean;
     referenceStrategy?: EvaluationReferenceStrategy;
+    internalMasterMethod?: InternalMasterMethod;
+    internalTargetContribution?: InternalTargetContribution;
+    internalCompatibilityThreshold?: number;
+    normalizeInternalSourceResiduals?: boolean;
 }): LegacyDiagnosisSnapshot => {
     const started = performance.now();
     try {
@@ -379,7 +393,35 @@ export const diagnoseTruthBlind = (input: {
                 ).masterDatingSeries,
             })
             : null;
+        const rawInternalModel = referenceStrategy.startsWith("internal-model")
+            ? buildInternalReferenceModel({
+                siteData: input.siteData,
+                targetId: input.targetId,
+                runId: input.runId,
+                rwlHash: input.context.rwlHash,
+                method: input.internalMasterMethod,
+                candidateTarget: referenceStrategy === "internal-model-flagged",
+                targetContribution: input.internalTargetContribution,
+                normalizeSourceResiduals: input.normalizeInternalSourceResiduals,
+            })
+            : null;
+        const internalIncompatibilityScore = rawInternalModel
+            ? scoreInternalTargetIncompatibility(rawInternalModel.targetCompatibility)
+            : null;
+        const internalModel = rawInternalModel
+            ? setInternalTargetCandidate(
+                rawInternalModel,
+                input.targetId,
+                referenceStrategy === "internal-model-flagged"
+                    || (referenceStrategy === "internal-model-classifier"
+                        && internalIncompatibilityScore !== null
+                        && internalIncompatibilityScore >= (
+                            input.internalCompatibilityThreshold ?? 0.16239316239316237
+                        )),
+            )
+            : null;
         const referenceConfig = productionReference?.referenceConfig
+            ?? internalModel?.referenceConfig
             ?? createInternalReferenceForEvaluation({
                 siteData: input.siteData,
                 targetId: input.targetId,
@@ -394,7 +436,9 @@ export const diagnoseTruthBlind = (input: {
             throw new Error(`internal reference unavailable: ${input.targetId}`);
         }
         const referenceMode = productionReference?.referenceMode
-            ?? "pairwise-bootstrap-target-excluded";
+            ?? (internalModel
+                ? "internal-model-target-excluded"
+                : "pairwise-bootstrap-target-excluded");
         const diagnosis = diagnoseCrossdating(input.siteData, {
             referenceConfig,
             targetTrees: [input.targetId],
@@ -778,6 +822,8 @@ export const diagnoseTruthBlind = (input: {
             referenceAnchorCount:
                 referenceConfig.cofechaPassReference?.summary.includedCount
                 ?? 0,
+            internalTargetCompatibility: internalModel?.targetCompatibility ?? null,
+            internalTargetIncompatibilityScore: internalIncompatibilityScore,
             durationMs: Math.round(performance.now() - started),
             error: null,
         };
@@ -791,6 +837,8 @@ export const diagnoseTruthBlind = (input: {
             operationGrid: null,
             referenceMode: "cofecha-master",
             referenceAnchorCount: 0,
+            internalTargetCompatibility: null,
+            internalTargetIncompatibilityScore: null,
             durationMs: Math.round(performance.now() - started),
             error: error instanceof Error ? error.stack ?? error.message : String(error),
         };

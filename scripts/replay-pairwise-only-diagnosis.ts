@@ -25,6 +25,10 @@ import {
     matchWorkflowSuggestion,
 } from "./itrdb-operation-capability/workflowSuggestionMetric";
 import type { CapabilityTruth } from "./itrdb-operation-capability/types";
+import type {
+    InternalMasterMethod,
+    InternalTargetContribution,
+} from "@/features/crossdating/internalReferenceModel";
 
 type Step = {
     caseIndex: number;
@@ -56,6 +60,30 @@ const referenceStrategy = valueFor(
     "--reference-strategy",
     "pairwise-only",
 ) as EvaluationReferenceStrategy;
+const internalMasterMethod = valueFor(
+    "--internal-master-method",
+    "weighted-huber",
+) as InternalMasterMethod;
+const internalTargetContribution = valueFor(
+    "--internal-target-contribution",
+    "exclude",
+) as InternalTargetContribution;
+const includeEvaluationLabels = valueFor(
+    "--include-evaluation-labels",
+    "false",
+) === "true";
+const selectedFileIds = new Set(valueFor("--file-ids")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean));
+const internalCompatibilityThreshold = Number(valueFor(
+    "--internal-compatibility-threshold",
+    "0.16239316239316237",
+));
+const normalizeInternalSourceResiduals = valueFor(
+    "--normalize-internal-source-residuals",
+    "false",
+) === "true";
 const usesStoredCofecha = referenceStrategy === "production"
     || referenceStrategy === "pairwise-with-cofecha-evidence"
     || referenceStrategy === "cofecha-master-without-diagnosis-evidence";
@@ -173,6 +201,12 @@ if (workerIndex === null) {
     const summary = {
         schemaVersion: 1,
         referenceStrategy,
+        internalMasterMethod,
+        internalTargetContribution,
+        usesCofechaForEvaluationLabels: includeEvaluationLabels,
+        selectedFileIds: [...selectedFileIds],
+        internalCompatibilityThreshold,
+        normalizeInternalSourceResiduals,
         usesCofechaMaster: referenceStrategy === "production"
             || referenceStrategy === "cofecha-master-without-diagnosis-evidence",
         usesCofechaPart6: usesStoredCofecha,
@@ -220,7 +254,9 @@ if (workerIndex === null) {
     writeFileSync(partPath(workerIndex), "");
     const steps = JSON.parse(readFileSync(join(runDir, "steps.json"), "utf8")) as Step[];
     const directories = findAttemptDirectories(join(runDir, "workers"));
-    const selected = steps.filter((_, index) => index % workerCount === workerIndex);
+    const selected = steps
+        .filter((step) => selectedFileIds.size === 0 || selectedFileIds.has(step.fileId))
+        .filter((_, index) => index % workerCount === workerIndex);
     for (const [index, step] of selected.entries()) {
         const key = `${step.caseIndex}:${step.step}`;
         const directory = directories.get(key);
@@ -230,12 +266,18 @@ if (workerIndex === null) {
         const loaded = await loadRwl(statePath, "tucson-auto");
         const outPath = join(directory, "VERYCOF.OUT");
         const usesCofechaEvidence = usesStoredCofecha;
-        const outText = usesCofechaEvidence
+        const evaluationOutText = usesCofechaEvidence || includeEvaluationLabels
             ? readFileSync(outPath, "utf8")
             : "";
+        const outText = usesCofechaEvidence ? evaluationOutText : "";
         const flaggedIds = usesCofechaEvidence
             ? extractPart6FlaggedASeriesIds(
                 splitReportByParts(outText).get("PART 6") ?? "",
+            )
+            : [];
+        const evaluationFlaggedIds = includeEvaluationLabels
+            ? extractPart6FlaggedASeriesIds(
+                splitReportByParts(evaluationOutText).get("PART 6") ?? "",
             )
             : [];
         const snapshot = diagnoseTruthBlind({
@@ -251,6 +293,10 @@ if (workerIndex === null) {
             },
             runId: `${referenceStrategy}-${key}`,
             referenceStrategy,
+            internalMasterMethod,
+            internalTargetContribution,
+            internalCompatibilityThreshold,
+            normalizeInternalSourceResiduals,
         });
         const primary = snapshot.reviewEvent;
         const alternative = primary?.interpretationAmbiguity?.alternative ?? null;
@@ -291,6 +337,12 @@ if (workerIndex === null) {
             windowEnd: primary?.endYear ?? null,
             referenceMode: snapshot.referenceMode,
             referenceAnchorCount: snapshot.referenceAnchorCount,
+            internalTargetCompatibility: snapshot.internalTargetCompatibility ?? null,
+            internalTargetIncompatibilityScore:
+                snapshot.internalTargetIncompatibilityScore ?? null,
+            evaluationCofechaFlagged: includeEvaluationLabels
+                ? evaluationFlaggedIds.includes(step.targetId)
+                : null,
             productionWorkflowCorrect: step.workflowSuggestionCorrect,
             productionResponse: step.response,
             error: snapshot.error,
