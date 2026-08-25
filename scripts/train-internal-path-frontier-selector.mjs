@@ -12,6 +12,10 @@ const rowsPath = resolve(valueFor("--rows"));
 const calibrationPath = valueFor("--calibration-rows");
 const safetyPath = valueFor("--safety-rows");
 const outputPath = resolve(valueFor("--output"));
+const treatNeutralNeitherAsHarmful = valueFor(
+    "--treat-neutral-neither-as-harmful",
+    "false",
+) === "true";
 const source = JSON.parse(readFileSync(rowsPath, "utf8"));
 const calibrationSource = calibrationPath
     ? JSON.parse(readFileSync(resolve(calibrationPath), "utf8"))
@@ -114,7 +118,8 @@ const classify = (rows, model) => rows.map((row) => ({
 
 const chooseZeroHarmThreshold = (predictions) => {
     const harmfulProbabilities = predictions
-        .filter((row) => row.harmful || row.neutralNeither)
+        .filter((row) => row.harmful
+            || (treatNeutralNeitherAsHarmful && row.neutralNeither))
         .map((row) => row.probability);
     const maximumHarmful = harmfulProbabilities.length > 0
         ? Math.max(...harmfulProbabilities)
@@ -166,6 +171,7 @@ const output = {
     featureNames,
     forbiddenFeatures: source.forbiddenFeatures,
     vetoPolicy: "reject_falseRing_to_negative_partial_without_joint_support",
+    treatNeutralNeitherAsHarmful,
     model: fittedModel,
     threshold,
     oof: summarize(oofPredictions, threshold),

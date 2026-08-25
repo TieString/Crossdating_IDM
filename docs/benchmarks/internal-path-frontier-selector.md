@@ -73,8 +73,30 @@ eliminating all development, reserve, and regression selections. That version is
 rejected as non-responsive; v5 keeps wrong-to-wrong changes visible in shadow audit
 but never promotes them as accuracy gains.
 
-The selector remains shadow-only. It still needs a newly constructed, complete-file
-holdout that has never participated in architecture diagnosis or threshold selection.
+## Third independent holdout
+
+A new eight-file holdout was selected from the deterministic structural pool after
+explicitly excluding every development, calibration, reserve, seventeen-file, and
+fifteen-file manifest. The frozen files are `co646`, `cana343`, `co036`, `ca514`,
+`co613`, `nm574`, `az543`, and `nm578`; each contributes six targets. Selection
+used only clean COFECHA quality gates and never inspected diagnosis output.
+
+The holdout contains 458 event opportunities and 48 Clean controls. The internal
+z-score reference baseline reached 403/458 (87.99%), response 99.56%, and Clean
+0/48; the production-reference result was 419/458 (91.48%). By family the internal
+baseline was A 44/48, B 123/145, C 132/144, and D 104/121.
+
+The frozen direction-safe v5 selector chose two overrides:
+
+- one B event was correct under both the product and stable packages;
+- one D event changed a correct whole-series move into an incorrect
+  `partialMove -50` without joint support;
+- no event was corrected.
+
+The resulting score fell to 402/458. This violates the zero-regression contract and
+overrides every earlier positive regression result. The path-frontier selector is
+therefore rejected and must not be connected even as a suggestion-changing shadow
+head. Stable path probabilities may remain diagnostic telemetry only.
 
 Artifacts:
 
@@ -87,3 +109,7 @@ Artifacts:
 `D:\软件测试\itrdb-unified-model-v2\models\internal-path-frontier-direction-safe-v5.json`
 
 `D:\软件测试\itrdb-unified-model-v2\models\internal-zscore-final17-rich-grid-v20`
+
+`D:\软件测试\itrdb-unified-model-v2\third-holdout\protocol`
+
+`D:\软件测试\itrdb-unified-model-v2\third-holdout\models\internal-zscore-third8-rich-grid-v21`

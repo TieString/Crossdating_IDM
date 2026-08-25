@@ -135,6 +135,11 @@ not master chronology construction.
 - Do not replace the production reference path. The frozen internal result remains
   25 correct suggestions below production on 873 events.
 
+A later, completely new eight-file holdout confirmed the boundary: the internal
+z-score reference reached 403/458 (87.99%) versus 419/458 (91.48%) for the
+production reference, with Clean 0/48 and no unavailable reference. This new result
+does not change the decision above.
+
 External artifacts:
 
 `D:\软件测试\itrdb-unified-model-v2\models\internal-weighted-huber-dev-flagged-v1`
@@ -160,3 +165,5 @@ External artifacts:
 `D:\软件测试\itrdb-unified-model-v2\second-holdout\models\internal-zscore-flagged-final-v14`
 
 `D:\软件测试\itrdb-unified-model-v2\second-holdout\models\internal-zscore-safe-clean-final-v13`
+
+`D:\软件测试\itrdb-unified-model-v2\third-holdout\models\internal-zscore-third8-rich-grid-v21`
