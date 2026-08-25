@@ -75,8 +75,8 @@ from 3/72 to 0/72, but regressed three correct local false-ring suggestions, so 
 use is rejected. A stricter conformal gate was calibrated at the minimum probability
 of 468 correct strict calibration events. Offline replay preserved every correct
 suggestion on development, calibration, and reserve while changing Clean suggestions
-from 2 to 0, 4 to 3, and 3 to 1 respectively. It remains shadow-only pending an
-actual replay and final holdout.
+from 2 to 0, 4 to 3, and 3 to 1 respectively. This qualified it for an actual
+reserve replay and one frozen final-holdout check.
 
 The actual twelve-file reserve replay matched the offline result: 600/686 correct
 suggestions were unchanged, response remained 98.83%, and Clean suggestions fell
@@ -84,6 +84,56 @@ from 3/72 to 1/72. A semantic row diff found zero event response, operation, shi
 or window changes; only two Clean responses were suppressed. This passes the
 zero-regression reserve gate but remains below the production reference's 618/686
 accuracy, so it is not a production replacement.
+
+## Frozen second holdout
+
+The selected configuration was frozen before opening the fifteen-file second
+holdout: arithmetic master, per-core residual z-score, current AIC AR path, target
+included in the diagnosis master, and target-excluded compatibility features.
+
+Final master comparison across all 963 frozen states:
+
+| Master metric | Unnormalized JS | Per-core z-score JS |
+| --- | ---: | ---: |
+| Mean correlation with COFECHA master | 0.884 | **0.916** |
+| Q10 correlation | 0.757 | **0.819** |
+| Median correlation | 0.909 | **0.933** |
+| Best lag equal to zero | 100% | 100% |
+
+Final fixed-state suggestion comparison:
+
+| Strategy | Correct / 873 | Accuracy | Response | Clean FP |
+| --- | ---: | ---: | ---: | ---: |
+| Production master + classification, no report text | 773 | **88.55%** | 99.43% | 1/90 |
+| Internal z-score master, always candidate | 748 | 85.68% | 98.28% | 5/90 |
+| Internal z-score master + safe-clean gate | 747 | 85.57% | 97.94% | 2/90 |
+| Previous all-other internal flags | 743 | 85.11% | 97.48% | 8/90 |
+| Previous stable-cluster internal flags | 741 | 84.88% | 96.91% | 7/90 |
+
+The always-candidate internal result was A 86/90 (95.56%), B 227/280
+(81.07%), C 238/270 (88.15%), and D 197/233 (84.55%). It corrected 34
+production failures and regressed 59 production-correct attempts.
+
+The safe-clean gate reduced three Clean false positives but suppressed one correct
+missing-ring suggestion on the final holdout. It therefore fails the zero-regression
+contract and is rejected despite passing development, calibration, and reserve.
+Compatibility probability remains useful shadow metadata, but must not gate the
+product suggestion.
+
+Of the 125 remaining internal failures, 15 were refusals, 39 had the correct
+operation/shift but missed the window, and 71 selected the wrong operation or shift.
+Forty-four of those operation failures had a `partialMove` truth. The remaining
+accuracy ceiling is therefore mostly in operation identity and location evidence,
+not master chronology construction.
+
+## Decision
+
+- Retain per-core z-score master construction as the best COFECHA-free shadow
+  reference candidate.
+- Retain the compatibility classifier as audited metadata only.
+- Reject direct candidate switching and the conformal safe-clean display gate.
+- Do not replace the production reference path. The frozen internal result remains
+  25 correct suggestions below production on 873 events.
 
 External artifacts:
 
@@ -104,3 +154,9 @@ External artifacts:
 `D:\软件测试\itrdb-unified-model-v2\models\internal-compatibility-dev18-cal10-v6.json`
 
 `D:\软件测试\itrdb-unified-model-v2\models\internal-zscore-mean-reserve12-safe-clean-v12`
+
+`D:\软件测试\itrdb-unified-model-v2\second-holdout\models\master-audit-final15-zscore-v2.json`
+
+`D:\软件测试\itrdb-unified-model-v2\second-holdout\models\internal-zscore-flagged-final-v14`
+
+`D:\软件测试\itrdb-unified-model-v2\second-holdout\models\internal-zscore-safe-clean-final-v13`
