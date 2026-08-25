@@ -77,6 +77,17 @@ const includeEvaluationLabels = valueFor(
     "--include-evaluation-labels",
     "false",
 ) === "true";
+const includeOperationGrid = valueFor("--include-operation-grid", "false") === "true";
+const includeDetailedAudit = valueFor("--include-detailed-audit", "false") === "true";
+const failedAttemptsPath = valueFor("--failed-attempts-from");
+const failedAttemptIds = failedAttemptsPath
+    ? new Set((JSON.parse(readFileSync(resolve(failedAttemptsPath), "utf8")) as Array<{
+        attemptId: string;
+        truthId: string | null;
+        workflowCorrect: boolean;
+    }>).filter((row) => row.truthId !== null && !row.workflowCorrect)
+        .map((row) => row.attemptId))
+    : null;
 const selectedFileIds = new Set(valueFor("--file-ids")
     .split(",")
     .map((value) => value.trim())
@@ -235,6 +246,10 @@ if (workerIndex === null) {
         internalMasterMethod,
         internalTargetContribution,
         usesCofechaForEvaluationLabels: includeEvaluationLabels,
+        includeOperationGrid,
+        includeDetailedAudit,
+        failedAttemptsPath: failedAttemptsPath || null,
+        selectedFailureAttempts: failedAttemptIds?.size ?? null,
         selectedFileIds: [...selectedFileIds],
         internalCompatibilityThreshold,
         internalCompatibilityModelPath: internalCompatibilityModelPath || null,
@@ -290,6 +305,9 @@ if (workerIndex === null) {
     const directories = findAttemptDirectories(join(runDir, "workers"));
     const selected = steps
         .filter((step) => selectedFileIds.size === 0 || selectedFileIds.has(step.fileId))
+        .filter((step) => failedAttemptIds === null || failedAttemptIds.has(
+            `evaluation:${step.caseIndex}:${step.step}`,
+        ))
         .filter((_, index) => index % workerCount === workerIndex);
     for (const [index, step] of selected.entries()) {
         const key = `${step.caseIndex}:${step.step}`;
@@ -334,6 +352,7 @@ if (workerIndex === null) {
             internalSplineImplementation,
             internalArImplementation,
             internalCompatibilityModel,
+            includeOperationGrid,
         });
         const primary = snapshot.reviewEvent;
         const alternative = primary?.interpretationAmbiguity?.alternative ?? null;
@@ -379,6 +398,10 @@ if (workerIndex === null) {
                 snapshot.internalTargetIncompatibilityScore ?? null,
             internalTargetIncompatibilityProbability:
                 snapshot.internalTargetIncompatibilityProbability ?? null,
+            operationGrid: includeOperationGrid ? snapshot.operationGrid : undefined,
+            candidates: includeDetailedAudit ? snapshot.candidates : undefined,
+            eventDecisionAudit: includeDetailedAudit ? snapshot.audit : undefined,
+            reviewDecision: includeDetailedAudit ? snapshot.reviewDecision : undefined,
             evaluationCofechaFlagged: includeEvaluationLabels
                 ? evaluationFlaggedIds.includes(step.targetId)
                 : null,
