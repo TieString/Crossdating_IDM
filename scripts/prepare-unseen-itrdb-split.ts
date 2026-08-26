@@ -31,6 +31,7 @@ type Pool = {
         relativePath: string;
         sourceSha256: string;
         deterministicOrder: string;
+        approximateMedianCorrelation?: number;
     }[];
 };
 
@@ -139,7 +140,12 @@ mkdirSync(workDir, { recursive: true });
 
 const qualified: CapabilityFile[] = [];
 const excluded: CapabilityManifest["excludedFiles"] = [];
-for (const [index, candidate] of pool.candidates.entries()) {
+const preselectedCandidates = [...pool.candidates].sort((left, right) => (
+    (right.approximateMedianCorrelation ?? -1)
+        - (left.approximateMedianCorrelation ?? -1)
+    || left.deterministicOrder.localeCompare(right.deterministicOrder)
+));
+for (const [index, candidate] of preselectedCandidates.entries()) {
     if (qualified.length >= desiredQualifiedFiles) break;
     if (excludedFileIds.has(candidate.fileId.toLowerCase())) continue;
     const inputPath = resolve(itrdbRoot, candidate.relativePath);
@@ -211,7 +217,7 @@ for (const [index, candidate] of pool.candidates.entries()) {
         });
         console.log(
             `UNSEEN_COFECHA accepted=${qualified.length}/${desiredQualifiedFiles}`
-            + ` checked=${index + 1}/${pool.candidates.length}`
+            + ` checked=${index + 1}/${preselectedCandidates.length}`
             + ` file=${candidate.fileId}`
             + ` r=${result.seriesIntercorrelation.toFixed(3)}`
             + ` eligible=${eligibleBeforeLimit.length}`,
@@ -224,7 +230,7 @@ for (const [index, candidate] of pool.candidates.entries()) {
             reason,
         });
         console.log(
-            `UNSEEN_COFECHA_EXCLUDED checked=${index + 1}/${pool.candidates.length}`
+            `UNSEEN_COFECHA_EXCLUDED checked=${index + 1}/${preselectedCandidates.length}`
             + ` file=${candidate.fileId} reason=${reason}`,
         );
     }
