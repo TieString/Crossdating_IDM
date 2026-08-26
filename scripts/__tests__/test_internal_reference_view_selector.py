@@ -113,6 +113,78 @@ class InternalReferenceViewSelectorTest(unittest.TestCase):
         columns = MODULE.feature_columns(frame)
         self.assertEqual(columns, ["support"])
 
+    def test_low_supported_false_ring_cannot_replace_partial_move(self):
+        frame = pd.DataFrame(
+            [
+                {
+                    **candidate(
+                        0,
+                        baseline=True,
+                        response=True,
+                        support=7,
+                        baseline_support=7,
+                        score=2,
+                        correct=1,
+                    ),
+                    "operation_partialMove": 1,
+                    "operation_falseRing": 0,
+                    "probability": 0.5,
+                },
+                {
+                    **candidate(
+                        1,
+                        baseline=False,
+                        response=True,
+                        support=2,
+                        baseline_support=7,
+                        score=2,
+                        correct=0,
+                    ),
+                    "operation_partialMove": 0,
+                    "operation_falseRing": 1,
+                    "probability": 0.99,
+                },
+            ]
+        )
+        selected = MODULE.learned_selection(frame, "probability", 0.8, 0.2, 2)
+        self.assertEqual(selected["evaluation:1:1"], 0)
+
+    def test_low_probability_safe_consensus_falls_back_to_baseline(self):
+        frame = pd.DataFrame(
+            [
+                {
+                    **candidate(
+                        0,
+                        baseline=True,
+                        response=True,
+                        support=1,
+                        baseline_support=1,
+                        score=2,
+                        correct=0,
+                    ),
+                    "operation_partialMove": 1,
+                    "operation_falseRing": 0,
+                    "probability": 0.5,
+                },
+                {
+                    **candidate(
+                        1,
+                        baseline=False,
+                        response=True,
+                        support=7,
+                        baseline_support=1,
+                        score=2,
+                        correct=1,
+                    ),
+                    "operation_partialMove": 1,
+                    "operation_falseRing": 0,
+                    "probability": 0.01,
+                },
+            ]
+        )
+        selected = MODULE.learned_selection(frame, "probability", 0.8, 0.2, 2)
+        self.assertEqual(selected["evaluation:1:1"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

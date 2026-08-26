@@ -14,6 +14,8 @@ const baselinePath = resolve(valueFor("--baseline-rows"));
 const outputPath = resolve(valueFor("--output"));
 const perFileFamily = Math.max(1, Number(valueFor("--per-file-family", "2")));
 const includeFailures = valueFor("--include-failures", "false") === "true";
+const allAttempts = valueFor("--all-attempts", "false") === "true";
+const excludeAttemptIdsPath = valueFor("--exclude-attempt-ids-from");
 const rows = JSON.parse(readFileSync(baselinePath, "utf8"));
 const clean = rows.filter((row) => row.family === "Clean");
 const failures = rows.filter((row) => (
@@ -32,7 +34,16 @@ const correctSample = Array.from(groups.values()).flatMap((group) => (
     [...group].sort((left, right) => score(left).localeCompare(score(right)))
         .slice(0, perFileFamily)
 ));
-const selected = [...clean, ...correctSample, ...(includeFailures ? failures : [])];
+const excludedAttemptIds = excludeAttemptIdsPath
+    ? new Set((() => {
+        const parsed = JSON.parse(readFileSync(resolve(excludeAttemptIdsPath), "utf8"));
+        return Array.isArray(parsed) ? parsed : parsed.attemptIds;
+    })())
+    : new Set();
+const selected = (allAttempts
+    ? rows
+    : [...clean, ...correctSample, ...(includeFailures ? failures : [])])
+    .filter((row) => !excludedAttemptIds.has(row.attemptId));
 const output = {
     schemaVersion: 1,
     baselinePath,

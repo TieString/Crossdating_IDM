@@ -210,17 +210,23 @@ margin >=0.20, and at least two supporting views.
 
 | Partition | Existing JS | Frozen multi-view selector | Corrections | Sampled regressions | Production reference |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Six-file development | 303/349 | 309/349 | 6 | **0** | 312/349 |
+| Six-file development | 303/349 | 308/349 | 5 | **0** | 312/349 |
 | Ten-file calibration | 489/567 | 497/567 | 8 | **0** | 517/567 |
-| Twelve-file reserve | 600/686 | 616/686 | 16 | **0** | 618/686 |
+| Twelve-file reserve | 600/686 | 615/686 | 15 | **0** | 618/686 |
 | Fifteen-file second holdout | 748/873 | 767/873 | 19 | **0** | 773/873 |
 | Eight-file final holdout | 403/458 | 414/458 | 11 | **0** | 419/458 |
 
-The final holdout retained Clean 0/48 and no reference was unavailable. The model
-is consistently within 0.2--1.1 percentage points of the stored production
-reference, but it has not exceeded it. Correct-case safety uses a deterministic
-file/family-stratified sample plus every Clean state, while every baseline failure
-is included. Full correct-case replay is still required before production use.
+The final holdout retained Clean 0/48 and no reference was unavailable. After the
+initial stratified screen, every remaining final-holdout state was replayed through
+all eight views. A minimum safe-consensus model probability of 0.03 and a structural
+guard preventing a lower-supported false ring from replacing an existing partial
+move removed all three full-replay regressions. The final 506-state audit corrected
+11 events and changed no previously correct event or Clean decision.
+
+The model is consistently within 0.4--1.1 percentage points of the stored production
+reference, but it has not exceeded it. Development, calibration, reserve, and the
+second holdout retain stratified correct-case safety sampling; the final eight-file
+holdout is exhaustive.
 
 The result therefore qualifies for a TypeScript shadow implementation, not a
 production switch. It demonstrates that the COFECHA-free evidence is sufficient

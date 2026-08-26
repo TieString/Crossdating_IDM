@@ -47,6 +47,7 @@ OPERATION_TYPES = (
     "wholeSeriesMove",
     "refused",
 )
+MINIMUM_SAFE_CONSENSUS_PROBABILITY = 0.03
 ALGORITHM_TAGS = (
     "bounded_complete_lag_path",
     "exact_bounded_component_decomposition",
@@ -73,6 +74,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fixed-minimum-probability", type=float)
     parser.add_argument("--fixed-minimum-margin", type=float)
     parser.add_argument("--fixed-minimum-support", type=int)
+    parser.add_argument("--fixed-model")
     return parser.parse_args()
 
 
@@ -534,13 +536,35 @@ def learned_selection(
     for attempt_id, group in frame.groupby("attemptId", sort=False):
         safe_index = safe_consensus_selection(group)
         safe = group.loc[safe_index]
+        baseline = group[group["baselineMember"] == 1].iloc[0]
+        if (
+            safe["baselineMember"] == 0
+            and (
+                safe[probability_column] < MINIMUM_SAFE_CONSENSUS_PROBABILITY
+                or (
+                    baseline["operation_partialMove"] == 1
+                    and safe["operation_falseRing"] == 1
+                    and safe["support"] <= baseline["baselineSupport"]
+                )
+            )
+        ):
+            safe_index = int(baseline.name)
+            safe = baseline
         if safe["baselineMember"] == 0:
             selected[attempt_id] = safe_index
             continue
         alternatives = group[
             (group["baselineMember"] == 0)
             & (group["support"] >= minimum_support)
-        ].sort_values(probability_column, ascending=False)
+        ].copy()
+        if safe["operation_partialMove"] == 1:
+            alternatives = alternatives[
+                ~(
+                    (alternatives["operation_falseRing"] == 1)
+                    & (alternatives["support"] <= safe["baselineSupport"])
+                )
+            ]
+        alternatives = alternatives.sort_values(probability_column, ascending=False)
         if alternatives.empty:
             selected[attempt_id] = safe_index
             continue
@@ -565,10 +589,30 @@ def build_decision_table(
         safe_index = safe_consensus_selection(group)
         safe = group.loc[safe_index]
         baseline = group[group["baselineMember"] == 1].iloc[0]
+        if (
+            safe["baselineMember"] == 0
+            and (
+                safe[probability_column] < MINIMUM_SAFE_CONSENSUS_PROBABILITY
+                or (
+                    baseline["operation_partialMove"] == 1
+                    and safe["operation_falseRing"] == 1
+                    and safe["support"] <= baseline["baselineSupport"]
+                )
+            )
+        ):
+            safe = baseline
         alternatives = group[
             (group["baselineMember"] == 0)
             & (group["support"] >= minimum_support)
-        ].sort_values(probability_column, ascending=False)
+        ].copy()
+        if safe["operation_partialMove"] == 1:
+            alternatives = alternatives[
+                ~(
+                    (alternatives["operation_falseRing"] == 1)
+                    & (alternatives["support"] <= safe["baselineSupport"])
+                )
+            ]
+        alternatives = alternatives.sort_values(probability_column, ascending=False)
         alternative = alternatives.iloc[0] if not alternatives.empty else None
         rows.append(
             {
@@ -815,6 +859,11 @@ def main() -> None:
     if best is None:
         raise RuntimeError("no zero-regression selector qualified")
     _, _, best_name, best_config = best
+    if args.fixed_model:
+        if args.fixed_model not in results or not results[args.fixed_model]:
+            raise RuntimeError(f"fixed model unavailable: {args.fixed_model}")
+        best_name = args.fixed_model
+        best_config = results[best_name][0]
     final_factory = (
         pair_factories[best_name]
         if best_name in pair_factories
