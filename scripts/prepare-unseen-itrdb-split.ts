@@ -103,8 +103,12 @@ const exclusionManifestPaths = valueFor("--exclude-manifests", "")
     .map((value) => value.trim())
     .filter(Boolean)
     .map((value) => resolve(value));
+const explicitExcludedFileIds = valueFor("--exclude-file-ids", "")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
 
-const excludedFileIds = new Set<string>();
+const excludedFileIds = new Set<string>(explicitExcludedFileIds);
 const collectExcludedIds = (value: unknown): void => {
     if (Array.isArray(value)) {
         value.forEach(collectExcludedIds);
