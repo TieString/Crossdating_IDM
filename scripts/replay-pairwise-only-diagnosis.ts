@@ -80,6 +80,10 @@ const includeEvaluationLabels = valueFor(
 ) === "true";
 const includeOperationGrid = valueFor("--include-operation-grid", "false") === "true";
 const includeDetailedAudit = valueFor("--include-detailed-audit", "false") === "true";
+const includeCompactEventEvidence = valueFor(
+    "--include-compact-event-evidence",
+    "false",
+) === "true";
 const failedAttemptsPath = valueFor("--failed-attempts-from");
 const failedAttemptIds = failedAttemptsPath
     ? new Set((JSON.parse(readFileSync(resolve(failedAttemptsPath), "utf8")) as Array<{
@@ -93,10 +97,21 @@ const selectedFileIds = new Set(valueFor("--file-ids")
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean));
-const selectedAttemptIds = new Set(valueFor("--attempt-ids")
+const selectedAttemptIdsPath = valueFor("--attempt-ids-from");
+const selectedAttemptIdsFromFile = selectedAttemptIdsPath
+    ? (() => {
+        const parsed = JSON.parse(readFileSync(resolve(selectedAttemptIdsPath), "utf8"));
+        const values = Array.isArray(parsed) ? parsed : parsed.attemptIds;
+        if (!Array.isArray(values)) throw new Error("attempt-id file must contain an array");
+        return values.map((value) => (
+            typeof value === "string" ? value : value.attemptId
+        )).filter(Boolean);
+    })()
+    : [];
+const selectedAttemptIds = new Set([...valueFor("--attempt-ids")
     .split(",")
     .map((value) => value.trim())
-    .filter(Boolean));
+    .filter(Boolean), ...selectedAttemptIdsFromFile]);
 const internalCompatibilityThreshold = Number(valueFor(
     "--internal-compatibility-threshold",
     "0.16239316239316237",
@@ -267,10 +282,12 @@ if (workerIndex === null) {
         usesCofechaForEvaluationLabels: includeEvaluationLabels,
         includeOperationGrid,
         includeDetailedAudit,
+        includeCompactEventEvidence,
         failedAttemptsPath: failedAttemptsPath || null,
         selectedFailureAttempts: failedAttemptIds?.size ?? null,
         selectedFileIds: [...selectedFileIds],
         selectedAttemptIds: [...selectedAttemptIds],
+        selectedAttemptIdsPath: selectedAttemptIdsPath || null,
         internalCompatibilityThreshold,
         internalCompatibilityModelPath: internalCompatibilityModelPath || null,
         normalizeInternalSourceResiduals,
@@ -428,6 +445,15 @@ if (workerIndex === null) {
                 snapshot.internalTargetIncompatibilityScore ?? null,
             internalTargetIncompatibilityProbability:
                 snapshot.internalTargetIncompatibilityProbability ?? null,
+            eventConfidence: includeCompactEventEvidence
+                ? primary?.confidenceLevel ?? null
+                : undefined,
+            eventEvidence: includeCompactEventEvidence
+                ? primary?.evidence ?? null
+                : undefined,
+            interpretationEvidence: includeCompactEventEvidence
+                ? primary?.interpretationAmbiguity?.evidence ?? null
+                : undefined,
             operationGrid: includeOperationGrid ? snapshot.operationGrid : undefined,
             candidates: includeDetailedAudit ? snapshot.candidates : undefined,
             eventDecisionAudit: includeDetailedAudit ? snapshot.audit : undefined,

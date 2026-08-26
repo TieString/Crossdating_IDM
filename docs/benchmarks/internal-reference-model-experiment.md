@@ -182,6 +182,57 @@ Artifacts:
 
 `D:\软件测试\itrdb-unified-model-v2\models\internal-adaptive-blend-reserve12-v2`
 
+## Multi-view reference package selector
+
+The next shadow experiment keeps eight fixed JS reference views over three
+orthogonal choices: post-AR versus raw-log residuals, AIC AR versus no AR/fixed
+AR1, and target-included versus target-excluded accumulation. An unnormalized
+view is retained as a scale-control channel. Each view still emits one immutable
+operation/shift/window package; the UI never sees eight alternatives.
+
+Across the twelve-file reserve, the union of those views contained a correct
+package for 34 of the 86 baseline failures. A deterministic safe consensus first
+selects only packages with at least two supporting views. An answered baseline is
+protected unless the competing support margin is at least two or baseline support
+is at most two; a refused baseline is recoverable only when internal incompatibility
+is at least one. This changed the reserve from 600/686 to 610/686 with zero sampled
+regressions and unchanged 3/72 Clean false positives.
+
+A file-isolated standardized logistic selector then ranks the unresolved immutable
+packages. Features contain only reference-view identity, support/margin, operation
+and shift semantics, target-excluded compatibility, event score/margin, lag-state
+convergence, counterfactual gain, location concentration/remote margin, reference
+support, confidence, and algorithm-source tags. File IDs, series IDs, benchmark
+families, absolute years, and truth fields are excluded. Development files train
+the model; calibration, twelve-file reserve, and fifteen-file second holdout set a
+cross-partition zero-regression deployment gate of probability >=0.80, probability
+margin >=0.20, and at least two supporting views.
+
+| Partition | Existing JS | Frozen multi-view selector | Corrections | Sampled regressions | Production reference |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Six-file development | 303/349 | 309/349 | 6 | **0** | 312/349 |
+| Ten-file calibration | 489/567 | 497/567 | 8 | **0** | 517/567 |
+| Twelve-file reserve | 600/686 | 616/686 | 16 | **0** | 618/686 |
+| Fifteen-file second holdout | 748/873 | 767/873 | 19 | **0** | 773/873 |
+| Eight-file final holdout | 403/458 | 414/458 | 11 | **0** | 419/458 |
+
+The final holdout retained Clean 0/48 and no reference was unavailable. The model
+is consistently within 0.2--1.1 percentage points of the stored production
+reference, but it has not exceeded it. Correct-case safety uses a deterministic
+file/family-stratified sample plus every Clean state, while every baseline failure
+is included. Full correct-case replay is still required before production use.
+
+The result therefore qualifies for a TypeScript shadow implementation, not a
+production switch. It demonstrates that the COFECHA-free evidence is sufficient
+to reach the same broad performance band once reference-view operation and location
+evidence are adjudicated together.
+
+Artifacts:
+
+`D:\软件测试\itrdb-unified-model-v2\models\internal-reference-view-selector-v8-cross-calibrated`
+
+`D:\软件测试\itrdb-unified-model-v2\models\internal-reference-view-selector-v9-third-holdout-final`
+
 ## Decision
 
 - Retain per-core z-score master construction as the best COFECHA-free shadow
