@@ -233,6 +233,14 @@ production switch. It demonstrates that the COFECHA-free evidence is sufficient
 to reach the same broad performance band once reference-view operation and location
 evidence are adjudicated together.
 
+The frozen 171-feature standardized-logistic artifact and package safety gate are
+now mirrored in TypeScript at
+`src/features/crossdating/diagnosis/internalReferenceViewSelector.ts`. The module
+reproduces the Python probability contract and remains unconnected to production
+diagnosis; reference-view generation, feature extraction, and shared-cache runtime
+work are still required before an end-user shadow can run without the offline
+evaluator.
+
 Artifacts:
 
 `D:\软件测试\itrdb-unified-model-v2\models\internal-reference-view-selector-v8-cross-calibrated`
