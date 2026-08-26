@@ -179,17 +179,23 @@ def main() -> None:
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--operation-identities", required=True)
     parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--row-cache")
     parser.add_argument("--stride", type=int, default=5)
     args = parser.parse_args()
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    rows, attempts = JOINT.build_table(
-        Path(args.rows_manifest).resolve(),
-        Path(args.run_dir).resolve(),
-        Path(args.operation_identities).resolve(),
-        max(1, args.stride),
-    )
+    if args.row_cache:
+        cache_dir = Path(args.row_cache).resolve()
+        rows = pd.read_pickle(cache_dir / "rows.pkl")
+        attempts = pd.read_pickle(cache_dir / "attempts.pkl")
+    else:
+        rows, attempts = JOINT.build_table(
+            Path(args.rows_manifest).resolve(),
+            Path(args.run_dir).resolve(),
+            Path(args.operation_identities).resolve(),
+            max(1, args.stride),
+        )
     rows["identity_key"] = (
         rows["attempt_id"].astype(str)
         + "|" + rows["event_type"].astype(str)
