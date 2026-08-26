@@ -14,6 +14,7 @@ import {
 import { loadRwl } from "./legacy-generalization/evaluator";
 import type {
     CofechaArImplementation,
+    CofechaLogImplementation,
     CofechaSplineImplementation,
 } from "@/features/crossdating/reference";
 
@@ -48,6 +49,16 @@ const arImplementation = valueFor(
     "--ar-implementation",
     "current-aic",
 ) as CofechaArImplementation;
+const logImplementation = valueFor(
+    "--log-implementation",
+    "post-ar",
+) as CofechaLogImplementation;
+const preSplineResidualBlendWeightValue = valueFor(
+    "--pre-spline-residual-blend-weight",
+);
+const preSplineResidualBlendWeight = preSplineResidualBlendWeightValue === ""
+    ? null
+    : Number(preSplineResidualBlendWeightValue);
 const selectedFileIds = new Set(valueFor("--file-ids")
     .split(",")
     .map((value) => value.trim())
@@ -126,6 +137,8 @@ for (const [index, step] of selected.entries()) {
         normalizeSourceResiduals,
         splineImplementation,
         arImplementation,
+        logImplementation,
+        preSplineResidualBlendWeight,
         computeSourceCompatibility: false,
     });
     if (!model?.referenceConfig.cofechaPassReference) continue;
@@ -189,6 +202,8 @@ const summary = {
     normalizeSourceResiduals,
     splineImplementation,
     arImplementation,
+    logImplementation,
+    preSplineResidualBlendWeight,
     attempts: rows.length,
     files: [...new Set(rows.map((row) => row.fileId))],
     masterCorrelation: {

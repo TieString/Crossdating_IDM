@@ -6,6 +6,7 @@ import {
     type CofechaPassReference,
     type CofechaReferencePoint,
     type CofechaArImplementation,
+    type CofechaLogImplementation,
     type CofechaSplineImplementation,
     type ReferenceSeriesConfig,
 } from "./reference";
@@ -54,6 +55,71 @@ export type InternalReferenceModel = {
     referenceConfig: ReferenceSeriesConfig;
     sourceCompatibility: InternalSeriesCompatibility[];
     targetCompatibility: InternalTargetCompatibilityFeatures;
+    adaptiveBlendAudit?: InternalReferenceBlendAudit;
+};
+
+export type InternalReferenceBlendAudit = {
+    applied: boolean;
+    weight: number;
+    reasons: Array<"anomaly_contrast_gain" | "reference_consensus_gain">;
+    targetZeroCorrelationDelta: number | null;
+    perReferenceIncompatibleFractionDelta: number | null;
+    perReferenceZeroCorrelationMedianDelta: number | null;
+};
+
+export const INTERNAL_ADAPTIVE_PRE_SPLINE_BLEND_WEIGHT = 1 / 16;
+const INTERNAL_ADAPTIVE_MIN_ANOMALY_CONTRAST_GAIN = 0.015;
+const INTERNAL_ADAPTIVE_MAX_PAIR_CONFLICT_INCREASE = 0.06;
+const INTERNAL_ADAPTIVE_MIN_PAIR_CONFLICT_REDUCTION = 0.1;
+const INTERNAL_ADAPTIVE_MIN_PAIR_MEDIAN_GAIN = 0.04;
+
+const finiteDelta = (next: number | null, previous: number | null) => (
+    next !== null && previous !== null
+        && Number.isFinite(next) && Number.isFinite(previous)
+        ? next - previous
+        : null
+);
+
+export const adjudicateAdaptiveInternalReferenceBlend = (
+    post: InternalTargetCompatibilityFeatures,
+    pre: InternalTargetCompatibilityFeatures,
+): InternalReferenceBlendAudit => {
+    const targetZeroCorrelationDelta = finiteDelta(
+        pre.zeroCorrelation,
+        post.zeroCorrelation,
+    );
+    const perReferenceIncompatibleFractionDelta = finiteDelta(
+        pre.perReferenceIncompatibleFraction,
+        post.perReferenceIncompatibleFraction,
+    );
+    const perReferenceZeroCorrelationMedianDelta = finiteDelta(
+        pre.perReferenceZeroCorrelationMedian,
+        post.perReferenceZeroCorrelationMedian,
+    );
+    const reasons: InternalReferenceBlendAudit["reasons"] = [];
+    if (targetZeroCorrelationDelta !== null
+        && targetZeroCorrelationDelta <= -INTERNAL_ADAPTIVE_MIN_ANOMALY_CONTRAST_GAIN
+        && perReferenceIncompatibleFractionDelta !== null
+        && perReferenceIncompatibleFractionDelta
+            <= INTERNAL_ADAPTIVE_MAX_PAIR_CONFLICT_INCREASE) {
+        reasons.push("anomaly_contrast_gain");
+    }
+    if (perReferenceIncompatibleFractionDelta !== null
+        && perReferenceIncompatibleFractionDelta
+            <= -INTERNAL_ADAPTIVE_MIN_PAIR_CONFLICT_REDUCTION
+        && perReferenceZeroCorrelationMedianDelta !== null
+        && perReferenceZeroCorrelationMedianDelta
+            >= INTERNAL_ADAPTIVE_MIN_PAIR_MEDIAN_GAIN) {
+        reasons.push("reference_consensus_gain");
+    }
+    return {
+        applied: reasons.length > 0,
+        weight: INTERNAL_ADAPTIVE_PRE_SPLINE_BLEND_WEIGHT,
+        reasons,
+        targetZeroCorrelationDelta,
+        perReferenceIncompatibleFractionDelta,
+        perReferenceZeroCorrelationMedianDelta,
+    };
 };
 
 export const INTERNAL_COMPATIBILITY_FEATURE_NAMES = [
@@ -298,23 +364,46 @@ const standardizeTree = (
     normalizeResidual: boolean,
     splineImplementation: CofechaSplineImplementation,
     arImplementation: CofechaArImplementation,
+    logImplementation: CofechaLogImplementation,
+    preSplineResidualBlendWeight: number | null,
 ): Map<number, number> => {
-    const points = cofechaStyleStandardize(
-        tree,
-        COFECHA_REFERENCE_DEFAULT_OPTIONS,
-        splineImplementation,
-        arImplementation,
+    const generate = (implementation: CofechaLogImplementation) => (
+        cofechaStyleStandardize(
+            tree,
+            COFECHA_REFERENCE_DEFAULT_OPTIONS,
+            splineImplementation,
+            arImplementation,
+            1,
+            "ratio",
+            implementation,
+        )
     );
+    const normalize = (points: ReturnType<typeof generate>) => {
+        if (points.length === 0) return new Map<number, number>();
+        const values = points.map((point) => point.value);
+        const average = mean(values);
+        const scale = standardDeviation(values) || 1;
+        return new Map(points.map((point) => [
+            point.year,
+            (point.value - average) / scale,
+        ]));
+    };
+    if (preSplineResidualBlendWeight !== null) {
+        const weight = clamp(preSplineResidualBlendWeight, 0, 1);
+        const post = normalize(generate("post-ar"));
+        const pre = normalize(generate("pre-spline-residual"));
+        return new Map(Array.from(post).flatMap(([year, postValue]) => {
+            const preValue = pre.get(year);
+            return preValue === undefined
+                ? []
+                : [[year, (1 - weight) * postValue + weight * preValue] as const];
+        }));
+    }
+    const points = generate(logImplementation);
     if (!normalizeResidual || points.length === 0) {
         return new Map(points.map((point) => [point.year, point.value]));
     }
-    const values = points.map((point) => point.value);
-    const average = mean(values);
-    const scale = standardDeviation(values) || 1;
-    return new Map(points.map((point) => [
-        point.year,
-        (point.value - average) / scale,
-    ]));
+    return normalize(points);
 };
 
 const aggregateUnweightedMedian = (series: readonly ResidualSeries[]) => {
@@ -519,8 +608,38 @@ export const buildInternalReferenceModel = (input: {
     normalizeSourceResiduals?: boolean;
     splineImplementation?: CofechaSplineImplementation;
     arImplementation?: CofechaArImplementation;
+    logImplementation?: CofechaLogImplementation;
+    preSplineResidualBlendWeight?: number | null;
+    adaptivePreSplineResidualBlend?: boolean;
     computeSourceCompatibility?: boolean;
 }): InternalReferenceModel | null => {
+    if (input.adaptivePreSplineResidualBlend === true) {
+        const shared = {
+            ...input,
+            adaptivePreSplineResidualBlend: false,
+            preSplineResidualBlendWeight: null,
+        };
+        const post = buildInternalReferenceModel({
+            ...shared,
+            logImplementation: "post-ar",
+        });
+        const pre = buildInternalReferenceModel({
+            ...shared,
+            logImplementation: "pre-spline-residual",
+        });
+        if (!post || !pre) return post ?? pre;
+        const audit = adjudicateAdaptiveInternalReferenceBlend(
+            post.targetCompatibility,
+            pre.targetCompatibility,
+        );
+        if (!audit.applied) return { ...post, adaptiveBlendAudit: audit };
+        const blended = buildInternalReferenceModel({
+            ...shared,
+            logImplementation: "post-ar",
+            preSplineResidualBlendWeight: audit.weight,
+        });
+        return blended ? { ...blended, adaptiveBlendAudit: audit } : post;
+    }
     const targetTree = input.siteData.get(input.targetId);
     if (!targetTree) return null;
     const references = Array.from(input.siteData)
@@ -532,6 +651,8 @@ export const buildInternalReferenceModel = (input: {
                 input.normalizeSourceResiduals === true,
                 input.splineImplementation ?? "discrete-penalty",
                 input.arImplementation ?? "current-aic",
+                input.logImplementation ?? "post-ar",
+                input.preSplineResidualBlendWeight ?? null,
             ),
         }))
         .filter((row) => row.values.size >= 30);
@@ -552,6 +673,8 @@ export const buildInternalReferenceModel = (input: {
         input.normalizeSourceResiduals === true,
         input.splineImplementation ?? "discrete-penalty",
         input.arImplementation ?? "current-aic",
+        input.logImplementation ?? "post-ar",
+        input.preSplineResidualBlendWeight ?? null,
     );
     const targetSourceCompatibility = summarizeCompatibility(
         input.targetId,

@@ -7,7 +7,10 @@ import type {
     PerReferenceCounterfactualRow,
     PerReferenceCounterfactualSummary,
 } from "@/features/crossdating/diagnosis/perReferenceCounterfactualEvidence";
-import type { InternalTargetCompatibilityFeatures } from "@/features/crossdating/internalReferenceModel";
+import type {
+    InternalReferenceBlendAudit,
+    InternalTargetCompatibilityFeatures,
+} from "@/features/crossdating/internalReferenceModel";
 
 export type LegacyTruthQuality =
     | "exact-injected"
@@ -219,6 +222,7 @@ export type LegacyDiagnosisSnapshot = {
         | "internal-model-target-excluded";
     referenceAnchorCount: number;
     internalTargetCompatibility?: InternalTargetCompatibilityFeatures | null;
+    internalReferenceBlendAudit?: InternalReferenceBlendAudit | null;
     internalTargetIncompatibilityScore?: number | null;
     internalTargetIncompatibilityProbability?: number | null;
     durationMs: number;

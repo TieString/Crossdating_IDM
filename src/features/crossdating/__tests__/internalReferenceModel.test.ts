@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+    adjudicateAdaptiveInternalReferenceBlend,
     buildInternalReferenceModel,
     INTERNAL_COMPATIBILITY_FEATURE_NAMES,
     predictInternalTargetIncompatibility,
@@ -114,5 +115,40 @@ describe("internal reference model", () => {
             false,
             { ...linearModel, safeStrictSuppressionThreshold: 0.2 },
         )).toBe(false);
+    });
+
+    it("applies the adaptive blend only for stronger anomaly or reference evidence", () => {
+        const base = buildInternalReferenceModel({
+            siteData: cleanSite(),
+            targetId: "TARGET",
+            runId: "adaptive-contract",
+            rwlHash: "hash",
+        })!.targetCompatibility;
+        const anomalyGain = adjudicateAdaptiveInternalReferenceBlend(base, {
+            ...base,
+            zeroCorrelation: (base.zeroCorrelation ?? 0) - 0.02,
+            perReferenceIncompatibleFraction:
+                (base.perReferenceIncompatibleFraction ?? 0) + 0.05,
+        });
+        expect(anomalyGain.applied).toBe(true);
+        expect(anomalyGain.reasons).toContain("anomaly_contrast_gain");
+
+        const conflict = adjudicateAdaptiveInternalReferenceBlend(base, {
+            ...base,
+            zeroCorrelation: (base.zeroCorrelation ?? 0) - 0.02,
+            perReferenceIncompatibleFraction:
+                (base.perReferenceIncompatibleFraction ?? 0) + 0.08,
+        });
+        expect(conflict.applied).toBe(false);
+
+        const consensusGain = adjudicateAdaptiveInternalReferenceBlend(base, {
+            ...base,
+            perReferenceIncompatibleFraction:
+                (base.perReferenceIncompatibleFraction ?? 0.2) - 0.12,
+            perReferenceZeroCorrelationMedian:
+                (base.perReferenceZeroCorrelationMedian ?? 0) + 0.05,
+        });
+        expect(consensusGain.applied).toBe(true);
+        expect(consensusGain.reasons).toContain("reference_consensus_gain");
     });
 });

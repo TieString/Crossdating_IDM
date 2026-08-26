@@ -126,10 +126,68 @@ Forty-four of those operation failures had a `partialMove` truth. The remaining
 accuracy ceiling is therefore mostly in operation identity and location evidence,
 not master chronology construction.
 
+## Controlled COFECHA parity and dual-view reference
+
+A differential probe now runs COFECHA with AR and log independently enabled,
+saves the `V` master, parses PART 7 per-core statistics, and compares the result
+against JS spline, AR, normalization, and aggregation variants. Synthetic fixtures
+cover identical, varied, central-impulse, and near-end impulse series. The probe
+rejected additive detrending and 2--4 decimal filtered-index quantization as
+explanations for the remaining difference. The public Cook-Holmes spline and the
+existing discrete penalty are close on ordinary series, but neither reproduces
+COFECHA 6.06P at four-decimal precision.
+
+The strongest general result was a second residual view that logs raw measurements,
+fits the spline in log space, and uses an additive log residual. Per-core residuals
+from the existing post-AR log view and this raw-log view are independently z-scored.
+The raw-log view substantially improved JS/COFECHA master similarity on both
+file-isolated screens:
+
+| Partition | Existing mean r / Q10 | Raw-log mean r / Q10 |
+| --- | ---: | ---: |
+| Six-file development, 385 states | 0.9153 / 0.8799 | **0.9498 / 0.9215** |
+| Ten-file calibration, 627 states | 0.9104 / 0.7600 | **0.9478 / 0.9066** |
+
+Using raw-log alone did not improve event decisions. A fixed 1/16 blend improved
+development from 303/349 to 307/349 with four corrections and zero regressions,
+but calibration remained 489/567 with six corrections and six regressions. Fixed
+blending is therefore rejected.
+
+The retained shadow head applies the 1/16 blend only when the target-excluded
+comparison provides directional evidence: either the raw-log view strengthens the
+target anomaly without materially increasing per-reference conflict, or it reduces
+per-reference conflict while raising median reference agreement. A low correlation
+alone is not sufficient; that branch produced one whole-series regression on the
+independent reserve and was removed before the final rerun.
+
+| Partition | Existing JS | Adaptive dual-view | Corrected | Correct to wrong | Clean FP |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Six-file development | 303/349 | 305/349 paired projection | 2 | **0** | 0/36 |
+| Ten-file calibration | 489/567 | 494/567 paired projection | 5 | **0** | 4/60 |
+| Twelve-file independent reserve | 600/686 | **601/686** full replay | 1 | **0** | 3/72 |
+
+The reserve response count stayed 678/686 and no reference was unavailable. This is
+the first internal-reference change in this experiment to improve an independent
+event replay while preserving every previously correct suggestion. It remains a
+shadow result: the stored production reference is still 618/686 on the reserve, so
+the JS reference has not yet reached replacement parity.
+
+Artifacts:
+
+`D:\软件测试\cofecha-js-parity-probe`
+
+`D:\软件测试\itrdb-unified-model-v2\models\master-audit-prelog-residual-dev6-v1.json`
+
+`D:\软件测试\itrdb-unified-model-v2\models\master-audit-prelog-cal10-v4.json`
+
+`D:\软件测试\itrdb-unified-model-v2\models\internal-adaptive-blend-reserve12-v2`
+
 ## Decision
 
 - Retain per-core z-score master construction as the best COFECHA-free shadow
   reference candidate.
+- Retain the direction-gated 1/16 raw-log blend as shadow reference metadata; it
+  passes the independent zero-regression gate but is not yet a production replacement.
 - Retain the compatibility classifier as audited metadata only.
 - Reject direct candidate switching and the conformal safe-clean display gate.
 - Do not replace the production reference path. The frozen internal result remains

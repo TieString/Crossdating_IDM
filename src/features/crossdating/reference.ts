@@ -39,6 +39,11 @@ export type IndexedPoint = {
 };
 
 export type CofechaSplineImplementation = "discrete-penalty" | "ltrr-cook-holmes";
+export type CofechaDetrendImplementation = "ratio" | "residual-plus-one";
+export type CofechaLogImplementation =
+    | "post-ar"
+    | "pre-spline-ratio"
+    | "pre-spline-residual";
 export type CofechaArImplementation =
     | "current-aic"
     | "none"
@@ -320,6 +325,7 @@ const solveCubicSmoothingSplineBanded = (
 const solveCubicSmoothingSplineTrend = (
     values: readonly number[],
     options: CofechaReferenceOptions,
+    lambdaScale = 1,
 ) => {
     if (values.length <= 2 || options.splineRigidityYears < 0) {
         return values.slice();
@@ -328,7 +334,7 @@ const solveCubicSmoothingSplineTrend = (
     const lambda = smoothingLambdaForFrequencyResponse(
         options.splineRigidityYears,
         options.splineFrequencyResponse,
-    );
+    ) * lambdaScale;
     const bandedSolution = solveCubicSmoothingSplineBanded(values, lambda);
     if (bandedSolution) {
         return bandedSolution.map((value) => Math.max(1e-6, value));
@@ -584,6 +590,9 @@ export function cofechaStyleStandardize(
     options: CofechaReferenceOptions = COFECHA_REFERENCE_DEFAULT_OPTIONS,
     splineImplementation: CofechaSplineImplementation = "discrete-penalty",
     arImplementation: CofechaArImplementation = "current-aic",
+    splineLambdaScale = 1,
+    detrendImplementation: CofechaDetrendImplementation = "ratio",
+    logImplementation: CofechaLogImplementation = "post-ar",
 ): IndexedPoint[] {
     const rawPoints = Array.from(series.entries())
         .filter((entry): entry is [number, number] => isUsableWidth(entry[1], options))
@@ -593,13 +602,22 @@ export function cofechaStyleStandardize(
     if (rawPoints.length === 0) return [];
 
     const rawWidths = rawPoints.map((point) => point.value);
+    const preSplineLog = options.useLogTransform
+        && logImplementation !== "post-ar";
+    const splineInput = preSplineLog
+        ? (() => {
+            const constant = mean(rawWidths) / 6;
+            return rawWidths.map((value) => Math.log(value + constant));
+        })()
+        : rawWidths;
+    const preSplineCenter = preSplineLog ? mean(splineInput) : 0;
     const trend = splineImplementation === "ltrr-cook-holmes"
         ? solveLtrrCubicSmoothingSplineTrend(
-            rawWidths,
+            splineInput,
             options.splineRigidityYears,
             options.splineFrequencyResponse,
         )
-        : solveCubicSmoothingSplineTrend(rawWidths, options);
+        : solveCubicSmoothingSplineTrend(splineInput, options, splineLambdaScale);
 
     // Step 1: spline detrending
     // 原始宽度除以趋势宽度，得到 mean 约为 1 的 dimensionless index。
@@ -610,7 +628,13 @@ export function cofechaStyleStandardize(
     let transformed = rawPoints.map((point, index) => {
         return {
             year: point.year,
-            value: point.value / trend[index],
+            value: preSplineLog
+                ? (logImplementation === "pre-spline-residual"
+                    ? splineInput[index] - trend[index] + preSplineCenter
+                    : splineInput[index] / trend[index])
+                : (detrendImplementation === "residual-plus-one"
+                    ? point.value - trend[index] + 1
+                    : point.value / trend[index]),
         };
     });
 
@@ -642,7 +666,9 @@ export function cofechaStyleStandardize(
         });
     }
 
-    if (options.useLogTransform && transformed.length > 0) {
+    if (options.useLogTransform
+        && logImplementation === "post-ar"
+        && transformed.length > 0) {
         const values = transformed.map((point) => point.value);
         const avg = mean(values);
         const cofechaConstant = avg / 6;

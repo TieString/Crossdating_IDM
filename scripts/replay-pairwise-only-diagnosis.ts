@@ -32,6 +32,7 @@ import type {
 } from "@/features/crossdating/internalReferenceModel";
 import type {
     CofechaArImplementation,
+    CofechaLogImplementation,
     CofechaSplineImplementation,
 } from "@/features/crossdating/reference";
 
@@ -92,6 +93,10 @@ const selectedFileIds = new Set(valueFor("--file-ids")
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean));
+const selectedAttemptIds = new Set(valueFor("--attempt-ids")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean));
 const internalCompatibilityThreshold = Number(valueFor(
     "--internal-compatibility-threshold",
     "0.16239316239316237",
@@ -126,6 +131,20 @@ const internalArImplementation = valueFor(
     "--internal-ar-implementation",
     "current-aic",
 ) as CofechaArImplementation;
+const internalLogImplementation = valueFor(
+    "--internal-log-implementation",
+    "post-ar",
+) as CofechaLogImplementation;
+const internalPreSplineResidualBlendWeightValue = valueFor(
+    "--internal-pre-spline-residual-blend-weight",
+);
+const internalPreSplineResidualBlendWeight = internalPreSplineResidualBlendWeightValue === ""
+    ? null
+    : Number(internalPreSplineResidualBlendWeightValue);
+const internalAdaptivePreSplineResidualBlend = valueFor(
+    "--internal-adaptive-pre-spline-residual-blend",
+    "false",
+) === "true";
 const usesStoredCofecha = referenceStrategy === "production"
     || referenceStrategy === "pairwise-with-cofecha-evidence"
     || referenceStrategy === "cofecha-master-without-diagnosis-evidence";
@@ -251,11 +270,15 @@ if (workerIndex === null) {
         failedAttemptsPath: failedAttemptsPath || null,
         selectedFailureAttempts: failedAttemptIds?.size ?? null,
         selectedFileIds: [...selectedFileIds],
+        selectedAttemptIds: [...selectedAttemptIds],
         internalCompatibilityThreshold,
         internalCompatibilityModelPath: internalCompatibilityModelPath || null,
         normalizeInternalSourceResiduals,
         internalSplineImplementation,
         internalArImplementation,
+        internalLogImplementation,
+        internalPreSplineResidualBlendWeight,
+        internalAdaptivePreSplineResidualBlend,
         usesCofechaMaster: referenceStrategy === "production"
             || referenceStrategy === "cofecha-master-without-diagnosis-evidence",
         usesCofechaPart6: usesStoredCofecha,
@@ -305,6 +328,9 @@ if (workerIndex === null) {
     const directories = findAttemptDirectories(join(runDir, "workers"));
     const selected = steps
         .filter((step) => selectedFileIds.size === 0 || selectedFileIds.has(step.fileId))
+        .filter((step) => selectedAttemptIds.size === 0 || selectedAttemptIds.has(
+            `evaluation:${step.caseIndex}:${step.step}`,
+        ))
         .filter((step) => failedAttemptIds === null || failedAttemptIds.has(
             `evaluation:${step.caseIndex}:${step.step}`,
         ))
@@ -351,6 +377,9 @@ if (workerIndex === null) {
             normalizeInternalSourceResiduals,
             internalSplineImplementation,
             internalArImplementation,
+            internalLogImplementation,
+            internalPreSplineResidualBlendWeight,
+            internalAdaptivePreSplineResidualBlend,
             internalCompatibilityModel,
             includeOperationGrid,
         });
@@ -394,6 +423,7 @@ if (workerIndex === null) {
             referenceMode: snapshot.referenceMode,
             referenceAnchorCount: snapshot.referenceAnchorCount,
             internalTargetCompatibility: snapshot.internalTargetCompatibility ?? null,
+            internalReferenceBlendAudit: snapshot.internalReferenceBlendAudit ?? null,
             internalTargetIncompatibilityScore:
                 snapshot.internalTargetIncompatibilityScore ?? null,
             internalTargetIncompatibilityProbability:

@@ -58,6 +58,7 @@ import {
     createCofechaPassReferenceConfig,
     type ReferenceSeriesConfig,
     type CofechaArImplementation,
+    type CofechaLogImplementation,
     type CofechaSplineImplementation,
 } from "@/features/crossdating/reference";
 import {
@@ -381,6 +382,9 @@ export const diagnoseTruthBlind = (input: {
     normalizeInternalSourceResiduals?: boolean;
     internalSplineImplementation?: CofechaSplineImplementation;
     internalArImplementation?: CofechaArImplementation;
+    internalLogImplementation?: CofechaLogImplementation;
+    internalPreSplineResidualBlendWeight?: number | null;
+    internalAdaptivePreSplineResidualBlend?: boolean;
     internalCompatibilityModel?: InternalCompatibilityLinearModel;
 }): LegacyDiagnosisSnapshot => {
     const started = performance.now();
@@ -414,6 +418,11 @@ export const diagnoseTruthBlind = (input: {
                 normalizeSourceResiduals: input.normalizeInternalSourceResiduals,
                 splineImplementation: input.internalSplineImplementation,
                 arImplementation: input.internalArImplementation,
+                logImplementation: input.internalLogImplementation,
+                preSplineResidualBlendWeight:
+                    input.internalPreSplineResidualBlendWeight,
+                adaptivePreSplineResidualBlend:
+                    input.internalAdaptivePreSplineResidualBlend,
             })
             : null;
         const internalIncompatibilityScore = rawInternalModel
@@ -851,6 +860,7 @@ export const diagnoseTruthBlind = (input: {
                 referenceConfig.cofechaPassReference?.summary.includedCount
                 ?? 0,
             internalTargetCompatibility: internalModel?.targetCompatibility ?? null,
+            internalReferenceBlendAudit: internalModel?.adaptiveBlendAudit ?? null,
             internalTargetIncompatibilityScore: internalIncompatibilityScore,
             internalTargetIncompatibilityProbability: internalIncompatibilityProbability,
             durationMs: Math.round(performance.now() - started),
@@ -867,6 +877,7 @@ export const diagnoseTruthBlind = (input: {
             referenceMode: "cofecha-master",
             referenceAnchorCount: 0,
             internalTargetCompatibility: null,
+            internalReferenceBlendAudit: null,
             internalTargetIncompatibilityScore: null,
             internalTargetIncompatibilityProbability: null,
             durationMs: Math.round(performance.now() - started),
