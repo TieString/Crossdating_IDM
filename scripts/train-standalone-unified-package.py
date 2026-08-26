@@ -22,6 +22,8 @@ FORBIDDEN = {
     "candidate_year",
     "operation_correct",
     "location_correct",
+    "location_relevance",
+    "location_error_years",
     "workflow_correct",
     "strict_correct",
 }
