@@ -88,7 +88,105 @@ def encode(frame: pd.DataFrame, columns: list[str]) -> tuple[pd.DataFrame, list[
     return values, list(values.columns)
 
 
-def operation_table(packages: pd.DataFrame) -> pd.DataFrame:
+def append_operation_support_features(operations: pd.DataFrame) -> pd.DataFrame:
+    """Normalize operation evidence by the overlap it retains within an attempt.
+
+    A large raw gain supported by a short surviving overlap must not be compared
+    as if it had the same evidential weight as a gain seen across both sides of a
+    well-supported boundary.  Ratios are computed only against competing runtime
+    hypotheses from the same attempt, so no corpus or truth metadata is exposed.
+    """
+
+    output = operations.copy()
+    grouped = output.groupby("attempt_id", sort=False)
+    support_columns = [
+        column
+        for column in (
+            "max_evidence_samplePairs",
+            "max_evidence_differencePairs",
+            "max_evidence_olderSamplePairs",
+            "max_evidence_newerSamplePairs",
+            "max_evidence_olderDifferencePairs",
+            "max_evidence_newerDifferencePairs",
+            "max_evidence_rawTransition_samplePairs",
+            "max_evidence_cofechaTransition_samplePairs",
+            "max_evidence_piecewise_olderPairs",
+            "max_evidence_piecewise_newerPairs",
+            "max_evidence_referenceChange_referenceCount",
+            "max_evidence_referenceTransition_referenceCount",
+            "max_evidence_perReference_referenceCount",
+        )
+        if column in output.columns
+    ]
+    for column in support_columns:
+        values = pd.to_numeric(output[column], errors="coerce")
+        maximum = grouped[column].transform("max")
+        denominator = pd.to_numeric(maximum, errors="coerce").where(
+            pd.to_numeric(maximum, errors="coerce") > 0
+        )
+        prefix = f"support_{column.removeprefix('max_evidence_')}"
+        output[f"{prefix}_attempt_ratio"] = (values / denominator).astype(
+            np.float32
+        )
+        output[f"{prefix}_attempt_percentile"] = grouped[column].rank(
+            pct=True
+        ).astype(np.float32)
+
+    for name, older_column, newer_column in (
+        (
+            "raw_pairs",
+            "max_evidence_olderSamplePairs",
+            "max_evidence_newerSamplePairs",
+        ),
+        (
+            "difference_pairs",
+            "max_evidence_olderDifferencePairs",
+            "max_evidence_newerDifferencePairs",
+        ),
+        (
+            "piecewise_pairs",
+            "max_evidence_piecewise_olderPairs",
+            "max_evidence_piecewise_newerPairs",
+        ),
+    ):
+        if older_column not in output or newer_column not in output:
+            continue
+        older = pd.to_numeric(output[older_column], errors="coerce")
+        newer = pd.to_numeric(output[newer_column], errors="coerce")
+        maximum = np.maximum(older, newer).replace(0, np.nan)
+        output[f"support_{name}_side_balance"] = (
+            np.minimum(older, newer) / maximum
+        ).astype(np.float32)
+        output[f"support_{name}_minimum"] = np.minimum(older, newer).astype(
+            np.float32
+        )
+
+    raw_ratio = output.get("support_samplePairs_attempt_ratio")
+    difference_ratio = output.get("support_differencePairs_attempt_ratio")
+    for gain_column, ratio in (
+        ("max_evidence_rawGain", raw_ratio),
+        ("max_evidence_differenceGain", difference_ratio),
+        (
+            "max_evidence_combinedGain",
+            (
+                (raw_ratio.fillna(0) + difference_ratio.fillna(0)) / 2
+                if raw_ratio is not None and difference_ratio is not None
+                else raw_ratio if raw_ratio is not None else difference_ratio
+            ),
+        ),
+    ):
+        if gain_column not in output or ratio is None:
+            continue
+        output[f"support_weighted_{gain_column.removeprefix('max_evidence_')}"] = (
+            pd.to_numeric(output[gain_column], errors="coerce")
+            * np.sqrt(np.clip(ratio, 0, 1))
+        ).astype(np.float32)
+    return output
+
+
+def operation_table(
+    packages: pd.DataFrame, *, enable_support_features: bool = False
+) -> pd.DataFrame:
     packages = packages.copy()
     packages["identity_group"] = (
         packages["attempt_id"].astype(str)
@@ -128,7 +226,53 @@ def operation_table(packages: pd.DataFrame) -> pd.DataFrame:
     ).add_prefix("source_count_")
     output = metadata.join(aggregate).join(source_counts).reset_index()
     output["shift_abs"] = output["shift_years"].abs()
-    return output
+    return (
+        append_operation_support_features(output)
+        if enable_support_features
+        else output
+    )
+
+
+def operation_type_table(operations: pd.DataFrame) -> pd.DataFrame:
+    """Collapse shift identities into a separate operation-type hypothesis."""
+
+    table = operations.copy()
+    table["type_group"] = (
+        table["attempt_id"].astype(str) + "|" + table["event_type"].astype(str)
+    )
+    excluded = {
+        "identity_group",
+        "type_group",
+        "attempt_id",
+        "cluster_id",
+        "file_id",
+        "family",
+        "event_type",
+        "operation_correct",
+    }
+    numeric = [
+        column
+        for column in table.columns
+        if column not in excluded
+        and pd.api.types.is_numeric_dtype(table[column])
+    ]
+    grouped = table.groupby("type_group", sort=False)
+    aggregate = grouped[numeric].max().add_prefix("type_max_")
+    metadata = grouped.agg(
+        attempt_id=("attempt_id", "first"),
+        cluster_id=("cluster_id", "first"),
+        file_id=("file_id", "first"),
+        family=("family", "first"),
+        is_clean=("is_clean", "first"),
+        event_type=("event_type", "first"),
+        operation_correct=("operation_correct", "max"),
+        shift_identity_count=("shift_years", "size"),
+        shift_minimum=("shift_years", "min"),
+        shift_maximum=("shift_years", "max"),
+        shift_mean=("shift_years", "mean"),
+        shift_standard_deviation=("shift_years", "std"),
+    )
+    return metadata.join(aggregate).reset_index()
 
 
 def clustered_lower(selected: pd.DataFrame, seed: int, repetitions: int) -> float:
@@ -153,7 +297,10 @@ def main() -> None:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--bootstrap-repetitions", type=int, default=5000)
     parser.add_argument("--maximum-clean-false-positives", type=int, default=1)
+    parser.add_argument("--exclude-candidate-sources", nargs="*", default=[])
     parser.add_argument("--enable-relative-evidence", action="store_true")
+    parser.add_argument("--enable-factorized-operation", action="store_true")
+    parser.add_argument("--enable-operation-support", action="store_true")
     args = parser.parse_args()
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -163,6 +310,10 @@ def main() -> None:
         ignore_index=True,
         sort=False,
     )
+    if args.exclude_candidate_sources:
+        packages = packages[
+            ~packages["candidate_source"].isin(args.exclude_candidate_sources)
+        ].reset_index(drop=True)
     packages = packages.copy()
     packages["cluster_id"] = (
         packages["attempt_id"].str.split(":", n=1).str[0]
@@ -173,7 +324,14 @@ def main() -> None:
         + "|" + packages["event_type"].astype(str)
         + "|" + packages["shift_years"].astype(int).astype(str)
     )
-    operations = operation_table(packages)
+    operations = operation_table(
+        packages, enable_support_features=args.enable_operation_support
+    )
+    operation_types = (
+        operation_type_table(operations)
+        if args.enable_factorized_operation
+        else pd.DataFrame()
+    )
     identity_operation_correct = operations.set_index("identity_group")[
         "operation_correct"
     ]
@@ -200,6 +358,24 @@ def main() -> None:
         }
     ]
     operation_values, operation_features = encode(operations, operation_columns)
+    if args.enable_factorized_operation:
+        type_columns = [
+            column
+            for column in operation_types.columns
+            if column not in {
+                "type_group",
+                "attempt_id",
+                "cluster_id",
+                "file_id",
+                "family",
+                "is_clean",
+                "operation_correct",
+            }
+        ]
+        type_values, type_features = encode(operation_types, type_columns)
+    else:
+        type_values = pd.DataFrame()
+        type_features = []
 
     location_columns = [
         column for column in packages.columns
@@ -236,6 +412,10 @@ def main() -> None:
     splitter = GroupKFold(n_splits=5)
     operation_rank_predictions = np.full(len(operations), np.nan)
     operation_classifier_predictions = np.full(len(operations), np.nan)
+    type_rank_predictions = np.full(len(operation_types), np.nan)
+    type_classifier_predictions = np.full(len(operation_types), np.nan)
+    shift_rank_predictions = np.full(len(operations), np.nan)
+    shift_classifier_predictions = np.full(len(operations), np.nan)
     location_global_predictions = np.full(len(packages), np.nan)
     location_typed_predictions = np.full(len(packages), np.nan)
     location_global_classifier_predictions = np.full(len(packages), np.nan)
@@ -276,6 +456,82 @@ def main() -> None:
                 operation_values.loc[operation_test]
             )[:, 1]
         )
+        if args.enable_factorized_operation:
+            type_train = operation_types.index[
+                ~operation_types["cluster_id"].isin(held_files)
+            ].to_numpy(dtype=int)
+            type_test = operation_types.index[
+                operation_types["cluster_id"].isin(held_files)
+            ].to_numpy(dtype=int)
+            type_ordered = operation_types.loc[type_train].sort_values(
+                "attempt_id"
+            ).index.to_numpy(dtype=int)
+            type_groups = operation_types.loc[type_ordered].groupby(
+                "attempt_id", sort=False
+            ).size().to_numpy()
+            type_ranker = ranker(71750 + fold)
+            type_ranker.fit(
+                type_values.loc[type_ordered],
+                operation_types.loc[type_ordered, "operation_correct"],
+                group=type_groups,
+            )
+            type_rank_predictions[type_test] = type_ranker.predict(
+                type_values.loc[type_test]
+            )
+            type_classifier = classifier(
+                operation_types.loc[type_train, "operation_correct"],
+                71850 + fold,
+            )
+            type_classifier.fit(
+                type_values.loc[type_train],
+                operation_types.loc[type_train, "operation_correct"],
+            )
+            type_classifier_predictions[type_test] = type_classifier.predict_proba(
+                type_values.loc[type_test]
+            )[:, 1]
+
+            correct_type = operations.groupby(
+                ["attempt_id", "event_type"], sort=False
+            )["operation_correct"].transform("max").eq(1)
+            for offset, event_type in enumerate(sorted(operations["event_type"].unique())):
+                shift_train = operations.index[
+                    ~operations["cluster_id"].isin(held_files)
+                    & operations["event_type"].eq(event_type)
+                    & correct_type
+                ].to_numpy(dtype=int)
+                shift_test = operations.index[
+                    operations["cluster_id"].isin(held_files)
+                    & operations["event_type"].eq(event_type)
+                ].to_numpy(dtype=int)
+                labels = operations.loc[shift_train, "operation_correct"]
+                if labels.nunique() < 2:
+                    shift_rank_predictions[shift_test] = float(labels.mean())
+                    shift_classifier_predictions[shift_test] = float(labels.mean())
+                    continue
+                shift_ordered = operations.loc[shift_train].sort_values(
+                    "attempt_id"
+                ).index.to_numpy(dtype=int)
+                shift_groups = operations.loc[shift_ordered].groupby(
+                    "attempt_id", sort=False
+                ).size().to_numpy()
+                shift_ranker = ranker(71900 + fold * 10 + offset)
+                shift_ranker.fit(
+                    operation_values.loc[shift_ordered],
+                    operations.loc[shift_ordered, "operation_correct"],
+                    group=shift_groups,
+                )
+                shift_rank_predictions[shift_test] = shift_ranker.predict(
+                    operation_values.loc[shift_test]
+                )
+                shift_classifier = classifier(labels, 71950 + fold * 10 + offset)
+                shift_classifier.fit(
+                    operation_values.loc[shift_train], labels
+                )
+                shift_classifier_predictions[shift_test] = (
+                    shift_classifier.predict_proba(
+                        operation_values.loc[shift_test]
+                    )[:, 1]
+                )
 
         local = packages["event_type"].isin(LOCAL_EVENT_TYPES)
         location_train_mask = (
@@ -360,6 +616,15 @@ def main() -> None:
     if (
         np.isnan(operation_rank_predictions).any()
         or np.isnan(operation_classifier_predictions).any()
+        or (
+            args.enable_factorized_operation
+            and (
+                np.isnan(type_rank_predictions).any()
+                or np.isnan(type_classifier_predictions).any()
+                or np.isnan(shift_rank_predictions).any()
+                or np.isnan(shift_classifier_predictions).any()
+            )
+        )
         or np.isnan(location_global_predictions[
             packages["event_type"].isin(LOCAL_EVENT_TYPES)
         ]).any()
@@ -384,6 +649,46 @@ def main() -> None:
     operations["operation_classifier_percentile"] = operation_groups[
         "operation_classifier_probability"
     ].rank(pct=True)
+    if args.enable_factorized_operation:
+        operation_types["type_rank_score"] = type_rank_predictions
+        operation_types["type_classifier_probability"] = type_classifier_predictions
+        type_groups = operation_types.groupby("attempt_id", sort=False)
+        operation_types["type_rank_percentile"] = type_groups[
+            "type_rank_score"
+        ].rank(pct=True)
+        operation_types["type_classifier_percentile"] = type_groups[
+            "type_classifier_probability"
+        ].rank(pct=True)
+        type_rank_by_group = operation_types.set_index("type_group")[
+            "type_rank_percentile"
+        ]
+        type_classifier_by_group = operation_types.set_index("type_group")[
+            "type_classifier_percentile"
+        ]
+        operations["type_group"] = (
+            operations["attempt_id"].astype(str)
+            + "|"
+            + operations["event_type"].astype(str)
+        )
+        operations["shift_rank_score"] = shift_rank_predictions
+        operations["shift_classifier_probability"] = shift_classifier_predictions
+        shift_groups = operations.groupby(
+            ["attempt_id", "event_type"], sort=False
+        )
+        operations["shift_rank_percentile"] = shift_groups[
+            "shift_rank_score"
+        ].rank(pct=True)
+        operations["shift_classifier_percentile"] = shift_groups[
+            "shift_classifier_probability"
+        ].rank(pct=True)
+        operations["typed_operation_rank_percentile"] = (
+            operations["type_group"].map(type_rank_by_group) * 0.75
+            + operations["shift_rank_percentile"] * 0.25
+        )
+        operations["typed_operation_classifier_percentile"] = (
+            operations["type_group"].map(type_classifier_by_group) * 0.75
+            + operations["shift_classifier_percentile"] * 0.25
+        )
     packages["location_global_score"] = location_global_predictions
     packages["location_typed_score"] = location_typed_predictions
     packages["location_global_classifier_probability"] = (
@@ -433,48 +738,77 @@ def main() -> None:
                 .set_index("identity_group")
             )
 
-    selections: dict[tuple[float, float, float], pd.DataFrame] = {}
+    selections: dict[tuple[float, float, float, float], pd.DataFrame] = {}
     grid_rows = []
     for operation_weight in (0.0, 0.25, 0.5, 0.75, 1.0):
-        operation_score = (
+        global_operation_score = (
             operations["operation_rank_percentile"] * (1 - operation_weight)
             + operations["operation_classifier_percentile"] * operation_weight
         )
-        operation_top = operations.assign(operation_score=operation_score).sort_values(
-            ["attempt_id", "operation_score"], ascending=[True, False]
-        ).groupby("attempt_id", sort=False).head(1)
-        for (typed_weight, classifier_weight), location_top in location_tops.items():
-            selected = operation_top.copy()
-            selected["location_correct"] = selected["identity_group"].map(
-                location_top["location_correct"]
-            )
-            selected["selected_package_correct"] = selected["identity_group"].map(
-                location_top["workflow_correct"]
-            )
-            selected["selected_candidate_source"] = selected["identity_group"].map(
-                location_top["candidate_source"]
-            )
-            selected["selected_candidate_year"] = selected["identity_group"].map(
-                location_top["candidate_year"]
-            )
-            local_selected = selected["event_type"].isin(LOCAL_EVENT_TYPES)
-            selected["final_correct"] = selected["operation_correct"].astype(int)
-            selected.loc[local_selected, "final_correct"] = (
-                selected.loc[local_selected, "selected_package_correct"]
-                .fillna(0)
-                .astype(int)
-            )
-            selected["candidate_has_response"] = selected["event_type"].ne("noEvent").astype(int)
-            event = selected[selected["family"] != "Clean"]
-            clean = selected[selected["family"] == "Clean"]
-            grid_rows.append({
-                "operationClassifierWeight": operation_weight,
-                "typedLocationWeight": typed_weight,
-                "locationClassifierWeight": classifier_weight,
-                "eventCorrect": int(event["final_correct"].sum()),
-                "cleanFalsePositives": int(clean["candidate_has_response"].sum()),
-            })
-            selections[(operation_weight, typed_weight, classifier_weight)] = selected
+        typed_operation_weights = (
+            (0.0, 0.25, 0.5, 0.75, 1.0)
+            if args.enable_factorized_operation
+            else (0.0,)
+        )
+        for typed_operation_weight in typed_operation_weights:
+            if args.enable_factorized_operation:
+                typed_operation_score = (
+                    operations["typed_operation_rank_percentile"]
+                    * (1 - operation_weight)
+                    + operations["typed_operation_classifier_percentile"]
+                    * operation_weight
+                )
+                operation_score = (
+                    global_operation_score * (1 - typed_operation_weight)
+                    + typed_operation_score * typed_operation_weight
+                )
+            else:
+                operation_score = global_operation_score
+            operation_top = operations.assign(
+                operation_score=operation_score
+            ).sort_values(
+                ["attempt_id", "operation_score"], ascending=[True, False]
+            ).groupby("attempt_id", sort=False).head(1)
+            for (typed_weight, classifier_weight), location_top in location_tops.items():
+                selected = operation_top.copy()
+                selected["location_correct"] = selected["identity_group"].map(
+                    location_top["location_correct"]
+                )
+                selected["selected_package_correct"] = selected["identity_group"].map(
+                    location_top["workflow_correct"]
+                )
+                selected["selected_candidate_source"] = selected["identity_group"].map(
+                    location_top["candidate_source"]
+                )
+                selected["selected_candidate_year"] = selected["identity_group"].map(
+                    location_top["candidate_year"]
+                )
+                local_selected = selected["event_type"].isin(LOCAL_EVENT_TYPES)
+                selected["final_correct"] = selected["operation_correct"].astype(int)
+                selected.loc[local_selected, "final_correct"] = (
+                    selected.loc[local_selected, "selected_package_correct"]
+                    .fillna(0)
+                    .astype(int)
+                )
+                selected["candidate_has_response"] = selected["event_type"].ne(
+                    "noEvent"
+                ).astype(int)
+                event = selected[selected["family"] != "Clean"]
+                clean = selected[selected["family"] == "Clean"]
+                grid_rows.append({
+                    "operationClassifierWeight": operation_weight,
+                    "typedOperationWeight": typed_operation_weight,
+                    "typedLocationWeight": typed_weight,
+                    "locationClassifierWeight": classifier_weight,
+                    "eventCorrect": int(event["final_correct"].sum()),
+                    "cleanFalsePositives": int(clean["candidate_has_response"].sum()),
+                })
+                selections[(
+                    operation_weight,
+                    typed_operation_weight,
+                    typed_weight,
+                    classifier_weight,
+                )] = selected
 
     grid = pd.DataFrame(grid_rows)
     eligible = grid[
@@ -485,6 +819,7 @@ def main() -> None:
     ).iloc[0]
     weights = (
         float(best["operationClassifierWeight"]),
+        float(best["typedOperationWeight"]),
         float(best["typedLocationWeight"]),
         float(best["locationClassifierWeight"]),
     )
@@ -509,13 +844,16 @@ def main() -> None:
         "eventAttempts": len(event),
         "cleanAttempts": len(clean),
         "operationIdentities": len(operations),
+        "operationTypes": len(operation_types),
         "locationPackages": len(packages),
         "operationFeatures": len(operation_features),
+        "operationTypeFeatures": len(type_features),
         "locationFeatures": len(location_features),
         "weights": {
             "operationClassifier": weights[0],
-            "typedLocation": weights[1],
-            "locationClassifier": weights[2],
+            "typedOperation": weights[1],
+            "typedLocation": weights[2],
+            "locationClassifier": weights[3],
         },
         "standaloneCorrect": int(event["final_correct"].sum()),
         "standaloneAccuracy": float(event["final_correct"].mean()),
@@ -528,12 +866,18 @@ def main() -> None:
         "byFamily": by_family,
     }
     operations.to_pickle(output_dir / "operation-oof-scores.pkl")
+    if args.enable_factorized_operation:
+        operation_types.to_pickle(output_dir / "operation-type-oof-scores.pkl")
     packages.to_pickle(output_dir / "location-oof-scores.pkl")
     selected.to_csv(output_dir / "standalone-hierarchical-top.csv", index=False)
     grid.to_csv(output_dir / "hierarchical-grid.csv", index=False)
     (output_dir / "operation-feature-names.json").write_text(
         json.dumps(operation_features, indent=2) + "\n", encoding="utf8"
     )
+    if args.enable_factorized_operation:
+        (output_dir / "operation-type-feature-names.json").write_text(
+            json.dumps(type_features, indent=2) + "\n", encoding="utf8"
+        )
     (output_dir / "location-feature-names.json").write_text(
         json.dumps(location_features, indent=2) + "\n", encoding="utf8"
     )

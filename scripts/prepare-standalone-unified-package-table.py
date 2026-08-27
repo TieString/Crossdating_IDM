@@ -13,7 +13,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from standalone_location_evidence import append_physical_year_posterior
+from standalone_location_evidence import (
+    append_frontier_competition_features,
+    append_local_year_shape_features,
+    append_physical_year_posterior,
+)
 
 
 LOCAL_EVENT_TYPES = {"missingRing", "falseRing", "partialMove"}
@@ -483,6 +487,9 @@ def main() -> None:
     parser.add_argument("--minimum-mode-distance", type=int, default=7)
     parser.add_argument("--enable-evidence-projection", action="store_true")
     parser.add_argument("--enable-physical-posterior", action="store_true")
+    parser.add_argument("--enable-frontier-competition", action="store_true")
+    parser.add_argument("--enable-local-year-shape", action="store_true")
+    parser.add_argument("--enable-whole-projection", action="store_true")
     args = parser.parse_args()
 
     run_dir = Path(args.run_dir).resolve()
@@ -529,6 +536,8 @@ def main() -> None:
         how="left",
         validate="many_to_one",
     )
+    if args.enable_local_year_shape:
+        rows = append_local_year_shape_features(rows)
     if args.enable_physical_posterior:
         rows = append_physical_year_posterior(rows)
     mode_score_columns = [
@@ -537,6 +546,7 @@ def main() -> None:
             "location_classifier_blend",
             "physical_consensus_score",
             "physical_consensus_smoothed13",
+            "shape_consensus_score",
         )
         if column in rows.columns
     ]
@@ -567,6 +577,22 @@ def main() -> None:
             ["attempt_id", "event_type", "shift_years"], sort=False
         )
     }
+    partial_identities_by_attempt: dict[str, list[tuple[int, pd.Series]]] = {}
+    if args.enable_whole_projection:
+        for (attempt_id, event_type, shift_years), group in row_groups.items():
+            if event_type != "partialMove" or int(shift_years) >= 0:
+                continue
+            score_column = (
+                "enriched_location_score"
+                if "enriched_location_score" in group.columns
+                else "operation_probability"
+            )
+            evidence = group.loc[
+                pd.to_numeric(group[score_column], errors="coerce").idxmax()
+            ]
+            partial_identities_by_attempt.setdefault(str(attempt_id), []).append(
+                (int(shift_years), evidence)
+            )
     selected_modes_by_attempt = {
         attempt_id: group
         for attempt_id, group in selected_modes.groupby("attempt_id", sort=False)
@@ -772,6 +798,39 @@ def main() -> None:
                 ),
             )
 
+        if args.enable_whole_projection:
+            truth_type = str(step.get("diagnosedTruthType") or "")
+            truth_shift_value = step.get("diagnosedTruthShiftYears")
+            truth_shift = (
+                int(truth_shift_value)
+                if isinstance(truth_shift_value, (int, float))
+                and not pd.isna(truth_shift_value)
+                else None
+            )
+            for shift_years, evidence in partial_identities_by_attempt.get(
+                attempt_id, []
+            ):
+                correct = (
+                    truth_type == "wholeSeriesMove"
+                    and truth_shift is not None
+                    and shift_years == truth_shift
+                )
+                append_candidate(
+                    step=step,
+                    attempt_id=attempt_id,
+                    source="wholeProjection",
+                    event_type="wholeSeriesMove",
+                    shift_years=shift_years,
+                    year=None,
+                    truth_year=None,
+                    operation_correct=correct,
+                    location_correct=correct,
+                    workflow_correct=correct,
+                    strict_correct=correct,
+                    evidence=evidence,
+                    runtime_event=None,
+                )
+
         for _, proposal in selected_modes_by_attempt.get(
             attempt_id, pd.DataFrame()
         ).iterrows():
@@ -805,6 +864,8 @@ def main() -> None:
             )
 
     table = append_location_geometry(attach_equivalent_bundle(pd.DataFrame(records)))
+    if args.enable_frontier_competition:
+        table = append_frontier_competition_features(table)
     output = Path(args.output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     table.to_pickle(output)
