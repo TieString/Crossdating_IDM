@@ -13,6 +13,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from standalone_location_evidence import append_physical_year_posterior
+
 
 LOCAL_EVENT_TYPES = {"missingRing", "falseRing", "partialMove"}
 ROW_LABEL_COLUMNS = {
@@ -480,6 +482,7 @@ def main() -> None:
     parser.add_argument("--modes-per-score", type=int, default=2)
     parser.add_argument("--minimum-mode-distance", type=int, default=7)
     parser.add_argument("--enable-evidence-projection", action="store_true")
+    parser.add_argument("--enable-physical-posterior", action="store_true")
     args = parser.parse_args()
 
     run_dir = Path(args.run_dir).resolve()
@@ -526,9 +529,20 @@ def main() -> None:
         how="left",
         validate="many_to_one",
     )
+    if args.enable_physical_posterior:
+        rows = append_physical_year_posterior(rows)
+    mode_score_columns = [
+        column for column in (
+            "enriched_location_score",
+            "location_classifier_blend",
+            "physical_consensus_score",
+            "physical_consensus_smoothed13",
+        )
+        if column in rows.columns
+    ]
     selected_modes = select_location_modes(
         rows,
-        ["enriched_location_score", "location_classifier_blend"],
+        mode_score_columns,
         max(1, args.modes_per_score),
         max(1, args.minimum_mode_distance),
     )
@@ -761,10 +775,15 @@ def main() -> None:
         for _, proposal in selected_modes_by_attempt.get(
             attempt_id, pd.DataFrame()
         ).iterrows():
+            mode_sources = str(proposal.get("location_mode_sources") or "")
             append_candidate(
                 step=step,
                 attempt_id=attempt_id,
-                source="enrichedProposal",
+                source=(
+                    "physicalConsensusProposal"
+                    if "physical_consensus" in mode_sources
+                    else "enrichedProposal"
+                ),
                 event_type=str(proposal["event_type"]),
                 shift_years=int(proposal["shift_years"]),
                 year=int(proposal["year"]),
