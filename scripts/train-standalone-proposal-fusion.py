@@ -54,6 +54,26 @@ def ranker(seed: int) -> lgb.LGBMRanker:
     )
 
 
+def classifier(seed: int) -> lgb.LGBMClassifier:
+    return lgb.LGBMClassifier(
+        objective="binary",
+        metric="binary_logloss",
+        n_estimators=500,
+        learning_rate=0.02,
+        num_leaves=7,
+        min_child_samples=20,
+        subsample=0.9,
+        colsample_bytree=0.8,
+        reg_alpha=2.0,
+        reg_lambda=9.0,
+        random_state=seed,
+        n_jobs=8,
+        verbosity=-1,
+        deterministic=True,
+        force_col_wise=True,
+    )
+
+
 def compact_geometry(column: str) -> bool:
     if not column.startswith("geometry_"):
         return False
@@ -140,6 +160,13 @@ def unique_columns(columns: list[str]) -> list[str]:
     return list(dict.fromkeys(columns))
 
 
+def proposal_sample_weights(proposals: pd.DataFrame) -> pd.Series:
+    """Give every event attempt equal total weight regardless of proposal count."""
+
+    counts = proposals.groupby("attempt_id")["attempt_id"].transform("size")
+    return (1.0 / counts).astype(np.float32)
+
+
 def encode(frame: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     duplicates = frame.columns[frame.columns.duplicated()].unique().tolist()
     if duplicates:
@@ -183,10 +210,18 @@ def proposal_rows(
     rows = []
     for role, frame in (("base", base), ("pair", pair), ("profile", profile)):
         local = frame[frame["event_type"].isin(LOCAL_EVENT_TYPES)].copy()
-        strict_column = (
-            "final_strict_correct"
-            if "final_strict_correct" in local
-            else "final_correct"
+        strict_column = next(
+            (
+                column
+                for column in (
+                    "final_strict_correct",
+                    "selected_package_strict_correct",
+                    "selected_package_correct",
+                    "final_correct",
+                )
+                if column in local
+            ),
+            "final_correct",
         )
         for _, row in local.iterrows():
             rows.append({
@@ -367,7 +402,22 @@ def main() -> None:
     parser.add_argument("--profile-location-scores", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--bootstrap-repetitions", type=int, default=3000)
+    parser.add_argument(
+        "--ensemble-members",
+        type=int,
+        default=1,
+        help="Average independent file-OOF rankers within each held-out fold.",
+    )
+    parser.add_argument(
+        "--model-type",
+        choices=("ranker", "classifier"),
+        default="ranker",
+        help="Direct proposal scorer used in every held-out file.",
+    )
+    parser.add_argument("--seed-base", type=int, default=131000)
     args = parser.parse_args()
+    if args.ensemble_members < 1:
+        raise ValueError("--ensemble-members must be at least 1")
 
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -455,13 +505,30 @@ def main() -> None:
         groups = proposals.loc[ordered].groupby(
             "attempt_id", sort=False
         ).size().to_numpy()
-        estimator = ranker(131000 + fold)
-        estimator.fit(
-            values.loc[ordered],
-            proposals.loc[ordered, "proposal_correct"],
-            group=groups,
-        )
-        predictions[test] = estimator.predict(values.loc[test])
+        fold_predictions = np.zeros(len(test), dtype=float)
+        for member in range(args.ensemble_members):
+            seed = args.seed_base + fold + member * 1009
+            if args.model_type == "classifier":
+                estimator = classifier(seed)
+                estimator.fit(
+                    values.loc[ordered],
+                    proposals.loc[ordered, "proposal_correct"],
+                    sample_weight=proposal_sample_weights(
+                        proposals.loc[ordered]
+                    ),
+                )
+                fold_predictions += estimator.predict_proba(
+                    values.loc[test]
+                )[:, 1]
+            else:
+                estimator = ranker(seed)
+                estimator.fit(
+                    values.loc[ordered],
+                    proposals.loc[ordered, "proposal_correct"],
+                    group=groups,
+                )
+                fold_predictions += estimator.predict(values.loc[test])
+        predictions[test] = fold_predictions / args.ensemble_members
     if np.isnan(predictions).any():
         raise RuntimeError("missing proposal-fusion OOF predictions")
     proposals["proposal_score"] = predictions
@@ -470,9 +537,22 @@ def main() -> None:
     ).groupby("attempt_id", sort=False).head(1).set_index("attempt_id")
 
     selected = base.copy().set_index("attempt_id")
+    if "final_strict_correct" not in selected:
+        selected["final_strict_correct"] = (
+            selected["selected_package_correct"]
+            if "selected_package_correct" in selected
+            else selected["final_correct"]
+        )
     attempts = selected.index.intersection(top.index)
     selected.loc[attempts, "final_correct"] = top.loc[
         attempts, "proposal_correct"
+    ].astype(int)
+    if "final_strict_correct" in selected:
+        selected.loc[attempts, "final_strict_correct"] = top.loc[
+            attempts, "proposal_strict_correct"
+        ].astype(int)
+    selected.loc[attempts, "operation_correct"] = top.loc[
+        attempts, "operation_correct"
     ].astype(int)
     selected.loc[attempts, "selected_candidate_year"] = top.loc[
         attempts, "candidate_year"
@@ -484,6 +564,9 @@ def main() -> None:
         "pair": "unifiedPairProposal",
         "profile": "unifiedFullYearProposal",
     })
+    selected.loc[attempts, "selected_proposal_role"] = top.loc[
+        attempts, "proposal_role"
+    ]
     selected = selected.reset_index()
     event = selected[selected["family"].ne("Clean")]
     clean = selected[selected["family"].eq("Clean")]
@@ -494,6 +577,8 @@ def main() -> None:
             "correct": int(group["final_correct"].sum()),
             "events": len(group),
             "workflowAccuracy": float(group["final_correct"].mean()),
+            "strictAccuracy": float(group["final_strict_correct"].mean()),
+            "operationAccuracy": float(group["operation_correct"].mean()),
             "responseRate": float(group["candidate_has_response"].mean()),
             "oneSided95FileClusterLower": clustered_lower(
                 group, 132000 + ord(family), args.bootstrap_repetitions
@@ -503,13 +588,16 @@ def main() -> None:
     }
     summary = {
         "schemaVersion": 1,
-        "selectionPolicy": "standalone_unified_three_proposal_ranker",
+        "selectionPolicy": f"standalone_unified_three_proposal_{args.model_type}",
         "truthAwareRuntimeSwitches": 0,
         "legacyFallbacks": 0,
         "files": int(proposals["cluster_id"].nunique()),
         "eventAttempts": len(event),
         "proposalRows": len(proposals),
         "features": len(feature_names),
+        "modelType": args.model_type,
+        "seedBase": args.seed_base,
+        "ensembleMembers": args.ensemble_members,
         "candidateOracleCorrect": int(
             proposals.groupby("attempt_id")["proposal_correct"].max().sum()
         ) + int(event[~event["event_type"].isin(LOCAL_EVENT_TYPES)][
@@ -518,6 +606,10 @@ def main() -> None:
         "baselineCorrect": int(baseline["final_correct"].sum()),
         "standaloneCorrect": int(event["final_correct"].sum()),
         "standaloneWorkflowAccuracy": float(event["final_correct"].mean()),
+        "standaloneStrictAccuracy": float(
+            event["final_strict_correct"].mean()
+        ),
+        "standaloneOperationAccuracy": float(event["operation_correct"].mean()),
         "responseRate": float(event["candidate_has_response"].mean()),
         "cleanFalsePositives": int(clean["candidate_has_response"].sum()),
         "overallOneSided95FileClusterLower": clustered_lower(
@@ -532,6 +624,11 @@ def main() -> None:
         "selectedRoles": top["proposal_role"].value_counts().to_dict(),
         "byFamily": by_family,
     }
+    feature_table = pd.concat([
+        proposals.reset_index(drop=True),
+        values.add_prefix("feature__").reset_index(drop=True),
+    ], axis=1)
+    feature_table.to_pickle(output_dir / "proposal-fusion-feature-table.pkl")
     proposals.to_pickle(output_dir / "proposal-fusion-oof-scores.pkl")
     selected.to_csv(output_dir / "standalone-proposal-fusion-top.csv", index=False)
     (output_dir / "feature-names.json").write_text(

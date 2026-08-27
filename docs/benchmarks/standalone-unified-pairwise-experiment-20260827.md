@@ -25,6 +25,8 @@ The pre-frozen calibration and final holdout files remain unopened.
 | Operation-family pairwise v23 | 94.39% | 94.93% | 94.70% | 93.64% | 94.70% | 19 | 4/414 |
 | Transition-compatible full-year v24 | 93.25% | 94.93% | 94.78% | 90.34% | 94.23% | - | 0/414 |
 | Three-proposal unified ranker v25 | **95.38%** | **95.65%** | **95.84%** | **95.01%** | **95.16%** | **1** | **0/414** |
+| Three-seed ranker ensemble v26 | 95.35% | 95.65% | 95.84% | 94.93% | 95.16% | 1 | 0/414 |
+| Equal-attempt probability head v29 | **95.40%** | **95.65%** | **95.84%** | **95.09%** | **95.16%** | **0** | **0/414** |
 
 The corrected v22 experiment directly selected 3,736/3,957 events, responded to
 100%, and had a file-clustered one-sided 95% lower bound of 92.37%. It corrected
@@ -53,6 +55,16 @@ one-sided 95% lower bounds range from 92.77% to 93.61%. Response is 100% and
 Clean remains 0/414. One v20-correct case changed to an error, so v25 meets the
 accuracy target but not yet the zero-regression safety gate.
 
+A three-seed ranker ensemble did not remove that regression and reduced C below
+95%, so v26 is retained as a negative stability experiment. The v29 head instead
+estimates the correctness probability of every proposal with equal total weight
+per event attempt, then directly selects the highest probability in that event.
+It reaches 3,775/3,957 (95.40%), keeps A/B/C/D above 95%, and raises the four
+file-clustered one-sided 95% lower bounds to 92.83%--93.63%. It corrects 53 v20
+failures with zero correct-to-wrong changes, 100% response, and 0/414 Clean false
+positives. The model still has no privileged base proposal or truth-aware runtime
+switch.
+
 ## Failure direction
 
 The direct v20 model has 235 failures: 92 operation/shift errors and 143 location
@@ -73,3 +85,5 @@ threshold or product-preservation gate.
 - Operation-family v23: `D:\软件测试\itrdb-unified-model-v2\standalone-v3\protocol-v2-new\models\development-33file-operation-family-pairwise-oof-v23`
 - Transition-compatible full-year v24: `D:\软件测试\itrdb-unified-model-v2\standalone-v3\protocol-v2-new\models\development-33file-transition-compatible-full-year-oof-v24`
 - Three-proposal unified ranker v25: `D:\软件测试\itrdb-unified-model-v2\standalone-v3\protocol-v2-new\models\development-33file-proposal-fusion-oof-v25`
+- Three-seed ranker ensemble v26: `D:\软件测试\itrdb-unified-model-v2\standalone-v3\protocol-v2-new\models\development-33file-proposal-fusion-ensemble3-oof-v26`
+- Equal-attempt probability head v29: `D:\软件测试\itrdb-unified-model-v2\standalone-v3\protocol-v2-new\models\development-33file-proposal-fusion-classifier-weighted-oof-v29`

@@ -19,6 +19,16 @@ SPEC.loader.exec_module(MODULE)
 
 
 class StandaloneProposalFusionTest(unittest.TestCase):
+    def test_each_attempt_has_equal_total_classifier_weight(self) -> None:
+        proposals = pd.DataFrame({
+            "attempt_id": ["a", "a", "b", "b", "b"],
+        })
+
+        weights = MODULE.proposal_sample_weights(proposals)
+
+        totals = weights.groupby(proposals["attempt_id"]).sum()
+        np.testing.assert_allclose(totals.to_numpy(), [1.0, 1.0])
+
     def test_join_keys_are_not_duplicated_when_they_are_features(self) -> None:
         columns = MODULE.unique_columns([
             "identity_group",
