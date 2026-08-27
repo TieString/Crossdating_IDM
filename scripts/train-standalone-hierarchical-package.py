@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 from pathlib import Path
 
@@ -794,6 +795,15 @@ def main() -> None:
     ):
         raise RuntimeError("missing hierarchical standalone OOF predictions")
 
+    # The encoded base matrices are the largest objects in the 33-file run and
+    # are no longer needed once every base head has emitted its OOF scores.
+    # Releasing them before encoding the meta heads prevents both generations
+    # from coexisting at the process memory peak.
+    del operation_values, location_values
+    if args.enable_factorized_operation:
+        del type_values
+    gc.collect()
+
     operations["operation_rank_score"] = operation_rank_predictions
     operations["operation_classifier_probability"] = operation_classifier_predictions
     operation_groups = operations.groupby("attempt_id", sort=False)
@@ -916,6 +926,8 @@ def main() -> None:
         ].groupby("identity_group", sort=False)["location_meta_score"].rank(
             pct=True
         )
+        del operation_meta_values, location_meta_values
+        gc.collect()
 
     location_tops: dict[tuple[float, float], pd.DataFrame] = {}
     for typed_weight in (0.0, 0.25, 0.5, 0.75, 1.0):
@@ -940,6 +952,13 @@ def main() -> None:
                 )
                 .groupby("identity_group", sort=False)
                 .head(1)
+                [[
+                    "identity_group",
+                    "location_correct",
+                    "workflow_correct",
+                    "candidate_source",
+                    "candidate_year",
+                ]]
                 .set_index("identity_group")
             )
     if args.enable_oof_meta_heads:
@@ -951,6 +970,13 @@ def main() -> None:
             )
             .groupby("identity_group", sort=False)
             .head(1)
+            [[
+                "identity_group",
+                "location_correct",
+                "workflow_correct",
+                "candidate_source",
+                "candidate_year",
+            ]]
             .set_index("identity_group")
         )
 
@@ -991,58 +1017,77 @@ def main() -> None:
             operations["operation_meta_percentile"],
         ))
 
-    selections: dict[tuple[float, float, float, float], pd.DataFrame] = {}
+    selected_operation_columns = [
+        "attempt_id",
+        "cluster_id",
+        "file_id",
+        "family",
+        "is_clean",
+        "identity_group",
+        "event_type",
+        "shift_years",
+        "operation_correct",
+    ]
+
+    def select_operation_top(operation_score: pd.Series) -> pd.DataFrame:
+        return (
+            operations.assign(operation_score=operation_score)
+            .sort_values(
+                ["attempt_id", "operation_score"], ascending=[True, False]
+            )
+            .groupby("attempt_id", sort=False)
+            .head(1)[selected_operation_columns]
+            .copy()
+        )
+
+    def project_selected(
+        operation_top: pd.DataFrame,
+        location_top: pd.DataFrame,
+    ) -> pd.DataFrame:
+        selected = operation_top.copy()
+        selected["location_correct"] = selected["identity_group"].map(
+            location_top["location_correct"]
+        )
+        selected["selected_package_correct"] = selected[
+            "identity_group"
+        ].map(location_top["workflow_correct"])
+        selected["selected_candidate_source"] = selected[
+            "identity_group"
+        ].map(location_top["candidate_source"])
+        selected["selected_candidate_year"] = selected[
+            "identity_group"
+        ].map(location_top["candidate_year"])
+        local_selected = selected["event_type"].isin(LOCAL_EVENT_TYPES)
+        selected["final_correct"] = selected["operation_correct"].astype(int)
+        selected.loc[local_selected, "final_correct"] = (
+            selected.loc[local_selected, "selected_package_correct"]
+            .fillna(0)
+            .astype(int)
+        )
+        selected["candidate_has_response"] = selected["event_type"].ne(
+            "noEvent"
+        ).astype(int)
+        return selected
+
     grid_rows = []
     for (
         operation_weight,
         typed_operation_weight,
         operation_score,
     ) in operation_score_options:
-        operation_top = operations.assign(
-            operation_score=operation_score
-        ).sort_values(
-            ["attempt_id", "operation_score"], ascending=[True, False]
-        ).groupby("attempt_id", sort=False).head(1)
+        operation_top = select_operation_top(operation_score)
         for (typed_weight, classifier_weight), location_top in location_tops.items():
-                selected = operation_top.copy()
-                selected["location_correct"] = selected["identity_group"].map(
-                    location_top["location_correct"]
-                )
-                selected["selected_package_correct"] = selected["identity_group"].map(
-                    location_top["workflow_correct"]
-                )
-                selected["selected_candidate_source"] = selected["identity_group"].map(
-                    location_top["candidate_source"]
-                )
-                selected["selected_candidate_year"] = selected["identity_group"].map(
-                    location_top["candidate_year"]
-                )
-                local_selected = selected["event_type"].isin(LOCAL_EVENT_TYPES)
-                selected["final_correct"] = selected["operation_correct"].astype(int)
-                selected.loc[local_selected, "final_correct"] = (
-                    selected.loc[local_selected, "selected_package_correct"]
-                    .fillna(0)
-                    .astype(int)
-                )
-                selected["candidate_has_response"] = selected["event_type"].ne(
-                    "noEvent"
-                ).astype(int)
-                event = selected[selected["family"] != "Clean"]
-                clean = selected[selected["family"] == "Clean"]
-                grid_rows.append({
-                    "operationClassifierWeight": operation_weight,
-                    "typedOperationWeight": typed_operation_weight,
-                    "typedLocationWeight": typed_weight,
-                    "locationClassifierWeight": classifier_weight,
-                    "eventCorrect": int(event["final_correct"].sum()),
-                    "cleanFalsePositives": int(clean["candidate_has_response"].sum()),
-                })
-                selections[(
-                    operation_weight,
-                    typed_operation_weight,
-                    typed_weight,
-                    classifier_weight,
-                )] = selected
+            selected = project_selected(operation_top, location_top)
+            event = selected[selected["family"] != "Clean"]
+            clean = selected[selected["family"] == "Clean"]
+            grid_rows.append({
+                "operationClassifierWeight": operation_weight,
+                "typedOperationWeight": typed_operation_weight,
+                "typedLocationWeight": typed_weight,
+                "locationClassifierWeight": classifier_weight,
+                "eventCorrect": int(event["final_correct"].sum()),
+                "cleanFalsePositives": int(clean["candidate_has_response"].sum()),
+            })
 
     grid = pd.DataFrame(grid_rows)
     eligible = grid[
@@ -1057,7 +1102,17 @@ def main() -> None:
         float(best["typedLocationWeight"]),
         float(best["locationClassifierWeight"]),
     )
-    selected = selections[weights]
+    selected_operation_score = next(
+        score
+        for operation_weight, typed_operation_weight, score
+        in operation_score_options
+        if operation_weight == weights[0]
+        and typed_operation_weight == weights[1]
+    )
+    selected = project_selected(
+        select_operation_top(selected_operation_score),
+        location_tops[(weights[2], weights[3])],
+    )
     event = selected[selected["family"] != "Clean"]
     clean = selected[selected["family"] == "Clean"]
     by_family = {
