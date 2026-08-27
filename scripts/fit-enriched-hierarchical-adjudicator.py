@@ -60,7 +60,11 @@ def main() -> None:
     parser.add_argument("--development-rows-manifest", required=True)
     parser.add_argument("--development-run-dir", required=True)
     parser.add_argument("--development-operation-identities", required=True)
-    parser.add_argument("--development-row-cache")
+    parser.add_argument(
+        "--development-row-cache",
+        nargs="+",
+        help="One or more development row caches; attempt identities are isolated.",
+    )
     parser.add_argument("--development-model-dir", required=True)
     parser.add_argument("--target-rows-manifest", required=True)
     parser.add_argument("--target-run-dir", required=True)
@@ -73,8 +77,18 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if args.development_row_cache:
-        development_cache = Path(args.development_row_cache).resolve()
-        development_rows = pd.read_pickle(development_cache / "rows.pkl")
+        development_frames = []
+        for index, cache_path in enumerate(args.development_row_cache):
+            development_cache = Path(cache_path).resolve()
+            frame = pd.read_pickle(development_cache / "rows.pkl")
+            frame["attempt_id"] = (
+                f"development-cache-{index}:" + frame["attempt_id"].astype(str)
+            )
+            development_frames.append(frame)
+        development_rows = pd.concat(
+            development_frames, ignore_index=True, sort=False
+        )
+        del development_frames
     else:
         development_rows, _ = JOINT.build_table(
             Path(args.development_rows_manifest).resolve(),

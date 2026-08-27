@@ -34,14 +34,25 @@ HIERARCHICAL = load_module(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--development-candidate-cache", required=True)
+    parser.add_argument(
+        "--development-candidate-cache",
+        required=True,
+        nargs="+",
+        help="One or more isolated development candidate caches.",
+    )
     parser.add_argument("--target-run-dir", required=True)
     parser.add_argument("--output-dir", required=True)
     args = parser.parse_args()
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    development = pd.read_pickle(Path(args.development_candidate_cache).resolve())
-    development["attempt_id"] = "training-cache:" + development["attempt_id"].astype(str)
+    development_frames = []
+    for index, cache_path in enumerate(args.development_candidate_cache):
+        frame = pd.read_pickle(Path(cache_path).resolve())
+        frame["attempt_id"] = (
+            f"training-cache-{index}:" + frame["attempt_id"].astype(str)
+        )
+        development_frames.append(frame)
+    development = pd.concat(development_frames, ignore_index=True, sort=False)
     development["dataset_role"] = "development"
     target, target_attempts = TRAINER.make_candidate_rows(
         Path(args.target_run_dir).resolve(),

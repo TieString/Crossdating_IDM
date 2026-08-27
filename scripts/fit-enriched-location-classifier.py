@@ -35,18 +35,32 @@ ENRICHED = load_module(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--development-row-cache", required=True)
+    parser.add_argument(
+        "--development-row-cache",
+        required=True,
+        nargs="+",
+        help="One or more development row caches; attempt identities are isolated.",
+    )
     parser.add_argument("--development-model-dir", required=True)
     parser.add_argument("--target-row-cache", required=True)
     parser.add_argument("--target-operation-identities", required=True)
+    parser.add_argument("--target-ranker-scores", required=True)
     parser.add_argument("--output-dir", required=True)
     args = parser.parse_args()
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    development_cache = Path(args.development_row_cache).resolve()
     target_cache = Path(args.target_row_cache).resolve()
-    development = pd.read_pickle(development_cache / "rows.pkl")
+    development_frames = []
+    for index, cache_path in enumerate(args.development_row_cache):
+        development_cache = Path(cache_path).resolve()
+        frame = pd.read_pickle(development_cache / "rows.pkl")
+        frame["attempt_id"] = (
+            f"development-cache-{index}:" + frame["attempt_id"].astype(str)
+        )
+        development_frames.append(frame)
+    development = pd.concat(development_frames, ignore_index=True, sort=False)
+    del development_frames
     target = pd.read_pickle(target_cache / "rows.pkl")
     attempts = pd.read_pickle(target_cache / "attempts.pkl")
     for table in (development, target):
@@ -58,9 +72,13 @@ def main() -> None:
     frozen = json.loads((
         Path(args.development_model_dir).resolve() / "summary.json"
     ).read_text(encoding="utf8"))["frozenWeights"]
-    if float(frozen["classifier"]) != 1:
-        raise RuntimeError("frozen classifier blend still requires a ranker")
     typed_weight = float(frozen["typedClassifier"])
+    classifier_weight = float(frozen["classifier"])
+    ranker_scores = pd.read_pickle(Path(args.target_ranker_scores).resolve())
+    ranker_score_by_row = ranker_scores["enriched_location_score"]
+    target["ranker_score"] = ranker_score_by_row.reindex(target.index).to_numpy()
+    if target["ranker_score"].isna().any():
+        raise RuntimeError("target ranker score cache does not align with row cache")
     target_identities = pd.read_csv(
         Path(args.target_operation_identities).resolve()
     )
@@ -73,7 +91,7 @@ def main() -> None:
         "identity_key", "attempt_id", "file_id", "family", "product_correct",
         "product_strict_correct", "truth_year", "operation_correct",
         "strict_operation_correct", "window_correct", "strict_correct",
-        "top_exact", "year",
+        "top_exact", "year", "ranker_score",
     }
     development["fit_role"] = "development"
     target["fit_role"] = "target"
@@ -123,15 +141,20 @@ def main() -> None:
     if target["typed_location_classifier_probability"].isna().any():
         raise RuntimeError("missing target typed classifier predictions")
     groups = target.groupby("identity_key", sort=False)
+    target["ranker_percentile"] = groups["ranker_score"].rank(pct=True)
     target["classifier_percentile"] = groups[
         "location_classifier_probability"
     ].rank(pct=True)
     target["typed_classifier_percentile"] = groups[
         "typed_location_classifier_probability"
     ].rank(pct=True)
-    target["location_classifier_blend"] = (
+    target["classifier_blend"] = (
         target["classifier_percentile"] * (1 - typed_weight)
         + target["typed_classifier_percentile"] * typed_weight
+    )
+    target["location_classifier_blend"] = (
+        target["ranker_percentile"] * (1 - classifier_weight)
+        + target["classifier_blend"] * classifier_weight
     )
     selected_identity = top_identity["identity_key"]
     selected_rows = target[
@@ -186,7 +209,8 @@ def main() -> None:
         "attempt_id", "file_id", "family", "identity_key", "event_type",
         "shift_years", "year", "window_correct", "strict_correct",
         "location_classifier_probability", "typed_location_classifier_probability",
-        "classifier_percentile", "typed_classifier_percentile",
+        "ranker_score", "ranker_percentile", "classifier_percentile",
+        "typed_classifier_percentile", "classifier_blend",
         "location_classifier_blend",
     ]].to_pickle(output_dir / "target-location-classifier-scores.pkl")
     (output_dir / "location-global-classifier.txt").write_text(
