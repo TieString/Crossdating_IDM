@@ -20,6 +20,20 @@ from standalone_location_evidence import (  # noqa: E402
 
 
 class StandaloneLocationEvidenceTest(unittest.TestCase):
+    def test_consensus_append_is_idempotent(self) -> None:
+        frame = pd.DataFrame({
+            "attempt_id": ["a", "a"],
+            "identity_group": ["g", "g"],
+            "candidate_year": [1900, 1901],
+            "evidence_identity_rawGain_percentile": [0.25, 0.75],
+        })
+
+        first = append_year_evidence_consensus(frame)
+        second = append_year_evidence_consensus(first)
+
+        self.assertFalse(second.columns.duplicated().any())
+        pd.testing.assert_frame_equal(first, second)
+
     def test_keeps_year_relative_percentiles_but_not_operation_aggregates(self) -> None:
         self.assertTrue(
             is_candidate_relative_evidence(

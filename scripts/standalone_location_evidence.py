@@ -395,4 +395,9 @@ def append_year_evidence_consensus(frame: pd.DataFrame) -> pd.DataFrame:
     consensus = pd.DataFrame(output, index=frame.index).replace(
         [np.inf, -np.inf], np.nan
     )
+    consensus = consensus[
+        [column for column in consensus.columns if column not in frame.columns]
+    ]
+    if consensus.empty:
+        return frame
     return pd.concat([frame, consensus], axis=1)
