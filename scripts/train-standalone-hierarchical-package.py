@@ -14,6 +14,7 @@ from sklearn.model_selection import GroupKFold
 
 from standalone_location_evidence import (
     append_year_evidence_consensus,
+    candidate_percentile_columns,
     is_candidate_relative_evidence,
 )
 
@@ -87,6 +88,140 @@ def cluster_ids(packages: pd.DataFrame, *, by_file_id: bool) -> pd.Series:
         packages["attempt_id"].str.split(":", n=1).str[0]
         + "|" + packages["file_id"].astype(str)
     )
+
+
+def meta_ranker(seed: int, *, location: bool) -> lgb.LGBMRanker:
+    return lgb.LGBMRanker(
+        objective="lambdarank",
+        metric="ndcg",
+        label_gain=[0, 1, 3, 7] if location else [0, 1],
+        n_estimators=500 if location else 400,
+        learning_rate=0.02,
+        num_leaves=15,
+        min_child_samples=60 if location else 36,
+        subsample=0.85,
+        colsample_bytree=0.85,
+        reg_alpha=1.5,
+        reg_lambda=7.0,
+        random_state=seed,
+        n_jobs=8,
+        verbosity=-1,
+        deterministic=True,
+        force_col_wise=True,
+    )
+
+
+def operation_meta_columns(frame: pd.DataFrame) -> list[str]:
+    exact = {
+        "event_type",
+        "shift_years",
+        "shift_abs",
+        "candidate_count",
+        "operation_rank_score",
+        "operation_classifier_probability",
+        "operation_rank_percentile",
+        "operation_classifier_percentile",
+        "typed_operation_rank_percentile",
+        "typed_operation_classifier_percentile",
+        "shift_rank_score",
+        "shift_classifier_probability",
+        "shift_rank_percentile",
+        "shift_classifier_percentile",
+        "max_runtime_score",
+        "max_runtime_score_margin",
+        "max_evidence_operation_probability",
+        "max_evidence_operation_rank_reciprocal",
+        "max_evidence_package_identity",
+        "max_evidence_baseline_lag",
+        "max_evidence_shift_baseline_distance",
+        "max_context_reference_anchor_count",
+        "max_context_cofecha_flagged",
+        "max_bundle_has_alternative",
+    }
+    return [
+        column
+        for column in frame.columns
+        if column in exact
+        or column.startswith("source_count_")
+        or column.startswith("support_")
+    ]
+
+
+def location_meta_columns(frame: pd.DataFrame) -> list[str]:
+    exact = {
+        "candidate_source",
+        "event_type",
+        "shift_years",
+        "shift_abs",
+        "candidate_has_response",
+        "candidate_year_present",
+        "context_reference_mode",
+        "runtime_confidence",
+        "runtime_score",
+        "runtime_score_margin",
+        "runtime_window_width",
+        "evidence_year_fraction",
+        "evidence_distance_from_operation_best",
+        "evidence_distance_from_side_best",
+        "evidence_enriched_location_score",
+        "evidence_classifier_percentile",
+        "evidence_typed_classifier_percentile",
+        "evidence_location_classifier_blend",
+        "location_global_score",
+        "location_typed_score",
+        "location_global_classifier_probability",
+        "location_typed_classifier_probability",
+        "location_global_percentile",
+        "location_typed_percentile",
+        "location_global_classifier_percentile",
+        "location_typed_classifier_percentile",
+    }
+    relative = set(candidate_percentile_columns(frame))
+    return [
+        column
+        for column in frame.columns
+        if column in exact
+        or column in relative
+        or column.startswith("geometry_")
+        or column.startswith("evidence_consensus_")
+        or column.startswith("runtime_source__")
+    ]
+
+
+def grouped_oof_meta_rank(
+    frame: pd.DataFrame,
+    values: pd.DataFrame,
+    *,
+    label: str,
+    group: str,
+    train_mask: pd.Series,
+    predict_mask: pd.Series,
+    location: bool,
+    seed: int,
+) -> np.ndarray:
+    predictions = np.full(len(frame), np.nan)
+    files = np.array(sorted(frame["cluster_id"].unique()))
+    splitter = GroupKFold(n_splits=5)
+    for fold, (_, test_file_indices) in enumerate(splitter.split(
+        np.zeros(len(files)), groups=files
+    )):
+        held_files = set(files[test_file_indices])
+        train = frame.index[
+            train_mask & ~frame["cluster_id"].isin(held_files)
+        ].to_numpy(dtype=int)
+        test = frame.index[
+            predict_mask & frame["cluster_id"].isin(held_files)
+        ].to_numpy(dtype=int)
+        ordered = frame.loc[train].sort_values(group).index.to_numpy(dtype=int)
+        groups = frame.loc[ordered].groupby(group, sort=False).size().to_numpy()
+        estimator = meta_ranker(seed + fold, location=location)
+        estimator.fit(
+            values.loc[ordered],
+            frame.loc[ordered, label],
+            group=groups,
+        )
+        predictions[test] = estimator.predict(values.loc[test])
+    return predictions
 
 
 def encode(frame: pd.DataFrame, columns: list[str]) -> tuple[pd.DataFrame, list[str]]:
@@ -310,6 +445,11 @@ def main() -> None:
     parser.add_argument("--enable-relative-evidence", action="store_true")
     parser.add_argument("--enable-factorized-operation", action="store_true")
     parser.add_argument("--enable-operation-support", action="store_true")
+    parser.add_argument(
+        "--enable-oof-meta-heads",
+        action="store_true",
+        help="Learn file-OOF fusion heads over independent base-head predictions.",
+    )
     parser.add_argument(
         "--cluster-by-file-id",
         action="store_true",
@@ -726,6 +866,57 @@ def main() -> None:
         "location_typed_classifier_probability"
     ].rank(pct=True)
 
+    operation_meta_features: list[str] = []
+    location_meta_features: list[str] = []
+    if args.enable_oof_meta_heads:
+        operation_meta_columns_selected = operation_meta_columns(operations)
+        operation_meta_values, operation_meta_features = encode(
+            operations, operation_meta_columns_selected
+        )
+        operation_meta_predictions = grouped_oof_meta_rank(
+            operations,
+            operation_meta_values,
+            label="operation_correct",
+            group="attempt_id",
+            train_mask=pd.Series(True, index=operations.index),
+            predict_mask=pd.Series(True, index=operations.index),
+            location=False,
+            seed=73500,
+        )
+        if np.isnan(operation_meta_predictions).any():
+            raise RuntimeError("missing operation meta-head OOF predictions")
+        operations["operation_meta_score"] = operation_meta_predictions
+        operations["operation_meta_percentile"] = operations.groupby(
+            "attempt_id", sort=False
+        )["operation_meta_score"].rank(pct=True)
+
+        packages = append_year_evidence_consensus(packages)
+        location_meta_columns_selected = location_meta_columns(packages)
+        location_meta_values, location_meta_features = encode(
+            packages, location_meta_columns_selected
+        )
+        meta_train_mask = (
+            local_mask & packages["identity_operation_correct"].eq(1)
+        )
+        location_meta_predictions = grouped_oof_meta_rank(
+            packages,
+            location_meta_values,
+            label="package_relevance",
+            group="identity_group",
+            train_mask=meta_train_mask,
+            predict_mask=local_mask,
+            location=True,
+            seed=74000,
+        )
+        if np.isnan(location_meta_predictions[local_mask]).any():
+            raise RuntimeError("missing location meta-head OOF predictions")
+        packages["location_meta_score"] = location_meta_predictions
+        packages.loc[local_mask, "location_meta_percentile"] = packages[
+            local_mask
+        ].groupby("identity_group", sort=False)["location_meta_score"].rank(
+            pct=True
+        )
+
     location_tops: dict[tuple[float, float], pd.DataFrame] = {}
     for typed_weight in (0.0, 0.25, 0.5, 0.75, 1.0):
         rank_score = (
@@ -751,9 +942,19 @@ def main() -> None:
                 .head(1)
                 .set_index("identity_group")
             )
+    if args.enable_oof_meta_heads:
+        location_tops[(2.0, 2.0)] = (
+            packages.assign(location_score=packages["location_meta_percentile"])
+            .sort_values(
+                ["identity_group", "location_score"],
+                ascending=[True, False],
+            )
+            .groupby("identity_group", sort=False)
+            .head(1)
+            .set_index("identity_group")
+        )
 
-    selections: dict[tuple[float, float, float, float], pd.DataFrame] = {}
-    grid_rows = []
+    operation_score_options: list[tuple[float, float, pd.Series]] = []
     for operation_weight in (0.0, 0.25, 0.5, 0.75, 1.0):
         global_operation_score = (
             operations["operation_rank_percentile"] * (1 - operation_weight)
@@ -778,12 +979,31 @@ def main() -> None:
                 )
             else:
                 operation_score = global_operation_score
-            operation_top = operations.assign(
-                operation_score=operation_score
-            ).sort_values(
-                ["attempt_id", "operation_score"], ascending=[True, False]
-            ).groupby("attempt_id", sort=False).head(1)
-            for (typed_weight, classifier_weight), location_top in location_tops.items():
+            operation_score_options.append((
+                operation_weight,
+                typed_operation_weight,
+                operation_score,
+            ))
+    if args.enable_oof_meta_heads:
+        operation_score_options.append((
+            2.0,
+            2.0,
+            operations["operation_meta_percentile"],
+        ))
+
+    selections: dict[tuple[float, float, float, float], pd.DataFrame] = {}
+    grid_rows = []
+    for (
+        operation_weight,
+        typed_operation_weight,
+        operation_score,
+    ) in operation_score_options:
+        operation_top = operations.assign(
+            operation_score=operation_score
+        ).sort_values(
+            ["attempt_id", "operation_score"], ascending=[True, False]
+        ).groupby("attempt_id", sort=False).head(1)
+        for (typed_weight, classifier_weight), location_top in location_tops.items():
                 selected = operation_top.copy()
                 selected["location_correct"] = selected["identity_group"].map(
                     location_top["location_correct"]
@@ -863,6 +1083,8 @@ def main() -> None:
         "operationFeatures": len(operation_features),
         "operationTypeFeatures": len(type_features),
         "locationFeatures": len(location_features),
+        "operationMetaFeatures": len(operation_meta_features),
+        "locationMetaFeatures": len(location_meta_features),
         "weights": {
             "operationClassifier": weights[0],
             "typedOperation": weights[1],
@@ -895,6 +1117,13 @@ def main() -> None:
     (output_dir / "location-feature-names.json").write_text(
         json.dumps(location_features, indent=2) + "\n", encoding="utf8"
     )
+    if args.enable_oof_meta_heads:
+        (output_dir / "operation-meta-feature-names.json").write_text(
+            json.dumps(operation_meta_features, indent=2) + "\n", encoding="utf8"
+        )
+        (output_dir / "location-meta-feature-names.json").write_text(
+            json.dumps(location_meta_features, indent=2) + "\n", encoding="utf8"
+        )
     (output_dir / "summary.json").write_text(
         json.dumps(summary, indent=2) + "\n", encoding="utf8"
     )
