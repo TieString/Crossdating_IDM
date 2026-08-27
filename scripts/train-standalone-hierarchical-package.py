@@ -80,6 +80,15 @@ def classifier(labels: pd.Series, seed: int) -> lgb.LGBMClassifier:
     )
 
 
+def cluster_ids(packages: pd.DataFrame, *, by_file_id: bool) -> pd.Series:
+    if by_file_id:
+        return packages["file_id"].astype(str)
+    return (
+        packages["attempt_id"].str.split(":", n=1).str[0]
+        + "|" + packages["file_id"].astype(str)
+    )
+
+
 def encode(frame: pd.DataFrame, columns: list[str]) -> tuple[pd.DataFrame, list[str]]:
     raw = frame[columns].copy()
     categorical = [column for column in raw.columns if raw[column].dtype == object]
@@ -301,6 +310,11 @@ def main() -> None:
     parser.add_argument("--enable-relative-evidence", action="store_true")
     parser.add_argument("--enable-factorized-operation", action="store_true")
     parser.add_argument("--enable-operation-support", action="store_true")
+    parser.add_argument(
+        "--cluster-by-file-id",
+        action="store_true",
+        help="Keep every scenario derived from the same RWL file in one OOF fold.",
+    )
     args = parser.parse_args()
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -315,9 +329,9 @@ def main() -> None:
             ~packages["candidate_source"].isin(args.exclude_candidate_sources)
         ].reset_index(drop=True)
     packages = packages.copy()
-    packages["cluster_id"] = (
-        packages["attempt_id"].str.split(":", n=1).str[0]
-        + "|" + packages["file_id"].astype(str)
+    packages["cluster_id"] = cluster_ids(
+        packages,
+        by_file_id=args.cluster_by_file_id,
     )
     packages["identity_group"] = (
         packages["attempt_id"].astype(str)
