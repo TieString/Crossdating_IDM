@@ -23,6 +23,7 @@ The pre-frozen calibration and final holdout files remain unopened.
 | Pairwise v21 (incorrect base replay) | 94.39% | 94.69% | 94.78% | 93.56% | 94.79% | 19 | 0/414 |
 | Pairwise v22 (exact base replay) | **94.41%** | **94.93%** | **94.94%** | **93.56%** | **94.60%** | 12 | 0/414 |
 | Operation-family pairwise v23 | 94.39% | 94.93% | 94.70% | 93.64% | 94.70% | 19 | 4/414 |
+| Transition-compatible full-year v24 | 93.25% | 94.93% | 94.78% | 90.34% | 94.23% | - | 0/414 |
 
 The corrected v22 experiment directly selected 3,736/3,957 events, responded to
 100%, and had a file-clustered one-sided 95% lower bound of 92.37%. It corrected
@@ -33,6 +34,14 @@ The operation-family head used only truth-blind in-attempt percentiles and equal
 family summaries. Its operation accuracy fell from 97.675% to 97.574%, while
 Clean false positives rose from zero to four. Raw family balancing alone is not
 an adequate operation-identity generator.
+
+The v24 full-year head adds the physical invariant `olderLag - newerLag =
+shiftYears` in raw/COFECHA and local/global views. Because an overall lag
+baseline cancels in the subtraction, the feature remains valid when whole and
+local events coexist. Used alone, this head regressed to 3,690/3,957 (93.25%),
+mainly in C, so it is retained as a negative replacement experiment. It still
+adds complementary evidence: the union oracle of v20, v22, and v24 reaches
+3,776/3,957 (95.43%), with every A/B/C/D family above 95%.
 
 ## Failure direction
 
@@ -52,3 +61,4 @@ threshold or product-preservation gate.
 - Direct standalone v20: `D:\软件测试\itrdb-unified-model-v2\standalone-v3\protocol-v2-new\models\development-33file-standalone-meta-oof-v20`
 - Pairwise v22: `D:\软件测试\itrdb-unified-model-v2\standalone-v3\protocol-v2-new\models\development-33file-standalone-pairwise-oof-v22`
 - Operation-family v23: `D:\软件测试\itrdb-unified-model-v2\standalone-v3\protocol-v2-new\models\development-33file-operation-family-pairwise-oof-v23`
+- Transition-compatible full-year v24: `D:\软件测试\itrdb-unified-model-v2\standalone-v3\protocol-v2-new\models\development-33file-transition-compatible-full-year-oof-v24`

@@ -103,6 +103,7 @@ def clustered_lower(selected: pd.DataFrame, seed: int, repetitions: int) -> floa
 
 
 def add_shape_features(rows: pd.DataFrame) -> pd.DataFrame:
+    rows = add_transition_shift_compatibility(rows)
     ordered = rows.sort_values(["identity_group", "year"]).copy()
     grouped = ordered.groupby("identity_group", sort=False)
     additions: dict[str, pd.Series] = {}
@@ -158,11 +159,67 @@ def add_shape_features(rows: pd.DataFrame) -> pd.DataFrame:
     ).reset_index(drop=True)
 
 
+def add_transition_shift_compatibility(rows: pd.DataFrame) -> pd.DataFrame:
+    """Compare every local boundary with its operation's expected lag step.
+
+    The invariant uses ``olderLag - newerLag`` and is therefore unchanged by a
+    coexisting whole-series baseline.  It sharpens operation identity and year
+    location without assuming that the fixed side has absolute lag zero.
+    """
+
+    additions: dict[str, pd.Series] = {}
+    shift = pd.to_numeric(rows["shift_years"], errors="coerce")
+    errors: list[pd.Series] = []
+    for source in ("rawTransition", "cofechaTransition"):
+        for scale, older_suffix, newer_suffix in (
+            ("global", "olderLag", "newerLag"),
+            ("local", "localOlderLag", "localNewerLag"),
+        ):
+            older_column = f"{source}_{older_suffix}"
+            newer_column = f"{source}_{newer_suffix}"
+            if older_column not in rows or newer_column not in rows:
+                continue
+            older = pd.to_numeric(rows[older_column], errors="coerce")
+            newer = pd.to_numeric(rows[newer_column], errors="coerce")
+            observed = older - newer
+            error = (observed - shift).abs()
+            prefix = f"transitionCompatibility_{source}_{scale}"
+            additions[f"{prefix}_observedStep"] = observed.astype(np.float32)
+            additions[f"{prefix}_absoluteError"] = error.astype(np.float32)
+            additions[f"{prefix}_exact"] = error.eq(0).astype(np.float32)
+            additions[f"{prefix}_withinOne"] = error.le(1).astype(np.float32)
+            additions[f"{prefix}_directionMatch"] = (
+                np.sign(observed).eq(np.sign(shift))
+            ).astype(np.float32)
+            errors.append(error)
+
+            gain_column = f"{source}_normalizedSplitGain"
+            if gain_column in rows:
+                gain = pd.to_numeric(rows[gain_column], errors="coerce")
+                additions[f"{prefix}_compatibleGain"] = (
+                    gain / (1 + error)
+                ).astype(np.float32)
+
+    if errors:
+        error_table = pd.concat(errors, axis=1)
+        additions["transitionCompatibility_minimumError"] = error_table.min(
+            axis=1
+        ).astype(np.float32)
+        additions["transitionCompatibility_medianError"] = error_table.median(
+            axis=1
+        ).astype(np.float32)
+        additions["transitionCompatibility_exactViewFraction"] = error_table.eq(
+            0
+        ).mean(axis=1).astype(np.float32)
+    return pd.concat([rows, pd.DataFrame(additions, index=rows.index)], axis=1)
+
+
 def load_selected_rows(
     specifications: list[str],
     operation_top: pd.DataFrame,
     candidate_modes: dict[str, pd.DataFrame],
     search_radius: int,
+    cluster_by_file_id: bool,
 ) -> pd.DataFrame:
     selected_frames = []
     for specification in specifications:
@@ -190,7 +247,11 @@ def load_selected_rows(
         )
         source = source.rename(columns={"attempt_id": "source_attempt_id"})
         source["attempt_id"] = prefix + ":" + source["source_attempt_id"].astype(str)
-        source["cluster_id"] = prefix + "|" + source["file_id"].astype(str)
+        source["cluster_id"] = (
+            source["file_id"].astype(str)
+            if cluster_by_file_id
+            else prefix + "|" + source["file_id"].astype(str)
+        )
         source["identity_group"] = (
             source["attempt_id"].astype(str)
             + "|" + source["event_type"].astype(str)
@@ -278,6 +339,11 @@ def main() -> None:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--search-radius", type=int, default=20)
     parser.add_argument("--bootstrap-repetitions", type=int, default=5000)
+    parser.add_argument(
+        "--cluster-by-file-id",
+        action="store_true",
+        help="Keep augmented scenarios from the same real RWL in one OOF fold.",
+    )
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir).resolve()
@@ -289,6 +355,7 @@ def main() -> None:
         operation_top,
         candidate_modes,
         max(6, args.search_radius),
+        args.cluster_by_file_id,
     ))
     values, feature_names = encode(rows)
     files = np.array(sorted(rows["cluster_id"].unique()))
@@ -374,9 +441,11 @@ def main() -> None:
                 location_score=score
             ).sort_values(
                 ["identity_group", "location_score"], ascending=[True, False]
-            ).groupby("identity_group", sort=False).head(1).set_index(
-                "identity_group"
-            )
+            ).groupby("identity_group", sort=False).head(1)[[
+                "identity_group",
+                "window_correct",
+                "year",
+            ]].set_index("identity_group")
 
     grid_rows = []
     selections = {}
