@@ -24,6 +24,7 @@ The pre-frozen calibration and final holdout files remain unopened.
 | Pairwise v22 (exact base replay) | **94.41%** | **94.93%** | **94.94%** | **93.56%** | **94.60%** | 12 | 0/414 |
 | Operation-family pairwise v23 | 94.39% | 94.93% | 94.70% | 93.64% | 94.70% | 19 | 4/414 |
 | Transition-compatible full-year v24 | 93.25% | 94.93% | 94.78% | 90.34% | 94.23% | - | 0/414 |
+| Three-proposal unified ranker v25 | **95.38%** | **95.65%** | **95.84%** | **95.01%** | **95.16%** | **1** | **0/414** |
 
 The corrected v22 experiment directly selected 3,736/3,957 events, responded to
 100%, and had a file-clustered one-sided 95% lower bound of 92.37%. It corrected
@@ -42,6 +43,15 @@ local events coexist. Used alone, this head regressed to 3,690/3,957 (93.25%),
 mainly in C, so it is retained as a negative replacement experiment. It still
 adds complementary evidence: the union oracle of v20, v22, and v24 reaches
 3,776/3,957 (95.43%), with every A/B/C/D family above 95%.
+
+The v25 ranker treats the v20 listwise, v22 pairwise, and v24 physical-profile
+outputs as three ordinary proposals. A five-fold file-held-out ranker selects
+every local-event location directly; it has no product default, truth-aware
+switch, or legacy fallback. It selected 3,774/3,957 (95.38%), only two below the
+three-proposal oracle. All four families exceed 95%, and their file-clustered
+one-sided 95% lower bounds range from 92.77% to 93.61%. Response is 100% and
+Clean remains 0/414. One v20-correct case changed to an error, so v25 meets the
+accuracy target but not yet the zero-regression safety gate.
 
 ## Failure direction
 
@@ -62,3 +72,4 @@ threshold or product-preservation gate.
 - Pairwise v22: `D:\软件测试\itrdb-unified-model-v2\standalone-v3\protocol-v2-new\models\development-33file-standalone-pairwise-oof-v22`
 - Operation-family v23: `D:\软件测试\itrdb-unified-model-v2\standalone-v3\protocol-v2-new\models\development-33file-operation-family-pairwise-oof-v23`
 - Transition-compatible full-year v24: `D:\软件测试\itrdb-unified-model-v2\standalone-v3\protocol-v2-new\models\development-33file-transition-compatible-full-year-oof-v24`
+- Three-proposal unified ranker v25: `D:\软件测试\itrdb-unified-model-v2\standalone-v3\protocol-v2-new\models\development-33file-proposal-fusion-oof-v25`
