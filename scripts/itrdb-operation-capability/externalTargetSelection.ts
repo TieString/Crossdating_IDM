@@ -1,0 +1,182 @@
+import { createHash } from "node:crypto";
+import type { CapabilityFile, CapabilityTarget } from "./types";
+
+export type TargetLengthBand = "100-199" | "200-299" | "300+";
+
+export const targetLengthBand = (target: CapabilityTarget): TargetLengthBand => (
+    target.seriesYears < 200
+        ? "100-199"
+        : target.seriesYears < 300
+            ? "200-299"
+            : "300+"
+);
+
+type Edge = {
+    to: number;
+    reverse: number;
+    capacity: number;
+    cost: number;
+    initialCapacity: number;
+};
+
+const addEdge = (
+    graph: Edge[][],
+    from: number,
+    to: number,
+    capacity: number,
+    cost: number,
+): Edge => {
+    const forward: Edge = {
+        to,
+        reverse: graph[to].length,
+        capacity,
+        cost,
+        initialCapacity: capacity,
+    };
+    const reverse: Edge = {
+        to: from,
+        reverse: graph[from].length,
+        capacity: 0,
+        cost: -cost,
+        initialCapacity: 0,
+    };
+    graph[from].push(forward);
+    graph[to].push(reverse);
+    return forward;
+};
+
+const minimumCostFlow = (
+    graph: Edge[][],
+    source: number,
+    sink: number,
+    requiredFlow: number,
+): void => {
+    let flow = 0;
+    while (flow < requiredFlow) {
+        const distance = Array.from({ length: graph.length }, () => Infinity);
+        const previousNode = Array.from({ length: graph.length }, () => -1);
+        const previousEdge = Array.from({ length: graph.length }, () => -1);
+        const queued = Array.from({ length: graph.length }, () => false);
+        const queue: number[] = [source];
+        distance[source] = 0;
+        queued[source] = true;
+        while (queue.length > 0) {
+            const node = queue.shift()!;
+            queued[node] = false;
+            graph[node].forEach((edge, edgeIndex) => {
+                if (edge.capacity <= 0
+                    || distance[edge.to] <= distance[node] + edge.cost) return;
+                distance[edge.to] = distance[node] + edge.cost;
+                previousNode[edge.to] = node;
+                previousEdge[edge.to] = edgeIndex;
+                if (!queued[edge.to]) {
+                    queue.push(edge.to);
+                    queued[edge.to] = true;
+                }
+            });
+        }
+        if (!Number.isFinite(distance[sink])) {
+            throw new Error(`unable to select ${requiredFlow} balanced targets; flow=${flow}`);
+        }
+        let increment = requiredFlow - flow;
+        for (let node = sink; node !== source; node = previousNode[node]) {
+            increment = Math.min(
+                increment,
+                graph[previousNode[node]][previousEdge[node]].capacity,
+            );
+        }
+        for (let node = sink; node !== source; node = previousNode[node]) {
+            const edge = graph[previousNode[node]][previousEdge[node]];
+            edge.capacity -= increment;
+            graph[node][edge.reverse].capacity += increment;
+        }
+        flow += increment;
+    }
+};
+
+const stableOrder = (seed: string, fileId: string, targetId: string): string => (
+    createHash("sha256").update(`${seed}:${fileId}:${targetId}`).digest("hex")
+);
+
+export const selectLengthBalancedTargets = (
+    files: readonly CapabilityFile[],
+    targetsPerFile: number,
+    seed: string,
+): {
+    selectedByFile: Map<string, CapabilityTarget[]>;
+    counts: Record<TargetLengthBand, number>;
+    idealCounts: Record<TargetLengthBand, number>;
+} => {
+    if (!Number.isInteger(targetsPerFile) || targetsPerFile <= 0) {
+        throw new Error("targetsPerFile must be a positive integer");
+    }
+    const bands: TargetLengthBand[] = ["100-199", "200-299", "300+"];
+    const total = files.length * targetsPerFile;
+    const base = Math.floor(total / bands.length);
+    const idealCounts: Record<TargetLengthBand, number> = {
+        "100-199": base + (total % 3 > 0 ? 1 : 0),
+        "200-299": base + (total % 3 > 1 ? 1 : 0),
+        "300+": base,
+    };
+    const source = 0;
+    const bandOffset = 1;
+    const fileOffset = bandOffset + bands.length;
+    const sink = fileOffset + files.length;
+    const graph = Array.from({ length: sink + 1 }, () => [] as Edge[]);
+    const bandFileEdges = new Map<string, Edge>();
+    bands.forEach((band, bandIndex) => {
+        addEdge(graph, source, bandOffset + bandIndex, idealCounts[band], 0);
+        addEdge(graph, source, bandOffset + bandIndex, total, 1);
+    });
+    files.forEach((file, fileIndex) => {
+        if (file.eligibleTargets.length < targetsPerFile) {
+            throw new Error(`file ${file.fileId} has fewer than ${targetsPerFile} targets`);
+        }
+        bands.forEach((band, bandIndex) => {
+            const capacity = file.eligibleTargets.filter((target) => (
+                targetLengthBand(target) === band
+            )).length;
+            const edge = addEdge(
+                graph,
+                bandOffset + bandIndex,
+                fileOffset + fileIndex,
+                capacity,
+                0,
+            );
+            bandFileEdges.set(`${band}|${file.fileId}`, edge);
+        });
+        addEdge(graph, fileOffset + fileIndex, sink, targetsPerFile, 0);
+    });
+    minimumCostFlow(graph, source, sink, total);
+
+    const counts: Record<TargetLengthBand, number> = {
+        "100-199": 0,
+        "200-299": 0,
+        "300+": 0,
+    };
+    const selectedByFile = new Map<string, CapabilityTarget[]>();
+    files.forEach((file) => {
+        const selected: CapabilityTarget[] = [];
+        bands.forEach((band) => {
+            const edge = bandFileEdges.get(`${band}|${file.fileId}`)!;
+            const take = edge.initialCapacity - edge.capacity;
+            const candidates = file.eligibleTargets.filter((target) => (
+                targetLengthBand(target) === band
+            )).sort((left, right) => (
+                stableOrder(seed, file.fileId, left.targetId)
+                    .localeCompare(stableOrder(seed, file.fileId, right.targetId))
+                || left.targetId.localeCompare(right.targetId)
+            ));
+            selected.push(...candidates.slice(0, take));
+            counts[band] += take;
+        });
+        if (selected.length !== targetsPerFile) {
+            throw new Error(`balanced target selection failed for ${file.fileId}`);
+        }
+        selectedByFile.set(
+            file.fileId,
+            selected.sort((left, right) => left.targetId.localeCompare(right.targetId)),
+        );
+    });
+    return { selectedByFile, counts, idealCounts };
+};
