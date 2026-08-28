@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": "itrdb-frozen-external-v1",
+  "scenarioGeneratorVersion": 6,
+  "frozenDate": "2026-08-28",
+  "seed": "frozen-external-scenarios-2026-08-28-v1",
+  "itrdbRoot": "D:/软件测试/数据/ITRDB/itrdb_download/measurements",
+  "fileIds": [
+    "aust111l",
+    "az516",
+    "az519",
+    "az525",
+    "brit094",
+    "ca520d",
+    "cana011",
+    "cana386",
+    "che546",
+    "co039",
+    "co540",
+    "fra069",
+    "germ055x",
+    "germ177",
+    "germ202",
+    "germ212",
+    "germ226",
+    "id005",
+    "lith042",
+    "mexi030",
+    "mexi030e",
+    "mexi055",
+    "mong007e",
+    "morc002",
+    "mt102",
+    "nm500",
+    "norw008",
+    "rus343",
+    "rus365",
+    "rus372",
+    "russ029w",
+    "russ082w",
+    "russ122x",
+    "russ167e",
+    "russ167w",
+    "russ218",
+    "russ234",
+    "russ250",
+    "russ268",
+    "svk021",
+    "swit110x",
+    "swit117e",
+    "swit130x",
+    "swit185",
+    "tun012",
+    "turk015",
+    "turk037",
+    "ut534",
+    "wa045",
+    "wa157"
+  ],
+  "selection": {
+    "minimumSeriesYears": 100,
+    "minimumMasterCorrelation": 0.6,
+    "maximumProblemSegments": 0,
+    "minimumFileIntercorrelation": 0.5,
+    "maximumFileProblemSegments": 0,
+    "minimumOlderContextYears": 45,
+    "minimumNewerContextYears": 15,
+    "maximumTargetsPerFile": 10,
+    "targetSelectionSeed": "frozen-external-targets-2026-08-28-v1",
+    "excludeFilesWithoutEligibleTargets": true,
+    "usesSignalStrength": false,
+    "usesDiagnosisOutput": false
+  },
+  "injection": {
+    "falseRingMode": "moderate",
+    "partialShiftYears": [
+      -6,
+      -20
+    ],
+    "wholeShiftYears": [
+      -4,
+      -11,
+      -20,
+      -50
+    ],
+    "distantSpacingYears": 30,
+    "nearSpacingYears": [
+      2,
+      5,
+      9,
+      13
+    ],
+    "distantEventCounts": [
+      2,
+      3,
+      4
+    ],
+    "nearUnitEventCounts": [
+      2,
+      3,
+      4
+    ],
+    "includeAdjacentOptionalSuccess": false,
+    "allowedWindowWidths": [
+      5,
+      7,
+      9,
+      13
+    ]
+  },
+  "families": {
+    "Clean": "one untouched control for every frozen target",
+    "A": "one balanced single missing/false/partial/negative-whole event",
+    "B": "one length-feasible distant same-type multi-event chain",
+    "C": "one length-feasible 2-13 year same-direction unit chain",
+    "D": "one length-feasible distant mixed-operation composition"
+  },
+  "design": {
+    "scenarioSampling": "balancedOnePerFamily",
+    "splitId": "frozen-external-50-files-2026-08-28-v1",
+    "datasetRole": "externalFrozenTest",
+    "casesPerTargetPerFamily": 1,
+    "eventPositionWeights": {
+      "middle": 0.4,
+      "newer": 0.35,
+      "barkNear": 0.25
+    },
+    "lengthAwareEventCounts": true
+  },
+  "statistics": {
+    "clusterUnit": "file",
+    "bootstrapReplicates": 20000,
+    "confidenceLevel": 0.95,
+    "targetCoverage": 0.9,
+    "seed": "frozen-external-file-bootstrap-2026-08-28-v1"
+  },
+  "runtime": {
+    "workers": 12,
+    "cofechaTimeoutSeconds": 60
+  },
+  "evaluationProtocol": {
+    "version": "frontier-workflow-suggestion-v1",
+    "mainMetric": "workflowSuggestionAccuracy",
+    "denominator": "actualFrontierDiagnosisAttempts",
+    "unreachedEvents": "serialRecoveryOnly",
+    "wholeSeriesMoveSuccess": "negativeExactShiftNoWindow"
+  }
+}
