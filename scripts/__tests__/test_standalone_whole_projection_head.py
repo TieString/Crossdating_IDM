@@ -113,6 +113,11 @@ class StandaloneWholeProjectionHeadTest(unittest.TestCase):
             second["whole_projection_switched"].tolist(),
         )
 
+    def test_clean_mask_falls_back_to_family(self) -> None:
+        frame = pd.DataFrame({"family": ["Clean", "A"]})
+
+        self.assertEqual(HEAD.clean_mask(frame).tolist(), [True, False])
+
 
 if __name__ == "__main__":
     unittest.main()

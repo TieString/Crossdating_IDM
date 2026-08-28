@@ -12,6 +12,14 @@ WHOLE_SOURCE_COLUMN = "source_count_wholeProjection"
 SCORE_COLUMN = "operation_meta_score"
 
 
+def clean_mask(frame: pd.DataFrame) -> pd.Series:
+    if "is_clean" in frame:
+        return frame["is_clean"].fillna(False).astype(bool)
+    if "family" in frame:
+        return frame["family"].astype(str).eq("Clean")
+    raise ValueError("frame must contain is_clean or family")
+
+
 def identity_group(frame: pd.DataFrame) -> pd.Series:
     return (
         frame["attempt_id"].astype(str)
@@ -179,7 +187,7 @@ def calibrate_threshold(
     upper = np.ceil(margins.max() / step) * step + step
     rows: list[dict[str, float | int]] = []
     base_correct = base["final_correct"].fillna(0).astype(bool)
-    is_clean = base["is_clean"].fillna(False).astype(bool)
+    is_clean = clean_mask(base)
     for threshold in np.arange(lower, upper + step / 2, step):
         selected = apply_threshold(base, competition, float(threshold))
         selected_correct = selected["final_correct"].fillna(0).astype(bool)
@@ -244,8 +252,9 @@ def summarize(
     base: pd.DataFrame,
     repetitions: int,
 ) -> dict[str, object]:
-    event = selected.loc[~selected["is_clean"].astype(bool)].copy()
-    clean = selected.loc[selected["is_clean"].astype(bool)].copy()
+    is_clean = clean_mask(selected)
+    event = selected.loc[~is_clean].copy()
+    clean = selected.loc[is_clean].copy()
     baseline = base.set_index("attempt_id")["final_correct"].astype(bool)
     before = event["attempt_id"].map(baseline).fillna(False).astype(bool)
     after = event["final_correct"].fillna(0).astype(bool)
