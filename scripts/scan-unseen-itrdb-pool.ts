@@ -102,6 +102,10 @@ const collectIds = (text: string, output: Set<string>): void => {
             output.add(item[1].toLowerCase());
         }
     }
+    const rwlBasenames = /\b([A-Za-z0-9][A-Za-z0-9_-]*)\.rwl\b/gi;
+    for (let match = rwlBasenames.exec(text); match; match = rwlBasenames.exec(text)) {
+        output.add(match[1].toLowerCase());
+    }
 };
 
 const historicalIds = new Set<string>();
@@ -126,6 +130,26 @@ tracked.forEach((path) => {
         // A malformed historical artifact is ignored but remains visible in the provenance count.
     }
 });
+try {
+    const trackedRwlReferences = execFileSync(
+        "git",
+        [
+            "grep", "-I", "-h", "-o", "-E",
+            "[A-Za-z0-9][A-Za-z0-9_-]*\\.rwl",
+            historicalCommit, "--",
+        ],
+        {
+            cwd: repoRoot,
+            encoding: "utf8",
+            windowsHide: true,
+            maxBuffer: 128 * 1024 * 1024,
+        },
+    );
+    collectIds(trackedRwlReferences, historicalIds);
+    historicalFiles.push(`git-rwl-references:${historicalCommit}`);
+} catch {
+    // git grep exits with status 1 when no RWL references exist.
+}
 
 const historyName = /^(?:steps|resolved-cases)\.json$|(?:config|manifest|split).*\.json$/i;
 const scanHistory = (directory: string): void => {
