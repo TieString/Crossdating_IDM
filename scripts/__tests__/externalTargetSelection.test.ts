@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { selectLengthBalancedTargets } from "../itrdb-operation-capability/externalTargetSelection";
+import {
+    selectFilesForLengthBalance,
+    selectLengthBalancedTargets,
+} from "../itrdb-operation-capability/externalTargetSelection";
 import type { CapabilityFile, CapabilityTarget } from "../itrdb-operation-capability/types";
 
 const target = (id: string, years: number): CapabilityTarget => ({
@@ -57,5 +60,32 @@ describe("external target length balancing", () => {
         expect(result.selectedByFile.get("short-only")).toHaveLength(10);
         expect(result.selectedByFile.get("mixed")).toHaveLength(10);
         expect(result.counts["100-199"]).toBeGreaterThan(result.idealCounts["100-199"]);
+    });
+
+    it("chooses length-diverse files within fixed correlation quotas", () => {
+        const candidates = new Map([
+            ["low", [
+                file("low-short", [12, 0, 0]),
+                file("low-balanced", [4, 4, 4]),
+            ]],
+            ["high", [
+                file("high-short", [12, 0, 0]),
+                file("high-balanced", [4, 4, 4]),
+            ]],
+        ]);
+        const selected = selectFilesForLengthBalance(
+            candidates,
+            { low: 1, high: 1 },
+            10,
+            "seed",
+        );
+        expect(selected.map((item) => item.fileId).sort()).toEqual([
+            "high-balanced", "low-balanced",
+        ]);
+        expect(selectLengthBalancedTargets(selected, 10, "seed").counts).toEqual({
+            "100-199": 7,
+            "200-299": 7,
+            "300+": 6,
+        });
     });
 });

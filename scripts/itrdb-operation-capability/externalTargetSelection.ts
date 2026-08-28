@@ -180,3 +180,64 @@ export const selectLengthBalancedTargets = (
     });
     return { selectedByFile, counts, idealCounts };
 };
+
+const balanceError = (
+    counts: Record<TargetLengthBand, number>,
+    total: number,
+): number => {
+    const ideal = total / 3;
+    return (Object.values(counts) as number[]).reduce((sum, value) => (
+        sum + Math.abs(value - ideal)
+    ), 0);
+};
+
+export const selectFilesForLengthBalance = <Band extends string>(
+    candidatesByBand: ReadonlyMap<Band, readonly CapabilityFile[]>,
+    requiredByBand: Readonly<Record<Band, number>>,
+    targetsPerFile: number,
+    seed: string,
+): CapabilityFile[] => {
+    const selected: CapabilityFile[] = [];
+    const selectedIds = new Set<string>();
+    const remaining = new Map<Band, number>(
+        [...candidatesByBand.keys()].map((band) => [band, requiredByBand[band]]),
+    );
+    while ([...remaining.values()].some((count) => count > 0)) {
+        const band = [...remaining.entries()].filter(([, count]) => count > 0)
+            .sort(([leftBand, leftCount], [rightBand, rightCount]) => {
+                const leftAvailable = candidatesByBand.get(leftBand)!
+                    .filter((file) => !selectedIds.has(file.fileId)).length;
+                const rightAvailable = candidatesByBand.get(rightBand)!
+                    .filter((file) => !selectedIds.has(file.fileId)).length;
+                return (rightCount / Math.max(1, rightAvailable))
+                    - (leftCount / Math.max(1, leftAvailable))
+                    || rightCount - leftCount
+                    || String(leftBand).localeCompare(String(rightBand));
+            })[0][0];
+        const candidates = candidatesByBand.get(band)!
+            .filter((file) => !selectedIds.has(file.fileId));
+        if (candidates.length < remaining.get(band)!) {
+            throw new Error(`insufficient files in correlation band ${String(band)}`);
+        }
+        const choice = candidates.map((candidate) => {
+            const trial = selectLengthBalancedTargets(
+                [...selected, candidate],
+                targetsPerFile,
+                `${seed}:trial`,
+            );
+            return {
+                candidate,
+                error: balanceError(trial.counts, (selected.length + 1) * targetsPerFile),
+                order: stableOrder(seed, String(band), candidate.fileId),
+            };
+        }).sort((left, right) => (
+            left.error - right.error
+            || left.order.localeCompare(right.order)
+            || left.candidate.fileId.localeCompare(right.candidate.fileId)
+        ))[0].candidate;
+        selected.push(choice);
+        selectedIds.add(choice.fileId);
+        remaining.set(band, remaining.get(band)! - 1);
+    }
+    return selected.sort((left, right) => left.fileId.localeCompare(right.fileId));
+};

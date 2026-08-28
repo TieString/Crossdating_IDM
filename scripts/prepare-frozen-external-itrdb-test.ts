@@ -11,7 +11,10 @@ import { fileURLToPath } from "node:url";
 import { parseCofechaResult } from "@/features/cofecha/formatter";
 import { normalizeCofechaSeriesId } from "@/features/cofecha/seriesId";
 import { loadRwl, runCofecha, sha256Bytes } from "./legacy-generalization/evaluator";
-import { selectLengthBalancedTargets } from "./itrdb-operation-capability/externalTargetSelection";
+import {
+    selectFilesForLengthBalance,
+    selectLengthBalancedTargets,
+} from "./itrdb-operation-capability/externalTargetSelection";
 import type {
     CapabilityConfig,
     CapabilityFile,
@@ -213,30 +216,30 @@ for (const [index, candidate] of orderedCandidates.entries()) {
     }
 }
 
-const selectedByBand = new Map<FileCorrelationBand, CapabilityFile[]>(
-    bands.map((band) => [band, qualifiedByBand.get(band)!.slice(0, quotas[band])]),
-);
-let fileDeficit = fileCount - bands.reduce(
-    (sum, band) => sum + selectedByBand.get(band)!.length,
-    0,
-);
+const requiredByBand: Record<FileCorrelationBand, number> = Object.fromEntries(
+    bands.map((band) => [band, Math.min(quotas[band], qualifiedByBand.get(band)!.length)]),
+) as Record<FileCorrelationBand, number>;
+let fileDeficit = fileCount - Object.values(requiredByBand)
+    .reduce((sum, count) => sum + count, 0);
 while (fileDeficit > 0) {
     const available = bands.filter((band) => (
-        selectedByBand.get(band)!.length < qualifiedByBand.get(band)!.length
+        requiredByBand[band] < qualifiedByBand.get(band)!.length
     )).sort((left, right) => (
-        (qualifiedByBand.get(right)!.length - selectedByBand.get(right)!.length)
-        - (qualifiedByBand.get(left)!.length - selectedByBand.get(left)!.length)
+        (qualifiedByBand.get(right)!.length - requiredByBand[right])
+        - (qualifiedByBand.get(left)!.length - requiredByBand[left])
         || left.localeCompare(right)
     ));
     if (available.length === 0) break;
     const band = available[0];
-    selectedByBand.get(band)!.push(
-        qualifiedByBand.get(band)![selectedByBand.get(band)!.length],
-    );
+    requiredByBand[band] += 1;
     fileDeficit -= 1;
 }
-const files = bands.flatMap((band) => selectedByBand.get(band)!)
-    .sort((left, right) => left.fileId.localeCompare(right.fileId));
+const files = selectFilesForLengthBalance(
+    qualifiedByBand,
+    requiredByBand,
+    targetsPerFile,
+    `${targetSeed}:files`,
+);
 if (files.length !== fileCount) {
     const counts = Object.fromEntries(bands.map((band) => [band, qualifiedByBand.get(band)!.length]));
     throw new Error(`only ${files.length}/${fileCount} files passed frozen quality gates: ${JSON.stringify(counts)}`);
@@ -360,7 +363,7 @@ const lock = {
     cofechaExeSha256: manifest.cofechaSha256,
     seeds: { scenarioSeed, targetSeed, bootstrapSeed },
     fileCorrelationQuotas: quotas,
-    fileCorrelationCounts: Object.fromEntries(bands.map((band) => [band, selectedByBand.get(band)!.length])),
+    fileCorrelationCounts: requiredByBand,
     fileCorrelationQualifiedCounts: Object.fromEntries(bands.map((band) => [band, qualifiedByBand.get(band)!.length])),
     fileCorrelationQuotaShortfall: Object.fromEntries(bands.map((band) => [
         band,
