@@ -2,6 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+    existsSync,
     mkdirSync,
     readFileSync,
     writeFileSync,
@@ -77,6 +78,7 @@ const frozenModelEvidenceCommit = valueFor(
 const fileCount = Number(valueFor("--files", "50"));
 const targetsPerFile = Number(valueFor("--targets-per-file", "10"));
 const timeoutSeconds = Number(valueFor("--cofecha-timeout-seconds", "60"));
+const reuseCleanWork = valueFor("--reuse-clean-work", "true") !== "false";
 const scenarioSeed = valueFor(
     "--scenario-seed",
     "frozen-external-scenarios-2026-08-28-v1",
@@ -154,15 +156,19 @@ for (const [index, candidate] of orderedCandidates.entries()) {
         if (loaded.sourceSha256 !== candidate.sourceSha256) {
             throw new Error("source_sha256_changed_since_structural_scan");
         }
-        const context = runCofecha({
-            siteData: loaded.siteData,
-            readResult: loaded.readResult,
-            workDir,
-            label: `${String(index + 1).padStart(4, "0")}-${candidate.fileId}`,
-            cofechaExe,
-            timeoutSeconds,
-        });
-        const result = parseCofechaResult(context.outText);
+        const label = `${String(index + 1).padStart(4, "0")}-${candidate.fileId}`;
+        const cachedOutPath = resolve(workDir, label, "VERYCOF.OUT");
+        const outText = reuseCleanWork && existsSync(cachedOutPath)
+            ? readFileSync(cachedOutPath, "utf8")
+            : runCofecha({
+                    siteData: loaded.siteData,
+                    readResult: loaded.readResult,
+                    workDir,
+                    label,
+                    cofechaExe,
+                    timeoutSeconds,
+                }).outText;
+        const result = parseCofechaResult(outText);
         const band = fileBand(result.seriesIntercorrelation);
         if (!band) throw new Error(`file_intercorrelation_below_minimum:${result.seriesIntercorrelation}`);
         if (result.possibleProblemsCount !== 0) {
@@ -195,7 +201,7 @@ for (const [index, candidate] of orderedCandidates.entries()) {
             fileId: candidate.fileId,
             relativePath: candidate.relativePath,
             sourceSha256: loaded.sourceSha256,
-            cleanCofechaSha256: digest(context.outText),
+            cleanCofechaSha256: digest(outText),
             seriesIntercorrelation: result.seriesIntercorrelation,
             possibleProblemSegments: result.possibleProblemsCount,
             totalSeries: loaded.series.size,
@@ -381,7 +387,12 @@ writeFileSync(
 );
 writeFileSync(
     resolve(outputDir, "selection-audit.json"),
-    `${JSON.stringify({ quotas, files, excluded }, null, 2)}\n`,
+    `${JSON.stringify({
+        quotas,
+        files,
+        qualifiedFiles: bands.flatMap((band) => qualifiedByBand.get(band)!),
+        excluded,
+    }, null, 2)}\n`,
     "utf8",
 );
 console.log(`EXTERNAL_PROTOCOL_FROZEN ${JSON.stringify({

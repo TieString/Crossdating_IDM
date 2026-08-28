@@ -239,5 +239,81 @@ export const selectFilesForLengthBalance = <Band extends string>(
         selectedIds.add(choice.fileId);
         remaining.set(band, remaining.get(band)! - 1);
     }
+    const bandByFile = new Map<string, Band>();
+    candidatesByBand.forEach((files, band) => files.forEach((file) => {
+        bandByFile.set(file.fileId, band);
+    }));
+    const profile = (file: CapabilityFile): Record<TargetLengthBand, number> => {
+        const counts: Record<TargetLengthBand, number> = {
+            "100-199": 0,
+            "200-299": 0,
+            "300+": 0,
+        };
+        file.eligibleTargets.forEach((target) => {
+            counts[targetLengthBand(target)] += 1;
+        });
+        return counts;
+    };
+    for (let round = 0; round < 25; round += 1) {
+        const current = selectLengthBalancedTargets(selected, targetsPerFile, seed);
+        const currentError = balanceError(current.counts, selected.length * targetsPerFile);
+        const deficits = Object.fromEntries(
+            (Object.keys(current.idealCounts) as TargetLengthBand[]).map((band) => (
+                [band, current.idealCounts[band] - current.counts[band]]
+            )),
+        ) as Record<TargetLengthBand, number>;
+        let best: {
+            index: number;
+            replacement: CapabilityFile;
+            error: number;
+            order: string;
+        } | null = null;
+        selected.forEach((selectedFile, index) => {
+            const correlationBand = bandByFile.get(selectedFile.fileId)!;
+            const alternatives = candidatesByBand.get(correlationBand)!
+                .filter((file) => !selectedIds.has(file.fileId))
+                .map((file) => {
+                    const counts = profile(file);
+                    const priority = (Object.keys(deficits) as TargetLengthBand[])
+                        .reduce((sum, band) => (
+                            sum + Math.min(targetsPerFile, counts[band]) * deficits[band]
+                        ), 0);
+                    return {
+                        file,
+                        priority,
+                        order: stableOrder(seed, String(correlationBand), file.fileId),
+                    };
+                })
+                .sort((left, right) => (
+                    right.priority - left.priority
+                    || left.order.localeCompare(right.order)
+                ))
+                .slice(0, 12);
+            alternatives.forEach(({ file, order }) => {
+                const trialFiles = [...selected];
+                trialFiles[index] = file;
+                const trial = selectLengthBalancedTargets(
+                    trialFiles,
+                    targetsPerFile,
+                    `${seed}:swap`,
+                );
+                const error = balanceError(trial.counts, trialFiles.length * targetsPerFile);
+                if (error >= currentError || (best && (
+                    error > best.error || (error === best.error && order >= best.order)
+                ))) return;
+                best = { index, replacement: file, error, order };
+            });
+        });
+        if (!best) break;
+        const resolvedBest = best as {
+            index: number;
+            replacement: CapabilityFile;
+            error: number;
+            order: string;
+        };
+        selectedIds.delete(selected[resolvedBest.index].fileId);
+        selected[resolvedBest.index] = resolvedBest.replacement;
+        selectedIds.add(resolvedBest.replacement.fileId);
+    }
     return selected.sort((left, right) => left.fileId.localeCompare(right.fileId));
 };
