@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import math
 import re
@@ -611,7 +612,15 @@ def main() -> None:
         f"evaluation:{int(step['caseIndex'])}:{int(step['step'])}": step
         for _, step in steps.iterrows()
     }
-    records: list[dict[str, Any]] = []
+    record_chunks: list[pd.DataFrame] = []
+    pending_records: list[dict[str, Any]] = []
+    record_chunk_size = 1024
+
+    def flush_record_chunk() -> None:
+        if not pending_records:
+            return
+        record_chunks.append(pd.DataFrame.from_records(pending_records))
+        pending_records.clear()
 
     def append_candidate(
         *,
@@ -701,7 +710,9 @@ def main() -> None:
                 if evidence is not None and column in evidence.index
                 else np.nan
             )
-        records.append(record)
+        pending_records.append(record)
+        if len(pending_records) >= record_chunk_size:
+            flush_record_chunk()
 
     for attempt_id, step in step_by_attempt.items():
         family = str(step["family"])
@@ -877,7 +888,19 @@ def main() -> None:
                 runtime_event=None,
             )
 
-    table = append_location_geometry(attach_equivalent_bundle(pd.DataFrame(records)))
+    flush_record_chunk()
+    del rows
+    del selected_modes
+    del row_group_positions
+    del partial_identities_by_attempt
+    del selected_mode_positions_by_attempt
+    gc.collect()
+    record_table = pd.concat(
+        record_chunks, ignore_index=True, sort=False, copy=False
+    )
+    del record_chunks
+    gc.collect()
+    table = append_location_geometry(attach_equivalent_bundle(record_table))
     if args.enable_frontier_competition:
         table = append_frontier_competition_features(table)
     output = Path(args.output).resolve()
