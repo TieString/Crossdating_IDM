@@ -50,7 +50,7 @@ def encode_combined(
     values = pd.get_dummies(
         combined[columns],
         columns=[column for column in columns if combined[column].dtype == object],
-        dtype=float,
+        dtype=np.float32,
     ).replace([np.inf, -np.inf], np.nan).fillna(0).astype(np.float32)
     return values, len(development), list(values.columns)
 
