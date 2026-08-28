@@ -188,9 +188,6 @@ for (const [index, candidate] of orderedCandidates.entries()) {
         if (eligibleTargets.length < targetsPerFile) {
             throw new Error(`zero_free_eligible_targets_below_${targetsPerFile}:${eligibleTargets.length}`);
         }
-        if (qualifiedByBand.get(band)!.length >= quotas[band]) {
-            throw new Error(`file_correlation_quota_filled:${band}`);
-        }
         qualifiedByBand.get(band)!.push({
             fileId: candidate.fileId,
             relativePath: candidate.relativePath,
@@ -216,11 +213,33 @@ for (const [index, candidate] of orderedCandidates.entries()) {
     }
 }
 
-const files = bands.flatMap((band) => qualifiedByBand.get(band)!)
+const selectedByBand = new Map<FileCorrelationBand, CapabilityFile[]>(
+    bands.map((band) => [band, qualifiedByBand.get(band)!.slice(0, quotas[band])]),
+);
+let fileDeficit = fileCount - bands.reduce(
+    (sum, band) => sum + selectedByBand.get(band)!.length,
+    0,
+);
+while (fileDeficit > 0) {
+    const available = bands.filter((band) => (
+        selectedByBand.get(band)!.length < qualifiedByBand.get(band)!.length
+    )).sort((left, right) => (
+        (qualifiedByBand.get(right)!.length - selectedByBand.get(right)!.length)
+        - (qualifiedByBand.get(left)!.length - selectedByBand.get(left)!.length)
+        || left.localeCompare(right)
+    ));
+    if (available.length === 0) break;
+    const band = available[0];
+    selectedByBand.get(band)!.push(
+        qualifiedByBand.get(band)![selectedByBand.get(band)!.length],
+    );
+    fileDeficit -= 1;
+}
+const files = bands.flatMap((band) => selectedByBand.get(band)!)
     .sort((left, right) => left.fileId.localeCompare(right.fileId));
 if (files.length !== fileCount) {
     const counts = Object.fromEntries(bands.map((band) => [band, qualifiedByBand.get(band)!.length]));
-    throw new Error(`unable to fill frozen file quotas: ${JSON.stringify({ quotas, counts })}`);
+    throw new Error(`only ${files.length}/${fileCount} files passed frozen quality gates: ${JSON.stringify(counts)}`);
 }
 const selection = selectLengthBalancedTargets(files, targetsPerFile, targetSeed);
 files.forEach((file) => {
@@ -341,7 +360,12 @@ const lock = {
     cofechaExeSha256: manifest.cofechaSha256,
     seeds: { scenarioSeed, targetSeed, bootstrapSeed },
     fileCorrelationQuotas: quotas,
-    fileCorrelationCounts: Object.fromEntries(bands.map((band) => [band, qualifiedByBand.get(band)!.length])),
+    fileCorrelationCounts: Object.fromEntries(bands.map((band) => [band, selectedByBand.get(band)!.length])),
+    fileCorrelationQualifiedCounts: Object.fromEntries(bands.map((band) => [band, qualifiedByBand.get(band)!.length])),
+    fileCorrelationQuotaShortfall: Object.fromEntries(bands.map((band) => [
+        band,
+        Math.max(0, quotas[band] - qualifiedByBand.get(band)!.length),
+    ])),
     targetLengthIdealCounts: selection.idealCounts,
     targetLengthCounts: selection.counts,
     fileIds: files.map((file) => file.fileId),
