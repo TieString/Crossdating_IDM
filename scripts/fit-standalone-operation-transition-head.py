@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""Apply frozen pairwise operation-transition policies to target files."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+import pandas as pd
+
+import standalone_operation_transition_head as TRANSITION
+import standalone_whole_projection_head as METRICS
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--base-top", required=True)
+    parser.add_argument("--operation-scores", required=True)
+    parser.add_argument("--identity-location-top", required=True)
+    parser.add_argument("--model-config", required=True)
+    parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--bootstrap-repetitions", type=int, default=20000)
+    args = parser.parse_args()
+    config = json.loads(
+        Path(args.model_config).resolve().read_text(encoding="utf8")
+    )
+    if config.get("modelType") != "standalone_pairwise_operation_transition_head":
+        raise ValueError("unexpected operation transition model type")
+    output_dir = Path(args.output_dir).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    base = pd.read_csv(Path(args.base_top).resolve())
+    competition = TRANSITION.build_competition(
+        base,
+        pd.read_pickle(Path(args.operation_scores).resolve()),
+        pd.read_pickle(Path(args.identity_location_top).resolve()),
+    )
+    selected = TRANSITION.apply_policies(
+        base, competition, list(config.get("policies", []))
+    )
+    summary = {
+        **config,
+        **METRICS.summarize(selected, base, args.bootstrap_repetitions),
+        "operationTransitionSwitches": int(
+            selected["operation_transition_switched"].sum()
+        ),
+        "selectionPolicy": "frozen_pairwise_operation_transition_predict",
+        "truthAwareRuntimeSwitches": 0,
+        "legacyFallbacks": 0,
+    }
+    (output_dir / "summary.json").write_text(
+        json.dumps(summary, indent=2) + "\n", encoding="utf8"
+    )
+    competition.to_csv(output_dir / "operation-transition-competition.csv", index=False)
+    selected.to_csv(output_dir / "standalone-operation-transition-top.csv", index=False)
+    print(json.dumps({"outputDir": str(output_dir), **summary}))
+
+
+if __name__ == "__main__":
+    main()
