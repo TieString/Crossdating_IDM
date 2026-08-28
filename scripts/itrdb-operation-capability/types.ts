@@ -15,10 +15,11 @@ export type CapabilityConfig = {
         | "itrdb-operation-capability-v2"
         | "itrdb-operation-capability-v3"
         | "itrdb-operation-capability-v4-1000"
-        | "itrdb-unified-adjudicator-v2";
+        | "itrdb-unified-adjudicator-v2"
+        | "itrdb-frozen-external-v1";
     frozenDate: string;
     seed: string;
-    scenarioGeneratorVersion: 3 | 4 | 5;
+    scenarioGeneratorVersion: 3 | 4 | 5 | 6;
     itrdbRoot: string;
     fileIds: string[];
     generalizationSelection?: {
@@ -64,10 +65,17 @@ export type CapabilityConfig = {
             | "development"
             | "calibration"
             | "finalHoldout"
-            | "expandedFrozenHoldoutReuse";
+            | "expandedFrozenHoldoutReuse"
+            | "externalFrozenTest";
         casesPerTargetPerFamily: number;
         priorProtocolVersion?: string;
         targetExpansion?: "retainPrior500PlusDeterministic500";
+        eventPositionWeights?: {
+            middle: number;
+            newer: number;
+            barkNear: number;
+        };
+        lengthAwareEventCounts?: boolean;
     };
     statistics?: {
         clusterUnit: "file";
@@ -120,7 +128,7 @@ export type CapabilityExcludedFile = {
 export type CapabilityManifest = {
     schemaVersion: 1;
     protocolVersion: CapabilityConfig["protocolVersion"];
-    scenarioGeneratorVersion: 3 | 4 | 5;
+    scenarioGeneratorVersion: 3 | 4 | 5 | 6;
     createdAt: string;
     gitCommit: string;
     configPath: string;
@@ -169,6 +177,9 @@ export type CapabilityCase = {
     spacingYears: number | null;
     partialShiftYears: number;
     wholeShiftYears: number;
+    eventCount?: number;
+    frontierPositionBand?: "middle" | "newer" | "barkNear" | null;
+    frontierDistanceFromNewest?: number | null;
     evaluationMode: CapabilityEvaluationMode;
     acceptanceTier: CapabilityAcceptanceTier;
     truths: CapabilityTruth[];

@@ -661,6 +661,362 @@ const buildBalancedCapabilityCases = (
     return cases;
 };
 
+type ExternalPositionBand = "middle" | "newer" | "barkNear";
+
+type ExternalScenarioPlan = {
+    key: string;
+    family: "A" | "B" | "C" | "D";
+    file: CapabilityManifest["files"][number];
+    target: CapabilityTarget;
+    targetIndex: number;
+    operationPattern: CapabilityOperation[];
+    localCount: number;
+    eventCount: number;
+    spacingYears: number;
+    partialShiftYears: number;
+    secondPartialShiftYears: number;
+    wholeShiftYears: number;
+    positionBand: ExternalPositionBand | null;
+    frontierDistance: number | null;
+};
+
+const externalPositionBounds: Record<
+    ExternalPositionBand,
+    { minimum: number; maximum: number | null }
+> = {
+    barkNear: { minimum: 15, maximum: 34 },
+    newer: { minimum: 35, maximum: 69 },
+    middle: { minimum: 70, maximum: null },
+};
+
+const eventCountChoices = (target: CapabilityTarget): number[] => (
+    target.seriesYears < 200
+        ? [2]
+        : target.seriesYears < 300
+            ? [2, 3]
+            : [3, 4]
+);
+
+const preferredEventCount = (
+    target: CapabilityTarget,
+    key: string,
+): number => balanced(eventCountChoices(target), key);
+
+const maximumFrontierDistance = (
+    config: CapabilityConfig,
+    target: CapabilityTarget,
+    localCount: number,
+    spacingYears: number,
+): number => (
+    target.endYear
+    - target.startYear
+    - config.selection.minimumOlderContextYears
+    - Math.max(0, localCount - 1) * spacingYears
+);
+
+const feasiblePositionBands = (
+    config: CapabilityConfig,
+    plan: ExternalScenarioPlan,
+): ExternalPositionBand[] => {
+    if (plan.localCount === 0) return [];
+    const maximumDistance = maximumFrontierDistance(
+        config,
+        plan.target,
+        plan.localCount,
+        plan.spacingYears,
+    );
+    return (["barkNear", "newer", "middle"] as const).filter((band) => (
+        maximumDistance >= externalPositionBounds[band].minimum
+    ));
+};
+
+const positionQuotas = (
+    total: number,
+    weights: NonNullable<CapabilityConfig["design"]>["eventPositionWeights"],
+): Record<ExternalPositionBand, number> => {
+    const normalized = weights ?? { middle: 0.4, newer: 0.35, barkNear: 0.25 };
+    const raw = (["middle", "newer", "barkNear"] as const).map((band) => ({
+        band,
+        exact: total * normalized[band],
+    }));
+    const quota = Object.fromEntries(raw.map(({ band, exact }) => (
+        [band, Math.floor(exact)]
+    ))) as Record<ExternalPositionBand, number>;
+    let remainder = total - Object.values(quota).reduce((sum, value) => sum + value, 0);
+    raw.sort((left, right) => (
+        (right.exact - Math.floor(right.exact))
+        - (left.exact - Math.floor(left.exact))
+        || left.band.localeCompare(right.band)
+    )).forEach(({ band }) => {
+        if (remainder <= 0) return;
+        quota[band] += 1;
+        remainder -= 1;
+    });
+    return quota;
+};
+
+const assignExternalPositions = (
+    config: CapabilityConfig,
+    plans: ExternalScenarioPlan[],
+): void => {
+    (["A", "B", "C", "D"] as const).forEach((family) => {
+        const localPlans = plans.filter((plan) => (
+            plan.family === family && plan.localCount > 0
+        ));
+        const quotas = positionQuotas(
+            localPlans.length,
+            config.design?.eventPositionWeights,
+        );
+        const assigned: Record<ExternalPositionBand, number> = {
+            middle: 0,
+            newer: 0,
+            barkNear: 0,
+        };
+        [...localPlans].sort((left, right) => {
+            const leftFeasible = feasiblePositionBands(config, left).length;
+            const rightFeasible = feasiblePositionBands(config, right).length;
+            return leftFeasible - rightFeasible
+                || stableHash(left.key) - stableHash(right.key)
+                || left.key.localeCompare(right.key);
+        }).forEach((plan) => {
+            const feasible = feasiblePositionBands(config, plan);
+            if (feasible.length === 0) {
+                throw new Error(`no feasible external position: ${plan.key}`);
+            }
+            const selected = [...feasible].sort((left, right) => (
+                (quotas[right] - assigned[right]) - (quotas[left] - assigned[left])
+                || stableHash(`${plan.key}:${left}`) - stableHash(`${plan.key}:${right}`)
+                || left.localeCompare(right)
+            ))[0];
+            const bounds = externalPositionBounds[selected];
+            const maximumDistance = maximumFrontierDistance(
+                config,
+                plan.target,
+                plan.localCount,
+                plan.spacingYears,
+            );
+            const upper = Math.min(bounds.maximum ?? maximumDistance, maximumDistance);
+            const width = upper - bounds.minimum + 1;
+            if (width <= 0) throw new Error(`invalid external position range: ${plan.key}`);
+            plan.positionBand = selected;
+            plan.frontierDistance = bounds.minimum
+                + stableHash(`${plan.key}:frontier-distance`) % width;
+            assigned[selected] += 1;
+        });
+    });
+};
+
+const externalYears = (plan: ExternalScenarioPlan): number[] => {
+    if (plan.localCount === 0 || plan.frontierDistance === null) return [];
+    const newest = plan.target.endYear - plan.frontierDistance;
+    return Array.from({ length: plan.localCount }, (_, index) => (
+        newest - (plan.localCount - index - 1) * plan.spacingYears
+    ));
+};
+
+const externalPatternForD = (
+    count: number,
+    targetIndex: number,
+    key: string,
+): LocalPattern => {
+    const patterns = distantMixedPatterns.filter((pattern) => (
+        pattern.operations.length === count
+    ));
+    if (patterns.length === 0) throw new Error(`no D pattern for ${count} events`);
+    return cyclic(patterns, targetIndex, key);
+};
+
+const buildFrozenExternalCapabilityCases = (
+    config: CapabilityConfig,
+    manifest: CapabilityManifest,
+): CapabilityCase[] => {
+    if (config.scenarioGeneratorVersion !== 6
+        || config.protocolVersion !== "itrdb-frozen-external-v1"
+        || config.design?.scenarioSampling !== "balancedOnePerFamily"
+        || config.design.casesPerTargetPerFamily !== 1
+        || config.design.lengthAwareEventCounts !== true) {
+        throw new Error("external scenario generator v6 requires the frozen external protocol");
+    }
+    if (config.injection.wholeShiftYears.length === 0
+        || config.injection.wholeShiftYears.some((shift) => (
+            !Number.isInteger(shift) || shift >= 0
+        ))) {
+        throw new Error("external scenario generator allows only negative whole shifts");
+    }
+    const flattened = manifest.files.flatMap((file) => (
+        file.eligibleTargets.map((target) => ({ file, target }))
+    ));
+    const plans: ExternalScenarioPlan[] = [];
+    const wholeShiftCounters: Record<"A" | "D", number> = { A: 0, D: 0 };
+    const nextWholeShift = (family: "A" | "D"): number => {
+        const shifts = config.injection.wholeShiftYears;
+        const phase = stableHash(`${config.seed}:${family}:external-whole-phase`) % shifts.length;
+        const shift = shifts[(phase + wholeShiftCounters[family]) % shifts.length];
+        wholeShiftCounters[family] += 1;
+        return shift;
+    };
+    const singlePatterns: CapabilityOperation[] = [
+        "missingRing", "falseRing", "partialMove", "wholeSeriesMove",
+    ];
+    const nearSpacings = configuredNearSpacings(config);
+    flattened.forEach(({ file, target }, targetIndex) => {
+        const baseKey = `${config.seed}:${file.fileId}:${target.targetId}`;
+        const partialShiftYears = balanced(
+            config.injection.partialShiftYears,
+            `${baseKey}:partial-shift`,
+        );
+        const secondPartialShiftYears = balanced(
+            [...config.injection.partialShiftYears].reverse(),
+            `${baseKey}:second-partial-shift`,
+        );
+        const aOperation = cyclic(
+            singlePatterns,
+            targetIndex,
+            `${config.seed}:A-operation`,
+        );
+        const aWholeShift = aOperation === "wholeSeriesMove"
+            ? nextWholeShift("A")
+            : balanced(config.injection.wholeShiftYears, `${baseKey}:A-whole`);
+        plans.push({
+            key: `${baseKey}:A`, family: "A", file, target, targetIndex,
+            operationPattern: [aOperation],
+            localCount: aOperation === "wholeSeriesMove" ? 0 : 1,
+            eventCount: 1,
+            spacingYears: 0,
+            partialShiftYears,
+            secondPartialShiftYears,
+            wholeShiftYears: aWholeShift,
+            positionBand: null,
+            frontierDistance: null,
+        });
+
+        const count = preferredEventCount(target, `${baseKey}:event-count`);
+        const bOperation = cyclic(
+            ["missingRing", "falseRing", "partialMove"] as const,
+            targetIndex,
+            `${config.seed}:B-operation`,
+        );
+        plans.push({
+            key: `${baseKey}:B`, family: "B", file, target, targetIndex,
+            operationPattern: Array.from({ length: count }, () => bOperation),
+            localCount: count,
+            eventCount: count,
+            spacingYears: config.injection.distantSpacingYears,
+            partialShiftYears,
+            secondPartialShiftYears,
+            wholeShiftYears: balanced(config.injection.wholeShiftYears, `${baseKey}:B-whole`),
+            positionBand: null,
+            frontierDistance: null,
+        });
+
+        const cOperation = cyclic(
+            ["missingRing", "falseRing"] as const,
+            targetIndex,
+            `${config.seed}:C-operation`,
+        );
+        const cSpacing = cyclic(
+            nearSpacings,
+            targetIndex,
+            `${config.seed}:C-spacing`,
+        );
+        plans.push({
+            key: `${baseKey}:C`, family: "C", file, target, targetIndex,
+            operationPattern: Array.from({ length: count }, () => cOperation),
+            localCount: count,
+            eventCount: count,
+            spacingYears: cSpacing,
+            partialShiftYears,
+            secondPartialShiftYears,
+            wholeShiftYears: balanced(config.injection.wholeShiftYears, `${baseKey}:C-whole`),
+            positionBand: null,
+            frontierDistance: null,
+        });
+
+        const dPattern = externalPatternForD(
+            count,
+            targetIndex,
+            `${config.seed}:D-pattern`,
+        );
+        const dWholeShift = dPattern.operations.includes("wholeSeriesMove")
+            ? nextWholeShift("D")
+            : balanced(config.injection.wholeShiftYears, `${baseKey}:D-whole`);
+        plans.push({
+            key: `${baseKey}:D`, family: "D", file, target, targetIndex,
+            operationPattern: dPattern.operations,
+            localCount: dPattern.operations.filter((operation) => (
+                operation !== "wholeSeriesMove"
+            )).length,
+            eventCount: count,
+            spacingYears: config.injection.distantSpacingYears,
+            partialShiftYears,
+            secondPartialShiftYears,
+            wholeShiftYears: dWholeShift,
+            positionBand: null,
+            frontierDistance: null,
+        });
+    });
+    assignExternalPositions(config, plans);
+
+    const cases: CapabilityCase[] = [];
+    flattened.forEach(({ file, target }) => {
+        const baseKey = `${config.seed}:${file.fileId}:${target.targetId}`;
+        const targetPlans = plans.filter((plan) => (
+            plan.file.fileId === file.fileId && plan.target.targetId === target.targetId
+        ));
+        const common = {
+            fileId: file.fileId,
+            relativePath: file.relativePath,
+            targetId: target.targetId,
+            seriesYears: target.seriesYears,
+            targetStartYear: target.startYear,
+            targetEndYear: target.endYear,
+            masterCorrelation: target.masterCorrelation,
+            problemSegments: target.problemSegments,
+        };
+        addCase(cases, {
+            ...common,
+            caseId: `${file.fileId}:${target.targetId}:Clean0-control-v6`,
+            family: "Clean",
+            scenarioId: "Clean0-control-v6",
+            spacingYears: null,
+            partialShiftYears: balanced(config.injection.partialShiftYears, `${baseKey}:partial-shift`),
+            wholeShiftYears: balanced(config.injection.wholeShiftYears, `${baseKey}:clean-whole`),
+            eventCount: 0,
+            frontierPositionBand: null,
+            frontierDistanceFromNewest: null,
+            evaluationMode: "sequentialFrontier",
+            acceptanceTier: "blocking",
+            truths: [],
+        });
+        targetPlans.forEach((plan) => {
+            const years = externalYears(plan);
+            const truths = buildPatternTruths(
+                { slug: plan.family, operations: plan.operationPattern },
+                years,
+                plan.partialShiftYears,
+                plan.secondPartialShiftYears,
+                plan.wholeShiftYears,
+            );
+            addCase(cases, {
+                ...common,
+                caseId: `${file.fileId}:${target.targetId}:${plan.family}-external-v6`,
+                family: plan.family,
+                scenarioId: `${plan.family}-external-v6`,
+                spacingYears: plan.localCount >= 2 ? plan.spacingYears : null,
+                partialShiftYears: plan.partialShiftYears,
+                wholeShiftYears: plan.wholeShiftYears,
+                eventCount: plan.eventCount,
+                frontierPositionBand: plan.positionBand,
+                frontierDistanceFromNewest: plan.frontierDistance,
+                evaluationMode: "sequentialFrontier",
+                acceptanceTier: "blocking",
+                truths,
+            });
+        });
+    });
+    return cases;
+};
+
 export const buildCapabilityCases = (
     config: CapabilityConfig,
     manifest: CapabilityManifest,
@@ -670,4 +1026,6 @@ export const buildCapabilityCases = (
         ? buildBalancedCapabilityCases(config, manifest, 4)
         : config.scenarioGeneratorVersion === 5
             ? buildBalancedCapabilityCases(config, manifest, 5)
-            : (() => { throw new Error("unsupported scenario generator version"); })();
+            : config.scenarioGeneratorVersion === 6
+                ? buildFrozenExternalCapabilityCases(config, manifest)
+                : (() => { throw new Error("unsupported scenario generator version"); })();
