@@ -266,8 +266,10 @@ def score_profile(
     output_dir: Path,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     modes = PROFILE.load_candidate_modes([str(package_table)])
+    package_attempt = str(base_top.iloc[0]["attempt_id"])
+    dataset_id = package_attempt.split(":evaluation:", 1)[0]
     rows = PROFILE.add_shape_features(PROFILE.load_selected_rows(
-        [f"external={row_cache}"],
+        [f"{dataset_id}={row_cache / 'rows.pkl'}"],
         base_top,
         modes,
         20,
@@ -334,7 +336,12 @@ def score_fusion(
         profile_location_path,
         base_weights,
     )
-    feature_names = FROZEN.load_feature_names(model_dir / "feature-names.json")
+    feature_names_path = model_dir / "feature-names.json"
+    feature_names = (
+        FROZEN.load_feature_names(feature_names_path)
+        if feature_names_path.exists()
+        else FROZEN.load_model_feature_names(model_dir / "proposal-classifier.txt")
+    )
     values, _ = FUSION.encode(raw)
     values = values.reindex(columns=feature_names, fill_value=0).replace(
         [np.inf, -np.inf], np.nan

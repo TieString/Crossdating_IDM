@@ -59,6 +59,16 @@ def load_feature_names(path: Path) -> list[str]:
     return values
 
 
+def load_model(path: Path) -> lgb.Booster:
+    # LightGBM's Windows C API cannot reliably open non-ASCII paths. Reading the
+    # model text in Python preserves the immutable artifact bytes during loading.
+    return lgb.Booster(model_str=path.read_text(encoding="utf8"))
+
+
+def load_model_feature_names(path: Path) -> list[str]:
+    return list(load_model(path).feature_name())
+
+
 def encode_frame(
     frame: pd.DataFrame,
     columns: Iterable[str],
@@ -82,7 +92,5 @@ def encode_frame(
 
 
 def predict(model_path: Path, values: pd.DataFrame | np.ndarray) -> np.ndarray:
-    # LightGBM's Windows C API cannot reliably open non-ASCII paths. Reading the
-    # immutable model text in Python keeps inference byte-identical.
-    model = lgb.Booster(model_str=model_path.read_text(encoding="utf8"))
+    model = load_model(model_path)
     return np.asarray(model.predict(values), dtype=float)
