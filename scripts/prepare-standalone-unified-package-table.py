@@ -571,32 +571,41 @@ def main() -> None:
         if column not in ROW_LABEL_COLUMNS
         and column not in {"event_type", "shift_years", "year"}
     ]
-    row_groups = {
-        key: group
-        for key, group in rows.groupby(
-            ["attempt_id", "event_type", "shift_years"], sort=False
-        )
-    }
-    partial_identities_by_attempt: dict[str, list[tuple[int, pd.Series]]] = {}
+    identity_group_columns = ["attempt_id", "event_type", "shift_years"]
+    row_group_positions = rows.groupby(
+        identity_group_columns, sort=False
+    ).indices
+
+    def row_group(key: tuple[str, str, int]) -> pd.DataFrame | None:
+        positions = row_group_positions.get(key)
+        return rows.iloc[positions] if positions is not None else None
+
+    partial_identities_by_attempt: dict[str, list[tuple[int, Any]]] = {}
     if args.enable_whole_projection:
-        for (attempt_id, event_type, shift_years), group in row_groups.items():
+        identity_group_order = rows[identity_group_columns].drop_duplicates()
+        for attempt_id, event_type, shift_years in identity_group_order.itertuples(
+            index=False, name=None
+        ):
             if event_type != "partialMove" or int(shift_years) >= 0:
                 continue
+            positions = row_group_positions[
+                (attempt_id, event_type, shift_years)
+            ]
+            group = rows.iloc[positions]
             score_column = (
                 "enriched_location_score"
                 if "enriched_location_score" in group.columns
                 else "operation_probability"
             )
-            evidence = group.loc[
-                pd.to_numeric(group[score_column], errors="coerce").idxmax()
-            ]
+            evidence_index = pd.to_numeric(
+                group[score_column], errors="coerce"
+            ).idxmax()
             partial_identities_by_attempt.setdefault(str(attempt_id), []).append(
-                (int(shift_years), evidence)
+                (int(shift_years), evidence_index)
             )
-    selected_modes_by_attempt = {
-        attempt_id: group
-        for attempt_id, group in selected_modes.groupby("attempt_id", sort=False)
-    }
+    selected_mode_positions_by_attempt = selected_modes.groupby(
+        "attempt_id", sort=False
+    ).indices
 
     step_by_attempt = {
         f"evaluation:{int(step['caseIndex'])}:{int(step['step'])}": step
@@ -757,7 +766,7 @@ def main() -> None:
                     window_correct = boolean(
                         step.get("workflowEquivalentWindowCovered")
                     )
-            group = row_groups.get((attempt_id, event_type, shift_years))
+            group = row_group((attempt_id, event_type, shift_years))
             evidence = None
             if group is not None and not group.empty:
                 evidence = (
@@ -807,9 +816,10 @@ def main() -> None:
                 and not pd.isna(truth_shift_value)
                 else None
             )
-            for shift_years, evidence in partial_identities_by_attempt.get(
+            for shift_years, evidence_index in partial_identities_by_attempt.get(
                 attempt_id, []
             ):
+                evidence = rows.loc[evidence_index]
                 correct = (
                     truth_type == "wholeSeriesMove"
                     and truth_shift is not None
@@ -831,9 +841,13 @@ def main() -> None:
                     runtime_event=None,
                 )
 
-        for _, proposal in selected_modes_by_attempt.get(
-            attempt_id, pd.DataFrame()
-        ).iterrows():
+        mode_positions = selected_mode_positions_by_attempt.get(attempt_id)
+        proposals = (
+            selected_modes.iloc[mode_positions]
+            if mode_positions is not None
+            else selected_modes.iloc[0:0]
+        )
+        for _, proposal in proposals.iterrows():
             mode_sources = str(proposal.get("location_mode_sources") or "")
             append_candidate(
                 step=step,
