@@ -103,12 +103,20 @@ def attempt_id(case_index: int, step: int) -> str:
     return f"evaluation:{int(case_index)}:{int(step)}"
 
 
+def normalize_attempt_id(value: object) -> str:
+    text = str(value)
+    marker = "evaluation:"
+    marker_index = text.find(marker)
+    return text[marker_index:] if marker_index >= 0 else text
+
+
 def top1_summary(
     name: str,
     path: Path,
     attempts: pd.DataFrame,
 ) -> dict[str, object]:
     top = pd.read_csv(path)
+    top["attempt_id"] = top["attempt_id"].map(normalize_attempt_id)
     joined = attempts[["attempt_id", "truth_type", "truth_year"]].merge(
         top[[
             "attempt_id", "event_type", "operation_correct",
@@ -192,6 +200,7 @@ def main() -> None:
     targets = pd.DataFrame(target_rows)
 
     final = pd.read_csv(model_dir / "final" / "standalone-whole-projection-top.csv")
+    final["attempt_id"] = final["attempt_id"].map(normalize_attempt_id)
     predictions = steps.merge(final, on="attempt_id", how="left", suffixes=("", "_model"))
     predictions = predictions.merge(
         cases[[
@@ -237,6 +246,7 @@ def main() -> None:
     event = predictions.loc[~predictions["is_clean"]].copy()
     clean = predictions.loc[predictions["is_clean"]].copy()
     package = pd.read_pickle(Path(args.package_table).resolve())
+    package["attempt_id"] = package["attempt_id"].map(normalize_attempt_id)
     oracle = package.groupby("attempt_id", sort=False).agg(
         candidate_oracle=("workflow_correct", "max"),
         strict_candidate_oracle=("strict_correct", "max"),
