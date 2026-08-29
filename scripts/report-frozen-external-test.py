@@ -110,6 +110,26 @@ def normalize_attempt_id(value: object) -> str:
     return text[marker_index:] if marker_index >= 0 else text
 
 
+def classify_failure_reasons(event: pd.DataFrame) -> np.ndarray:
+    """Classify only failed predictions; a post-package recovery stays correct."""
+
+    return np.select(
+        [
+            event["model_workflow_correct"].eq(1),
+            event["model_response"].eq(0),
+            event["candidate_oracle"].eq(0),
+            event["model_operation_correct"].eq(0),
+        ],
+        [
+            "correct",
+            "refusal",
+            "evidence_projection_loss",
+            "operation_or_shift_selection",
+        ],
+        default="location_selection",
+    )
+
+
 def top1_summary(
     name: str,
     path: Path,
@@ -254,22 +274,7 @@ def main() -> None:
     event = event.merge(oracle, on="attempt_id", how="left")
     event["candidate_oracle"] = event["candidate_oracle"].fillna(0).astype(int)
 
-    failure_reason = np.select(
-        [
-            event["model_response"].eq(0),
-            event["candidate_oracle"].eq(0),
-            event["model_operation_correct"].eq(0),
-            event["model_workflow_correct"].eq(0),
-        ],
-        [
-            "refusal",
-            "evidence_projection_loss",
-            "operation_or_shift_selection",
-            "location_selection",
-        ],
-        default="correct",
-    )
-    event["failure_reason"] = failure_reason
+    event["failure_reason"] = classify_failure_reasons(event)
 
     family_metrics: dict[str, object] = {}
     for family, group in event.groupby("family", sort=True):

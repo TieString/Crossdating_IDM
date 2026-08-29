@@ -5,6 +5,8 @@ import sys
 import unittest
 from pathlib import Path
 
+import pandas as pd
+
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 
@@ -33,6 +35,24 @@ class FrozenExternalReportTest(unittest.TestCase):
         self.assertEqual(
             REPORT.normalize_attempt_id("evaluation:123:4"),
             "evaluation:123:4",
+        )
+
+    def test_post_package_recovery_is_not_reclassified_as_failure(self) -> None:
+        frame = pd.DataFrame({
+            "model_workflow_correct": [1, 0, 0, 0, 0],
+            "model_response": [1, 0, 1, 1, 1],
+            "candidate_oracle": [0, 0, 0, 1, 1],
+            "model_operation_correct": [1, 0, 0, 0, 1],
+        })
+        self.assertEqual(
+            REPORT.classify_failure_reasons(frame).tolist(),
+            [
+                "correct",
+                "refusal",
+                "evidence_projection_loss",
+                "operation_or_shift_selection",
+                "location_selection",
+            ],
         )
 
 

@@ -91,6 +91,10 @@ counts were 2/13/23/12. Eligible target lengths were 246/167/87 for
 balance. Full family-by-stratum rows are retained in `strata.csv` with the raw
 external artifacts.
 
+Candidate Oracle and mutually exclusive failure attribution by file and
+target/master correlation are reported in
+[`itrdb-frozen-external-v1-correlation-oracle-audit-2026-08-29.md`](itrdb-frozen-external-v1-correlation-oracle-audit-2026-08-29.md).
+
 For multi-event families, the workflow accuracies by event count were:
 
 | Family | 2 events | 3 events | 4 events |
@@ -101,17 +105,26 @@ For multi-event families, the workflow accuracies by event count were:
 
 ## Remaining Failures
 
-Of 556 failed event opportunities:
+Of 554 failed event opportunities:
 
-- Operation or exact-shift selection: 315.
-- Correct operation but wrong 13-year window: 167.
-- No workflow-correct candidate in the immutable package: 59.
+- Operation or exact-shift error: 347.
+- Window-location error: 149.
+- Workflow-equivalent frontier error: 41.
 - Refusal: 15.
+- Final package-projection inconsistency: 2.
 
-The dominant operation confusions were partialMove to wholeSeriesMove (59),
-falseRing to partialMove (55), wrong partialMove magnitude (40),
-wholeSeriesMove to partialMove (35), and partialMove to falseRing (31). D alone
-accounted for 158 operation errors and 40 of the 59 evidence-projection losses.
+By processing stage, 495 failures had a workflow-correct immutable package but
+lost it during final ranking/adjudication; 59 failures had no workflow-correct
+immutable package. The latter includes two refusals. Two additional attempts
+without a correct immutable package were corrected by the post-package whole
+projection and are successes, not failures.
+
+The exclusive operation errors were concentrated in D (183), followed by B
+(75), C (60), and A (29). The most frequent exact transitions were missingRing
+to falseRing (25), partialMove -20 to falseRing (24), falseRing to partialMove
+-20 (24), partialMove -20 to wholeSeriesMove -20 (16), and falseRing to
+missingRing (14). D also accounted for 40 of the 59 failed Candidate Oracle
+misses.
 
 Exact-year Top1 remained secondary to window coverage: ranker 860/3,705
 (23.21%), pair 834/3,705 (22.51%), full-year 695/3,705 (18.76%), and final
