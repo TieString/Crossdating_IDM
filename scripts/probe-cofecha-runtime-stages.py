@@ -298,6 +298,16 @@ def parse_args() -> argparse.Namespace:
         choices=("plain", "logon", "arraw", "full"),
         default="plain",
     )
+    parser.add_argument("--spline-years", type=int, default=32)
+    parser.add_argument("--segment-length", type=int, default=50)
+    parser.add_argument("--segment-lag", type=int, default=25)
+    parser.add_argument(
+        "--correlation-method",
+        choices=("pearson", "spearman"),
+        default="pearson",
+    )
+    parser.add_argument("--critical-correlation", type=float)
+    parser.add_argument("--include-absent-rings", action="store_true")
     return parser.parse_args()
 
 
@@ -347,10 +357,26 @@ def main() -> None:
         "",
         "",
     ]
+    if args.spline_years != 32:
+        prompt_lines.extend(("1", str(args.spline_years), ""))
+    if args.segment_length != 50 or args.segment_lag != 25:
+        prompt_lines.extend((
+            "2",
+            str(args.segment_length),
+            str(args.segment_lag),
+        ))
     if args.profile in ("plain", "logon"):
         prompt_lines.extend(("3", "N"))
     if args.profile in ("plain", "arraw"):
         prompt_lines.extend(("4", "N"))
+    if args.correlation_method != "pearson" or args.critical_correlation is not None:
+        prompt_lines.extend((
+            "5",
+            "S" if args.correlation_method == "spearman" else "P",
+            "" if args.critical_correlation is None else str(args.critical_correlation),
+        ))
+    if args.include_absent_rings:
+        prompt_lines.extend(("9", "N"))
     prompt_lines.extend(("6", "V", "", ""))
     prompt = "\n".join(prompt_lines).encode("ascii")
     device.input(pid, prompt)

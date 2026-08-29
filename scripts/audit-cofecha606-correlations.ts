@@ -23,17 +23,19 @@ const expected = Number(valueFor("--expected"));
 const windowStart = Number(valueFor("--start"));
 const windowEnd = Number(valueFor("--end"));
 const inspectYear = Number(valueFor("--year"));
+const splineRigidityYears = Number(valueFor("--spline-years") || 32);
 stopMarker.value = await detectPrecision(readFileSync(path, "utf8"));
 const loaded = await loadRwl(path, "tucson-auto", {
     preserveNegativeMeasurements: true,
 });
 const master = buildCofecha606MasterSeries(loaded.siteData, {
     ...COFECHA_REFERENCE_DEFAULT_OPTIONS,
+    splineRigidityYears,
     useAutoregressiveModel: true,
     useLogTransform: true,
 })!;
 const prepared = prepareCofecha606SeriesForReport(loaded.siteData, {
-    splineRigidityYears: 32,
+    splineRigidityYears,
     splineFrequencyResponse: 0.5,
     segmentLength: 50,
     segmentLag: 25,

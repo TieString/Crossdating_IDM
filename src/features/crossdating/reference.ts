@@ -1152,10 +1152,11 @@ export function cofechaStyleStandardize(
 
     if (numericImplementation === "legacy-float32"
         && splineImplementation === "ltrr-cook-holmes") {
+        // COFECHA's VAR_STAB pass stays at 32 years even when option 1 changes.
         const stabilizedValues = cofecha606StabilizeFilteredSeries(
             transformed.map((point) => point.value),
-            options.splineRigidityYears,
-            options.splineFrequencyResponse,
+            32,
+            0.5,
         );
         transformed = transformed.map((point, index) => ({
             year: point.year,

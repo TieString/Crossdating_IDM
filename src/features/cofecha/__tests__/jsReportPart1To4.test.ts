@@ -167,4 +167,31 @@ describe("COFECHA 6.06 JS report Parts 1-4", () => {
             comparedYears: 49,
         });
     });
+
+    it("honors the COFECHA processing and segment settings", () => {
+        const report = generateCofecha606JsReport(buildVariedSite(), {
+            jobName: "SET",
+            inputFileName: "settings.rwl",
+            splineRigidityYears: 50,
+            segmentLength: 60,
+            segmentLag: 30,
+            correlationMethod: "spearman",
+            useAutoregressiveModel: false,
+            useLogTransform: false,
+            omitAbsentRingsFromMaster: false,
+        });
+
+        expect(report.options).toMatchObject({
+            splineRigidityYears: 50,
+            segmentLength: 60,
+            segmentLag: 30,
+            correlationMethod: "spearman",
+            criticalCorrelation: 0.2997,
+            omitAbsentRingsFromMaster: false,
+        });
+        expect(report.part5.criticalCorrelation).toBe(0.2997);
+        expect(report.part6.highOutlierThreshold).toBe(4);
+        expect(report.part6.lowOutlierThreshold).toBe(-4);
+        expect(report.part5.series[0].segments[0].lagCorrelations).toHaveLength(21);
+    });
 });

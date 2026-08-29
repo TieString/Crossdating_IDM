@@ -25,11 +25,26 @@ const loaded = await loadRwl(rwlPath, "tucson-auto", {
     preserveNegativeMeasurements: true,
 });
 const out = readFileSync(outPath, "utf8");
+const splineRigidityYears = Number(out.match(
+    /Cubic smoothing spline 50% wavelength cutoff for filtering\s+(\d+) years/,
+)?.[1] ?? 32);
+const segmentOptions = out.match(
+    /Segments examined are\s+(\d+) years lagged successively by\s+(\d+) years/,
+);
+const criticalCorrelation = Number(out.match(
+    /Critical correlation, 99% confidence level\s+([\d.]+)/,
+)?.[1] ?? 0.3281);
 const jsReport = generateCofecha606JsReport(loaded.siteData, {
     jobName: out.match(/\bRun\s+(\S+)/)?.[1] ?? "FULL",
     inputFileName: basename(rwlPath),
+    splineRigidityYears,
+    segmentLength: Number(segmentOptions?.[1] ?? 50),
+    segmentLag: Number(segmentOptions?.[2] ?? 25),
     useAutoregressiveModel: /Autoregressive model applied/.test(out),
     useLogTransform: /Series transformed to logarithms/.test(out),
+    correlationMethod: /CORRELATION is Spearman/.test(out) ? "spearman" : "pearson",
+    criticalCorrelation,
+    omitAbsentRingsFromMaster: /Absent rings are omitted from master series/.test(out),
 });
 
 const integer = (pattern: RegExp) => Number(out.match(pattern)?.[1]);

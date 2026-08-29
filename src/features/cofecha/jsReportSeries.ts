@@ -143,6 +143,30 @@ export const cofecha606Pearson = (
     return Math.max(-1, Math.min(1, correlation));
 };
 
+const cofecha606Ranks = (values: readonly number[]) => {
+    const sorted = values.map((value, index) => ({ value: Math.fround(value), index }))
+        .sort((left, right) => left.value - right.value || left.index - right.index);
+    const ranks = Array<number>(values.length);
+    for (let start = 0; start < sorted.length;) {
+        let end = start + 1;
+        while (end < sorted.length && sorted[end].value === sorted[start].value) end += 1;
+        const rank = Math.fround((start + 1 + end) / 2);
+        for (let index = start; index < end; index += 1) {
+            ranks[sorted[index].index] = rank;
+        }
+        start = end;
+    }
+    return ranks;
+};
+
+export const cofecha606Spearman = (
+    leftValues: readonly number[],
+    rightValues: readonly number[],
+) => cofecha606Pearson(
+    cofecha606Ranks(leftValues),
+    cofecha606Ranks(rightValues),
+);
+
 const lagOneAutocorrelation = (values: readonly number[]) => {
     if (values.length < 3) return 0;
     return cofecha606Pearson(values.slice(0, -1), values.slice(1));

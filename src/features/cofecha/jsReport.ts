@@ -9,6 +9,7 @@ import {
 } from "@/features/crossdating/reference";
 import {
     cofecha606Pearson,
+    cofecha606Spearman,
     prepareCofecha606SeriesForReport,
     type Cofecha606DescriptiveStats,
 } from "./jsReportSeries";
@@ -26,7 +27,8 @@ export type Cofecha606JsReportOptions = {
     segmentLag?: number;
     useAutoregressiveModel?: boolean;
     useLogTransform?: boolean;
-    correlationMethod?: "pearson";
+    correlationMethod?: "pearson" | "spearman";
+    criticalCorrelation?: number;
     saveMaster?: boolean;
     listMeasurements?: boolean;
     includedParts?: readonly Cofecha606ReportPart[];
@@ -231,25 +233,46 @@ export type Cofecha606JsReport = {
 
 const DEFAULT_PARTS: Cofecha606ReportPart[] = [1, 2, 3, 4, 5, 6, 7];
 
+const defaultCriticalCorrelation = (segmentLength: number) => {
+    const degreesOfFreedom = Math.max(1, segmentLength - 2);
+    const z = 2.3263478740408408;
+    const inverseDf = 1 / degreesOfFreedom;
+    const criticalT = z
+        + (z ** 3 + z) * inverseDf / 4
+        + (5 * z ** 5 + 16 * z ** 3 + 3 * z) * inverseDf ** 2 / 96
+        + (3 * z ** 7 + 19 * z ** 5 + 17 * z ** 3 - 15 * z)
+            * inverseDf ** 3 / 384
+        + (79 * z ** 9 + 776 * z ** 7 + 1482 * z ** 5 - 1920 * z ** 3 - 945 * z)
+            * inverseDf ** 4 / 92160;
+    return Math.round(
+        criticalT / Math.sqrt(criticalT * criticalT + degreesOfFreedom) * 10000,
+    ) / 10000;
+};
+
 const normalizeOptions = (
     input: Cofecha606JsReportOptions,
-): Cofecha606JsReport["options"] => ({
-    jobName: input.jobName,
-    inputFileName: input.inputFileName,
-    title: input.title ?? "",
-    runAt: input.runAt ?? new Date(),
-    splineRigidityYears: input.splineRigidityYears ?? 32,
-    splineFrequencyResponse: input.splineFrequencyResponse ?? 0.5,
-    segmentLength: input.segmentLength ?? 50,
-    segmentLag: input.segmentLag ?? 25,
-    useAutoregressiveModel: input.useAutoregressiveModel ?? true,
-    useLogTransform: input.useLogTransform ?? true,
-    correlationMethod: input.correlationMethod ?? "pearson",
-    saveMaster: input.saveMaster ?? true,
-    listMeasurements: input.listMeasurements ?? false,
-    includedParts: [...input.includedParts ?? DEFAULT_PARTS],
-    omitAbsentRingsFromMaster: input.omitAbsentRingsFromMaster ?? true,
-});
+): Cofecha606JsReport["options"] => {
+    const segmentLength = input.segmentLength ?? 50;
+    return {
+        jobName: input.jobName,
+        inputFileName: input.inputFileName,
+        title: input.title ?? "",
+        runAt: input.runAt ?? new Date(),
+        splineRigidityYears: input.splineRigidityYears ?? 32,
+        splineFrequencyResponse: input.splineFrequencyResponse ?? 0.5,
+        segmentLength,
+        segmentLag: input.segmentLag ?? Math.floor(segmentLength / 2),
+        useAutoregressiveModel: input.useAutoregressiveModel ?? true,
+        useLogTransform: input.useLogTransform ?? true,
+        correlationMethod: input.correlationMethod ?? "pearson",
+        criticalCorrelation: input.criticalCorrelation
+            ?? defaultCriticalCorrelation(segmentLength),
+        saveMaster: input.saveMaster ?? true,
+        listMeasurements: input.listMeasurements ?? false,
+        includedParts: [...input.includedParts ?? DEFAULT_PARTS],
+        omitAbsentRingsFromMaster: input.omitAbsentRingsFromMaster ?? true,
+    };
+};
 
 const spanOf = (years: readonly number[]): Cofecha606YearSpan => {
     const sorted = [...years].sort((left, right) => left - right);
@@ -280,6 +303,9 @@ export const generateCofecha606JsReport = (
     inputOptions: Cofecha606JsReportOptions,
 ): Cofecha606JsReport => {
     const options = normalizeOptions(inputOptions);
+    const correlateValues = options.correlationMethod === "spearman"
+        ? cofecha606Spearman
+        : cofecha606Pearson;
     const segments = splitCofecha606SeriesSegments(siteData);
     const master = buildCofecha606MasterSeries(siteData, toReferenceOptions(options));
     if (!master || master.data.size === 0) {
@@ -373,7 +399,10 @@ export const generateCofecha606JsReport = (
             coverage.add(seriesIndex);
             coverageByYear.set(year, coverage);
             const sourceValue = series.segment.data.get(year);
-            if (typeof sourceValue === "number" && sourceValue <= 0) return;
+            if (typeof sourceValue === "number" && (
+                sourceValue < 0
+                || sourceValue === 0 && options.omitAbsentRingsFromMaster
+            )) return;
             const testingContributors = testingContributorsByYear.get(year) ?? [];
             testingContributors.push({ seriesIndex, value: series.testingValues[index] });
             testingContributorsByYear.set(year, testingContributors);
@@ -466,7 +495,7 @@ export const generateCofecha606JsReport = (
             referenceValues.push(referenceValue);
         });
         return {
-            correlation: cofecha606Pearson(targetValues, referenceValues),
+            correlation: correlateValues(targetValues, referenceValues),
             comparedYears: targetValues.length,
         };
     };
@@ -483,7 +512,8 @@ export const generateCofecha606JsReport = (
         series.years.forEach((year, index) => {
             if (year < startYear || year > endYear) return;
             const sourceValue = series.segment.data.get(year);
-            if (sourceValue === 0) return;
+            if (sourceValue === 0
+                && options.correlationMethod === "pearson") return;
             const referenceValue = reference.get(year + lagYears);
             if (referenceValue === undefined) {
                 completeReference = false;
@@ -494,7 +524,7 @@ export const generateCofecha606JsReport = (
         });
         return completeReference && targetValues.length >= 2
             ? {
-                correlation: cofecha606Pearson(referenceValues, targetValues),
+                correlation: correlateValues(referenceValues, targetValues),
                 comparedYears: targetValues.length,
             }
             : {
@@ -594,7 +624,7 @@ export const generateCofecha606JsReport = (
                         : current
                 ), asDated);
                 const flag = best.lagYears === 0
-                    ? (asDated.correlation ?? 0) < 0.3281 ? "A" : null
+                    ? (asDated.correlation ?? 0) < options.criticalCorrelation ? "A" : null
                     : "B";
                 return {
                     ...window,
@@ -639,6 +669,8 @@ export const generateCofecha606JsReport = (
     const outlierStandardDeviation = Math.fround(
         outlierScaleSum / Math.fround(continuousTimeSpan.years),
     );
+    const highOutlierThreshold = options.useLogTransform ? 3 : 4;
+    const lowOutlierThreshold = options.useLogTransform ? -4.5 : -4;
     const part6Series: Cofecha606Part6Series[] = part7PreparedSeries.map(
         (series, index) => {
             const sourceIndex = preparedSeries.indexOf(series);
@@ -743,7 +775,8 @@ export const generateCofecha606JsReport = (
                                 / outlierStandardDeviation,
                     )
                     : 0;
-                return standardDeviations > 3 || standardDeviations < -4.5
+                return standardDeviations > highOutlierThreshold
+                    || standardDeviations < lowOutlierThreshold
                     ? [{ year, standardDeviations }]
                     : [];
             });
@@ -892,13 +925,13 @@ export const generateCofecha606JsReport = (
             })),
         },
         part5: {
-            criticalCorrelation: 0.3281,
+            criticalCorrelation: options.criticalCorrelation,
             series: part5Series,
         },
         part6: {
             divergenceThreshold: 4,
-            highOutlierThreshold: 3,
-            lowOutlierThreshold: -4.5,
+            highOutlierThreshold,
+            lowOutlierThreshold,
             outlierStandardDeviation,
             series: part6Series,
         },
