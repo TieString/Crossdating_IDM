@@ -26,6 +26,7 @@ from immutable_two_stage_adjudicator import (
     pair_classifier,
     pair_tournament_scores,
     project_relative_features,
+    project_operation_hierarchy_features,
     ranker,
     seed_percentile,
     select_top,
@@ -197,8 +198,7 @@ def top_with_standardized_margin(
 
 def project_locations_into_operations(
     operation_top: pd.DataFrame,
-    proposal_top: pd.DataFrame,
-    dense_location_top: pd.DataFrame,
+    location_top: pd.DataFrame,
 ) -> pd.DataFrame:
     selected = operation_top.copy()
     if "selected_package_correct" not in selected:
@@ -216,27 +216,13 @@ def project_locations_into_operations(
             pd.NA, index=selected.index, dtype=object
         )
     local_mask = selected["event_type"].isin(LOCAL_EVENT_TYPES)
-    proposal_by_identity = proposal_top.set_index("identity_group")
-    dense_by_identity = dense_location_top.set_index("identity_group")
+    if location_top["identity_group"].duplicated().any():
+        raise RuntimeError("location head must return one package per identity")
+    location_by_identity = location_top.set_index("identity_group")
     for row_index in selected.index[local_mask]:
         identity = selected.at[row_index, "identity_group"]
-        if identity in proposal_by_identity.index:
-            location = proposal_by_identity.loc[identity]
-            selected.at[row_index, "selected_package_correct"] = location[
-                "proposal_correct"
-            ]
-            selected.at[row_index, "location_correct"] = location[
-                "proposal_correct"
-            ]
-            selected.at[row_index, "selected_candidate_source"] = location[
-                "candidate_source"
-            ]
-            selected.at[row_index, "selected_candidate_year"] = location[
-                "candidate_year"
-            ]
-            selected.at[row_index, "proposal_role"] = location["proposal_role"]
-        elif identity in dense_by_identity.index:
-            location = dense_by_identity.loc[identity]
+        if identity in location_by_identity.index:
+            location = location_by_identity.loc[identity]
             selected.at[row_index, "selected_package_correct"] = location[
                 "workflow_correct"
             ]
@@ -249,6 +235,9 @@ def project_locations_into_operations(
             selected.at[row_index, "selected_candidate_year"] = location[
                 "candidate_year"
             ]
+            selected.at[row_index, "proposal_role"] = location.get(
+                "proposal_role", pd.NA
+            )
         # A wrong operation identity can legitimately have no location package
         # because the location head is trained only on correct identities.  It
         # remains an incomplete challenger and can never pass the safety gate.
@@ -315,9 +304,8 @@ def safe_two_stage_projection(
     baseline: pd.DataFrame,
     operations: pd.DataFrame,
     operation_score: pd.Series,
-    proposal_top: pd.DataFrame,
-    proposal_margin: pd.Series,
-    dense_location_top: pd.DataFrame,
+    location_top: pd.DataFrame,
+    location_identity_margin: pd.Series,
     operation_threshold: float | None = None,
     location_threshold: float | None = None,
 ) -> tuple[pd.DataFrame, dict[str, float]]:
@@ -330,7 +318,7 @@ def safe_two_stage_projection(
         operation_top.index
     ].to_numpy()
     challenger = project_locations_into_operations(
-        operation_top, proposal_top, dense_location_top
+        operation_top, location_top
     )
     operation_margin = operation_override_margin(
         operations, operation_score, operation_top, baseline
@@ -370,24 +358,28 @@ def safe_two_stage_projection(
 
     baseline_operation = baseline.copy()
     location_challenger = project_locations_into_operations(
-        baseline_operation, proposal_top, dense_location_top
+        baseline_operation, location_top
     )
     location_by_attempt = location_challenger.set_index("attempt_id")
     local = baseline["event_type"].isin(LOCAL_EVENT_TYPES)
-    same_identity_proposal = baseline["identity_group"].eq(
-        baseline["attempt_id"].map(
-            proposal_top.set_index("attempt_id")["identity_group"]
-        )
+    available_location_identities = set(location_top["identity_group"])
+    same_identity_location = baseline["identity_group"].isin(
+        available_location_identities
+    )
+    location_margin = pd.Series(
+        baseline["identity_group"].map(location_identity_margin).to_numpy(),
+        index=baseline["attempt_id"],
+        dtype=float,
     )
     moved_window = pd.to_numeric(
         baseline["selected_candidate_year"], errors="coerce"
     ).ne(pd.to_numeric(location_challenger["selected_candidate_year"], errors="coerce"))
-    location_eligible = local & same_identity_proposal & moved_window
+    location_eligible = local & same_identity_location & moved_window
     if location_threshold is None:
         location_threshold = calibrate_no_regression_threshold(
             baseline,
             location_challenger,
-            proposal_margin,
+            location_margin,
             baseline_correct="final_correct",
             challenger_correct="final_correct",
             eligible=location_eligible,
@@ -395,7 +387,7 @@ def safe_two_stage_projection(
     operation_accepted_ids = set(accepted_attempts)
     location_accept = (
         location_eligible
-        & baseline["attempt_id"].map(proposal_margin).gt(location_threshold)
+        & baseline["attempt_id"].map(location_margin).gt(location_threshold)
         & ~baseline["attempt_id"].isin(operation_accepted_ids)
     )
     location_attempts = baseline.loc[location_accept, "attempt_id"]
@@ -414,7 +406,7 @@ def safe_two_stage_projection(
         operation_margin
     )
     result["location_override_margin_z"] = result["attempt_id"].map(
-        proposal_margin
+        location_margin
     )
     return result, {
         "operationThresholdZ": float(operation_threshold),
@@ -899,7 +891,9 @@ def score_target_safe_two_stage(
     location_spec: FeatureSpec,
     proposal_spec: FeatureSpec,
     operation_ranker,
+    operation_pair,
     location_ranker,
+    location_pair,
     proposal_ranker,
     operation_weight: float,
     location_weight: float,
@@ -907,32 +901,38 @@ def score_target_safe_two_stage(
     safety_calibration: dict[str, float],
     location_anchor_tables: dict[str, pd.DataFrame] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, float]]:
-    if any(weight != 0 for weight in (
-        operation_weight, location_weight, proposal_weight
-    )):
-        raise RuntimeError(
-            "safe target inference currently requires the frozen listwise heads"
-        )
     operations = prepare_operation(target_operations)
     operation_values = project_relative_features(operations, operation_spec)
-    operation_score = pd.Series(
-        operation_ranker.predict(operation_values), index=operations.index
+    operation_rank_score = operation_ranker.predict(operation_values)
+    operation_seed = seed_percentile(
+        operations, group="attempt_id", columns=OPERATION_SEED
     )
+    if operation_weight > 0:
+        operation_rank_percentile = within_group_percentile(
+            operations, operation_rank_score, "attempt_id"
+        )
+        operation_pair_score = pair_tournament_scores(
+            operations,
+            operation_values,
+            operation_pair,
+            group="attempt_id",
+            shortlist_score=operation_rank_percentile.mul(0.7).add(
+                operation_seed.mul(0.3)
+            ),
+            shortlist_size=16,
+        )
+        operation_score = blended_percentiles(
+            operations,
+            operation_rank_score,
+            operation_pair_score,
+            group="attempt_id",
+            weight=operation_weight,
+        )
+    else:
+        operation_score = pd.Series(operation_rank_score, index=operations.index)
     operation_top = select_top(operations, operation_score, "attempt_id")
 
     proposals = prepare_proposals(target_proposals)
-    proposal_values = project_relative_features(proposals, proposal_spec)
-    proposal_score = pd.Series(
-        proposal_ranker.predict(proposal_values), index=proposals.index
-    )
-    proposal_top, proposal_identity_margin = top_with_standardized_margin(
-        proposals, proposal_score, group="identity_group"
-    )
-    proposal_margin = pd.Series(
-        proposal_top["identity_group"].map(proposal_identity_margin).to_numpy(),
-        index=proposal_top["attempt_id"],
-    )
-
     baseline = ensure_identity_group(baseline)
     needed_identities = set(
         operation_top.loc[
@@ -948,40 +948,70 @@ def score_target_safe_two_stage(
             target_locations["identity_group"].isin(needed_identities)
         ].reset_index(drop=True)
     )
-    if "proposal_role" not in selected_locations:
-        selected_locations["proposal_role"] = "densePackage"
-    if "frozen_proposal_available" not in selected_locations:
-        selected_locations["frozen_proposal_available"] = np.float32(0)
+    selected_proposals = proposals.loc[
+        proposals["identity_group"].isin(needed_identities)
+    ].reset_index(drop=True)
+    selected_locations = append_frozen_proposal_packages(
+        selected_locations, selected_proposals
+    )
     if location_anchor_tables:
         selected_locations, _ = add_location_proposal_anchors(
             selected_locations, location_anchor_tables
         )
     if selected_locations.empty:
-        dense_location_top = pd.DataFrame(columns=[
+        location_top = pd.DataFrame(columns=[
             "identity_group",
             "workflow_correct",
             "location_correct",
             "candidate_source",
             "candidate_year",
         ])
+        location_identity_margin = pd.Series(dtype=float)
     else:
         location_values = project_relative_features(
             selected_locations, location_spec
         )
-        location_score = pd.Series(
-            location_ranker.predict(location_values), index=selected_locations.index
+        location_rank_score = location_ranker.predict(location_values)
+        location_seed = seed_percentile(
+            selected_locations,
+            group="identity_group",
+            columns=LOCATION_SEED,
         )
-        dense_location_top = select_top(
-            selected_locations, location_score, "identity_group"
+        if location_weight > 0:
+            location_rank_percentile = within_group_percentile(
+                selected_locations, location_rank_score, "identity_group"
+            )
+            location_pair_score = pair_tournament_scores(
+                selected_locations,
+                location_values,
+                location_pair,
+                group="identity_group",
+                shortlist_score=location_rank_percentile.mul(0.7).add(
+                    location_seed.mul(0.3)
+                ),
+                shortlist_size=16,
+            )
+            location_score = blended_percentiles(
+                selected_locations,
+                location_rank_score,
+                location_pair_score,
+                group="identity_group",
+                weight=location_weight,
+            )
+        else:
+            location_score = pd.Series(
+                location_rank_score, index=selected_locations.index
+            )
+        location_top, location_identity_margin = top_with_standardized_margin(
+            selected_locations, location_score, group="identity_group"
         )
 
     selected, runtime_safety = safe_two_stage_projection(
         baseline=baseline,
         operations=operations,
         operation_score=operation_score,
-        proposal_top=proposal_top,
-        proposal_margin=proposal_margin,
-        dense_location_top=dense_location_top,
+        location_top=location_top,
+        location_identity_margin=location_identity_margin,
         operation_threshold=float(safety_calibration["operationThresholdZ"]),
         location_threshold=float(safety_calibration["locationThresholdZ"]),
     )
@@ -1184,23 +1214,15 @@ def main() -> None:
             group="identity_group",
             weight=location_weight,
         )
-        dense_location_top = select_top(
-            location_training, dense_location_score, "identity_group"
-        )
-        proposal_top, proposal_identity_margin = top_with_standardized_margin(
-            development_proposals, proposal_score, group="identity_group"
-        )
-        proposal_margin = pd.Series(
-            proposal_top["identity_group"].map(proposal_identity_margin).to_numpy(),
-            index=proposal_top["attempt_id"],
+        location_top, location_identity_margin = top_with_standardized_margin(
+            location_training, dense_location_score, group="identity_group"
         )
         selected, safety = safe_two_stage_projection(
             baseline=baseline,
             operations=operations,
             operation_score=operation_score,
-            proposal_top=proposal_top,
-            proposal_margin=proposal_margin,
-            dense_location_top=dense_location_top,
+            location_top=location_top,
+            location_identity_margin=location_identity_margin,
         )
     oof_summary = summarize(
         selected,
@@ -1227,6 +1249,11 @@ def main() -> None:
         "safetyCalibration": safety,
         "candidateGeneratorFrozen": True,
         "candidatePackageSha256": sha256(development_location_path),
+        "baselinePackageSha256": (
+            sha256(development_current)
+            if development_current is not None
+            else None
+        ),
         "baseCandidateOracleCorrect": int(
             base_packages[base_packages["family"].ne("Clean")]
             .groupby("attempt_id", sort=False)["workflow_correct"]
@@ -1339,7 +1366,10 @@ def main() -> None:
             raise RuntimeError(
                 "target proposal anchor names must match development anchors"
             )
-        target_packages = prepare_location(pd.read_pickle(target_location_path))
+        target_base_packages = prepare_location(
+            pd.read_pickle(target_location_path)
+        )
+        target_packages = target_base_packages
         target_proposal_path = (
             Path(args.target_location_proposals).resolve()
             if args.target_location_proposals
@@ -1371,19 +1401,24 @@ def main() -> None:
             target_selected, target_operations, target_runtime_safety = (
                 score_target_safe_two_stage(
                     pd.read_pickle(target_operation_path),
-                    target_packages,
+                    target_base_packages,
                     target_proposals,
                     pd.read_csv(target_current),
                     operation_spec=operation_spec,
                     location_spec=location_spec,
                     proposal_spec=proposal_spec,
                     operation_ranker=operation_model,
+                    operation_pair=operation_pair_model,
                     location_ranker=location_model,
+                    location_pair=location_pair_model,
                     proposal_ranker=proposal_model,
                     operation_weight=operation_weight,
                     location_weight=location_weight,
                     proposal_weight=proposal_weight,
                     safety_calibration=safety,
+                    location_anchor_tables=load_anchor_tables(
+                        target_anchor_paths
+                    ),
                 )
             )
         else:
@@ -1412,6 +1447,11 @@ def main() -> None:
             "files": int(target_selected["file_id"].nunique()),
             "candidateGeneratorFrozen": True,
             "candidatePackageSha256": sha256(target_location_path),
+            "baselinePackageSha256": (
+                sha256(target_current)
+                if target_current is not None
+                else None
+            ),
             "frozenProposalPackageSha256": (
                 sha256(target_proposal_path)
                 if target_proposal_path is not None

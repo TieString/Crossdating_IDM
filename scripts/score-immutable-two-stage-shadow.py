@@ -51,7 +51,9 @@ def main() -> None:
     model = joblib.load(model_path)
     required_model_keys = {
         "operationRanker",
+        "operationPair",
         "locationRanker",
+        "locationPair",
         "proposalRanker",
         "operationSpec",
         "locationSpec",
@@ -86,7 +88,9 @@ def main() -> None:
         location_spec=model["locationSpec"],
         proposal_spec=model["proposalSpec"],
         operation_ranker=model["operationRanker"],
+        operation_pair=model["operationPair"],
         location_ranker=model["locationRanker"],
+        location_pair=model["locationPair"],
         proposal_ranker=model["proposalRanker"],
         operation_weight=float(model["operationPairWeight"]),
         location_weight=float(model["locationPairWeight"]),
@@ -106,6 +110,7 @@ def main() -> None:
         "files": int(selected["file_id"].nunique()),
         "candidateGeneratorFrozen": True,
         "modelSha256": trainer.sha256(model_path),
+        "baselinePackageSha256": trainer.sha256(current_path),
         "operationScoresSha256": trainer.sha256(operation_path),
         "candidatePackageSha256": trainer.sha256(location_path),
         "frozenProposalPackageSha256": trainer.sha256(proposal_path),

@@ -21,8 +21,28 @@ TRAINER_SPEC = importlib.util.spec_from_file_location(
 trainer = importlib.util.module_from_spec(TRAINER_SPEC)
 TRAINER_SPEC.loader.exec_module(trainer)
 
+POINTWISE_SPEC = importlib.util.spec_from_file_location(
+    "immutable_operation_pointwise",
+    SCRIPT_DIR / "audit-immutable-operation-pointwise.py",
+)
+pointwise = importlib.util.module_from_spec(POINTWISE_SPEC)
+POINTWISE_SPEC.loader.exec_module(pointwise)
+
 
 class ImmutableTwoStageAdjudicatorTest(unittest.TestCase):
+    def test_pointwise_weights_balance_each_diagnosis_and_label_side(self) -> None:
+        frame = pd.DataFrame({
+            "attempt_id": ["a", "a", "a", "b", "b"],
+            "operation_correct": [1, 0, 0, 1, 1],
+        })
+
+        weights = pointwise.diagnosis_balanced_weights(frame)
+
+        self.assertAlmostEqual(weights[:3].sum(), 1.0)
+        self.assertAlmostEqual(weights[3:].sum(), 1.0)
+        self.assertAlmostEqual(weights[0], 0.5)
+        self.assertAlmostEqual(weights[1:3].sum(), 0.5)
+
     def test_relative_projection_ignores_absolute_score_scale(self) -> None:
         frame = pd.DataFrame({
             "attempt_id": ["a", "a", "a"],
@@ -43,6 +63,37 @@ class ImmutableTwoStageAdjudicatorTest(unittest.TestCase):
         transformed = adjudicator.project_relative_features(rescaled, spec)
 
         pd.testing.assert_frame_equal(original, transformed)
+
+    def test_operation_hierarchy_separates_shift_and_operation_competition(self) -> None:
+        frame = pd.DataFrame({
+            "attempt_id": ["a", "a", "a"],
+            "event_type": ["missingRing", "missingRing", "partialMove"],
+            "shift_years": [-1, -2, -2],
+            "raw_score": [0.1, 0.3, 0.2],
+        })
+        spec = adjudicator.make_feature_spec(
+            frame,
+            group_column="attempt_id",
+            maximum_numeric=10,
+            categorical_columns=("event_type",),
+        )
+
+        projected = adjudicator.project_operation_hierarchy_features(frame, spec)
+        rescaled = frame.copy()
+        rescaled["raw_score"] = rescaled["raw_score"].mul(20).add(7)
+        transformed = adjudicator.project_operation_hierarchy_features(
+            rescaled, spec
+        )
+
+        self.assertLess(
+            projected.loc[0, "raw_score__operation_rank"],
+            projected.loc[1, "raw_score__operation_rank"],
+        )
+        self.assertGreater(
+            projected.loc[1, "raw_score__operation_max_envelope_rank"],
+            projected.loc[2, "raw_score__operation_max_envelope_rank"],
+        )
+        pd.testing.assert_frame_equal(projected, transformed)
 
     def test_location_projection_cannot_cross_operation_identity(self) -> None:
         operation = pd.DataFrame({
@@ -193,6 +244,60 @@ class ImmutableTwoStageAdjudicatorTest(unittest.TestCase):
         self.assertEqual(projected["candidate_source"], "frozenProposal:profile")
         self.assertEqual(projected["workflow_correct"], 1)
 
+    def test_dense_and_frozen_proposals_share_one_location_head(self) -> None:
+        operation = adjudicator.ensure_identity_group(pd.DataFrame({
+            "attempt_id": ["a"],
+            "file_id": ["f"],
+            "family": ["A"],
+            "event_type": ["missingRing"],
+            "shift_years": [-1],
+            "operation_correct": [1],
+        }))
+        dense = pd.DataFrame({
+            "attempt_id": ["a", "a"],
+            "file_id": ["f", "f"],
+            "family": ["A", "A"],
+            "event_type": ["missingRing", "missingRing"],
+            "shift_years": [-1, -1],
+            "candidate_year": [1900, 1901],
+            "candidate_source": ["dense", "dense"],
+            "identity_operation_correct": [1, 1],
+            "workflow_correct": [0, 1],
+            "location_correct": [0, 1],
+            "location_relevance": [0, 3],
+        })
+        proposal = pd.DataFrame({
+            "attempt_id": ["a"],
+            "file_id": ["f"],
+            "family": ["A"],
+            "event_type": ["missingRing"],
+            "shift_years": [-1],
+            "candidate_year": [1899],
+            "proposal_role": ["pair"],
+            "proposal_score": [0.9],
+            "proposal_correct": [0],
+            "operation_correct": [1],
+        })
+        packages = adjudicator.append_frozen_proposal_packages(dense, proposal)
+        score = pd.Series(
+            [2.0 if source == "dense" and year == 1901 else 1.0
+             for source, year in zip(
+                 packages["candidate_source"], packages["candidate_year"]
+             )],
+            index=packages.index,
+        )
+        location_top = adjudicator.select_top(
+            packages, score, "identity_group"
+        )
+
+        selected = trainer.project_locations_into_operations(
+            operation, location_top
+        )
+
+        self.assertEqual(selected.iloc[0]["selected_candidate_year"], 1901)
+        self.assertEqual(selected.iloc[0]["selected_candidate_source"], "dense")
+        self.assertEqual(selected.iloc[0]["final_correct"], 1)
+
     def test_categorical_feature_names_are_lightgbm_safe(self) -> None:
         frame = pd.DataFrame({
             "attempt_id": ["a", "a"],
@@ -266,7 +371,7 @@ class ImmutableTwoStageAdjudicatorTest(unittest.TestCase):
             "operation_correct": [0, 1],
         })
         operations = adjudicator.ensure_identity_group(operations)
-        proposal_top = pd.DataFrame({
+        location_top = pd.DataFrame({
             "attempt_id": ["a"],
             "identity_group": ["a|falseRing|1"],
             "event_type": ["falseRing"],
@@ -274,23 +379,16 @@ class ImmutableTwoStageAdjudicatorTest(unittest.TestCase):
             "candidate_year": [1910],
             "candidate_source": ["frozenProposal:pair"],
             "proposal_role": ["pair"],
-            "proposal_correct": [1],
+            "workflow_correct": [1],
+            "location_correct": [1],
         })
-        dense = pd.DataFrame(columns=[
-            "identity_group",
-            "workflow_correct",
-            "location_correct",
-            "candidate_source",
-            "candidate_year",
-        ])
 
         original, _ = trainer.safe_two_stage_projection(
             baseline=baseline,
             operations=operations,
             operation_score=pd.Series([0.0, 2.0]),
-            proposal_top=proposal_top,
-            proposal_margin=pd.Series({"a": 1.0}),
-            dense_location_top=dense,
+            location_top=location_top,
+            location_identity_margin=pd.Series({"a|falseRing|1": 1.0}),
             operation_threshold=0.5,
             location_threshold=0.0,
         )
@@ -300,15 +398,14 @@ class ImmutableTwoStageAdjudicatorTest(unittest.TestCase):
         changed_operations["operation_correct"] = 1 - changed_operations[
             "operation_correct"
         ]
-        changed_proposal = proposal_top.copy()
-        changed_proposal["proposal_correct"] = 0
+        changed_location = location_top.copy()
+        changed_location[["workflow_correct", "location_correct"]] = 0
         relabeled, _ = trainer.safe_two_stage_projection(
             baseline=changed_labels,
             operations=changed_operations,
             operation_score=pd.Series([0.0, 2.0]),
-            proposal_top=changed_proposal,
-            proposal_margin=pd.Series({"a": 1.0}),
-            dense_location_top=dense,
+            location_top=changed_location,
+            location_identity_margin=pd.Series({"a|falseRing|1": 1.0}),
             operation_threshold=0.5,
             location_threshold=0.0,
         )

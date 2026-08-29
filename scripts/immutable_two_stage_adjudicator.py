@@ -426,6 +426,75 @@ def project_relative_features(
     return features.replace([np.inf, -np.inf], np.nan).fillna(0).astype(np.float32)
 
 
+def project_operation_hierarchy_features(
+    frame: pd.DataFrame,
+    spec: FeatureSpec,
+) -> pd.DataFrame:
+    """Add truth-blind within-operation competition to relative evidence.
+
+    A flat listwise row can see whether it wins an evidence channel globally,
+    but mixed diagnoses also need to distinguish two separate questions: which
+    shift wins inside one operation type, and which operation envelope wins the
+    diagnosis.  Every added value remains a rank or standardized margin inside
+    the current diagnosis; no file, series, calendar year, or label is exposed.
+    """
+
+    if "event_type" not in frame:
+        raise RuntimeError("operation hierarchy requires event_type")
+    features = project_relative_features(frame, spec)
+    attempt = frame[spec.group_column]
+    event_type = frame["event_type"].fillna("missing").astype(str)
+    typed_group = pd.MultiIndex.from_arrays([attempt, event_type])
+    extra: dict[str, pd.Series | np.ndarray] = {}
+
+    type_size = event_type.groupby(typed_group, sort=False).transform("size")
+    attempt_size = attempt.groupby(attempt, sort=False).transform("size")
+    extra["operation_type_candidate_fraction"] = (
+        type_size.div(attempt_size.replace(0, np.nan)).astype(np.float32)
+    )
+    extra["operation_type_candidate_count_rank"] = type_size.groupby(
+        attempt, sort=False
+    ).rank(pct=True, method="average").astype(np.float32)
+
+    for column in spec.numeric_columns:
+        values = pd.to_numeric(
+            frame[column]
+            if column in frame
+            else pd.Series(np.nan, index=frame.index),
+            errors="coerce",
+        )
+        typed = values.groupby(typed_group, sort=False)
+        typed_mean = typed.transform("mean")
+        typed_std = typed.transform("std").replace(0, np.nan)
+        typed_max = typed.transform("max")
+        typed_min = typed.transform("min")
+        extra[f"{column}__operation_rank"] = typed.rank(
+            pct=True, method="average"
+        ).astype(np.float32)
+        extra[f"{column}__operation_z"] = (
+            (values - typed_mean) / typed_std
+        ).clip(-8, 8).astype(np.float32)
+        extra[f"{column}__operation_max_margin"] = (
+            (values - typed_max) / typed_std
+        ).clip(-12, 0).astype(np.float32)
+        extra[f"{column}__operation_min_margin"] = (
+            (typed_min - values) / typed_std
+        ).clip(-12, 0).astype(np.float32)
+
+        # Broadcast each operation type's envelope, then rank the envelopes
+        # against the other operation identities in this diagnosis.
+        extra[f"{column}__operation_max_envelope_rank"] = typed_max.groupby(
+            attempt, sort=False
+        ).rank(pct=True, method="average").astype(np.float32)
+        extra[f"{column}__operation_min_envelope_rank"] = typed_min.groupby(
+            attempt, sort=False
+        ).rank(pct=True, method="average").astype(np.float32)
+
+    hierarchy = pd.DataFrame(extra, index=frame.index)
+    combined = pd.concat([features, hierarchy], axis=1)
+    return combined.replace([np.inf, -np.inf], np.nan).fillna(0).astype(np.float32)
+
+
 def ranker(seed: int, *, graded: bool = False) -> lgb.LGBMRanker:
     return lgb.LGBMRanker(
         objective="lambdarank",
