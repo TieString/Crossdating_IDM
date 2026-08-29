@@ -53,7 +53,12 @@ export type CofechaArImplementation =
     | "fixed-2"
     | "fixed-3"
     | "fixed-4"
-    | "fixed-5";
+    | "fixed-5"
+    | "fixed-6"
+    | "fixed-7"
+    | "fixed-8"
+    | "fixed-9"
+    | "fixed-10";
 
 export type CofechaReferencePoint = {
     year: number;
@@ -661,6 +666,13 @@ const cofecha606MeanAndPopulationSd = (values: readonly number[]) => {
     };
 };
 
+export type Cofecha606MasterSeries = {
+    data: Map<number, number>;
+    sampleDepth: Map<number, number>;
+    includedSeriesIds: string[];
+    options: CofechaReferenceOptions;
+};
+
 export const cofecha606StandardizeValues = (
     values: readonly number[],
 ): number[] => {
@@ -674,6 +686,27 @@ export const cofecha606StandardizeValues = (
                 standardDeviation,
             ))
             : Math.fround(value - meanValue)
+    ));
+};
+
+export const cofecha606LogTransform = (
+    values: readonly number[],
+): number[] => {
+    if (values.length === 0) return [];
+    const source = values.map(Math.fround);
+    const minimum = Math.min(0, ...source);
+    let shiftedSum = Math.fround(0);
+    const shifted = source.map((value) => {
+        const result = Math.fround(value - minimum);
+        shiftedSum = Math.fround(shiftedSum + result);
+        return result;
+    });
+    const factor = 0.16670000553131104;
+    let offset = Math.fround((factor * shiftedSum) / Math.fround(shifted.length));
+    if (offset < 0.00009999999747378752) offset = Math.fround(1);
+    const logOffset = Math.fround(Math.log(offset));
+    return shifted.map((value) => Math.fround(
+        Math.log(value + offset) - logOffset,
     ));
 };
 
@@ -918,6 +951,127 @@ const fitAutoregressiveModel = (
     };
 };
 
+export const cofecha606AutoregressiveResidual = (
+    values: readonly number[],
+    forcedOrder?: number,
+) => {
+    const source = values.map(Math.fround);
+    if (source.length < 8) {
+        return {
+            order: 0,
+            coefficients: [] as number[],
+            meanValue: source.length > 0 ? source[0] : 0,
+            residuals: source,
+        };
+    }
+    const count = Math.fround(source.length);
+    let sum = Math.fround(0);
+    source.forEach((value) => {
+        sum = Math.fround(sum + value);
+    });
+    const meanValue = Math.fround(sum / count);
+    const centered = source.map((value) => Math.fround(value - meanValue));
+    let errorVariance = Math.fround(0);
+    centered.forEach((value) => {
+        errorVariance = Math.fround(extendedMultiplyAdd(
+            value,
+            value,
+            errorVariance,
+        ));
+    });
+    errorVariance = Math.fround(errorVariance / count);
+
+    let forward = centered.slice(1);
+    let backward = centered.slice(0, -1);
+    let polynomial = [Math.fround(1)];
+    let bestPolynomial = polynomial.slice();
+    let bestOrder = 0;
+    let previousAic = Math.fround(
+        count * Math.log(errorVariance) + 2,
+    );
+    const maximumOrder = Math.min(
+        forcedOrder ?? 10,
+        Math.floor(source.length / 3),
+    );
+    for (let order = 1; order <= maximumOrder; order += 1) {
+        let numerator = Math.fround(0);
+        let denominator = Math.fround(0);
+        for (let index = 0; index < forward.length; index += 1) {
+            numerator = Math.fround(extendedMultiplyAdd(
+                forward[index],
+                backward[index],
+                numerator,
+            ));
+            denominator = Math.fround(extendedMultiplyAdd(
+                backward[index],
+                backward[index],
+                extendedMultiplyAdd(
+                    forward[index],
+                    forward[index],
+                    denominator,
+                ),
+            ));
+        }
+        if (!Number.isFinite(denominator) || denominator <= 0) break;
+        const reflection = Math.fround((-2 * numerator) / denominator);
+        const previousPolynomial = polynomial.slice();
+        polynomial = [...previousPolynomial, Math.fround(0)];
+        for (let index = 1; index < order; index += 1) {
+            polynomial[index] = Math.fround(extendedMultiplyAdd(
+                reflection,
+                previousPolynomial[order - index],
+                previousPolynomial[index],
+            ));
+        }
+        polynomial[order] = reflection;
+        errorVariance = Math.fround(
+            errorVariance * (1 - reflection * reflection),
+        );
+        const aic = Math.fround(
+            count * Math.log(errorVariance) + 2 * (order + 1),
+        );
+        const accepted = forcedOrder !== undefined
+            ? order <= forcedOrder
+            : aic < previousAic;
+        if (!accepted) break;
+        bestOrder = order;
+        bestPolynomial = polynomial.slice();
+        previousAic = aic;
+
+        const nextForward: number[] = [];
+        const nextBackward: number[] = [];
+        for (let index = 0; index < forward.length - 1; index += 1) {
+            nextForward.push(Math.fround(extendedMultiplyAdd(
+                reflection,
+                backward[index + 1],
+                forward[index + 1],
+            )));
+            nextBackward.push(Math.fround(extendedMultiplyAdd(
+                reflection,
+                forward[index],
+                backward[index],
+            )));
+        }
+        forward = nextForward;
+        backward = nextBackward;
+    }
+
+    const coefficients = bestPolynomial.slice(1).map((value) => Math.fround(-value));
+    const residuals = centered.slice();
+    for (let index = bestOrder; index < residuals.length; index += 1) {
+        let residual = centered[index];
+        for (let lag = 1; lag <= bestOrder; lag += 1) {
+            residual = extendedMultiplyAdd(
+                -coefficients[lag - 1],
+                centered[index - lag],
+                residual,
+            );
+        }
+        residuals[index] = Math.fround(residual);
+    }
+    return { order: bestOrder, coefficients, meanValue, residuals };
+};
+
 export function cofechaStyleStandardize(
     series: RwlTreeData,
     options: CofechaReferenceOptions = COFECHA_REFERENCE_DEFAULT_OPTIONS,
@@ -927,17 +1081,20 @@ export function cofechaStyleStandardize(
     detrendImplementation: CofechaDetrendImplementation = "ratio",
     logImplementation: CofechaLogImplementation = "post-ar",
     numericImplementation: CofechaNumericImplementation = "double",
+    legacyStopMarkerValue: number = stopMarker.value,
 ): IndexedPoint[] {
     const rawPoints = Array.from(series.entries())
         .filter((entry): entry is [number, number] => (
             numericImplementation === "legacy-float32"
-                ? typeof entry[1] === "number" && Number.isFinite(entry[1]) && entry[1] >= 0
+                ? typeof entry[1] === "number"
+                    && Number.isFinite(entry[1])
+                    && entry[1] !== legacyStopMarkerValue
                 : isUsableWidth(entry[1], options)
         ))
         .map(([year, value]) => ({
             year,
             value: numericImplementation === "legacy-float32"
-                ? parseCofecha606TucsonWidth(value, stopMarker.value)
+                ? parseCofecha606TucsonWidth(value, legacyStopMarkerValue)
                 : Math.max(value, 1e-6),
         }))
         .sort((a, b) => a.year - b.year);
@@ -962,6 +1119,9 @@ export function cofechaStyleStandardize(
             numericImplementation,
         )
         : solveCubicSmoothingSplineTrend(splineInput, options, splineLambdaScale);
+    const legacyDetrended = numericImplementation === "legacy-float32" && !preSplineLog
+        ? cofecha606DivideSeries(rawWidths, trend)
+        : null;
 
     // Step 1: spline detrending
     // 原始宽度除以趋势宽度，得到 mean 约为 1 的 dimensionless index。
@@ -978,8 +1138,8 @@ export function cofechaStyleStandardize(
                     : splineInput[index] / trend[index])
                 : (detrendImplementation === "residual-plus-one"
                     ? point.value - trend[index] + 1
-                    : numericImplementation === "legacy-float32"
-                        ? Math.fround(Math.fround(point.value) / Math.fround(trend[index]))
+                    : legacyDetrended
+                        ? legacyDetrended[index]
                         : point.value / trend[index]),
         };
     });
@@ -1004,51 +1164,74 @@ export function cofechaStyleStandardize(
         const forcedOrder = arImplementation.startsWith("fixed-")
             ? Number(arImplementation.slice("fixed-".length))
             : undefined;
-        const model = fitAutoregressiveModel(values, 5, forcedOrder);
-
-        // Step 2: AR prewhitening
-        // 每条样芯单独预白化，避免一条序列自己的生长惯性被误当成
-        // 与其它样芯同步的 crossdating 信号。
-        //
-        // COFECHA's AR modeling removes persistence that remains after spline
-        // filtering. We keep the residual centered near the original mean so the
-        // following log transform still represents proportional departures.
-        transformed = transformed.slice(model.order).map((point, index) => {
-            const sourceIndex = index + model.order;
-            const predictedDeviation = model.coefficients.reduce((sum, coefficient, lagIndex) => (
-                sum + coefficient * (values[sourceIndex - lagIndex - 1] - model.meanValue)
-            ), 0);
-            return {
+        if (numericImplementation === "legacy-float32") {
+            const model = cofecha606AutoregressiveResidual(values, forcedOrder);
+            transformed = transformed.map((point, index) => ({
                 year: point.year,
-                value: model.meanValue + (values[sourceIndex] - model.meanValue) - predictedDeviation,
-            };
-        });
+                value: model.residuals[index],
+            }));
+        } else {
+            const model = fitAutoregressiveModel(values, 5, forcedOrder);
+
+            // Step 2: AR prewhitening
+            // 每条样芯单独预白化，避免一条序列自己的生长惯性被误当成
+            // 与其它样芯同步的 crossdating 信号。
+            //
+            // COFECHA's AR modeling removes persistence that remains after spline
+            // filtering. We keep the residual centered near the original mean so the
+            // following log transform still represents proportional departures.
+            transformed = transformed.slice(model.order).map((point, index) => {
+                const sourceIndex = index + model.order;
+                const predictedDeviation = model.coefficients.reduce(
+                    (sum, coefficient, lagIndex) => (
+                        sum + coefficient * (values[sourceIndex - lagIndex - 1] - model.meanValue)
+                    ),
+                    0,
+                );
+                return {
+                    year: point.year,
+                    value: model.meanValue
+                        + (values[sourceIndex] - model.meanValue)
+                        - predictedDeviation,
+                };
+            });
+        }
     }
 
     if (options.useLogTransform
         && logImplementation === "post-ar"
         && transformed.length > 0) {
-        const values = transformed.map((point) => point.value);
-        const avg = mean(values);
-        const cofechaConstant = avg / 6;
-        const minValue = Math.min(...values);
-        const positivityShift = minValue + cofechaConstant <= 0
-            ? Math.abs(minValue + cofechaConstant) + 1e-6
-            : 0;
+        if (numericImplementation === "legacy-float32") {
+            const logged = cofecha606LogTransform(
+                transformed.map((point) => point.value),
+            );
+            transformed = transformed.map((point, index) => ({
+                year: point.year,
+                value: logged[index],
+            }));
+        } else {
+            const values = transformed.map((point) => point.value);
+            const avg = mean(values);
+            const cofechaConstant = avg / 6;
+            const minValue = Math.min(...values);
+            const positivityShift = minValue + cofechaConstant <= 0
+                ? Math.abs(minValue + cofechaConstant) + 1e-6
+                : 0;
 
-        // Step 3: log transform
-        // COFECHA 默认对转换后的序列取对数，并先加均值的 1/6。
-        // 若 AR residual 使局部值落到非正区间，则只加最小必要 shift，
-        // 保证数学定义有效，同时尽量不改变相对年际形态。
-        //
-        // COFECHA adds one-sixth of the series mean before taking logs. This
-        // keeps locally absent or very narrow rings from becoming log(0), while
-        // preserving the proportional weighting that makes log transforms useful
-        // for ring-width indices.
-        transformed = transformed.map((point) => ({
-            year: point.year,
-            value: Math.log(point.value + cofechaConstant + positivityShift),
-        }));
+            // Step 3: log transform
+            // COFECHA 默认对转换后的序列取对数，并先加均值的 1/6。
+            // 若 AR residual 使局部值落到非正区间，则只加最小必要 shift，
+            // 保证数学定义有效，同时尽量不改变相对年际形态。
+            //
+            // COFECHA adds one-sixth of the series mean before taking logs. This
+            // keeps locally absent or very narrow rings from becoming log(0), while
+            // preserving the proportional weighting that makes log transforms useful
+            // for ring-width indices.
+            transformed = transformed.map((point) => ({
+                year: point.year,
+                value: Math.log(point.value + cofechaConstant + positivityShift),
+            }));
+        }
     }
 
     if (options.useFirstDifference && transformed.length >= 2) {
@@ -1070,6 +1253,147 @@ export function cofechaStyleStandardize(
     }
     return transformed;
 }
+
+export function buildCofecha606MasterSeries(
+    siteData: RwlSiteData,
+    options: CofechaReferenceOptions = COFECHA_REFERENCE_DEFAULT_OPTIONS,
+): Cofecha606MasterSeries | null {
+    const valuesByYear = new Map<number, number[]>();
+    const replicationByYear = new Map<number, number>();
+    const includedSeriesIds: string[] = [];
+    const filteringOptions: CofechaReferenceOptions = {
+        ...options,
+        // COFECHA's saved chronology is formed before AR prewhitening. AR
+        // affects checking/statistics, while FULL.MAS equals LOG-only.MAS.
+        useAutoregressiveModel: false,
+        // Keep zero placeholders through both spline passes and final per-core
+        // standardization. Their original-year mask is applied only below.
+        omitAbsentRingsFromMaster: false,
+    };
+    const contiguousSegments = (tree: RwlTreeData): Array<{
+        data: RwlTreeData;
+        stopMarkerValue: number;
+    }> => {
+        const segments: Array<{
+            data: RwlTreeData;
+            stopMarkerValue: number;
+        }> = [];
+        let segment: (typeof segments)[number] | null = null;
+        let previousYear: number | null = null;
+        const entries = [...tree.entries()].sort(([left], [right]) => left - right);
+        entries.forEach(([year, value], index) => {
+            const nextYear = entries[index + 1]?.[0];
+            const isTerminal = value === -9999
+                || (value === 999 && (nextYear === undefined || nextYear !== year + 1));
+            if (isTerminal) {
+                if (segment) segment.stopMarkerValue = value;
+                segment = null;
+                previousYear = null;
+                return;
+            }
+            if (value === null) {
+                segment = null;
+                previousYear = null;
+                return;
+            }
+            if (!segment || previousYear === null || year !== previousYear + 1) {
+                segment = {
+                    data: new Map<number, number | null>(),
+                    stopMarkerValue: stopMarker.value,
+                };
+                segments.push(segment);
+            }
+            segment.data.set(year, value);
+            previousYear = year;
+        });
+        return segments;
+    };
+    siteData.forEach((tree, seriesId) => {
+        let included = false;
+        contiguousSegments(tree).forEach((segment) => {
+            const filtered = cofechaStyleStandardize(
+                segment.data,
+                filteringOptions,
+                "ltrr-cook-holmes",
+                "none",
+                1,
+                "ratio",
+                "post-ar",
+                "legacy-float32",
+                segment.stopMarkerValue,
+            );
+            if (filtered.length === 0) return;
+            included = true;
+            const standardized = cofecha606StandardizeValues(
+                filtered.map((point) => point.value),
+            );
+            filtered.forEach((point, index) => {
+                replicationByYear.set(
+                    point.year,
+                    (replicationByYear.get(point.year) ?? 0) + 1,
+                );
+                const sourceValue = segment.data.get(point.year);
+                if (options.omitAbsentRingsFromMaster
+                    && typeof sourceValue === "number"
+                    && sourceValue <= 0) return;
+                const yearValues = valuesByYear.get(point.year) ?? [];
+                yearValues.push(standardized[index]);
+                valuesByYear.set(point.year, yearValues);
+            });
+        });
+        if (included) includedSeriesIds.push(seriesId);
+    });
+    if (replicationByYear.size === 0) return null;
+
+    const coveredYears = [...replicationByYear.keys()].sort((left, right) => left - right);
+    const continuousSpans: number[][] = [];
+    coveredYears.forEach((year) => {
+        const current = continuousSpans[continuousSpans.length - 1];
+        if (!current || year !== current[current.length - 1] + 1) {
+            continuousSpans.push([year]);
+        } else {
+            current.push(year);
+        }
+    });
+    const years = continuousSpans.sort((left, right) => (
+        right.length - left.length
+        || right[right.length - 1] - left[left.length - 1]
+    ))[0] ?? [];
+    const sampleDepth = new Map<number, number>();
+    const annualMeans = years.map((year) => {
+        const values = valuesByYear.get(year) ?? [];
+        sampleDepth.set(year, replicationByYear.get(year) ?? values.length);
+        if (values.length === 0) return Math.fround(0);
+        let sum = Math.fround(0);
+        values.forEach((value) => {
+            sum = Math.fround(sum + Math.fround(value));
+        });
+        return Math.fround(sum / Math.fround(values.length));
+    });
+    const masterValues = cofecha606StandardizeValues(annualMeans);
+    return {
+        data: new Map(years.map((year, index) => [year, masterValues[index]])),
+        sampleDepth,
+        includedSeriesIds,
+        options: { ...options },
+    };
+}
+
+export const formatCofecha606MasterSeries = (
+    master: Pick<Cofecha606MasterSeries, "data">,
+): string => `${[...master.data]
+    .sort(([left], [right]) => left - right)
+    .map(([year, value]) => {
+        const fixedValue = value.toFixed(4);
+        const roundedValue = fixedValue === "-0.0000"
+            ? "0.0000"
+            : fixedValue;
+        const formattedValue = roundedValue
+            .replace(/^0(?=\.)/, "")
+            .replace(/^-0(?=\.)/, "-");
+        return `${String(year).padStart(6, " ")}${formattedValue.padStart(10, " ")}`;
+    })
+    .join("\r\n")}\r\n`;
 
 export function buildCofechaPassReference(
     siteData: RwlSiteData,

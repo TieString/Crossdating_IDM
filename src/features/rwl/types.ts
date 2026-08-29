@@ -20,6 +20,7 @@ export interface RwlReadOptions {
   // Tucson / Heidelberg 解析参数
   long?: boolean;                 // 负年代：ID 7 + 年份 5
   edgeZeros?: boolean;            // true: 保留 0；false: 0 也视为缺失
+  preserveNegativeMeasurements?: boolean; // 精确复刻 COFECHA 时保留非终止负值
   stopMarker?: number;            // 默认 -9999
   header?: boolean | "auto";      // heidelberg / tucson 是否自动跳过 header
 
@@ -45,6 +46,7 @@ export interface RwlReadResult {
   readOptions?: {
     tucsonLong?: boolean;        // Tucson 格式：true 为 7 列，false 为 8 列
     edgeZeros?: boolean;         // 是否保留边界 0
+    preserveNegativeMeasurements?: boolean; // 是否保留非终止负测量值
     fhDataFormat?: "column" | "block";  // FH 数据格式
     fhUnit?: { multiplier: number; divisor: number };  // FH Unit 参数
   };

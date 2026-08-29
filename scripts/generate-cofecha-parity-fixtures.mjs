@@ -11,7 +11,13 @@ const valueFor = (name, fallback = "") => {
 const outputDir = resolve(valueFor("--output-dir"));
 mkdirSync(outputDir, { recursive: true });
 
-const formatSeries = (id, values, startYear = 1800, preserveSpecialValues = false) => {
+const formatSeries = (
+    id,
+    values,
+    startYear = 1800,
+    preserveSpecialValues = false,
+    terminalValue = -9999,
+) => {
     const lines = [];
     for (let offset = 0; offset < values.length; offset += 10) {
         const year = startYear + offset;
@@ -34,7 +40,7 @@ const formatSeries = (id, values, startYear = 1800, preserveSpecialValues = fals
     lines.push(
         id.padEnd(8, " ")
         + String(startYear + values.length).padStart(4, " ")
-        + String(-9999).padStart(6, " "),
+        + String(terminalValue).padStart(6, " "),
     );
     return lines.join("\r\n");
 };
@@ -103,6 +109,22 @@ const fixtures = {
     "parser-grid.rwl": parserGrid.map((series) => (
         formatSeries(series.id, series.values, 1500, true)
     )).join("\r\n"),
+    "parser-grid-short.rwl": [
+        formatSeries(
+            "PRS00001",
+            Array.from({ length: 500 }, (_, value) => value),
+            1500,
+            true,
+            999,
+        ),
+        formatSeries(
+            "PRS00002",
+            Array.from({ length: 499 }, (_, index) => index + 500),
+            1500,
+            true,
+            999,
+        ),
+    ].join("\r\n"),
 };
 Object.entries(fixtures).forEach(([name, text]) => {
     writeFileSync(resolve(outputDir, name), `${text}\r\n`, "ascii");

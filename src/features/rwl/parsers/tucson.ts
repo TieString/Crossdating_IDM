@@ -43,6 +43,7 @@ function detectHeaderAuto(firstDataLine: string, long: boolean): boolean {
 
 export function parseTucson(text: string, opts: RwlReadOptions = {}): RwlReadResult {
   const edgeZeros = opts.edgeZeros ?? true;
+  const preserveNegativeMeasurements = opts.preserveNegativeMeasurements ?? false;
   const activeStopMarker = opts.stopMarker ?? -9999;
   const header = opts.header ?? "auto";
 
@@ -125,9 +126,14 @@ export function parseTucson(text: string, opts: RwlReadOptions = {}): RwlReadRes
       let value: number | null = rawValue;
 
       if (edgeZeros) {
-        if (value < 0 && value !== activeStopMarker) value = null;
+        if (value < 0
+          && value !== activeStopMarker
+          && !preserveNegativeMeasurements) value = null;
       } else {
-        if (value <= 0 && value !== activeStopMarker) value = null;
+        if (value < 0
+          && value !== activeStopMarker
+          && !preserveNegativeMeasurements) value = null;
+        if (value === 0) value = null;
       }
 
       series.set(year0 + i, value);
@@ -145,6 +151,7 @@ export function parseTucson(text: string, opts: RwlReadOptions = {}): RwlReadRes
     readOptions: {
       tucsonLong: long,
       edgeZeros,
+      preserveNegativeMeasurements,
     },
   };
 }

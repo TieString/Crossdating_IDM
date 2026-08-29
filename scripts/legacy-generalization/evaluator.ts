@@ -93,6 +93,7 @@ import {
 import { formatHandlers, readRwlString } from "@/features/rwl";
 import type {
     RwlFormat,
+    RwlReadOptions,
     RwlReadResult,
     RwlSiteData,
     RwlTreeData,
@@ -154,20 +155,30 @@ export const siteHash = (siteData: RwlSiteData): string => sha256Bytes(JSON.stri
 export const readRwlForEvaluation = async (
     sourceText: string,
     declaredFormat?: string,
+    additionalOptions: RwlReadOptions = {},
 ): Promise<RwlReadResult> => {
     const preferFormat: RwlFormat | undefined = declaredFormat === "tucson-auto"
         ? "tucson"
         : undefined;
-    return readRwlString(sourceText, { edgeZeros: true, preferFormat });
+    return readRwlString(sourceText, {
+        ...additionalOptions,
+        edgeZeros: true,
+        preferFormat,
+    });
 };
 
 export const loadRwl = async (
     path: string,
     declaredFormat?: string,
+    additionalOptions: RwlReadOptions = {},
 ): Promise<LoadedRwl> => {
     const bytes = readFileSync(path);
     const sourceText = bytes.toString("utf8");
-    const readResult = await readRwlForEvaluation(sourceText, declaredFormat);
+    const readResult = await readRwlForEvaluation(
+        sourceText,
+        declaredFormat,
+        additionalOptions,
+    );
     const series = new Map(Array.from(readResult.data, ([id, valuesByYear]) => {
         const observedEntries = Array.from(valuesByYear).flatMap(([year, value]) => (
             typeof value === "number" && value !== -9999

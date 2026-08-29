@@ -13,7 +13,7 @@ import frida
 
 HOOK_SCRIPT = r"""
 const base = Process.mainModule.base;
-const calls = { spline: 0, divser: 0, varianceStabilize: 0, standardize: 0 };
+const calls = { spline: 0, divser: 0, varianceStabilize: 0, standardize: 0, ar: 0 };
 
 function readFloatArray(address, length) {
     const values = [];
@@ -110,6 +110,40 @@ Interceptor.attach(base.add(0xe765), {
         send(this.payload);
     },
 });
+
+Interceptor.attach(base.add(0xeb08), {
+    onEnter(args) {
+        this.length = args[0].readS32();
+        this.input = args[1];
+        this.output = args[13];
+        this.scalarAddresses = [];
+        for (let index = 5; index <= 12; index += 1) {
+            this.scalarAddresses.push(args[index]);
+        }
+        this.workAddresses = [args[2], args[3], args[4]];
+        this.payload = {
+            stage: "ar",
+            call: ++calls.ar,
+            length: this.length,
+            input: readFloatArray(this.input, this.length),
+        };
+    },
+    onLeave() {
+        this.payload.centeredInput = readFloatArray(this.input, this.length);
+        this.payload.output = readFloatArray(this.output, this.length);
+        this.payload.scalars = this.scalarAddresses.map((address) => ({
+            intValue: address.readS32(),
+            floatValue: address.readFloat(),
+        }));
+        this.payload.parameterHeads = this.scalarAddresses.map((address) => (
+            readFloatArray(address, 16)
+        ));
+        this.payload.workArrayHeads = this.workAddresses.map((address) => (
+            readFloatArray(address, Math.min(this.length, 16))
+        ));
+        send(this.payload);
+    },
+});
 """
 
 
@@ -119,6 +153,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rwl", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--job", default="TRACE")
+    parser.add_argument(
+        "--profile",
+        choices=("plain", "logon", "arraw", "full"),
+        default="plain",
+    )
     return parser.parse_args()
 
 
@@ -161,21 +200,19 @@ def main() -> None:
     script.on("message", on_message)
     script.load()
     device.resume(pid)
-    prompt = "\n".join([
+    prompt_lines = [
         args.job[:5].upper(),
         runtime_name,
         "",
         "",
         "",
-        "3",
-        "N",
-        "4",
-        "N",
-        "6",
-        "V",
-        "",
-        "",
-    ]).encode("ascii")
+    ]
+    if args.profile in ("plain", "logon"):
+        prompt_lines.extend(("3", "N"))
+    if args.profile in ("plain", "arraw"):
+        prompt_lines.extend(("4", "N"))
+    prompt_lines.extend(("6", "V", "", ""))
+    prompt = "\n".join(prompt_lines).encode("ascii")
     device.input(pid, prompt)
     if not detached.wait(120):
         device.kill(pid)
@@ -185,6 +222,7 @@ def main() -> None:
         "schemaVersion": 1,
         "cofechaExe": str(args.cofecha_exe.resolve()),
         "sourceRwl": str(args.rwl.resolve()),
+        "profile": args.profile,
         "records": records,
         "processOutput": process_output,
     }

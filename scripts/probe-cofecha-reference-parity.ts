@@ -10,12 +10,15 @@ import {
 import { basename, join, resolve } from "node:path";
 import { stopMarker } from "@/shared/constants";
 import { parseCofecha606TucsonWidth } from "@/features/crossdating/cofecha606F63";
+import { detectPrecision } from "@/features/rwl/detect";
 import {
     COFECHA_REFERENCE_DEFAULT_OPTIONS,
+    buildCofecha606MasterSeries,
     cofecha606DivideSeries,
     cofecha606StandardizeValues,
     cofecha606StabilizeFilteredSeries,
     cofechaStyleStandardize,
+    formatCofecha606MasterSeries,
     solveCofecha606SplineTrend,
     type CofechaArImplementation,
     type CofechaDetrendImplementation,
@@ -60,6 +63,11 @@ const AR_MODES: CofechaArImplementation[] = [
     "fixed-3",
     "fixed-4",
     "fixed-5",
+    "fixed-6",
+    "fixed-7",
+    "fixed-8",
+    "fixed-9",
+    "fixed-10",
 ];
 const SPLINE_MODES: CofechaSplineImplementation[] = [
     "ltrr-cook-holmes",
@@ -96,6 +104,8 @@ const requestedProfiles = new Set(valueFor("--profiles", "plain,logon,arraw,full
     .filter(Boolean));
 const profiles = ALL_PROFILES.filter((profile) => requestedProfiles.has(profile.id));
 const listMeasurements = valueFor("--list-measurements", "false") === "true";
+const exactOnly = valueFor("--exact-only", "false") === "true";
+const runtimeStagesPath = valueFor("--runtime-stages", "");
 const requestedLambdaScales = valueFor("--lambda-scales", "");
 const lambdaScalesToTest = requestedLambdaScales
     ? requestedLambdaScales.split(",").map(Number).filter((value) => (
@@ -233,8 +243,9 @@ const runProfile = (profile: ProbeProfile) => {
         throw new Error(`COFECHA ${profile.id} failed: ${result.stderr}`);
     }
     const path = masterPath(profile);
+    const masterText = readFileSync(path, "utf8");
     const master = new Map<number, number>();
-    readFileSync(path, "utf8").split(/\r?\n/).forEach((line) => {
+    masterText.split(/\r?\n/).forEach((line) => {
         const match = line.match(/^\s*(-?\d+)\s+([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*$/);
         if (match) master.set(Number(match[1]), Number(match[2]));
     });
@@ -252,6 +263,17 @@ const runProfile = (profile: ProbeProfile) => {
         arOrder: number;
     }>();
     const report = readFileSync(reportPath(profile), "utf8");
+    const masterDepth = new Map<number, number>();
+    const partThreeHeading = "PART 3:  Master Dating Series:";
+    const partThreeStart = report.indexOf(partThreeHeading);
+    const partThree = partThreeStart >= 0
+        ? report.slice(partThreeStart + partThreeHeading.length)
+            .split("PART 4:  Master Bar Plot:")[0] ?? ""
+        : "";
+    const depthPattern = /(?:^|\s)(-?\d{1,4})\s+([+-]?(?:\d*\.\d+))\s+(\d+)(?=\s|$)/g;
+    for (const match of partThree.matchAll(depthPattern)) {
+        masterDepth.set(Number(match[1]), Number(match[3]));
+    }
     const partSeven = report.split("PART 7:  DESCRIPTIVE STATISTICS:")[1] ?? "";
     partSeven.split(/\r?\n/).forEach((line) => {
         const fields = line.trim().split(/\s+/);
@@ -271,10 +293,251 @@ const runProfile = (profile: ProbeProfile) => {
             arOrder: numeric[14],
         });
     });
-    return { master, descriptiveStats };
+    return { master, masterText, masterDepth, descriptiveStats };
 };
 
-const loaded = await loadRwl(sourcePath, "tucson-auto");
+stopMarker.value = await detectPrecision(readFileSync(sourcePath, "utf8"));
+const loaded = await loadRwl(sourcePath, "tucson-auto", {
+    preserveNegativeMeasurements: true,
+});
+const inputValues = [...loaded.siteData.values()].flatMap((tree) => (
+    [...tree.values()].filter((value): value is number => (
+        typeof value === "number" && Number.isFinite(value) && value !== stopMarker.value
+    ))
+));
+const structuralGapCount = [...loaded.siteData.values()].reduce((total, tree) => {
+    const years = [...tree.entries()]
+        .filter(([, value]) => value !== stopMarker.value)
+        .map(([year]) => year);
+    if (years.length === 0) return total;
+    return total + (Math.max(...years) - Math.min(...years) + 1 - years.length);
+}, 0);
+const inputStats = {
+    stopMarker: stopMarker.value,
+    seriesCount: loaded.siteData.size,
+    pointCount: inputValues.length,
+    zeroCount: inputValues.filter((value) => value === 0).length,
+    above9998Count: inputValues.filter((value) => value > 9998).length,
+    maximumWidth: inputValues.length > 0 ? Math.max(...inputValues) : null,
+    structuralGapCount,
+    series: [...loaded.siteData].map(([seriesId, tree]) => {
+        const entries = [...tree.entries()]
+            .filter(([, value]) => value !== stopMarker.value)
+            .sort(([left], [right]) => left - right);
+        return {
+            seriesId,
+            startYear: entries[0]?.[0] ?? null,
+            endYear: entries.at(-1)?.[0] ?? null,
+            pointCount: entries.length,
+            zeroCount: entries.filter(([, value]) => value === 0).length,
+            leadingZero: entries[0]?.[1] === 0,
+            trailingZero: entries.at(-1)?.[1] === 0,
+        };
+    }),
+};
+const runtimeInputAudit = (() => {
+    if (!runtimeStagesPath) return null;
+    const runtime = JSON.parse(readFileSync(resolve(runtimeStagesPath), "utf8"));
+    const firstSplinePasses = runtime.records
+        .filter((record: { stage?: string }) => record.stage === "spline")
+        .filter((_: unknown, index: number) => index % 2 === 0);
+    const runtimeMasterCores = runtime.records.filter((record: {
+        stage?: string;
+        callerOffset?: string;
+    }) => record.stage === "standardize" && record.callerOffset === "0x795f");
+    const runtimeVariancePasses = runtime.records.filter((record: { stage?: string }) => (
+        record.stage === "varianceStabilize"
+    ));
+    const runtimeFirstDivisions = runtime.records
+        .filter((record: { stage?: string }) => record.stage === "divser")
+        .filter((_: unknown, index: number) => index % 2 === 0);
+    const runtimeVarianceStandardizations = runtime.records.filter((record: {
+        stage?: string;
+        callerOffset?: string;
+    }) => record.stage === "standardize" && record.callerOffset === "0xe510");
+    const runtimeSecondSplines = runtime.records
+        .filter((record: { stage?: string }) => record.stage === "spline")
+        .filter((_: unknown, index: number) => index % 2 === 1);
+    const runtimeSecondDivisions = runtime.records
+        .filter((record: { stage?: string }) => record.stage === "divser")
+        .filter((_: unknown, index: number) => index % 2 === 1);
+    const trees = [...loaded.siteData];
+    const mismatches = trees.flatMap(([seriesId, tree], seriesIndex) => {
+        const expected = [...tree.entries()]
+            .filter((entry): entry is [number, number] => (
+                typeof entry[1] === "number"
+                && Number.isFinite(entry[1])
+                && entry[1] !== stopMarker.value
+            ))
+            .sort(([left], [right]) => left - right)
+            .map(([, value]) => parseCofecha606TucsonWidth(value, stopMarker.value));
+        const actual = firstSplinePasses[seriesIndex]?.input ?? [];
+        const valueMismatchCount = Array.from(
+            { length: Math.min(expected.length, actual.length) },
+            (_, index) => expected[index] !== actual[index],
+        ).filter(Boolean).length;
+        return expected.length === actual.length && valueMismatchCount === 0 ? [] : [{
+            seriesId,
+            expectedLength: expected.length,
+            actualLength: actual.length,
+            valueMismatchCount,
+        }];
+    });
+    return {
+        expectedSeries: trees.length,
+        actualSeries: firstSplinePasses.length,
+        mismatches,
+        masterCoreMismatches: trees.flatMap(([seriesId, tree], seriesIndex) => {
+            const rawValues = [...tree.entries()]
+                .filter((entry): entry is [number, number] => (
+                    typeof entry[1] === "number"
+                    && Number.isFinite(entry[1])
+                    && entry[1] !== stopMarker.value
+                ))
+                .sort(([left], [right]) => left - right)
+                .map(([, value]) => parseCofecha606TucsonWidth(value, stopMarker.value));
+            const trend = solveCofecha606SplineTrend(rawValues, 32, 0.5) ?? [];
+            const runtimeTrend = firstSplinePasses[seriesIndex]?.output ?? [];
+            const trendErrors = Array.from(
+                { length: Math.min(trend.length, runtimeTrend.length) },
+                (_, index) => trend[index] - runtimeTrend[index],
+            );
+            const divided = trend.length === rawValues.length
+                ? cofecha606DivideSeries(rawValues, trend)
+                : [];
+            const runtimeDivided = runtimeFirstDivisions[seriesIndex]?.output ?? [];
+            const divisionErrors = Array.from(
+                { length: Math.min(divided.length, runtimeDivided.length) },
+                (_, index) => divided[index] - runtimeDivided[index],
+            );
+            const varianceStandardized = cofecha606StandardizeValues(divided);
+            const runtimeVarianceStandardized = runtimeVarianceStandardizations[seriesIndex]?.output ?? [];
+            const varianceStandardizationErrors = Array.from(
+                {
+                    length: Math.min(
+                        varianceStandardized.length,
+                        runtimeVarianceStandardized.length,
+                    ),
+                },
+                (_, index) => (
+                    varianceStandardized[index] - runtimeVarianceStandardized[index]
+                ),
+            );
+            const absoluteStandardized = varianceStandardized.map((value) => (
+                value < 0 ? Math.fround(value * -1) : value
+            ));
+            const secondTrend = solveCofecha606SplineTrend(
+                absoluteStandardized,
+                32,
+                0.5,
+            ) ?? [];
+            const runtimeSecondTrend = runtimeSecondSplines[seriesIndex]?.output ?? [];
+            const secondTrendErrors = Array.from(
+                { length: Math.min(secondTrend.length, runtimeSecondTrend.length) },
+                (_, index) => secondTrend[index] - runtimeSecondTrend[index],
+            );
+            const secondDivided = cofecha606DivideSeries(
+                absoluteStandardized,
+                secondTrend,
+            );
+            const runtimeSecondDivided = runtimeSecondDivisions[seriesIndex]?.output ?? [];
+            const secondDivisionErrors = Array.from(
+                { length: Math.min(secondDivided.length, runtimeSecondDivided.length) },
+                (_, index) => secondDivided[index] - runtimeSecondDivided[index],
+            );
+            const unlogged = cofechaStyleStandardize(tree, {
+                ...COFECHA_REFERENCE_DEFAULT_OPTIONS,
+                useAutoregressiveModel: false,
+                useLogTransform: false,
+                omitAbsentRingsFromMaster: false,
+            }, "ltrr-cook-holmes", "none", 1, "ratio", "post-ar", "legacy-float32");
+            const runtimeVariance = runtimeVariancePasses[seriesIndex]?.output ?? [];
+            const manualVariance = cofecha606StabilizeFilteredSeries(
+                divided,
+                32,
+                0.5,
+            );
+            const manualVarianceErrors = Array.from(
+                { length: Math.min(manualVariance.length, runtimeVariance.length) },
+                (_, index) => manualVariance[index] - runtimeVariance[index],
+            );
+            const varianceErrors = Array.from(
+                { length: Math.min(unlogged.length, runtimeVariance.length) },
+                (_, index) => unlogged[index].value - runtimeVariance[index],
+            );
+            const filtered = cofechaStyleStandardize(tree, {
+                ...COFECHA_REFERENCE_DEFAULT_OPTIONS,
+                useAutoregressiveModel: false,
+                useLogTransform: true,
+                omitAbsentRingsFromMaster: false,
+            }, "ltrr-cook-holmes", "none", 1, "ratio", "post-ar", "legacy-float32");
+            const expected = cofecha606StandardizeValues(
+                filtered.map((point) => point.value),
+            );
+            const runtimeCore = runtimeMasterCores[seriesIndex];
+            const actualInput = runtimeCore?.input ?? [];
+            const actual = runtimeCore?.output ?? [];
+            const inputErrors = Array.from(
+                { length: Math.min(filtered.length, actualInput.length) },
+                (_, index) => filtered[index].value - actualInput[index],
+            );
+            const errors = Array.from(
+                { length: Math.min(expected.length, actual.length) },
+                (_, index) => expected[index] - actual[index],
+            );
+            const mismatchCount = errors.filter((error) => error !== 0).length;
+            return expected.length === actual.length && mismatchCount === 0 ? [] : [{
+                seriesId,
+                expectedLength: expected.length,
+                actualLength: actual.length,
+                mismatchCount,
+                maxAbsoluteError: errors.length > 0
+                    ? Math.max(...errors.map(Math.abs))
+                    : null,
+                inputMismatchCount: inputErrors.filter((error) => error !== 0).length,
+                inputMaxAbsoluteError: inputErrors.length > 0
+                    ? Math.max(...inputErrors.map(Math.abs))
+                    : null,
+                varianceMismatchCount: varianceErrors.filter((error) => error !== 0).length,
+                varianceMaxAbsoluteError: varianceErrors.length > 0
+                    ? Math.max(...varianceErrors.map(Math.abs))
+                    : null,
+                manualVarianceMismatchCount: manualVarianceErrors
+                    .filter((error) => error !== 0).length,
+                manualVarianceMaxAbsoluteError: manualVarianceErrors.length > 0
+                    ? Math.max(...manualVarianceErrors.map(Math.abs))
+                    : null,
+                trendMismatchCount: trendErrors.filter((error) => error !== 0).length,
+                trendMaxAbsoluteError: trendErrors.length > 0
+                    ? Math.max(...trendErrors.map(Math.abs))
+                    : null,
+                divisionMismatchCount: divisionErrors.filter((error) => error !== 0).length,
+                divisionMaxAbsoluteError: divisionErrors.length > 0
+                    ? Math.max(...divisionErrors.map(Math.abs))
+                    : null,
+                varianceStandardizationMismatchCount: varianceStandardizationErrors
+                    .filter((error) => error !== 0).length,
+                varianceStandardizationMaxAbsoluteError: varianceStandardizationErrors.length > 0
+                    ? Math.max(...varianceStandardizationErrors.map(Math.abs))
+                    : null,
+                secondTrendMismatchCount: secondTrendErrors.filter((error) => error !== 0).length,
+                secondTrendMaxAbsoluteError: secondTrendErrors.length > 0
+                    ? Math.max(...secondTrendErrors.map(Math.abs))
+                    : null,
+                secondDivisionMismatchCount: secondDivisionErrors
+                    .filter((error) => error !== 0).length,
+                secondDivisionMaxAbsoluteError: secondDivisionErrors.length > 0
+                    ? Math.max(...secondDivisionErrors.map(Math.abs))
+                    : null,
+                expectedVarianceHead: unlogged.slice(0, 5).map((point) => point.value),
+                manualVarianceHead: manualVariance.slice(0, 5),
+                actualVarianceHead: runtimeVariance.slice(0, 5),
+                standardizedHead: varianceStandardized.slice(0, 5),
+                secondDivisionHead: secondDivided.slice(0, 5),
+            }];
+        }),
+    };
+})();
 const firstTreeEntry = loaded.siteData.entries().next().value as
     | [string, (typeof loaded.siteData extends Map<string, infer V> ? V : never)]
     | undefined;
@@ -282,7 +545,9 @@ if (!firstTreeEntry) throw new Error(`empty RWL: ${sourcePath}`);
 const [firstTreeId, firstTree] = firstTreeEntry;
 const firstRawValues = [...firstTree.entries()]
     .filter((entry): entry is [number, number] => (
-        typeof entry[1] === "number" && Number.isFinite(entry[1]) && entry[1] > 0
+        typeof entry[1] === "number"
+        && Number.isFinite(entry[1])
+        && entry[1] !== stopMarker.value
     ))
     .sort(([left], [right]) => left - right)
     .map(([, value]) => parseCofecha606TucsonWidth(value, stopMarker.value));
@@ -358,11 +623,14 @@ const buildJsMaster = (input: {
     loaded.siteData.forEach((tree) => {
         let points = quantizePoints(cofechaStyleStandardize(tree, {
             ...COFECHA_REFERENCE_DEFAULT_OPTIONS,
-            useAutoregressiveModel: input.profile.useAr,
+            // COFECHA applies AR residuals to checking/statistics, not to the
+            // saved master chronology. FULLCOF.MAS equals LOGONCOF.MAS and
+            // ARRAWCOF.MAS equals PLAINCOF.MAS byte-for-byte.
+            useAutoregressiveModel: false,
             useLogTransform: input.profile.useLog,
             minReplication: 1,
             omitAbsentRingsFromMaster: input.numeric !== "legacy-float32",
-        }, input.spline, input.profile.useAr ? input.ar : "none", input.splineLambdaScale, input.detrend, input.log, input.numeric), input.filteredQuantizationDigits);
+        }, input.spline, "none", input.splineLambdaScale, input.detrend, input.log, input.numeric), input.filteredQuantizationDigits);
         if (input.normalizeCore && points.length > 0) {
             const values = points.map((point) => point.value);
             if (input.numeric === "legacy-float32" && !input.sampleCoreSd) {
@@ -426,6 +694,10 @@ const compare = (
         actualVariance += actualDelta ** 2;
     });
     const errors = pairs.map((row) => row.actualValue - row.expectedValue);
+    const fourDecimals = (value: number) => {
+        const formatted = value.toFixed(4);
+        return formatted === "-0.0000" ? "0.0000" : formatted;
+    };
     return {
         expectedYears: expected.size,
         actualYears: actual.size,
@@ -435,11 +707,14 @@ const compare = (
         mae: mean(errors.map(Math.abs)),
         maxAbsoluteError: Math.max(...errors.map(Math.abs)),
         exactFourDecimals: pairs.filter((row) => (
-            row.actualValue.toFixed(4) === row.expectedValue.toFixed(4)
+            fourDecimals(row.actualValue) === fourDecimals(row.expectedValue)
         )).length,
         exactFourDecimalRate: pairs.filter((row) => (
-            row.actualValue.toFixed(4) === row.expectedValue.toFixed(4)
+            fourDecimals(row.actualValue) === fourDecimals(row.expectedValue)
         )).length / Math.max(1, pairs.length),
+        fourDecimalMismatches: pairs.filter((row) => (
+            fourDecimals(row.actualValue) !== fourDecimals(row.expectedValue)
+        )).slice(0, 20),
     };
 };
 
@@ -473,6 +748,44 @@ const profileResults = [];
 for (const profile of profiles) {
     const cofecha = runProfile(profile);
     const cofechaMaster = cofecha.master;
+    const exactBuilder = buildCofecha606MasterSeries(loaded.siteData, {
+        ...COFECHA_REFERENCE_DEFAULT_OPTIONS,
+        useAutoregressiveModel: profile.useAr,
+        useLogTransform: profile.useLog,
+    });
+    if (!exactBuilder) throw new Error(`exact builder returned no master for ${profile.id}`);
+    const formattedExactMaster = formatCofecha606MasterSeries(exactBuilder);
+    const normalizedCofechaText = cofecha.masterText.replace(/\r?\n/g, "\r\n");
+    const depthYears = new Set([
+        ...cofecha.masterDepth.keys(),
+        ...exactBuilder.sampleDepth.keys(),
+    ]);
+    const depthMismatches = [...depthYears].flatMap((year) => {
+        const expected = cofecha.masterDepth.get(year);
+        const actual = exactBuilder.sampleDepth.get(year);
+        return expected === actual ? [] : [{ year, expected, actual }];
+    });
+    const exactBuilderResult = {
+        ...compare(cofechaMaster, exactBuilder.data),
+        formattedTextExact: formattedExactMaster === normalizedCofechaText,
+        expectedDepthYears: cofecha.masterDepth.size,
+        actualDepthYears: exactBuilder.sampleDepth.size,
+        depthMismatches,
+    };
+    if (exactOnly) {
+        profileResults.push({
+            profile,
+            cofechaMasterPath: masterPath(profile),
+            cofechaYears: cofechaMaster.size,
+            exactBuilder: exactBuilderResult,
+        });
+        console.log(`COFECHA_PARITY_PROFILE ${JSON.stringify({
+            profile: profile.id,
+            years: cofechaMaster.size,
+            exactBuilder: exactBuilderResult,
+        })}`);
+        continue;
+    }
     const variants = [];
     const filterDiagnostics: Array<{
         spline: CofechaSplineImplementation;
@@ -606,6 +919,7 @@ for (const profile of profiles) {
         profile,
         cofechaMasterPath: masterPath(profile),
         cofechaYears: cofechaMaster.size,
+        exactBuilder: exactBuilderResult,
         firstCoreId: firstTreeId,
         cofechaFirstCoreStats: cofecha.descriptiveStats.get(firstTreeId.toUpperCase()) ?? null,
         rawBestFirstCoreStats,
@@ -634,6 +948,8 @@ const output = {
     sourcePath,
     sourceName: basename(sourcePath),
     cofechaExe,
+    inputStats,
+    runtimeInputAudit,
     exactPlainCoreDiagnostics: {
         splineSolved: exactFirstTrend !== null,
         firstRawValues,
