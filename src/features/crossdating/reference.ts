@@ -673,6 +673,13 @@ export type Cofecha606MasterSeries = {
     options: CofechaReferenceOptions;
 };
 
+export type Cofecha606SeriesSegment = {
+    seriesId: string;
+    segmentIndex: number;
+    data: RwlTreeData;
+    stopMarkerValue: number;
+};
+
 export const cofecha606StandardizeValues = (
     values: readonly number[],
 ): number[] => {
@@ -1254,32 +1261,14 @@ export function cofechaStyleStandardize(
     return transformed;
 }
 
-export function buildCofecha606MasterSeries(
+export const splitCofecha606SeriesSegments = (
     siteData: RwlSiteData,
-    options: CofechaReferenceOptions = COFECHA_REFERENCE_DEFAULT_OPTIONS,
-): Cofecha606MasterSeries | null {
-    const valuesByYear = new Map<number, number[]>();
-    const replicationByYear = new Map<number, number>();
-    const includedSeriesIds: string[] = [];
-    const filteringOptions: CofechaReferenceOptions = {
-        ...options,
-        // COFECHA's saved chronology is formed before AR prewhitening. AR
-        // affects checking/statistics, while FULL.MAS equals LOG-only.MAS.
-        useAutoregressiveModel: false,
-        // Keep zero placeholders through both spline passes and final per-core
-        // standardization. Their original-year mask is applied only below.
-        omitAbsentRingsFromMaster: false,
-    };
-    const contiguousSegments = (tree: RwlTreeData): Array<{
-        data: RwlTreeData;
-        stopMarkerValue: number;
-    }> => {
-        const segments: Array<{
-            data: RwlTreeData;
-            stopMarkerValue: number;
-        }> = [];
-        let segment: (typeof segments)[number] | null = null;
+): Cofecha606SeriesSegment[] => {
+    const result: Cofecha606SeriesSegment[] = [];
+    siteData.forEach((tree, seriesId) => {
+        let segment: Cofecha606SeriesSegment | null = null;
         let previousYear: number | null = null;
+        let segmentIndex = 0;
         const entries = [...tree.entries()].sort(([left], [right]) => left - right);
         entries.forEach(([year, value], index) => {
             const nextYear = entries[index + 1]?.[0];
@@ -1297,20 +1286,42 @@ export function buildCofecha606MasterSeries(
                 return;
             }
             if (!segment || previousYear === null || year !== previousYear + 1) {
+                segmentIndex += 1;
                 segment = {
+                    seriesId,
+                    segmentIndex,
                     data: new Map<number, number | null>(),
                     stopMarkerValue: stopMarker.value,
                 };
-                segments.push(segment);
+                result.push(segment);
             }
             segment.data.set(year, value);
             previousYear = year;
         });
-        return segments;
+    });
+    return result;
+};
+
+export function buildCofecha606MasterSeries(
+    siteData: RwlSiteData,
+    options: CofechaReferenceOptions = COFECHA_REFERENCE_DEFAULT_OPTIONS,
+): Cofecha606MasterSeries | null {
+    const valuesByYear = new Map<number, number[]>();
+    const replicationByYear = new Map<number, number>();
+    const includedSeriesIds: string[] = [];
+    const filteringOptions: CofechaReferenceOptions = {
+        ...options,
+        // COFECHA's saved chronology is formed before AR prewhitening. AR
+        // affects checking/statistics, while FULL.MAS equals LOG-only.MAS.
+        useAutoregressiveModel: false,
+        // Keep zero placeholders through both spline passes and final per-core
+        // standardization. Their original-year mask is applied only below.
+        omitAbsentRingsFromMaster: false,
     };
-    siteData.forEach((tree, seriesId) => {
+    const allSegments = splitCofecha606SeriesSegments(siteData);
+    siteData.forEach((_tree, seriesId) => {
         let included = false;
-        contiguousSegments(tree).forEach((segment) => {
+        allSegments.filter((segment) => segment.seriesId === seriesId).forEach((segment) => {
             const filtered = cofechaStyleStandardize(
                 segment.data,
                 filteringOptions,
