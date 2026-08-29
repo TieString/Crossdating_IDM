@@ -383,7 +383,12 @@ def project_relative_features(
     groups = frame.groupby(spec.group_column, sort=False)
     output: dict[str, pd.Series | np.ndarray] = {}
     for column in spec.numeric_columns:
-        values = pd.to_numeric(frame.get(column), errors="coerce")
+        values = pd.to_numeric(
+            frame[column]
+            if column in frame
+            else pd.Series(np.nan, index=frame.index),
+            errors="coerce",
+        )
         grouped_values = values.groupby(frame[spec.group_column], sort=False)
         mean = grouped_values.transform("mean")
         standard_deviation = grouped_values.transform("std").replace(0, np.nan)
@@ -400,7 +405,11 @@ def project_relative_features(
         output[f"{column}__missing"] = values.isna().astype(np.float32)
 
     for column in spec.categorical_columns:
-        values = frame[column].fillna("missing").astype(str)
+        values = (
+            frame[column]
+            if column in frame
+            else pd.Series("missing", index=frame.index)
+        ).fillna("missing").astype(str)
         for level in spec.categorical_levels[column]:
             output[_categorical_feature_name(column, level)] = values.eq(level).astype(
                 np.float32

@@ -905,6 +905,7 @@ def score_target_safe_two_stage(
     location_weight: float,
     proposal_weight: float,
     safety_calibration: dict[str, float],
+    location_anchor_tables: dict[str, pd.DataFrame] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, float]]:
     if any(weight != 0 for weight in (
         operation_weight, location_weight, proposal_weight
@@ -942,10 +943,19 @@ def score_target_safe_two_stage(
             baseline["event_type"].isin(LOCAL_EVENT_TYPES), "identity_group"
         ]
     )
-    locations = prepare_location(target_locations)
-    selected_locations = locations[
-        locations["identity_group"].isin(needed_identities)
-    ].reset_index(drop=True)
+    selected_locations = prepare_location(
+        target_locations.loc[
+            target_locations["identity_group"].isin(needed_identities)
+        ].reset_index(drop=True)
+    )
+    if "proposal_role" not in selected_locations:
+        selected_locations["proposal_role"] = "densePackage"
+    if "frozen_proposal_available" not in selected_locations:
+        selected_locations["frozen_proposal_available"] = np.float32(0)
+    if location_anchor_tables:
+        selected_locations, _ = add_location_proposal_anchors(
+            selected_locations, location_anchor_tables
+        )
     if selected_locations.empty:
         dense_location_top = pd.DataFrame(columns=[
             "identity_group",
