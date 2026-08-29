@@ -198,6 +198,30 @@ function CofechaSection() {
         <div>
             <h2 className={styles["section-title"]}>COFECHA</h2>
 
+            <Row label="报告引擎" align="top">
+                <div className={styles["segmented-control"]} role="group" aria-label="COFECHA 报告引擎">
+                    <button
+                        className={`${styles["segment-button"]} ${settings.cofecha.engine === "javascript" ? styles["segment-button-active"] : ""}`}
+                        type="button"
+                        aria-pressed={settings.cofecha.engine === "javascript"}
+                        onClick={() => updateCofechaSettings({ engine: "javascript" })}
+                    >
+                        JavaScript
+                    </button>
+                    <button
+                        className={`${styles["segment-button"]} ${settings.cofecha.engine === "official" ? styles["segment-button-active"] : ""}`}
+                        type="button"
+                        aria-pressed={settings.cofecha.engine === "official"}
+                        onClick={() => updateCofechaSettings({ engine: "official" })}
+                    >
+                        官方 COFECHA
+                    </button>
+                </div>
+                <div className={styles["setting-note"]}>
+                    报告查看与定年建议使用同一引擎。
+                </div>
+            </Row>
+
             <Row label="可执行文件" align="top">
                 <div className={styles["executable-row"]}>
                     <input
@@ -217,7 +241,7 @@ function CofechaSection() {
                     )}
                 </div>
                 <div className={executablePath ? styles["configured-status"] : styles["unconfigured-status"]}>
-                    {executablePath ? "COFECHA 已配置" : "COFECHA 尚未配置"}
+                    {executablePath ? "官方 COFECHA 已配置" : "官方 COFECHA 尚未配置"}
                 </div>
             </Row>
 

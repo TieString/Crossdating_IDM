@@ -12,7 +12,7 @@ interface CofechaProcessOutput {
 
 /** Runs whichever COFECHA executable the user selected; the executable is never copied. */
 
-export async function runCofecha(
+export async function runOfficialCofecha(
   rwlText: string,
   inputFileName?: string,
   executablePath?: string,

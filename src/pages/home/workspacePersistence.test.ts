@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+    getPersistedCofechaEngine,
     loadPersistedCofechaState,
     loadPersistedReferenceState,
     persistCofechaState,
@@ -57,7 +58,7 @@ describe("workspace persistence browser fallback", () => {
             filePath,
             "PART 6: smoke",
             undefined,
-            "cofecha",
+            "javascript",
             "PART 6",
             "hash-smoke",
         );
@@ -65,9 +66,20 @@ describe("workspace persistence browser fallback", () => {
         await expect(loadPersistedCofechaState(filePath)).resolves.toMatchObject({
             version: 1,
             outFileContent: "PART 6: smoke",
+            cofechaEngine: "javascript",
             selectedPart: "PART 6",
             cofechaInputSignature: "hash-smoke",
         });
+    });
+
+    it("maps legacy persisted COFECHA versions to the official engine", () => {
+        expect(getPersistedCofechaEngine({
+            version: 1,
+            savedAt: "2026-08-30T00:00:00.000Z",
+            outFileContent: "",
+            cofechaVersion: "cofecha",
+            selectedPart: "全部",
+        })).toBe("official");
     });
 
     it("round-trips reference state without requiring Tauri", async () => {

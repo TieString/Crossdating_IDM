@@ -7,7 +7,6 @@ export const formatTitle = (fileName: string | null, isModified: boolean) => (
     fileName ? `${fileName}${isModified ? " *" : ""}` : DEFAULT_HOME_TITLE
 );
 
-export type CofechaVersion = "cofecha" | "cofecha12k" | "cofechawin";
 export type TitleMenuKind = "file" | "edit" | "run";
 
 export const TREE_ALL_OPTION_LABEL = "📜 全部";

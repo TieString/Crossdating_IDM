@@ -1,36 +1,11 @@
-import { exists, readTextFile } from "@tauri-apps/plugin-fs";
 import { ICofechaResult } from "./types";
 import { normalizeCofechaSeriesId } from "./seriesId";
-import { getCofechaWorkDir } from "@/services/fs/workspace";
-import { join } from "@tauri-apps/api/path";
 // COFECHA 输出解析模块。
 // 这里的目标不是完整理解报告全文，而是提取前端真正需要展示的部分：
 // 1. PART 1 中的统计摘要；
 // 2. PART 3 中的主序列相关数据；
 // 3. PART 6 中的潜在问题详情。
 // 解析结果会被整理成统一的 ICofechaResult，供页面层直接消费。
-/**
- * 从工作空间读取COFECHA输出文件内容的异步函数
- * @returns {Promise<string>} 返回一个Promise，解析为文件内容字符串
- */
-const readOutFile = async (): Promise<string> => {
-    try {
-        // 使用readTextFile函数读取文件，文件路径相对于应用程序资源目录
-        const outPath = await join(await getCofechaWorkDir(), "VERYCOF.OUT");
-        if (!await exists(outPath)) {
-            console.error("VERYCOF.OUT not found:", outPath);
-            return "VERYCOF.OUT not found";
-        }
-        const content = await readTextFile(outPath); // 路径相对于应用程序数据目录
-        console.log("正在读取工作空间文件");
-        
-        return content;
-    } catch (error) {
-        console.log('读取文件出错:' + error);
-        return "读取文件出错";
-    }
-}
-
 const parseCofechaResult = (content: string): ICofechaResult => {
     // 先按 PART 拆分，再从各部分提取前端需要的摘要字段。
     const reportParts = splitReportByParts(content);
@@ -227,5 +202,5 @@ export function extractPart6FlaggedASeriesIds(text: string): string[] {
 
 
 
-export { readOutFile, parseCofechaResult };
+export { parseCofechaResult };
 

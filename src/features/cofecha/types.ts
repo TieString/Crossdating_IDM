@@ -1,3 +1,5 @@
+export type CofechaEngine = "official" | "javascript";
+
 export interface ICofechaResult {
     masterSeriesYear: string,
     seriesIntercorrelation: number,

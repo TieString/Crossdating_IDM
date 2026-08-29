@@ -10,6 +10,10 @@ Crossdating IDM 不包含、复制或分发 COFECHA 可执行程序。用户可�
 
 COFECHA 由 Richard L. Holmes 创建。推荐引用：Holmes, R. L. (1983). Computer-assisted quality control in tree-ring dating and measurement. *Tree-Ring Bulletin*, 43, 69-78。
 
+## cofecha-js
+
+Crossdating IDM 依赖 GPL-3.0-only 的 [`cofecha-js`](https://github.com/TieString/cofecha-js) 生成可移植的 COFECHA 兼容报告。该依赖不包含、调用或分发官方 COFECHA 可执行程序。
+
 ## ITRDB 示例数据
 
 根目录 `test-data` 中的 RWL 示例来自 NOAA National Centers for Environmental Information, World Data Service for Paleoclimatology 管理的 International Tree-Ring Data Bank (ITRDB)。数据继续适用 ITRDB 及原始调查者的归属和引用要求；来源链接、文件校验值和逐站点说明见 `test-data/README.md` 与 `test-data/SHA256SUMS.txt`。

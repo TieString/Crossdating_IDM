@@ -4,7 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { createPortal } from "react-dom";
 import Menu from "@/components/Menu/Menu";
 import { useSettings } from "@/features/settings/SettingsContext";
-import { CofechaVersion, TitleMenuKind } from "./homeShared";
+import { TitleMenuKind } from "./homeShared";
 
 type MenuItem = {
     label: string;
@@ -15,7 +15,6 @@ type MenuItem = {
 
 type HomeTitleBarBridgeProps = {
     title: string;
-    cofechaVersion: CofechaVersion;
     onLoad: () => void | Promise<void>;
     onSave: () => void | Promise<void>;
     onSaveAs: () => void | Promise<void>;
@@ -23,7 +22,6 @@ type HomeTitleBarBridgeProps = {
     onRedo: () => void | Promise<void>;
     canUndo?: boolean;
     canRedo?: boolean;
-    onCofechaVersionChange: (version: CofechaVersion) => void;
     onActiveMenuChange?: (menu: TitleMenuKind | null) => void;
     onOpenOperationLog?: () => void | Promise<void>;
     onOpenSettings?: () => void | Promise<void>;

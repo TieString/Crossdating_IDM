@@ -26,7 +26,11 @@ import {
     normalizeReferenceSeriesConfig,
     type ReferenceSeriesConfig,
 } from "@/features/crossdating/reference";
-import type { ICofechaResult } from "@/features/cofecha/types";
+import type { CofechaEngine, ICofechaResult } from "@/features/cofecha/types";
+import {
+    isCofechaValidationFresh,
+    type CofechaValidationIdentity,
+} from "@/features/cofecha/validationIdentity";
 import { detectPrecision, readRwlString } from "@/features/rwl";
 import {
     RwlBatchMoveConflictError,
@@ -44,11 +48,11 @@ import {
     type PersistedTreeRingScanState,
     type TreeRingScanSeriesState,
 } from "@/features/treeRingScans";
-import { runCofecha } from "@/services/cofecha/runner";
+import { runCofechaReport } from "@/services/cofecha";
 import { readRwlFile, saveFile } from "@/services/fs/io";
 import { stopMarker } from "@/shared/constants";
 import { useSettings } from "@/features/settings/SettingsContext";
-import { ALL_OPTION_VALUE, CofechaVersion, formatTitle } from "./homeShared";
+import { ALL_OPTION_VALUE, formatTitle } from "./homeShared";
 import type { DiagnosisWorkerRequest, DiagnosisWorkerResponse } from "./diagnosisWorker";
 import { selectAutomaticDiagnosisReferenceConfig } from "./diagnosisReferencePolicy";
 import {
@@ -63,6 +67,7 @@ import {
 import { createSerialTaskQueue } from "./serialTaskQueue";
 import {
     deserializeCofechaResult,
+    getPersistedCofechaEngine,
     loadPersistedCofechaState,
     loadPersistedHistorySnapshot,
     loadPersistedReferenceState,
@@ -128,7 +133,7 @@ type BreadthScanRequest = {
 };
 
 type RunCofechaApplyOptions = {
-    version?: CofechaVersion;
+    engine?: CofechaEngine;
     selectedPart?: string;
     inputData?: RwlSiteData;
     workspaceGuard?: {
@@ -243,7 +248,7 @@ export function useHomeWorkspace() {
     const diagnosisResultCacheRef = useRef<DiagnosisResultCache | null>(null);
     const referenceOperationCounterRef = useRef(0);
     // COFECHA .OUT 对应数据的签名 + 引擎版本。用于判断当前 .OUT 是否仍与编辑数据匹配（新鲜）。
-    const lastCofechaValidationRef = useRef<{ inputSignature: string; version: CofechaVersion } | null>(null);
+    const lastCofechaValidationRef = useRef<CofechaValidationIdentity | null>(null);
     const latestDiagnosisCandidatesRef = useRef<DiagnosisCandidateOperation[]>([]);
     const latestDynamicReferenceConfigRef = useRef<ReferenceSeriesConfig | null>(null);
 
@@ -296,9 +301,7 @@ export function useHomeWorkspace() {
     const [cofechaParts, setCofechaParts] = useState<Map<string, string>>(new Map());
     const [selectedPart, setSelectedPart] = useState<string>(ALL_OPTION_VALUE);
     const { settings } = useSettings();
-    // Persisted workspaces retain this identifier, while execution always uses the one loaded EXE.
-    const cofechaVersion: CofechaVersion = "cofecha";
-    const setCofechaVersion = useCallback((_version: CofechaVersion) => undefined, []);
+    const activeCofechaEngineRef = useRef<CofechaEngine>(settings.cofecha.engine);
     const [isFileLoading, setIsFileLoading] = useState(false);
     const [isCofechaRunning, setIsCofechaRunning] = useState(false);
     const [isEventDiagnosisRunning, setIsEventDiagnosisRunning] = useState(false);
@@ -441,15 +444,17 @@ export function useHomeWorkspace() {
 
     useEffect(() => {
         if (!filePathRef.current || (!outFileContent && !cofechaResult)) return;
+        const validation = lastCofechaValidationRef.current;
+        if (!validation) return;
         void persistCofechaState(
             filePathRef.current,
             outFileContent,
             cofechaResult,
-            cofechaVersion,
+            validation.engine,
             selectedPart,
-            lastCofechaValidationRef.current?.inputSignature,
+            validation.inputSignature,
         );
-    }, [cofechaResult, cofechaVersion, outFileContent, selectedPart]);
+    }, [cofechaResult, outFileContent, selectedPart]);
 
     // savedBaseline：磁盘上真正保存的数据。恢复 localStorage 草稿后，工作数据可能与磁盘不一致，
     // 此时用磁盘数据当基线，让 isModified（标题的 *）如实反映"草稿未写盘"。不传则以工作数据为基线（视为已保存）。
@@ -536,18 +541,17 @@ export function useHomeWorkspace() {
     const runCofechaAndApplyResult = useCallback(async (
         input: string,
         sourcePath: string,
-        options?: CofechaVersion | RunCofechaApplyOptions,
+        options?: RunCofechaApplyOptions,
     ) => {
-        const resolvedOptions = typeof options === "object" ? options : undefined;
-        const version = typeof options === "string" ? options : options?.version ?? cofechaVersion;
+        const engine = options?.engine ?? settings.cofecha.engine;
         const executablePath = settings.cofecha.executablePath.trim();
-        if (!executablePath) {
+        if (engine === "official" && !executablePath) {
             return;
         }
-        const selectedPartForPersistence = resolvedOptions?.selectedPart ?? selectedPart;
-        const inputData = resolvedOptions?.inputData ?? rwlEditorRef.current.getData();
+        const selectedPartForPersistence = options?.selectedPart ?? selectedPart;
+        const inputData = options?.inputData ?? rwlEditorRef.current.getData();
         const inputSignature = hashRwlSiteData(inputData);
-        const workspaceGuard = resolvedOptions?.workspaceGuard;
+        const workspaceGuard = options?.workspaceGuard;
         const requestId = ++cofechaRequestIdRef.current;
 
         setIsCofechaRunning(true);
@@ -558,14 +562,19 @@ export function useHomeWorkspace() {
                 if (requestId !== cofechaRequestIdRef.current) {
                     return null;
                 }
-                return runCofecha(input, baseName, executablePath);
+                return runCofechaReport({
+                    engine,
+                    rwlText: input,
+                    inputFileName: baseName,
+                    executablePath,
+                });
             });
             if (nextOutText === null) {
                 return;
             }
             const nextResult = parseCofechaResult(nextOutText);
             const nextParts = splitReportByParts(nextOutText);
-            const cofechaRunId = `cofecha-${Date.now()}`;
+            const cofechaRunId = `${engine === "javascript" ? "cofecha-js" : "cofecha"}-${Date.now()}`;
             const flaggedAIds = extractPart6FlaggedASeriesIds(nextParts.get("PART 6") ?? "");
             const classification = classifyCofechaPart6Series(
                 Array.from(inputData.keys()),
@@ -592,7 +601,8 @@ export function useHomeWorkspace() {
                 });
             logCofechaReferenceComparison(nextResult.masterDatingSeries, dynamicReferenceConfig);
 
-            const isLatestRequest = requestId === cofechaRequestIdRef.current;
+            const isLatestRequest = requestId === cofechaRequestIdRef.current
+                && engine === activeCofechaEngineRef.current;
             const matchesWorkspace = !workspaceGuard || (
                 rwlEditorRef.current === workspaceGuard.editor
                 && filePathRef.current === workspaceGuard.filePath
@@ -603,7 +613,7 @@ export function useHomeWorkspace() {
             }
             lastCofechaValidationRef.current = {
                 inputSignature,
-                version,
+                engine,
             };
             latestDynamicReferenceConfigRef.current = dynamicReferenceConfig;
             setDynamicReferenceConfig(dynamicReferenceConfig);
@@ -615,7 +625,7 @@ export function useHomeWorkspace() {
                 sourcePath,
                 nextOutText,
                 nextResult,
-                version,
+                engine,
                 selectedPartForPersistence,
                 inputSignature,
             );
@@ -624,7 +634,7 @@ export function useHomeWorkspace() {
                 setIsCofechaRunning(false);
             }
         }
-    }, [cofechaVersion, selectedPart, settings.cofecha.executablePath]);
+    }, [selectedPart, settings.cofecha.engine, settings.cofecha.executablePath]);
 
     const handleLoad = useCallback(async () => {
         if (isFileLoadingRef.current) {
@@ -692,10 +702,14 @@ export function useHomeWorkspace() {
                     ?? (restoredReferenceConfig?.mode === "dynamic" ? restoredReferenceConfig : null),
                 nextEditor.getData(),
             );
+            const persistedEngine = persistedCofecha
+                ? getPersistedCofechaEngine(persistedCofecha)
+                : null;
             const manualReferenceConfig = restoredReferenceConfig?.mode === "dynamic"
                 ? null
                 : restoredReferenceConfig;
-            const dynamicReferenceConfig = restoredDynamicReferenceConfig?.mode === "dynamic"
+            const dynamicReferenceConfig = persistedEngine === settings.cofecha.engine
+                && restoredDynamicReferenceConfig?.mode === "dynamic"
                 ? restoredDynamicReferenceConfig
                 : null;
             setReferenceConfig(manualReferenceConfig);
@@ -724,7 +738,7 @@ export function useHomeWorkspace() {
                 if (persistedCofecha.cofechaInputSignature) {
                     lastCofechaValidationRef.current = {
                         inputSignature: persistedCofecha.cofechaInputSignature,
-                        version: persistedCofecha.cofechaVersion,
+                        engine: getPersistedCofechaEngine(persistedCofecha),
                     };
                 }
             } else {
@@ -925,7 +939,7 @@ export function useHomeWorkspace() {
         if (!filePath || isCofechaRunning || isFileLoadingRef.current) {
             return;
         }
-        if (!settings.cofecha.executablePath.trim()) {
+        if (settings.cofecha.engine === "official" && !settings.cofecha.executablePath.trim()) {
             await message("请先通过“运行 > 加载 COFECHA...”或“设置 > COFECHA”选择从 LTRR 获取的 EXE 文件。", {
                 title: "需要加载 COFECHA",
                 kind: "info",
@@ -941,7 +955,7 @@ export function useHomeWorkspace() {
                 editor.exportAsRwlString(),
                 filePath,
                 {
-                    version: cofechaVersion,
+                    engine: settings.cofecha.engine,
                     inputData,
                     workspaceGuard: {
                         editor,
@@ -957,7 +971,34 @@ export function useHomeWorkspace() {
                 kind: "error",
             });
         }
-    }, [cofechaVersion, isCofechaRunning, runCofechaAndApplyResult, settings.cofecha.executablePath]);
+    }, [isCofechaRunning, runCofechaAndApplyResult, settings.cofecha.engine, settings.cofecha.executablePath]);
+
+    useEffect(() => {
+        if (activeCofechaEngineRef.current === settings.cofecha.engine) return;
+
+        activeCofechaEngineRef.current = settings.cofecha.engine;
+        cofechaRequestIdRef.current += 1;
+        setIsCofechaRunning(false);
+        lastCofechaValidationRef.current = null;
+        latestDynamicReferenceConfigRef.current = null;
+        diagnosisResultCacheRef.current = null;
+        setDynamicReferenceConfig(null);
+
+        const filePath = filePathRef.current;
+        if (!filePath || isFileLoadingRef.current) return;
+        if (settings.cofecha.engine === "official" && !settings.cofecha.executablePath.trim()) return;
+
+        const editor = rwlEditorRef.current;
+        const inputData = editor.getData();
+        const inputHash = hashRwlSiteData(inputData);
+        void runCofechaAndApplyResult(editor.exportAsRwlString(), filePath, {
+            engine: settings.cofecha.engine,
+            inputData,
+            workspaceGuard: { editor, filePath, inputHash },
+        }).catch((error) => {
+            console.error("切换 COFECHA 报告引擎失败", error);
+        });
+    }, [runCofechaAndApplyResult, settings.cofecha.engine, settings.cofecha.executablePath]);
 
     const handleExportCofechaOut = useCallback(async (): Promise<string | null> => {
         if (!outFileContent) return null;
@@ -1728,9 +1769,12 @@ export function useHomeWorkspace() {
         }
 
         const lastValidation = lastCofechaValidationRef.current;
-        const cofechaFresh = Boolean(outFileContent)
-            && lastValidation !== null
-            && lastValidation.inputSignature === siteDataSignature;
+        const cofechaFresh = isCofechaValidationFresh(
+            Boolean(outFileContent),
+            lastValidation,
+            siteDataSignature,
+            settings.cofecha.engine,
+        );
         const diagnosisCofechaText = cofechaFresh ? outFileContent : undefined;
         let resultCache = diagnosisResultCacheRef.current;
         if (resultCache?.siteData !== siteData
@@ -1839,7 +1883,7 @@ export function useHomeWorkspace() {
         };
         // outFileContent 加入依赖：COFECHA 重跑（保存后）更新 .OUT 时重新诊断，使 COFECHA 驱动候选与
         // 逐个（bark-to-pith）迭代工作流生效。
-    }, [diagnosisReferenceConfig, historyAnimation?.id, markCurrentDiagnosisStale, outFileContent, selectedTree, settings.diagnosis.enabled, siteData, siteDataSignature]);
+    }, [diagnosisReferenceConfig, historyAnimation?.id, markCurrentDiagnosisStale, outFileContent, selectedTree, settings.cofecha.engine, settings.diagnosis.enabled, siteData, siteDataSignature]);
 
     const breadthScanTargets = useMemo(() => orderBreadthScanTargets(
         Array.from(siteData.keys()),
@@ -1887,9 +1931,12 @@ export function useHomeWorkspace() {
         }
 
         const lastValidation = lastCofechaValidationRef.current;
-        const cofechaFresh = Boolean(outFileContent)
-            && lastValidation !== null
-            && lastValidation.inputSignature === siteDataSignature;
+        const cofechaFresh = isCofechaValidationFresh(
+            Boolean(outFileContent),
+            lastValidation,
+            siteDataSignature,
+            settings.cofecha.engine,
+        );
         const diagnosisCofechaText = cofechaFresh ? outFileContent : undefined;
         const flaggedTrees = diagnosisReferenceConfig?.classification?.candidateFlaggedIds ?? [];
         const previousPriorityTrees = sortBreadthDiagnosisSuggestions(
@@ -1927,6 +1974,7 @@ export function useHomeWorkspace() {
         breadthScanRequest,
         diagnosisReferenceConfig,
         outFileContent,
+        settings.cofecha.engine,
         siteData,
         siteDataSignature,
     ]);
@@ -2173,9 +2221,13 @@ export function useHomeWorkspace() {
             return true;
         }
 
-        return lastValidation.version !== cofechaVersion
-            || lastValidation.inputSignature !== siteDataSignature;
-    }, [cofechaResult, cofechaVersion, deletionMarkers, siteData]);
+        return !isCofechaValidationFresh(
+            Boolean(outFileContent),
+            lastValidation,
+            siteDataSignature,
+            settings.cofecha.engine,
+        );
+    }, [cofechaResult, outFileContent, settings.cofecha.engine, siteDataSignature]);
     const crossdatingValidationSummary = useMemo(() => (
         buildCrossdatingValidationSummary({
             hasData: siteData.size > 0,
@@ -2194,7 +2246,7 @@ export function useHomeWorkspace() {
     const hasChart = siteData.size > 0;
     const shouldShowWelcome = !fileName && !isFileLoading;
     const shouldShowProcessing = isFileLoading || isCofechaRunning;
-    const processingText = isFileLoading ? "正在读取并解析 RWL..." : "正在运行 COFECHA...";
+    const processingText = isFileLoading ? "正在读取并解析 RWL..." : "正在生成 COFECHA 报告...";
     const problemTextColor = cofechaResult?.possibleProblemsCount !== undefined && cofechaResult.possibleProblemsCount >= 100
         ? "red"
         : "black";
@@ -2207,7 +2259,6 @@ export function useHomeWorkspace() {
 
     return {
         cofechaResult,
-        cofechaVersion,
         breadthDiagnosisNavigator,
         canRunBreadthDiagnosis,
         crossdatingValidationSummary,
@@ -2272,7 +2323,6 @@ export function useHomeWorkspace() {
         selectedPart,
         selectedProblemText,
         selectedTree,
-        setCofechaVersion,
         setSelectedPart,
         shouldShowProcessing,
         shouldShowWelcome,

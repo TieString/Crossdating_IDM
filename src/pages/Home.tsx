@@ -381,7 +381,6 @@ export default function Home() {
         canResetToRawData,
         canExportCofechaOut,
         cofechaResult,
-        cofechaVersion,
         breadthDiagnosisNavigator,
         canRunBreadthDiagnosis,
         crossdatingValidationSummary,
@@ -438,7 +437,6 @@ export default function Home() {
         selectedPart,
         selectedProblemText,
         selectedTree,
-        setCofechaVersion,
         setSelectedPart,
         shouldShowProcessing,
         shouldShowWelcome,
@@ -1550,7 +1548,6 @@ export default function Home() {
         <>
             <HomeTitleBarBridge
                 title={chartTreeOffsets.size > 0 && !windowTitle.endsWith(" *") ? `${windowTitle} *` : windowTitle}
-                cofechaVersion={cofechaVersion}
                 onLoad={handleLoad}
                 onSave={handleSave}
                 onSaveAs={handleSaveAs}
@@ -1558,7 +1555,6 @@ export default function Home() {
                 onRedo={handleContextualRedo}
                 canUndo={isRawEditing ? rawEditorHistoryState.undoCount > 0 : historyStatus.undoCount > 0}
                 canRedo={isRawEditing ? rawEditorHistoryState.redoCount > 0 : historyStatus.redoCount > 0}
-                onCofechaVersionChange={setCofechaVersion}
                 onActiveMenuChange={setActiveMenu}
                 onOpenOperationLog={() => handleOpenWorkspaceWindow("operation-log")}
                 onOpenSettings={openSettingsWindow}

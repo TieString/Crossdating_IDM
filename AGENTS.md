@@ -17,7 +17,8 @@
 - [src/features/crossdating/diagnosis/jointEventAdjudicator.ts](src/features/crossdating/diagnosis/jointEventAdjudicator.ts)：将完整阶段事件聚合为不可变的“操作 × 位移 × 位置”假设，先按操作证据、再按位置模式统一选择；切换生产前通过 `jointEventDecisions` shadow 审计
 - [docs/js-internal-diagnosis-events-report.md](docs/js-internal-diagnosis-events-report.md)：JS 内部诊断的指标定义、数据拆分、冻结保留集和广域 ITRDB 准确度
 - [src/services/fs/io.ts](src/services/fs/io.ts)：文件读写辅助与解析桥接
-- [src/services/cofecha/runner.ts](src/services/cofecha/runner.ts)：COFECHA 执行与 OUT 文件处理
+- [src/services/cofecha/index.ts](src/services/cofecha/index.ts)：`cofecha-js`／官方 COFECHA 双引擎统一入口
+- [src/services/cofecha/runner.ts](src/services/cofecha/runner.ts)：官方 COFECHA EXE 执行与 OUT 文件处理
 - [src-tauri/src/lib.rs](src-tauri/src/lib.rs)：Tauri 命令注册入口
 - [src-tauri/src/commands.rs](src-tauri/src/commands.rs)：前端可调用的 Rust 命令
 
@@ -29,8 +30,8 @@
 4. 解析后的数据通过 RWL 编辑器工具渲染并支持修改。
 5. 用户可在折线图中进入“参考”模式，多选可靠序列；[src/features/crossdating/reference.ts](src/features/crossdating/reference.ts) 会按年份对齐生成 derived reference series，配置按文件路径持久化。
 6. [src/features/crossdating/diagnosis.ts](src/features/crossdating/diagnosis.ts) 会基于 working series 和 reference config 计算内部轻量诊断，不运行外部 COFECHA，不自动修改数据。
-7. 保存时会触发 [src/services/cofecha/runner.ts](src/services/cofecha/runner.ts)，它会把输入写入 COFECHA 工作目录，运行 sidecar，并读取 `VERYCOF.OUT`。
-8. COFECHA 汇总结果的解析在 [src/features/cofecha/formatter.ts](src/features/cofecha/formatter.ts) 中完成，并由 [src/pages/home/useHomeWorkspace.ts](src/pages/home/useHomeWorkspace.ts) 按文件路径持久化最近一次 OUT/result 与 `RUN_COFECHA` 日志。
+7. 打开、保存或重新验证时会触发 [src/services/cofecha/index.ts](src/services/cofecha/index.ts)：默认在 Web Worker 中调用 npm 包 `cofecha-js`；设置为官方引擎时才把输入写入 COFECHA 工作目录并运行用户选择的 EXE。
+8. 两种引擎都返回完整 OUT 文本，统一由 [src/features/cofecha/formatter.ts](src/features/cofecha/formatter.ts) 解析；[src/pages/home/useHomeWorkspace.ts](src/pages/home/useHomeWorkspace.ts) 按文件路径持久化 OUT/result、输入签名和引擎来源。
 9. COFECHA 结果只保存在工作区状态和应用数据目录中，不再自动镜像到源 `.rwl` 文件旁边；用户必须通过主窗口或独立 COFECHA 模块中的导出图标显式选择位置并导出完整原始 OUT。
 
 ## 文件格式说明
@@ -38,8 +39,8 @@
 - Tucson RWL 是主要输入格式，支持短格式（8 列编号）和长格式（7 列编号）。
 - 解析器依赖可从源文本推导出的 stop marker。
 - **格式透明性**：打开什么格式的 RWL，保存后仍保持同样格式。详见 [RWL_FORMAT_SPEC.md](RWL_FORMAT_SPEC.md)。
-- COFECHA 工作区文件保存在应用数据目录下的 `cofecha-work` 中。
-- `VERYCOF.OUT` 是前端消费的关键输出文件。
+- 官方 COFECHA 工作区文件保存在应用数据目录下的 `cofecha-work` 中；JavaScript 引擎不创建外部工作目录文件。
+- 前端统一消费内存中的完整 OUT；官方引擎从 `VERYCOF.OUT` 读取，JavaScript 引擎由 `cofecha-js` 直接生成。
 - OUT 导出按钮固定在主窗口和独立 COFECHA 工具栏最右侧，使用 24 px 纯图标样式；只写出内存中的完整原始 `outFileContent`，不得导出当前 PART 筛选文本或带链接、复选框、排序和 `Age` 列的 HTML 渲染副本；没有 OUT 时图标按钮保持显示但禁用。
 
 ## 开源许可
