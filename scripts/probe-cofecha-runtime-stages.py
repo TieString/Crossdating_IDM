@@ -308,6 +308,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--critical-correlation", type=float)
     parser.add_argument("--include-absent-rings", action="store_true")
+    parser.add_argument("--first-difference", action="store_true")
     return parser.parse_args()
 
 
@@ -377,6 +378,8 @@ def main() -> None:
         ))
     if args.include_absent_rings:
         prompt_lines.extend(("9", "N"))
+    if args.first_difference:
+        prompt_lines.extend(("F", "Y"))
     prompt_lines.extend(("6", "V", "", ""))
     prompt = "\n".join(prompt_lines).encode("ascii")
     device.input(pid, prompt)

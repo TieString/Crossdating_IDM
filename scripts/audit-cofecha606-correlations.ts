@@ -33,6 +33,7 @@ const master = buildCofecha606MasterSeries(loaded.siteData, {
     splineRigidityYears,
     useAutoregressiveModel: true,
     useLogTransform: true,
+    useFirstDifference: false,
 })!;
 const prepared = prepareCofecha606SeriesForReport(loaded.siteData, {
     splineRigidityYears,

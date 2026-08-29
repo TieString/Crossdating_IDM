@@ -5,6 +5,7 @@ import {
     formatCofecha606JsReport,
     generateCofecha606JsReport,
 } from "../jsReport";
+import { parseCofechaResult } from "../formatter";
 
 const width = (index: number, seriesIndex: number) => {
     const shared = 950
@@ -83,6 +84,7 @@ describe("COFECHA 6.06 JS report Parts 1-4", () => {
         expect(report.part3.years[0].value.toFixed(4)).toBe("-1.2031");
         expect(report.part3.years[199].value.toFixed(4)).toBe("0.6673");
         expect(report.part4.bars).toHaveLength(200);
+        expect(report.savedMasterText).toContain("1800");
         const firstStats = report.part7.series[0];
         expect(firstStats.segmentCount).toBe(7);
         expect(firstStats.unfiltered.mean.toFixed(2)).toBe("0.96");
@@ -116,6 +118,15 @@ describe("COFECHA 6.06 JS report Parts 1-4", () => {
         expect(text).toContain("PART 5: CORRELATION OF SERIES BY SEGMENTS");
         expect(text).toContain("PART 6: POTENTIAL PROBLEMS");
         expect(text).toContain("PART 7: DESCRIPTIVE STATISTICS");
+        const parsed = parseCofechaResult(text);
+        expect(parsed.masterSeriesYear).toBe("1800-1999");
+        expect(parsed.seriesIntercorrelation).toBeCloseTo(
+            report.part1.seriesIntercorrelation ?? 0,
+            3,
+        );
+        expect(parsed.possibleProblemsCount).toBe(4);
+        expect(parsed.masterCorrelations.size).toBe(6);
+        expect(parsed.possibleProblemsDetail.size).toBeGreaterThan(0);
     });
 
     it("keeps repeated same-ID segments independent in Part 2", () => {
@@ -179,6 +190,9 @@ describe("COFECHA 6.06 JS report Parts 1-4", () => {
             useAutoregressiveModel: false,
             useLogTransform: false,
             omitAbsentRingsFromMaster: false,
+            saveMaster: false,
+            listMeasurements: true,
+            includedParts: [1, 5, 7],
         });
 
         expect(report.options).toMatchObject({
@@ -190,8 +204,15 @@ describe("COFECHA 6.06 JS report Parts 1-4", () => {
             omitAbsentRingsFromMaster: false,
         });
         expect(report.part5.criticalCorrelation).toBe(0.2997);
+        expect(report.savedMasterText).toBeNull();
         expect(report.part6.highOutlierThreshold).toBe(4);
         expect(report.part6.lowOutlierThreshold).toBe(-4);
         expect(report.part5.series[0].segments[0].lagCorrelations).toHaveLength(21);
+        const text = formatCofecha606JsReport(report);
+        expect(text).toContain("PART 1:");
+        expect(text).toContain("PART 5:");
+        expect(text).toContain("PART 7:");
+        expect(text).not.toContain("PART 2:");
+        expect(text).not.toContain("PART 6:");
     });
 });

@@ -17,6 +17,7 @@
     "validate:workspace-windows": "node scripts/validate-workspace-windows.mjs",
     "validate:auto-crossdating": "node scripts/validate-auto-crossdating.mjs",
     "validate:cofecha-reference": "node scripts/validate-cofecha-reference.mjs",
+    "validate:cofecha-js-report": "node scripts/run-validate-cofecha606-js-report-parts1-4.mjs",
     "benchmark:co612-zero-frontier-matrix": "node scripts/run-co612-zero-frontier-matrix.mjs",
     "export:tree-ring-scan-fixtures": "vite-node scripts/export-tree-ring-scan-fixtures.ts",
     "validate:tree-ring-scan-pair": "vite-node scripts/validate-tree-ring-scan-pair.ts",

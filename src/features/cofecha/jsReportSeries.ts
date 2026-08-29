@@ -18,6 +18,7 @@ export type Cofecha606SeriesAnalysisOptions = {
     segmentLag: number;
     useAutoregressiveModel: boolean;
     useLogTransform: boolean;
+    useFirstDifference: boolean;
     segmentGridStartYear: number;
     segmentGridEndYear: number;
     analysisStartYear: number;
@@ -269,28 +270,50 @@ export const prepareCofecha606SeriesForReport = (
         const rawValues = entries.map(([, value]) => (
             parseCofecha606TucsonWidth(value, segment.stopMarkerValue)
         ));
-        const baseFiltered = cofechaStyleStandardize(segment.data, {
-            ...COFECHA_REFERENCE_DEFAULT_OPTIONS,
-            splineRigidityYears: options.splineRigidityYears,
-            splineFrequencyResponse: options.splineFrequencyResponse,
-            useAutoregressiveModel: false,
-            useLogTransform: false,
-            omitAbsentRingsFromMaster: false,
-        }, "ltrr-cook-holmes", "none", 1, "ratio", "post-ar", "legacy-float32", segment.stopMarkerValue);
-        const baseFilteredValues = baseFiltered.map((point) => point.value);
-        const masterFilteredValues = options.useLogTransform
-            ? cofecha606LogTransform(baseFilteredValues)
-            : baseFilteredValues.slice();
-        const arModel = options.useAutoregressiveModel
-            ? cofecha606AutoregressiveResidual(baseFilteredValues)
-            : {
+        const firstDifferences = rawValues.map((value, valueIndex) => (
+            valueIndex === 0
+                ? Math.fround(0)
+                : Math.fround(value - rawValues[valueIndex - 1])
+        ));
+        const useUntransformedValues = options.splineRigidityYears < 0;
+        const directValues = options.useFirstDifference ? firstDifferences : rawValues;
+        const standardizedDirectValues = options.useFirstDifference || useUntransformedValues
+            ? cofecha606StandardizeValues(directValues)
+            : [];
+        const baseFilteredValues = options.useFirstDifference || useUntransformedValues
+            ? directValues
+            : cofechaStyleStandardize(segment.data, {
+                ...COFECHA_REFERENCE_DEFAULT_OPTIONS,
+                splineRigidityYears: options.splineRigidityYears,
+                splineFrequencyResponse: options.splineFrequencyResponse,
+                useAutoregressiveModel: false,
+                useLogTransform: false,
+                omitAbsentRingsFromMaster: false,
+            }, "ltrr-cook-holmes", "none", 1, "ratio", "post-ar", "legacy-float32", segment.stopMarkerValue)
+                .map((point) => point.value);
+        const masterFilteredValues = options.useFirstDifference || useUntransformedValues
+            ? directValues
+            : options.useLogTransform
+                ? cofecha606LogTransform(baseFilteredValues)
+                : baseFilteredValues.slice();
+        const arModel = options.useFirstDifference || useUntransformedValues
+            ? {
                 order: 0,
                 coefficients: [] as number[],
-                residuals: baseFilteredValues.slice(),
-            };
-        const filteredValues = options.useLogTransform
-            ? cofecha606LogTransform(arModel.residuals)
-            : arModel.residuals.slice();
+                residuals: directValues,
+            }
+            : options.useAutoregressiveModel
+                ? cofecha606AutoregressiveResidual(baseFilteredValues)
+                : {
+                    order: 0,
+                    coefficients: [] as number[],
+                    residuals: baseFilteredValues.slice(),
+                };
+        const filteredValues = options.useFirstDifference || useUntransformedValues
+            ? standardizedDirectValues
+            : options.useLogTransform
+                ? cofecha606LogTransform(arModel.residuals)
+                : arModel.residuals.slice();
         const sensitivity = meanSensitivity(rawValues);
         const windows = segmentWindows(
             years[0],
@@ -323,7 +346,9 @@ export const prepareCofecha606SeriesForReport = (
             arCoefficients: arModel.coefficients,
             arResidualValues: arModel.residuals,
             filteredValues,
-            testingValues: cofecha606StandardizeValues(filteredValues),
+            testingValues: options.useFirstDifference || useUntransformedValues
+                ? standardizedDirectValues
+                : cofecha606StandardizeValues(filteredValues),
             meanSensitivity: sensitivity.mean,
             meanSensitivitySum: sensitivity.sum,
             meanSensitivityPairCount: sensitivity.pairCount,

@@ -25,9 +25,11 @@ const loaded = await loadRwl(rwlPath, "tucson-auto", {
     preserveNegativeMeasurements: true,
 });
 const out = readFileSync(outPath, "utf8");
-const splineRigidityYears = Number(out.match(
-    /Cubic smoothing spline 50% wavelength cutoff for filtering\s+(\d+) years/,
-)?.[1] ?? 32);
+const splineRigidityYears = /Series are not transformed: no spline/.test(out)
+    ? -1
+    : Number(out.match(
+        /Cubic smoothing spline 50% wavelength cutoff for filtering\s+(\d+) years/,
+    )?.[1] ?? 32);
 const segmentOptions = out.match(
     /Segments examined are\s+(\d+) years lagged successively by\s+(\d+) years/,
 );
@@ -42,6 +44,7 @@ const jsReport = generateCofecha606JsReport(loaded.siteData, {
     segmentLag: Number(segmentOptions?.[2] ?? 25),
     useAutoregressiveModel: /Autoregressive model applied/.test(out),
     useLogTransform: /Series transformed to logarithms/.test(out),
+    useFirstDifference: /^\s*F\s+First difference transform of data/m.test(out),
     correlationMethod: /CORRELATION is Spearman/.test(out) ? "spearman" : "pearson",
     criticalCorrelation,
     omitAbsentRingsFromMaster: /Absent rings are omitted from master series/.test(out),

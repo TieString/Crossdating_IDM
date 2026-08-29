@@ -24,6 +24,7 @@ const prepared = prepareCofecha606SeriesForReport(loaded.siteData, {
     segmentLag: 25,
     useAutoregressiveModel: true,
     useLogTransform: true,
+    useFirstDifference: false,
     segmentGridStartYear: -10000,
     segmentGridEndYear: 10000,
     analysisStartYear: -10000,

@@ -4,6 +4,7 @@ import {
     buildCofecha606MasterSeries,
     cofecha606ExtendedMultiplyAdd,
     cofecha606StandardizeValues,
+    formatCofecha606MasterSeries,
     splitCofecha606SeriesSegments,
     type CofechaReferenceOptions,
 } from "@/features/crossdating/reference";
@@ -27,6 +28,7 @@ export type Cofecha606JsReportOptions = {
     segmentLag?: number;
     useAutoregressiveModel?: boolean;
     useLogTransform?: boolean;
+    useFirstDifference?: boolean;
     correlationMethod?: "pearson" | "spearman";
     criticalCorrelation?: number;
     saveMaster?: boolean;
@@ -50,6 +52,7 @@ export type Cofecha606Part2Series = {
     years: number;
     absentYears: number[];
     negativeMeasurementYears: number[];
+    measurements: Array<{ year: number; value: number }>;
 };
 
 export type Cofecha606Part3Year = {
@@ -172,6 +175,7 @@ export type Cofecha606JsReport = {
     };
     completedParts: Cofecha606ReportPart[];
     pendingParts: Cofecha606ReportPart[];
+    savedMasterText: string | null;
     part1: {
         masterTimeSpan: Cofecha606YearSpan;
         continuousTimeSpan: Cofecha606YearSpan;
@@ -253,17 +257,25 @@ const normalizeOptions = (
     input: Cofecha606JsReportOptions,
 ): Cofecha606JsReport["options"] => {
     const segmentLength = input.segmentLength ?? 50;
+    const useFirstDifference = input.useFirstDifference ?? false;
+    const splineRigidityYears = input.splineRigidityYears ?? 32;
+    const disableTransformation = splineRigidityYears < 0;
     return {
         jobName: input.jobName,
         inputFileName: input.inputFileName,
         title: input.title ?? "",
         runAt: input.runAt ?? new Date(),
-        splineRigidityYears: input.splineRigidityYears ?? 32,
+        splineRigidityYears,
         splineFrequencyResponse: input.splineFrequencyResponse ?? 0.5,
         segmentLength,
         segmentLag: input.segmentLag ?? Math.floor(segmentLength / 2),
-        useAutoregressiveModel: input.useAutoregressiveModel ?? true,
-        useLogTransform: input.useLogTransform ?? true,
+        useAutoregressiveModel: useFirstDifference || disableTransformation
+            ? false
+            : input.useAutoregressiveModel ?? true,
+        useLogTransform: useFirstDifference || disableTransformation
+            ? false
+            : input.useLogTransform ?? true,
+        useFirstDifference,
         correlationMethod: input.correlationMethod ?? "pearson",
         criticalCorrelation: input.criticalCorrelation
             ?? defaultCriticalCorrelation(segmentLength),
@@ -291,6 +303,7 @@ const toReferenceOptions = (
     splineFrequencyResponse: options.splineFrequencyResponse,
     useAutoregressiveModel: options.useAutoregressiveModel,
     useLogTransform: options.useLogTransform,
+    useFirstDifference: options.useFirstDifference,
     omitAbsentRingsFromMaster: options.omitAbsentRingsFromMaster,
 });
 
@@ -326,6 +339,9 @@ export const generateCofecha606JsReport = (
             negativeMeasurementYears: entries.flatMap(
                 ([year, value]) => typeof value === "number" && value < 0 ? [year] : [],
             ),
+            measurements: entries.flatMap(([year, value]) => (
+                typeof value === "number" ? [{ year, value }] : []
+            )),
         };
     });
     const allCoveredYears = part2Series.flatMap((series) => (
@@ -669,8 +685,10 @@ export const generateCofecha606JsReport = (
     const outlierStandardDeviation = Math.fround(
         outlierScaleSum / Math.fround(continuousTimeSpan.years),
     );
-    const highOutlierThreshold = options.useLogTransform ? 3 : 4;
-    const lowOutlierThreshold = options.useLogTransform ? -4.5 : -4;
+    const useAsymmetricOutlierThresholds = options.useLogTransform
+        || options.useFirstDifference;
+    const highOutlierThreshold = useAsymmetricOutlierThresholds ? 3 : 4;
+    const lowOutlierThreshold = useAsymmetricOutlierThresholds ? -4.5 : -4;
     const part6Series: Cofecha606Part6Series[] = part7PreparedSeries.map(
         (series, index) => {
             const sourceIndex = preparedSeries.indexOf(series);
@@ -816,7 +834,8 @@ export const generateCofecha606JsReport = (
                         masterValue,
                         sampleDepth: master.sampleDepth.get(year) ?? 0,
                         absentCount: absentCountByYear.get(year) ?? 0,
-                        warningNotUsuallyNarrow: masterValue >= -0.4,
+                        warningNotUsuallyNarrow: !options.useFirstDifference
+                            && masterValue >= -0.4,
                     };
                 }),
                 outliers,
@@ -889,6 +908,9 @@ export const generateCofecha606JsReport = (
         options,
         completedParts: [1, 2, 3, 4, 5, 6, 7],
         pendingParts: [],
+        savedMasterText: options.saveMaster
+            ? formatCofecha606MasterSeries(master)
+            : null,
         part1: {
             masterTimeSpan,
             continuousTimeSpan,
@@ -1026,12 +1048,13 @@ export const formatCofecha606JsReport = (
         `Continuous time span: ${spanText(report.part1.continuousTimeSpan)}`,
         `Portion with two or more series: ${spanText(report.part1.twoOrMoreSeriesSpan)}`,
         `Number of dated series: ${report.part1.datedSeriesCount}`,
+        `Master series ${report.part1.masterTimeSpan.startYear} ${report.part1.masterTimeSpan.endYear} ${report.part1.masterTimeSpan.years}`,
         `Total rings: ${report.part1.totalRings}`,
         `Total dated rings checked: ${report.part1.totalDatedRingsChecked ?? "pending Part 7"}`,
-        `Mean length of series: ${fixed(report.part1.meanSeriesLength, 1)}`,
-        `Series intercorrelation: ${fixedCorrelation(report.part1.seriesIntercorrelation ?? 0, 3)}`,
-        `Average mean sensitivity: ${fixed(report.part1.averageMeanSensitivity ?? 0, 3)}`,
-        `Segments with possible problems: ${report.part1.possibleProblemSegments ?? "pending Part 6"}`,
+        `Mean length of series ${fixed(report.part1.meanSeriesLength, 1)}`,
+        `Series intercorrelation ${fixedCorrelation(report.part1.seriesIntercorrelation ?? 0, 3)}`,
+        `Average mean sensitivity ${fixed(report.part1.averageMeanSensitivity ?? 0, 3)}`,
+        `Segments, possible problems ${report.part1.possibleProblemSegments ?? "pending Part 6"}`,
         `Absent rings: ${report.part1.absentRingCount} (${fixed(report.part1.absentRingPercent, 3)}%)`,
         "",
     );
@@ -1050,6 +1073,19 @@ export const formatCofecha606JsReport = (
             String(series.years).padStart(6, " "),
         ].join(" "));
     });
+    if (report.options.listMeasurements) {
+        push("", "RING MEASUREMENTS", "Seq Series Year Value");
+        report.part2.series.forEach((series) => {
+            series.measurements.forEach((measurement) => {
+                push([
+                    String(series.sequence).padStart(4, " "),
+                    series.seriesId.padEnd(8, " "),
+                    String(measurement.year).padStart(6, " "),
+                    String(measurement.value).padStart(8, " "),
+                ].join(" "));
+            });
+        });
+    }
 
     push("", "PART 3: MASTER DATING SERIES", "Year Value Depth Absent");
     report.part3.years.forEach((row) => {
@@ -1100,6 +1136,7 @@ export const formatCofecha606JsReport = (
     report.part6.series.forEach((series) => {
         push(
             "",
+            "=".repeat(131),
             `${series.seriesId} ${series.startYear} to ${series.endYear}  Series ${series.sequence}`,
         );
         if (series.uncheckedOlderSpan) {
@@ -1110,7 +1147,7 @@ export const formatCofecha606JsReport = (
         }
         series.flaggedSegments.forEach((segment) => {
             push(
-                `[A] ${segment.analysisStartYear}-${segment.analysisEndYear}  as dated ${fixedCorrelation(segment.correlation, 2)}  best lag ${segment.bestLagYears >= 0 ? "+" : ""}${segment.bestLagYears} (${fixedCorrelation(segment.bestCorrelation, 2)})  ${segment.flag}`,
+                `[A] Segment ${segment.analysisStartYear}-${segment.analysisEndYear}  as dated ${fixedCorrelation(segment.correlation, 2)}  best lag ${segment.bestLagYears >= 0 ? "+" : ""}${segment.bestLagYears} (${fixedCorrelation(segment.bestCorrelation, 2)})  ${segment.flag}`,
                 `    ${segment.lagCorrelations.map((row) => (
                     `${row.lagYears >= 0 ? "+" : ""}${row.lagYears}:${row.correlation === null ? "NA" : fixedCorrelation(row.correlation, 2)}`
                 )).join(" ")}`,
@@ -1157,6 +1194,7 @@ export const formatCofecha606JsReport = (
             );
         }
     });
+    push("=".repeat(131));
 
     push(
         "",
@@ -1202,5 +1240,14 @@ export const formatCofecha606JsReport = (
         fixed(report.part7.totals.meanFilteredAutocorrelation, 3).padStart(7, " "),
     ].join(" "));
 
-    return `${lines.filter((line, index) => line !== "" || lines[index - 1] !== "").join("\n")}\n`;
+    const includedParts = new Set(report.options.includedParts);
+    let currentPart: Cofecha606ReportPart | null = null;
+    const selectedLines = lines.filter((line) => {
+        const heading = line.match(/^PART ([1-7]):/);
+        if (heading) currentPart = Number(heading[1]) as Cofecha606ReportPart;
+        return currentPart === null || includedParts.has(currentPart);
+    });
+    return `${selectedLines.filter(
+        (line, index) => line !== "" || selectedLines[index - 1] !== "",
+    ).join("\n")}\n`;
 };

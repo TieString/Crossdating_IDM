@@ -1245,9 +1245,13 @@ export function cofechaStyleStandardize(
         // Step 4: optional first difference
         // COFECHA 允许用户启用 first differencing，但它不是默认行为；
         // 因此默认配置保持 false，只在明确打开时才做。
-        transformed = transformed.slice(1).map((point, index) => ({
+        transformed = transformed.map((point, index) => ({
             year: point.year,
-            value: point.value - transformed[index].value,
+            value: index === 0
+                ? 0
+                : numericImplementation === "legacy-float32"
+                    ? Math.fround(point.value - transformed[index - 1].value)
+                    : point.value - transformed[index - 1].value,
         }));
     }
 
@@ -1322,17 +1326,46 @@ export function buildCofecha606MasterSeries(
     siteData.forEach((_tree, seriesId) => {
         let included = false;
         allSegments.filter((segment) => segment.seriesId === seriesId).forEach((segment) => {
-            const filtered = cofechaStyleStandardize(
-                segment.data,
-                filteringOptions,
-                "ltrr-cook-holmes",
-                "none",
-                1,
-                "ratio",
-                "post-ar",
-                "legacy-float32",
-                segment.stopMarkerValue,
-            );
+            const filtered = options.useFirstDifference
+                ? [...segment.data.entries()]
+                    .filter((entry): entry is [number, number] => typeof entry[1] === "number")
+                    .sort(([left], [right]) => left - right)
+                    .map(([year, value], index, entries) => ({
+                        year,
+                        value: index === 0
+                            ? Math.fround(0)
+                            : Math.fround(
+                                parseCofecha606TucsonWidth(value, segment.stopMarkerValue)
+                                - parseCofecha606TucsonWidth(
+                                    entries[index - 1][1],
+                                    segment.stopMarkerValue,
+                                ),
+                            ),
+                    }))
+                : options.splineRigidityYears < 0
+                    ? [...segment.data.entries()]
+                        .filter((entry): entry is [number, number] => (
+                            typeof entry[1] === "number"
+                        ))
+                        .sort(([left], [right]) => left - right)
+                        .map(([year, value]) => ({
+                            year,
+                            value: parseCofecha606TucsonWidth(
+                                value,
+                                segment.stopMarkerValue,
+                            ),
+                        }))
+                    : cofechaStyleStandardize(
+                        segment.data,
+                        filteringOptions,
+                        "ltrr-cook-holmes",
+                        "none",
+                        1,
+                        "ratio",
+                        "post-ar",
+                        "legacy-float32",
+                        segment.stopMarkerValue,
+                    );
             if (filtered.length === 0) return;
             included = true;
             const standardized = cofecha606StandardizeValues(
