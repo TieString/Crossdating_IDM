@@ -6,6 +6,7 @@ import {
     type CofechaReferenceOptions,
 } from "@/features/crossdating/reference";
 import {
+    cofecha606Pearson,
     prepareCofecha606SeriesForReport,
     type Cofecha606DescriptiveStats,
 } from "./jsReportSeries";
@@ -77,6 +78,34 @@ export type Cofecha606Part7Series = {
     arOrder: number;
 };
 
+export type Cofecha606Part5Segment = {
+    startYear: number;
+    endYear: number;
+    analysisStartYear: number;
+    analysisEndYear: number;
+    correlation: number;
+    comparedYears: number;
+    flag: "A" | "B" | null;
+    bestLagYears: number;
+    bestCorrelation: number;
+    lagCorrelations: Array<{
+        lagYears: number;
+        correlation: number | null;
+        comparedYears: number;
+    }>;
+};
+
+export type Cofecha606Part5Series = {
+    sequence: number;
+    seriesId: string;
+    segmentIndex: number;
+    startYear: number;
+    endYear: number;
+    correlationWithMaster: number;
+    comparedYears: number;
+    segments: Cofecha606Part5Segment[];
+};
+
 export type Cofecha606JsReport = {
     schemaVersion: 1;
     engine: "cofecha-6.06-js";
@@ -121,7 +150,10 @@ export type Cofecha606JsReport = {
     part4: {
         bars: Cofecha606Part4Bar[];
     };
-    part5: null;
+    part5: {
+        criticalCorrelation: number;
+        series: Cofecha606Part5Series[];
+    };
     part6: null;
     part7: {
         series: Cofecha606Part7Series[];
@@ -263,6 +295,8 @@ export const generateCofecha606JsReport = (
         ...options,
         segmentGridStartYear,
         segmentGridEndYear,
+        analysisStartYear: segmentGridSpan.startYear,
+        analysisEndYear: segmentGridSpan.endYear,
     });
     const part7PreparedSeries = preparedSeries.filter((series) => {
         const startYear = series.years[0];
@@ -270,6 +304,181 @@ export const generateCofecha606JsReport = (
         return endYear >= continuousTimeSpan.startYear
             && startYear <= continuousTimeSpan.endYear;
     });
+    const contributorsByYear = new Map<number, Array<{
+        seriesIndex: number;
+        value: number;
+    }>>();
+    const coverageByYear = new Map<number, Set<number>>();
+    preparedSeries.forEach((series, seriesIndex) => {
+        series.years.forEach((year, index) => {
+            const coverage = coverageByYear.get(year) ?? new Set<number>();
+            coverage.add(seriesIndex);
+            coverageByYear.set(year, coverage);
+            const sourceValue = series.segment.data.get(year);
+            if (typeof sourceValue === "number" && sourceValue <= 0) return;
+            const contributors = contributorsByYear.get(year) ?? [];
+            contributors.push({ seriesIndex, value: series.testingValues[index] });
+            contributorsByYear.set(year, contributors);
+        });
+    });
+    const leaveOneOutReference = (
+        omittedSeriesIndex: number,
+        includeTargetWhenAlone = false,
+    ) => new Map(
+        [...coverageByYear].flatMap(([year, coverage]) => {
+            const contributors = contributorsByYear.get(year) ?? [];
+            const retained = contributors.filter((row) => row.seriesIndex !== omittedSeriesIndex);
+            const insideSharedSpan = year >= segmentGridSpan.startYear
+                && year <= segmentGridSpan.endYear;
+            const omittedSeries = preparedSeries[omittedSeriesIndex];
+            const omittedYearIndex = omittedSeries?.years.indexOf(year) ?? -1;
+            const omittedSourceValue = omittedSeries?.segment.data.get(year);
+            if (omittedYearIndex >= 0
+                && typeof omittedSourceValue === "number"
+                && omittedSourceValue < 0
+                && contributors.length > 1) {
+                let sum = Math.fround(0);
+                contributors.forEach((row) => {
+                    sum = Math.fround(sum + Math.fround(row.value));
+                });
+                const adjustedSum = Math.fround(
+                    sum - Math.fround(omittedSeries.testingValues[omittedYearIndex]),
+                );
+                return [[
+                    year,
+                    Math.fround(adjustedSum / Math.fround(contributors.length - 1)),
+                ] as const];
+            }
+            if (contributors.length === 0) {
+                return insideSharedSpan ? [[year, 0] as const] : [];
+            }
+            const hasOtherCoverage = [...coverage]
+                .some((seriesIndex) => seriesIndex !== omittedSeriesIndex);
+            const selected = retained.length > 0
+                ? retained
+                : hasOtherCoverage || includeTargetWhenAlone && insideSharedSpan
+                    ? contributors
+                    : [];
+            if (selected.length === 0) return [];
+            let sum = Math.fround(0);
+            selected.forEach((row) => {
+                sum = Math.fround(sum + Math.fround(row.value));
+            });
+            return [[year, Math.fround(sum / Math.fround(selected.length))] as const];
+        }),
+    );
+    const correlate = (
+        series: (typeof preparedSeries)[number],
+        reference: ReadonlyMap<number, number>,
+        startYear?: number,
+        endYear?: number,
+        omitAbsentTarget = false,
+    ) => {
+        const targetValues: number[] = [];
+        const referenceValues: number[] = [];
+        series.years.forEach((year, index) => {
+            if (startYear !== undefined && year < startYear) return;
+            if (endYear !== undefined && year > endYear) return;
+            if (omitAbsentTarget) {
+                const sourceValue = series.segment.data.get(year);
+                if (sourceValue === 0) return;
+            }
+            const referenceValue = reference.get(year);
+            if (referenceValue === undefined) return;
+            targetValues.push(series.testingValues[index]);
+            referenceValues.push(referenceValue);
+        });
+        return {
+            correlation: cofecha606Pearson(targetValues, referenceValues),
+            comparedYears: targetValues.length,
+        };
+    };
+    const correlateSegmentAtLag = (
+        series: (typeof preparedSeries)[number],
+        reference: ReadonlyMap<number, number>,
+        startYear: number,
+        endYear: number,
+        lagYears: number,
+    ) => {
+        const targetValues: number[] = [];
+        const referenceValues: number[] = [];
+        let completeReference = true;
+        series.years.forEach((year, index) => {
+            if (year < startYear || year > endYear) return;
+            const sourceValue = series.segment.data.get(year);
+            if (sourceValue === 0) return;
+            const referenceValue = reference.get(year + lagYears);
+            if (referenceValue === undefined) {
+                completeReference = false;
+                return;
+            }
+            targetValues.push(series.testingValues[index]);
+            referenceValues.push(referenceValue);
+        });
+        return completeReference && targetValues.length >= 2
+            ? {
+                correlation: cofecha606Pearson(referenceValues, targetValues),
+                comparedYears: targetValues.length,
+            }
+            : {
+                correlation: null,
+                comparedYears: targetValues.length,
+            };
+    };
+    const part5Series: Cofecha606Part5Series[] = part7PreparedSeries.map((series, index) => {
+        const sourceIndex = preparedSeries.indexOf(series);
+        const reference = leaveOneOutReference(sourceIndex, true);
+        const segmentReference = leaveOneOutReference(sourceIndex, true);
+        const overall = correlate(series, reference);
+        return {
+            sequence: index + 1,
+            seriesId: series.segment.seriesId,
+            segmentIndex: series.segment.segmentIndex,
+            startYear: series.years[0],
+            endYear: series.years[series.years.length - 1],
+            correlationWithMaster: overall.correlation,
+            comparedYears: overall.comparedYears,
+            segments: series.segmentWindows.map((window) => {
+                const lagCorrelations = Array.from({ length: 21 }, (_, index) => {
+                    const lagYears = index - 10;
+                    return {
+                        lagYears,
+                        ...correlateSegmentAtLag(
+                            series,
+                            segmentReference,
+                            window.analysisStartYear,
+                            window.analysisEndYear,
+                            lagYears,
+                        ),
+                    };
+                });
+                const asDated = lagCorrelations[10];
+                const best = lagCorrelations.reduce((current, candidate) => (
+                    candidate.correlation !== null
+                        && (current.correlation === null
+                            || candidate.correlation > current.correlation)
+                        ? candidate
+                        : current
+                ), asDated);
+                const flag = best.lagYears === 0
+                    ? (asDated.correlation ?? 0) < 0.3281 ? "A" : null
+                    : "B";
+                return {
+                    ...window,
+                    correlation: asDated.correlation ?? 0,
+                    comparedYears: asDated.comparedYears,
+                    flag,
+                    bestLagYears: best.lagYears,
+                    bestCorrelation: best.correlation ?? 0,
+                    lagCorrelations,
+                };
+            }),
+        };
+    });
+    const correlationBySequence = new Map(part5Series.map((series) => [
+        series.sequence,
+        series.correlationWithMaster,
+    ]));
     const part7Series: Cofecha606Part7Series[] = part7PreparedSeries.map((series, index) => ({
         sequence: index + 1,
         seriesId: series.segment.seriesId,
@@ -279,7 +488,7 @@ export const generateCofecha606JsReport = (
         years: series.years.length,
         segmentCount: series.segmentCount,
         flagCount: null,
-        correlationWithMaster: null,
+        correlationWithMaster: correlationBySequence.get(index + 1) ?? null,
         unfiltered: series.unfilteredStats,
         meanSensitivity: series.meanSensitivity,
         filtered: series.filteredStats,
@@ -303,6 +512,18 @@ export const generateCofecha606JsReport = (
     const weightedMeanSensitivity = sensitivityPairCount > 0
         ? Math.fround(sensitivitySum / Math.fround(sensitivityPairCount))
         : 0;
+    let intercorrelationSum = Math.fround(0);
+    part5Series.forEach((series) => {
+        intercorrelationSum = Math.fround(
+            intercorrelationSum
+                + Math.fround(series.correlationWithMaster * series.comparedYears),
+        );
+    });
+    const seriesIntercorrelation = totalDatedRingsChecked > 0
+        ? Math.fround(
+            intercorrelationSum / Math.fround(totalDatedRingsChecked),
+        )
+        : 0;
 
     return {
         schemaVersion: 1,
@@ -314,8 +535,8 @@ export const generateCofecha606JsReport = (
             runAtIso: options.runAt.toISOString(),
         },
         options,
-        completedParts: [2, 3, 4],
-        pendingParts: [1, 5, 6, 7],
+        completedParts: [2, 3, 4, 5],
+        pendingParts: [1, 6, 7],
         part1: {
             masterTimeSpan,
             continuousTimeSpan,
@@ -327,7 +548,7 @@ export const generateCofecha606JsReport = (
             absentRingCount,
             absentRingPercent: totalRings > 0 ? absentRingCount / totalRings * 100 : 0,
             meanSeriesLength: part2Series.length > 0 ? totalRings / part2Series.length : 0,
-            seriesIntercorrelation: null,
+            seriesIntercorrelation,
             averageMeanSensitivity: weightedMeanSensitivity,
             possibleProblemSegments: null,
             absentRingsBySeries: part2Series
@@ -348,7 +569,10 @@ export const generateCofecha606JsReport = (
                 magnitude: Math.abs(row.value),
             })),
         },
-        part5: null,
+        part5: {
+            criticalCorrelation: 0.3281,
+            series: part5Series,
+        },
         part6: null,
         part7: {
             series: part7Series,
@@ -359,7 +583,7 @@ export const generateCofecha606JsReport = (
                     0,
                 ),
                 flagCount: null,
-                correlationWithMaster: null,
+                correlationWithMaster: seriesIntercorrelation,
                 meanMeasurement: average(part7Series.map((series) => series.unfiltered.mean)),
                 maximumMeasurement: Math.max(
                     ...part7Series.map((series) => series.unfiltered.maximum),
@@ -394,6 +618,11 @@ const fixed = (value: number, digits: number) => {
     return text === `-${(0).toFixed(digits)}` ? (0).toFixed(digits) : text;
 };
 
+const fixedCorrelation = (value: number, digits: number) => fixed(
+    value === 0 ? 0 : value + Math.sign(value) * 0.000001,
+    digits,
+);
+
 export const formatCofecha606JsReport = (
     report: Cofecha606JsReport,
 ): string => {
@@ -421,6 +650,9 @@ export const formatCofecha606JsReport = (
         `Total rings: ${report.part1.totalRings}`,
         `Total dated rings checked: ${report.part1.totalDatedRingsChecked ?? "pending Part 7"}`,
         `Mean length of series: ${fixed(report.part1.meanSeriesLength, 1)}`,
+        `Series intercorrelation: ${fixedCorrelation(report.part1.seriesIntercorrelation ?? 0, 3)}`,
+        `Average mean sensitivity: ${fixed(report.part1.averageMeanSensitivity ?? 0, 3)}`,
+        `Segments with possible problems: ${report.part1.possibleProblemSegments ?? "pending Part 6"}`,
         `Absent rings: ${report.part1.absentRingCount} (${fixed(report.part1.absentRingPercent, 3)}%)`,
         "",
     );
@@ -462,6 +694,27 @@ export const formatCofecha606JsReport = (
 
     push(
         "",
+        "PART 5: CORRELATION OF SERIES BY SEGMENTS",
+        `Critical correlation: ${fixed(report.part5.criticalCorrelation, 4)}`,
+        "Seq Series Time span Segment Correlation Flag Best lag Best correlation",
+    );
+    report.part5.series.forEach((series) => {
+        series.segments.forEach((segment) => {
+            push([
+                String(series.sequence).padStart(4, " "),
+                series.seriesId.padEnd(8, " "),
+                `${series.startYear}-${series.endYear}`.padStart(13, " "),
+                `${segment.startYear}-${segment.endYear}`.padStart(13, " "),
+                fixedCorrelation(segment.correlation, 2).padStart(6, " "),
+                (segment.flag ?? "").padStart(4, " "),
+                String(segment.bestLagYears).padStart(8, " "),
+                fixedCorrelation(segment.bestCorrelation, 2).padStart(16, " "),
+            ].join(" "));
+        });
+    });
+
+    push(
+        "",
         "PART 7: DESCRIPTIVE STATISTICS",
         "Seq Series Interval Years Segments Flags Master Mean Max SD Auto Sens FMax FSD FAuto AR",
     );
@@ -474,7 +727,9 @@ export const formatCofecha606JsReport = (
             String(row.years).padStart(5, " "),
             String(row.segmentCount).padStart(4, " "),
             String(row.flagCount ?? "pending").padStart(7, " "),
-            String(row.correlationWithMaster ?? "pending").padStart(7, " "),
+            (row.correlationWithMaster === null
+                ? "pending"
+                : fixedCorrelation(row.correlationWithMaster, 3)).padStart(7, " "),
             fixed(row.unfiltered.mean, 2).padStart(6, " "),
             fixed(row.unfiltered.maximum, 2).padStart(6, " "),
             fixed(row.unfiltered.standardDeviation, 3).padStart(7, " "),

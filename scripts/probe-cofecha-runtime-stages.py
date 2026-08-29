@@ -21,6 +21,8 @@ const calls = {
     ar: 0,
     stats: 0,
     pearson: 0,
+    segmentPearson: 0,
+    segmentEvaluation: 0,
 };
 
 function readFloatArray(address, length) {
@@ -176,6 +178,9 @@ Interceptor.attach(base.add(0xd08b), {
 Interceptor.attach(base.add(0xd2d2), {
     onEnter(args) {
         this.output = args[3];
+        this.length = args[0].readS32();
+        this.left = args[1];
+        this.right = args[2];
         this.payload = {
             stage: "pearson",
             call: ++calls.pearson,
@@ -191,7 +196,68 @@ Interceptor.attach(base.add(0xd2d2), {
         this.payload.leftSquares = base.add(0x19cfcc).readFloat();
         this.payload.rightSquares = base.add(0x19cfb4).readFloat();
         this.payload.reciprocal = base.add(0x19cfc4).readFloat();
+        if (this.payload.callerOffset === "0x932a") {
+            this.payload.left = readFloatArray(this.left, this.length);
+            this.payload.right = readFloatArray(this.right, this.length);
+        }
         send(this.payload);
+    },
+});
+
+Interceptor.attach(base.add(0x171da), {
+    onEnter(args) {
+        if (!this.returnAddress.equals(base.add(0x11172))) return;
+        this.active = true;
+        this.length = args[0].readS32();
+        this.output = args[5];
+        this.payload = {
+            stage: "segmentPearson",
+            call: ++calls.segmentPearson,
+            length: this.length,
+            left: readFloatArray(args[1], this.length),
+            right: readFloatArray(args[2], this.length),
+            mask: Array.from(new Uint8Array(args[3].readByteArray(this.length))),
+        };
+    },
+    onLeave() {
+        if (!this.active) return;
+        this.payload.correlation = this.output.readFloat();
+        send(this.payload);
+    },
+});
+
+Interceptor.attach(base.add(0x1101a), {
+    onEnter(args) {
+        this.payload = {
+            stage: "segmentEvaluation",
+            call: ++calls.segmentEvaluation,
+            rawArgs: Array.from({ length: 20 }, (_, index) => args[index].toUInt32()),
+        };
+    },
+    onLeave() {
+        this.payload.correlations = readFloatArray(base.add(0x19d4c0), 21);
+        this.payload.bestLagIndex = base.add(0x19d434).readS32();
+        this.payload.bestCorrelation = base.add(0x19d430).readFloat();
+        send(this.payload);
+    },
+});
+
+Interceptor.attach(base.add(0x9c8e), {
+    onEnter() {
+        send({
+            stage: "reportAverages",
+            seriesCount: base.add(0x19caa0).readS32(),
+            correlationDenominator: base.add(0x19caec).readS32(),
+            values: [
+                0x19cb84,
+                0x19cb58,
+                0x19caa8,
+                0x19c9ec,
+                0x19cb7c,
+                0x19cae0,
+                0x19cc54,
+            ].map((offset) => base.add(offset).readFloat()),
+        });
     },
 });
 """

@@ -20,6 +20,8 @@ export type Cofecha606SeriesAnalysisOptions = {
     useLogTransform: boolean;
     segmentGridStartYear: number;
     segmentGridEndYear: number;
+    analysisStartYear: number;
+    analysisEndYear: number;
 };
 
 export type Cofecha606DescriptiveStats = {
@@ -35,6 +37,7 @@ export type Cofecha606PreparedSeries = {
     years: number[];
     rawValues: number[];
     baseFilteredValues: number[];
+    masterValues: number[];
     arOrder: number;
     arCoefficients: number[];
     arResidualValues: number[];
@@ -47,6 +50,14 @@ export type Cofecha606PreparedSeries = {
     filteredStats: Cofecha606DescriptiveStats;
     segmentCount: number;
     checkedYearCount: number;
+    segmentWindows: Cofecha606SegmentWindow[];
+};
+
+export type Cofecha606SegmentWindow = {
+    startYear: number;
+    endYear: number;
+    analysisStartYear: number;
+    analysisEndYear: number;
 };
 
 const floatMeanAndSampleStandardDeviation = (values: readonly number[]) => {
@@ -176,6 +187,8 @@ const segmentWindows = (
     lag: number,
     gridStartYear: number,
     gridEndYear: number,
+    analysisStartBoundary: number,
+    analysisEndBoundary: number,
 ) => {
     const minimumOverlap = length / 2;
     const windows: Array<{ startYear: number; endYear: number }> = [];
@@ -199,9 +212,25 @@ const segmentWindows = (
                     - Math.abs((right.startYear + right.endYear) / 2 - center)
                 || left.startYear - right.startYear;
         });
-        return [windows[0]];
+        windows.splice(1);
     }
-    return windows;
+    const analysisSeriesStart = Math.max(startYear, analysisStartBoundary);
+    const analysisSeriesEnd = Math.min(endYear, analysisEndBoundary);
+    const seriesLength = analysisSeriesEnd - analysisSeriesStart + 1;
+    if (seriesLength <= 0) return [];
+    const analysisLength = Math.min(length, seriesLength);
+    const latestAnalysisStart = analysisSeriesEnd - analysisLength + 1;
+    return windows.map((window) => {
+        const analysisStartYear = Math.max(
+            analysisSeriesStart,
+            Math.min(window.startYear, latestAnalysisStart),
+        );
+        return {
+            ...window,
+            analysisStartYear,
+            analysisEndYear: analysisStartYear + analysisLength - 1,
+        };
+    });
 };
 
 export const prepareCofecha606SeriesForReport = (
@@ -225,6 +254,9 @@ export const prepareCofecha606SeriesForReport = (
             omitAbsentRingsFromMaster: false,
         }, "ltrr-cook-holmes", "none", 1, "ratio", "post-ar", "legacy-float32", segment.stopMarkerValue);
         const baseFilteredValues = baseFiltered.map((point) => point.value);
+        const masterFilteredValues = options.useLogTransform
+            ? cofecha606LogTransform(baseFilteredValues)
+            : baseFilteredValues.slice();
         const arModel = options.useAutoregressiveModel
             ? cofecha606AutoregressiveResidual(baseFilteredValues)
             : {
@@ -243,6 +275,8 @@ export const prepareCofecha606SeriesForReport = (
             options.segmentLag,
             options.segmentGridStartYear,
             options.segmentGridEndYear,
+            options.analysisStartYear,
+            options.analysisEndYear,
         );
         const checkedYears = new Set<number>();
         windows.forEach((window) => {
@@ -260,6 +294,7 @@ export const prepareCofecha606SeriesForReport = (
             years,
             rawValues,
             baseFilteredValues,
+            masterValues: cofecha606StandardizeValues(masterFilteredValues),
             arOrder: arModel.order,
             arCoefficients: arModel.coefficients,
             arResidualValues: arModel.residuals,
@@ -272,5 +307,6 @@ export const prepareCofecha606SeriesForReport = (
             filteredStats: stats(filteredValues),
             segmentCount: windows.length,
             checkedYearCount: checkedYears.size,
+            segmentWindows: windows,
         };
     });

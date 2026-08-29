@@ -18,6 +18,7 @@ const valueFor = (name: string) => {
 const rwlPath = resolve(valueFor("--rwl"));
 const outPath = resolve(valueFor("--out"));
 const outputPath = resolve(valueFor("--output"));
+const runtimeStagesArgument = valueFor("--runtime-stages");
 const sourceText = readFileSync(rwlPath, "utf8");
 stopMarker.value = await detectPrecision(sourceText);
 const loaded = await loadRwl(rwlPath, "tucson-auto", {
@@ -95,6 +96,28 @@ partSevenText.split(/\r?\n/).forEach((line) => {
     actualPart7.set(Number(fields[0]), numeric);
 });
 
+const partFiveHeading = /PART 5:\s+CORRELATION OF SERIES BY SEGMENTS:/;
+const partFiveStart = out.search(partFiveHeading);
+const partFiveText = partFiveStart >= 0
+    ? out.slice(partFiveStart).split(/PART 6:/)[0] ?? ""
+    : "";
+const actualPart5 = new Map<number, Array<{
+    correlation: number;
+    flag: "A" | "B" | null;
+}>>();
+partFiveText.split(/\r?\n/).forEach((line) => {
+    const row = line.match(/^\s*(\d+)\s+\S+\s+-?\d+\s+-?\d+\s+(.*)$/);
+    if (!row) return;
+    const values = [...row[2].matchAll(/([+-]?(?:\d*\.\d+))(A|B)?/g)].map((match) => ({
+        correlation: Number(match[1]),
+        flag: (match[2] as "A" | "B" | undefined) ?? null,
+    }));
+    if (values.length === 0) return;
+    const sequence = Number(row[1]);
+    actualPart5.set(sequence, [...actualPart5.get(sequence) ?? [], ...values]);
+});
+
+const rounded = (value: number, digits: number) => Number(value.toFixed(digits));
 const part1Comparisons = {
     masterTimeSpan: JSON.stringify(jsReport.part1.masterTimeSpan)
         === JSON.stringify(actualPart1.masterTimeSpan),
@@ -113,6 +136,8 @@ const part1Comparisons = {
         === actualPart1.meanSeriesLength,
     averageMeanSensitivity: Number(jsReport.part1.averageMeanSensitivity?.toFixed(3))
         === Number(out.match(/Average mean sensitivity\s+([\d.]+)/)?.[1]),
+    seriesIntercorrelation: rounded(jsReport.part1.seriesIntercorrelation ?? 0, 3)
+        === Number(out.match(/Series intercorrelation\s+([\d.]+)/)?.[1]),
 };
 const part2Mismatches = jsReport.part2.series.flatMap((row) => {
     const actual = actualPart2.get(row.sequence);
@@ -124,7 +149,6 @@ const part2Mismatches = jsReport.part2.series.flatMap((row) => {
         ? []
         : [{ expected: actual ?? null, actual: row }];
 });
-const rounded = (value: number, digits: number) => Number(value.toFixed(digits));
 const part7Mismatches = jsReport.part7.series.flatMap((row) => {
     const actual = actualPart7.get(row.sequence);
     const comparisons = actual ? {
@@ -132,6 +156,7 @@ const part7Mismatches = jsReport.part7.series.flatMap((row) => {
         endYear: row.endYear === actual[3],
         years: row.years === actual[4],
         segmentCount: row.segmentCount === actual[5],
+        correlationWithMaster: rounded(row.correlationWithMaster ?? 0, 3) === actual[7],
         unfilteredMean: rounded(row.unfiltered.mean, 2) === actual[8],
         unfilteredMaximum: rounded(row.unfiltered.maximum, 2) === actual[9],
         unfilteredSd: rounded(row.unfiltered.standardDeviation, 3) === actual[10],
@@ -150,6 +175,57 @@ const part7Mismatches = jsReport.part7.series.flatMap((row) => {
         actual: row,
     }];
 });
+const part5Mismatches = jsReport.part5.series.flatMap((row) => {
+    const expected = actualPart5.get(row.sequence) ?? [];
+    const correlationMismatches = row.segments.flatMap((segment, index) => (
+        expected[index]
+            && Math.abs(segment.correlation - expected[index].correlation) <= 0.00501
+            && segment.flag === expected[index].flag
+            ? []
+            : [{ index, expected: expected[index] ?? null, actual: segment }]
+    ));
+    return expected.length === row.segments.length && correlationMismatches.length === 0
+        ? []
+        : [{
+            sequence: row.sequence,
+            seriesId: row.seriesId,
+            expectedCount: expected.length,
+            actualCount: row.segments.length,
+            correlationMismatches,
+        }];
+});
+const runtimeEvaluations = runtimeStagesArgument
+    ? (JSON.parse(readFileSync(resolve(runtimeStagesArgument), "utf8")) as {
+        records?: Array<{
+            stage?: string;
+            correlations?: number[];
+            bestLagIndex?: number;
+        }>;
+    }).records?.filter((record) => record.stage === "segmentEvaluation") ?? []
+    : [];
+const jsSegments = jsReport.part5.series.flatMap((series) => series.segments);
+const runtimeLagMismatches = runtimeEvaluations
+    .slice(0, jsSegments.length)
+    .flatMap((runtime, segmentIndex) => {
+    const segment = jsSegments[segmentIndex];
+    if (!segment || !runtime.correlations) return [{ segmentIndex, reason: "missing" }];
+    const values = segment.lagCorrelations.map((row) => row.correlation ?? -9.99);
+    const mismatchedLags = values.flatMap((value, lagIndex) => (
+        Math.abs(value - (runtime.correlations?.[lagIndex] ?? Number.NaN)) <= 0.0001
+            ? []
+            : [{ lagYears: lagIndex - 10, expected: runtime.correlations?.[lagIndex], actual: value }]
+    ));
+    const expectedBestLag = (runtime.bestLagIndex ?? 11) - 11;
+    return mismatchedLags.length === 0 && segment.bestLagYears === expectedBestLag
+        ? []
+        : [{ segmentIndex, expectedBestLag, actualBestLag: segment.bestLagYears, mismatchedLags }];
+    });
+if (runtimeEvaluations.length > 0 && runtimeEvaluations.length < jsSegments.length) {
+    runtimeLagMismatches.push({
+        segmentIndex: runtimeEvaluations.length,
+        reason: "missing-runtime-evaluation",
+    });
+}
 const output = {
     schemaVersion: 1,
     rwlPath,
@@ -178,6 +254,27 @@ const output = {
     part3: {
         years: jsReport.part3.years.length,
     },
+    part5: {
+        expectedRows: actualPart5.size,
+        actualRows: jsReport.part5.series.length,
+        overallComparedYears: jsReport.part5.series.reduce(
+            (sum, series) => sum + series.comparedYears,
+            0,
+        ),
+        overallSeries: jsReport.part5.series.map((series) => ({
+            sequence: series.sequence,
+            seriesId: series.seriesId,
+            comparedYears: series.comparedYears,
+            correlation: series.correlationWithMaster,
+        })),
+        mismatches: part5Mismatches,
+        passed: actualPart5.size === jsReport.part5.series.length
+            && part5Mismatches.length === 0
+            && runtimeLagMismatches.length === 0,
+        runtimeEvaluations: runtimeEvaluations.length,
+        runtimeTrailingEvaluations: Math.max(0, runtimeEvaluations.length - jsSegments.length),
+        runtimeLagMismatches,
+    },
     part7: {
         expectedRows: actualPart7.size,
         actualRows: jsReport.part7.series.length,
@@ -194,4 +291,6 @@ console.log(`COFECHA_JS_REPORT_PARTS_1_4 ${JSON.stringify({
     part2Mismatches: part2Mismatches.length,
     part7: output.part7.passed,
     part7Mismatches: part7Mismatches.length,
+    part5: output.part5.passed,
+    part5Mismatches: part5Mismatches.length,
 })}`);

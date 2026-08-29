@@ -26,6 +26,8 @@ const prepared = prepareCofecha606SeriesForReport(loaded.siteData, {
     useLogTransform: true,
     segmentGridStartYear: -10000,
     segmentGridEndYear: 10000,
+    analysisStartYear: -10000,
+    analysisEndYear: 10000,
 })[sequence - 1];
 const values = stage === "filtered" ? prepared.filteredValues : prepared.rawValues;
 let leftSum = Math.fround(0);

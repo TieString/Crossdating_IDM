@@ -60,8 +60,8 @@ describe("COFECHA 6.06 JS report Parts 1-4", () => {
             title: "Parity fixture",
             runAtIso: runAt.toISOString(),
         });
-        expect(report.completedParts).toEqual([2, 3, 4]);
-        expect(report.pendingParts).toEqual([1, 5, 6, 7]);
+        expect(report.completedParts).toEqual([2, 3, 4, 5]);
+        expect(report.pendingParts).toEqual([1, 6, 7]);
         expect(report.part1.datedSeriesCount).toBe(6);
         expect(report.part1.totalRings).toBe(1200);
         expect(report.part1.totalDatedRingsChecked).toBe(1200);
@@ -95,6 +95,13 @@ describe("COFECHA 6.06 JS report Parts 1-4", () => {
         expect(firstStats.filtered.lagOneAutocorrelation.toFixed(3)).toBe("0.152");
         expect(firstStats.arOrder).toBe(5);
         expect(report.part7.totals.segmentCount).toBe(42);
+        expect(report.part5.series).toHaveLength(6);
+        expect(report.part5.series[0].segments).toHaveLength(7);
+        expect(report.part5.series[0].segments[0].lagCorrelations).toHaveLength(21);
+        expect(report.part5.series[0].segments[0].lagCorrelations[10].lagYears).toBe(0);
+        expect(report.part5.series[0].segments[0].correlation).toBe(
+            report.part5.series[0].segments[0].lagCorrelations[10].correlation,
+        );
 
         const text = formatCofecha606JsReport(report);
         expect(text).toContain("Run FULL");
@@ -123,5 +130,34 @@ describe("COFECHA 6.06 JS report Parts 1-4", () => {
             expect.objectContaining({ segmentIndex: 1, startYear: 1800, endYear: 1803 }),
             expect.objectContaining({ segmentIndex: 2, startYear: 1900, endYear: 1903 }),
         ]);
+    });
+
+    it("separates displayed segment grids from the full calculation window", () => {
+        const site: RwlSiteData = new Map(
+            Array.from({ length: 3 }, (_, seriesIndex) => {
+                const startYear = seriesIndex === 0 ? 1804 : 1800;
+                const tree: RwlTreeData = new Map(
+                    Array.from({ length: 100 }, (_, index) => [
+                        startYear + index,
+                        width(startYear - 1800 + index, seriesIndex),
+                    ]),
+                );
+                if (seriesIndex === 0) tree.set(1820, 0);
+                return [`EDGE0${seriesIndex + 1}`, tree];
+            }),
+        );
+        const report = generateCofecha606JsReport(site, {
+            jobName: "EDGE",
+            inputFileName: "edge.rwl",
+        });
+        const first = report.part5.series[0].segments[0];
+
+        expect(first).toMatchObject({
+            startYear: 1800,
+            endYear: 1849,
+            analysisStartYear: 1804,
+            analysisEndYear: 1853,
+            comparedYears: 49,
+        });
     });
 });
