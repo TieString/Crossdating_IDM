@@ -11,7 +11,7 @@ const valueFor = (name, fallback = "") => {
 const outputDir = resolve(valueFor("--output-dir"));
 mkdirSync(outputDir, { recursive: true });
 
-const formatSeries = (id, values, startYear = 1800) => {
+const formatSeries = (id, values, startYear = 1800, preserveSpecialValues = false) => {
     const lines = [];
     for (let offset = 0; offset < values.length; offset += 10) {
         const year = startYear + offset;
@@ -20,8 +20,10 @@ const formatSeries = (id, values, startYear = 1800) => {
             + String(year).padStart(4, " ")
             + values.slice(offset, offset + 10)
                 .map((value) => {
-                    const rounded = Math.max(1, Math.round(value));
-                    const safe = rounded === 999 || rounded === 9999
+                    const rounded = preserveSpecialValues
+                        ? Math.round(value)
+                        : Math.max(1, Math.round(value));
+                    const safe = !preserveSpecialValues && (rounded === 999 || rounded === 9999)
                         ? rounded + 2
                         : rounded;
                     return String(safe).padStart(6, " ");
@@ -74,6 +76,15 @@ const impulseSeries = (idPrefix, impulseIndex) => Array.from(
 );
 const impulseCenter = impulseSeries("IMPC", 100);
 const impulseNearEdge = impulseSeries("IMPE", 8);
+const parserValues = Array.from({ length: 9999 }, (_, value) => value)
+    .filter((value) => value !== 999);
+const parserGrid = Array.from(
+    { length: Math.ceil(parserValues.length / 500) },
+    (_, seriesIndex) => ({
+        id: `PAR${String(seriesIndex + 1).padStart(5, "0")}`,
+        values: parserValues.slice(seriesIndex * 500, (seriesIndex + 1) * 500),
+    }),
+);
 
 const fixtures = {
     "single.rwl": formatSeries("SINGLE1", oneValues),
@@ -88,6 +99,9 @@ const fixtures = {
     )).join("\r\n"),
     "impulse-edge-six.rwl": impulseNearEdge.map((series) => (
         formatSeries(series.id, series.values)
+    )).join("\r\n"),
+    "parser-grid.rwl": parserGrid.map((series) => (
+        formatSeries(series.id, series.values, 1500, true)
     )).join("\r\n"),
 };
 Object.entries(fixtures).forEach(([name, text]) => {

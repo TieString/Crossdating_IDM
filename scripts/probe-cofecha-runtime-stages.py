@@ -13,7 +13,7 @@ import frida
 
 HOOK_SCRIPT = r"""
 const base = Process.mainModule.base;
-const calls = { spline: 0, divser: 0, varianceStabilize: 0 };
+const calls = { spline: 0, divser: 0, varianceStabilize: 0, standardize: 0 };
 
 function readFloatArray(address, length) {
     const values = [];
@@ -40,6 +40,15 @@ Interceptor.attach(base.add(0xd620), {
     onLeave() {
         this.payload.output = readFloatArray(this.output, this.length);
         send(this.payload);
+    },
+});
+
+Interceptor.attach(base.add(0xd708), {
+    onEnter() {
+        send({
+            stage: "splinePenalty",
+            value: base.add(0x19d008).readDouble(),
+        });
     },
 });
 
@@ -74,6 +83,29 @@ Interceptor.attach(base.add(0xe4da), {
         };
     },
     onLeave() {
+        this.payload.output = readFloatArray(this.series, this.length);
+        send(this.payload);
+    },
+});
+
+Interceptor.attach(base.add(0xe765), {
+    onEnter(args) {
+        this.length = args[0].readS32();
+        this.series = args[1];
+        this.meanAddress = args[2];
+        this.sdAddress = args[3];
+        this.payload = {
+            stage: "standardize",
+            call: ++calls.standardize,
+            callerOffset: this.returnAddress.sub(base).toString(),
+            length: this.length,
+            degreesOfFreedomAdjustment: args[4].readS32(),
+            input: readFloatArray(this.series, this.length),
+        };
+    },
+    onLeave() {
+        this.payload.mean = this.meanAddress.readFloat();
+        this.payload.standardDeviation = this.sdAddress.readFloat();
         this.payload.output = readFloatArray(this.series, this.length);
         send(this.payload);
     },

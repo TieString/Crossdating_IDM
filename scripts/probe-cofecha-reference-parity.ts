@@ -8,9 +8,12 @@ import {
     writeFileSync,
 } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import { stopMarker } from "@/shared/constants";
+import { parseCofecha606TucsonWidth } from "@/features/crossdating/cofecha606F63";
 import {
     COFECHA_REFERENCE_DEFAULT_OPTIONS,
     cofecha606DivideSeries,
+    cofecha606StandardizeValues,
     cofecha606StabilizeFilteredSeries,
     cofechaStyleStandardize,
     solveCofecha606SplineTrend,
@@ -282,7 +285,7 @@ const firstRawValues = [...firstTree.entries()]
         typeof entry[1] === "number" && Number.isFinite(entry[1]) && entry[1] > 0
     ))
     .sort(([left], [right]) => left - right)
-    .map(([, value]) => value);
+    .map(([, value]) => parseCofecha606TucsonWidth(value, stopMarker.value));
 const exactFirstTrend = solveCofecha606SplineTrend(
     firstRawValues,
     COFECHA_REFERENCE_DEFAULT_OPTIONS.splineRigidityYears,
@@ -298,6 +301,32 @@ const exactFirstStabilized = exactFirstDetrended
         COFECHA_REFERENCE_DEFAULT_OPTIONS.splineFrequencyResponse,
     )
     : null;
+const exactFirstStandardized = exactFirstDetrended
+    ? cofecha606StandardizeValues(exactFirstDetrended)
+    : null;
+const exactFirstAbsoluteStandardized = exactFirstStandardized?.map((value) => (
+    value < 0 ? Math.fround(value * -1) : value
+)) ?? null;
+const exactSecondTrend = exactFirstAbsoluteStandardized
+    ? solveCofecha606SplineTrend(
+        exactFirstAbsoluteStandardized,
+        COFECHA_REFERENCE_DEFAULT_OPTIONS.splineRigidityYears,
+        COFECHA_REFERENCE_DEFAULT_OPTIONS.splineFrequencyResponse,
+    )
+    : null;
+const exactSecondDetrended = exactFirstAbsoluteStandardized && exactSecondTrend
+    ? cofecha606DivideSeries(exactFirstAbsoluteStandardized, exactSecondTrend)
+    : null;
+const exactPlainMasterCorePoints = cofechaStyleStandardize(firstTree, {
+    ...COFECHA_REFERENCE_DEFAULT_OPTIONS,
+    useAutoregressiveModel: false,
+    useLogTransform: false,
+    omitAbsentRingsFromMaster: false,
+    minReplication: 1,
+}, "ltrr-cook-holmes", "none", 1, "ratio", "post-ar", "legacy-float32");
+const exactPlainMasterCore = cofecha606StandardizeValues(
+    exactPlainMasterCorePoints.map((point) => point.value),
+);
 const standardizeFirstCore = (input: {
     profile: ProbeProfile;
     spline: CofechaSplineImplementation;
@@ -332,23 +361,45 @@ const buildJsMaster = (input: {
             useAutoregressiveModel: input.profile.useAr,
             useLogTransform: input.profile.useLog,
             minReplication: 1,
+            omitAbsentRingsFromMaster: input.numeric !== "legacy-float32",
         }, input.spline, input.profile.useAr ? input.ar : "none", input.splineLambdaScale, input.detrend, input.log, input.numeric), input.filteredQuantizationDigits);
         if (input.normalizeCore && points.length > 0) {
             const values = points.map((point) => point.value);
-            const average = mean(values);
-            const scale = sd(values, input.sampleCoreSd) || 1;
-            points = points.map((point) => ({
-                ...point,
-                value: (point.value - average) / scale,
-            }));
+            if (input.numeric === "legacy-float32" && !input.sampleCoreSd) {
+                const standardized = cofecha606StandardizeValues(values);
+                points = points.map((point, index) => ({
+                    ...point,
+                    value: standardized[index],
+                }));
+            } else {
+                const average = mean(values);
+                const scale = sd(values, input.sampleCoreSd) || 1;
+                points = points.map((point) => ({
+                    ...point,
+                    value: (point.value - average) / scale,
+                }));
+            }
         }
         points.forEach(({ year, value }) => {
+            if (input.numeric === "legacy-float32" && tree.get(year) === 0) return;
             valuesByYear.set(year, [...valuesByYear.get(year) ?? [], value]);
         });
     });
     const raw = new Map([...valuesByYear]
         .sort(([left], [right]) => left - right)
-        .map(([year, values]) => [year, mean(values)]));
+        .map(([year, values]) => {
+            if (input.numeric !== "legacy-float32") return [year, mean(values)];
+            let sum = Math.fround(0);
+            values.forEach((value) => {
+                sum = Math.fround(sum + Math.fround(value));
+            });
+            return [year, Math.fround(sum / Math.fround(values.length))];
+        }));
+    if (input.numeric === "legacy-float32" && !input.sampleMasterSd) {
+        const years = [...raw.keys()];
+        const standardized = cofecha606StandardizeValues([...raw.values()]);
+        return new Map(years.map((year, index) => [year, standardized[index]]));
+    }
     return zScoreMap(raw, input.sampleMasterSd);
 };
 
@@ -512,9 +563,9 @@ for (const profile of profiles) {
         }
     }
     variants.sort((left, right) => (
-        right.correlation - left.correlation
+        right.exactFourDecimalRate - left.exactFourDecimalRate
         || left.rmse - right.rmse
-        || right.exactFourDecimalRate - left.exactFourDecimalRate
+        || right.correlation - left.correlation
     ));
     const best = variants[0];
     const bestMaster = buildJsMaster({
@@ -585,6 +636,8 @@ const output = {
     cofechaExe,
     exactPlainCoreDiagnostics: {
         splineSolved: exactFirstTrend !== null,
+        firstRawValues,
+        firstTrendValues: exactFirstTrend,
         firstDetrendedStats: exactFirstDetrended
             ? seriesStats(exactFirstDetrended)
             : null,
@@ -596,6 +649,13 @@ const output = {
                 value !== exactFirstStabilized[index]
             )).length
             : 0,
+        firstDetrendedValues: exactFirstDetrended,
+        firstStandardizedValues: exactFirstStandardized,
+        secondTrendValues: exactSecondTrend,
+        secondDetrendedValues: exactSecondDetrended,
+        masterCoreYears: exactPlainMasterCorePoints.map((point) => point.year),
+        masterCoreFilteredValues: exactPlainMasterCorePoints.map((point) => point.value),
+        masterCoreValues: exactPlainMasterCore,
     },
     profiles: profileResults,
 };

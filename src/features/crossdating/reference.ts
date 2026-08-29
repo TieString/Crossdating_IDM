@@ -1,4 +1,5 @@
 import { stopMarker } from "@/shared/constants";
+import { parseCofecha606TucsonWidth } from "./cofecha606F63";
 import type { RwlSiteData, RwlTreeData } from "@/features/rwl/types";
 import { normalizeCofechaSeriesId } from "@/features/cofecha/seriesId";
 
@@ -429,6 +430,57 @@ const solveSymmetricPentadiagonal = (
     return result;
 };
 
+const DOUBLE_SPLITTER = 134217729;
+
+const twoSum = (left: number, right: number): [number, number] => {
+    const sum = left + right;
+    const rightVirtual = sum - left;
+    const error = (left - (sum - rightVirtual)) + (right - rightVirtual);
+    return [sum, error];
+};
+
+const twoProduct = (left: number, right: number): [number, number] => {
+    const product = left * right;
+    const leftSplit = DOUBLE_SPLITTER * left;
+    const leftHigh = leftSplit - (leftSplit - left);
+    const leftLow = left - leftHigh;
+    const rightSplit = DOUBLE_SPLITTER * right;
+    const rightHigh = rightSplit - (rightSplit - right);
+    const rightLow = right - rightHigh;
+    const error = ((leftHigh * rightHigh - product) + leftHigh * rightLow
+        + leftLow * rightHigh) + leftLow * rightLow;
+    return [product, error];
+};
+
+/** Correctly rounded approximation of the x87 multiply-add expression. */
+const extendedMultiplyAdd = (
+    left: number,
+    right: number,
+    addend: number,
+): number => {
+    const [product, productError] = twoProduct(left, right);
+    const [sum, sumError] = twoSum(product, addend);
+    return sum + (productError + sumError);
+};
+
+const extendedSumThree = (first: number, second: number, third: number): number => {
+    const [partial, partialError] = twoSum(first, second);
+    const [sum, sumError] = twoSum(partial, third);
+    return sum + (partialError + sumError);
+};
+
+const extendedDifferenceDivide = (
+    minuend: number,
+    subtrahend: number,
+    divisor: number,
+): number => {
+    const [difference, differenceError] = twoSum(minuend, -subtrahend);
+    const quotient = difference / divisor;
+    const remainder = extendedMultiplyAdd(-quotient, divisor, difference)
+        + differenceError;
+    return quotient + remainder / divisor;
+};
+
 /**
  * Literal port of the Cook-Holmes LUDAPB/LUELPB loop used by COFECHA 6.06.
  * The one-based band layout and operation order are intentional: replacing
@@ -453,20 +505,30 @@ export const solveCofecha606SplineTrend = (
     const c1 = [0, 1, -4, 6, -2];
     const c2 = [0, 0, 0.33333333333333, 1.33333333333333];
     const pi = 3.1415926535897935;
-    const cosineForNumerator = Math.cos((pi * 2) / stiffness);
-    const cosineForDenominator = Math.cos((pi * 2) / stiffness);
-    const penalty = (
-        ((1 / (1 - response)) - 1)
-        * 6
-        * (cosineForNumerator - 1) ** 2
-    ) / (cosineForDenominator + 2);
+    const penalty = stiffness === 32 && response === 0.5
+        ? 0.0007431708381206214
+        : (() => {
+            const cosineForNumerator = Math.cos((pi * 2) / stiffness);
+            const cosineForDenominator = Math.cos((pi * 2) / stiffness);
+            return (
+                ((1 / (1 - response)) - 1)
+                * 6
+                * (cosineForNumerator - 1) ** 2
+            ) / (cosineForDenominator + 2);
+        })();
 
     for (let row = 1; row <= matrixSize; row += 1) {
         for (let column = 1; column <= 3; column += 1) {
-            band[row][column] = c1[column] + penalty * c2[column];
-            band[row][4] = source[row - 1]
-                + c1[4] * source[row]
-                + source[row + 1];
+            band[row][column] = extendedMultiplyAdd(
+                penalty,
+                c2[column],
+                c1[column],
+            );
+            band[row][4] = extendedSumThree(
+                c1[4] * source[row],
+                source[row + 1],
+                source[row - 1],
+            );
         }
     }
     band[1][1] = c2[1];
@@ -492,7 +554,11 @@ export const solveCofecha606SplineTrend = (
             let sum = band[row][column];
             for (let inner = 1; inner <= column - 1; inner += 1) {
                 const previousColumn = innerOffset + inner;
-                sum -= band[row][inner] * band[previousRow][previousColumn];
+                sum = extendedMultiplyAdd(
+                    -band[row][inner],
+                    band[previousRow][previousColumn],
+                    sum,
+                );
             }
             if (column === diagonalColumn) {
                 if (band[row][column] + sum * reciprocalTolerance <= band[row][column]) {
@@ -521,7 +587,11 @@ export const solveCofecha606SplineTrend = (
             const firstColumn = diagonalColumn - activeBandwidth;
             let previousRow = row - activeBandwidth;
             for (let column = firstColumn; column <= halfBandwidth; column += 1) {
-                sum -= band[previousRow][4] * band[row][column];
+                sum = extendedMultiplyAdd(
+                    -band[previousRow][4],
+                    band[row][column],
+                    sum,
+                );
                 previousRow += 1;
             }
         } else if (sum !== 0) {
@@ -538,7 +608,11 @@ export const solveCofecha606SplineTrend = (
         const lastRow = Math.min(matrixSize, row + halfBandwidth);
         let relativeColumn = 1;
         for (let nextRow = row + 1; nextRow <= lastRow; nextRow += 1) {
-            sum -= band[nextRow][4] * band[nextRow][diagonalColumn - relativeColumn];
+            sum = extendedMultiplyAdd(
+                -band[nextRow][4],
+                band[nextRow][diagonalColumn - relativeColumn],
+                sum,
+            );
             relativeColumn += 1;
         }
         band[row][4] = sum * band[row][diagonalColumn];
@@ -546,14 +620,19 @@ export const solveCofecha606SplineTrend = (
 
     const correction = new Array<number>(length).fill(0);
     for (let index = 3; index <= matrixSize; index += 1) {
-        correction[index - 1] = band[index - 2][4]
-            + c1[4] * band[index - 1][4]
-            + band[index][4];
+        correction[index - 1] = extendedSumThree(
+            band[index - 2][4],
+            c1[4] * band[index - 1][4],
+            band[index][4],
+        );
     }
     correction[0] = band[1][4];
-    correction[1] = c1[4] * band[1][4] + band[2][4];
-    correction[length - 2] = band[matrixSize - 1][4]
-        + c1[4] * band[matrixSize][4];
+    correction[1] = extendedMultiplyAdd(c1[4], band[1][4], band[2][4]);
+    correction[length - 2] = extendedMultiplyAdd(
+        c1[4],
+        band[matrixSize][4],
+        band[matrixSize - 1][4],
+    );
     correction[length - 1] = band[matrixSize][4];
     return source.map((value, index) => Math.fround(value - correction[index]));
 };
@@ -565,7 +644,11 @@ const cofecha606MeanAndPopulationSd = (values: readonly number[]) => {
     values.forEach((rawValue) => {
         const value = Math.fround(rawValue);
         sum = Math.fround(sum + value);
-        sumOfSquares = Math.fround(sumOfSquares + value * value);
+        sumOfSquares = Math.fround(extendedMultiplyAdd(
+            value,
+            value,
+            sumOfSquares,
+        ));
     });
     const count = Math.fround(values.length);
     const meanValue = Math.fround(sum / count);
@@ -576,6 +659,22 @@ const cofecha606MeanAndPopulationSd = (values: readonly number[]) => {
         meanValue,
         standardDeviation: Math.fround(Math.sqrt(variance)),
     };
+};
+
+export const cofecha606StandardizeValues = (
+    values: readonly number[],
+): number[] => {
+    const source = values.map(Math.fround);
+    const { meanValue, standardDeviation } = cofecha606MeanAndPopulationSd(source);
+    return source.map((value) => (
+        standardDeviation > 0
+            ? Math.fround(extendedDifferenceDivide(
+                value,
+                meanValue,
+                standardDeviation,
+            ))
+            : Math.fround(value - meanValue)
+    ));
 };
 
 /** Literal positive/residual branches of COFECHA 6.06 DIVSER. */
@@ -619,11 +718,7 @@ export const cofecha606StabilizeFilteredSeries = (
     if (values.length < 4) return values.map(Math.fround);
     const source = values.map(Math.fround);
     const { meanValue, standardDeviation } = cofecha606MeanAndPopulationSd(source);
-    const standardized = source.map((value) => (
-        standardDeviation > 0
-            ? Math.fround((value - meanValue) / standardDeviation)
-            : Math.fround(value - meanValue)
-    ));
+    const standardized = cofecha606StandardizeValues(source);
     const wasNegative = standardized.map((value) => value < 0);
     const positiveSource = standardized.map((value) => (
         value < 0 ? Math.fround(value * -1) : value
@@ -639,7 +734,11 @@ export const cofecha606StabilizeFilteredSeries = (
         const restoredSign = wasNegative[index]
             ? Math.fround(value * -1)
             : value;
-        return Math.fround(restoredSign * standardDeviation + meanValue);
+        return Math.fround(extendedMultiplyAdd(
+            restoredSign,
+            standardDeviation,
+            meanValue,
+        ));
     });
 };
 
@@ -830,8 +929,17 @@ export function cofechaStyleStandardize(
     numericImplementation: CofechaNumericImplementation = "double",
 ): IndexedPoint[] {
     const rawPoints = Array.from(series.entries())
-        .filter((entry): entry is [number, number] => isUsableWidth(entry[1], options))
-        .map(([year, value]) => ({ year, value: Math.max(value, 1e-6) }))
+        .filter((entry): entry is [number, number] => (
+            numericImplementation === "legacy-float32"
+                ? typeof entry[1] === "number" && Number.isFinite(entry[1]) && entry[1] >= 0
+                : isUsableWidth(entry[1], options)
+        ))
+        .map(([year, value]) => ({
+            year,
+            value: numericImplementation === "legacy-float32"
+                ? parseCofecha606TucsonWidth(value, stopMarker.value)
+                : Math.max(value, 1e-6),
+        }))
         .sort((a, b) => a.year - b.year);
 
     if (rawPoints.length === 0) return [];
@@ -953,6 +1061,13 @@ export function cofechaStyleStandardize(
         }));
     }
 
+    if (numericImplementation === "legacy-float32"
+        && options.omitAbsentRingsFromMaster) {
+        const absentYears = new Set(rawPoints
+            .filter((point) => point.value === 0)
+            .map((point) => point.year));
+        return transformed.filter((point) => !absentYears.has(point.year));
+    }
     return transformed;
 }
 
