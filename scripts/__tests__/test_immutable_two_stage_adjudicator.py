@@ -242,6 +242,84 @@ class ImmutableTwoStageAdjudicatorTest(unittest.TestCase):
         self.assertFalse(margin["a"] > threshold)
         self.assertTrue(margin["b"] > threshold)
 
+    def test_frozen_threshold_inference_does_not_read_correctness_labels(self) -> None:
+        baseline = pd.DataFrame({
+            "attempt_id": ["a"],
+            "file_id": ["f"],
+            "family": ["A"],
+            "event_type": ["missingRing"],
+            "shift_years": [-1],
+            "operation_correct": [1],
+            "final_correct": [1],
+            "selected_package_correct": [1],
+            "location_correct": [1],
+            "selected_candidate_source": ["baseline"],
+            "selected_candidate_year": [1900],
+            "candidate_has_response": [1],
+        })
+        operations = pd.DataFrame({
+            "attempt_id": ["a", "a"],
+            "file_id": ["f", "f"],
+            "family": ["A", "A"],
+            "event_type": ["missingRing", "falseRing"],
+            "shift_years": [-1, 1],
+            "operation_correct": [0, 1],
+        })
+        operations = adjudicator.ensure_identity_group(operations)
+        proposal_top = pd.DataFrame({
+            "attempt_id": ["a"],
+            "identity_group": ["a|falseRing|1"],
+            "event_type": ["falseRing"],
+            "shift_years": [1],
+            "candidate_year": [1910],
+            "candidate_source": ["frozenProposal:pair"],
+            "proposal_role": ["pair"],
+            "proposal_correct": [1],
+        })
+        dense = pd.DataFrame(columns=[
+            "identity_group",
+            "workflow_correct",
+            "location_correct",
+            "candidate_source",
+            "candidate_year",
+        ])
+
+        original, _ = trainer.safe_two_stage_projection(
+            baseline=baseline,
+            operations=operations,
+            operation_score=pd.Series([0.0, 2.0]),
+            proposal_top=proposal_top,
+            proposal_margin=pd.Series({"a": 1.0}),
+            dense_location_top=dense,
+            operation_threshold=0.5,
+            location_threshold=0.0,
+        )
+        changed_labels = baseline.copy()
+        changed_labels[["operation_correct", "final_correct"]] = 0
+        changed_operations = operations.copy()
+        changed_operations["operation_correct"] = 1 - changed_operations[
+            "operation_correct"
+        ]
+        changed_proposal = proposal_top.copy()
+        changed_proposal["proposal_correct"] = 0
+        relabeled, _ = trainer.safe_two_stage_projection(
+            baseline=changed_labels,
+            operations=changed_operations,
+            operation_score=pd.Series([0.0, 2.0]),
+            proposal_top=changed_proposal,
+            proposal_margin=pd.Series({"a": 1.0}),
+            dense_location_top=dense,
+            operation_threshold=0.5,
+            location_threshold=0.0,
+        )
+
+        columns = [
+            "identity_group",
+            "selected_candidate_year",
+            "decision_source",
+        ]
+        pd.testing.assert_frame_equal(original[columns], relabeled[columns])
+
 
 if __name__ == "__main__":
     unittest.main()

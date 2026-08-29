@@ -889,6 +889,95 @@ def score_target(
     return selected, operations, selected_locations
 
 
+def score_target_safe_two_stage(
+    target_operations: pd.DataFrame,
+    target_locations: pd.DataFrame,
+    target_proposals: pd.DataFrame,
+    baseline: pd.DataFrame,
+    *,
+    operation_spec: FeatureSpec,
+    location_spec: FeatureSpec,
+    proposal_spec: FeatureSpec,
+    operation_ranker,
+    location_ranker,
+    proposal_ranker,
+    operation_weight: float,
+    location_weight: float,
+    proposal_weight: float,
+    safety_calibration: dict[str, float],
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, float]]:
+    if any(weight != 0 for weight in (
+        operation_weight, location_weight, proposal_weight
+    )):
+        raise RuntimeError(
+            "safe target inference currently requires the frozen listwise heads"
+        )
+    operations = prepare_operation(target_operations)
+    operation_values = project_relative_features(operations, operation_spec)
+    operation_score = pd.Series(
+        operation_ranker.predict(operation_values), index=operations.index
+    )
+    operation_top = select_top(operations, operation_score, "attempt_id")
+
+    proposals = prepare_proposals(target_proposals)
+    proposal_values = project_relative_features(proposals, proposal_spec)
+    proposal_score = pd.Series(
+        proposal_ranker.predict(proposal_values), index=proposals.index
+    )
+    proposal_top, proposal_identity_margin = top_with_standardized_margin(
+        proposals, proposal_score, group="identity_group"
+    )
+    proposal_margin = pd.Series(
+        proposal_top["identity_group"].map(proposal_identity_margin).to_numpy(),
+        index=proposal_top["attempt_id"],
+    )
+
+    baseline = ensure_identity_group(baseline)
+    needed_identities = set(
+        operation_top.loc[
+            operation_top["event_type"].isin(LOCAL_EVENT_TYPES), "identity_group"
+        ]
+    ) | set(
+        baseline.loc[
+            baseline["event_type"].isin(LOCAL_EVENT_TYPES), "identity_group"
+        ]
+    )
+    locations = prepare_location(target_locations)
+    selected_locations = locations[
+        locations["identity_group"].isin(needed_identities)
+    ].reset_index(drop=True)
+    if selected_locations.empty:
+        dense_location_top = pd.DataFrame(columns=[
+            "identity_group",
+            "workflow_correct",
+            "location_correct",
+            "candidate_source",
+            "candidate_year",
+        ])
+    else:
+        location_values = project_relative_features(
+            selected_locations, location_spec
+        )
+        location_score = pd.Series(
+            location_ranker.predict(location_values), index=selected_locations.index
+        )
+        dense_location_top = select_top(
+            selected_locations, location_score, "identity_group"
+        )
+
+    selected, runtime_safety = safe_two_stage_projection(
+        baseline=baseline,
+        operations=operations,
+        operation_score=operation_score,
+        proposal_top=proposal_top,
+        proposal_margin=proposal_margin,
+        dense_location_top=dense_location_top,
+        operation_threshold=float(safety_calibration["operationThresholdZ"]),
+        location_threshold=float(safety_calibration["locationThresholdZ"]),
+    )
+    return selected, operations, runtime_safety
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--development-operation-scores", required=True)
@@ -1250,28 +1339,57 @@ def main() -> None:
             raise RuntimeError(
                 "target frozen proposal table must match development configuration"
             )
+        target_proposals = None
         if target_proposal_path is not None:
+            target_proposals = prepare_proposals(
+                pd.read_pickle(target_proposal_path)
+            )
             target_packages = append_frozen_proposal_packages(
-                target_packages, pd.read_pickle(target_proposal_path)
+                target_packages, target_proposals
             )
         target_packages, _ = add_location_proposal_anchors(
             target_packages, load_anchor_tables(target_anchor_paths)
         )
-        target_selected, target_operations, _ = score_target(
-            pd.read_pickle(target_operation_path),
-            target_packages,
-            operation_spec=operation_spec,
-            location_spec=location_spec,
-            operation_ranker=operation_model,
-            operation_pair=operation_pair_model,
-            location_ranker=location_model,
-            location_pair=location_pair_model,
-            operation_weight=operation_weight,
-            location_weight=location_weight,
-        )
         target_current = (
             Path(args.target_current_top).resolve() if args.target_current_top else None
         )
+        if (
+            target_current is not None
+            and target_proposals is not None
+            and proposal_model is not None
+        ):
+            target_selected, target_operations, target_runtime_safety = (
+                score_target_safe_two_stage(
+                    pd.read_pickle(target_operation_path),
+                    target_packages,
+                    target_proposals,
+                    pd.read_csv(target_current),
+                    operation_spec=operation_spec,
+                    location_spec=location_spec,
+                    proposal_spec=proposal_spec,
+                    operation_ranker=operation_model,
+                    location_ranker=location_model,
+                    proposal_ranker=proposal_model,
+                    operation_weight=operation_weight,
+                    location_weight=location_weight,
+                    proposal_weight=proposal_weight,
+                    safety_calibration=safety,
+                )
+            )
+        else:
+            target_selected, target_operations, _ = score_target(
+                pd.read_pickle(target_operation_path),
+                target_packages,
+                operation_spec=operation_spec,
+                location_spec=location_spec,
+                operation_ranker=operation_model,
+                operation_pair=operation_pair_model,
+                location_ranker=location_model,
+                location_pair=location_pair_model,
+                operation_weight=operation_weight,
+                location_weight=location_weight,
+            )
+            target_runtime_safety = {}
         target_summary = summarize(
             target_selected,
             target_packages,
@@ -1280,7 +1398,7 @@ def main() -> None:
         )
         target_summary.update({
             "schemaVersion": 1,
-            "modelType": "immutable_two_stage_listwise_pairwise",
+            "modelType": "immutable_two_stage_safe_listwise_pairwise",
             "files": int(target_selected["file_id"].nunique()),
             "candidateGeneratorFrozen": True,
             "candidatePackageSha256": sha256(target_location_path),
@@ -1294,6 +1412,9 @@ def main() -> None:
             },
             "operationPairWeight": operation_weight,
             "locationPairWeight": location_weight,
+            "proposalPairWeight": proposal_weight,
+            "safetyCalibration": safety,
+            "runtimeSafety": target_runtime_safety,
             "trainingCallsOnTarget": 0,
             "truthAwareRuntimeSwitches": 0,
         })
