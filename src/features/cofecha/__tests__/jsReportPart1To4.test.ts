@@ -60,8 +60,8 @@ describe("COFECHA 6.06 JS report Parts 1-4", () => {
             title: "Parity fixture",
             runAtIso: runAt.toISOString(),
         });
-        expect(report.completedParts).toEqual([2, 3, 4, 5]);
-        expect(report.pendingParts).toEqual([1, 6, 7]);
+        expect(report.completedParts).toEqual([1, 2, 3, 4, 5, 6, 7]);
+        expect(report.pendingParts).toEqual([]);
         expect(report.part1.datedSeriesCount).toBe(6);
         expect(report.part1.totalRings).toBe(1200);
         expect(report.part1.totalDatedRingsChecked).toBe(1200);
@@ -95,6 +95,10 @@ describe("COFECHA 6.06 JS report Parts 1-4", () => {
         expect(firstStats.filtered.lagOneAutocorrelation.toFixed(3)).toBe("0.152");
         expect(firstStats.arOrder).toBe(5);
         expect(report.part7.totals.segmentCount).toBe(42);
+        expect(report.part1.possibleProblemSegments).toBe(4);
+        expect(report.part7.totals.flagCount).toBe(4);
+        expect(report.part6.series).toHaveLength(6);
+        expect(report.part6.outlierStandardDeviation).toBeGreaterThan(0);
         expect(report.part5.series).toHaveLength(6);
         expect(report.part5.series[0].segments).toHaveLength(7);
         expect(report.part5.series[0].segments[0].lagCorrelations).toHaveLength(21);
@@ -109,6 +113,9 @@ describe("COFECHA 6.06 JS report Parts 1-4", () => {
         expect(text).toContain("File of DATED series: varied-six.rwl");
         expect(text).toContain("PART 1: OPTIONS AND SUMMARY");
         expect(text).toContain("PART 4: MASTER BAR DATA");
+        expect(text).toContain("PART 5: CORRELATION OF SERIES BY SEGMENTS");
+        expect(text).toContain("PART 6: POTENTIAL PROBLEMS");
+        expect(text).toContain("PART 7: DESCRIPTIVE STATISTICS");
     });
 
     it("keeps repeated same-ID segments independent in Part 2", () => {

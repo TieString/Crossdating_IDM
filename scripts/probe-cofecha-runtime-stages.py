@@ -23,6 +23,7 @@ const calls = {
     pearson: 0,
     segmentPearson: 0,
     segmentEvaluation: 0,
+    part6IssueScan: 0,
 };
 
 function readFloatArray(address, length) {
@@ -258,6 +259,29 @@ Interceptor.attach(base.add(0x9c8e), {
                 0x19cc54,
             ].map((offset) => base.add(offset).readFloat()),
         });
+    },
+});
+
+Interceptor.attach(base.add(0xf4e0), {
+    onEnter(args) {
+        this.startYear = args[2].readS32();
+        this.endYear = args[3].readS32();
+        this.length = this.endYear - this.startYear + 1;
+        this.payload = {
+            stage: "part6IssueScan",
+            call: ++calls.part6IssueScan,
+            startYear: this.startYear,
+            endYear: this.endYear,
+            seriesNumber: args[9].readS32(),
+            mode: args[10].readUtf8String(1),
+            scalar: args[6].readFloat(),
+            left: readFloatArray(args[4], this.length),
+            right: readFloatArray(args[5], this.length),
+        };
+    },
+    onLeave() {
+        this.payload.issueCount = base.add(0x19d1f8).readS32();
+        send(this.payload);
     },
 });
 """

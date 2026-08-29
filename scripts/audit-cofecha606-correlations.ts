@@ -165,12 +165,99 @@ const averageSavedMasterCorrelation = prepared.reduce((total, series) => {
     });
     return total + cofecha606Pearson(left, right);
 }, 0) / prepared.length;
+const masterResiduals = prepared.flatMap((series, seriesIndex) => {
+    const reference = averageMaps("masterValues", seriesIndex);
+    return series.years.flatMap((year, index) => {
+        const value = reference.get(year);
+        return value === undefined ? [] : [series.masterValues[index] - value];
+    });
+});
+const savedMasterResiduals = prepared.flatMap((series) => series.years.flatMap((year, index) => {
+    const value = master.data.get(year);
+    return value === undefined ? [] : [series.masterValues[index] - value];
+}));
+const positiveSavedMasterResiduals = prepared.flatMap((series) => series.years.flatMap((year, index) => {
+    const value = master.data.get(year);
+    const source = series.segment.data.get(year);
+    return value === undefined || typeof source !== "number" || source <= 0
+        ? []
+        : [series.masterValues[index] - value];
+}));
+const masterResidualMean = masterResiduals.reduce((sum, value) => sum + value, 0)
+    / masterResiduals.length;
+const masterResidualSquares = masterResiduals.reduce(
+    (sum, value) => sum + value * value,
+    0,
+);
+const masterResidualCenteredSquares = masterResiduals.reduce(
+    (sum, value) => sum + (value - masterResidualMean) ** 2,
+    0,
+);
+const clippedResidualScales = (() => {
+    let retained = masterResiduals.slice();
+    const rounds: Array<{ count: number; rms: number; sampleSd: number }> = [];
+    for (let iteration = 0; iteration < 10; iteration += 1) {
+        const mean = retained.reduce((sum, value) => sum + value, 0) / retained.length;
+        const rms = Math.sqrt(
+            retained.reduce((sum, value) => sum + value * value, 0) / retained.length,
+        );
+        const sampleSd = Math.sqrt(
+            retained.reduce((sum, value) => sum + (value - mean) ** 2, 0)
+                / (retained.length - 1),
+        );
+        rounds.push({ count: retained.length, rms, sampleSd });
+        const next = retained.filter((value) => value <= 3 * sampleSd && value >= -4.5 * sampleSd);
+        if (next.length === retained.length) break;
+        retained = next;
+    }
+    return rounds;
+})();
+const yearlyMasterStandardDeviations = (() => {
+    const valuesByYear = new Map<number, number[]>();
+    prepared.forEach((series) => {
+        series.years.forEach((year, index) => {
+            const source = series.segment.data.get(year);
+            if (typeof source === "number" && source <= 0) return;
+            const values = valuesByYear.get(year) ?? [];
+            values.push(series.masterValues[index]);
+            valuesByYear.set(year, values);
+        });
+    });
+    return [...valuesByYear.values()].flatMap((values) => {
+        if (values.length < 2) return [];
+        const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+        return [Math.sqrt(
+            values.reduce((sum, value) => sum + (value - mean) ** 2, 0)
+                / (values.length - 1),
+        )];
+    });
+})();
 
 console.log(JSON.stringify({
     sequence,
     seriesId: target.segment.seriesId,
     expected,
     averageSavedMasterCorrelation,
+    masterResidualScaleCandidates: {
+        count: masterResiduals.length,
+        mean: masterResidualMean,
+        rms: Math.sqrt(masterResidualSquares / masterResiduals.length),
+        populationSd: Math.sqrt(masterResidualCenteredSquares / masterResiduals.length),
+        sampleSd: Math.sqrt(masterResidualCenteredSquares / (masterResiduals.length - 1)),
+        savedMasterRms: Math.sqrt(
+            savedMasterResiduals.reduce((sum, value) => sum + value * value, 0)
+                / savedMasterResiduals.length,
+        ),
+        positiveSavedMasterRms: Math.sqrt(
+            positiveSavedMasterResiduals.reduce((sum, value) => sum + value * value, 0)
+                / positiveSavedMasterResiduals.length,
+        ),
+        clippedResidualScales,
+        yearlySdMean: yearlyMasterStandardDeviations.reduce((sum, value) => sum + value, 0)
+            / yearlyMasterStandardDeviations.length,
+        yearlySdMedian: [...yearlyMasterStandardDeviations]
+            .sort((left, right) => left - right)[Math.floor(yearlyMasterStandardDeviations.length / 2)],
+    },
     inspectedYear: Number.isFinite(inspectYear) ? prepared.flatMap((series, seriesIndex) => {
         const index = series.years.indexOf(inspectYear);
         return index >= 0 ? [{
@@ -179,6 +266,9 @@ console.log(JSON.stringify({
             source: series.segment.data.get(inspectYear),
             testing: series.testingValues[index],
             master: series.masterValues[index],
+            baseFiltered: series.baseFilteredValues[index],
+            arResidual: series.arResidualValues[index],
+            filtered: series.filteredValues[index],
         }] : [];
     }) : null,
     savedMaster: correlation(master.data),
@@ -212,6 +302,9 @@ console.log(JSON.stringify({
                     source: target.segment.data.get(year),
                     testing: target.testingValues[index],
                     master: target.masterValues[index],
+                    baseFiltered: target.baseFilteredValues[index],
+                    arResidual: target.arResidualValues[index],
+                    filtered: target.filteredValues[index],
                     leaveOneOutTesting: leaveOneOutWithFallback.get(year),
                     leaveOneOutMaster: leaveOneOutMasterReference.get(year),
                     coverageCount: coverageCountByYear.get(year),

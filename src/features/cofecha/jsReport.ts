@@ -2,6 +2,8 @@ import type { RwlSiteData } from "@/features/rwl/types";
 import {
     COFECHA_REFERENCE_DEFAULT_OPTIONS,
     buildCofecha606MasterSeries,
+    cofecha606ExtendedMultiplyAdd,
+    cofecha606StandardizeValues,
     splitCofecha606SeriesSegments,
     type CofechaReferenceOptions,
 } from "@/features/crossdating/reference";
@@ -106,6 +108,53 @@ export type Cofecha606Part5Series = {
     segments: Cofecha606Part5Segment[];
 };
 
+export type Cofecha606InfluencePoint = {
+    year: number;
+    effect: number;
+    relation: "greater" | "lesser" | "equal";
+};
+
+export type Cofecha606InfluenceSummary = {
+    correlation: number;
+    lower: Cofecha606InfluencePoint[];
+    higher: Cofecha606InfluencePoint[];
+};
+
+export type Cofecha606Part6Series = {
+    sequence: number;
+    seriesId: string;
+    segmentIndex: number;
+    startYear: number;
+    endYear: number;
+    uncheckedOlderSpan: Cofecha606YearSpan | null;
+    uncheckedNewerSpan: Cofecha606YearSpan | null;
+    firstRingAbsent: boolean;
+    lastRingAbsent: boolean;
+    flaggedSegments: Cofecha606Part5Segment[];
+    overallInfluence: Cofecha606InfluenceSummary;
+    segmentInfluences: Array<{
+        startYear: number;
+        endYear: number;
+        influence: Cofecha606InfluenceSummary;
+    }>;
+    divergentChanges: Array<{
+        fromYear: number;
+        toYear: number;
+        standardDeviations: number;
+    }>;
+    absentRings: Array<{
+        year: number;
+        masterValue: number;
+        sampleDepth: number;
+        absentCount: number;
+        warningNotUsuallyNarrow: boolean;
+    }>;
+    outliers: Array<{
+        year: number;
+        standardDeviations: number;
+    }>;
+};
+
 export type Cofecha606JsReport = {
     schemaVersion: 1;
     engine: "cofecha-6.06-js";
@@ -154,7 +203,13 @@ export type Cofecha606JsReport = {
         criticalCorrelation: number;
         series: Cofecha606Part5Series[];
     };
-    part6: null;
+    part6: {
+        divergenceThreshold: number;
+        highOutlierThreshold: number;
+        lowOutlierThreshold: number;
+        outlierStandardDeviation: number;
+        series: Cofecha606Part6Series[];
+    };
     part7: {
         series: Cofecha606Part7Series[];
         totals: {
@@ -304,10 +359,13 @@ export const generateCofecha606JsReport = (
         return endYear >= continuousTimeSpan.startYear
             && startYear <= continuousTimeSpan.endYear;
     });
-    const contributorsByYear = new Map<number, Array<{
+    type ReferenceValueKey = "testingValues" | "masterValues";
+    type ReferenceContributor = {
         seriesIndex: number;
         value: number;
-    }>>();
+    };
+    const testingContributorsByYear = new Map<number, ReferenceContributor[]>();
+    const masterContributorsByYear = new Map<number, ReferenceContributor[]>();
     const coverageByYear = new Map<number, Set<number>>();
     preparedSeries.forEach((series, seriesIndex) => {
         series.years.forEach((year, index) => {
@@ -316,20 +374,29 @@ export const generateCofecha606JsReport = (
             coverageByYear.set(year, coverage);
             const sourceValue = series.segment.data.get(year);
             if (typeof sourceValue === "number" && sourceValue <= 0) return;
-            const contributors = contributorsByYear.get(year) ?? [];
-            contributors.push({ seriesIndex, value: series.testingValues[index] });
-            contributorsByYear.set(year, contributors);
+            const testingContributors = testingContributorsByYear.get(year) ?? [];
+            testingContributors.push({ seriesIndex, value: series.testingValues[index] });
+            testingContributorsByYear.set(year, testingContributors);
+            const masterContributors = masterContributorsByYear.get(year) ?? [];
+            masterContributors.push({ seriesIndex, value: series.masterValues[index] });
+            masterContributorsByYear.set(year, masterContributors);
         });
     });
     const leaveOneOutReference = (
+        valueKey: ReferenceValueKey,
         omittedSeriesIndex: number,
         includeTargetWhenAlone = false,
+        zeroWhenUnmatched = false,
     ) => new Map(
         [...coverageByYear].flatMap(([year, coverage]) => {
-            const contributors = contributorsByYear.get(year) ?? [];
+            const contributors = (valueKey === "testingValues"
+                ? testingContributorsByYear
+                : masterContributorsByYear).get(year) ?? [];
             const retained = contributors.filter((row) => row.seriesIndex !== omittedSeriesIndex);
             const insideSharedSpan = year >= segmentGridSpan.startYear
                 && year <= segmentGridSpan.endYear;
+            const hasOtherCoverage = [...coverage]
+                .some((seriesIndex) => seriesIndex !== omittedSeriesIndex);
             const omittedSeries = preparedSeries[omittedSeriesIndex];
             const omittedYearIndex = omittedSeries?.years.indexOf(year) ?? -1;
             const omittedSourceValue = omittedSeries?.segment.data.get(year);
@@ -342,18 +409,27 @@ export const generateCofecha606JsReport = (
                     sum = Math.fround(sum + Math.fround(row.value));
                 });
                 const adjustedSum = Math.fround(
-                    sum - Math.fround(omittedSeries.testingValues[omittedYearIndex]),
+                    sum - Math.fround(omittedSeries[valueKey][omittedYearIndex]),
                 );
                 return [[
                     year,
                     Math.fround(adjustedSum / Math.fround(contributors.length - 1)),
                 ] as const];
             }
-            if (contributors.length === 0) {
-                return insideSharedSpan ? [[year, 0] as const] : [];
+            if (retained.length === 0 && zeroWhenUnmatched) {
+                return omittedYearIndex >= 0
+                    ? [[year, Math.fround(
+                        omittedSourceValue === 0
+                            ? 0
+                            : omittedSeries[valueKey][omittedYearIndex],
+                    )] as const]
+                    : [];
             }
-            const hasOtherCoverage = [...coverage]
-                .some((seriesIndex) => seriesIndex !== omittedSeriesIndex);
+            if (contributors.length === 0) {
+                return insideSharedSpan
+                    ? [[year, 0] as const]
+                    : [];
+            }
             const selected = retained.length > 0
                 ? retained
                 : hasOtherCoverage || includeTargetWhenAlone && insideSharedSpan
@@ -373,6 +449,7 @@ export const generateCofecha606JsReport = (
         startYear?: number,
         endYear?: number,
         omitAbsentTarget = false,
+        referenceLagYears = 0,
     ) => {
         const targetValues: number[] = [];
         const referenceValues: number[] = [];
@@ -383,7 +460,7 @@ export const generateCofecha606JsReport = (
                 const sourceValue = series.segment.data.get(year);
                 if (sourceValue === 0) return;
             }
-            const referenceValue = reference.get(year);
+            const referenceValue = reference.get(year + referenceLagYears);
             if (referenceValue === undefined) return;
             targetValues.push(series.testingValues[index]);
             referenceValues.push(referenceValue);
@@ -425,10 +502,66 @@ export const generateCofecha606JsReport = (
                 comparedYears: targetValues.length,
             };
     };
+    const influenceSummary = (
+        years: readonly number[],
+        targetValues: readonly number[],
+        referenceValues: readonly number[],
+    ): Cofecha606InfluenceSummary => {
+        const correlation = cofecha606Pearson(targetValues, referenceValues);
+        const points = years.map((year, removedIndex) => {
+            const retainedTarget = targetValues.filter((_, index) => index !== removedIndex);
+            const retainedReference = referenceValues.filter((_, index) => index !== removedIndex);
+            const withoutPoint = cofecha606Pearson(retainedTarget, retainedReference);
+            const target = targetValues[removedIndex];
+            const reference = referenceValues[removedIndex];
+            return {
+                year,
+                effect: Math.fround(correlation - withoutPoint),
+                relation: target > reference
+                    ? "greater" as const
+                    : target < reference
+                        ? "lesser" as const
+                        : "equal" as const,
+            };
+        });
+        return {
+            correlation,
+            lower: points.filter((point) => point.effect < 0)
+                .sort((left, right) => left.effect - right.effect || left.year - right.year)
+                .slice(0, 6),
+            higher: points.filter((point) => point.effect > 0)
+                .sort((left, right) => right.effect - left.effect || left.year - right.year)
+                .slice(0, 2),
+        };
+    };
+    const pairedValues = (
+        series: (typeof preparedSeries)[number],
+        reference: ReadonlyMap<number, number>,
+        valueKey: ReferenceValueKey,
+        startYear?: number,
+        endYear?: number,
+        omitAbsentTarget = false,
+        referenceLagYears = 0,
+    ) => {
+        const years: number[] = [];
+        const targetValues: number[] = [];
+        const referenceValues: number[] = [];
+        series.years.forEach((year, index) => {
+            if (startYear !== undefined && year < startYear) return;
+            if (endYear !== undefined && year > endYear) return;
+            if (omitAbsentTarget && series.segment.data.get(year) === 0) return;
+            const referenceValue = reference.get(year + referenceLagYears);
+            if (referenceValue === undefined) return;
+            years.push(year);
+            targetValues.push(series[valueKey][index]);
+            referenceValues.push(referenceValue);
+        });
+        return { years, targetValues, referenceValues };
+    };
     const part5Series: Cofecha606Part5Series[] = part7PreparedSeries.map((series, index) => {
         const sourceIndex = preparedSeries.indexOf(series);
-        const reference = leaveOneOutReference(sourceIndex, true);
-        const segmentReference = leaveOneOutReference(sourceIndex, true);
+        const reference = leaveOneOutReference("testingValues", sourceIndex, true);
+        const segmentReference = leaveOneOutReference("testingValues", sourceIndex, true);
         const overall = correlate(series, reference);
         return {
             sequence: index + 1,
@@ -475,6 +608,192 @@ export const generateCofecha606JsReport = (
             }),
         };
     });
+    let outlierScaleSum = Math.fround(0);
+    for (
+        let year = masterTimeSpan.startYear;
+        year <= masterTimeSpan.endYear;
+        year += 1
+    ) {
+        const values = masterContributorsByYear.get(year) ?? [];
+        if (values.length <= 1) continue;
+        let sum = Math.fround(0);
+        let sumOfSquares = Math.fround(0);
+        values.forEach((row) => {
+            const value = Math.fround(row.value);
+            sum = Math.fround(sum + value);
+            sumOfSquares = Math.fround(cofecha606ExtendedMultiplyAdd(
+                value,
+                value,
+                sumOfSquares,
+            ));
+        });
+        const mean = Math.fround(sum / Math.fround(values.length));
+        const varianceNumerator = Math.abs(
+            sumOfSquares - mean * mean * values.length,
+        );
+        const standardDeviation = Math.fround(Math.sqrt(
+            varianceNumerator / (values.length - 1),
+        ));
+        outlierScaleSum = Math.fround(outlierScaleSum + standardDeviation);
+    }
+    const outlierStandardDeviation = Math.fround(
+        outlierScaleSum / Math.fround(continuousTimeSpan.years),
+    );
+    const part6Series: Cofecha606Part6Series[] = part7PreparedSeries.map(
+        (series, index) => {
+            const sourceIndex = preparedSeries.indexOf(series);
+            const testingReference = leaveOneOutReference(
+                "testingValues",
+                sourceIndex,
+                true,
+            );
+            const masterReference = leaveOneOutReference(
+                "masterValues",
+                sourceIndex,
+                true,
+                true,
+            );
+            const strictChangeReference = leaveOneOutReference(
+                "masterValues",
+                sourceIndex,
+            );
+            const overallPairs = pairedValues(
+                series,
+                testingReference,
+                "testingValues",
+            );
+            const flaggedSegments = part5Series[index].segments.filter(
+                (segment) => segment.flag !== null,
+            );
+            const segmentInfluences = flaggedSegments.map((segment) => {
+                const pairs = pairedValues(
+                    series,
+                    testingReference,
+                    "testingValues",
+                    segment.analysisStartYear,
+                    segment.analysisEndYear,
+                );
+                return {
+                    startYear: segment.analysisStartYear,
+                    endYear: segment.analysisEndYear,
+                    influence: influenceSummary(
+                        pairs.years,
+                        pairs.targetValues,
+                        pairs.referenceValues,
+                    ),
+                };
+            });
+            const masterPairs = pairedValues(
+                series,
+                masterReference,
+                "masterValues",
+            );
+            const strictChangePairs = pairedValues(
+                series,
+                strictChangeReference,
+                "masterValues",
+            );
+            const changePairs = hasDisconnectedSpan
+                && series.years[0] === continuousTimeSpan.startYear
+                ? masterPairs
+                : strictChangePairs;
+            const targetDifferences: number[] = changePairs.years.length > 0 ? [0] : [];
+            const referenceDifferences: number[] = changePairs.years.length > 0 ? [0] : [];
+            for (let pairIndex = 1; pairIndex < changePairs.years.length; pairIndex += 1) {
+                if (changePairs.years[pairIndex] !== changePairs.years[pairIndex - 1] + 1) {
+                    targetDifferences.push(0);
+                    referenceDifferences.push(0);
+                    continue;
+                }
+                targetDifferences.push(Math.fround(
+                    changePairs.targetValues[pairIndex]
+                        - changePairs.targetValues[pairIndex - 1],
+                ));
+                referenceDifferences.push(Math.fround(
+                    changePairs.referenceValues[pairIndex]
+                        - changePairs.referenceValues[pairIndex - 1],
+                ));
+            }
+            const standardizedTargetDifferences = cofecha606StandardizeValues(
+                targetDifferences,
+            );
+            const standardizedReferenceDifferences = cofecha606StandardizeValues(
+                referenceDifferences,
+            );
+            const divergentChanges = changePairs.years.flatMap((toYear, diffIndex) => {
+                if (diffIndex === 0
+                    || toYear !== changePairs.years[diffIndex - 1] + 1) return [];
+                const standardDeviations = Math.fround(
+                    standardizedTargetDifferences[diffIndex]
+                        - standardizedReferenceDifferences[diffIndex],
+                );
+                return Math.abs(standardDeviations) >= 4
+                    ? [{
+                        fromYear: toYear - 1,
+                        toYear,
+                        standardDeviations,
+                    }]
+                    : [];
+            });
+            const outliers = masterPairs.years.flatMap((year, pairIndex) => {
+                const standardDeviations = outlierStandardDeviation > 0
+                    ? Math.fround(
+                        (masterPairs.targetValues[pairIndex]
+                            - masterPairs.referenceValues[pairIndex])
+                                / outlierStandardDeviation,
+                    )
+                    : 0;
+                return standardDeviations > 3 || standardDeviations < -4.5
+                    ? [{ year, standardDeviations }]
+                    : [];
+            });
+            const absentYears = [...series.segment.data.entries()]
+                .flatMap(([year, value]) => value === 0 ? [year] : [])
+                .sort((left, right) => left - right);
+            const firstCheckedYear = overallPairs.years[0];
+            const lastCheckedYear = overallPairs.years[overallPairs.years.length - 1];
+            return {
+                sequence: index + 1,
+                seriesId: series.segment.seriesId,
+                segmentIndex: series.segment.segmentIndex,
+                startYear: series.years[0],
+                endYear: series.years[series.years.length - 1],
+                uncheckedOlderSpan: firstCheckedYear > series.years[0]
+                    ? spanOf([series.years[0], firstCheckedYear - 1])
+                    : null,
+                uncheckedNewerSpan: lastCheckedYear < series.years[series.years.length - 1]
+                    ? spanOf([lastCheckedYear + 1, series.years[series.years.length - 1]])
+                    : null,
+                firstRingAbsent: series.segment.data.get(series.years[0]) === 0,
+                lastRingAbsent: series.segment.data.get(
+                    series.years[series.years.length - 1],
+                ) === 0,
+                flaggedSegments,
+                overallInfluence: influenceSummary(
+                    overallPairs.years,
+                    overallPairs.targetValues,
+                    overallPairs.referenceValues,
+                ),
+                segmentInfluences,
+                divergentChanges,
+                absentRings: absentYears.map((year) => {
+                    const masterValue = master.data.get(year) ?? 0;
+                    return {
+                        year,
+                        masterValue,
+                        sampleDepth: master.sampleDepth.get(year) ?? 0,
+                        absentCount: absentCountByYear.get(year) ?? 0,
+                        warningNotUsuallyNarrow: masterValue >= -0.4,
+                    };
+                }),
+                outliers,
+            };
+        },
+    );
+    const flagCountBySequence = new Map(part6Series.map((series) => [
+        series.sequence,
+        series.flaggedSegments.length,
+    ]));
     const correlationBySequence = new Map(part5Series.map((series) => [
         series.sequence,
         series.correlationWithMaster,
@@ -487,7 +806,7 @@ export const generateCofecha606JsReport = (
         endYear: series.years[series.years.length - 1],
         years: series.years.length,
         segmentCount: series.segmentCount,
-        flagCount: null,
+        flagCount: flagCountBySequence.get(index + 1) ?? 0,
         correlationWithMaster: correlationBySequence.get(index + 1) ?? null,
         unfiltered: series.unfilteredStats,
         meanSensitivity: series.meanSensitivity,
@@ -535,8 +854,8 @@ export const generateCofecha606JsReport = (
             runAtIso: options.runAt.toISOString(),
         },
         options,
-        completedParts: [2, 3, 4, 5],
-        pendingParts: [1, 6, 7],
+        completedParts: [1, 2, 3, 4, 5, 6, 7],
+        pendingParts: [],
         part1: {
             masterTimeSpan,
             continuousTimeSpan,
@@ -550,7 +869,10 @@ export const generateCofecha606JsReport = (
             meanSeriesLength: part2Series.length > 0 ? totalRings / part2Series.length : 0,
             seriesIntercorrelation,
             averageMeanSensitivity: weightedMeanSensitivity,
-            possibleProblemSegments: null,
+            possibleProblemSegments: part6Series.reduce(
+                (sum, series) => sum + series.flaggedSegments.length,
+                0,
+            ),
             absentRingsBySeries: part2Series
                 .filter((series) => series.absentYears.length > 0)
                 .map((series) => ({
@@ -573,7 +895,13 @@ export const generateCofecha606JsReport = (
             criticalCorrelation: 0.3281,
             series: part5Series,
         },
-        part6: null,
+        part6: {
+            divergenceThreshold: 4,
+            highOutlierThreshold: 3,
+            lowOutlierThreshold: -4.5,
+            outlierStandardDeviation,
+            series: part6Series,
+        },
         part7: {
             series: part7Series,
             totals: {
@@ -582,7 +910,10 @@ export const generateCofecha606JsReport = (
                     (sum, series) => sum + series.segmentCount,
                     0,
                 ),
-                flagCount: null,
+                flagCount: part6Series.reduce(
+                    (sum, series) => sum + series.flaggedSegments.length,
+                    0,
+                ),
                 correlationWithMaster: seriesIntercorrelation,
                 meanMeasurement: average(part7Series.map((series) => series.unfiltered.mean)),
                 maximumMeasurement: Math.max(
@@ -622,6 +953,21 @@ const fixedCorrelation = (value: number, digits: number) => fixed(
     value === 0 ? 0 : value + Math.sign(value) * 0.000001,
     digits,
 );
+
+const signedFixed = (value: number, digits: number) => (
+    `${value >= 0 ? "+" : ""}${fixed(value, digits)}`
+);
+
+const influenceText = (summary: Cofecha606InfluenceSummary) => {
+    const lower = summary.lower.map((point) => (
+        `${point.year}${point.relation === "greater" ? ">" : point.relation === "lesser" ? "<" : "="}`
+        + ` ${signedFixed(point.effect, 3)}`
+    )).join("  ");
+    const higher = summary.higher.map((point) => (
+        `${point.year} ${signedFixed(point.effect, 3)}`
+    )).join("  ");
+    return `Lower ${lower}  Higher ${higher}`;
+};
 
 export const formatCofecha606JsReport = (
     report: Cofecha606JsReport,
@@ -715,6 +1061,72 @@ export const formatCofecha606JsReport = (
 
     push(
         "",
+        "PART 6: POTENTIAL PROBLEMS",
+        `[A] Flagged segment lag correlations; [B] point influence; [C] first-difference divergence; [D] absent rings; [E] outliers`,
+    );
+    report.part6.series.forEach((series) => {
+        push(
+            "",
+            `${series.seriesId} ${series.startYear} to ${series.endYear}  Series ${series.sequence}`,
+        );
+        if (series.uncheckedOlderSpan) {
+            push(`[*] Older part cannot be checked: ${spanText(series.uncheckedOlderSpan)}`);
+        }
+        if (series.uncheckedNewerSpan) {
+            push(`[*] Newer part cannot be checked: ${spanText(series.uncheckedNewerSpan)}`);
+        }
+        series.flaggedSegments.forEach((segment) => {
+            push(
+                `[A] ${segment.analysisStartYear}-${segment.analysisEndYear}  as dated ${fixedCorrelation(segment.correlation, 2)}  best lag ${segment.bestLagYears >= 0 ? "+" : ""}${segment.bestLagYears} (${fixedCorrelation(segment.bestCorrelation, 2)})  ${segment.flag}`,
+                `    ${segment.lagCorrelations.map((row) => (
+                    `${row.lagYears >= 0 ? "+" : ""}${row.lagYears}:${row.correlation === null ? "NA" : fixedCorrelation(row.correlation, 2)}`
+                )).join(" ")}`,
+            );
+        });
+        push(
+            `[B] Entire series, effect on correlation (${fixedCorrelation(series.overallInfluence.correlation, 3)}):`,
+            `    ${influenceText(series.overallInfluence)}`,
+        );
+        series.segmentInfluences.forEach((segment) => {
+            push(
+                `[B] ${segment.startYear}-${segment.endYear} segment:`,
+                `    ${influenceText(segment.influence)}`,
+            );
+        });
+        if (series.divergentChanges.length > 0) {
+            push(
+                `[C] Year-to-year changes diverging by at least ${fixed(report.part6.divergenceThreshold, 1)} SD:`,
+                `    ${series.divergentChanges.map((event) => (
+                    `${event.fromYear}-${event.toYear} ${signedFixed(event.standardDeviations, 1)} SD`
+                )).join("; ")}`,
+            );
+        }
+        if (series.absentRings.length > 0) {
+            push("[D] Absent rings: Year Master Depth Absent Warning");
+            series.absentRings.forEach((event) => {
+                push([
+                    String(event.year).padStart(6, " "),
+                    fixedCorrelation(event.masterValue, 3).padStart(7, " "),
+                    String(event.sampleDepth).padStart(5, " "),
+                    String(event.absentCount).padStart(6, " "),
+                    event.warningNotUsuallyNarrow ? "not usually narrow" : "",
+                ].join(" "));
+            });
+            if (series.firstRingAbsent) push("    WARNING: First ring in series is absent");
+            if (series.lastRingAbsent) push("    WARNING: Last ring in series is absent");
+        }
+        if (series.outliers.length > 0) {
+            push(
+                `[E] Outliers (${fixed(report.part6.highOutlierThreshold, 1)} SD above or ${fixed(report.part6.lowOutlierThreshold, 1)} SD below):`,
+                `    ${series.outliers.map((event) => (
+                    `${event.year} ${signedFixed(event.standardDeviations, 1)} SD`
+                )).join("; ")}`,
+            );
+        }
+    });
+
+    push(
+        "",
         "PART 7: DESCRIPTIVE STATISTICS",
         "Seq Series Interval Years Segments Flags Master Mean Max SD Auto Sens FMax FSD FAuto AR",
     );
@@ -741,6 +1153,21 @@ export const formatCofecha606JsReport = (
             String(row.arOrder).padStart(3, " "),
         ].join(" "));
     });
+    push([
+        "Total or mean:".padEnd(27, " "),
+        String(report.part7.totals.years).padStart(6, " "),
+        String(report.part7.totals.segmentCount).padStart(6, " "),
+        String(report.part7.totals.flagCount ?? 0).padStart(6, " "),
+        fixedCorrelation(report.part7.totals.correlationWithMaster ?? 0, 3).padStart(8, " "),
+        fixed(report.part7.totals.meanMeasurement, 2).padStart(6, " "),
+        fixed(report.part7.totals.maximumMeasurement, 2).padStart(6, " "),
+        fixed(report.part7.totals.meanMeasurementStandardDeviation, 3).padStart(7, " "),
+        fixed(report.part7.totals.meanMeasurementAutocorrelation, 3).padStart(7, " "),
+        fixed(report.part7.totals.meanSensitivity, 3).padStart(6, " "),
+        fixed(report.part7.totals.maximumFilteredValue, 2).padStart(6, " "),
+        fixed(report.part7.totals.meanFilteredStandardDeviation, 3).padStart(7, " "),
+        fixed(report.part7.totals.meanFilteredAutocorrelation, 3).padStart(7, " "),
+    ].join(" "));
 
     return `${lines.filter((line, index) => line !== "" || lines[index - 1] !== "").join("\n")}\n`;
 };

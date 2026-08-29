@@ -53,6 +53,7 @@ const actualPart1 = {
     absentRingCount: integer(/^\s*(\d+) absent rings\s+[\d.]+%/m),
     absentRingPercent: decimal(/^\s*\d+ absent rings\s+([\d.]+)%/m),
     meanSeriesLength: decimal(/Mean length of series\s+([\d.]+)/),
+    possibleProblemSegments: integer(/Segments, possible problems\s+(\d+)/),
 };
 
 const part2Heading = /PART 2:\s+TIME PLOT OF TREE-RING SERIES:/;
@@ -117,6 +118,115 @@ partFiveText.split(/\r?\n/).forEach((line) => {
     actualPart5.set(sequence, [...actualPart5.get(sequence) ?? [], ...values]);
 });
 
+type ParsedInfluencePoint = {
+    year: number;
+    effect: number;
+    relation: "greater" | "lesser" | null;
+};
+const parseInfluenceLine = (line: string | undefined) => {
+    const lowerText = line?.match(/Lower\s+(.*?)\s+Higher\s+(.*)$/)?.[1] ?? "";
+    const higherText = line?.match(/Lower\s+(.*?)\s+Higher\s+(.*)$/)?.[2] ?? "";
+    const parse = (text: string): ParsedInfluencePoint[] => [
+        ...text.matchAll(/(-?\d+)([<>])?\s+([+-]?(?:\d*\.\d+))/g),
+    ].map((match) => ({
+        year: Number(match[1]),
+        effect: Number(match[3]),
+        relation: match[2] === ">"
+            ? "greater"
+            : match[2] === "<"
+                ? "lesser"
+                : null,
+    }));
+    return { lower: parse(lowerText), higher: parse(higherText) };
+};
+const partSixStart = out.lastIndexOf("PART 6:  POTENTIAL PROBLEMS:");
+const partSixEnd = out.lastIndexOf("PART 7:");
+const partSixText = partSixStart >= 0 && partSixEnd > partSixStart
+    ? out.slice(partSixStart, partSixEnd)
+    : "";
+const actualPart6 = new Map<number, {
+    overallCorrelation: number;
+    lower: ParsedInfluencePoint[];
+    higher: ParsedInfluencePoint[];
+    segmentInfluences: Array<{
+        startYear: number;
+        endYear: number;
+        lower: ParsedInfluencePoint[];
+        higher: ParsedInfluencePoint[];
+    }>;
+    divergentChanges: Array<{
+        fromYear: number;
+        toYear: number;
+        standardDeviations: number;
+    }>;
+    absentRings: Array<{
+        year: number;
+        masterValue: number;
+        sampleDepth: number;
+        absentCount: number;
+        warningNotUsuallyNarrow: boolean;
+    }>;
+    outliers: Array<{ year: number; standardDeviations: number }>;
+}>();
+const partSixHeaders = [...partSixText.matchAll(
+    /^\s*(\S+)\s+(-?\d+)\s+to\s+(-?\d+)\s+\d+\s+years\s+Series\s+(\d+)\s*$/gm,
+)];
+partSixHeaders.forEach((header, headerIndex) => {
+    const blockStart = (header.index ?? 0) + header[0].length;
+    const blockEnd = partSixHeaders[headerIndex + 1]?.index ?? partSixText.length;
+    const block = partSixText.slice(blockStart, blockEnd);
+    const overall = block.match(
+        /\[B\] Entire series, effect on correlation \(\s*([+-]?(?:\d*\.\d+))\) is:\s*\r?\n([^\r\n]+)/,
+    );
+    const overallInfluence = parseInfluenceLine(overall?.[2]);
+    const segmentInfluences = [...block.matchAll(
+        /^\s*(-?\d+)\s+to\s+(-?\d+)\s+segment:\s*\r?\n([^\r\n]+)/gm,
+    )].map((match) => ({
+        startYear: Number(match[1]),
+        endYear: Number(match[2]),
+        ...parseInfluenceLine(match[3]),
+    }));
+    const divergentBlock = block.match(
+        /\[C\] Year-to-year changes diverging by over\s+[\d.]+\s+std deviations:\s*([\s\S]*?)(?=\r?\n\s*\[[DE]\]|\r?\n\s*=)/,
+    )?.[1] ?? "";
+    const divergentChanges = [...divergentBlock.matchAll(
+        /(-?\d+)\s+(-?\d+)\s+([+-]?(?:\d*\.\d+))\s+SD/g,
+    )].map((match) => ({
+        fromYear: Number(match[1]),
+        toYear: Number(match[2]),
+        standardDeviations: Number(match[3]),
+    }));
+    const absentBlock = block.match(
+        /\[D\]\s+\d+\s+Absent rings:[^\r\n]*\r?\n([\s\S]*?)(?=\r?\n\s*\[[E]\]|\r?\n\s*=)/,
+    )?.[1] ?? "";
+    const absentRings = [...absentBlock.matchAll(
+        /^\s*(-?\d+)\s+([+-]?(?:\d*\.\d+))\s+(\d+)\s+(\d+)(.*)$/gm,
+    )].map((match) => ({
+        year: Number(match[1]),
+        masterValue: Number(match[2]),
+        sampleDepth: Number(match[3]),
+        absentCount: Number(match[4]),
+        warningNotUsuallyNarrow: /WARNING/.test(match[5]),
+    }));
+    const outlierBlock = block.match(
+        /\[E\] Outliers\s+\d+[^\r\n]*\r?\n([\s\S]*?)(?=\r?\n\s*=)/,
+    )?.[1] ?? "";
+    const outliers = [...outlierBlock.matchAll(
+        /(-?\d+)\s*([+-](?:\d*\.\d+))\s+SD/g,
+    )].map((match) => ({
+        year: Number(match[1]),
+        standardDeviations: Number(match[2]),
+    }));
+    actualPart6.set(Number(header[4]), {
+        overallCorrelation: Number(overall?.[1]),
+        ...overallInfluence,
+        segmentInfluences,
+        divergentChanges,
+        absentRings,
+        outliers,
+    });
+});
+
 const rounded = (value: number, digits: number) => Number(value.toFixed(digits));
 const part1Comparisons = {
     masterTimeSpan: JSON.stringify(jsReport.part1.masterTimeSpan)
@@ -138,6 +248,8 @@ const part1Comparisons = {
         === Number(out.match(/Average mean sensitivity\s+([\d.]+)/)?.[1]),
     seriesIntercorrelation: rounded(jsReport.part1.seriesIntercorrelation ?? 0, 3)
         === Number(out.match(/Series intercorrelation\s+([\d.]+)/)?.[1]),
+    possibleProblemSegments: jsReport.part1.possibleProblemSegments
+        === actualPart1.possibleProblemSegments,
 };
 const part2Mismatches = jsReport.part2.series.flatMap((row) => {
     const actual = actualPart2.get(row.sequence);
@@ -156,6 +268,7 @@ const part7Mismatches = jsReport.part7.series.flatMap((row) => {
         endYear: row.endYear === actual[3],
         years: row.years === actual[4],
         segmentCount: row.segmentCount === actual[5],
+        flagCount: row.flagCount === actual[6],
         correlationWithMaster: rounded(row.correlationWithMaster ?? 0, 3) === actual[7],
         unfilteredMean: rounded(row.unfiltered.mean, 2) === actual[8],
         unfilteredMaximum: rounded(row.unfiltered.maximum, 2) === actual[9],
@@ -193,6 +306,102 @@ const part5Mismatches = jsReport.part5.series.flatMap((row) => {
             actualCount: row.segments.length,
             correlationMismatches,
         }];
+});
+const influenceMatches = (
+    actual: readonly { year: number; effect: number; relation?: string | null }[],
+    expected: readonly { year: number; effect: number; relation?: string | null }[],
+    compareRelation: boolean,
+) => {
+    if (actual.length !== expected.length) return false;
+    const unmatched = [...expected];
+    return actual.every((point) => {
+        const matchIndex = unmatched.findIndex((candidate) => (
+            point.year === candidate.year
+            && Math.abs(point.effect - candidate.effect) <= 0.00051
+            && (!compareRelation || point.relation === candidate.relation)
+        ));
+        if (matchIndex < 0) return false;
+        unmatched.splice(matchIndex, 1);
+        return true;
+    });
+};
+const part6Mismatches = jsReport.part6.series.flatMap((series) => {
+    const expected = actualPart6.get(series.sequence);
+    if (!expected) return [{ sequence: series.sequence, seriesId: series.seriesId, reason: "missing" }];
+    const segmentInfluencesMatch = series.segmentInfluences.length
+        === expected.segmentInfluences.length
+        && series.segmentInfluences.every((segment, index) => {
+            const expectedSegment = expected.segmentInfluences[index];
+            return segment.startYear === expectedSegment?.startYear
+                && segment.endYear === expectedSegment?.endYear
+                && influenceMatches(
+                    segment.influence.lower,
+                    expectedSegment?.lower ?? [],
+                    true,
+                )
+                && influenceMatches(
+                    segment.influence.higher,
+                    expectedSegment?.higher ?? [],
+                    false,
+                );
+        });
+    const divergentChangesMatch = series.divergentChanges.length
+        === expected.divergentChanges.length
+        && series.divergentChanges.every((event, index) => (
+            event.fromYear === expected.divergentChanges[index]?.fromYear
+            && event.toYear === expected.divergentChanges[index]?.toYear
+            && Math.abs(event.standardDeviations
+                - (expected.divergentChanges[index]?.standardDeviations ?? Number.NaN)) <= 0.051
+        ));
+    const absentRingsMatch = series.absentRings.length === expected.absentRings.length
+        && series.absentRings.every((event, index) => (
+            event.year === expected.absentRings[index]?.year
+            && Math.abs(event.masterValue
+                - (expected.absentRings[index]?.masterValue ?? Number.NaN)) <= 0.00051
+            && event.sampleDepth === expected.absentRings[index]?.sampleDepth
+            && event.absentCount === expected.absentRings[index]?.absentCount
+            && event.warningNotUsuallyNarrow
+                === expected.absentRings[index]?.warningNotUsuallyNarrow
+        ));
+    const outliersMatch = series.outliers.length === expected.outliers.length
+        && series.outliers.every((event, index) => (
+            event.year === expected.outliers[index]?.year
+            && Math.abs(event.standardDeviations
+                - (expected.outliers[index]?.standardDeviations ?? Number.NaN)) <= 0.051
+        ));
+    const comparisons = {
+        overallCorrelation: Math.abs(series.overallInfluence.correlation
+            - expected.overallCorrelation) <= 0.00051,
+        lower: influenceMatches(series.overallInfluence.lower, expected.lower, true),
+        higher: influenceMatches(series.overallInfluence.higher, expected.higher, false),
+        segmentInfluences: segmentInfluencesMatch,
+        divergentChanges: divergentChangesMatch,
+        absentRings: absentRingsMatch,
+        outliers: outliersMatch,
+    };
+    return Object.values(comparisons).every(Boolean) ? [] : [{
+        sequence: series.sequence,
+        seriesId: series.seriesId,
+        comparisons,
+        expected: {
+            overallCorrelation: expected.overallCorrelation,
+            lower: expected.lower,
+            higher: expected.higher,
+            segmentInfluences: expected.segmentInfluences,
+            divergentChanges: expected.divergentChanges,
+            absentRings: expected.absentRings,
+            outliers: expected.outliers,
+        },
+        actual: {
+            overallCorrelation: series.overallInfluence.correlation,
+            lower: series.overallInfluence.lower,
+            higher: series.overallInfluence.higher,
+            segmentInfluences: series.segmentInfluences,
+            divergentChanges: series.divergentChanges,
+            absentRings: series.absentRings,
+            outliers: series.outliers,
+        },
+    }];
 });
 const runtimeEvaluations = runtimeStagesArgument
     ? (JSON.parse(readFileSync(resolve(runtimeStagesArgument), "utf8")) as {
@@ -238,10 +447,6 @@ const output = {
         expected: actualPart1,
         actual: jsReport.part1,
         comparisons: part1Comparisons,
-        deferred: {
-            seriesIntercorrelation: true,
-            possibleProblemSegments: true,
-        },
         passed: Object.values(part1Comparisons).every(Boolean),
     },
     part2: {
@@ -275,6 +480,14 @@ const output = {
         runtimeTrailingEvaluations: Math.max(0, runtimeEvaluations.length - jsSegments.length),
         runtimeLagMismatches,
     },
+    part6: {
+        expectedRows: actualPart6.size,
+        actualRows: jsReport.part6.series.length,
+        outlierStandardDeviation: jsReport.part6.outlierStandardDeviation,
+        mismatches: part6Mismatches,
+        passed: actualPart6.size === jsReport.part6.series.length
+            && part6Mismatches.length === 0,
+    },
     part7: {
         expectedRows: actualPart7.size,
         actualRows: jsReport.part7.series.length,
@@ -293,4 +506,6 @@ console.log(`COFECHA_JS_REPORT_PARTS_1_4 ${JSON.stringify({
     part7Mismatches: part7Mismatches.length,
     part5: output.part5.passed,
     part5Mismatches: part5Mismatches.length,
+    part6: output.part6.passed,
+    part6Mismatches: part6Mismatches.length,
 })}`);
