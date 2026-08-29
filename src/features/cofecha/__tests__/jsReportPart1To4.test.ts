@@ -64,6 +64,8 @@ describe("COFECHA 6.06 JS report Parts 1-4", () => {
         expect(report.pendingParts).toEqual([1, 5, 6, 7]);
         expect(report.part1.datedSeriesCount).toBe(6);
         expect(report.part1.totalRings).toBe(1200);
+        expect(report.part1.totalDatedRingsChecked).toBe(1200);
+        expect(report.part1.averageMeanSensitivity?.toFixed(3)).toBe("0.056");
         expect(report.part1.masterTimeSpan).toEqual({
             startYear: 1800,
             endYear: 1999,
@@ -81,6 +83,18 @@ describe("COFECHA 6.06 JS report Parts 1-4", () => {
         expect(report.part3.years[0].value.toFixed(4)).toBe("-1.2031");
         expect(report.part3.years[199].value.toFixed(4)).toBe("0.6673");
         expect(report.part4.bars).toHaveLength(200);
+        const firstStats = report.part7.series[0];
+        expect(firstStats.segmentCount).toBe(7);
+        expect(firstStats.unfiltered.mean.toFixed(2)).toBe("0.96");
+        expect(firstStats.unfiltered.maximum.toFixed(2)).toBe("1.48");
+        expect(firstStats.unfiltered.standardDeviation.toFixed(3)).toBe("0.193");
+        expect(firstStats.unfiltered.lagOneAutocorrelation.toFixed(3)).toBe("0.942");
+        expect(firstStats.meanSensitivity.toFixed(3)).toBe("0.056");
+        expect(firstStats.filtered.maximum.toFixed(2)).toBe("2.51");
+        expect(firstStats.filtered.standardDeviation.toFixed(3)).toBe("0.155");
+        expect(firstStats.filtered.lagOneAutocorrelation.toFixed(3)).toBe("0.152");
+        expect(firstStats.arOrder).toBe(5);
+        expect(report.part7.totals.segmentCount).toBe(42);
 
         const text = formatCofecha606JsReport(report);
         expect(text).toContain("Run FULL");

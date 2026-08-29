@@ -5,6 +5,10 @@ import {
     splitCofecha606SeriesSegments,
     type CofechaReferenceOptions,
 } from "@/features/crossdating/reference";
+import {
+    prepareCofecha606SeriesForReport,
+    type Cofecha606DescriptiveStats,
+} from "./jsReportSeries";
 
 export type Cofecha606ReportPart = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
@@ -57,6 +61,22 @@ export type Cofecha606Part4Bar = {
     magnitude: number;
 };
 
+export type Cofecha606Part7Series = {
+    sequence: number;
+    seriesId: string;
+    segmentIndex: number;
+    startYear: number;
+    endYear: number;
+    years: number;
+    segmentCount: number;
+    flagCount: number | null;
+    correlationWithMaster: number | null;
+    unfiltered: Cofecha606DescriptiveStats;
+    meanSensitivity: number;
+    filtered: Cofecha606DescriptiveStats;
+    arOrder: number;
+};
+
 export type Cofecha606JsReport = {
     schemaVersion: 1;
     engine: "cofecha-6.06-js";
@@ -103,7 +123,23 @@ export type Cofecha606JsReport = {
     };
     part5: null;
     part6: null;
-    part7: null;
+    part7: {
+        series: Cofecha606Part7Series[];
+        totals: {
+            years: number;
+            segmentCount: number;
+            flagCount: number | null;
+            correlationWithMaster: number | null;
+            meanMeasurement: number;
+            maximumMeasurement: number;
+            meanMeasurementStandardDeviation: number;
+            meanMeasurementAutocorrelation: number;
+            meanSensitivity: number;
+            maximumFilteredValue: number;
+            meanFilteredStandardDeviation: number;
+            meanFilteredAutocorrelation: number;
+        };
+    };
 };
 
 const DEFAULT_PARTS: Cofecha606ReportPart[] = [1, 2, 3, 4, 5, 6, 7];
@@ -137,24 +173,6 @@ const spanOf = (years: readonly number[]): Cofecha606YearSpan => {
     };
 };
 
-const longestContinuousSpan = (
-    years: readonly number[],
-): Cofecha606YearSpan | null => {
-    if (years.length === 0) return null;
-    const sorted = [...new Set(years)].sort((left, right) => left - right);
-    const spans: number[][] = [];
-    sorted.forEach((year) => {
-        const current = spans[spans.length - 1];
-        if (!current || year !== current[current.length - 1] + 1) spans.push([year]);
-        else current.push(year);
-    });
-    const selected = spans.sort((left, right) => (
-        right.length - left.length
-        || right[right.length - 1] - left[left.length - 1]
-    ))[0];
-    return spanOf(selected);
-};
-
 const toReferenceOptions = (
     options: Cofecha606JsReport["options"],
 ): CofechaReferenceOptions => ({
@@ -165,6 +183,10 @@ const toReferenceOptions = (
     useLogTransform: options.useLogTransform,
     omitAbsentRingsFromMaster: options.omitAbsentRingsFromMaster,
 });
+
+const average = (values: readonly number[]) => (
+    values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length)
+);
 
 export const generateCofecha606JsReport = (
     siteData: RwlSiteData,
@@ -217,15 +239,70 @@ export const generateCofecha606JsReport = (
         (sum, series) => sum + series.absentYears.length,
         0,
     );
-    const twoOrMoreSeriesSpan = longestContinuousSpan(
-        part3Years.filter((row) => row.sampleDepth >= 2).map((row) => row.year),
-    );
     const masterTimeSpan = spanOf(allCoveredYears);
     const continuousTimeSpan = spanOf(masterYears);
-    const reportedTwoOrMoreSeriesSpan = masterTimeSpan.startYear !== continuousTimeSpan.startYear
-        || masterTimeSpan.endYear !== continuousTimeSpan.endYear
+    const sortedStarts = part2Series.map((series) => series.startYear)
+        .sort((left, right) => left - right);
+    const sortedEnds = part2Series.map((series) => series.endYear)
+        .sort((left, right) => right - left);
+    const hasDisconnectedSpan = masterTimeSpan.startYear !== continuousTimeSpan.startYear
+        || masterTimeSpan.endYear !== continuousTimeSpan.endYear;
+    const reportedTwoOrMoreSeriesSpan = hasDisconnectedSpan
         ? continuousTimeSpan
-        : twoOrMoreSeriesSpan;
+        : part2Series.length >= 2
+            ? spanOf([sortedStarts[1], sortedEnds[1]])
+            : null;
+    const segmentGridSpan = reportedTwoOrMoreSeriesSpan ?? continuousTimeSpan;
+    const segmentGridStartYear = Math.floor(
+        segmentGridSpan.startYear / options.segmentLag,
+    ) * options.segmentLag;
+    const segmentGridEndYear = Math.ceil(
+        (segmentGridSpan.endYear + 1) / options.segmentLag,
+    ) * options.segmentLag - options.segmentLength;
+    const preparedSeries = prepareCofecha606SeriesForReport(siteData, {
+        ...options,
+        segmentGridStartYear,
+        segmentGridEndYear,
+    });
+    const part7PreparedSeries = preparedSeries.filter((series) => {
+        const startYear = series.years[0];
+        const endYear = series.years[series.years.length - 1];
+        return endYear >= continuousTimeSpan.startYear
+            && startYear <= continuousTimeSpan.endYear;
+    });
+    const part7Series: Cofecha606Part7Series[] = part7PreparedSeries.map((series, index) => ({
+        sequence: index + 1,
+        seriesId: series.segment.seriesId,
+        segmentIndex: series.segment.segmentIndex,
+        startYear: series.years[0],
+        endYear: series.years[series.years.length - 1],
+        years: series.years.length,
+        segmentCount: series.segmentCount,
+        flagCount: null,
+        correlationWithMaster: null,
+        unfiltered: series.unfilteredStats,
+        meanSensitivity: series.meanSensitivity,
+        filtered: series.filteredStats,
+        arOrder: series.arOrder,
+    }));
+    const totalDatedRingsChecked = hasDisconnectedSpan
+        ? totalRings
+        : part2Series.reduce((sum, series) => {
+            if (!reportedTwoOrMoreSeriesSpan) return sum;
+            const overlap = Math.min(series.endYear, reportedTwoOrMoreSeriesSpan.endYear)
+                - Math.max(series.startYear, reportedTwoOrMoreSeriesSpan.startYear)
+                + 1;
+            return sum + Math.max(0, overlap);
+        }, 0);
+    let sensitivitySum = Math.fround(0);
+    let sensitivityPairCount = 0;
+    preparedSeries.forEach((series) => {
+        sensitivitySum = Math.fround(sensitivitySum + series.meanSensitivitySum);
+        sensitivityPairCount += series.meanSensitivityPairCount;
+    });
+    const weightedMeanSensitivity = sensitivityPairCount > 0
+        ? Math.fround(sensitivitySum / Math.fround(sensitivityPairCount))
+        : 0;
 
     return {
         schemaVersion: 1,
@@ -246,12 +323,12 @@ export const generateCofecha606JsReport = (
             datedSeriesCount: part2Series.length,
             uniqueSeriesIdCount: siteData.size,
             totalRings,
-            totalDatedRingsChecked: null,
+            totalDatedRingsChecked,
             absentRingCount,
             absentRingPercent: totalRings > 0 ? absentRingCount / totalRings * 100 : 0,
             meanSeriesLength: part2Series.length > 0 ? totalRings / part2Series.length : 0,
             seriesIntercorrelation: null,
-            averageMeanSensitivity: null,
+            averageMeanSensitivity: weightedMeanSensitivity,
             possibleProblemSegments: null,
             absentRingsBySeries: part2Series
                 .filter((series) => series.absentYears.length > 0)
@@ -273,7 +350,38 @@ export const generateCofecha606JsReport = (
         },
         part5: null,
         part6: null,
-        part7: null,
+        part7: {
+            series: part7Series,
+            totals: {
+                years: totalRings,
+                segmentCount: part7Series.reduce(
+                    (sum, series) => sum + series.segmentCount,
+                    0,
+                ),
+                flagCount: null,
+                correlationWithMaster: null,
+                meanMeasurement: average(part7Series.map((series) => series.unfiltered.mean)),
+                maximumMeasurement: Math.max(
+                    ...part7Series.map((series) => series.unfiltered.maximum),
+                ),
+                meanMeasurementStandardDeviation: average(
+                    part7Series.map((series) => series.unfiltered.standardDeviation),
+                ),
+                meanMeasurementAutocorrelation: average(
+                    part7Series.map((series) => series.unfiltered.lagOneAutocorrelation),
+                ),
+                meanSensitivity: weightedMeanSensitivity,
+                maximumFilteredValue: Math.max(
+                    ...part7Series.map((series) => series.filtered.maximum),
+                ),
+                meanFilteredStandardDeviation: average(
+                    part7Series.map((series) => series.filtered.standardDeviation),
+                ),
+                meanFilteredAutocorrelation: average(
+                    part7Series.map((series) => series.filtered.lagOneAutocorrelation),
+                ),
+            },
+        },
     };
 };
 
@@ -349,6 +457,33 @@ export const formatCofecha606JsReport = (
             fixed(row.value, 4).padStart(9, " "),
             row.direction.padStart(8, " "),
             fixed(row.magnitude, 4).padStart(9, " "),
+        ].join(" "));
+    });
+
+    push(
+        "",
+        "PART 7: DESCRIPTIVE STATISTICS",
+        "Seq Series Interval Years Segments Flags Master Mean Max SD Auto Sens FMax FSD FAuto AR",
+    );
+    report.part7.series.forEach((row) => {
+        push([
+            String(row.sequence).padStart(4, " "),
+            row.seriesId.padEnd(8, " "),
+            String(row.startYear).padStart(6, " "),
+            String(row.endYear).padStart(6, " "),
+            String(row.years).padStart(5, " "),
+            String(row.segmentCount).padStart(4, " "),
+            String(row.flagCount ?? "pending").padStart(7, " "),
+            String(row.correlationWithMaster ?? "pending").padStart(7, " "),
+            fixed(row.unfiltered.mean, 2).padStart(6, " "),
+            fixed(row.unfiltered.maximum, 2).padStart(6, " "),
+            fixed(row.unfiltered.standardDeviation, 3).padStart(7, " "),
+            fixed(row.unfiltered.lagOneAutocorrelation, 3).padStart(7, " "),
+            fixed(row.meanSensitivity, 3).padStart(6, " "),
+            fixed(row.filtered.maximum, 2).padStart(6, " "),
+            fixed(row.filtered.standardDeviation, 3).padStart(7, " "),
+            fixed(row.filtered.lagOneAutocorrelation, 3).padStart(7, " "),
+            String(row.arOrder).padStart(3, " "),
         ].join(" "));
     });
 

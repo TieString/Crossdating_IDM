@@ -468,6 +468,8 @@ const extendedMultiplyAdd = (
     return sum + (productError + sumError);
 };
 
+export const cofecha606ExtendedMultiplyAdd = extendedMultiplyAdd;
+
 const extendedSumThree = (first: number, second: number, third: number): number => {
     const [partial, partialError] = twoSum(first, second);
     const [sum, sumError] = twoSum(partial, third);
@@ -988,8 +990,8 @@ export const cofecha606AutoregressiveResidual = (
     });
     errorVariance = Math.fround(errorVariance / count);
 
-    let forward = centered.slice(1);
-    let backward = centered.slice(0, -1);
+    let forwardCorrection = new Array<number>(centered.length + 1).fill(0);
+    let backwardCorrection = new Array<number>(centered.length + 1).fill(0);
     let polynomial = [Math.fround(1)];
     let bestPolynomial = polynomial.slice();
     let bestOrder = 0;
@@ -997,30 +999,27 @@ export const cofecha606AutoregressiveResidual = (
         count * Math.log(errorVariance) + 2,
     );
     const maximumOrder = Math.min(
-        forcedOrder ?? 10,
+        forcedOrder ?? 9,
         Math.floor(source.length / 3),
     );
     for (let order = 1; order <= maximumOrder; order += 1) {
         let numerator = Math.fround(0);
         let denominator = Math.fround(0);
-        for (let index = 0; index < forward.length; index += 1) {
-            numerator = Math.fround(extendedMultiplyAdd(
-                forward[index],
-                backward[index],
-                numerator,
-            ));
-            denominator = Math.fround(extendedMultiplyAdd(
-                backward[index],
-                backward[index],
-                extendedMultiplyAdd(
-                    forward[index],
-                    forward[index],
-                    denominator,
-                ),
-            ));
+        const effectiveLength = centered.length - order;
+        for (let index = 0; index < effectiveLength; index += 1) {
+            const forward = centered[index + order] + forwardCorrection[index];
+            const backward = backwardCorrection[index] + centered[index];
+            numerator = Math.fround(
+                numerator - forward * backward * 2,
+            );
+            denominator = Math.fround(
+                denominator
+                + forward * forward
+                + backward * backward,
+            );
         }
         if (!Number.isFinite(denominator) || denominator <= 0) break;
-        const reflection = Math.fround((-2 * numerator) / denominator);
+        const reflection = Math.fround(numerator / denominator);
         const previousPolynomial = polynomial.slice();
         polynomial = [...previousPolynomial, Math.fround(0)];
         for (let index = 1; index < order; index += 1) {
@@ -1039,28 +1038,28 @@ export const cofecha606AutoregressiveResidual = (
         );
         const accepted = forcedOrder !== undefined
             ? order <= forcedOrder
-            : aic < previousAic;
+            : order === 1 || aic < previousAic;
         if (!accepted) break;
         bestOrder = order;
         bestPolynomial = polynomial.slice();
         previousAic = aic;
 
-        const nextForward: number[] = [];
-        const nextBackward: number[] = [];
-        for (let index = 0; index < forward.length - 1; index += 1) {
-            nextForward.push(Math.fround(extendedMultiplyAdd(
-                reflection,
-                backward[index + 1],
-                forward[index + 1],
-            )));
-            nextBackward.push(Math.fround(extendedMultiplyAdd(
-                reflection,
-                forward[index],
-                backward[index],
-            )));
+        const nextForward = forwardCorrection.slice();
+        const nextBackward = backwardCorrection.slice();
+        for (let index = 0; index < effectiveLength; index += 1) {
+            nextBackward[index] = Math.fround(
+                reflection * centered[index + order]
+                + reflection * forwardCorrection[index]
+                + backwardCorrection[index],
+            );
+            nextForward[index] = Math.fround(
+                reflection * backwardCorrection[index + 1]
+                + reflection * centered[index + 1]
+                + forwardCorrection[index + 1],
+            );
         }
-        forward = nextForward;
-        backward = nextBackward;
+        forwardCorrection = nextForward;
+        backwardCorrection = nextBackward;
     }
 
     const coefficients = bestPolynomial.slice(1).map((value) => Math.fround(-value));
@@ -1068,13 +1067,13 @@ export const cofecha606AutoregressiveResidual = (
     for (let index = bestOrder; index < residuals.length; index += 1) {
         let residual = centered[index];
         for (let lag = 1; lag <= bestOrder; lag += 1) {
-            residual = extendedMultiplyAdd(
+            residual = Math.fround(extendedMultiplyAdd(
                 -coefficients[lag - 1],
                 centered[index - lag],
                 residual,
-            );
+            ));
         }
-        residuals[index] = Math.fround(residual);
+        residuals[index] = residual;
     }
     return { order: bestOrder, coefficients, meanValue, residuals };
 };

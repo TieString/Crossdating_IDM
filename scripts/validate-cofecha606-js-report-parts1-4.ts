@@ -83,6 +83,18 @@ for (const match of part2Text.matchAll(
     });
 }
 
+const partSevenHeading = /PART 7:\s+DESCRIPTIVE STATISTICS:/;
+const partSevenStart = out.search(partSevenHeading);
+const partSevenText = partSevenStart >= 0 ? out.slice(partSevenStart) : "";
+const actualPart7 = new Map<number, number[]>();
+partSevenText.split(/\r?\n/).forEach((line) => {
+    const fields = line.trim().split(/\s+/);
+    if (fields.length !== 17 || !/^\d+$/.test(fields[0])) return;
+    const numeric = fields.map((field, index) => index === 1 ? Number.NaN : Number(field));
+    if (numeric.slice(2).some((value) => !Number.isFinite(value))) return;
+    actualPart7.set(Number(fields[0]), numeric);
+});
+
 const part1Comparisons = {
     masterTimeSpan: JSON.stringify(jsReport.part1.masterTimeSpan)
         === JSON.stringify(actualPart1.masterTimeSpan),
@@ -92,11 +104,15 @@ const part1Comparisons = {
         === JSON.stringify(actualPart1.twoOrMoreSeriesSpan),
     datedSeriesCount: jsReport.part1.datedSeriesCount === actualPart1.datedSeriesCount,
     totalRings: jsReport.part1.totalRings === actualPart1.totalRings,
+    totalDatedRingsChecked: jsReport.part1.totalDatedRingsChecked
+        === actualPart1.totalDatedRingsChecked,
     absentRingCount: jsReport.part1.absentRingCount === actualPart1.absentRingCount,
     absentRingPercent: Number(jsReport.part1.absentRingPercent.toFixed(3))
         === actualPart1.absentRingPercent,
     meanSeriesLength: Number(jsReport.part1.meanSeriesLength.toFixed(1))
         === actualPart1.meanSeriesLength,
+    averageMeanSensitivity: Number(jsReport.part1.averageMeanSensitivity?.toFixed(3))
+        === Number(out.match(/Average mean sensitivity\s+([\d.]+)/)?.[1]),
 };
 const part2Mismatches = jsReport.part2.series.flatMap((row) => {
     const actual = actualPart2.get(row.sequence);
@@ -107,6 +123,32 @@ const part2Mismatches = jsReport.part2.series.flatMap((row) => {
         && actual.years === row.years
         ? []
         : [{ expected: actual ?? null, actual: row }];
+});
+const rounded = (value: number, digits: number) => Number(value.toFixed(digits));
+const part7Mismatches = jsReport.part7.series.flatMap((row) => {
+    const actual = actualPart7.get(row.sequence);
+    const comparisons = actual ? {
+        startYear: row.startYear === actual[2],
+        endYear: row.endYear === actual[3],
+        years: row.years === actual[4],
+        segmentCount: row.segmentCount === actual[5],
+        unfilteredMean: rounded(row.unfiltered.mean, 2) === actual[8],
+        unfilteredMaximum: rounded(row.unfiltered.maximum, 2) === actual[9],
+        unfilteredSd: rounded(row.unfiltered.standardDeviation, 3) === actual[10],
+        unfilteredAc: rounded(row.unfiltered.lagOneAutocorrelation, 3) === actual[11],
+        meanSensitivity: rounded(row.meanSensitivity, 3) === actual[12],
+        filteredMaximum: rounded(row.filtered.maximum, 2) === actual[13],
+        filteredSd: rounded(row.filtered.standardDeviation, 3) === actual[14],
+        filteredAc: rounded(row.filtered.lagOneAutocorrelation, 3) === actual[15],
+        arOrder: row.arOrder === actual[16],
+    } : null;
+    return comparisons && Object.values(comparisons).every(Boolean) ? [] : [{
+        sequence: row.sequence,
+        seriesId: row.seriesId,
+        comparisons,
+        expected: actual ?? null,
+        actual: row,
+    }];
 });
 const output = {
     schemaVersion: 1,
@@ -121,9 +163,7 @@ const output = {
         actual: jsReport.part1,
         comparisons: part1Comparisons,
         deferred: {
-            totalDatedRingsChecked: actualPart1.totalDatedRingsChecked,
             seriesIntercorrelation: true,
-            averageMeanSensitivity: true,
             possibleProblemSegments: true,
         },
         passed: Object.values(part1Comparisons).every(Boolean),
@@ -138,6 +178,13 @@ const output = {
     part3: {
         years: jsReport.part3.years.length,
     },
+    part7: {
+        expectedRows: actualPart7.size,
+        actualRows: jsReport.part7.series.length,
+        mismatches: part7Mismatches,
+        passed: actualPart7.size === jsReport.part7.series.length
+            && part7Mismatches.length === 0,
+    },
 };
 writeFileSync(outputPath, `${JSON.stringify(output, null, 2)}\n`, "utf8");
 console.log(`COFECHA_JS_REPORT_PARTS_1_4 ${JSON.stringify({
@@ -145,4 +192,6 @@ console.log(`COFECHA_JS_REPORT_PARTS_1_4 ${JSON.stringify({
     part1: output.part1.passed,
     part2: output.part2.passed,
     part2Mismatches: part2Mismatches.length,
+    part7: output.part7.passed,
+    part7Mismatches: part7Mismatches.length,
 })}`);

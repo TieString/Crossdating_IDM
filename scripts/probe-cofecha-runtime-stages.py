@@ -13,7 +13,15 @@ import frida
 
 HOOK_SCRIPT = r"""
 const base = Process.mainModule.base;
-const calls = { spline: 0, divser: 0, varianceStabilize: 0, standardize: 0, ar: 0 };
+const calls = {
+    spline: 0,
+    divser: 0,
+    varianceStabilize: 0,
+    standardize: 0,
+    ar: 0,
+    stats: 0,
+    pearson: 0,
+};
 
 function readFloatArray(address, length) {
     const values = [];
@@ -141,6 +149,48 @@ Interceptor.attach(base.add(0xeb08), {
         this.payload.workArrayHeads = this.workAddresses.map((address) => (
             readFloatArray(address, Math.min(this.length, 16))
         ));
+        send(this.payload);
+    },
+});
+
+Interceptor.attach(base.add(0xd08b), {
+    onEnter(args) {
+        this.payload = {
+            stage: "stats",
+            call: ++calls.stats,
+            callerOffset: this.returnAddress.sub(base).toString(),
+            length: args[0].readS32(),
+        };
+        this.outputs = [args[2], args[3], args[4], args[5], args[6]];
+    },
+    onLeave() {
+        this.payload.mean = this.outputs[0].readFloat();
+        this.payload.maximum = this.outputs[1].readFloat();
+        this.payload.minimum = this.outputs[2].readFloat();
+        this.payload.meanSensitivity = this.outputs[3].readFloat();
+        this.payload.standardDeviation = this.outputs[4].readFloat();
+        send(this.payload);
+    },
+});
+
+Interceptor.attach(base.add(0xd2d2), {
+    onEnter(args) {
+        this.output = args[3];
+        this.payload = {
+            stage: "pearson",
+            call: ++calls.pearson,
+            callerOffset: this.returnAddress.sub(base).toString(),
+            length: args[0].readS32(),
+        };
+    },
+    onLeave() {
+        this.payload.correlation = this.output.readFloat();
+        this.payload.leftSum = base.add(0x19cfbc).readFloat();
+        this.payload.rightSum = base.add(0x19cfc0).readFloat();
+        this.payload.cross = base.add(0x19cfc8).readFloat();
+        this.payload.leftSquares = base.add(0x19cfcc).readFloat();
+        this.payload.rightSquares = base.add(0x19cfb4).readFloat();
+        this.payload.reciprocal = base.add(0x19cfc4).readFloat();
         send(this.payload);
     },
 });
