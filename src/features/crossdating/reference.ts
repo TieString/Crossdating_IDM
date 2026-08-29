@@ -44,6 +44,7 @@ export type CofechaLogImplementation =
     | "post-ar"
     | "pre-spline-ratio"
     | "pre-spline-residual";
+export type CofechaNumericImplementation = "double" | "legacy-float32";
 export type CofechaArImplementation =
     | "current-aic"
     | "none"
@@ -428,17 +429,245 @@ const solveSymmetricPentadiagonal = (
     return result;
 };
 
+/**
+ * Literal port of the Cook-Holmes LUDAPB/LUELPB loop used by COFECHA 6.06.
+ * The one-based band layout and operation order are intentional: replacing
+ * this with a mathematically equivalent Cholesky solve changes legacy output.
+ */
+export const solveCofecha606SplineTrend = (
+    values: readonly number[],
+    rigidityYears: number,
+    frequencyResponse: number,
+): number[] | null => {
+    const length = values.length;
+    if (length < 4) return null;
+
+    const source = values.map(Math.fround);
+    const stiffness = Math.fround(rigidityYears);
+    const response = Math.fround(frequencyResponse);
+    const matrixSize = length - 2;
+    const band = Array.from(
+        { length: matrixSize + 1 },
+        () => new Array<number>(5).fill(0),
+    );
+    const c1 = [0, 1, -4, 6, -2];
+    const c2 = [0, 0, 0.33333333333333, 1.33333333333333];
+    const pi = 3.1415926535897935;
+    const cosineForNumerator = Math.cos((pi * 2) / stiffness);
+    const cosineForDenominator = Math.cos((pi * 2) / stiffness);
+    const penalty = (
+        ((1 / (1 - response)) - 1)
+        * 6
+        * (cosineForNumerator - 1) ** 2
+    ) / (cosineForDenominator + 2);
+
+    for (let row = 1; row <= matrixSize; row += 1) {
+        for (let column = 1; column <= 3; column += 1) {
+            band[row][column] = c1[column] + penalty * c2[column];
+            band[row][4] = source[row - 1]
+                + c1[4] * source[row]
+                + source[row + 1];
+        }
+    }
+    band[1][1] = c2[1];
+    band[1][2] = c2[1];
+    band[2][1] = c2[1];
+
+    const halfBandwidth = 2;
+    const reciprocalTolerance = 1 / (matrixSize * 16);
+    let determinantMantissa = 1;
+    const diagonalColumn = halfBandwidth + 1;
+    for (let row = 1; row <= halfBandwidth; row += 1) {
+        for (let column = row; column <= halfBandwidth; column += 1) {
+            const targetColumn = diagonalColumn - column;
+            band[row][targetColumn] = 0;
+        }
+    }
+    for (let row = 1; row <= matrixSize; row += 1) {
+        const rowMinusDiagonal = row - diagonalColumn;
+        const firstColumn = Math.max(1, 1 - rowMinusDiagonal);
+        for (let column = firstColumn; column <= diagonalColumn; column += 1) {
+            const previousRow = rowMinusDiagonal + column;
+            const innerOffset = diagonalColumn - column;
+            let sum = band[row][column];
+            for (let inner = 1; inner <= column - 1; inner += 1) {
+                const previousColumn = innerOffset + inner;
+                sum -= band[row][inner] * band[previousRow][previousColumn];
+            }
+            if (column === diagonalColumn) {
+                if (band[row][column] + sum * reciprocalTolerance <= band[row][column]) {
+                    return null;
+                }
+                band[row][column] = 1 / Math.sqrt(sum);
+                determinantMantissa *= sum;
+                while (Math.abs(determinantMantissa) > 1) {
+                    determinantMantissa *= 0.0625;
+                }
+                while (Math.abs(determinantMantissa) <= 0.0625) {
+                    determinantMantissa *= 16;
+                }
+                continue;
+            }
+            band[row][column] = sum * band[previousRow][diagonalColumn];
+        }
+    }
+
+    let encounteredNonZero = false;
+    let activeBandwidth = 0;
+    for (let row = 1; row <= matrixSize; row += 1) {
+        let sum = band[row][4];
+        if (encounteredNonZero) {
+            activeBandwidth = Math.min(halfBandwidth, activeBandwidth + 1);
+            const firstColumn = diagonalColumn - activeBandwidth;
+            let previousRow = row - activeBandwidth;
+            for (let column = firstColumn; column <= halfBandwidth; column += 1) {
+                sum -= band[previousRow][4] * band[row][column];
+                previousRow += 1;
+            }
+        } else if (sum !== 0) {
+            encounteredNonZero = true;
+        }
+        band[row][4] = sum * band[row][diagonalColumn];
+    }
+
+    band[matrixSize][4] *= band[matrixSize][diagonalColumn];
+    const matrixSizePlusOne = matrixSize + 1;
+    for (let offset = 2; offset <= matrixSize; offset += 1) {
+        const row = matrixSizePlusOne - offset;
+        let sum = band[row][4];
+        const lastRow = Math.min(matrixSize, row + halfBandwidth);
+        let relativeColumn = 1;
+        for (let nextRow = row + 1; nextRow <= lastRow; nextRow += 1) {
+            sum -= band[nextRow][4] * band[nextRow][diagonalColumn - relativeColumn];
+            relativeColumn += 1;
+        }
+        band[row][4] = sum * band[row][diagonalColumn];
+    }
+
+    const correction = new Array<number>(length).fill(0);
+    for (let index = 3; index <= matrixSize; index += 1) {
+        correction[index - 1] = band[index - 2][4]
+            + c1[4] * band[index - 1][4]
+            + band[index][4];
+    }
+    correction[0] = band[1][4];
+    correction[1] = c1[4] * band[1][4] + band[2][4];
+    correction[length - 2] = band[matrixSize - 1][4]
+        + c1[4] * band[matrixSize][4];
+    correction[length - 1] = band[matrixSize][4];
+    return source.map((value, index) => Math.fround(value - correction[index]));
+};
+
+const cofecha606MeanAndPopulationSd = (values: readonly number[]) => {
+    if (values.length === 0) return { meanValue: 0, standardDeviation: 0 };
+    let sum = Math.fround(0);
+    let sumOfSquares = Math.fround(0);
+    values.forEach((rawValue) => {
+        const value = Math.fround(rawValue);
+        sum = Math.fround(sum + value);
+        sumOfSquares = Math.fround(sumOfSquares + value * value);
+    });
+    const count = Math.fround(values.length);
+    const meanValue = Math.fround(sum / count);
+    const variance = Math.abs(
+        (sumOfSquares - meanValue * meanValue * count) / count,
+    );
+    return {
+        meanValue,
+        standardDeviation: Math.fround(Math.sqrt(variance)),
+    };
+};
+
+/** Literal positive/residual branches of COFECHA 6.06 DIVSER. */
+export const cofecha606DivideSeries = (
+    sourceValues: readonly number[],
+    curveValues: readonly number[],
+): number[] => {
+    const source = sourceValues.map(Math.fround);
+    const curve = curveValues.map(Math.fround);
+    const useResidualBranch = Math.min(...source) < 0 || Math.min(...curve) <= 0;
+    if (!useResidualBranch) {
+        return source.map((value, index) => Math.fround(value / curve[index]));
+    }
+
+    let minimum = Math.fround(1);
+    let average = Math.fround(0);
+    const residual = source.map((value, index) => {
+        const transformed = Math.fround(value - curve[index] + 1);
+        average = Math.fround(average + transformed);
+        minimum = Math.min(minimum, transformed);
+        return transformed;
+    });
+    average = Math.fround(average / Math.fround(residual.length));
+    if (minimum < 0) {
+        average = Math.fround(0);
+        residual.forEach((value, index) => {
+            residual[index] = Math.fround(value - minimum);
+            average = Math.fround(average + residual[index]);
+        });
+        average = Math.fround(average / Math.fround(residual.length));
+    }
+    return residual.map((value) => Math.fround(value / average));
+};
+
+/** Second spline pass performed by COFECHA after the initial detrending. */
+export const cofecha606StabilizeFilteredSeries = (
+    values: readonly number[],
+    rigidityYears: number,
+    frequencyResponse: number,
+): number[] => {
+    if (values.length < 4) return values.map(Math.fround);
+    const source = values.map(Math.fround);
+    const { meanValue, standardDeviation } = cofecha606MeanAndPopulationSd(source);
+    const standardized = source.map((value) => (
+        standardDeviation > 0
+            ? Math.fround((value - meanValue) / standardDeviation)
+            : Math.fround(value - meanValue)
+    ));
+    const wasNegative = standardized.map((value) => value < 0);
+    const positiveSource = standardized.map((value) => (
+        value < 0 ? Math.fround(value * -1) : value
+    ));
+    const trend = solveCofecha606SplineTrend(
+        positiveSource,
+        rigidityYears,
+        frequencyResponse,
+    );
+    if (!trend) return source;
+    const stabilized = cofecha606DivideSeries(positiveSource, trend);
+    return stabilized.map((value, index) => {
+        const restoredSign = wasNegative[index]
+            ? Math.fround(value * -1)
+            : value;
+        return Math.fround(restoredSign * standardDeviation + meanValue);
+    });
+};
+
 /** Cook-Holmes/LTRR cubic spline equations used by the public CROSSDATE source. */
 export const solveLtrrCubicSmoothingSplineTrend = (
     values: readonly number[],
     rigidityYears: number,
     frequencyResponse: number,
+    numericImplementation: CofechaNumericImplementation = "double",
 ): number[] => {
     if (values.length < 4) {
         const average = values.length > 0 ? mean(values) : 0;
         return values.map(() => average);
     }
-    const period = Math.max(3, rigidityYears);
+    if (numericImplementation === "legacy-float32") {
+        const legacyTrend = solveCofecha606SplineTrend(
+            values,
+            rigidityYears,
+            frequencyResponse,
+        );
+        if (legacyTrend) return legacyTrend;
+    }
+    const sourceValues = numericImplementation === "legacy-float32"
+        ? values.map(Math.fround)
+        : values;
+    const period = Math.max(3, numericImplementation === "legacy-float32"
+        ? Math.fround(rigidityYears)
+        : rigidityYears);
     const response = Math.min(0.99, Math.max(0.01, frequencyResponse));
     const cosine = Math.cos(2 * Math.PI / period);
     const multiplier = (
@@ -458,7 +687,7 @@ export const solveLtrrCubicSmoothingSplineTrend = (
     lowerTwo[0] = 0;
     if (systemSize > 1) lowerTwo[1] = 0;
     const rhs = Array.from({ length: systemSize }, (_, index) => (
-        values[index] - 2 * values[index + 1] + values[index + 2]
+        sourceValues[index] - 2 * sourceValues[index + 1] + sourceValues[index + 2]
     ));
     const coefficients = solveSymmetricPentadiagonal(
         diagonal,
@@ -481,7 +710,12 @@ export const solveLtrrCubicSmoothingSplineTrend = (
     correction[values.length - 2] = coefficients[systemSize - 2]
         - 2 * coefficients[systemSize - 1];
     correction[values.length - 1] = coefficients[systemSize - 1];
-    return values.map((value, index) => Math.max(1e-6, value - correction[index]));
+    return sourceValues.map((value, index) => {
+        const trendValue = Math.max(1e-6, value - correction[index]);
+        return numericImplementation === "legacy-float32"
+            ? Math.fround(trendValue)
+            : trendValue;
+    });
 };
 
 const solveLinearSystem = (matrix: number[][], rhs: number[]) => {
@@ -593,6 +827,7 @@ export function cofechaStyleStandardize(
     splineLambdaScale = 1,
     detrendImplementation: CofechaDetrendImplementation = "ratio",
     logImplementation: CofechaLogImplementation = "post-ar",
+    numericImplementation: CofechaNumericImplementation = "double",
 ): IndexedPoint[] {
     const rawPoints = Array.from(series.entries())
         .filter((entry): entry is [number, number] => isUsableWidth(entry[1], options))
@@ -616,6 +851,7 @@ export function cofechaStyleStandardize(
             splineInput,
             options.splineRigidityYears,
             options.splineFrequencyResponse,
+            numericImplementation,
         )
         : solveCubicSmoothingSplineTrend(splineInput, options, splineLambdaScale);
 
@@ -634,9 +870,24 @@ export function cofechaStyleStandardize(
                     : splineInput[index] / trend[index])
                 : (detrendImplementation === "residual-plus-one"
                     ? point.value - trend[index] + 1
-                    : point.value / trend[index]),
+                    : numericImplementation === "legacy-float32"
+                        ? Math.fround(Math.fround(point.value) / Math.fround(trend[index]))
+                        : point.value / trend[index]),
         };
     });
+
+    if (numericImplementation === "legacy-float32"
+        && splineImplementation === "ltrr-cook-holmes") {
+        const stabilizedValues = cofecha606StabilizeFilteredSeries(
+            transformed.map((point) => point.value),
+            options.splineRigidityYears,
+            options.splineFrequencyResponse,
+        );
+        transformed = transformed.map((point, index) => ({
+            year: point.year,
+            value: stabilizedValues[index],
+        }));
+    }
 
     if (options.useAutoregressiveModel
         && arImplementation !== "none"

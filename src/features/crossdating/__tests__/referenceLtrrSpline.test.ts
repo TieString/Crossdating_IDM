@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { solveLtrrCubicSmoothingSplineTrend } from "../reference";
+import {
+    cofecha606DivideSeries,
+    cofecha606StabilizeFilteredSeries,
+    solveCofecha606SplineTrend,
+    solveLtrrCubicSmoothingSplineTrend,
+} from "../reference";
 
 const denseSolve = (matrix: number[][], rhs: number[]) => {
     const size = rhs.length;
@@ -75,5 +80,40 @@ describe("LTRR Cook-Holmes cubic spline", () => {
         const values = Array.from({ length: 20 }, (_, index) => 100 + index * 3);
         expect(solveLtrrCubicSmoothingSplineTrend(values, 32, 0.5))
             .toEqual(values);
+    });
+
+    it("matches COFECHA 6.06 filtering stages at legacy float boundaries", () => {
+        const width = (index: number) => {
+            const shared = 950
+                + 170 * Math.sin(index * 0.41)
+                + 85 * Math.cos(index * 0.17)
+                + 55 * Math.sin(index * 1.07);
+            const growth = 1.65 - 0.0032 * index + 0.000004 * index ** 2;
+            const individual = 1
+                + 0.08 * Math.sin(index * 0.071)
+                + 0.03 * Math.cos(index * 0.23);
+            const rounded = Math.max(1, Math.round(
+                shared * growth * individual * 0.72,
+            ));
+            return (rounded === 999 || rounded === 9999 ? rounded + 2 : rounded) / 1000;
+        };
+        const values = Array.from({ length: 200 }, (_, index) => width(index));
+        const trend = solveCofecha606SplineTrend(values, 32, 0.5);
+        expect(trend).not.toBeNull();
+        const detrended = cofecha606DivideSeries(values, trend!);
+        const stabilized = cofecha606StabilizeFilteredSeries(detrended, 32, 0.5);
+        const checkpoints = [
+            [0, 1.406529188156128, 0.9000880122184753, 0.8361272215843201],
+            [1, 1.3783183097839355, 1.0237113237380981, 1.0386852025985718],
+            [50, 0.9755228757858276, 1.15630304813385, 1.1771379709243774],
+            [100, 0.9687645435333252, 0.9651468396186829, 0.9570547938346863],
+            [150, 0.8256573677062988, 0.8344866037368774, 0.8097567558288574],
+            [199, 0.7420222163200378, 1.020185112953186, 1.0369166135787964],
+        ] as const;
+        checkpoints.forEach(([index, expectedTrend, expectedDetrended, expectedStabilized]) => {
+            expect(trend![index]).toBeCloseTo(expectedTrend, 5);
+            expect(detrended[index]).toBeCloseTo(expectedDetrended, 5);
+            expect(stabilized[index]).toBeCloseTo(expectedStabilized, 5);
+        });
     });
 });

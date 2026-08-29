@@ -10,10 +10,14 @@ import {
 import { basename, join, resolve } from "node:path";
 import {
     COFECHA_REFERENCE_DEFAULT_OPTIONS,
+    cofecha606DivideSeries,
+    cofecha606StabilizeFilteredSeries,
     cofechaStyleStandardize,
+    solveCofecha606SplineTrend,
     type CofechaArImplementation,
     type CofechaDetrendImplementation,
     type CofechaLogImplementation,
+    type CofechaNumericImplementation,
     type CofechaSplineImplementation,
 } from "@/features/crossdating/reference";
 import { loadRwl } from "./legacy-generalization/evaluator";
@@ -68,6 +72,10 @@ const ALL_LOG_MODES: CofechaLogImplementation[] = [
     "pre-spline-residual",
 ];
 const ALL_FILTERED_QUANTIZATION_DIGITS: Array<number | null> = [null, 2, 3, 4];
+const ALL_NUMERIC_MODES: CofechaNumericImplementation[] = [
+    "double",
+    "legacy-float32",
+];
 
 const args = process.argv.slice(2).filter((argument) => argument !== "--");
 const valueFor = (name: string, fallback = ""): string => {
@@ -110,6 +118,13 @@ const requestedLogModes = new Set(valueFor("--log-modes", "post-ar")
     .map((value) => value.trim())
     .filter(Boolean));
 const logModesToTest = ALL_LOG_MODES.filter((mode) => requestedLogModes.has(mode));
+const requestedNumericModes = new Set(valueFor("--numeric-modes", "double")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean));
+const numericModesToTest = ALL_NUMERIC_MODES.filter((mode) => (
+    requestedNumericModes.has(mode)
+));
 mkdirSync(outputDir, { recursive: true });
 const runtimeName = "INPUT.RWL";
 copyFileSync(sourcePath, join(outputDir, runtimeName));
@@ -262,6 +277,27 @@ const firstTreeEntry = loaded.siteData.entries().next().value as
     | undefined;
 if (!firstTreeEntry) throw new Error(`empty RWL: ${sourcePath}`);
 const [firstTreeId, firstTree] = firstTreeEntry;
+const firstRawValues = [...firstTree.entries()]
+    .filter((entry): entry is [number, number] => (
+        typeof entry[1] === "number" && Number.isFinite(entry[1]) && entry[1] > 0
+    ))
+    .sort(([left], [right]) => left - right)
+    .map(([, value]) => value);
+const exactFirstTrend = solveCofecha606SplineTrend(
+    firstRawValues,
+    COFECHA_REFERENCE_DEFAULT_OPTIONS.splineRigidityYears,
+    COFECHA_REFERENCE_DEFAULT_OPTIONS.splineFrequencyResponse,
+);
+const exactFirstDetrended = exactFirstTrend
+    ? cofecha606DivideSeries(firstRawValues, exactFirstTrend)
+    : null;
+const exactFirstStabilized = exactFirstDetrended
+    ? cofecha606StabilizeFilteredSeries(
+        exactFirstDetrended,
+        COFECHA_REFERENCE_DEFAULT_OPTIONS.splineRigidityYears,
+        COFECHA_REFERENCE_DEFAULT_OPTIONS.splineFrequencyResponse,
+    )
+    : null;
 const standardizeFirstCore = (input: {
     profile: ProbeProfile;
     spline: CofechaSplineImplementation;
@@ -269,12 +305,13 @@ const standardizeFirstCore = (input: {
     splineLambdaScale: number;
     detrend: CofechaDetrendImplementation;
     log: CofechaLogImplementation;
+    numeric: CofechaNumericImplementation;
 }) => cofechaStyleStandardize(firstTree, {
     ...COFECHA_REFERENCE_DEFAULT_OPTIONS,
     useAutoregressiveModel: input.profile.useAr,
     useLogTransform: input.profile.useLog,
     minReplication: 1,
-}, input.spline, input.profile.useAr ? input.ar : "none", input.splineLambdaScale, input.detrend, input.log);
+}, input.spline, input.profile.useAr ? input.ar : "none", input.splineLambdaScale, input.detrend, input.log, input.numeric);
 const buildJsMaster = (input: {
     profile: ProbeProfile;
     spline: CofechaSplineImplementation;
@@ -285,6 +322,7 @@ const buildJsMaster = (input: {
     splineLambdaScale: number;
     detrend: CofechaDetrendImplementation;
     log: CofechaLogImplementation;
+    numeric: CofechaNumericImplementation;
     filteredQuantizationDigits: number | null;
 }) => {
     const valuesByYear = new Map<number, number[]>();
@@ -294,7 +332,7 @@ const buildJsMaster = (input: {
             useAutoregressiveModel: input.profile.useAr,
             useLogTransform: input.profile.useLog,
             minReplication: 1,
-        }, input.spline, input.profile.useAr ? input.ar : "none", input.splineLambdaScale, input.detrend, input.log), input.filteredQuantizationDigits);
+        }, input.spline, input.profile.useAr ? input.ar : "none", input.splineLambdaScale, input.detrend, input.log, input.numeric), input.filteredQuantizationDigits);
         if (input.normalizeCore && points.length > 0) {
             const values = points.map((point) => point.value);
             const average = mean(values);
@@ -391,6 +429,7 @@ for (const profile of profiles) {
         ar: CofechaArImplementation | "none";
         detrend: CofechaDetrendImplementation;
         log: CofechaLogImplementation;
+        numeric: CofechaNumericImplementation;
         filteredQuantizationDigits: number | null;
         firstCoreStats: ReturnType<typeof seriesStats>;
     }> = [];
@@ -402,6 +441,7 @@ for (const profile of profiles) {
                 const profileLogModes = profile.useLog ? logModesToTest : ["post-ar" as const];
                 for (const log of profileLogModes) {
                     for (const detrend of detrendModesToTest) {
+                    for (const numeric of numericModesToTest) {
                     const unquantizedFirstCorePoints = standardizeFirstCore({
                         profile,
                         spline,
@@ -409,6 +449,7 @@ for (const profile of profiles) {
                         splineLambdaScale,
                         detrend,
                         log,
+                        numeric,
                     });
                     for (const filteredQuantizationDigits of filteredQuantizationDigitsToTest) {
                         const rawFirstCorePoints = quantizePoints(
@@ -421,6 +462,7 @@ for (const profile of profiles) {
                             ar,
                             detrend,
                             log,
+                            numeric,
                             filteredQuantizationDigits,
                             firstCoreStats: seriesStats(
                                 rawFirstCorePoints.map((point) => point.value),
@@ -440,6 +482,7 @@ for (const profile of profiles) {
                                         splineLambdaScale,
                                         detrend,
                                         log,
+                                        numeric,
                                         filteredQuantizationDigits,
                                     });
                                     variants.push({
@@ -448,6 +491,7 @@ for (const profile of profiles) {
                                         ar,
                                         detrend,
                                         log,
+                                        numeric,
                                         filteredQuantizationDigits,
                                         normalizeCore,
                                         sampleCoreSd,
@@ -460,6 +504,7 @@ for (const profile of profiles) {
                                 }
                             }
                         }
+                    }
                     }
                 }
                 }
@@ -482,6 +527,7 @@ for (const profile of profiles) {
         splineLambdaScale: best.splineLambdaScale,
         detrend: best.detrend,
         log: best.log,
+        numeric: best.numeric,
         filteredQuantizationDigits: best.filteredQuantizationDigits,
     });
     let bestFirstCorePoints = quantizePoints(standardizeFirstCore({
@@ -491,6 +537,7 @@ for (const profile of profiles) {
         splineLambdaScale: best.splineLambdaScale,
         detrend: best.detrend,
         log: best.log,
+        numeric: best.numeric,
     }), best.filteredQuantizationDigits);
     const rawBestFirstCoreStats = seriesStats(
         bestFirstCorePoints.map((point) => point.value),
@@ -536,6 +583,20 @@ const output = {
     sourcePath,
     sourceName: basename(sourcePath),
     cofechaExe,
+    exactPlainCoreDiagnostics: {
+        splineSolved: exactFirstTrend !== null,
+        firstDetrendedStats: exactFirstDetrended
+            ? seriesStats(exactFirstDetrended)
+            : null,
+        stabilizedStats: exactFirstStabilized
+            ? seriesStats(exactFirstStabilized)
+            : null,
+        stabilizedChangedValues: exactFirstDetrended && exactFirstStabilized
+            ? exactFirstDetrended.filter((value, index) => (
+                value !== exactFirstStabilized[index]
+            )).length
+            : 0,
+    },
     profiles: profileResults,
 };
 writeFileSync(
