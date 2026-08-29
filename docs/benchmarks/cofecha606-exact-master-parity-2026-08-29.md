@@ -66,3 +66,23 @@ npm run build                                       passed
 ```
 
 The exact builder is available as a shadow API. Production reference selection is not switched by this experiment commit.
+
+## Independent frozen holdout
+
+After implementation and the 34-file validation were frozen, the pre-existing unified-adjudicator `finalHoldout` list was evaluated without further code changes.
+
+| Metric | Result |
+| --- | ---: |
+| Frozen files requested | 17 |
+| COFECHA-evaluable files | 14 |
+| Evaluable files passed | 14/14 |
+| Calendar years matched | 5,945/5,945 |
+| Four-decimal values matched | 5,945/5,945 |
+| Sample-depth mismatches | 0 |
+| Byte-identical MAS files | 14/14 |
+
+`russ027x`, `russ094x`, and `russ170w` use numeric-only series identifiers. COFECHA 6.06 printed the report header but emitted no MAS file, so these three are recorded as non-evaluable rather than parity failures.
+
+Frozen output:
+
+`D:\软件测试\cofecha-js-parity-probe\exact-master-independent-final-holdout-v1\summary.json`
