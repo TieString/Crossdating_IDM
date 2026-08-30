@@ -36,6 +36,7 @@ const runDir = resolve(valueFor("--run-dir"));
 const proposalsPath = resolve(valueFor("--proposals"));
 const outputDir = resolve(valueFor("--output-dir"));
 const workerCount = Math.max(1, Number(valueFor("--workers", "8")));
+const includePerReference = !args.includes("--skip-per-reference");
 const workerIndexValue = valueFor("--worker-index");
 const workerIndex = workerIndexValue === "" ? null : Number(workerIndexValue);
 const scriptPath = fileURLToPath(import.meta.url);
@@ -110,6 +111,15 @@ const flatten = (
 
 const partPath = (index: number): string => join(outputDir, `part-${index}.ndjson`);
 
+const stableWorkerForAttempt = (attemptId: string): number => {
+    let hash = 2166136261;
+    for (let index = 0; index < attemptId.length; index += 1) {
+        hash ^= attemptId.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0) % workerCount;
+};
+
 if (workerIndex === null) {
     mkdirSync(outputDir, { recursive: true });
     const statuses = await Promise.all(Array.from({ length: workerCount }, (_, index) => (
@@ -131,22 +141,50 @@ if (workerIndex === null) {
     if (statuses.some((status) => status !== 0)) {
         throw new Error(`residual worker failure: ${statuses.join(",")}`);
     }
-    const rows = Array.from({ length: workerCount }, (_, index) => (
-        readFileSync(partPath(index), "utf8").split(/\r?\n/)
-            .filter(Boolean)
-            .map((line) => JSON.parse(line))
-    )).flat().sort((left, right) => String(
-        left.proposal_id ?? left.attempt_id,
-    ).localeCompare(String(right.proposal_id ?? right.attempt_id)));
-    writeFileSync(join(outputDir, "residual-evidence.json"), `${JSON.stringify({
-        schemaVersion: 2,
-        runDir,
-        proposalsPath,
-        rows,
-    }, null, 2)}\n`, "utf8");
+    const parts = Array.from(
+        { length: workerCount }, (_, index) => partPath(index),
+    );
+    const totalBytes = parts.reduce(
+        (sum, path) => sum + statSync(path).size,
+        0,
+    );
+    let rowCount = 0;
+    if (totalBytes <= 256 * 1024 * 1024) {
+        const rows = parts.flatMap((path) => (
+            readFileSync(path, "utf8").split(/\r?\n/)
+                .filter(Boolean)
+                .map((line) => JSON.parse(line))
+        )).sort((left, right) => String(
+            left.proposal_id ?? left.attempt_id,
+        ).localeCompare(String(right.proposal_id ?? right.attempt_id)));
+        rowCount = rows.length;
+        writeFileSync(join(outputDir, "residual-evidence.json"), `${JSON.stringify({
+            schemaVersion: 2,
+            runDir,
+            proposalsPath,
+            includePerReference,
+            rows,
+        }, null, 2)}\n`, "utf8");
+    } else {
+        const rowsPath = join(outputDir, "residual-evidence.ndjson");
+        writeFileSync(rowsPath, "", "utf8");
+        parts.forEach((path) => {
+            const content = readFileSync(path, "utf8");
+            appendFileSync(rowsPath, content);
+            rowCount += content.split(/\r?\n/).filter(Boolean).length;
+        });
+        writeFileSync(join(outputDir, "residual-evidence.json"), `${JSON.stringify({
+            schemaVersion: 3,
+            runDir,
+            proposalsPath,
+            includePerReference,
+            rowsNdjsonPath: "residual-evidence.ndjson",
+            rowCount,
+        }, null, 2)}\n`, "utf8");
+    }
     console.log(`APPLIED_RESIDUAL_COMPLETE ${JSON.stringify({
         outputDir,
-        attempts: rows.length,
+        attempts: rowCount,
     })}`);
 } else {
     mkdirSync(outputDir, { recursive: true });
@@ -158,7 +196,18 @@ if (workerIndex === null) {
     ]));
     const directories = findAttemptDirectories(join(runDir, "workers"));
     const proposals = parseCsv(readFileSync(proposalsPath, "utf8"))
-        .filter((_, index) => index % workerCount === workerIndex);
+        .filter((proposal) => (
+            stableWorkerForAttempt(proposal.attempt_id) === workerIndex
+        ));
+    let cachedAttempt: {
+        key: string;
+        statePath: string;
+        outPath: string;
+        loaded: Awaited<ReturnType<typeof loadRwl>>;
+        outText: string;
+        flaggedIds: string[];
+        rwlHash: string;
+    } | null = null;
     for (const [index, proposal] of proposals.entries()) {
         const match = proposal.attempt_id.match(/:(\d+):(\d+)$/);
         if (!match) continue;
@@ -175,21 +224,32 @@ if (workerIndex === null) {
             "noEvent",
         ] as string[];
         if (!supported.includes(eventType)) continue;
-        const statePath = join(directory, "state.rwl");
-        const outPath = join(directory, "VERYCOF.OUT");
-        const loaded = await loadRwl(statePath, "tucson-auto");
-        const outText = readFileSync(outPath, "utf8");
-        const part6 = splitReportByParts(outText).get("PART 6") ?? "";
+        if (cachedAttempt?.key !== key) {
+            const statePath = join(directory, "state.rwl");
+            const outPath = join(directory, "VERYCOF.OUT");
+            const loaded = await loadRwl(statePath, "tucson-auto");
+            const outText = readFileSync(outPath, "utf8");
+            const part6 = splitReportByParts(outText).get("PART 6") ?? "";
+            cachedAttempt = {
+                key,
+                statePath,
+                outPath,
+                loaded,
+                outText,
+                flaggedIds: [...extractPart6FlaggedASeriesIds(part6)],
+                rwlHash: sha256Bytes(readFileSync(statePath)),
+            };
+        }
         const residual = scoreAppliedOperationResidualForEvaluation({
-            siteData: loaded.siteData,
+            siteData: cachedAttempt.loaded.siteData,
             targetId: step.targetId,
             context: {
                 stateDir: directory,
-                sitePath: statePath,
-                outPath,
-                outText,
-                flaggedIds: extractPart6FlaggedASeriesIds(part6),
-                rwlHash: sha256Bytes(readFileSync(statePath)),
+                sitePath: cachedAttempt.statePath,
+                outPath: cachedAttempt.outPath,
+                outText: cachedAttempt.outText,
+                flaggedIds: new Set(cachedAttempt.flaggedIds),
+                rwlHash: cachedAttempt.rwlHash,
             },
             runId: `applied-residual-${workerIndex}-${key}`,
             operation: {
@@ -197,6 +257,7 @@ if (workerIndex === null) {
                 shiftYears: Number(proposal.shift_years),
                 year: Number(proposal.year),
             },
+            includePerReference,
         });
         appendFileSync(partPath(workerIndex), `${JSON.stringify({
             proposal_id: proposal.proposal_id || proposal.attempt_id,

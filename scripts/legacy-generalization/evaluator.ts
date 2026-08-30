@@ -1113,7 +1113,70 @@ type ResidualEvaluationOperation = {
     year: number;
 };
 
+export const residualFirstNewerYearForEvaluation = (
+    operation: ResidualEvaluationOperation,
+    seriesFirstYear: number,
+): number => {
+    if (operation.eventType === "wholeSeriesMove"
+        || operation.eventType === "noEvent") {
+        return seriesFirstYear;
+    }
+    return operation.eventType === "partialMove"
+        ? operation.year
+        : operation.year + 1;
+};
+
+export const residualBreakpointYearForEvaluation = (
+    operation: ResidualEvaluationOperation,
+): number => operation.eventType === "partialMove"
+    ? operation.year - 1
+    : operation.year;
+
+export const residualNewerSideYearForOffsetForEvaluation = (
+    operation: ResidualEvaluationOperation,
+    seriesFirstYear: number,
+    offset: number,
+): number => {
+    const firstNewerYear = residualFirstNewerYearForEvaluation(
+        operation,
+        seriesFirstYear,
+    );
+    return operation.eventType === "wholeSeriesMove"
+        || operation.eventType === "noEvent"
+        ? firstNewerYear
+        : firstNewerYear + Math.max(0, offset - 1);
+};
+
 type LagTransitionScan = ReturnType<typeof scoreLagTransitionHypotheses>;
+
+export const summarizeLagStateForEvaluation = (
+    lags: readonly number[],
+) => {
+    const counts = new Map<number, number>();
+    lags.forEach((lag) => counts.set(lag, (counts.get(lag) ?? 0) + 1));
+    const ranked = [...counts.entries()].sort((left, right) => (
+        right[1] - left[1]
+        || Math.abs(left[0]) - Math.abs(right[0])
+        || left[0] - right[0]
+    ));
+    const modeLag = ranked[0]?.[0] ?? 0;
+    const modeCount = ranked[0]?.[1] ?? 0;
+    return {
+        segmentCount: lags.length,
+        distinctLagCount: counts.size,
+        modeLag,
+        modeFraction: lags.length > 0 ? modeCount / lags.length : 0,
+        zeroLagFraction: lags.length > 0
+            ? lags.filter((lag) => lag === 0).length / lags.length
+            : 0,
+        meanAbsoluteLag: meanFinite(lags.map((lag) => Math.abs(lag))),
+    };
+};
+
+export const lagStepForEvaluation = (
+    olderLag: number,
+    newerLag: number,
+): number => olderLag - newerLag;
 
 /**
  * Summarizes only transition evidence newer than a proposed correction.
@@ -1189,11 +1252,11 @@ const residualNewerSideByOffset = (input: {
     operation: ResidualEvaluationOperation;
     seriesFirstYear: number;
 }) => Object.fromEntries([1, 5, 9, 13].map((offset) => {
-    const firstYear = ["wholeSeriesMove", "noEvent"].includes(
-        input.operation.eventType,
-    )
-        ? input.seriesFirstYear
-        : input.operation.year + offset;
+    const firstYear = residualNewerSideYearForOffsetForEvaluation(
+        input.operation,
+        input.seriesFirstYear,
+        offset,
+    );
     const beforeTransition = residualTransitionRegionSummary(
         input.beforeTransitions,
         firstYear,
@@ -1343,6 +1406,19 @@ const residualSegmentRegionSummary = (
     };
 };
 
+type AppliedResidualBaseline = {
+    config: ReturnType<typeof getConfig>;
+    before: SeriesCoreDiagnosis;
+    current: RwlTreeData;
+    beforePath: ReturnType<typeof diagnoseLagPath>;
+    beforeTransitions: LagTransitionScan;
+};
+
+const APPLIED_RESIDUAL_BASELINE_CACHE = new WeakMap<
+    RwlSiteData,
+    Map<string, AppliedResidualBaseline>
+>();
+
 /** Applies one proposal in memory and measures the residual chronology without hidden truth. */
 export const scoreAppliedOperationResidualForEvaluation = (input: {
     siteData: RwlSiteData;
@@ -1350,24 +1426,65 @@ export const scoreAppliedOperationResidualForEvaluation = (input: {
     context: CofechaContext;
     runId: string;
     operation: ResidualEvaluationOperation;
+    includePerReference?: boolean;
 }) => {
-    const { referenceConfig } = createProductionReferenceForEvaluation({
-        siteData: input.siteData,
-        targetId: input.targetId,
-        flaggedAIds: input.context.flaggedIds,
-        cofechaRunId: input.runId,
-        rwlHash: input.context.rwlHash,
-        masterDatingSeries: parseCofechaResult(input.context.outText).masterDatingSeries,
-    });
-    const config = getConfig({ referenceConfig });
-    const before = diagnoseSeriesCore(
-        input.siteData,
-        input.targetId,
+    const pathConfig = {
+        ...INTERNAL_EVENT_PATH_CONFIG,
+        maxPartialGapYears: DEFAULT_MAX_PARTIAL_GAP_YEARS,
+    };
+    let targetCache = APPLIED_RESIDUAL_BASELINE_CACHE.get(input.siteData);
+    if (!targetCache) {
+        targetCache = new Map();
+        APPLIED_RESIDUAL_BASELINE_CACHE.set(input.siteData, targetCache);
+    }
+    let baseline = targetCache.get(input.targetId);
+    if (!baseline) {
+        const { referenceConfig } = createProductionReferenceForEvaluation({
+            siteData: input.siteData,
+            targetId: input.targetId,
+            flaggedAIds: input.context.flaggedIds,
+            cofechaRunId: input.runId,
+            rwlHash: input.context.rwlHash,
+            masterDatingSeries: parseCofechaResult(
+                input.context.outText,
+            ).masterDatingSeries,
+        });
+        const config = getConfig({ referenceConfig });
+        const before = diagnoseSeriesCore(
+            input.siteData,
+            input.targetId,
+            config,
+            preprocessSeries,
+        );
+        const current = input.siteData.get(input.targetId);
+        if (!before || !current) return null;
+        const beforeCache = createLagPathCache();
+        baseline = {
+            config,
+            before,
+            current,
+            beforePath: diagnoseLagPath(
+                before,
+                input.siteData,
+                pathConfig,
+                beforeCache,
+            ),
+            beforeTransitions: scoreLagTransitionHypotheses(
+                before,
+                input.siteData,
+                pathConfig,
+                beforeCache,
+            ),
+        };
+        targetCache.set(input.targetId, baseline);
+    }
+    const {
         config,
-        preprocessSeries,
-    );
-    const current = input.siteData.get(input.targetId);
-    if (!before || !current) return null;
+        before,
+        current,
+        beforePath,
+        beforeTransitions,
+    } = baseline;
     let corrected: RwlTreeData;
     try {
         if (input.operation.eventType === "noEvent") {
@@ -1415,29 +1532,12 @@ export const scoreAppliedOperationResidualForEvaluation = (input: {
     );
     if (!after) return { applied: false };
 
-    const pathConfig = {
-        ...INTERNAL_EVENT_PATH_CONFIG,
-        maxPartialGapYears: DEFAULT_MAX_PARTIAL_GAP_YEARS,
-    };
-    const beforeCache = createLagPathCache();
     const afterCache = createLagPathCache();
-    const beforePath = diagnoseLagPath(
-        before,
-        input.siteData,
-        pathConfig,
-        beforeCache,
-    );
     const afterPath = diagnoseLagPath(
         after,
         correctedSite,
         pathConfig,
         afterCache,
-    );
-    const beforeTransitions = scoreLagTransitionHypotheses(
-        before,
-        input.siteData,
-        pathConfig,
-        beforeCache,
     );
     const afterTransitions = scoreLagTransitionHypotheses(
         after,
@@ -1485,11 +1585,10 @@ export const scoreAppliedOperationResidualForEvaluation = (input: {
     const afterCore = residualCoreSummary(after);
     const beforeTransition = transitionSummary(beforeTransitions);
     const afterTransition = transitionSummary(afterTransitions);
-    const firstNewerYear = ["wholeSeriesMove", "noEvent"].includes(
-        input.operation.eventType,
-    )
-        ? Math.min(...current.keys())
-        : input.operation.year + 1;
+    const firstNewerYear = residualFirstNewerYearForEvaluation(
+        input.operation,
+        Math.min(...current.keys()),
+    );
     const beforeNewerTransition = residualTransitionRegionSummary(
         beforeTransitions,
         firstNewerYear,
@@ -1534,7 +1633,65 @@ export const scoreAppliedOperationResidualForEvaluation = (input: {
         operation: input.operation,
         seriesFirstYear: Math.min(...current.keys()),
     });
-    const perReference = input.operation.eventType === "wholeSeriesMove"
+    const newerOffsetRows = Object.values(newerSideByOffset);
+    const frontierConsistency = {
+        afterPathPresenceFraction: meanFinite(newerOffsetRows.map((row) => (
+            Number(row.afterPath.eventCount > 0)
+        ))),
+        afterPathEventCountMean: meanFinite(newerOffsetRows.map(
+            (row) => row.afterPath.eventCount,
+        )),
+        afterPathEventCountMaximum: Math.max(
+            0,
+            ...newerOffsetRows.map((row) => row.afterPath.eventCount),
+        ),
+        afterPathStrongestScoreMean: meanFinite(newerOffsetRows.map(
+            (row) => row.afterPath.strongestEventScore,
+        )),
+        afterPathStrongestScoreMaximum: Math.max(
+            0,
+            ...newerOffsetRows.map(
+                (row) => row.afterPath.strongestEventScore,
+            ),
+        ),
+        afterPathShiftDirectionAgreementFraction: meanFinite(
+            newerOffsetRows.map((row) => Number(
+                Math.sign(row.afterPath.newestEventShift)
+                    === Math.sign(input.operation.shiftYears)
+                && row.afterPath.newestEventShift !== 0,
+            )),
+        ),
+        afterTransitionStrengthMean: meanFinite(newerOffsetRows.map(
+            (row) => row.afterTransition.strongestNormalizedSplitGain,
+        )),
+        afterTransitionStrengthMaximum: Math.max(
+            0,
+            ...newerOffsetRows.map(
+                (row) => row.afterTransition.strongestNormalizedSplitGain,
+            ),
+        ),
+        afterTransitionBalancedMean: meanFinite(newerOffsetRows.map(
+            (row) => row.afterTransition.strongestBalancedAdvantage,
+        )),
+        afterTransitionLocalGainMean: meanFinite(newerOffsetRows.map(
+            (row) => row.afterTransition.strongestLocalGain31,
+        )),
+        transitionStrengthDeltaMean: meanFinite(newerOffsetRows.map((row) => (
+            row.afterTransition.strongestNormalizedSplitGain
+                - row.beforeTransition.strongestNormalizedSplitGain
+        ))),
+        newerToCorrectedBoundaryStrengthMargin:
+            afterNewerTransition.strongestNormalizedSplitGain
+                - afterTransition.localNormalizedSplitGain,
+        newerToCorrectedBoundaryBalancedMargin:
+            afterNewerTransition.strongestBalancedAdvantage
+                - afterTransition.localBalancedAdvantage,
+        newerToCorrectedBoundaryLocalGainMargin:
+            afterNewerTransition.strongestLocalGain31
+                - afterTransition.localGain31,
+    };
+    const perReference = input.includePerReference === false
+        || input.operation.eventType === "wholeSeriesMove"
         || input.operation.eventType === "noEvent"
         ? null
         : (() => {
@@ -1550,15 +1707,19 @@ export const scoreAppliedOperationResidualForEvaluation = (input: {
                 input.operation.shiftYears,
                 { baselineLagCenter: afterPath.newestLag },
             );
+            const breakpointYear = residualBreakpointYearForEvaluation(
+                input.operation,
+            );
+            const fifthNewerYear = firstNewerYear + 4;
             const beforeSummary = residualPerReferenceSummary(
                 beforeRows,
-                input.operation.year,
-                input.operation.year + 5,
+                breakpointYear,
+                fifthNewerYear,
             );
             const afterSummary = residualPerReferenceSummary(
                 afterRows,
-                input.operation.year,
-                input.operation.year + 5,
+                breakpointYear,
+                fifthNewerYear,
             );
             return {
                 before: beforeSummary,
@@ -1579,6 +1740,209 @@ export const scoreAppliedOperationResidualForEvaluation = (input: {
     const newestAfterEvent = afterPath.events.slice().sort((left, right) => (
         right.endYear - left.endYear
     ))[0] ?? null;
+    const localOperation = input.operation.eventType === "missingRing"
+        || input.operation.eventType === "falseRing"
+        || input.operation.eventType === "partialMove";
+    const wholeOperation = input.operation.eventType === "wholeSeriesMove";
+    const beforeGlobalLag = before.globalSlidingMatch.bestGlobalLag;
+    const afterGlobalLag = after.globalSlidingMatch.bestGlobalLag;
+    const beforeNewestLag = beforePath.newestLag;
+    const afterNewestLag = afterPath.newestLag;
+    const lagState = (core: SeriesCoreDiagnosis) => (
+        summarizeLagStateForEvaluation(
+            core.segments.map((segment) => segment.bestLag),
+        )
+    );
+    const regionalLagState = (
+        core: SeriesCoreDiagnosis,
+        side: "older" | "newer",
+        nearestCount?: number,
+    ) => {
+        const ranked = core.segments.filter((segment) => {
+            const midpoint = (segment.startYear + segment.endYear) / 2;
+            return side === "older"
+                ? midpoint < firstNewerYear
+                : midpoint >= firstNewerYear;
+        }).sort((left, right) => {
+            const leftMidpoint = (left.startYear + left.endYear) / 2;
+            const rightMidpoint = (right.startYear + right.endYear) / 2;
+            return Math.abs(leftMidpoint - firstNewerYear)
+                - Math.abs(rightMidpoint - firstNewerYear);
+        });
+        const selected = nearestCount === undefined
+            ? ranked
+            : ranked.slice(0, nearestCount);
+        return summarizeLagStateForEvaluation(
+            selected.map((segment) => segment.bestLag),
+        );
+    };
+    const beforeLagState = lagState(before);
+    const afterLagState = lagState(after);
+    const beforeOlderLagState = localOperation
+        ? regionalLagState(before, "older")
+        : summarizeLagStateForEvaluation([]);
+    const beforeNewerLagState = localOperation
+        ? regionalLagState(before, "newer")
+        : summarizeLagStateForEvaluation([]);
+    const afterOlderLagState = localOperation
+        ? regionalLagState(after, "older")
+        : summarizeLagStateForEvaluation([]);
+    const afterNewerLagState = localOperation
+        ? regionalLagState(after, "newer")
+        : summarizeLagStateForEvaluation([]);
+    const beforeRegionalLagStep = lagStepForEvaluation(
+        beforeOlderLagState.modeLag,
+        beforeNewerLagState.modeLag,
+    );
+    const afterRegionalLagStep = lagStepForEvaluation(
+        afterOlderLagState.modeLag,
+        afterNewerLagState.modeLag,
+    );
+    const boundaryStates = (core: SeriesCoreDiagnosis, nearestCount: number) => {
+        const older = localOperation
+            ? regionalLagState(core, "older", nearestCount)
+            : summarizeLagStateForEvaluation([]);
+        const newer = localOperation
+            ? regionalLagState(core, "newer", nearestCount)
+            : summarizeLagStateForEvaluation([]);
+        return {
+            older,
+            newer,
+            step: lagStepForEvaluation(older.modeLag, newer.modeLag),
+        };
+    };
+    const beforeNearestBoundary = boundaryStates(before, 1);
+    const afterNearestBoundary = boundaryStates(after, 1);
+    const beforeThreeBoundary = boundaryStates(before, 3);
+    const afterThreeBoundary = boundaryStates(after, 3);
+    const operationSpecific = {
+        localOperation: Number(localOperation),
+        wholeOperation: Number(wholeOperation),
+        noEventOperation: Number(input.operation.eventType === "noEvent"),
+        unitOperation: Number(
+            input.operation.eventType === "missingRing"
+            || input.operation.eventType === "falseRing",
+        ),
+        beforeGlobalLag,
+        afterGlobalLag,
+        beforeGlobalLagMagnitude: Math.abs(beforeGlobalLag),
+        afterGlobalLagMagnitude: Math.abs(afterGlobalLag),
+        globalLagMagnitudeReduction:
+            Math.abs(beforeGlobalLag) - Math.abs(afterGlobalLag),
+        afterGlobalLagResolved: Number(afterGlobalLag === 0),
+        beforeNewestLag,
+        afterNewestLag,
+        beforeNewestLagMagnitude: Math.abs(beforeNewestLag),
+        afterNewestLagMagnitude: Math.abs(afterNewestLag),
+        newestLagMagnitudeReduction:
+            Math.abs(beforeNewestLag) - Math.abs(afterNewestLag),
+        baselineAgreement: Number(beforeGlobalLag === beforeNewestLag),
+        baselineDisagreementMagnitude: Math.abs(
+            beforeGlobalLag - beforeNewestLag,
+        ),
+        shiftToBeforeGlobalLagDistance: Math.abs(
+            input.operation.shiftYears - beforeGlobalLag,
+        ),
+        shiftToBeforeNewestLagDistance: Math.abs(
+            input.operation.shiftYears - beforeNewestLag,
+        ),
+        shiftMatchesBeforeGlobalLag: Number(
+            input.operation.shiftYears === beforeGlobalLag,
+        ),
+        shiftMatchesBeforeNewestLag: Number(
+            input.operation.shiftYears === beforeNewestLag,
+        ),
+        fixedBaselineChangeMagnitude: Math.abs(
+            afterNewestLag - beforeNewestLag,
+        ),
+        localFixedBaselinePreserved: Number(
+            localOperation && afterNewestLag === beforeNewestLag,
+        ),
+        localFixedBaselineBroken: Number(
+            localOperation && afterNewestLag !== beforeNewestLag,
+        ),
+        wholeGlobalLagResolved: Number(
+            wholeOperation && afterGlobalLag === 0,
+        ),
+        wholeNewestLagResolved: Number(
+            wholeOperation && afterNewestLag === 0,
+        ),
+        wholeBothBaselinesResolved: Number(
+            wholeOperation && afterGlobalLag === 0 && afterNewestLag === 0,
+        ),
+        beforeLagMode: beforeLagState.modeLag,
+        beforeLagModeFraction: beforeLagState.modeFraction,
+        beforeLagDistinctCount: beforeLagState.distinctLagCount,
+        beforeLagZeroFraction: beforeLagState.zeroLagFraction,
+        afterLagMode: afterLagState.modeLag,
+        afterLagModeFraction: afterLagState.modeFraction,
+        afterLagDistinctCount: afterLagState.distinctLagCount,
+        afterLagZeroFraction: afterLagState.zeroLagFraction,
+        lagModeMagnitudeReduction:
+            Math.abs(beforeLagState.modeLag) - Math.abs(afterLagState.modeLag),
+        lagDistinctCountReduction:
+            beforeLagState.distinctLagCount - afterLagState.distinctLagCount,
+        shiftToBeforeLagModeDistance: Math.abs(
+            input.operation.shiftYears - beforeLagState.modeLag,
+        ),
+        shiftMatchesBeforeLagMode: Number(
+            input.operation.shiftYears === beforeLagState.modeLag,
+        ),
+        beforeOlderLagMode: beforeOlderLagState.modeLag,
+        beforeOlderLagModeFraction: beforeOlderLagState.modeFraction,
+        beforeNewerLagMode: beforeNewerLagState.modeLag,
+        beforeNewerLagModeFraction: beforeNewerLagState.modeFraction,
+        beforeRegionalLagStep,
+        shiftToBeforeRegionalStepDistance: Math.abs(
+            input.operation.shiftYears - beforeRegionalLagStep,
+        ),
+        shiftMatchesBeforeRegionalStep: Number(
+            localOperation
+            && input.operation.shiftYears === beforeRegionalLagStep,
+        ),
+        afterOlderLagMode: afterOlderLagState.modeLag,
+        afterOlderLagModeFraction: afterOlderLagState.modeFraction,
+        afterNewerLagMode: afterNewerLagState.modeLag,
+        afterNewerLagModeFraction: afterNewerLagState.modeFraction,
+        afterRegionalLagStep,
+        regionalLagStepMagnitudeReduction:
+            Math.abs(beforeRegionalLagStep) - Math.abs(afterRegionalLagStep),
+        regionalLagStepResolved: Number(
+            localOperation && afterRegionalLagStep === 0,
+        ),
+        beforeNearestOlderLag: beforeNearestBoundary.older.modeLag,
+        beforeNearestNewerLag: beforeNearestBoundary.newer.modeLag,
+        beforeNearestBoundaryStep: beforeNearestBoundary.step,
+        shiftToBeforeNearestBoundaryStepDistance: Math.abs(
+            input.operation.shiftYears - beforeNearestBoundary.step,
+        ),
+        shiftMatchesBeforeNearestBoundaryStep: Number(
+            localOperation
+            && input.operation.shiftYears === beforeNearestBoundary.step,
+        ),
+        afterNearestBoundaryStep: afterNearestBoundary.step,
+        nearestBoundaryStepMagnitudeReduction:
+            Math.abs(beforeNearestBoundary.step)
+                - Math.abs(afterNearestBoundary.step),
+        beforeThreeOlderLagMode: beforeThreeBoundary.older.modeLag,
+        beforeThreeOlderLagModeFraction:
+            beforeThreeBoundary.older.modeFraction,
+        beforeThreeNewerLagMode: beforeThreeBoundary.newer.modeLag,
+        beforeThreeNewerLagModeFraction:
+            beforeThreeBoundary.newer.modeFraction,
+        beforeThreeBoundaryStep: beforeThreeBoundary.step,
+        shiftToBeforeThreeBoundaryStepDistance: Math.abs(
+            input.operation.shiftYears - beforeThreeBoundary.step,
+        ),
+        shiftMatchesBeforeThreeBoundaryStep: Number(
+            localOperation
+            && input.operation.shiftYears === beforeThreeBoundary.step,
+        ),
+        afterThreeBoundaryStep: afterThreeBoundary.step,
+        threeBoundaryStepMagnitudeReduction:
+            Math.abs(beforeThreeBoundary.step)
+                - Math.abs(afterThreeBoundary.step),
+    };
     return {
         applied: true,
         beforeCore,
@@ -1671,7 +2035,9 @@ export const scoreAppliedOperationResidualForEvaluation = (input: {
             ),
             byOffset: newerSideByOffset,
         },
+        frontierConsistency,
         perReference,
+        operationSpecific,
     };
 };
 

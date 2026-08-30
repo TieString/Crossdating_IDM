@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -36,9 +37,41 @@ def test_operation_features_drop_calendar_years_and_use_attempt_relative_scores(
     assert list(features["shift_magnitude"]) == [1, 4]
 
 
+def test_operation_features_can_exclude_one_evidence_family() -> None:
+    frame = pd.DataFrame({
+        "attempt_id": ["run:1", "run:1"],
+        "event_type": ["missingRing", "wholeSeriesMove"],
+        "shift_years": [-1, -1],
+        "selection_oof_score": [0.6, 0.4],
+        "residual_operationSpecific_baselineAgreement": [0, 1],
+        "residual_coreDelta_meanSegmentR0": [0.1, 0.2],
+    })
+    features = MODULE.residual_operation_features(
+        frame, ("residual_operationSpecific_",)
+    )
+    assert not any("operationSpecific" in column for column in features)
+    assert "residual_coreDelta_meanSegmentR0__rank" in features
+
+
+def test_operation_features_keep_raw_values_only_for_relative_improvements() -> None:
+    frame = pd.DataFrame({
+        "attempt_id": ["run:1", "run:1"],
+        "event_type": ["missingRing", "wholeSeriesMove"],
+        "shift_years": [-1, -1],
+        "residual_beforeCore_globalCurrentR": [0.2, 0.8],
+        "residual_coreDelta_globalCurrentR": [0.1, 0.3],
+        "residual_pathEventReduction": [1, 0],
+    })
+    features = MODULE.residual_operation_features(frame)
+    assert "residual_beforeCore_globalCurrentR__relative_value" not in features
+    assert "residual_coreDelta_globalCurrentR__relative_value" in features
+    assert "residual_pathEventReduction__relative_value" in features
+
+
 def test_operation_summary_counts_repairs_and_regressions() -> None:
     baseline = pd.DataFrame({
         "attempt_id": ["a", "b", "clean"],
+        "file_id": ["file-a", "file-b", "file-clean"],
         "family": ["A", "D", "Clean"],
         "event_type": ["missingRing", "falseRing", "noEvent"],
         "identity_workflow_oracle": [0, 1, 1],
@@ -52,3 +85,43 @@ def test_operation_summary_counts_repairs_and_regressions() -> None:
     assert summary["repairs"] == 1
     assert summary["regressions"] == 1
     assert summary["cleanFalsePositives"] == 0
+
+
+def test_file_cluster_lower_is_deterministic_and_below_point_estimate() -> None:
+    frame = pd.DataFrame({
+        "file_id": ["a", "a", "b", "b"],
+        "correct": [1, 1, 1, 0],
+    })
+    first = MODULE.file_cluster_lower(
+        frame, "correct", repetitions=2_000, seed="fixed"
+    )
+    second = MODULE.file_cluster_lower(
+        frame, "correct", repetitions=2_000, seed="fixed"
+    )
+    assert first == second
+    assert first <= frame["correct"].mean()
+
+
+def test_read_residual_frame_accepts_sharded_directory(tmp_path: Path) -> None:
+    rows = [
+        {"proposal_id": "a", "residual_applied": True},
+        {"proposal_id": "b", "residual_applied": False},
+    ]
+    for index, row in enumerate(rows):
+        (tmp_path / f"part-{index}.ndjson").write_text(
+            json.dumps(row) + "\n", encoding="utf8"
+        )
+    output = MODULE.read_residual_frame(tmp_path)
+    assert output["proposal_id"].tolist() == ["a", "b"]
+
+
+def test_winner_margin_is_computed_within_each_attempt() -> None:
+    frame = pd.DataFrame({
+        "attempt_id": ["a", "a", "b"],
+        "selection_oof_score": [0.3, 0.2, 0.1],
+    })
+    margin = MODULE.winner_margin_by_attempt(
+        frame, pd.Series([0.9, 0.4, 0.7])
+    )
+    assert margin["a"] == 0.5
+    assert margin["b"] == float("inf")
