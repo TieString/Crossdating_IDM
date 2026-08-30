@@ -1104,7 +1104,11 @@ export const scoreSelectedOperationRowsForEvaluation = (input: {
     return selected ?? null;
 };
 
-type ResidualEvaluationOperation = EvaluationOperationIdentity & {
+type ResidualEvaluationOperation = {
+    eventType: EvaluationOperationIdentity["eventType"]
+        | "wholeSeriesMove"
+        | "noEvent";
+    shiftYears: number;
     year: number;
 };
 
@@ -1201,6 +1205,41 @@ const residualCoreSummary = (core: SeriesCoreDiagnosis) => ({
     unresolvedB: core.unresolvedB,
 });
 
+const residualSegmentRegionSummary = (
+    core: SeriesCoreDiagnosis,
+    firstYear: number,
+    requireFullSegment: boolean,
+) => {
+    const segments = core.segments.filter((segment) => (
+        requireFullSegment
+            ? segment.startYear >= firstYear
+            : (segment.startYear + segment.endYear) / 2 >= firstYear
+    ));
+    return {
+        segmentCount: segments.length,
+        flaggedSegments: segments.filter((segment) => segment.flagged).length,
+        nonzeroLagSegments: segments.filter(
+            (segment) => segment.bestLag !== 0,
+        ).length,
+        zeroLagFraction: segments.length > 0
+            ? segments.filter((segment) => segment.bestLag === 0).length
+                / segments.length
+            : 0,
+        meanAbsoluteLag: meanFinite(
+            segments.map((segment) => Math.abs(segment.bestLag)),
+        ),
+        maximumAbsoluteLag: Math.max(
+            0,
+            ...segments.map((segment) => Math.abs(segment.bestLag)),
+        ),
+        meanR0: meanFinite(segments.map((segment) => segment.r0)),
+        meanBestR: meanFinite(segments.map((segment) => segment.bestR)),
+        meanCorrelationGain: meanFinite(segments.map((segment) => (
+            (segment.bestR ?? 0) - (segment.r0 ?? 0)
+        ))),
+    };
+};
+
 /** Applies one proposal in memory and measures the residual chronology without hidden truth. */
 export const scoreAppliedOperationResidualForEvaluation = (input: {
     siteData: RwlSiteData;
@@ -1228,7 +1267,17 @@ export const scoreAppliedOperationResidualForEvaluation = (input: {
     if (!before || !current) return null;
     let corrected: RwlTreeData;
     try {
-        if (input.operation.eventType === "missingRing") {
+        if (input.operation.eventType === "noEvent") {
+            corrected = current;
+        } else if (input.operation.eventType === "wholeSeriesMove") {
+            const years = [...current.keys()];
+            corrected = moveSeriesTailByOffset(
+                current,
+                Math.min(...years),
+                Math.max(...years),
+                input.operation.shiftYears,
+            );
+        } else if (input.operation.eventType === "missingRing") {
             corrected = insertMissingYearAtSide(
                 current,
                 input.operation.year,
@@ -1333,7 +1382,11 @@ export const scoreAppliedOperationResidualForEvaluation = (input: {
     const afterCore = residualCoreSummary(after);
     const beforeTransition = transitionSummary(beforeTransitions);
     const afterTransition = transitionSummary(afterTransitions);
-    const firstNewerYear = input.operation.year + 1;
+    const firstNewerYear = ["wholeSeriesMove", "noEvent"].includes(
+        input.operation.eventType,
+    )
+        ? Math.min(...current.keys())
+        : input.operation.year + 1;
     const beforeNewerTransition = residualTransitionRegionSummary(
         beforeTransitions,
         firstNewerYear,
@@ -1349,6 +1402,26 @@ export const scoreAppliedOperationResidualForEvaluation = (input: {
     const afterNewerPath = residualPathRegionSummary(
         afterPath,
         firstNewerYear,
+    );
+    const beforeNewerSegments = residualSegmentRegionSummary(
+        before,
+        firstNewerYear,
+        false,
+    );
+    const afterNewerSegments = residualSegmentRegionSummary(
+        after,
+        firstNewerYear,
+        false,
+    );
+    const beforeFixedSegments = residualSegmentRegionSummary(
+        before,
+        firstNewerYear,
+        true,
+    );
+    const afterFixedSegments = residualSegmentRegionSummary(
+        after,
+        firstNewerYear,
+        true,
     );
     const newestAfterEvent = afterPath.events.slice().sort((left, right) => (
         right.endYear - left.endYear
@@ -1409,6 +1482,38 @@ export const scoreAppliedOperationResidualForEvaluation = (input: {
                     key,
                     Number(afterNewerPath[key as keyof typeof afterNewerPath])
                         - Number(beforeNewerPath[key as keyof typeof beforeNewerPath]),
+                ]),
+            ),
+            beforeSegments: beforeNewerSegments,
+            afterSegments: afterNewerSegments,
+            segmentDelta: Object.fromEntries(
+                Object.keys(beforeNewerSegments).map((key) => [
+                    key,
+                    Number(
+                        afterNewerSegments[
+                            key as keyof typeof afterNewerSegments
+                        ],
+                    ) - Number(
+                        beforeNewerSegments[
+                            key as keyof typeof beforeNewerSegments
+                        ],
+                    ),
+                ]),
+            ),
+            beforeFixedSegments,
+            afterFixedSegments,
+            fixedSegmentDelta: Object.fromEntries(
+                Object.keys(beforeFixedSegments).map((key) => [
+                    key,
+                    Number(
+                        afterFixedSegments[
+                            key as keyof typeof afterFixedSegments
+                        ],
+                    ) - Number(
+                        beforeFixedSegments[
+                            key as keyof typeof beforeFixedSegments
+                        ],
+                    ),
                 ]),
             ),
         },

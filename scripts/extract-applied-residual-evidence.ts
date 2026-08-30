@@ -21,7 +21,8 @@ import {
 } from "./legacy-generalization/evaluator";
 
 type ProposalRow = Record<string, string>;
-type LocalEventType = "missingRing" | "falseRing" | "partialMove";
+type EvaluatedEventType = "missingRing" | "falseRing" | "partialMove"
+    | "wholeSeriesMove" | "noEvent";
 type Step = { caseIndex: number; step: number; targetId: string };
 
 const args = process.argv.slice(2).filter((argument) => argument !== "--");
@@ -165,10 +166,15 @@ if (workerIndex === null) {
         const step = stepById.get(key);
         const directory = directories.get(key);
         if (!step || !directory) continue;
-        const eventType = proposal.event_type as LocalEventType;
-        if (!(["missingRing", "falseRing", "partialMove"] as string[]).includes(
-            eventType,
-        )) continue;
+        const eventType = proposal.event_type as EvaluatedEventType;
+        const supported = [
+            "missingRing",
+            "falseRing",
+            "partialMove",
+            "wholeSeriesMove",
+            "noEvent",
+        ] as string[];
+        if (!supported.includes(eventType)) continue;
         const statePath = join(directory, "state.rwl");
         const outPath = join(directory, "VERYCOF.OUT");
         const loaded = await loadRwl(statePath, "tucson-auto");
