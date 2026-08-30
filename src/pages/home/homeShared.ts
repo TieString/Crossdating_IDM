@@ -25,6 +25,11 @@ export const COFECHA_PART_OPTIONS = [
     { value: "PART 7", label: "🪶 PART 7: Descriptive Statistics" },
 ];
 
+export const COFECHA_PART8_OPTION = {
+    value: "PART 8",
+    label: "🧭 PART 8: Undated Series Adjustments",
+};
+
 export const PANEL_DIVIDER_GUTTER_SIZE = 0;
 export const COLLAPSED_PANEL_RATIO = 0.995;
 

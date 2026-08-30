@@ -10,7 +10,7 @@ import type {
 import type { CrossdatingValidationSummary } from "@/features/crossdating/validation";
 import type { ReferenceSeriesConfig } from "@/features/crossdating/reference";
 import type { DeleteMode, DeleteShift, MissingInsertSide, RwlOperationLogEntry, SerializedRwlTreeData } from "@/features/rwl/edit";
-import type { ICofechaResult } from "@/features/cofecha/types";
+import type { CofechaUndatedSort, ICofechaResult } from "@/features/cofecha/types";
 import type { RwlSiteData } from "@/features/rwl/types";
 import type { ChartJumpTarget } from "@/components/Chart/chartNavigation";
 
@@ -142,6 +142,8 @@ export type CofechaWindowState = {
     linkedReport: { html: string; count: number };
     partOptions: Array<{ value: string; label: string }>;
     selectedPart: string;
+    undatedFileName: string | null;
+    undatedSort: CofechaUndatedSort;
     /** 主窗口请求独立 COFECHA 窗口滚动到某序列 PART 6 块时的跳转目标。 */
     jumpTarget?: { id: number; tree: string };
 };
@@ -187,6 +189,9 @@ export type WorkspaceWindowCommand =
     | { kind: "operation-log"; type: "jump"; tree: string; year?: number }
     | { kind: "cofecha"; type: "select-part"; part: string }
     | { kind: "cofecha"; type: "run-validation" }
+    | { kind: "cofecha"; type: "load-undated" }
+    | { kind: "cofecha"; type: "clear-undated" }
+    | { kind: "cofecha"; type: "set-undated-sort"; sort: CofechaUndatedSort }
     | { kind: "cofecha"; type: "export-out" }
     | { kind: "cofecha"; type: "jump"; tree: string; year?: number }
     | { kind: "cofecha"; type: "toggle-part2-age-sort" }

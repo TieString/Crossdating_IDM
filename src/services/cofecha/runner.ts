@@ -3,6 +3,7 @@ import { readTextFile, exists, remove } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
 import { clearWorkDir, getCofechaWorkDir } from "@/services/fs";
 import { saveFile } from "../fs/io";
+import type { CofechaUndatedInput } from "@/features/cofecha/types";
 
 interface CofechaProcessOutput {
   exitCode: number | null;
@@ -16,6 +17,7 @@ export async function runOfficialCofecha(
   rwlText: string,
   inputFileName?: string,
   executablePath?: string,
+  undated?: CofechaUndatedInput,
 ): Promise<string> {
   const normalizedExecutablePath = executablePath?.trim() ?? "";
   if (!normalizedExecutablePath) {
@@ -36,12 +38,27 @@ export async function runOfficialCofecha(
   // 当前集成下，COFECHA 对非 ASCII 文件名不稳定，因此这里统一降级。
   const runtimeInputName = hasNonAsciiName ? defaultInputName : requestedName;
   const inputPath = await join(workDir, runtimeInputName);
+  const requestedUndatedName = undated?.inputFileName.trim() || "UNDATED.RWL";
+  const runtimeUndatedInputName = undated
+    ? (/[^\x00-\x7F]/.test(requestedUndatedName)
+        || requestedUndatedName.toLowerCase() === runtimeInputName.toLowerCase()
+      ? "UNDATED.RWL"
+      : requestedUndatedName)
+    : null;
+  const undatedInputPath = runtimeUndatedInputName
+    ? await join(workDir, runtimeUndatedInputName)
+    : null;
 
   await saveFile(inputPath, rwlText);
+  if (undated && undatedInputPath) {
+    await saveFile(undatedInputPath, undated.rwlText);
+  }
 
   const processOutput = await invoke<CofechaProcessOutput>("run_external_cofecha", {
     executablePath: normalizedExecutablePath,
     runtimeInputName,
+    runtimeUndatedInputName,
+    undatedSort: undated?.sort ?? null,
   });
   const outPath = await join(workDir, "VERYCOF.OUT");
 
@@ -54,9 +71,12 @@ export async function runOfficialCofecha(
   }
 
   const outRawText = await readTextFile(outPath);
-  const outText = runtimeInputName !== requestedName
-    ? outRawText.split(runtimeInputName).join(requestedName)
-    : outRawText;
+  let outText = runtimeInputName !== requestedName
+      ? outRawText.split(runtimeInputName).join(requestedName)
+      : outRawText;
+  if (runtimeUndatedInputName && runtimeUndatedInputName !== requestedUndatedName) {
+    outText = outText.split(runtimeUndatedInputName).join(requestedUndatedName);
+  }
 
   try {
     if (runtimeInputName !== defaultInputName && (await exists(inputPath))) {

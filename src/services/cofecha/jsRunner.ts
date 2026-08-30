@@ -1,4 +1,5 @@
 import { runCofecha, type CofechaArtifacts, type CofechaReport, type RunCofechaRequest } from "cofecha-js";
+import type { CofechaUndatedInput } from "@/features/cofecha/types";
 import type { CofechaJsWorkerRequest, CofechaJsWorkerResponse } from "./jsWorkerProtocol";
 
 let nextWorkerRequestId = 0;
@@ -11,13 +12,24 @@ const jobNameFromFileName = (fileName: string) => {
 export const createCofechaJsRequest = (
   rwlText: string,
   inputFileName = "INPUT.RWL",
+  undated?: CofechaUndatedInput,
 ): RunCofechaRequest => ({
   input: {
     format: "tucson-rwl",
     text: rwlText,
     fileName: inputFileName,
+    ...(undated ? {
+      undated: {
+        format: "tucson-rwl" as const,
+        text: undated.rwlText,
+        fileName: undated.inputFileName,
+      },
+    } : {}),
   },
-  options: { masterOutput: "N" },
+  options: {
+    masterOutput: "N",
+    ...(undated ? { undatedSort: undated.sort } : {}),
+  },
   metadata: {
     jobName: jobNameFromFileName(inputFileName),
     runAt: new Date().toISOString(),
@@ -28,14 +40,16 @@ export const createCofechaJsRequest = (
 export const runCofechaJsInline = (
   rwlText: string,
   inputFileName?: string,
-): CofechaArtifacts<CofechaReport> => runCofecha(createCofechaJsRequest(rwlText, inputFileName));
+  undated?: CofechaUndatedInput,
+): CofechaArtifacts<CofechaReport> => runCofecha(createCofechaJsRequest(rwlText, inputFileName, undated));
 
 export const runCofechaJs = (
   rwlText: string,
   inputFileName?: string,
+  undated?: CofechaUndatedInput,
 ): Promise<string> => {
   if (typeof Worker === "undefined") {
-    return Promise.resolve(runCofechaJsInline(rwlText, inputFileName).outText);
+    return Promise.resolve(runCofechaJsInline(rwlText, inputFileName, undated).outText);
   }
 
   const id = ++nextWorkerRequestId;
@@ -57,7 +71,7 @@ export const runCofechaJs = (
     };
     worker.postMessage({
       id,
-      request: createCofechaJsRequest(rwlText, inputFileName),
+      request: createCofechaJsRequest(rwlText, inputFileName, undated),
     } satisfies CofechaJsWorkerRequest);
   });
 };

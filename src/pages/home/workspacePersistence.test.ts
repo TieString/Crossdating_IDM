@@ -61,6 +61,12 @@ describe("workspace persistence browser fallback", () => {
             "javascript",
             "PART 6",
             "hash-smoke",
+            {
+                filePath: "D:/软件测试/undated.rwl",
+                fileName: "undated.rwl",
+                sort: "adjustment",
+            },
+            "undated-hash",
         );
 
         await expect(loadPersistedCofechaState(filePath)).resolves.toMatchObject({
@@ -69,6 +75,12 @@ describe("workspace persistence browser fallback", () => {
             cofechaEngine: "javascript",
             selectedPart: "PART 6",
             cofechaInputSignature: "hash-smoke",
+            cofechaUndatedInputSignature: "undated-hash",
+            undated: {
+                filePath: "D:/软件测试/undated.rwl",
+                fileName: "undated.rwl",
+                sort: "adjustment",
+            },
         });
     });
 

@@ -30,7 +30,7 @@
 4. 解析后的数据通过 RWL 编辑器工具渲染并支持修改。
 5. 用户可在折线图中进入“参考”模式，多选可靠序列；[src/features/crossdating/reference.ts](src/features/crossdating/reference.ts) 会按年份对齐生成 derived reference series，配置按文件路径持久化。
 6. [src/features/crossdating/diagnosis.ts](src/features/crossdating/diagnosis.ts) 会基于 working series 和 reference config 计算内部轻量诊断，不运行外部 COFECHA，不自动修改数据。
-7. 打开、保存或重新验证时会触发 [src/services/cofecha/index.ts](src/services/cofecha/index.ts)：默认在 Web Worker 中调用 npm 包 `cofecha-js`；设置为官方引擎时才把输入写入 COFECHA 工作目录并运行用户选择的 EXE。
+7. 打开、保存或重新验证时会触发 [src/services/cofecha/index.ts](src/services/cofecha/index.ts)：默认在 Web Worker 中调用 npm 包 `cofecha-js`；设置为官方引擎时才把输入写入 COFECHA 工作目录并运行用户选择的 EXE。可选 undated RWL 与当前 dated 工作区联合生成 PART 8。
 8. 两种引擎都返回完整 OUT 文本，统一由 [src/features/cofecha/formatter.ts](src/features/cofecha/formatter.ts) 解析；[src/pages/home/useHomeWorkspace.ts](src/pages/home/useHomeWorkspace.ts) 按文件路径持久化 OUT/result、输入签名和引擎来源。
 9. COFECHA 结果只保存在工作区状态和应用数据目录中，不再自动镜像到源 `.rwl` 文件旁边；用户必须通过主窗口或独立 COFECHA 模块中的导出图标显式选择位置并导出完整原始 OUT。
 
@@ -69,6 +69,7 @@
 - [src/pages/useResizablePanels.ts](src/pages/useResizablePanels.ts)：分栏拖动指针事件通过 `requestAnimationFrame` 合并为每帧最多一次布局更新，布局只在拖动结束时写入 localStorage。拖动期间仅暂停并隐藏 header 的绘制/扫描影像介质及其 ResizeObserver 状态更新，松手后统一测量一次；不得修改宽度表格，也不得为 Chart.js 增加 resizeDelay。
 - [src/pages/home/cofechaPart2View.ts](src/pages/home/cofechaPart2View.ts)：COFECHA PART 2 的排序、复选框和 `Age` 列只属于报告查看器的渲染副本，严禁修改或持久化回 `VERYCOF.OUT`/原始报告。完整年龄按同一 Ident 全部行的最早起始年到最晚结束年计算（`maxEnd - minStart + 1`），不得相加各行 `Yrs`；按年龄排序必须以 Ident 分组并保持多行相邻。标题识别必须接受“全部内容”原始报告中的换页符 `\f` 和前导空白。标题中的排序动作复用年份超链接样式，但仅“按年龄排序／恢复原顺序”文字使用 14px Microsoft YaHei/微软雅黑，报告正文维持原有 Consolas 固定宽度字体；每行复选框按 Ident 同步，并通过 Home 的折线选择集合联动主窗口和独立折线图窗口。独立 COFECHA 窗口的同类操作必须经 workspace command 回传主窗口。
 - 独立 COFECHA 报告窗口不显示 `validation-summary` 摘要卡，只保留顶部统计、PART 工具栏、过期状态和重新验证入口；主窗口既有验证状态逻辑不受影响。
+- 主窗口与独立 COFECHA 窗口共用 [src/pages/home/CofechaUndatedControls.tsx](src/pages/home/CofechaUndatedControls.tsx)：当前工作区是 dated master，加载一份 undated RWL 后才显示 PART 8，并允许按最高相关 `R` 或年份调整 `D` 排序。加载、更换、排序和清除都必须重新生成完整报告；undated 路径、文件名、内容签名和排序随 dated 工作区持久化，不进入定年建议目标或 RWL 编辑器。
 - 折线图工具栏固定提供“重置”，只清除手动年份偏移，不改变 X/Y 缩放或跳转标记；没有偏移时按钮禁用。序列按钮在名称左侧显示负偏移、右侧显示正偏移，不再显示诊断事件 `E` 徽标或事件总数徽标；没有手动参考时按钮显示“参考”，生成后同一按钮改为 `清除参考(N)` 并负责清除，不另占按钮位置，也不显示参考点数。全局按钮样式使用 `box-shadow: none`。
 - 折线图年份偏移由 Home 统一持有并同步到独立折线图窗口；偏移阶段只作为待保存预览，不立即改写 RWL。执行“保存”或“另存为”时，[src/features/rwl/edit.ts](src/features/rwl/edit.ts) 会在序列化和 COFECHA 之前把全部非零偏移作为同一个可撤销批次写入 working data，并生成同批次操作日志；提交失败会取消本次保存，提交成功后清空对应预览偏移。受控偏移同步必须对 Map 内容做相等保护，禁止在 effect 中形成父子回写循环。
 - 折线图缩放窗口按实际日历年保存，并在选择集合或年份域变化后重新映射到 CategoryScale；暂时全不选、切换序列或点击“重置”都不会清空原缩放。
