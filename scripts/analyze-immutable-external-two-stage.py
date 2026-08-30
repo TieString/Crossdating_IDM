@@ -224,6 +224,8 @@ def main() -> None:
     operation = pd.read_csv(args.operation_top)
     operation["attempt_key"] = operation["attempt_id"].map(normalize_attempt)
     final = pd.read_csv(args.final_top)
+    if "final_strict_correct" not in final:
+        final["final_strict_correct"] = final["final_correct"]
     final["attempt_key"] = final["attempt_id"].map(normalize_attempt)
     baseline = pd.read_csv(args.baseline_top)
     baseline["attempt_key"] = baseline["attempt_id"].map(normalize_attempt)

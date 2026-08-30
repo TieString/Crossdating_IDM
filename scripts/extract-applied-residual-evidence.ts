@@ -134,9 +134,11 @@ if (workerIndex === null) {
         readFileSync(partPath(index), "utf8").split(/\r?\n/)
             .filter(Boolean)
             .map((line) => JSON.parse(line))
-    )).flat();
+    )).flat().sort((left, right) => String(
+        left.proposal_id ?? left.attempt_id,
+    ).localeCompare(String(right.proposal_id ?? right.attempt_id)));
     writeFileSync(join(outputDir, "residual-evidence.json"), `${JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 2,
         runDir,
         proposalsPath,
         rows,
@@ -157,7 +159,7 @@ if (workerIndex === null) {
     const proposals = parseCsv(readFileSync(proposalsPath, "utf8"))
         .filter((_, index) => index % workerCount === workerIndex);
     for (const [index, proposal] of proposals.entries()) {
-        const match = proposal.attempt_id.match(/^[^:]+:(\d+):(\d+)$/);
+        const match = proposal.attempt_id.match(/:(\d+):(\d+)$/);
         if (!match) continue;
         const key = `${Number(match[1])}:${Number(match[2])}`;
         const step = stepById.get(key);
@@ -191,6 +193,7 @@ if (workerIndex === null) {
             },
         });
         appendFileSync(partPath(workerIndex), `${JSON.stringify({
+            proposal_id: proposal.proposal_id || proposal.attempt_id,
             attempt_id: proposal.attempt_id,
             file_id: proposal.file_id,
             family: proposal.family,

@@ -1108,6 +1108,74 @@ type ResidualEvaluationOperation = EvaluationOperationIdentity & {
     year: number;
 };
 
+type LagTransitionScan = ReturnType<typeof scoreLagTransitionHypotheses>;
+
+/**
+ * Summarizes only transition evidence newer than a proposed correction.
+ * The fixed/newer side is intentionally measured after the proposal is applied:
+ * an older, out-of-order proposal should leave the real frontier in this region.
+ */
+const residualTransitionRegionSummary = (
+    scan: LagTransitionScan,
+    firstNewerYear: number,
+) => {
+    const rows = scan.hypotheses.flatMap((hypothesis) => (
+        hypothesis.rows
+            .filter((row) => row.year >= firstNewerYear)
+            .map((row) => ({
+                ...row,
+                correctionYears: hypothesis.correctionYears,
+            }))
+    ));
+    const ranked = rows.slice().sort((left, right) => (
+        right.normalizedSplitGain - left.normalizedSplitGain
+        || right.balancedAdvantage - left.balancedAdvantage
+        || right.localGain31 - left.localGain31
+    ));
+    const strongest = ranked[0] ?? null;
+    const top = ranked.slice(0, 3);
+    return {
+        rowCount: rows.length,
+        correctionCount: new Set(rows.map((row) => row.correctionYears)).size,
+        strongestCorrection: strongest?.correctionYears ?? 0,
+        strongestYear: strongest?.year ?? 0,
+        strongestNormalizedSplitGain: strongest?.normalizedSplitGain ?? 0,
+        strongestBalancedAdvantage: strongest?.balancedAdvantage ?? 0,
+        strongestLocalGain31: strongest?.localGain31 ?? 0,
+        top3NormalizedSplitGainMean: meanFinite(
+            top.map((row) => row.normalizedSplitGain),
+        ),
+        top3BalancedAdvantageMean: meanFinite(
+            top.map((row) => row.balancedAdvantage),
+        ),
+    };
+};
+
+const residualPathRegionSummary = (
+    path: ReturnType<typeof diagnoseLagPath>,
+    firstNewerYear: number,
+) => {
+    const events = path.events.filter((event) => (
+        (event.rankedYears[0]?.year ?? Number.NEGATIVE_INFINITY)
+            >= firstNewerYear
+    ));
+    const newest = events.slice().sort((left, right) => (
+        (right.rankedYears[0]?.year ?? 0) - (left.rankedYears[0]?.year ?? 0)
+    ))[0] ?? null;
+    const strongest = events.slice().sort((left, right) => (
+        right.evidence.score - left.evidence.score
+    ))[0] ?? null;
+    return {
+        eventCount: events.length,
+        newestEventYear: newest?.rankedYears[0]?.year ?? 0,
+        newestEventShift: newest ? effectiveShift(newest) ?? 0 : 0,
+        strongestEventYear: strongest?.rankedYears[0]?.year ?? 0,
+        strongestEventShift: strongest ? effectiveShift(strongest) ?? 0 : 0,
+        strongestEventScore: strongest?.evidence.score ?? 0,
+        strongestEventMargin: strongest?.evidence.scoreMargin ?? 0,
+    };
+};
+
 const meanFinite = (values: Array<number | null | undefined>): number => {
     const finite = values.filter(
         (value): value is number => value !== null
@@ -1265,6 +1333,23 @@ export const scoreAppliedOperationResidualForEvaluation = (input: {
     const afterCore = residualCoreSummary(after);
     const beforeTransition = transitionSummary(beforeTransitions);
     const afterTransition = transitionSummary(afterTransitions);
+    const firstNewerYear = input.operation.year + 1;
+    const beforeNewerTransition = residualTransitionRegionSummary(
+        beforeTransitions,
+        firstNewerYear,
+    );
+    const afterNewerTransition = residualTransitionRegionSummary(
+        afterTransitions,
+        firstNewerYear,
+    );
+    const beforeNewerPath = residualPathRegionSummary(
+        beforePath,
+        firstNewerYear,
+    );
+    const afterNewerPath = residualPathRegionSummary(
+        afterPath,
+        firstNewerYear,
+    );
     const newestAfterEvent = afterPath.events.slice().sort((left, right) => (
         right.endYear - left.endYear
     ))[0] ?? null;
@@ -1299,6 +1384,34 @@ export const scoreAppliedOperationResidualForEvaluation = (input: {
             Number(afterTransition[key as keyof typeof afterTransition])
                 - Number(beforeTransition[key as keyof typeof beforeTransition]),
         ])),
+        newerSide: {
+            firstYear: firstNewerYear,
+            beforeTransition: beforeNewerTransition,
+            afterTransition: afterNewerTransition,
+            transitionDelta: Object.fromEntries(
+                Object.keys(beforeNewerTransition).map((key) => [
+                    key,
+                    Number(
+                        afterNewerTransition[
+                            key as keyof typeof afterNewerTransition
+                        ],
+                    ) - Number(
+                        beforeNewerTransition[
+                            key as keyof typeof beforeNewerTransition
+                        ],
+                    ),
+                ]),
+            ),
+            beforePath: beforeNewerPath,
+            afterPath: afterNewerPath,
+            pathDelta: Object.fromEntries(
+                Object.keys(beforeNewerPath).map((key) => [
+                    key,
+                    Number(afterNewerPath[key as keyof typeof afterNewerPath])
+                        - Number(beforeNewerPath[key as keyof typeof beforeNewerPath]),
+                ]),
+            ),
+        },
     };
 };
 
