@@ -3,6 +3,8 @@ import { startTransition, useCallback, useEffect, useMemo, useRef, useState } fr
 import { extractPart6FlaggedASeriesIds, parseCofechaResult, splitReportByParts } from "@/features/cofecha/formatter";
 import { getCofechaSeriesMapValue } from "@/features/cofecha/seriesId";
 import {
+    applyAuthoritativeModelDecision,
+    type AuthoritativeDiagnosisDecision,
     type CrossdatingDiagnosis,
     getDisplayedDiagnosisEvents,
     getDiagnosisCandidateLabel,
@@ -45,6 +47,7 @@ import {
     type TreeRingScanSeriesState,
 } from "@/features/treeRingScans";
 import { runCofecha } from "@/services/cofecha/runner";
+import { runAuthoritativeUnifiedDiagnosis } from "@/services/diagnosis/authoritativeRuntime";
 import { readRwlFile, saveFile } from "@/services/fs/io";
 import { stopMarker } from "@/shared/constants";
 import { useSettings } from "@/features/settings/SettingsContext";
@@ -1702,6 +1705,51 @@ export function useHomeWorkspace() {
             ))
     ), [fileName, operationLog]);
     const diagnosisReferenceConfig = selectAutomaticDiagnosisReferenceConfig(dynamicReferenceConfig);
+    const resolveAuthoritativeDiagnosis = useCallback(async (
+        baseDiagnosis: CrossdatingDiagnosis,
+        targetTree: string,
+        freshCofechaText: string | undefined,
+    ): Promise<CrossdatingDiagnosis> => {
+        let decision: AuthoritativeDiagnosisDecision;
+        if (!freshCofechaText) {
+            decision = {
+                schemaVersion: 1,
+                modelVersion: "applied-residual-unified-v12",
+                authority: "authoritative",
+                status: "refused",
+                eventType: "noEvent",
+                shiftYears: 0,
+                startYear: null,
+                endYear: null,
+                topYear: null,
+                identityGroup: null,
+                refusalReason: "fresh_cofecha_report_required",
+            };
+        } else {
+            try {
+                decision = await runAuthoritativeUnifiedDiagnosis({
+                    rwlText: rwlEditorRef.current.exportAsRwlString(),
+                    outText: freshCofechaText,
+                    targetId: targetTree,
+                });
+            } catch (error) {
+                decision = {
+                    schemaVersion: 1,
+                    modelVersion: "applied-residual-unified-v12",
+                    authority: "authoritative",
+                    status: "error",
+                    eventType: "noEvent",
+                    shiftYears: 0,
+                    startYear: null,
+                    endYear: null,
+                    topYear: null,
+                    identityGroup: null,
+                    refusalReason: error instanceof Error ? error.message : String(error),
+                };
+            }
+        }
+        return applyAuthoritativeModelDecision(baseDiagnosis, decision, targetTree);
+    }, []);
     useEffect(() => {
         let cancelled = false;
         let startTimer: number | null = null;
@@ -1748,7 +1796,7 @@ export function useHomeWorkspace() {
             resultCache.reviewResults = new Map();
         }
         const cachedDiagnosis = resultCache.results.get(targetTree);
-        if (cachedDiagnosis) {
+        if (cachedDiagnosis?.authoritativeModelDecision) {
             setIsEventDiagnosisRunning(false);
             startTransition(() => setCrossdatingDiagnosis(cachedDiagnosis));
             return undefined;
@@ -1769,7 +1817,7 @@ export function useHomeWorkspace() {
             workerForRequest = worker;
             diagnosisWorkerRef.current = worker;
 
-            worker.onmessage = (event: MessageEvent<DiagnosisWorkerResponse>) => {
+            worker.onmessage = async (event: MessageEvent<DiagnosisWorkerResponse>) => {
                 const response = event.data;
                 if (
                     cancelled
@@ -1787,9 +1835,23 @@ export function useHomeWorkspace() {
                     return;
                 }
 
-                const resolvedDiagnosis = response.diagnosis;
+                const resolvedDiagnosis = await resolveAuthoritativeDiagnosis(
+                    response.diagnosis,
+                    targetTree,
+                    diagnosisCofechaText,
+                );
+                if (
+                    cancelled
+                    || response.id !== diagnosisRequestIdRef.current
+                    || diagnosisWorkerRef.current !== worker
+                ) {
+                    return;
+                }
                 setIsEventDiagnosisRunning(false);
-                console.info(`[JS 事件诊断] ${targetTree} · ${Math.round(response.elapsedMs)} ms`);
+                console.info(
+                    `[统一模型诊断] ${targetTree} · JS证据 ${Math.round(response.elapsedMs)} ms`
+                    + ` · ${resolvedDiagnosis.authoritativeModelDecision?.status ?? "error"}`,
+                );
                 resultCache.results.set(targetTree, resolvedDiagnosis);
                 resultCache.reviewResults.set(targetTree, resolvedDiagnosis);
                 startTransition(() => {
@@ -1839,7 +1901,7 @@ export function useHomeWorkspace() {
         };
         // outFileContent 加入依赖：COFECHA 重跑（保存后）更新 .OUT 时重新诊断，使 COFECHA 驱动候选与
         // 逐个（bark-to-pith）迭代工作流生效。
-    }, [diagnosisReferenceConfig, historyAnimation?.id, markCurrentDiagnosisStale, outFileContent, selectedTree, settings.diagnosis.enabled, siteData, siteDataSignature]);
+    }, [diagnosisReferenceConfig, historyAnimation?.id, markCurrentDiagnosisStale, outFileContent, resolveAuthoritativeDiagnosis, selectedTree, settings.diagnosis.enabled, siteData, siteDataSignature]);
 
     const breadthScanTargets = useMemo(() => orderBreadthScanTargets(
         Array.from(siteData.keys()),
@@ -2040,7 +2102,7 @@ export function useHomeWorkspace() {
             const cachedDiagnosis = cacheMatches
                 ? currentCache.reviewResults?.get(targetTree)
                 : undefined;
-            if (cachedDiagnosis) {
+            if (cachedDiagnosis?.authoritativeModelDecision) {
                 activeTarget = null;
                 processDiagnosis(targetTree, cachedDiagnosis);
                 scheduleNext(scanNext, 0);
@@ -2053,7 +2115,7 @@ export function useHomeWorkspace() {
             const requestId = ++breadthDiagnosisRequestIdRef.current;
             activeRequestId = requestId;
 
-            worker.onmessage = (event: MessageEvent<DiagnosisWorkerResponse>) => {
+            worker.onmessage = async (event: MessageEvent<DiagnosisWorkerResponse>) => {
                 const response = event.data;
                 if (cancelled
                     || breadthScanContextRef.current !== context
@@ -2062,9 +2124,9 @@ export function useHomeWorkspace() {
                     return;
                 }
 
-                activeTarget = null;
-                activeRequestId = null;
                 if ("error" in response) {
+                    activeTarget = null;
+                    activeRequestId = null;
                     const attempts = (context.attempts.get(targetTree) ?? 0) + 1;
                     context.attempts.set(targetTree, attempts);
                     if (attempts < 2) {
@@ -2082,6 +2144,20 @@ export function useHomeWorkspace() {
                     return;
                 }
 
+                const authoritativeDiagnosis = await resolveAuthoritativeDiagnosis(
+                    response.diagnosis,
+                    targetTree,
+                    context.cofechaText,
+                );
+                if (cancelled
+                    || breadthScanContextRef.current !== context
+                    || response.id !== activeRequestId
+                    || response.id !== breadthDiagnosisRequestIdRef.current) {
+                    return;
+                }
+                activeTarget = null;
+                activeRequestId = null;
+
                 let resultCache = diagnosisResultCacheRef.current;
                 if (resultCache?.siteData !== context.siteData
                     || resultCache.referenceConfig !== context.referenceConfig
@@ -2096,9 +2172,9 @@ export function useHomeWorkspace() {
                     diagnosisResultCacheRef.current = resultCache;
                 }
                 resultCache.reviewResults ??= new Map();
-                resultCache.reviewResults.set(targetTree, response.diagnosis);
-                resultCache.results.set(targetTree, response.diagnosis);
-                processDiagnosis(targetTree, response.diagnosis);
+                resultCache.reviewResults.set(targetTree, authoritativeDiagnosis);
+                resultCache.results.set(targetTree, authoritativeDiagnosis);
+                processDiagnosis(targetTree, authoritativeDiagnosis);
                 scheduleNext(scanNext);
             };
 
@@ -2154,6 +2230,7 @@ export function useHomeWorkspace() {
         isEventDiagnosisRunning,
         isFileLoading,
         isSaveRunning,
+        resolveAuthoritativeDiagnosis,
         selectedTree,
     ]);
 

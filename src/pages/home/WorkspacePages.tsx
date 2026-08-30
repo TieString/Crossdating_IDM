@@ -518,8 +518,8 @@ export function ExpandedChartPage({
 
     const activeEventCount = diagnosis.events.filter((event) => !event.stale).length;
     const diagnosisSubtitle = activeEventCount > 0
-        ? ` · JS 事件诊断 ${activeEventCount} 个窗口`
-        : " · JS 事件诊断未发现复核窗口";
+        ? ` · 统一诊断模型 ${activeEventCount} 个窗口`
+        : " · 统一诊断模型未发现复核窗口";
 
     return (
         <PageShell

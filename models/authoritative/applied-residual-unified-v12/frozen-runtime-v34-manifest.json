@@ -1,0 +1,202 @@
+[
+  {
+    "relativePath": "calibration-enriched-hierarchical-fit-v2\\location-falseRing-model.txt",
+    "bytes": 1789517,
+    "sha256": "abecbe46ba92095aeb77dcd4c8aa48c347259ce524544ad44df305da0618605a"
+  },
+  {
+    "relativePath": "calibration-enriched-hierarchical-fit-v2\\location-feature-names.json",
+    "bytes": 12499,
+    "sha256": "b150f7fe0bab42c70aaef265eeb0b7c8c7c48da653bb31c0fe00a38d01cceccd"
+  },
+  {
+    "relativePath": "calibration-enriched-hierarchical-fit-v2\\location-global-model.txt",
+    "bytes": 2007642,
+    "sha256": "1d53d62486fb6cdbab6e62bed192c782328b8672564a5dc96620bebcc67ce1bf"
+  },
+  {
+    "relativePath": "calibration-enriched-hierarchical-fit-v2\\location-missingRing-model.txt",
+    "bytes": 1783344,
+    "sha256": "3e3d45b61d448c9c67a02936fdc7e7e7e176d407043b94f81ffe43fbe7d282b8"
+  },
+  {
+    "relativePath": "calibration-enriched-hierarchical-fit-v2\\location-partialMove-model.txt",
+    "bytes": 2000642,
+    "sha256": "402a85fa1916113f55e140f9e7290478d73332569c4a68439fc728d147275d15"
+  },
+  {
+    "relativePath": "calibration-enriched-hierarchical-fit-v2\\operation-feature-names.json",
+    "bytes": 27049,
+    "sha256": "42cba2a36d3c6b4717d447854cb79657bc7b3f599b53718b3ac343b8148db34b"
+  },
+  {
+    "relativePath": "calibration-enriched-hierarchical-fit-v2\\operation-model-0.txt",
+    "bytes": 1239672,
+    "sha256": "a2f8b6e86e5073e4e98123bcd5c9bfb9bf9a1184ecf925aaf542c5e0a9b4e04c"
+  },
+  {
+    "relativePath": "calibration-enriched-hierarchical-fit-v2\\operation-model-1.txt",
+    "bytes": 1239299,
+    "sha256": "a12ee7802e3dfb4a064782c8678dfac92d27149b935e07a41f67ac7160ef45f1"
+  },
+  {
+    "relativePath": "calibration-enriched-hierarchical-fit-v2\\operation-model-2.txt",
+    "bytes": 1239903,
+    "sha256": "b0e02a9feaa8303dcd5ee4abd8cb21d2b25ca80eed9d1f7e22e62db883b1c4f5"
+  },
+  {
+    "relativePath": "calibration-enriched-hierarchical-fit-v2\\summary.json",
+    "bytes": 1235,
+    "sha256": "36f0c31960c4de4c126d2fbbf78dca8cbbbb2fa29c8afea39ea6f30467778e9f"
+  },
+  {
+    "relativePath": "calibration-enriched-location-classifier-fit-v2\\feature-names.json",
+    "bytes": 12499,
+    "sha256": "b150f7fe0bab42c70aaef265eeb0b7c8c7c48da653bb31c0fe00a38d01cceccd"
+  },
+  {
+    "relativePath": "calibration-enriched-location-classifier-fit-v2\\location-falseRing-classifier.txt",
+    "bytes": 2145777,
+    "sha256": "479894c13c12485c81e7d27222acbdaf23dd9e2c37438cfb7e3ab50263ff103c"
+  },
+  {
+    "relativePath": "calibration-enriched-location-classifier-fit-v2\\location-global-classifier.txt",
+    "bytes": 2202662,
+    "sha256": "9e41b6e8f9ea9ce2834ab25fa9fe0e6e12b5719da7448ad98dbe00fa27c5c2e8"
+  },
+  {
+    "relativePath": "calibration-enriched-location-classifier-fit-v2\\location-missingRing-classifier.txt",
+    "bytes": 2143544,
+    "sha256": "d998766aef6417ce340b553db086a9a674bde0bb3660ef71045595c40e79e981"
+  },
+  {
+    "relativePath": "calibration-enriched-location-classifier-fit-v2\\location-partialMove-classifier.txt",
+    "bytes": 2199289,
+    "sha256": "6c8e7bf0afe8c756b825aedde43fc1245d6b9bdd004ea868c481bc8917fa4ff1"
+  },
+  {
+    "relativePath": "calibration-enriched-location-classifier-fit-v2\\summary.json",
+    "bytes": 974,
+    "sha256": "8987c2152d1e52aa784bd646ba834c6e4d6e635965c696949d25d81484f97ca5"
+  },
+  {
+    "relativePath": "calibration-standalone-whole-modes8-fit-v38\\location-falseRing-classifier.txt",
+    "bytes": 1533688,
+    "sha256": "0654f6ae5e346be98285cdf54f951a6af105b3d80c55a24e2b4b3d83cfd7ce03"
+  },
+  {
+    "relativePath": "calibration-standalone-whole-modes8-fit-v38\\location-falseRing-ranker.txt",
+    "bytes": 1452144,
+    "sha256": "52abd02a413ec5c15305dbad997651b47161cb263f76e2876975d3ff6490cb29"
+  },
+  {
+    "relativePath": "calibration-standalone-whole-modes8-fit-v38\\location-feature-names.json",
+    "bytes": 288736,
+    "sha256": "c5c71b528d1fa10ab594434d183493f1bf87456978ff3456a5c2b4bddf16a03c"
+  },
+  {
+    "relativePath": "calibration-standalone-whole-modes8-fit-v38\\location-global-classifier.txt",
+    "bytes": 1681409,
+    "sha256": "d56e9402c7f6565fba12ca75f3650af6664cd93eecec144b4c977a0129a7a0d7"
+  },
+  {
+    "relativePath": "calibration-standalone-whole-modes8-fit-v38\\location-global-ranker.txt",
+    "bytes": 1507075,
+    "sha256": "92fa1312e91e828fce6abb6d63f9306fd5b27a58c48219db36af06ac409bbaba"
+  },
+  {
+    "relativePath": "calibration-standalone-whole-modes8-fit-v38\\location-meta-ranker.txt",
+    "bytes": 977319,
+    "sha256": "7b715ddb02f29c2caf5290ff030efda4778e06ed0e4d674311ba4979edcd7053"
+  },
+  {
+    "relativePath": "calibration-standalone-whole-modes8-fit-v38\\location-missingRing-classifier.txt",
+    "bytes": 1541765,
+    "sha256": "396e8d1b2dcd26b10a8350a8526ffc717604b38cf1a3bc3ed31b1d25c9be7ba7"
+  },
+  {
+    "relativePath": "calibration-standalone-whole-modes8-fit-v38\\location-missingRing-ranker.txt",
+    "bytes": 1450898,
+    "sha256": "6119a39f6e352cd7f1d052eff6a4e6920319b461f809c6fc75b0b9de5dc30b89"
+  },
+  {
+    "relativePath": "calibration-standalone-whole-modes8-fit-v38\\location-partialMove-classifier.txt",
+    "bytes": 1673148,
+    "sha256": "bd9827da5c53759693f2ba4136c7a24a6f88bd06745bc0520522ba5ba61a20cb"
+  },
+  {
+    "relativePath": "calibration-standalone-whole-modes8-fit-v38\\location-partialMove-ranker.txt",
+    "bytes": 1503258,
+    "sha256": "429cb25269ae0ec4046948be57a5359f841a317b5c2cb8b2d759e48596adf031"
+  },
+  {
+    "relativePath": "calibration-standalone-whole-modes8-fit-v38\\locationMeta-feature-names.json",
+    "bytes": 54874,
+    "sha256": "6801ca79062f65dd3409f43618e888fe53395c9a1bfc348ea1e08c8479e77b1d"
+  },
+  {
+    "relativePath": "calibration-standalone-whole-modes8-fit-v38\\operation-classifier.txt",
+    "bytes": 1498913,
+    "sha256": "633100c9f8dd9ade42c5efc8019d51ebd0af68cc09b88da260a5a72d1bf3b7c4"
+  },
+  {
+    "relativePath": "calibration-standalone-whole-modes8-fit-v38\\operation-feature-names.json",
+    "bytes": 68391,
+    "sha256": "8441d0ee8b8788995f6ee1b1d47386d816452f52c6adb4d410c51eee85483a9a"
+  },
+  {
+    "relativePath": "calibration-standalone-whole-modes8-fit-v38\\operation-meta-ranker.txt",
+    "bytes": 679271,
+    "sha256": "c0b43954ba7da6c8c4b3703da45f1b6cc2b472177d81568ea8daf0ba98a835ea"
+  },
+  {
+    "relativePath": "calibration-standalone-whole-modes8-fit-v38\\operation-ranker.txt",
+    "bytes": 1408181,
+    "sha256": "af8b4d6d2590e6227d3ec03e8cebcd2e5ff166b8c787e35676eae047bdcede3e"
+  },
+  {
+    "relativePath": "calibration-standalone-whole-modes8-fit-v38\\operation-type-classifier.txt",
+    "bytes": 1499703,
+    "sha256": "021b73297dff76928d6a029d731a7671261282e183c7cb95fb213b525ff54898"
+  },
+  {
+    "relativePath": "calibration-standalone-whole-modes8-fit-v38\\operation-type-ranker.txt",
+    "bytes": 1372906,
+    "sha256": "20824c1680c597dfa6bd7c03bce33954e51c053f7ff6db87514be0d13e4f7dd2"
+  },
+  {
+    "relativePath": "calibration-standalone-whole-modes8-fit-v38\\operationMeta-feature-names.json",
+    "bytes": 2795,
+    "sha256": "5ce1db20d5b3576d91e0ce8fd073fb030b0715aa992ac06b54db7cfb15e1517b"
+  },
+  {
+    "relativePath": "calibration-standalone-whole-modes8-fit-v38\\operationType-feature-names.json",
+    "bytes": 78448,
+    "sha256": "a690c93bc69793b347ff2c2f031c7ab214fd42befb8a29c3a568e5c62e86d04f"
+  },
+  {
+    "relativePath": "calibration-standalone-whole-modes8-fit-v38\\shift-partialMove-classifier.txt",
+    "bytes": 1474450,
+    "sha256": "81e0fe369e6ac2ecd85a4a347f1d9485a51d411c66bfe01701a94af5f27097d8"
+  },
+  {
+    "relativePath": "calibration-standalone-whole-modes8-fit-v38\\shift-partialMove-ranker.txt",
+    "bytes": 635924,
+    "sha256": "58ba1cb72f82ca5c5146fd4c152382e1a465984c3bb7867484c9953ffba933be"
+  },
+  {
+    "relativePath": "calibration-standalone-whole-modes8-fit-v38\\shift-wholeSeriesMove-classifier.txt",
+    "bytes": 965528,
+    "sha256": "e0224b3083581b4d6876fe1133318cebbbdc2252dae5d83fc1434164d54e8853"
+  },
+  {
+    "relativePath": "calibration-standalone-whole-modes8-fit-v38\\shift-wholeSeriesMove-ranker.txt",
+    "bytes": 447093,
+    "sha256": "daf64e09535d8942761533d5438a9e97089e04187a78b2dbef81d1bdcac141fe"
+  },
+  {
+    "relativePath": "calibration-standalone-whole-modes8-fit-v38\\summary.json",
+    "bytes": 1926,
+    "sha256": "cd3298aef36c264cff801af7ca4b529cb2c203f241bce4d30ed9930c41210964"
+  }
+]

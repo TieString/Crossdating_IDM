@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "developmentCandidateRows": 378626,
+  "targetCandidateRows": 124848,
+  "targetAttempts": 1078,
+  "targetFiles": 17,
+  "productFailures": 98,
+  "operationRecoverableFailures": 98,
+  "operationTopCorrect": 68,
+  "operationTopCorrectRate": 0.6938775510204082,
+  "strictOperationTopCorrect": 38
+}

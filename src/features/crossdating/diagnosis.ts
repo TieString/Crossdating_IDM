@@ -24,6 +24,7 @@ export {
     eventAtLocationAlternative,
 } from "./diagnosis/eventLocationAlternatives";
 export { getDisplayedDiagnosisEvents } from "./diagnosis/eventDisplay";
+export { applyAuthoritativeModelDecision } from "./diagnosis/authoritativeModelProjection";
 export {
     diagnosisEventInterpretationChain,
     projectActiveDiagnosisEventInterpretation,

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "developmentRows": 1620837,
+  "targetRows": 483661,
+  "features": 306,
+  "frozenWeights": {
+    "typedClassifier": 0.75,
+    "classifier": 0.75
+  },
+  "events": 582,
+  "productCorrect": 524,
+  "operationTopCorrect": 34,
+  "completeCorrections": 26,
+  "strictCompleteCorrections": 22,
+  "oracleUnionCorrect": 550,
+  "oracleUnionAccuracy": 0.9450171821305842,
+  "byFamily": {
+    "A": {
+      "events": 60,
+      "productCorrect": 57,
+      "completeCorrections": 2,
+      "oracleUnionCorrect": 59
+    },
+    "B": {
+      "events": 179,
+      "productCorrect": 157,
+      "completeCorrections": 10,
+      "oracleUnionCorrect": 167
+    },
+    "C": {
+      "events": 180,
+      "productCorrect": 165,
+      "completeCorrections": 8,
+      "oracleUnionCorrect": 173
+    },
+    "D": {
+      "events": 163,
+      "productCorrect": 145,
+      "completeCorrections": 6,
+      "oracleUnionCorrect": 151
+    }
+  }
+}

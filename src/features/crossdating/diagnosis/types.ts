@@ -875,8 +875,24 @@ export type CrossdatingDiagnosis = {
     eventDecisionAudits?: DiagnosisEventDecisionAudit[];
     reviewEvents?: DiagnosisEvent[];
     reviewWindowDecisions?: DiagnosisReviewWindowDecision[];
-    /** Shadow until the single adjudicator passes the frozen production gates. */
+    /** Historical shadow audit retained as candidate evidence only. */
     jointEventDecisions?: DiagnosisJointEventDecision[];
+    /** Sole user-facing authority in the experiment worktree. */
+    authoritativeModelDecision?: AuthoritativeDiagnosisDecision;
+};
+
+export type AuthoritativeDiagnosisDecision = {
+    schemaVersion: 1;
+    modelVersion: string;
+    authority: "authoritative";
+    status: "selected" | "refused" | "error";
+    eventType: DiagnosisEventType | "noEvent";
+    shiftYears: number;
+    startYear: number | null;
+    endYear: number | null;
+    topYear: number | null;
+    identityGroup: string | null;
+    refusalReason: string | null;
 };
 
 export type LocalSimulationOperationType =

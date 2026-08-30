@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "modelVersion": "applied-residual-unified-v12",
+  "truthBlind": true,
+  "operationIdentityImmutable": true,
+  "sameIdentityLocationImmutable": true,
+  "operationRows": 18472,
+  "operationFeatures": 1312,
+  "operationPairRows": 18894,
+  "locationRows": 27663,
+  "locationFeatures": 2808,
+  "locationPairRows": 78508,
+  "modelFile": "model.joblib",
+  "modelSha256": "59407d3a26a11baf3212385272029d301c839e89e5416e03015c98aa8abe0fe7",
+  "inputSha256": {
+    "operationProposals": "25be8687f1bdc7de68740435921a87f6d25e512d24815ad9b4f5772f59526d75",
+    "operationResidual": "0fdd79aa4e133b78c37411faed6cd81e5214046066249a1d30527a5b20b7d8ee",
+    "identityMetadata": "bcd9dc32b15534cc289b8e0b5f0498f66623f09965c5c4a364de0b256bfd3b1a",
+    "operationTop": "8f11f8ebf3f360f3fb8cd0b852f6072386af9f96d30f04cd94e0e1eb30b8defb",
+    "locationScores": "67fe4c9ad81fa5585ca34f7cfce39a163e66661a9ae9eb6c5afb8b23ba6b50ef",
+    "locationResidual": "f420a5aaa5778203b07093c3da5e52394f6d8f0825138bd9e1fa6c2f5a0e2e3e"
+  },
+  "runtimeContract": {
+    "operationInputs": [
+      "immutable Top4 identities",
+      "base selection/meta/pair scores",
+      "post-correction residual evidence"
+    ],
+    "locationInputs": [
+      "selected operation identity only",
+      "immutable location candidates",
+      "base listwise/pairwise and anchor scores",
+      "post-correction per-reference residual evidence"
+    ],
+    "output": "one immutable operation/shift/window package"
+  }
+}
