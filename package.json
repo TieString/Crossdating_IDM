@@ -19,6 +19,7 @@
     "validate:cofecha-reference": "node scripts/validate-cofecha-reference.mjs",
     "validate:unified-shadow-model": "python scripts/validate-applied-residual-unified-shadow.py",
     "validate:authoritative-unified-model": "python scripts/validate-authoritative-unified-runtime.py",
+    "validate:online-unified-model": "python scripts/validate-online-unified-model-parity.py",
     "validate:cofecha-js-report": "node scripts/run-validate-cofecha606-js-report-parts1-4.mjs",
     "benchmark:co612-zero-frontier-matrix": "node scripts/run-co612-zero-frontier-matrix.mjs",
     "export:tree-ring-scan-fixtures": "vite-node scripts/export-tree-ring-scan-fixtures.ts",

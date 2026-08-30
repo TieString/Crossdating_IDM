@@ -1,7 +1,6 @@
 use tauri::Builder;
 
 mod bayesian_dating_mcmc;
-mod authoritative_diagnosis;
 mod cofecha;
 mod commands;
 mod file_ops;
@@ -17,7 +16,6 @@ pub fn run() {
             commands::greet,
             commands::list_files_and_directories,
             commands::prepare_tree_ring_scan_image,
-            authoritative_diagnosis::run_authoritative_unified_diagnosis,
             cofecha::run_external_cofecha,
             bayesian_dating_mcmc::bayesian_date_series_mcmc,
         ])

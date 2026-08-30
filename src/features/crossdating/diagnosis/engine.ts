@@ -105,6 +105,7 @@ export function diagnoseCrossdating(
         ));
     const seriesDiagnoses = seriesDiagnosisResults
         .filter((diagnosis): diagnosis is SeriesCoreDiagnosis => diagnosis !== null);
+    seriesDiagnoses.forEach((diagnosis) => options.captureSeriesCore?.(diagnosis));
     const segments = seriesDiagnoses.flatMap((diagnosis) => diagnosis.segments);
     const propagationPatterns = seriesDiagnoses.flatMap((diagnosis) => diagnosis.propagationPatterns);
     const globalSlidingMatches = seriesDiagnoses.map((diagnosis) => diagnosis.globalSlidingMatch);

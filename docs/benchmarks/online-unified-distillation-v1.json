@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "modelVersion": "applied-residual-unified-v12-online-v1",
+  "teacherModelVersion": "applied-residual-unified-v12",
+  "attempts": 4618,
+  "files": 50,
+  "operationRows": 176793,
+  "locationRows": 491277,
+  "locationTrainRows": 462755,
+  "operationFeatures": 896,
+  "locationFeatures": 1654,
+  "operationPackageOracle": 1.0,
+  "locationPackageOracle": 0.9036472509526402,
+  "fileOofOperationTop1": 0.9174967518406236,
+  "fileOofLocationTop1GivenPackage": 0.2955906369080022,
+  "fileOofCombinedTeacherFidelity": 0.4157644001732352,
+  "fileMacroCombinedTeacherFidelity": 0.418988435089248,
+  "operationFolds": [
+    {
+      "fold": 1,
+      "trainFiles": 40,
+      "testFiles": 10,
+      "attempts": 923,
+      "top1": 0.9382448537378115
+    },
+    {
+      "fold": 2,
+      "trainFiles": 40,
+      "testFiles": 10,
+      "attempts": 881,
+      "top1": 0.9330306469920545
+    },
+    {
+      "fold": 3,
+      "trainFiles": 40,
+      "testFiles": 10,
+      "attempts": 947,
+      "top1": 0.9017951425554382
+    },
+    {
+      "fold": 4,
+      "trainFiles": 40,
+      "testFiles": 10,
+      "attempts": 983,
+      "top1": 0.9084435401831129
+    },
+    {
+      "fold": 5,
+      "trainFiles": 40,
+      "testFiles": 10,
+      "attempts": 884,
+      "top1": 0.9072398190045249
+    }
+  ],
+  "locationFolds": [
+    {
+      "fold": 1,
+      "trainFiles": 40,
+      "testFiles": 10,
+      "attempts": 678,
+      "top1": 0.3274336283185841
+    },
+    {
+      "fold": 2,
+      "trainFiles": 40,
+      "testFiles": 10,
+      "attempts": 651,
+      "top1": 0.3225806451612903
+    },
+    {
+      "fold": 3,
+      "trainFiles": 40,
+      "testFiles": 10,
+      "attempts": 666,
+      "top1": 0.32432432432432434
+    },
+    {
+      "fold": 4,
+      "trainFiles": 40,
+      "testFiles": 10,
+      "attempts": 694,
+      "top1": 0.3400576368876081
+    },
+    {
+      "fold": 5,
+      "trainFiles": 40,
+      "testFiles": 10,
+      "attempts": 631,
+      "top1": 0.3201267828843106
+    }
+  ]
+}

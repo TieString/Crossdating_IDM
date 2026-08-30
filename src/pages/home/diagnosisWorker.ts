@@ -1,13 +1,22 @@
 /// <reference lib="webworker" />
 
 import { diagnoseCrossdating } from "@/features/crossdating/diagnosis/engine";
+import { applyAuthoritativeModelDecision } from "@/features/crossdating/diagnosis/authoritativeModelProjection";
 import {
     selectInsufficientReferencePairwiseFallback,
 } from "@/features/crossdating/diagnosis/insufficientReferenceFallback";
 import type {
+    AuthoritativeDiagnosisDecision,
     CrossdatingDiagnosis,
+    DiagnosisEvent,
     ReviewWindowDisplayMode,
+    SeriesCoreDiagnosis,
 } from "@/features/crossdating/diagnosis/types";
+import { buildOnlineUnifiedEvidenceForTarget } from "@/features/crossdating/diagnosis/onlineUnifiedEvidenceRuntime";
+import {
+    inferOnlineUnifiedDiagnosis,
+    warmOnlineUnifiedModel,
+} from "@/features/crossdating/diagnosis/onlineUnifiedModel";
 import type { ReferenceSeriesConfig } from "@/features/crossdating/reference";
 import {
     createPairwiseBootstrapReferenceConfig,
@@ -35,6 +44,11 @@ export type DiagnosisWorkerResponse =
         id: number;
         diagnosis: CrossdatingDiagnosis;
         elapsedMs: number;
+        evidenceElapsedMs: number;
+        packageElapsedMs: number;
+        modelElapsedMs: number;
+        operationCandidateCount: number;
+        locationCandidateCount: number;
       }
     | {
         id: number;
@@ -42,6 +56,8 @@ export type DiagnosisWorkerResponse =
       };
 
 const ctx = self as DedicatedWorkerGlobalScope;
+
+warmOnlineUnifiedModel();
 
 ctx.addEventListener("message", (event: MessageEvent<DiagnosisWorkerRequest>) => {
     const {
@@ -54,6 +70,7 @@ ctx.addEventListener("message", (event: MessageEvent<DiagnosisWorkerRequest>) =>
         includeEventDecisionAudits,
     } = event.data;
 
+    let phase = "reference";
     try {
         const startedAt = performance.now();
         const automaticReferenceConfig = selectAutomaticDiagnosisReferenceConfig(referenceConfig);
@@ -62,6 +79,11 @@ ctx.addEventListener("message", (event: MessageEvent<DiagnosisWorkerRequest>) =>
                 id,
                 diagnosis: createEmptyCrossdatingDiagnosis(),
                 elapsedMs: performance.now() - startedAt,
+                evidenceElapsedMs: performance.now() - startedAt,
+                packageElapsedMs: 0,
+                modelElapsedMs: 0,
+                operationCandidateCount: 0,
+                locationCandidateCount: 0,
             } satisfies DiagnosisWorkerResponse);
             return;
         }
@@ -70,12 +92,19 @@ ctx.addEventListener("message", (event: MessageEvent<DiagnosisWorkerRequest>) =>
             automaticReferenceConfig,
             targetTree,
         );
+        let effectiveReferenceConfig = targetReferenceConfig;
+        phase = "evidence";
+        let capturedCore: SeriesCoreDiagnosis | null = null;
         let diagnosis = diagnoseCrossdating(siteData, {
             referenceConfig: targetReferenceConfig,
             targetTrees: targetTree ? [targetTree] : [],
             cofechaText,
             reviewWindowDisplayMode,
-            includeEventDecisionAudits,
+            includeEventDecisionAudits: targetTree !== undefined
+                ? true : includeEventDecisionAudits,
+            captureSeriesCore: (core) => {
+                if (core.targetTree === targetTree) capturedCore = core;
+            },
         });
         const needsPairwiseFallback = targetTree !== undefined
             && targetReferenceConfig?.cofechaPassReference?.source !== "pairwise_bootstrap"
@@ -105,23 +134,84 @@ ctx.addEventListener("message", (event: MessageEvent<DiagnosisWorkerRequest>) =>
                     cofechaText,
                     reviewWindowDisplayMode,
                     includeEventDecisionAudits,
+                    captureSeriesCore: (core) => {
+                        if (core.targetTree === targetTree) capturedCore = core;
+                    },
                 });
                 diagnosis = selectInsufficientReferencePairwiseFallback(
                     diagnosis,
                     pairwiseDiagnosis,
                     siteData.get(targetTree),
                 );
+                effectiveReferenceConfig = targetPairwiseReference;
             }
+        }
+        const evidenceElapsedMs = performance.now() - startedAt;
+        let packageElapsedMs = 0;
+        let modelElapsedMs = 0;
+        let operationCandidateCount = 0;
+        let locationCandidateCount = 0;
+        if (targetTree && effectiveReferenceConfig) {
+            phase = "package";
+            const packageStartedAt = performance.now();
+            const bundle = buildOnlineUnifiedEvidenceForTarget({
+                diagnosis,
+                siteData,
+                targetTree,
+                referenceConfig: effectiveReferenceConfig,
+                core: capturedCore,
+            });
+            packageElapsedMs = performance.now() - packageStartedAt;
+            let decision: AuthoritativeDiagnosisDecision;
+            let executableEvent: DiagnosisEvent | null = null;
+            if (bundle) {
+                phase = "model";
+                const inference = inferOnlineUnifiedDiagnosis(bundle);
+                decision = inference.decision;
+                executableEvent = inference.selectedPackage?.event ?? null;
+                modelElapsedMs = inference.operationElapsedMs + inference.locationElapsedMs;
+                operationCandidateCount = inference.operationCandidateCount;
+                locationCandidateCount = inference.locationCandidateCount;
+            } else {
+                decision = {
+                    schemaVersion: 1,
+                    modelVersion: "applied-residual-unified-v12-online-v1",
+                    authority: "authoritative",
+                    status: "refused",
+                    eventType: "noEvent",
+                    shiftYears: 0,
+                    startYear: null,
+                    endYear: null,
+                    topYear: null,
+                    identityGroup: null,
+                    packageId: null,
+                    refusalReason: "online_evidence_bundle_unavailable",
+                };
+            }
+            phase = "projection";
+            diagnosis = applyAuthoritativeModelDecision(
+                diagnosis,
+                decision,
+                targetTree,
+                executableEvent,
+            );
         }
         ctx.postMessage({
             id,
             diagnosis,
             elapsedMs: performance.now() - startedAt,
+            evidenceElapsedMs,
+            packageElapsedMs,
+            modelElapsedMs,
+            operationCandidateCount,
+            locationCandidateCount,
         } satisfies DiagnosisWorkerResponse);
     } catch (error) {
         ctx.postMessage({
             id,
-            error: error instanceof Error ? error.stack ?? error.message : String(error),
+            error: `[${phase}] ${error instanceof Error
+                ? error.stack ?? error.message
+                : String(error)}`,
         } satisfies DiagnosisWorkerResponse);
     }
 });

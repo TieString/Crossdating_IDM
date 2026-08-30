@@ -1805,7 +1805,7 @@ export default function Home() {
                                                         ) : null}
                                                         {isEventDiagnosisRunning && selectedTreeEvents.length === 0 ? (
                                                             <div style={{ padding: "8px 6px", color: "#6b7280", fontSize: 12 }}>
-                                                                正在运行当前序列的统一诊断模型...
+                                                                正在分析当前序列...
                                                             </div>
                                                         ) : null}
                                                     </div>

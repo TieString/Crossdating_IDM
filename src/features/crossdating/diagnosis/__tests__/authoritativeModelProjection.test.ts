@@ -72,34 +72,62 @@ const decision = (
 });
 
 describe("authoritative model projection", () => {
-    it("replaces the old final answer with the model operation and window", () => {
+    it("refuses a selected identity that has no executable model package", () => {
         const result = applyAuthoritativeModelDecision(
             diagnosis(event("wholeSeriesMove", -6)),
             decision({}),
             "TARGET",
         );
-        expect(result.events).toHaveLength(1);
-        expect(result.reviewEvents).toHaveLength(1);
-        expect(result.events[0]).toMatchObject({
-            eventType: "partialMove",
-            shiftYears: -6,
-            startYear: 1930,
-            endYear: 1938,
+        expect(result.events).toEqual([]);
+        expect(result.reviewEvents).toEqual([]);
+        expect(result.authoritativeModelDecision).toMatchObject({
+            status: "error",
+            refusalReason: "online_executable_package_contract_mismatch",
         });
-        expect(result.events[0]?.rankedYears.map((row) => row.year)).toEqual([1934]);
     });
 
-    it("keeps operation identity immutable while projecting a same-identity location", () => {
+    it("rejects a package whose location differs from the model decision", () => {
+        const executable = event("partialMove", -6);
+        executable.id = "online-package:TARGET:partialMove:-6:1934";
+        executable.startYear = 1950;
+        executable.endYear = 1954;
+        executable.rankedYears = [{ year: 1952, rank: 1, score: 4, evidenceTags: [] }];
         const result = applyAuthoritativeModelDecision(
             diagnosis(event("partialMove", -6)),
-            decision({ startYear: 1950, endYear: 1954, topYear: 1952 }),
+            decision({ packageId: executable.id }),
             "TARGET",
+            executable,
         );
-        expect(result.events[0]).toMatchObject({
-            eventType: "partialMove",
-            shiftYears: -6,
-            startYear: 1950,
-            endYear: 1954,
+        expect(result.events).toEqual([]);
+        expect(result.authoritativeModelDecision).toMatchObject({
+            status: "error",
+            refusalReason: "online_executable_package_contract_mismatch",
+        });
+    });
+
+    it("uses a self-contained model package without borrowing an old event template", () => {
+        const executable = event("partialMove", -6);
+        executable.id = "online-package:TARGET:partialMove:-6:1934";
+        executable.startYear = 1930;
+        executable.endYear = 1938;
+        executable.rankedYears = [{
+            year: 1934,
+            rank: 1,
+            score: 4,
+            evidenceTags: ["online_unified_model"],
+        }];
+        executable.evidence.candidateIds = [];
+        const result = applyAuthoritativeModelDecision(
+            diagnosis(event("wholeSeriesMove", -6)),
+            decision({ packageId: executable.id }),
+            "TARGET",
+            executable,
+        );
+        expect(result.events).toEqual([executable]);
+        expect(result.events[0]?.evidence.candidateIds).toEqual([]);
+        expect(result.authoritativeModelDecision).toMatchObject({
+            status: "selected",
+            packageId: executable.id,
         });
     });
 

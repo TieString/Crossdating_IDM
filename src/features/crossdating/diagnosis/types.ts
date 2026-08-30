@@ -892,6 +892,8 @@ export type AuthoritativeDiagnosisDecision = {
     endYear: number | null;
     topYear: number | null;
     identityGroup: string | null;
+    /** Immutable executable package selected by the online unified model. */
+    packageId?: string | null;
     refusalReason: string | null;
 };
 
@@ -970,6 +972,11 @@ export type DiagnosisOptions = {
     includeEventDecisionAudits?: boolean;
     /** Separate user-facing review threshold; strict automatic events remain unchanged. */
     reviewWindowDisplayMode?: ReviewWindowDisplayMode;
+    /**
+     * Internal online-runtime hook. It exposes the already computed target core so
+     * the unified model can build evidence without diagnosing the same series twice.
+     */
+    captureSeriesCore?: (diagnosis: SeriesCoreDiagnosis) => void;
 };
 
 export type NumericSeries = Map<number, number>;
@@ -982,6 +989,7 @@ export type EffectiveDiagnosisConfig = Required<Omit<
     | "sharedZeroMarkerMode"
     | "includeEventDecisionAudits"
     | "reviewWindowDisplayMode"
+    | "captureSeriesCore"
 >> & {
     referenceConfig: ReferenceSeriesConfig | null;
     minPairsForCorrelation: number;
