@@ -8,6 +8,10 @@ const rootArgument = process.argv.find((argument) => argument.startsWith("--root
 const fixtureRoot = rootArgument?.slice("--root=".length) || process.env.COFECHA_PARITY_ROOT;
 const casesArgument = process.argv.find((argument) => argument.startsWith("--cases="));
 const casesDirectory = casesArgument?.slice("--cases=".length);
+const installedCofechaPackage = JSON.parse(readFileSync(
+  path.join(process.cwd(), "node_modules", "cofecha-js", "package.json"),
+  "utf8",
+));
 
 if (!fixtureRoot && !casesDirectory) {
   throw new Error("Pass --root=PATH, --cases=PATH, or set COFECHA_PARITY_ROOT.");
@@ -39,10 +43,16 @@ const collectPairs = (directory) => {
 
 const collectManifestPairs = (directory) => readdirSync(directory, { withFileTypes: true })
   .filter((entry) => entry.isFile() && path.extname(entry.name).toLowerCase() === ".json")
-  .map((entry) => ({
-    label: path.basename(entry.name, path.extname(entry.name)),
-    audit: JSON.parse(readFileSync(path.join(directory, entry.name), "utf8")),
-  }))
+  .flatMap((entry) => {
+    try {
+      return [{
+        label: path.basename(entry.name, path.extname(entry.name)),
+        audit: JSON.parse(readFileSync(path.join(directory, entry.name), "utf8")),
+      }];
+    } catch {
+      return [];
+    }
+  })
   .filter(({ audit }) => (
     typeof audit.rwlPath === "string"
     && typeof audit.outPath === "string"
@@ -125,7 +135,7 @@ try {
   });
   const passed = cases.filter((item) => item.passed).length;
   const result = {
-    package: "cofecha-js@0.1.0",
+    package: `cofecha-js@${installedCofechaPackage.version}`,
     fixtureSource: path.resolve(casesDirectory ?? fixtureRoot),
     files: cases.length,
     passed,
