@@ -68,6 +68,76 @@ def test_operation_features_keep_raw_values_only_for_relative_improvements() -> 
     assert "residual_pathEventReduction__relative_value" in features
 
 
+def test_baseline_identity_fit_separates_local_and_whole_expectations() -> None:
+    frame = pd.DataFrame({
+        "attempt_id": ["a", "a", "a"],
+        "event_type": ["missingRing", "wholeSeriesMove", "partialMove"],
+        "shift_years": [-1, -3, -6],
+        "residual_operationSpecific_beforeNewestLag": [-2, -2, -2],
+        "residual_operationSpecific_beforeNewerLagMode": [-2, -2, -2],
+        "residual_operationSpecific_beforeThreeNewerLagMode": [-2, -2, -2],
+        "residual_operationSpecific_beforeGlobalLag": [-3, -3, -3],
+        "residual_operationSpecific_beforeLagMode": [-3, -3, -3],
+        "residual_operationSpecific_afterNewestLag": [-2, 0, -4],
+        "residual_operationSpecific_afterNewerLagMode": [-2, 0, -4],
+        "residual_operationSpecific_afterOlderLagMode": [-2, 0, -1],
+        "residual_operationSpecific_afterGlobalLag": [-2, 0, -2],
+        "residual_operationSpecific_afterLagMode": [-2, 0, -2],
+        "residual_operationSpecific_afterRegionalLagStep": [0, 0, 3],
+        "residual_operationSpecific_beforeRegionalLagStep": [-1, 0, -1],
+        "residual_operationSpecific_beforeNearestBoundaryStep": [-1, 0, -1],
+        "residual_operationSpecific_beforeThreeBoundaryStep": [-1, 0, -1],
+    })
+    derived = MODULE.add_baseline_identity_fit_evidence(frame)
+    assert derived.loc[0, "derived_identityFit_localJoint"] == 0
+    assert derived.loc[1, "derived_identityFit_wholeJoint"] == 0
+    assert derived.loc[2, "derived_identityFit_localJoint"] < 0
+    plain = MODULE.residual_operation_features(frame)
+    enabled = MODULE.residual_operation_features(
+        frame, include_baseline_identity_fit=True
+    )
+    assert not any("derived_identityFit" in name for name in plain)
+    assert "derived_identityFit_localJoint__rank" in enabled
+    compact = MODULE.residual_operation_features(
+        frame,
+        include_baseline_identity_fit=True,
+        baseline_identity_fit_local_shift_only=True,
+    )
+    assert "derived_identityFit_localShift__rank" in compact
+    assert not any("localJoint" in name for name in compact)
+
+
+def test_compact_per_reference_fit_uses_residual_not_raw_trace() -> None:
+    frame = pd.DataFrame({
+        "attempt_id": ["a", "a"],
+        "event_type": ["partialMove", "partialMove"],
+        "shift_years": [-6, -6],
+        "residual_perReference_before_localFixedLagStepWeighted": [-6, -2],
+        "residual_perReference_after_localFixedLagStepWeighted": [0, -3],
+        "residual_perReference_before_localFixedLagStepPositiveFraction": [
+            0.9, 0.4,
+        ],
+        "residual_perReference_before_localReferenceCount": [8, 8],
+        "residual_perReference_after_localReferenceCount": [8, 4],
+        "residual_perReference_before_localWhitenedGainMean": [0.7, 0.4],
+        "residual_perReference_after_localWhitenedGainMean": [0.1, 0.3],
+        "residual_perReference_after_newerStrongestCombinedGain": [0.0, 0.5],
+    })
+    derived = MODULE.add_compact_per_reference_fit_evidence(frame)
+    assert derived.loc[0, "derived_perReference_shiftFit"] == 0
+    assert derived.loc[0, "derived_perReference_stepResidual"] == 0
+    assert derived.loc[0, "derived_perReference_stepReduction"] > (
+        derived.loc[1, "derived_perReference_stepReduction"]
+    )
+    values = MODULE.residual_operation_features(
+        frame,
+        ("residual_perReference_",),
+        include_compact_per_reference_fit=True,
+    )
+    assert "derived_perReference_shiftFit__rank" in values
+    assert not any(name.startswith("residual_perReference") for name in values)
+
+
 def test_operation_summary_counts_repairs_and_regressions() -> None:
     baseline = pd.DataFrame({
         "attempt_id": ["a", "b", "clean"],

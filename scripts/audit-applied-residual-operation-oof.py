@@ -34,6 +34,176 @@ pair = load_module(
 )
 
 
+def numeric_column(
+    frame: pd.DataFrame,
+    name: str,
+    default: float = 0.0,
+) -> pd.Series:
+    if name not in frame:
+        return pd.Series(default, index=frame.index, dtype=np.float64)
+    return pd.to_numeric(frame[name], errors="coerce").fillna(default)
+
+
+def add_baseline_identity_fit_evidence(frame: pd.DataFrame) -> pd.DataFrame:
+    """Derive physical operation fit after a robust lag-baseline estimate."""
+
+    output = frame.copy()
+    before_newest = numeric_column(
+        output, "residual_operationSpecific_beforeNewestLag"
+    )
+    before_newer_mode = numeric_column(
+        output, "residual_operationSpecific_beforeNewerLagMode"
+    )
+    before_three_newer = numeric_column(
+        output, "residual_operationSpecific_beforeThreeNewerLagMode"
+    )
+    newer_baseline = pd.concat(
+        [before_newest, before_newer_mode, before_three_newer], axis=1
+    ).median(axis=1)
+    before_global = numeric_column(
+        output, "residual_operationSpecific_beforeGlobalLag"
+    )
+    before_mode = numeric_column(
+        output, "residual_operationSpecific_beforeLagMode"
+    )
+    whole_baseline = pd.concat(
+        [before_global, before_newest, before_mode], axis=1
+    ).median(axis=1)
+
+    after_newest = numeric_column(
+        output, "residual_operationSpecific_afterNewestLag"
+    )
+    after_newer_mode = numeric_column(
+        output, "residual_operationSpecific_afterNewerLagMode"
+    )
+    after_older_mode = numeric_column(
+        output, "residual_operationSpecific_afterOlderLagMode"
+    )
+    after_global = numeric_column(
+        output, "residual_operationSpecific_afterGlobalLag"
+    )
+    after_mode = numeric_column(
+        output, "residual_operationSpecific_afterLagMode"
+    )
+    after_regional_step = numeric_column(
+        output, "residual_operationSpecific_afterRegionalLagStep"
+    )
+    before_steps = [
+        numeric_column(
+            output, "residual_operationSpecific_beforeRegionalLagStep"
+        ),
+        numeric_column(
+            output, "residual_operationSpecific_beforeNearestBoundaryStep"
+        ),
+        numeric_column(
+            output, "residual_operationSpecific_beforeThreeBoundaryStep"
+        ),
+    ]
+    shifts = pd.to_numeric(
+        output["shift_years"], errors="coerce"
+    ).fillna(0)
+    local = output["event_type"].isin(
+        ["missingRing", "falseRing", "partialMove"]
+    ).astype(np.float64)
+    whole = output["event_type"].eq(
+        "wholeSeriesMove"
+    ).astype(np.float64)
+
+    local_fixed_error = (
+        (after_newest - before_newest).abs()
+        + (after_newer_mode - newer_baseline).abs()
+    ) / 2
+    local_moved_error = (
+        (after_older_mode - newer_baseline).abs()
+        + after_regional_step.abs()
+    ) / 2
+    local_shift_error = pd.concat(
+        [(shifts - step).abs() for step in before_steps], axis=1
+    ).median(axis=1)
+    whole_after_error = pd.concat(
+        [after_global.abs(), after_newest.abs(), after_mode.abs()], axis=1
+    ).median(axis=1)
+    whole_shift_error = (shifts - whole_baseline).abs()
+
+    output["derived_baseline_newerLag"] = newer_baseline
+    output["derived_baseline_wholeLag"] = whole_baseline
+    output["derived_identityFit_localFixedSide"] = -local_fixed_error * local
+    output["derived_identityFit_localMovedSide"] = -local_moved_error * local
+    output["derived_identityFit_localShift"] = -local_shift_error * local
+    output["derived_identityFit_wholeResidual"] = -whole_after_error * whole
+    output["derived_identityFit_wholeShift"] = -whole_shift_error * whole
+    output["derived_identityFit_localJoint"] = -(
+        local_fixed_error + local_moved_error + local_shift_error
+    ) * local
+    output["derived_identityFit_wholeJoint"] = -(
+        whole_after_error + whole_shift_error
+    ) * whole
+    return output
+
+
+def add_compact_per_reference_fit_evidence(
+    frame: pd.DataFrame,
+) -> pd.DataFrame:
+    """Compress per-reference traces into operation-specific physical fit."""
+
+    output = frame.copy()
+    shifts = pd.to_numeric(
+        output["shift_years"], errors="coerce"
+    ).fillna(0)
+    local = output["event_type"].isin(
+        ["missingRing", "falseRing", "partialMove"]
+    ).astype(np.float64)
+    before_step = numeric_column(
+        output,
+        "residual_perReference_before_localFixedLagStepWeighted",
+    )
+    after_step = numeric_column(
+        output,
+        "residual_perReference_after_localFixedLagStepWeighted",
+    )
+    before_support = numeric_column(
+        output,
+        "residual_perReference_before_localFixedLagStepPositiveFraction",
+    )
+    before_count = numeric_column(
+        output, "residual_perReference_before_localReferenceCount"
+    )
+    after_count = numeric_column(
+        output, "residual_perReference_after_localReferenceCount"
+    )
+    before_gain = numeric_column(
+        output,
+        "residual_perReference_before_localWhitenedGainMean",
+    )
+    after_gain = numeric_column(
+        output,
+        "residual_perReference_after_localWhitenedGainMean",
+    )
+    newer_residual = numeric_column(
+        output,
+        "residual_perReference_after_newerStrongestCombinedGain",
+    )
+
+    output["derived_perReference_shiftFit"] = -(
+        shifts - before_step
+    ).abs() * local
+    output["derived_perReference_stepResidual"] = -after_step.abs() * local
+    output["derived_perReference_stepReduction"] = (
+        before_step.abs() - after_step.abs()
+    ) * local
+    output["derived_perReference_supportedStepReduction"] = (
+        (before_step.abs() - after_step.abs()) * before_support * local
+    )
+    output["derived_perReference_gainReduction"] = (
+        before_gain - after_gain
+    ) * local
+    output["derived_perReference_newerResidual"] = -newer_residual * local
+    output["derived_perReference_stableCount"] = pd.concat(
+        [before_count, after_count], axis=1
+    ).min(axis=1) * local
+    return output
+
+
 def read_residual_frame(path: Path) -> pd.DataFrame:
     if path.is_dir():
         parts = sorted(path.glob("part-*.ndjson"))
@@ -56,10 +226,25 @@ def read_residual_frame(path: Path) -> pd.DataFrame:
 def residual_operation_features(
     frame: pd.DataFrame,
     excluded_prefixes: tuple[str, ...] = (),
+    *,
+    include_baseline_identity_fit: bool = False,
+    baseline_identity_fit_local_shift_only: bool = False,
+    include_compact_per_reference_fit: bool = False,
 ) -> pd.DataFrame:
     """Project evidence to diagnosis-relative coordinates within each attempt."""
 
-    source = frame.copy()
+    source = (
+        add_baseline_identity_fit_evidence(frame)
+        if include_baseline_identity_fit else frame.copy()
+    )
+    if baseline_identity_fit_local_shift_only:
+        keep = "derived_identityFit_localShift"
+        source = source.drop(columns=[
+            column for column in source
+            if column.startswith("derived_") and column != keep
+        ])
+    if include_compact_per_reference_fit:
+        source = add_compact_per_reference_fit_evidence(source)
     numeric_columns: list[str] = []
     for column in source.columns:
         if any(column.startswith(prefix) for prefix in excluded_prefixes):
@@ -68,6 +253,7 @@ def residual_operation_features(
         if not (
             column in {"selection_oof_score", "meta_oof_score", "pair_oof_score"}
             or column.startswith("residual_")
+            or column.startswith("derived_")
         ):
             continue
         if "year" in lowered:
@@ -221,9 +407,22 @@ def main() -> None:
     parser.add_argument("--outer-splits", type=int, default=5)
     parser.add_argument("--shortlist-size", type=int, default=2)
     parser.add_argument("--exclude-feature-prefix", action="append", default=[])
+    parser.add_argument("--include-baseline-identity-fit", action="store_true")
+    parser.add_argument(
+        "--baseline-identity-fit-local-shift-only", action="store_true"
+    )
+    parser.add_argument(
+        "--include-compact-per-reference-fit", action="store_true"
+    )
     args = parser.parse_args()
     if args.shortlist_size < 2:
         parser.error("--shortlist-size must be at least 2")
+    if args.baseline_identity_fit_local_shift_only \
+            and not args.include_baseline_identity_fit:
+        parser.error(
+            "--baseline-identity-fit-local-shift-only requires "
+            "--include-baseline-identity-fit"
+        )
 
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -280,7 +479,17 @@ def main() -> None:
         raise RuntimeError("operation residual shortlist misses identity labels")
 
     excluded_prefixes = tuple(args.exclude_feature_prefix)
-    values = residual_operation_features(shortlist, excluded_prefixes)
+    values = residual_operation_features(
+        shortlist,
+        excluded_prefixes,
+        include_baseline_identity_fit=args.include_baseline_identity_fit,
+        baseline_identity_fit_local_shift_only=(
+            args.baseline_identity_fit_local_shift_only
+        ),
+        include_compact_per_reference_fit=(
+            args.include_compact_per_reference_fit
+        ),
+    )
     predictions = np.full(len(shortlist), np.nan, dtype=np.float32)
     fold_importances: list[np.ndarray] = []
     splitter = GroupKFold(
@@ -386,6 +595,13 @@ def main() -> None:
         "candidateIdentitiesImmutable": True,
         "topOperationIdentities": args.shortlist_size,
         "excludedFeaturePrefixes": list(excluded_prefixes),
+        "baselineIdentityFitEnabled": args.include_baseline_identity_fit,
+        "baselineIdentityFitLocalShiftOnly": (
+            args.baseline_identity_fit_local_shift_only
+        ),
+        "compactPerReferenceFitEnabled": (
+            args.include_compact_per_reference_fit
+        ),
         "featureCount": int(values.shape[1]),
         "failureBreakdown": failure_breakdown,
         "baseline": summarize(baseline, baseline),
