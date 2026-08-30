@@ -163,6 +163,36 @@ def test_anchor_oof_evidence_is_explicitly_opt_in() -> None:
     ]
 
 
+def test_compact_per_reference_location_builds_physical_modes() -> None:
+    frame = pd.DataFrame({
+        "attempt_id": ["a", "a"],
+        "event_type": ["missingRing", "missingRing"],
+        "shift_years": [-1, -1],
+        "year": [1900, 1901],
+        "listwise_score": [0.5, 0.5],
+        "pairwise_score": [0.5, 0.5],
+        "residual_perReference_before_localCombinedRank": [0.9, 0.4],
+        "residual_perReference_after_localCombinedRank": [0.1, 0.3],
+        "residual_perReference_before_localPeakKernel9": [0.8, 0.4],
+        "residual_perReference_after_localPeakKernel9": [0.1, 0.3],
+        "residual_perReference_before_localFixedLagStepWeighted": [-1, 0],
+        "residual_perReference_after_localFixedLagStepWeighted": [0, -1],
+        "residual_perReference_before_localFixedLagStepPositiveFraction": [
+            0.9, 0.2,
+        ],
+    })
+    values = MODULE.residual_features(
+        frame,
+        excluded_prefixes=("residual_perReference_",),
+        include_compact_per_reference_location=True,
+    )
+    rank = "derived_perReferenceLocation_peakReduction__rank"
+    assert values.loc[0, rank] > values.loc[1, rank]
+    assert "derived_perReferenceLocation_peakReduction__physical_mode5_mean" \
+        in values
+    assert not any(name.startswith("residual_perReference") for name in values)
+
+
 def test_physical_residual_modes_prefer_smaller_unresolved_evidence() -> None:
     frame = pd.DataFrame({
         "attempt_id": ["run:1"] * 2,

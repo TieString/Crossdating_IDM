@@ -109,6 +109,104 @@ def read_residual_frame(path: Path) -> pd.DataFrame:
     return pd.DataFrame(payload["rows"])
 
 
+def numeric_column(
+    frame: pd.DataFrame,
+    name: str,
+    default: float = 0.0,
+) -> pd.Series:
+    if name not in frame:
+        return pd.Series(default, index=frame.index, dtype=np.float64)
+    return pd.to_numeric(frame[name], errors="coerce").fillna(default)
+
+
+def add_compact_per_reference_location_evidence(
+    frame: pd.DataFrame,
+) -> pd.DataFrame:
+    """Compress per-reference before/after traces into location evidence."""
+
+    output = frame.copy()
+    before_combined = numeric_column(
+        output, "residual_perReference_before_localCombinedRank"
+    )
+    after_combined = numeric_column(
+        output, "residual_perReference_after_localCombinedRank"
+    )
+    before_peak = numeric_column(
+        output, "residual_perReference_before_localPeakKernel9"
+    )
+    after_peak = numeric_column(
+        output, "residual_perReference_after_localPeakKernel9"
+    )
+    before_difference = numeric_column(
+        output,
+        "residual_perReference_before_localDifferenceGainWeighted",
+    )
+    after_difference = numeric_column(
+        output,
+        "residual_perReference_after_localDifferenceGainWeighted",
+    )
+    before_whitened = numeric_column(
+        output,
+        "residual_perReference_before_localWhitenedGainMean",
+    )
+    after_whitened = numeric_column(
+        output,
+        "residual_perReference_after_localWhitenedGainMean",
+    )
+    before_fixed_step = numeric_column(
+        output,
+        "residual_perReference_before_localFixedLagStepWeighted",
+    )
+    after_fixed_step = numeric_column(
+        output,
+        "residual_perReference_after_localFixedLagStepWeighted",
+    )
+    support = numeric_column(
+        output,
+        "residual_perReference_before_localFixedLagStepPositiveFraction",
+    )
+    before_count = numeric_column(
+        output, "residual_perReference_before_localReferenceCount"
+    )
+    after_count = numeric_column(
+        output, "residual_perReference_after_localReferenceCount"
+    )
+    newer_residual = numeric_column(
+        output,
+        "residual_perReference_after_newerStrongestCombinedGain",
+    )
+    remaining_distance = numeric_column(
+        output, "residual_perReference_after_strongestDistance"
+    )
+
+    output["derived_perReferenceLocation_combinedReduction"] = (
+        before_combined - after_combined
+    )
+    output["derived_perReferenceLocation_peakReduction"] = (
+        before_peak - after_peak
+    )
+    output["derived_perReferenceLocation_differenceReduction"] = (
+        before_difference - after_difference
+    )
+    output["derived_perReferenceLocation_whitenedReduction"] = (
+        before_whitened - after_whitened
+    )
+    output["derived_perReferenceLocation_fixedStepReduction"] = (
+        before_fixed_step.abs() - after_fixed_step.abs()
+    )
+    output["derived_perReferenceLocation_supportedStepReduction"] = (
+        (before_fixed_step.abs() - after_fixed_step.abs()) * support
+    )
+    output["derived_perReferenceLocation_newerResidual"] = -newer_residual
+    output["derived_perReferenceLocation_remainingDistance"] = (
+        remaining_distance
+    )
+    output["derived_perReferenceLocation_stableCount"] = pd.concat(
+        [before_count, after_count], axis=1
+    ).min(axis=1)
+    return output
+
+
 def proposal_id(frame: pd.DataFrame) -> pd.Series:
     return (
         frame["attempt_id"].astype(str)
@@ -154,10 +252,13 @@ def residual_features(
     orient_physical_residuals: bool = False,
     include_bottom_evidence: bool = False,
     include_anchor_oof_evidence: bool = False,
+    include_compact_per_reference_location: bool = False,
 ) -> pd.DataFrame:
     """Use only diagnosis-relative values plus within-identity rank/z/margin."""
 
     source = add_relative_year_distances(frame)
+    if include_compact_per_reference_location:
+        source = add_compact_per_reference_location_evidence(source)
     location_score_columns = CORE_LOCATION_SCORE_COLUMNS
     if include_all_frozen_views:
         location_score_columns += EXTRA_FROZEN_LOCATION_SCORE_COLUMNS
@@ -172,9 +273,13 @@ def residual_features(
             include_anchor_oof_evidence
             and column == "anchor_location_oof_score"
         )
+        compact_per_reference = (
+            include_compact_per_reference_location
+            and column.startswith("derived_perReferenceLocation_")
+        )
         if column in location_score_columns or column.startswith(
             "residual_"
-        ) or bottom_evidence or anchor_evidence:
+        ) or bottom_evidence or anchor_evidence or compact_per_reference:
             values = pd.to_numeric(source[column], errors="coerce")
             if values.notna().any():
                 source[column] = values.astype(np.float64)
@@ -201,6 +306,10 @@ def residual_features(
             column for column in numeric_columns
             if column in location_score_columns
             or any(token in column.lower() for token in PHYSICAL_MODE_TOKENS)
+            or (
+                include_compact_per_reference_location
+                and column.startswith("derived_perReferenceLocation_")
+            )
         ]
     for column in mode_columns:
         oriented = physical_mode_signal(
@@ -420,6 +529,9 @@ def main() -> None:
     parser.add_argument("--orient-physical-residuals", action="store_true")
     parser.add_argument("--include-bottom-evidence", action="store_true")
     parser.add_argument("--include-anchor-oof-evidence", action="store_true")
+    parser.add_argument(
+        "--include-compact-per-reference-location", action="store_true"
+    )
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir).resolve()
@@ -455,6 +567,9 @@ def main() -> None:
         orient_physical_residuals=args.orient_physical_residuals,
         include_bottom_evidence=args.include_bottom_evidence,
         include_anchor_oof_evidence=args.include_anchor_oof_evidence,
+        include_compact_per_reference_location=(
+            args.include_compact_per_reference_location
+        ),
     )
     predictions = np.full(len(rows), np.nan, dtype=np.float32)
     feature_importance = np.zeros(values.shape[1], dtype=np.float64)
@@ -545,6 +660,9 @@ def main() -> None:
         "physicalResidualOrientationEnabled": args.orient_physical_residuals,
         "bottomEvidenceEnabled": args.include_bottom_evidence,
         "anchorOofEvidenceEnabled": args.include_anchor_oof_evidence,
+        "compactPerReferenceLocationEnabled": (
+            args.include_compact_per_reference_location
+        ),
         "featureCount": int(values.shape[1]),
         "attemptsWithResidual": int(rows["attempt_id"].nunique()),
         "residualCandidates": int(len(rows)),
