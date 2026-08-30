@@ -57,22 +57,31 @@ def add_relative_year_distances(frame: pd.DataFrame) -> pd.DataFrame:
         and (column.endswith("Year") or column.endswith("_firstYear"))
         and "Delta_" not in column
     ]
+    distance_columns: dict[str, pd.Series] = {}
     for column in year_columns:
         values = pd.to_numeric(output[column], errors="coerce")
         valid = values.notna() & values.ne(0)
         distance = values.sub(output["year"]).where(valid)
-        output[f"{column}_signed_distance"] = distance
-        output[f"{column}_absolute_distance"] = distance.abs()
-        output[f"{column}_present"] = valid.astype(np.int8)
-    return output.drop(columns=year_columns)
+        distance_columns[f"{column}_signed_distance"] = distance
+        distance_columns[f"{column}_absolute_distance"] = distance.abs()
+        distance_columns[f"{column}_present"] = valid.astype(np.int8)
+    return pd.concat([
+        output.drop(columns=year_columns),
+        pd.DataFrame(distance_columns, index=output.index),
+    ], axis=1)
 
 
-def residual_features(frame: pd.DataFrame) -> pd.DataFrame:
+def residual_features(
+    frame: pd.DataFrame,
+    excluded_prefixes: tuple[str, ...] = (),
+) -> pd.DataFrame:
     """Use only diagnosis-relative values plus within-identity rank/z/margin."""
 
     source = add_relative_year_distances(frame)
     numeric_columns = []
     for column in source.columns:
+        if any(column.startswith(prefix) for prefix in excluded_prefixes):
+            continue
         if column in {"listwise_score", "pairwise_score"} or column.startswith(
             "residual_"
         ):
@@ -174,6 +183,7 @@ def main() -> None:
     parser.add_argument("--operation-top", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--outer-splits", type=int, default=5)
+    parser.add_argument("--exclude-feature-prefix", action="append", default=[])
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir).resolve()
@@ -200,7 +210,8 @@ def main() -> None:
     rows["selected_operation_correct"] = (
         rows["attempt_id"].map(operation_correct).fillna(0).astype(np.int8)
     )
-    values = residual_features(rows)
+    excluded_prefixes = tuple(args.exclude_feature_prefix)
+    values = residual_features(rows, excluded_prefixes)
     predictions = np.full(len(rows), np.nan, dtype=np.float32)
     splitter = GroupKFold(
         n_splits=min(args.outer_splits, rows["file_id"].nunique())
@@ -253,6 +264,7 @@ def main() -> None:
         "truthBlindResidualGeneration": True,
         "operationIdentityImmutable": True,
         "candidateWindowsImmutable": True,
+        "excludedFeaturePrefixes": list(excluded_prefixes),
         "featureCount": int(values.shape[1]),
         "attemptsWithResidual": int(rows["attempt_id"].nunique()),
         "residualCandidates": int(len(rows)),

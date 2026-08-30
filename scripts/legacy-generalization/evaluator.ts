@@ -26,6 +26,7 @@ import { DEFAULT_MAX_PARTIAL_GAP_YEARS } from "@/features/crossdating/diagnosis/
 import {
     scorePerReferenceCounterfactualEvidence,
     summarizePerReferenceCounterfactualRows,
+    type PerReferenceCounterfactualRow,
 } from "@/features/crossdating/diagnosis/perReferenceCounterfactualEvidence";
 import { scoreBoundaryLocalCounterfactual } from "@/features/crossdating/diagnosis/boundaryLocalCounterfactual";
 import { scoreNegativePartialMoveBoundaries } from "@/features/crossdating/diagnosis/partialBreakpointRefinement";
@@ -1180,6 +1181,55 @@ const residualPathRegionSummary = (
     };
 };
 
+const residualNewerSideByOffset = (input: {
+    beforeTransitions: LagTransitionScan;
+    afterTransitions: LagTransitionScan;
+    beforePath: ReturnType<typeof diagnoseLagPath>;
+    afterPath: ReturnType<typeof diagnoseLagPath>;
+    operation: ResidualEvaluationOperation;
+    seriesFirstYear: number;
+}) => Object.fromEntries([1, 5, 9, 13].map((offset) => {
+    const firstYear = ["wholeSeriesMove", "noEvent"].includes(
+        input.operation.eventType,
+    )
+        ? input.seriesFirstYear
+        : input.operation.year + offset;
+    const beforeTransition = residualTransitionRegionSummary(
+        input.beforeTransitions,
+        firstYear,
+    );
+    const afterTransition = residualTransitionRegionSummary(
+        input.afterTransitions,
+        firstYear,
+    );
+    const beforePath = residualPathRegionSummary(input.beforePath, firstYear);
+    const afterPath = residualPathRegionSummary(input.afterPath, firstYear);
+    return [`offset${offset}`, {
+        firstYear,
+        beforeTransition,
+        afterTransition,
+        transitionDelta: Object.fromEntries(
+            Object.keys(beforeTransition).map((key) => [
+                key,
+                Number(
+                    afterTransition[key as keyof typeof afterTransition],
+                ) - Number(
+                    beforeTransition[key as keyof typeof beforeTransition],
+                ),
+            ]),
+        ),
+        beforePath,
+        afterPath,
+        pathDelta: Object.fromEntries(
+            Object.keys(beforePath).map((key) => [
+                key,
+                Number(afterPath[key as keyof typeof afterPath])
+                    - Number(beforePath[key as keyof typeof beforePath]),
+            ]),
+        ),
+    }];
+}));
+
 const meanFinite = (values: Array<number | null | undefined>): number => {
     const finite = values.filter(
         (value): value is number => value !== null
@@ -1189,6 +1239,59 @@ const meanFinite = (values: Array<number | null | undefined>): number => {
     return finite.length > 0
         ? finite.reduce((sum, value) => sum + value, 0) / finite.length
         : 0;
+};
+
+const residualPerReferenceSummary = (
+    rows: readonly PerReferenceCounterfactualRow[],
+    candidateYear: number,
+    firstNewerYear: number,
+) => {
+    const combinedGain = (row: PerReferenceCounterfactualRow) => (
+        row.differenceGainWeighted * 0.6 + row.whitenedGainMean * 0.4
+    );
+    const ranked = rows.slice().sort((left, right) => (
+        combinedGain(right) - combinedGain(left)
+        || right.fixedLagStepWeighted - left.fixedLagStepWeighted
+    ));
+    const local = rows.filter(
+        (row) => Math.abs(row.year - candidateYear) <= 1,
+    ).sort((left, right) => (
+        combinedGain(right) - combinedGain(left)
+        || Math.abs(left.year - candidateYear) - Math.abs(right.year - candidateYear)
+    ))[0] ?? null;
+    const newer = rows.filter((row) => row.year >= firstNewerYear).sort(
+        (left, right) => combinedGain(right) - combinedGain(left),
+    )[0] ?? null;
+    const localRank = local && ranked.length > 1
+        ? 1 - ranked.indexOf(local) / (ranked.length - 1)
+        : local ? 1 : 0;
+    return {
+        rowCount: rows.length,
+        localAvailable: Number(local !== null),
+        localDistance: local ? Math.abs(local.year - candidateYear) : 0,
+        localReferenceCount: local?.referenceCount ?? 0,
+        localCombinedGain: local ? combinedGain(local) : 0,
+        localCombinedRank: localRank,
+        localDifferenceGainWeighted: local?.differenceGainWeighted ?? 0,
+        localWhitenedGainMean: local?.whitenedGainMean ?? 0,
+        localPositiveDifferenceGainFraction:
+            local?.positiveDifferenceGainFraction ?? 0,
+        localPositiveWhitenedGainFraction:
+            local?.positiveWhitenedGainFraction ?? 0,
+        localFixedLagStepWeighted: local?.fixedLagStepWeighted ?? 0,
+        localFixedLagStepPositiveFraction:
+            local?.fixedLagStepPositiveFraction ?? 0,
+        localPeakKernel5: local?.peakKernel5 ?? 0,
+        localPeakKernel9: local?.peakKernel9 ?? 0,
+        strongestCombinedGain: ranked[0] ? combinedGain(ranked[0]) : 0,
+        strongestDistance: ranked[0]
+            ? Math.abs(ranked[0].year - candidateYear)
+            : 0,
+        newerStrongestCombinedGain: newer ? combinedGain(newer) : 0,
+        newerStrongestDistance: newer
+            ? Math.abs(newer.year - candidateYear)
+            : 0,
+    };
 };
 
 const residualCoreSummary = (core: SeriesCoreDiagnosis) => ({
@@ -1423,6 +1526,56 @@ export const scoreAppliedOperationResidualForEvaluation = (input: {
         firstNewerYear,
         true,
     );
+    const newerSideByOffset = residualNewerSideByOffset({
+        beforeTransitions,
+        afterTransitions,
+        beforePath,
+        afterPath,
+        operation: input.operation,
+        seriesFirstYear: Math.min(...current.keys()),
+    });
+    const perReference = input.operation.eventType === "wholeSeriesMove"
+        || input.operation.eventType === "noEvent"
+        ? null
+        : (() => {
+            const beforeRows = scorePerReferenceCounterfactualEvidence(
+                before,
+                input.siteData,
+                input.operation.shiftYears,
+                { baselineLagCenter: beforePath.newestLag },
+            );
+            const afterRows = scorePerReferenceCounterfactualEvidence(
+                after,
+                correctedSite,
+                input.operation.shiftYears,
+                { baselineLagCenter: afterPath.newestLag },
+            );
+            const beforeSummary = residualPerReferenceSummary(
+                beforeRows,
+                input.operation.year,
+                input.operation.year + 5,
+            );
+            const afterSummary = residualPerReferenceSummary(
+                afterRows,
+                input.operation.year,
+                input.operation.year + 5,
+            );
+            return {
+                before: beforeSummary,
+                after: afterSummary,
+                delta: Object.fromEntries(
+                    Object.keys(beforeSummary).map((key) => [
+                        key,
+                        Number(afterSummary[key as keyof typeof afterSummary])
+                            - Number(
+                                beforeSummary[
+                                    key as keyof typeof beforeSummary
+                                ],
+                            ),
+                    ]),
+                ),
+            };
+        })();
     const newestAfterEvent = afterPath.events.slice().sort((left, right) => (
         right.endYear - left.endYear
     ))[0] ?? null;
@@ -1516,7 +1669,9 @@ export const scoreAppliedOperationResidualForEvaluation = (input: {
                     ),
                 ]),
             ),
+            byOffset: newerSideByOffset,
         },
+        perReference,
     };
 };
 
