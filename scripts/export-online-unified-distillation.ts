@@ -217,11 +217,21 @@ const main = async (): Promise<void> => {
     const outputPath = resolve(args.output ?? "online-unified-distillation.ndjson.gz");
     const searchRadiusYears = Number(args["search-radius-years"] ?? 25);
     const includeProfilePeaks = args["include-profile-peaks"] !== "false";
+    const shardCount = Number(args["shard-count"] ?? 1);
+    const shardIndex = Number(args["shard-index"] ?? 0);
+    const gzipLevel = Number(args["gzip-level"] ?? 1);
     const labelMode = args["label-mode"] === "workflow-truth"
         ? "workflow-truth"
         : args["label-mode"] === "truth" ? "truth" : "teacher";
     if (!args["run-dir"] || !args.teacher) {
         throw new Error("--run-dir and --teacher are required");
+    }
+    if (!Number.isInteger(shardCount) || shardCount < 1
+        || !Number.isInteger(shardIndex) || shardIndex < 0 || shardIndex >= shardCount) {
+        throw new Error("shard index must be within a positive shard count");
+    }
+    if (!Number.isInteger(gzipLevel) || gzipLevel < 0 || gzipLevel > 9) {
+        throw new Error("gzip level must be an integer from 0 through 9");
     }
 
     const [teachers, cases, steps] = await Promise.all([
@@ -235,14 +245,15 @@ const main = async (): Promise<void> => {
         row,
     ]));
     const paths = auditPaths(runDir);
-    const gzip = createGzip({ level: 6 });
+    const selectedTeachers = teachers.filter((_, index) => index % shardCount === shardIndex);
+    const gzip = createGzip({ level: gzipLevel });
     const output = createWriteStream(outputPath);
     gzip.pipe(output);
 
     let written = 0;
     let operationOracle = 0;
     let locationOracle = 0;
-    for (const teacher of teachers) {
+    for (const teacher of selectedTeachers) {
         const match = /:(\d+):(\d+)$/.exec(teacher.attempt_id);
         if (!match) continue;
         const step = stepByCoordinates.get(`${Number(match[1])}:${Number(match[2])}`);
@@ -472,7 +483,9 @@ const main = async (): Promise<void> => {
         if (!gzip.write(line)) await once(gzip, "drain");
         written += 1;
         if (written % 250 === 0) {
-            process.stderr.write(`exported ${written}/${teachers.length}\n`);
+            process.stderr.write(
+                `exported shard=${shardIndex}/${shardCount} ${written}/${selectedTeachers.length}\n`,
+            );
         }
     }
     gzip.end();
@@ -484,6 +497,9 @@ const main = async (): Promise<void> => {
         schemaVersion: 1,
         output: outputPath,
         attempts: written,
+        shardIndex,
+        shardCount,
+        gzipLevel,
         operationOracle: operationOracle / Math.max(1, written),
         locationOracle: locationOracle / Math.max(1, written),
         sourceRun: basename(runDir),
