@@ -14,7 +14,10 @@ import {
 } from "@/features/cofecha/formatter";
 import { diagnoseCrossdating } from "@/features/crossdating/diagnosis/engine";
 import { applyAuthoritativeModelDecision } from "@/features/crossdating/diagnosis/authoritativeModelProjection";
-import { buildOnlineUnifiedEvidenceForTarget } from "@/features/crossdating/diagnosis/onlineUnifiedEvidenceRuntime";
+import {
+    buildOnlineUnifiedEvidenceForTarget,
+    summarizeOnlineUnifiedOperationProfilePeaks,
+} from "@/features/crossdating/diagnosis/onlineUnifiedEvidenceRuntime";
 import { inferOnlineUnifiedDiagnosis } from "@/features/crossdating/diagnosis/onlineUnifiedModel";
 import { getConfig } from "@/features/crossdating/diagnosis/config";
 import { INTERNAL_EVENT_PATH_CONFIG } from "@/features/crossdating/diagnosis/eventEnsemble";
@@ -759,6 +762,16 @@ export const diagnoseTruthBlind = (input: {
                         topThreeDifferenceGain: operation.topThreeDifferenceGain,
                         remoteDifferenceMargin: operation.remoteDifferenceMargin,
                         baselineLag: operation.baselineLag,
+                        profilePeaks: summarizeOnlineUnifiedOperationProfilePeaks(operation),
+                        yearProfile: operation.rows.map((row) => ({
+                            year: row.year,
+                            rawGain: row.rawGain,
+                            differenceGain: row.differenceGain,
+                            combinedGain: row.combinedGain,
+                            sideStepScore: row.sideStepScore,
+                            sideMinimumAdvantage: row.sideMinimumAdvantage,
+                            correctedSideSupport: row.correctedSideSupport,
+                        })),
                     })),
                     dynamicSelection: dynamicSelection ? {
                         eventType: dynamicSelection.operation.eventType,

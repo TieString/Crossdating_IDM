@@ -121,11 +121,13 @@ describe("online unified location packages", () => {
         }));
         evidence.operations = evidence.operations.map((operation) => ({
             ...operation,
-            bestYear: operation.bestYear === null ? null : operation.bestYear - 20,
+            bestYear: operation.bestYear - 20,
         }));
         const locations = buildOnlineUnifiedLocationPackages(evidence, {
             eventType: "missingRing",
             shiftYears: -1,
+        }, {
+            searchRadiusYears: 25,
         });
 
         expect(locations.some((candidate) => (
@@ -147,11 +149,54 @@ describe("online unified location packages", () => {
         const locations = buildOnlineUnifiedLocationPackages(evidence, {
             eventType: "missingRing",
             shiftYears: -1,
+        }, {
+            includeProfilePeaks: true,
         });
 
         expect(locations.some((candidate) => candidate.topYear === 1880)).toBe(true);
         expect(locations.find((candidate) => candidate.topYear === 1880)?.features)
             .toMatchObject({ source_counterfactual_within_2: 1 });
+    });
+
+    it("does not change a frozen model candidate set without an explicit option", () => {
+        const evidence = bundle();
+        evidence.operations[0]!.profilePeaks = [{
+            source: "sideStep",
+            year: 1880,
+            score: 0.8,
+            remoteMargin: 0.3,
+        }];
+        const locations = buildOnlineUnifiedLocationPackages(evidence, {
+            eventType: "missingRing",
+            shiftYears: -1,
+        });
+
+        expect(locations.some((candidate) => candidate.topYear === 1880)).toBe(false);
+        expect(Math.max(...locations.map((candidate) => candidate.topYear))).toBe(1870);
+    });
+
+    it("uses the selected identity full-year profile without widening its output window", () => {
+        const evidence = bundle();
+        evidence.operations[0]!.yearProfile = [{
+            year: 1888,
+            rawGain: 0.1,
+            differenceGain: 0.4,
+            combinedGain: 0.325,
+            sideStepScore: 0.6,
+            sideMinimumAdvantage: 0.3,
+            correctedSideSupport: 0.8,
+        }];
+        const locations = buildOnlineUnifiedLocationPackages(evidence, {
+            eventType: "missingRing",
+            shiftYears: -1,
+        }, {
+            includeYearProfile: true,
+        });
+        const profiled = locations.find((candidate) => candidate.topYear === 1888);
+
+        expect(profiled?.features.profile_difference_gain).toBe(0.4);
+        expect(profiled?.features.profile_side_step_score).toBe(0.6);
+        expect([5, 7, 9, 13]).toContain(profiled?.width);
     });
 });
 

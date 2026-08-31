@@ -64,6 +64,17 @@ export type OnlineUnifiedGridOperation = {
     remoteDifferenceMargin: number;
     baselineLag: number;
     profilePeaks?: OnlineUnifiedOperationProfilePeak[];
+    yearProfile?: OnlineUnifiedOperationYearProfile[];
+};
+
+export type OnlineUnifiedOperationYearProfile = {
+    year: number;
+    rawGain: number;
+    differenceGain: number;
+    combinedGain: number;
+    sideStepScore: number;
+    sideMinimumAdvantage: number;
+    correctedSideSupport: number;
 };
 
 export type OnlineUnifiedOperationProfilePeak = {
@@ -252,6 +263,12 @@ const LOCATION_NUMERIC_FEATURES = [
     "dynamic_exact",
     "unit_distance",
     "unit_exact",
+    "profile_raw_gain",
+    "profile_difference_gain",
+    "profile_combined_gain",
+    "profile_side_step_score",
+    "profile_side_minimum_advantage",
+    "profile_corrected_side_support",
     ...SOURCE_TOKENS.flatMap((token) => [
         `source_${token}_within_2`,
         `source_${token}_within_6`,
@@ -803,6 +820,7 @@ type LocationAnchor = {
 const locationAnchors = (
     bundle: OnlineUnifiedEvidenceBundle,
     identity: OnlineUnifiedOperationIdentity,
+    includeProfilePeaks: boolean,
 ): LocationAnchor[] => {
     const key = operationIdentity(identity);
     const claims = bundle.claims.filter((claim) => claimIdentity(claim) === key);
@@ -831,15 +849,17 @@ const locationAnchors = (
             stage: 0.5,
             correlationGain: grid.bestCombinedGain,
         });
-        (grid.profilePeaks ?? []).forEach((peak) => output.push({
-            year: peak.year,
-            source: `counterfactual profile ${peak.source}`,
-            score: peak.score,
-            margin: peak.remoteMargin,
-            confidence: 0.7,
-            stage: 0.52,
-            correlationGain: peak.score,
-        }));
+        if (includeProfilePeaks) {
+            (grid.profilePeaks ?? []).forEach((peak) => output.push({
+                year: peak.year,
+                source: `counterfactual profile ${peak.source}`,
+                score: peak.score,
+                margin: peak.remoteMargin,
+                confidence: 0.7,
+                stage: 0.52,
+                correlationGain: peak.score,
+            }));
+        }
     }
     for (const [source, selection] of [
         ["dynamic", bundle.dynamicSelection],
@@ -956,6 +976,7 @@ const locationFeatures = (
     const unit = bundle.unitSelection
         && operationIdentity(bundle.unitSelection) === operationIdentity(identity)
         ? bundle.unitSelection : null;
+    const profile = grid?.yearProfile?.find((row) => row.year === topYear);
     const features: Record<string, number> = {
         event_type_missingRing: Number(identity.eventType === "missingRing"),
         event_type_falseRing: Number(identity.eventType === "falseRing"),
@@ -989,6 +1010,12 @@ const locationFeatures = (
         dynamic_exact: Number(dynamic?.bestYear === topYear),
         unit_distance: unit ? Math.abs(topYear - unit.bestYear) : 99,
         unit_exact: Number(unit?.bestYear === topYear),
+        profile_raw_gain: finite(profile?.rawGain),
+        profile_difference_gain: finite(profile?.differenceGain),
+        profile_combined_gain: finite(profile?.combinedGain),
+        profile_side_step_score: finite(profile?.sideStepScore),
+        profile_side_minimum_advantage: finite(profile?.sideMinimumAdvantage),
+        profile_corrected_side_support: finite(profile?.correctedSideSupport),
     };
     SOURCE_TOKENS.forEach((token) => {
         const matching = anchors.filter((anchor) => anchor.source.toLowerCase().includes(token));
@@ -1024,27 +1051,49 @@ export const buildOnlineUnifiedLocationPackages = (
         }) => boolean;
         /** Keep one executable review window per physical year for online inference. */
         compactWindowPerYear?: boolean;
+        /** Candidate expansion is frozen with the model and must be enabled explicitly. */
+        searchRadiusYears?: number;
+        /** Profile peaks alter the candidate set and therefore require a matching model. */
+        includeProfilePeaks?: boolean;
+        /** Full yearly profiles are frozen with the location model. */
+        includeYearProfile?: boolean;
     },
 ): OnlineUnifiedLocationPackage[] => {
     if (identity.eventType === "noEvent" || identity.eventType === "wholeSeriesMove") {
         return [];
     }
-    const anchors = locationAnchors(bundle, identity);
-    if (anchors.length === 0) return [];
+    const anchors = locationAnchors(
+        bundle,
+        identity,
+        options?.includeProfilePeaks === true,
+    );
+    const profileOperation = bundle.operations.find((operation) => (
+        operationIdentity(operation) === operationIdentity(identity)
+    ));
+    if (anchors.length === 0
+        && !(options?.includeYearProfile === true
+            && (profileOperation?.yearProfile?.length ?? 0) > 0)) return [];
     const identityClaims = bundle.claims.filter((claim) => (
         claimIdentity(claim) === operationIdentity(identity)
     ));
     const candidateYearSet = new Set<number>();
+    const searchRadiusYears = Math.max(0, Math.floor(options?.searchRadiusYears ?? 13));
     anchors.forEach((anchor) => {
-        // The review window remains at most 13 years wide, but the internal
-        // locator must be able to recover from a moderately displaced anchor.
-        for (let offset = -25; offset <= 25; offset += 1) {
+        for (let offset = -searchRadiusYears; offset <= searchRadiusYears; offset += 1) {
             const year = anchor.year + offset;
             if (year >= bundle.targetRange.startYear && year <= bundle.targetRange.endYear) {
                 candidateYearSet.add(year);
             }
         }
     });
+    if (options?.includeYearProfile === true) {
+        profileOperation?.yearProfile?.forEach((row) => {
+            if (row.year >= bundle.targetRange.startYear
+                && row.year <= bundle.targetRange.endYear) {
+                candidateYearSet.add(row.year);
+            }
+        });
+    }
     const candidateYears = [...candidateYearSet].sort((left, right) => left - right);
     const widths = [5, 7, 9, 13] as const;
     const identityGroup = `${bundle.seriesId}|${operationIdentity(identity)}`;

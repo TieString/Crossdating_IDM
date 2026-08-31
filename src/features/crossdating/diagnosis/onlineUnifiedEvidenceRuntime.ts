@@ -20,7 +20,7 @@ import type { CrossdatingDiagnosis } from "./types";
 import type { SeriesCoreDiagnosis } from "./types";
 import type { JointCounterfactualOperationScore } from "./jointCounterfactualOperation";
 
-const operationProfilePeaks = (
+export const summarizeOnlineUnifiedOperationProfilePeaks = (
     operation: JointCounterfactualOperationScore,
 ): OnlineUnifiedOperationProfilePeak[] => {
     const definitions = [
@@ -66,6 +66,7 @@ export const buildOnlineUnifiedEvidenceForTarget = (input: {
     targetTree: string;
     referenceConfig: ReferenceSeriesConfig;
     core?: SeriesCoreDiagnosis | null;
+    includeExperimentalYearProfiles?: boolean;
 }): OnlineUnifiedEvidenceBundle | null => {
     const config = getConfig({ referenceConfig: input.referenceConfig });
     const core = input.core ?? diagnoseSeriesCore(
@@ -116,7 +117,18 @@ export const buildOnlineUnifiedEvidenceForTarget = (input: {
             topThreeDifferenceGain: operation.topThreeDifferenceGain,
             remoteDifferenceMargin: operation.remoteDifferenceMargin,
             baselineLag: operation.baselineLag,
-            profilePeaks: operationProfilePeaks(operation),
+            profilePeaks: input.includeExperimentalYearProfiles === true
+                ? summarizeOnlineUnifiedOperationProfilePeaks(operation) : [],
+            yearProfile: input.includeExperimentalYearProfiles === true
+                ? operation.rows.map((row) => ({
+                    year: row.year,
+                    rawGain: row.rawGain,
+                    differenceGain: row.differenceGain,
+                    combinedGain: row.combinedGain,
+                    sideStepScore: row.sideStepScore,
+                    sideMinimumAdvantage: row.sideMinimumAdvantage,
+                    correctedSideSupport: row.correctedSideSupport,
+                })) : [],
         })),
         dynamicSelection: dynamicSelection ? {
             eventType: dynamicSelection.operation.eventType,

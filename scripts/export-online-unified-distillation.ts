@@ -11,6 +11,7 @@ import {
     type OnlineUnifiedLocationPackage,
     type OnlineUnifiedOperationCandidate,
     type OnlineUnifiedOperationIdentity,
+    type OnlineUnifiedOperationProfilePeak,
 } from "@/features/crossdating/diagnosis/onlineUnifiedEvidence";
 import type {
     CrossdatingDiagnosis,
@@ -214,6 +215,8 @@ const main = async (): Promise<void> => {
     const runDir = resolve(args["run-dir"] ?? "");
     const teacherPath = resolve(args.teacher ?? "");
     const outputPath = resolve(args.output ?? "online-unified-distillation.ndjson.gz");
+    const searchRadiusYears = Number(args["search-radius-years"] ?? 25);
+    const includeProfilePeaks = args["include-profile-peaks"] !== "false";
     const labelMode = args["label-mode"] === "workflow-truth"
         ? "workflow-truth"
         : args["label-mode"] === "truth" ? "truth" : "teacher";
@@ -273,6 +276,29 @@ const main = async (): Promise<void> => {
                 topThreeDifferenceGain: numeric(operation.topThreeDifferenceGain),
                 remoteDifferenceMargin: numeric(operation.remoteDifferenceMargin),
                 baselineLag: numeric(operation.baselineLag),
+                profilePeaks: Array.isArray(operation.profilePeaks)
+                    ? operation.profilePeaks.map((value) => {
+                        const peak = value as Record<string, unknown>;
+                        return {
+                            source: String(peak.source) as OnlineUnifiedOperationProfilePeak["source"],
+                            year: numeric(peak.year),
+                            score: numeric(peak.score),
+                            remoteMargin: numeric(peak.remoteMargin),
+                        };
+                    }) : [],
+                yearProfile: Array.isArray(operation.yearProfile)
+                    ? operation.yearProfile.map((value) => {
+                        const row = value as Record<string, unknown>;
+                        return {
+                            year: numeric(row.year),
+                            rawGain: numeric(row.rawGain),
+                            differenceGain: numeric(row.differenceGain),
+                            combinedGain: numeric(row.combinedGain),
+                            sideStepScore: numeric(row.sideStepScore),
+                            sideMinimumAdvantage: numeric(row.sideMinimumAdvantage),
+                            correctedSideSupport: numeric(row.correctedSideSupport),
+                        };
+                    }) : [],
             })),
             dynamicSelection: grid.dynamicSelection ? {
                 eventType: String(grid.dynamicSelection.eventType) as "missingRing" | "falseRing" | "partialMove",
@@ -356,6 +382,9 @@ const main = async (): Promise<void> => {
                 )));
                 const locations = buildOnlineUnifiedLocationPackages(bundle, operation, {
                     compactWindowPerYear: true,
+                    searchRadiusYears,
+                    includeProfilePeaks,
+                    includeYearProfile: true,
                     includeWindow: (candidate) => (
                         !usesTruth
                         || Math.abs(candidate.topYear - targetYear) <= 6
