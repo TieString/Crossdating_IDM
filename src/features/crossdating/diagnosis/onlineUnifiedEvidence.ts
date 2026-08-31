@@ -2,11 +2,17 @@ import type {
     CrossdatingDiagnosis,
     DiagnosisConfidence,
     DiagnosisEvent,
+    DiagnosisEventInterpretationAmbiguity,
     DiagnosisEventAuditSnapshot,
     DiagnosisEventDecisionAudit,
     DiagnosisEventType,
     YearRange,
 } from "./types";
+import {
+    attachWholeLocalEventInterpretation,
+    makeEndpointMissingReviewFromWhole,
+} from "./endpointWholeMissingInterpretation";
+import { attachMissingPartialInterpretation } from "./missingPartialInterpretation";
 
 export const ONLINE_UNIFIED_EVIDENCE_VERSION = "online-unified-evidence-v1";
 export const ONLINE_UNIFIED_MODEL_VERSION = "applied-residual-unified-v12-online-v1";
@@ -68,6 +74,11 @@ export type OnlineUnifiedSelectionAnchor = {
     shiftScoreMargin: number | null;
 };
 
+export type OnlineUnifiedEventSource = {
+    stage: OnlineUnifiedClaimStage;
+    event: DiagnosisEvent;
+};
+
 export type OnlineUnifiedEvidenceBundle = {
     schemaVersion: 1;
     evidenceVersion: typeof ONLINE_UNIFIED_EVIDENCE_VERSION;
@@ -82,6 +93,8 @@ export type OnlineUnifiedEvidenceBundle = {
     finalReason: string;
     pass: Record<string, number>;
     claims: OnlineUnifiedEventClaim[];
+    /** Runtime-only executable events. They never enter model features or scoring. */
+    eventSources?: OnlineUnifiedEventSource[];
     operations: OnlineUnifiedGridOperation[];
     dynamicSelection: OnlineUnifiedSelectionAnchor | null;
     unitSelection: OnlineUnifiedSelectionAnchor | null;
@@ -300,15 +313,23 @@ const visitEvent = (
     event: DiagnosisEvent | undefined,
     stage: OnlineUnifiedClaimStage,
     output: OnlineUnifiedEventClaim[],
+    eventSources?: OnlineUnifiedEventSource[],
 ): void => {
     if (!event) return;
     output.push(claimFromEvent(event, stage));
+    eventSources?.push({ stage, event });
     event.operationAlternatives?.forEach((alternative) => visitEvent(
         alternative,
         stage,
         output,
+        eventSources,
     ));
-    visitEvent(event.interpretationAmbiguity?.alternative, stage, output);
+    visitEvent(
+        event.interpretationAmbiguity?.alternative,
+        stage,
+        output,
+        eventSources,
+    );
 };
 
 const auditStageEvents = (
@@ -397,6 +418,18 @@ const deduplicateClaims = (
     });
 };
 
+const deduplicateEventSources = (
+    sources: readonly OnlineUnifiedEventSource[],
+): OnlineUnifiedEventSource[] => {
+    const seen = new Set<string>();
+    return sources.filter(({ stage, event }) => {
+        const key = [stage, event.id].join(":");
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+};
+
 export const buildOnlineUnifiedEvidenceBundle = (input: {
     diagnosis: CrossdatingDiagnosis;
     seriesId: string;
@@ -411,15 +444,26 @@ export const buildOnlineUnifiedEvidenceBundle = (input: {
     );
     if (!audit?.targetRange) return null;
     const claims: OnlineUnifiedEventClaim[] = [];
-    input.diagnosis.events.forEach((event) => visitEvent(event, "strict", claims));
-    input.diagnosis.reviewEvents?.forEach((event) => visitEvent(event, "review", claims));
+    const eventSources: OnlineUnifiedEventSource[] = [];
+    input.diagnosis.events.forEach((event) => visitEvent(
+        event,
+        "strict",
+        claims,
+        eventSources,
+    ));
+    input.diagnosis.reviewEvents?.forEach((event) => visitEvent(
+        event,
+        "review",
+        claims,
+        eventSources,
+    ));
     auditStageEvents(audit).forEach(([stage, events]) => {
         events.forEach((event, index) => claims.push(claimFromAudit(event, stage, index)));
     });
     appendBoundedAuditClaims(audit, claims);
     input.diagnosis.jointEventDecisions?.forEach((decision) => {
         if (decision.seriesId === input.seriesId && decision.event) {
-            visitEvent(decision.event, "joint", claims);
+            visitEvent(decision.event, "joint", claims, eventSources);
         }
     });
     return {
@@ -438,6 +482,7 @@ export const buildOnlineUnifiedEvidenceBundle = (input: {
             typeof value === "number" ? [[key, value]] : []
         ))),
         claims: deduplicateClaims(claims),
+        eventSources: deduplicateEventSources(eventSources),
         operations: [...input.operations],
         dynamicSelection: input.dynamicSelection,
         unitSelection: input.unitSelection,
@@ -1082,6 +1127,314 @@ const packageConfidence = (
     return "low";
 };
 
+const VALID_LOCAL_WINDOW_WIDTHS = new Set([5, 7, 9, 13]);
+
+const eventSourceDistance = (
+    event: DiagnosisEvent,
+    topYear: number | null,
+): number => {
+    if (topYear === null) return 0;
+    const sourceTop = topYearOf(event)
+        ?? Math.round((event.startYear + event.endYear) / 2);
+    return Math.abs(sourceTop - topYear);
+};
+
+const automaticEventIdentityAllowed = (event: DiagnosisEvent): boolean => identityAllowed({
+    eventType: event.eventType,
+    shiftYears: effectiveOnlineShift(event.eventType, event.shiftYears),
+});
+
+const sourceEventIsPackageCompatible = (
+    event: DiagnosisEvent,
+    bundle: OnlineUnifiedEvidenceBundle,
+): boolean => {
+    if (event.seriesId !== bundle.seriesId
+        || event.stale === true
+        || !automaticEventIdentityAllowed(event)) return false;
+    if (event.eventType === "wholeSeriesMove") return true;
+    const width = event.endYear - event.startYear + 1;
+    return VALID_LOCAL_WINDOW_WIDTHS.has(width)
+        && event.startYear >= bundle.targetRange.startYear
+        && event.endYear <= bundle.targetRange.endYear
+        && event.rankedYears.some((row) => (
+            row.year >= event.startYear && row.year <= event.endYear
+        ));
+};
+
+const cloneAmbiguityEvidence = (
+    ambiguity: DiagnosisEventInterpretationAmbiguity,
+): DiagnosisEventInterpretationAmbiguity["evidence"] => {
+    if (ambiguity.kind === "missingRingsOrPartialMove") {
+        return {
+            ...ambiguity.evidence,
+            missingYears: [...ambiguity.evidence.missingYears],
+            virtualCountEvaluation: ambiguity.evidence.virtualCountEvaluation ? {
+                ...ambiguity.evidence.virtualCountEvaluation,
+                years: [...ambiguity.evidence.virtualCountEvaluation.years],
+            } : undefined,
+            completedComposition: ambiguity.evidence.completedComposition
+                ? { ...ambiguity.evidence.completedComposition }
+                : undefined,
+        };
+    }
+    return {
+        ...ambiguity.evidence,
+        finalEvidenceClaims: [...ambiguity.evidence.finalEvidenceClaims],
+    };
+};
+
+const cloneExecutableEquivalentEvent = (
+    source: DiagnosisEvent,
+    bundle: OnlineUnifiedEvidenceBundle,
+    packageId: string,
+    depth: number,
+    visited: Set<DiagnosisEvent>,
+): DiagnosisEvent | null => {
+    if (depth > 3
+        || visited.has(source)
+        || !sourceEventIsPackageCompatible(source, bundle)) return null;
+    const nextVisited = new Set(visited);
+    nextVisited.add(source);
+    const sourceAmbiguity = source.interpretationAmbiguity;
+    const clonedAlternative = sourceAmbiguity
+        ? cloneExecutableEquivalentEvent(
+            sourceAmbiguity.alternative,
+            bundle,
+            packageId,
+            depth + 1,
+            nextVisited,
+        )
+        : null;
+    const ambiguity = sourceAmbiguity && clonedAlternative ? {
+        kind: sourceAmbiguity.kind,
+        alternative: clonedAlternative,
+        evidence: cloneAmbiguityEvidence(sourceAmbiguity),
+    } as DiagnosisEventInterpretationAmbiguity : undefined;
+    const sourceTop = topYearOf(source);
+    const event: DiagnosisEvent = {
+        ...source,
+        id: [
+            packageId,
+            "interpretation",
+            depth,
+            source.eventType,
+            sourceTop ?? "whole",
+        ].join(":"),
+        rankedYears: source.rankedYears
+            .filter((row) => row.year >= source.startYear && row.year <= source.endYear)
+            .map((row) => ({ ...row, evidenceTags: [...row.evidenceTags] })),
+        reviewCoreRange: source.reviewCoreRange
+            ? { ...source.reviewCoreRange }
+            : undefined,
+        alternativeTypes: ambiguity
+            ? [ambiguity.alternative.eventType]
+            : [],
+        locationAlternatives: undefined,
+        operationAlternatives: undefined,
+        interpretationAmbiguity: ambiguity,
+        seriesRange: { ...bundle.targetRange },
+        stale: false,
+        evidence: {
+            ...source.evidence,
+            algorithmSources: [...new Set([
+                ...source.evidence.algorithmSources,
+                "online_unified_equivalent_interpretation",
+            ])],
+            candidateIds: [],
+            notes: [...new Set([
+                ...source.evidence.notes,
+                "equivalent_interpretation_package=" + packageId,
+            ])],
+            locationEvidence: source.evidence.locationEvidence?.map((entry) => ({
+                ...entry,
+            })),
+        },
+    };
+    if (event.eventType === "missingRing" || event.eventType === "falseRing") {
+        delete event.shiftYears;
+        delete event.shiftSide;
+    }
+    return event;
+};
+
+const matchingInterpretationSource = (
+    bundle: OnlineUnifiedEvidenceBundle,
+    identity: OnlineUnifiedOperationIdentity,
+    topYear: number | null,
+): OnlineUnifiedEventSource | null => (
+    bundle.eventSources ?? []
+).filter(({ event }) => (
+    sourceEventIsPackageCompatible(event, bundle)
+    && event.interpretationAmbiguity !== undefined
+    && event.eventType === identity.eventType
+    && effectiveOnlineShift(event.eventType, event.shiftYears) === identity.shiftYears
+)).sort((left, right) => (
+    eventSourceDistance(left.event, topYear) - eventSourceDistance(right.event, topYear)
+    || STAGE_PRIORITY[right.stage] - STAGE_PRIORITY[left.stage]
+    || right.event.evidence.score - left.event.evidence.score
+))[0] ?? null;
+
+const attachFallbackMissingInterpretation = (
+    partial: DiagnosisEvent,
+    bundle: OnlineUnifiedEvidenceBundle,
+): DiagnosisEvent => {
+    if (partial.eventType !== "partialMove"
+        || (partial.shiftYears ?? 0) >= -1
+        || partial.interpretationAmbiguity) return partial;
+    const firstFixedYear = topYearOf(partial)
+        ?? Math.round((partial.startYear + partial.endYear) / 2);
+    const missingYear = Math.max(
+        partial.startYear,
+        Math.min(partial.endYear, firstFixedYear - 1),
+    );
+    const missing: DiagnosisEvent = {
+        ...partial,
+        id: [
+            partial.id,
+            "interpretation",
+            "missingRing",
+            missingYear,
+        ].join(":"),
+        eventType: "missingRing",
+        rankedYears: [{
+            year: missingYear,
+            rank: 1,
+            score: partial.evidence.score,
+            evidenceTags: ["online_unified_partial_boundary_fallback"],
+        }],
+        alternativeTypes: [],
+        interpretationAmbiguity: undefined,
+        shiftYears: undefined,
+        shiftSide: undefined,
+        reviewOnly: true,
+        evidence: {
+            ...partial.evidence,
+            algorithmSources: [...new Set([
+                ...partial.evidence.algorithmSources,
+                "online_unified_partial_boundary_fallback",
+            ])],
+            lagBefore: -1,
+            lagAfter: 0,
+            candidateIds: [],
+            notes: [...new Set([
+                ...partial.evidence.notes,
+                "interpretation=discrete_missing_ring_frontier",
+                "interpretation_count=cumulative_lag_only",
+            ])],
+        },
+    };
+    return attachMissingPartialInterpretation(partial, missing, {
+        interpretationBasis: "virtualSequentialFrontier",
+        missingRingCount: Math.abs(partial.shiftYears!),
+        cumulativeShiftYears: partial.shiftYears!,
+        missingYears: [],
+        partialFirstFixedYear: firstFixedYear,
+        normalizedCounterfactualGainDifference: 0,
+        masterMargin: 0,
+        referenceMedianMargin: 0,
+        referenceCount: bundle.referenceSourceCount,
+        missingReferenceSupport: 0,
+        partialReferenceSupport: 0,
+        countEvidence: "cumulativeLagOnly",
+        frontierYear: missingYear,
+        frontierLocalization: "partialBoundaryFallback",
+    });
+};
+
+const bestFallbackLocalSource = (
+    bundle: OnlineUnifiedEvidenceBundle,
+    wholeShiftYears: number,
+): OnlineUnifiedEventSource | null => (
+    bundle.eventSources ?? []
+).filter(({ event }) => (
+    sourceEventIsPackageCompatible(event, bundle)
+    && (
+        (event.eventType === "partialMove" && event.shiftYears === wholeShiftYears)
+        || event.eventType === "missingRing"
+    )
+)).sort((left, right) => {
+    const leftExactPartial = Number(
+        left.event.eventType === "partialMove" && left.event.shiftYears === wholeShiftYears,
+    );
+    const rightExactPartial = Number(
+        right.event.eventType === "partialMove" && right.event.shiftYears === wholeShiftYears,
+    );
+    return rightExactPartial - leftExactPartial
+        || (topYearOf(right.event) ?? Number.NEGATIVE_INFINITY)
+            - (topYearOf(left.event) ?? Number.NEGATIVE_INFINITY)
+        || STAGE_PRIORITY[right.stage] - STAGE_PRIORITY[left.stage]
+        || right.event.evidence.score - left.event.evidence.score;
+})[0] ?? null;
+
+const attachExecutableInterpretations = (
+    primary: DiagnosisEvent,
+    bundle: OnlineUnifiedEvidenceBundle,
+    identity: OnlineUnifiedOperationIdentity,
+    topYear: number | null,
+): DiagnosisEvent => {
+    const source = matchingInterpretationSource(bundle, identity, topYear);
+    const sourceAmbiguity = source?.event.interpretationAmbiguity;
+    const clonedAlternative = sourceAmbiguity
+        ? cloneExecutableEquivalentEvent(
+            sourceAmbiguity.alternative,
+            bundle,
+            primary.id,
+            1,
+            new Set(source ? [source.event] : []),
+        )
+        : null;
+    const completedAlternative = clonedAlternative?.eventType === "partialMove"
+        ? attachFallbackMissingInterpretation(clonedAlternative, bundle)
+        : clonedAlternative;
+    if (sourceAmbiguity && completedAlternative) {
+        return {
+            ...primary,
+            alternativeTypes: [completedAlternative.eventType],
+            interpretationAmbiguity: {
+                kind: sourceAmbiguity.kind,
+                alternative: completedAlternative,
+                evidence: cloneAmbiguityEvidence(sourceAmbiguity),
+            } as DiagnosisEventInterpretationAmbiguity,
+        };
+    }
+    if (primary.eventType === "partialMove") {
+        return attachFallbackMissingInterpretation(primary, bundle);
+    }
+    if (primary.eventType !== "wholeSeriesMove" || (primary.shiftYears ?? 0) >= 0) {
+        return primary;
+    }
+    const localSource = bestFallbackLocalSource(bundle, primary.shiftYears!);
+    const clonedLocal = localSource
+        ? cloneExecutableEquivalentEvent(
+            localSource.event,
+            bundle,
+            primary.id,
+            1,
+            new Set(),
+        )
+        : null;
+    const local = clonedLocal?.eventType === "partialMove"
+        ? attachFallbackMissingInterpretation(clonedLocal, bundle)
+        : clonedLocal ?? makeEndpointMissingReviewFromWhole(primary);
+    if (!local) return primary;
+    return {
+        ...attachWholeLocalEventInterpretation(primary, local, {
+            wholeShiftYears: primary.shiftYears!,
+            localEventType: local.eventType as Exclude<
+                DiagnosisEventType,
+                "wholeSeriesMove"
+            >,
+            localWindowWidth: (
+                local.endYear - local.startYear + 1
+            ) as 5 | 7 | 9 | 13,
+            localEvidenceSource: clonedLocal ? "diagnosed" : "syntheticEndpointReview",
+            operationScoreMargin: primary.evidence.scoreMargin,
+            finalEvidenceClaims: [],
+        }),
+        alternativeTypes: [local.eventType],
+    };
+};
+
 /**
  * Materializes the model choice into a self-contained event. Applying this event
  * never needs to find a legacy event or candidate with the same identity.
@@ -1144,9 +1497,15 @@ export const buildOnlineUnifiedExecutablePackage = (input: {
         reviewOnly: false,
         stale: false,
     };
+    const executableEvent = attachExecutableInterpretations(
+        event,
+        bundle,
+        candidate,
+        topYear,
+    );
     return {
         packageId: candidate.packageId,
         identityGroup: candidate.identityGroup,
-        event,
+        event: executableEvent,
     };
 };
