@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import gzip
 import json
 from collections import defaultdict
@@ -130,6 +131,11 @@ def load_location_rows(
 
 def feature_names(frame: pd.DataFrame) -> list[str]:
     return sorted(column for column in frame.columns if column not in META_COLUMNS)
+
+
+def compact_feature_storage(frame: pd.DataFrame, features: list[str]) -> None:
+    frame.replace([np.inf, -np.inf], np.nan, inplace=True)
+    frame[features] = frame[features].fillna(0.0).astype(np.float32)
 
 
 def prepare_grouped(
@@ -288,7 +294,12 @@ def main() -> None:
     input_paths = [Path(value) for value in args.input]
     operation, attempts = load_operation_rows(input_paths)
     operation_features = feature_names(operation)
-    operation = operation.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    compact_feature_storage(operation, operation_features)
+    operation_rows_count = len(operation)
+    operation_feature_count = len(operation_features)
+    operation_package_oracle = float(
+        operation.groupby("attempt_id")["label"].max().mean()
+    )
 
     operation_oof, operation_folds = fit_oof(
         operation,
@@ -297,18 +308,31 @@ def main() -> None:
         260,
     )
     operation_top = selected_by_attempt(operation, operation_oof)
+    operation_booster = fit_final(
+        operation,
+        operation_features,
+        args.seed,
+        260,
+    )
     predicted_location_groups = {
         attempt_id: f"{attempt_id}|{row['event_type']}|{row['shift_years']}"
         for attempt_id, row in operation_top.items()
         if row["event_type"] not in {"noEvent", "wholeSeriesMove"}
     }
+    del operation, operation_oof
+    gc.collect()
     location = load_location_rows(
         input_paths,
         attempts,
         predicted_location_groups,
     )
     location_features = feature_names(location)
-    location = location.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    compact_feature_storage(location, location_features)
+    location_rows_count = len(location)
+    location_feature_count = len(location_features)
+    location_package_oracle = float(
+        location.groupby("location_group")["label"].max().mean()
+    )
     location_valid_groups = set(
         location.groupby("location_group")["label"].max()
         .loc[lambda values: values > 0].index
@@ -363,12 +387,6 @@ def main() -> None:
             "workflow_oracle": int(metadata["workflow_oracle"]),
         })
 
-    operation_booster = fit_final(
-        operation,
-        operation_features,
-        args.seed,
-        260,
-    )
     location_booster = fit_final(
         location_train,
         location_features,
@@ -395,20 +413,16 @@ def main() -> None:
         "teacherModelVersion": model["teacherModelVersion"],
         "attempts": attempt_count,
         "files": len(per_file),
-        "operationRows": len(operation),
-        "locationRows": len(location),
+        "operationRows": operation_rows_count,
+        "locationRows": location_rows_count,
         "locationTrainRows": len(location_train),
-        "operationFeatures": len(operation_features),
-        "locationFeatures": len(location_features),
-        "operationPackageOracle": float(
-            operation.groupby("attempt_id")["label"].max().mean()
-        ),
+        "operationFeatures": operation_feature_count,
+        "locationFeatures": location_feature_count,
+        "operationPackageOracle": operation_package_oracle,
         "workflowPackageOracle": float(np.mean([
             int(metadata["workflow_oracle"]) for metadata in attempts.values()
         ])),
-        "locationPackageOracle": float(
-            location.groupby("location_group")["label"].max().mean()
-        ),
+        "locationPackageOracle": location_package_oracle,
         "fileOofOperationTop1": operation_correct / max(1, attempt_count),
         "fileOofLocationTop1GivenPackage": location_correct / max(1, local_attempts),
         "fileOofCombinedTeacherFidelity": combined_correct / max(1, attempt_count),
