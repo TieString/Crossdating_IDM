@@ -11,12 +11,40 @@ import {
 import {
     buildOnlineUnifiedEvidenceBundle,
     type OnlineUnifiedEvidenceBundle,
+    type OnlineUnifiedOperationProfilePeak,
 } from "./onlineUnifiedEvidence";
 import { DEFAULT_MAX_PARTIAL_GAP_YEARS } from "./partialMoveSemantics";
 import { preprocessSeries } from "./series";
 import { diagnoseSeriesCore } from "./segments";
 import type { CrossdatingDiagnosis } from "./types";
 import type { SeriesCoreDiagnosis } from "./types";
+import type { JointCounterfactualOperationScore } from "./jointCounterfactualOperation";
+
+const operationProfilePeaks = (
+    operation: JointCounterfactualOperationScore,
+): OnlineUnifiedOperationProfilePeak[] => {
+    const definitions = [
+        ["rawGain", (row: JointCounterfactualOperationScore["rows"][number]) => row.rawGain],
+        ["differenceGain", (row: JointCounterfactualOperationScore["rows"][number]) => row.differenceGain],
+        ["combinedGain", (row: JointCounterfactualOperationScore["rows"][number]) => row.combinedGain],
+        ["sideStep", (row: JointCounterfactualOperationScore["rows"][number]) => row.sideStepScore],
+        ["sideMinimumAdvantage", (row: JointCounterfactualOperationScore["rows"][number]) => row.sideMinimumAdvantage],
+        ["correctedSideSupport", (row: JointCounterfactualOperationScore["rows"][number]) => row.correctedSideSupport],
+    ] as const;
+    return definitions.flatMap(([source, score]) => {
+        const ranked = operation.rows.filter((row) => Number.isFinite(score(row)))
+            .sort((left, right) => score(right) - score(left) || right.year - left.year);
+        const best = ranked[0];
+        if (!best) return [];
+        const remote = ranked.find((row) => Math.abs(row.year - best.year) > 17);
+        return [{
+            source,
+            year: best.year,
+            score: score(best),
+            remoteMargin: score(best) - score(remote ?? best),
+        }];
+    });
+};
 
 const effectiveAuditShift = (event: {
     eventType: string;
@@ -88,6 +116,7 @@ export const buildOnlineUnifiedEvidenceForTarget = (input: {
             topThreeDifferenceGain: operation.topThreeDifferenceGain,
             remoteDifferenceMargin: operation.remoteDifferenceMargin,
             baselineLag: operation.baselineLag,
+            profilePeaks: operationProfilePeaks(operation),
         })),
         dynamicSelection: dynamicSelection ? {
             eventType: dynamicSelection.operation.eventType,

@@ -110,6 +110,49 @@ describe("online unified location packages", () => {
             .map((row) => row.packageId);
         expect(compact).toEqual(expected);
     });
+
+    it("searches beyond a displaced anchor without widening the review window", () => {
+        const evidence = bundle();
+        evidence.claims = evidence.claims.map((claim) => ({
+            ...claim,
+            startYear: claim.startYear - 20,
+            endYear: claim.endYear - 20,
+            topYear: claim.topYear === null ? null : claim.topYear - 20,
+        }));
+        evidence.operations = evidence.operations.map((operation) => ({
+            ...operation,
+            bestYear: operation.bestYear === null ? null : operation.bestYear - 20,
+        }));
+        const locations = buildOnlineUnifiedLocationPackages(evidence, {
+            eventType: "missingRing",
+            shiftYears: -1,
+        });
+
+        expect(locations.some((candidate) => (
+            candidate.startYear <= 1851
+            && candidate.endYear >= 1851
+        ))).toBe(true);
+        expect(locations.every((candidate) => [5, 7, 9, 13].includes(candidate.width)))
+            .toBe(true);
+    });
+
+    it("retains independent counterfactual profile peaks as location anchors", () => {
+        const evidence = bundle();
+        evidence.operations[0]!.profilePeaks = [{
+            source: "sideStep",
+            year: 1880,
+            score: 0.8,
+            remoteMargin: 0.3,
+        }];
+        const locations = buildOnlineUnifiedLocationPackages(evidence, {
+            eventType: "missingRing",
+            shiftYears: -1,
+        });
+
+        expect(locations.some((candidate) => candidate.topYear === 1880)).toBe(true);
+        expect(locations.find((candidate) => candidate.topYear === 1880)?.features)
+            .toMatchObject({ source_counterfactual_within_2: 1 });
+    });
 });
 
 const eventEvidence = (

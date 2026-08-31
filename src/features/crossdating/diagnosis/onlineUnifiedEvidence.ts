@@ -63,6 +63,20 @@ export type OnlineUnifiedGridOperation = {
     topThreeDifferenceGain: number;
     remoteDifferenceMargin: number;
     baselineLag: number;
+    profilePeaks?: OnlineUnifiedOperationProfilePeak[];
+};
+
+export type OnlineUnifiedOperationProfilePeak = {
+    source:
+        | "rawGain"
+        | "differenceGain"
+        | "combinedGain"
+        | "sideStep"
+        | "sideMinimumAdvantage"
+        | "correctedSideSupport";
+    year: number;
+    score: number;
+    remoteMargin: number;
 };
 
 export type OnlineUnifiedSelectionAnchor = {
@@ -164,6 +178,15 @@ const SOURCE_TOKENS = [
     "unit",
 ] as const;
 
+const PROFILE_PEAK_SOURCES = [
+    "rawGain",
+    "differenceGain",
+    "combinedGain",
+    "sideStep",
+    "sideMinimumAdvantage",
+    "correctedSideSupport",
+] as const;
+
 const OPERATION_NUMERIC_FEATURES = [
     "claim_count",
     "claim_stage_count",
@@ -186,6 +209,14 @@ const OPERATION_NUMERIC_FEATURES = [
     "grid_top_three_difference_gain",
     "grid_remote_difference_margin",
     "grid_baseline_lag",
+    "grid_profile_peak_count",
+    "grid_profile_peak_year_spread",
+    "grid_profile_peak_max_score",
+    "grid_profile_peak_max_margin",
+    ...PROFILE_PEAK_SOURCES.flatMap((source) => [
+        `grid_profile_${source}_score`,
+        `grid_profile_${source}_margin`,
+    ]),
     "dynamic_selected",
     "dynamic_score",
     "dynamic_score_margin",
@@ -626,6 +657,8 @@ const operationClaimFeatures = (
         && operationIdentity(bundle.dynamicSelection) === operationIdentity(identity);
     const unitSelected = bundle.unitSelection !== null
         && operationIdentity(bundle.unitSelection) === operationIdentity(identity);
+    const profilePeaks = grid?.profilePeaks ?? [];
+    const profileYears = profilePeaks.map((peak) => peak.year);
     const features: Record<string, number> = {
         event_type_missingRing: Number(identity.eventType === "missingRing"),
         event_type_falseRing: Number(identity.eventType === "falseRing"),
@@ -678,6 +711,17 @@ const operationClaimFeatures = (
         grid_top_three_difference_gain: finite(grid?.topThreeDifferenceGain),
         grid_remote_difference_margin: finite(grid?.remoteDifferenceMargin),
         grid_baseline_lag: finite(grid?.baselineLag),
+        grid_profile_peak_count: profilePeaks.length,
+        grid_profile_peak_year_spread: profileYears.length > 0
+            ? Math.max(...profileYears) - Math.min(...profileYears) : 0,
+        grid_profile_peak_max_score: Math.max(
+            0,
+            ...profilePeaks.map((peak) => finite(peak.score)),
+        ),
+        grid_profile_peak_max_margin: Math.max(
+            0,
+            ...profilePeaks.map((peak) => finite(peak.remoteMargin)),
+        ),
         dynamic_selected: Number(dynamicSelected),
         dynamic_score: dynamicSelected ? finite(bundle.dynamicSelection?.score) : 0,
         dynamic_score_margin: dynamicSelected
@@ -692,6 +736,11 @@ const operationClaimFeatures = (
         raw_global_lag_match: Number(identity.shiftYears === bundle.rawGlobalLag),
         cofecha_global_lag_match: Number(identity.shiftYears === bundle.cofechaGlobalLag),
     };
+    PROFILE_PEAK_SOURCES.forEach((source) => {
+        const peak = profilePeaks.find((candidate) => candidate.source === source);
+        features[`grid_profile_${source}_score`] = finite(peak?.score);
+        features[`grid_profile_${source}_margin`] = finite(peak?.remoteMargin);
+    });
     SOURCE_TOKENS.forEach((token) => {
         features[`source_${token}_claim_count`] = claims.filter(
             (claim) => sourceTokenPresent(claim, token),
@@ -782,6 +831,15 @@ const locationAnchors = (
             stage: 0.5,
             correlationGain: grid.bestCombinedGain,
         });
+        (grid.profilePeaks ?? []).forEach((peak) => output.push({
+            year: peak.year,
+            source: `counterfactual profile ${peak.source}`,
+            score: peak.score,
+            margin: peak.remoteMargin,
+            confidence: 0.7,
+            stage: 0.52,
+            correlationGain: peak.score,
+        }));
     }
     for (const [source, selection] of [
         ["dynamic", bundle.dynamicSelection],
@@ -978,7 +1036,9 @@ export const buildOnlineUnifiedLocationPackages = (
     ));
     const candidateYearSet = new Set<number>();
     anchors.forEach((anchor) => {
-        for (let offset = -13; offset <= 13; offset += 1) {
+        // The review window remains at most 13 years wide, but the internal
+        // locator must be able to recover from a moderately displaced anchor.
+        for (let offset = -25; offset <= 25; offset += 1) {
             const year = anchor.year + offset;
             if (year >= bundle.targetRange.startYear && year <= bundle.targetRange.endYear) {
                 candidateYearSet.add(year);

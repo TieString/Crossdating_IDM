@@ -4,6 +4,7 @@ import { basename, join, resolve } from "node:path";
 import { createGzip } from "node:zlib";
 import { createInterface } from "node:readline";
 import {
+    buildOnlineUnifiedExecutablePackage,
     buildOnlineUnifiedEvidenceBundle,
     buildOnlineUnifiedLocationPackages,
     buildOnlineUnifiedOperationCandidates,
@@ -149,11 +150,27 @@ const identityMatches = (
 ): boolean => candidate.eventType === target.eventType
     && candidate.shiftYears === target.shiftYears;
 
+const workflowIdentityMatches = (
+    candidate: OnlineUnifiedOperationIdentity,
+    target: OnlineUnifiedOperationIdentity,
+): boolean => identityMatches(candidate, target)
+    || (
+        target.eventType === "missingRing"
+        && candidate.eventType === "partialMove"
+        && candidate.shiftYears < -1
+    );
+
 const sampleOperationRows = (
     candidates: OnlineUnifiedOperationCandidate[],
     target: OnlineUnifiedOperationIdentity,
+    workflowLabels = false,
 ): OnlineUnifiedOperationCandidate[] => {
     const selected = candidates.find((candidate) => identityMatches(candidate, target));
+    const workflowCompatible = workflowLabels
+        ? candidates.filter((candidate) => workflowIdentityMatches(candidate, target))
+            .sort((left, right) => candidateHeuristic(right) - candidateHeuristic(left))
+            .slice(0, 6)
+        : [];
     const familyWinners = ["noEvent", "missingRing", "falseRing", "partialMove", "wholeSeriesMove"]
         .flatMap((eventType) => candidates
             .filter((candidate) => candidate.eventType === eventType)
@@ -162,7 +179,7 @@ const sampleOperationRows = (
     const strongest = [...candidates]
         .sort((left, right) => candidateHeuristic(right) - candidateHeuristic(left))
         .slice(0, 32);
-    return [...new Map([selected, ...familyWinners, ...strongest]
+    return [...new Map([selected, ...workflowCompatible, ...familyWinners, ...strongest]
         .filter((candidate): candidate is OnlineUnifiedOperationCandidate => Boolean(candidate))
         .map((candidate) => [candidate.packageId, candidate])).values()];
 };
@@ -197,7 +214,9 @@ const main = async (): Promise<void> => {
     const runDir = resolve(args["run-dir"] ?? "");
     const teacherPath = resolve(args.teacher ?? "");
     const outputPath = resolve(args.output ?? "online-unified-distillation.ndjson.gz");
-    const labelMode = args["label-mode"] === "truth" ? "truth" : "teacher";
+    const labelMode = args["label-mode"] === "workflow-truth"
+        ? "workflow-truth"
+        : args["label-mode"] === "truth" ? "truth" : "teacher";
     if (!args["run-dir"] || !args.teacher) {
         throw new Error("--run-dir and --teacher are required");
     }
@@ -279,7 +298,9 @@ const main = async (): Promise<void> => {
             cofechaGlobalLag: numeric(grid.cofechaCoreGlobalSlidingMatch?.bestGlobalLag),
         });
         if (!bundle) continue;
-        const targetIdentity = labelMode === "truth"
+        const usesTruth = labelMode !== "teacher";
+        const workflowLabels = labelMode === "workflow-truth";
+        const targetIdentity = usesTruth
             ? step.family === "Clean"
                 ? { eventType: "noEvent" as const, shiftYears: 0 }
                 : {
@@ -287,66 +308,122 @@ const main = async (): Promise<void> => {
                     shiftYears: numeric(step.diagnosedTruthShiftYears),
                 }
             : effectiveTeacherIdentity(teacher);
-        const targetYear = labelMode === "truth"
+        const targetYear = usesTruth
             ? numeric(step.diagnosedTruthYear)
             : numeric(teacher.top_year);
         const allOperations = buildOnlineUnifiedOperationCandidates(bundle);
         const operationHit = allOperations.some((candidate) => (
-            identityMatches(candidate, targetIdentity)
+            workflowLabels
+                ? workflowIdentityMatches(candidate, targetIdentity)
+                : identityMatches(candidate, targetIdentity)
         ));
         operationOracle += Number(operationHit);
-        const operationRows = sampleOperationRows(allOperations, targetIdentity).map(
+        const sampledOperations = sampleOperationRows(
+            allOperations,
+            targetIdentity,
+            workflowLabels,
+        );
+        const operationRows = sampledOperations.map(
             (candidate) => ({
                 packageId: candidate.packageId,
                 eventType: candidate.eventType,
                 shiftYears: candidate.shiftYears,
-                label: Number(identityMatches(candidate, targetIdentity)),
+                label: Number(workflowLabels
+                    ? workflowIdentityMatches(candidate, targetIdentity)
+                    : identityMatches(candidate, targetIdentity)),
                 features: candidate.features,
             }),
         );
         let locationRows: Array<Record<string, unknown>> = [];
         let locationHit = targetIdentity.eventType === "noEvent"
             || targetIdentity.eventType === "wholeSeriesMove";
-        if (targetIdentity.eventType !== "noEvent"
-            && targetIdentity.eventType !== "wholeSeriesMove") {
-            const claimWindowKeys = new Set(bundle.claims.filter((claim) => (
-                claim.eventType === targetIdentity.eventType
-                && claim.shiftYears === targetIdentity.shiftYears
-                && claim.topYear !== null
-            )).map((claim) => (
-                `${claim.topYear}:${claim.startYear}:${claim.endYear}`
-            )));
-            const locations = buildOnlineUnifiedLocationPackages(bundle, targetIdentity, {
-                compactWindowPerYear: true,
-                includeWindow: (candidate) => (
-                    Math.abs(candidate.topYear - targetYear) <= 6
-                    || Math.abs(
-                        (candidate.startYear + candidate.endYear) / 2
-                        - candidate.topYear,
-                    ) <= 0.5
-                    || claimWindowKeys.has(
-                        `${candidate.topYear}:${candidate.startYear}:${candidate.endYear}`,
-                    )
-                ),
+        const positiveLocalOperations = sampledOperations.filter((candidate) => (
+            candidate.eventType !== "noEvent"
+            && candidate.eventType !== "wholeSeriesMove"
+            && (workflowLabels
+                ? workflowIdentityMatches(candidate, targetIdentity)
+                : identityMatches(candidate, targetIdentity))
+        ));
+        const locationOperations = positiveLocalOperations;
+        if (locationOperations.length > 0) {
+            locationRows = locationOperations.flatMap((operation) => {
+                const claimWindowKeys = new Set(bundle.claims.filter((claim) => (
+                    claim.eventType === operation.eventType
+                    && claim.shiftYears === operation.shiftYears
+                    && claim.topYear !== null
+                )).map((claim) => (
+                    `${claim.topYear}:${claim.startYear}:${claim.endYear}`
+                )));
+                const locations = buildOnlineUnifiedLocationPackages(bundle, operation, {
+                    compactWindowPerYear: true,
+                    includeWindow: (candidate) => (
+                        !usesTruth
+                        || Math.abs(candidate.topYear - targetYear) <= 6
+                        || Math.abs(
+                            (candidate.startYear + candidate.endYear) / 2
+                            - candidate.topYear,
+                        ) <= 0.5
+                        || claimWindowKeys.has(
+                            `${candidate.topYear}:${candidate.startYear}:${candidate.endYear}`,
+                        )
+                    ),
+                });
+                const sampled = sampleLocationRows(
+                    locations,
+                    targetYear,
+                    labelMode === "teacher" ? teacher : undefined,
+                );
+                const locationGroup = [
+                    teacher.attempt_id,
+                    operation.eventType,
+                    operation.shiftYears,
+                ].join("|");
+                return sampled.map((candidate) => {
+                    const executable = buildOnlineUnifiedExecutablePackage({
+                        bundle,
+                        candidate,
+                        score: 0,
+                        scoreMargin: 0,
+                    });
+                    const primary = executable?.event ?? null;
+                    const alternative = primary?.interpretationAmbiguity?.alternative ?? null;
+                    const candidateCoversTruth = candidate.startYear <= targetYear
+                        && candidate.endYear >= targetYear;
+                    const exactPrimary = identityMatches(candidate, targetIdentity);
+                    const reviewedPrimary = workflowLabels
+                        && targetIdentity.eventType === "missingRing"
+                        && primary?.eventType === "partialMove"
+                        && (primary.shiftYears ?? 0) < -1;
+                    const exactAlternative = alternative !== null
+                        && identityMatches({
+                            eventType: alternative.eventType,
+                            shiftYears: alternative.eventType === "missingRing"
+                                ? -1
+                                : alternative.eventType === "falseRing"
+                                    ? 1
+                                    : alternative.shiftYears ?? 0,
+                        }, targetIdentity)
+                        && alternative.startYear <= targetYear
+                        && alternative.endYear >= targetYear;
+                    return {
+                        locationGroup,
+                        packageId: candidate.packageId,
+                        eventType: operation.eventType,
+                        shiftYears: operation.shiftYears,
+                        startYear: candidate.startYear,
+                        endYear: candidate.endYear,
+                        topYear: candidate.topYear,
+                        width: candidate.width,
+                        label: Number(usesTruth
+                            ? candidateCoversTruth
+                                && (exactPrimary || reviewedPrimary || exactAlternative)
+                            : candidate.startYear === numeric(teacher.start_year)
+                                && candidate.endYear === numeric(teacher.end_year)
+                                && candidate.topYear === numeric(teacher.top_year)),
+                        features: candidate.features,
+                    };
+                });
             });
-            const sampled = sampleLocationRows(
-                locations,
-                targetYear,
-                labelMode === "teacher" ? teacher : undefined,
-            );
-            locationRows = sampled.map((candidate) => ({
-                packageId: candidate.packageId,
-                startYear: candidate.startYear,
-                endYear: candidate.endYear,
-                topYear: candidate.topYear,
-                width: candidate.width,
-                label: Number(labelMode === "truth"
-                    ? candidate.startYear <= targetYear && candidate.endYear >= targetYear
-                    : candidate.startYear === numeric(teacher.start_year)
-                        && candidate.endYear === numeric(teacher.end_year)
-                        && candidate.topYear === numeric(teacher.top_year)),
-                features: candidate.features,
-            }));
             locationHit = locationRows.some((row) => row.label === 1);
         }
         locationOracle += Number(locationHit);
@@ -359,6 +436,7 @@ const main = async (): Promise<void> => {
             targetYear: targetIdentity.eventType === "wholeSeriesMove"
                 || targetIdentity.eventType === "noEvent" ? null : targetYear,
             targetIdentity,
+            workflowOracle: operationHit && locationHit,
             operationRows,
             locationRows,
         })}\n`;

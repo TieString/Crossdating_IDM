@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "overall": {
+    "files": 50,
+    "attempts": 4618,
+    "workflowCorrect": 4090,
+    "workflowAccuracy": 0.8856647899523603,
+    "clusteredOneSided95Lower": 0.8676726939983181,
+    "operationErrors": 229,
+    "windowErrors": 299,
+    "oracleMissing": 209
+  },
+  "byFamily": {
+    "A": {
+      "files": 50,
+      "attempts": 500,
+      "workflowCorrect": 476,
+      "workflowAccuracy": 0.952,
+      "clusteredOneSided95Lower": 0.936,
+      "operationErrors": 18,
+      "windowErrors": 6,
+      "oracleMissing": 3
+    },
+    "B": {
+      "files": 50,
+      "attempts": 1206,
+      "workflowCorrect": 1075,
+      "workflowAccuracy": 0.8913764510779436,
+      "clusteredOneSided95Lower": 0.8694952060518099,
+      "operationErrors": 38,
+      "windowErrors": 93,
+      "oracleMissing": 50
+    },
+    "C": {
+      "files": 50,
+      "attempts": 1206,
+      "workflowCorrect": 1063,
+      "workflowAccuracy": 0.8814262023217247,
+      "clusteredOneSided95Lower": 0.8571428571428571,
+      "operationErrors": 26,
+      "windowErrors": 117,
+      "oracleMissing": 60
+    },
+    "Clean": {
+      "files": 50,
+      "attempts": 500,
+      "workflowCorrect": 474,
+      "workflowAccuracy": 0.948,
+      "clusteredOneSided95Lower": 0.926,
+      "operationErrors": 26,
+      "windowErrors": 0,
+      "oracleMissing": 0
+    },
+    "D": {
+      "files": 50,
+      "attempts": 1206,
+      "workflowCorrect": 1002,
+      "workflowAccuracy": 0.8308457711442786,
+      "clusteredOneSided95Lower": 0.8038692672939167,
+      "operationErrors": 121,
+      "windowErrors": 83,
+      "oracleMissing": 96
+    }
+  },
+  "byFileCorrelation": {
+    "0.50-0.60": {
+      "files": 2,
+      "attempts": 163,
+      "workflowCorrect": 148,
+      "workflowAccuracy": 0.9079754601226994,
+      "clusteredOneSided95Lower": 0.8674698795180723,
+      "operationErrors": 12,
+      "windowErrors": 3,
+      "oracleMissing": 1
+    },
+    "0.60-0.70": {
+      "files": 13,
+      "attempts": 1253,
+      "workflowCorrect": 1089,
+      "workflowAccuracy": 0.8691141260973663,
+      "clusteredOneSided95Lower": 0.84591642791317,
+      "operationErrors": 66,
+      "windowErrors": 98,
+      "oracleMissing": 72
+    },
+    "0.70-0.80": {
+      "files": 23,
+      "attempts": 2152,
+      "workflowCorrect": 1883,
+      "workflowAccuracy": 0.875,
+      "clusteredOneSided95Lower": 0.843426296299351,
+      "operationErrors": 107,
+      "windowErrors": 162,
+      "oracleMissing": 112
+    },
+    ">=0.80": {
+      "files": 12,
+      "attempts": 1050,
+      "workflowCorrect": 970,
+      "workflowAccuracy": 0.9238095238095239,
+      "clusteredOneSided95Lower": 0.898822290037609,
+      "operationErrors": 44,
+      "windowErrors": 36,
+      "oracleMissing": 24
+    }
+  },
+  "byTargetCorrelation": {
+    "0.60-0.70": {
+      "files": 37,
+      "attempts": 1558,
+      "workflowCorrect": 1327,
+      "workflowAccuracy": 0.8517329910141207,
+      "clusteredOneSided95Lower": 0.8255020375266461,
+      "operationErrors": 99,
+      "windowErrors": 132,
+      "oracleMissing": 92
+    },
+    "0.70-0.80": {
+      "files": 44,
+      "attempts": 1865,
+      "workflowCorrect": 1663,
+      "workflowAccuracy": 0.8916890080428954,
+      "clusteredOneSided95Lower": 0.8666633233032431,
+      "operationErrors": 83,
+      "windowErrors": 119,
+      "oracleMissing": 84
+    },
+    ">=0.80": {
+      "files": 30,
+      "attempts": 1195,
+      "workflowCorrect": 1100,
+      "workflowAccuracy": 0.9205020920502092,
+      "clusteredOneSided95Lower": 0.8960270069160614,
+      "operationErrors": 47,
+      "windowErrors": 48,
+      "oracleMissing": 33
+    }
+  }
+}
