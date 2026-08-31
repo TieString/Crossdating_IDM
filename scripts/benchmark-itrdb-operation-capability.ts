@@ -39,6 +39,7 @@ import type {
     CapabilityOperation,
     CapabilityTruth,
 } from "./itrdb-operation-capability/types";
+import type { EvaluationDecisionMode } from "./legacy-generalization/evaluator";
 
 type Interpretation = "primary" | "alternative";
 type EventResolutionMode = "algorithm" | "human_rescue" | "none";
@@ -164,6 +165,7 @@ type RunPlan = {
     workerCount: number;
     maxSteps: number | null;
     keepAllCofecha: boolean;
+    decisionMode: EvaluationDecisionMode;
     executionGitCommit?: string;
 };
 
@@ -200,6 +202,12 @@ const cofechaExe = resolve(cofechaExeInput);
 const workerIndexRaw = valueFor("--worker-index");
 const workerIndex = workerIndexRaw === null ? null : Number(workerIndexRaw);
 const planPath = resolve(valueFor("--plan") ?? join(runDir, "run-plan.json"));
+const requestedDecisionMode = (valueFor("--decision-mode")
+    ?? "legacy") as EvaluationDecisionMode;
+if (!new Set<EvaluationDecisionMode>(["legacy", "online-unified"])
+    .has(requestedDecisionMode)) {
+    throw new Error(`invalid --decision-mode: ${requestedDecisionMode}`);
+}
 
 const sha256 = (value: Buffer | string): string => createHash("sha256")
     .update(value).digest("hex");
@@ -296,6 +304,7 @@ const runCase = async (input: {
     workerDir: string;
     maxSteps: number | null;
     keepAllCofecha: boolean;
+    decisionMode: EvaluationDecisionMode;
 }): Promise<{ row: CaseRow; steps: StepRow[] }> => {
     const started = Date.now();
     const file = input.manifest.files.find((item) => item.fileId === input.spec.fileId);
@@ -339,6 +348,7 @@ const runCase = async (input: {
             context,
             runId: `capability-before-${input.spec.index}-${step}`,
             includeOperationGrid: keepDiagnosisAudits,
+            decisionMode: input.decisionMode,
         });
         const after = diagnoseTruthBlind({
             siteData: reopened,
@@ -346,6 +356,7 @@ const runCase = async (input: {
             context,
             runId: `capability-after-${input.spec.index}-${step}`,
             includeOperationGrid: keepDiagnosisAudits,
+            decisionMode: input.decisionMode,
         });
         if (keepDiagnosisAudits) {
             writeFileSync(
@@ -1054,6 +1065,7 @@ const runWorker = async (): Promise<void> => {
                 workerDir,
                 maxSteps: plan.maxSteps,
                 keepAllCofecha: plan.keepAllCofecha,
+                decisionMode: plan.decisionMode,
             });
             caseRows.push(result.row);
             stepRows.push(...result.steps);
@@ -1135,6 +1147,9 @@ const runParent = async (): Promise<void> => {
     const existingPlan = mergeExisting
         ? JSON.parse(readFileSync(planPath, "utf8")) as RunPlan
         : null;
+    if (existingPlan && existingPlan.decisionMode !== requestedDecisionMode) {
+        throw new Error("existing run plan decision mode mismatch");
+    }
     if (existingPlan
         && (existingPlan.configSha256 !== sha256(configBytes)
             || existingPlan.manifestSha256 !== sha256(manifestBytes))) {
@@ -1207,6 +1222,7 @@ const runParent = async (): Promise<void> => {
         workerCount,
         maxSteps,
         keepAllCofecha: hasFlag("--keep-all-cofecha"),
+        decisionMode: requestedDecisionMode,
         executionGitCommit: currentGitCommit(),
     };
     if (!existingPlan) {
@@ -1225,6 +1241,7 @@ const runParent = async (): Promise<void> => {
             cases: selectedCases.length,
             truths: selectedCases.reduce((sum, spec) => sum + spec.truths.length, 0),
             maxSteps,
+            decisionMode: plan.decisionMode,
         })}`);
     } else {
         console.log(`CAPABILITY_MERGE_EXISTING ${JSON.stringify({
@@ -1284,6 +1301,7 @@ const runParent = async (): Promise<void> => {
         runDir,
         gitCommit: plan.executionGitCommit ?? manifest.gitCommit,
         executionGitCommit: plan.executionGitCommit ?? null,
+        decisionMode: plan.decisionMode,
         manifestGitCommit: manifest.gitCommit,
         configSha256: plan.configSha256,
         manifestSha256: plan.manifestSha256,

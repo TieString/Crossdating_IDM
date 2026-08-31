@@ -13,6 +13,9 @@ import {
     splitReportByParts,
 } from "@/features/cofecha/formatter";
 import { diagnoseCrossdating } from "@/features/crossdating/diagnosis/engine";
+import { applyAuthoritativeModelDecision } from "@/features/crossdating/diagnosis/authoritativeModelProjection";
+import { buildOnlineUnifiedEvidenceForTarget } from "@/features/crossdating/diagnosis/onlineUnifiedEvidenceRuntime";
+import { inferOnlineUnifiedDiagnosis } from "@/features/crossdating/diagnosis/onlineUnifiedModel";
 import { getConfig } from "@/features/crossdating/diagnosis/config";
 import { INTERNAL_EVENT_PATH_CONFIG } from "@/features/crossdating/diagnosis/eventEnsemble";
 import {
@@ -381,12 +384,15 @@ export type EvaluationReferenceStrategy =
     | "internal-model-classifier"
     | "internal-model-safe-clean-gate";
 
+export type EvaluationDecisionMode = "legacy" | "online-unified";
+
 export const diagnoseTruthBlind = (input: {
     siteData: RwlSiteData;
     targetId: string;
     context: CofechaContext;
     runId: string;
     includeOperationGrid?: boolean;
+    decisionMode?: EvaluationDecisionMode;
     referenceStrategy?: EvaluationReferenceStrategy;
     internalMasterMethod?: InternalMasterMethod;
     internalTargetContribution?: InternalTargetContribution;
@@ -852,20 +858,57 @@ export const diagnoseTruthBlind = (input: {
                 };
             })()
             : null;
+        const projectedDiagnosis = input.decisionMode === "online-unified"
+            ? (() => {
+                const bundle = buildOnlineUnifiedEvidenceForTarget({
+                    diagnosis,
+                    siteData: input.siteData,
+                    targetTree: input.targetId,
+                    referenceConfig,
+                });
+                if (!bundle) return applyAuthoritativeModelDecision(
+                    diagnosis,
+                    {
+                        schemaVersion: 1,
+                        modelVersion: "applied-residual-unified-v12-online-v1",
+                        authority: "authoritative",
+                        status: "refused",
+                        eventType: "noEvent",
+                        shiftYears: 0,
+                        startYear: null,
+                        endYear: null,
+                        topYear: null,
+                        identityGroup: null,
+                        packageId: null,
+                        refusalReason: "online_evidence_bundle_unavailable",
+                    },
+                    input.targetId,
+                );
+                const inference = inferOnlineUnifiedDiagnosis(bundle);
+                return applyAuthoritativeModelDecision(
+                    diagnosis,
+                    inference.decision,
+                    input.targetId,
+                    inference.selectedPackage?.event ?? null,
+                );
+            })()
+            : diagnosis;
         const suppressStrictSuggestion = referenceStrategy === "internal-model-safe-clean-gate"
             && shouldSuppressInternalStrictSuggestion(
                 internalIncompatibilityProbability,
-                diagnosis.events[0] !== undefined,
+                projectedDiagnosis.events[0] !== undefined,
                 input.internalCompatibilityModel,
             );
         return {
-            strictEvent: suppressStrictSuggestion ? null : diagnosis.events[0] ?? null,
-            reviewEvent: suppressStrictSuggestion ? null : diagnosis.reviewEvents?.[0] ?? null,
-            candidates: diagnosis.candidates.map((candidate) => candidateAudit(
+            strictEvent: suppressStrictSuggestion ? null : projectedDiagnosis.events[0] ?? null,
+            reviewEvent: suppressStrictSuggestion
+                ? null
+                : projectedDiagnosis.reviewEvents?.[0] ?? null,
+            candidates: projectedDiagnosis.candidates.map((candidate) => candidateAudit(
                 candidate as unknown as Record<string, unknown>,
             )),
-            audit: diagnosis.eventDecisionAudits?.[0] ?? null,
-            reviewDecision: diagnosis.reviewWindowDecisions?.[0] ?? null,
+            audit: projectedDiagnosis.eventDecisionAudits?.[0] ?? null,
+            reviewDecision: projectedDiagnosis.reviewWindowDecisions?.[0] ?? null,
             operationGrid,
             referenceMode,
             referenceAnchorCount:
