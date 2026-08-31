@@ -546,6 +546,12 @@ const deduplicateClaims = (
     });
 };
 
+const claimWasProducedByOnlineUnifiedModel = (
+    claim: OnlineUnifiedEventClaim,
+): boolean => claim.algorithmSources.some((source) => (
+    source.trim().toLowerCase().replace(/[-\s]+/g, "_") === "online_unified_model"
+));
+
 const deduplicateEventSources = (
     sources: readonly OnlineUnifiedEventSource[],
 ): OnlineUnifiedEventSource[] => {
@@ -609,7 +615,13 @@ export const buildOnlineUnifiedEvidenceBundle = (input: {
         pass: Object.fromEntries(Object.entries(audit.pass).flatMap(([key, value]) => (
             typeof value === "number" ? [[key, value]] : []
         ))),
-        claims: deduplicateClaims(claims),
+        // The online model may run repeatedly while the same working data is open. Its previous
+        // answer remains available as an executable interpretation source, but it must never be
+        // fed back as evidence for the next answer. Otherwise the model can merely reproduce its
+        // own earlier package instead of adjudicating the underlying lag/counterfactual evidence.
+        claims: deduplicateClaims(claims.filter(
+            (claim) => !claimWasProducedByOnlineUnifiedModel(claim),
+        )),
         eventSources: deduplicateEventSources(eventSources),
         operations: [...input.operations],
         dynamicSelection: input.dynamicSelection,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+    buildOnlineUnifiedEvidenceBundle,
     buildOnlineUnifiedExecutablePackage,
     buildOnlineUnifiedLocationPackages,
     buildOnlineUnifiedOperationCandidates,
@@ -8,7 +9,11 @@ import {
     type OnlineUnifiedLocationPackage,
     type OnlineUnifiedOperationCandidate,
 } from "../onlineUnifiedEvidence";
-import type { DiagnosisEvent, DiagnosisEventEvidence } from "../types";
+import type {
+    CrossdatingDiagnosis,
+    DiagnosisEvent,
+    DiagnosisEventEvidence,
+} from "../types";
 
 const bundle = (): OnlineUnifiedEvidenceBundle => ({
     schemaVersion: 1,
@@ -202,6 +207,69 @@ describe("online unified location packages", () => {
             .toBeCloseTo(0.6);
         expect(profiled?.features.profile_difference_gain_local_quantile_4).toBe(1);
         expect([5, 7, 9, 13]).toContain(profiled?.width);
+    });
+});
+
+describe("online unified evidence boundary", () => {
+    it("does not feed a previous online model answer back into model features", () => {
+        const modelEvent: DiagnosisEvent = {
+            id: "previous-model-answer",
+            seriesId: "TARGET",
+            eventType: "missingRing",
+            startYear: 1848,
+            endYear: 1854,
+            rankedYears: [{
+                year: 1851,
+                rank: 1,
+                score: 2,
+                evidenceTags: ["online_unified_model"],
+            }],
+            confidenceLevel: "high",
+            evidence: eventEvidence(-1, "online_unified_model"),
+            alternativeTypes: [],
+        };
+        const physicalEvent: DiagnosisEvent = {
+            ...modelEvent,
+            id: "physical-counterfactual",
+            evidence: eventEvidence(-1, "counterfactual"),
+        };
+        const diagnosis = {
+            events: [modelEvent, physicalEvent],
+            reviewEvents: [],
+            eventDecisionAudits: [{
+                seriesId: "TARGET",
+                targetRange: { startYear: 1800, endYear: 1900 },
+                cofechaFlagged: true,
+                referenceSourceCount: 8,
+                minimumReferenceDepth: 4,
+                medianReferenceDepth: 7,
+                candidateCount: 2,
+                candidateModeCount: 1,
+                finalReason: "event_selected",
+                pass: {},
+                candidateProjectedEvents: [],
+                detectedBeforeFusion: [],
+                detectedAfterFusion: [],
+                retainedAfterEndpointGuard: [],
+                displayedBeforeLocator: [],
+                finalEvents: [],
+            }],
+            jointEventDecisions: [],
+        } as unknown as CrossdatingDiagnosis;
+
+        const evidence = buildOnlineUnifiedEvidenceBundle({
+            diagnosis,
+            seriesId: "TARGET",
+            operations: [],
+            dynamicSelection: null,
+            unitSelection: null,
+            rawGlobalLag: 0,
+            cofechaGlobalLag: 0,
+        });
+
+        expect(evidence?.claims).toHaveLength(1);
+        expect(evidence?.claims[0]?.algorithmSources).toEqual(["counterfactual"]);
+        expect(evidence?.eventSources).toHaveLength(2);
     });
 });
 
