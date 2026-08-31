@@ -1042,6 +1042,29 @@ const readInputs = () => {
     return { config, manifest, configBytes, manifestBytes };
 };
 
+const partitionCasesByEstimatedWork = (
+    cases: readonly CapabilityCase[],
+    workerCount: number,
+): CapabilityCase[][] => {
+    const buckets = Array.from({ length: workerCount }, () => [] as CapabilityCase[]);
+    const loads = Array.from({ length: workerCount }, () => 0);
+    [...cases].sort((left, right) => (
+        right.truths.length - left.truths.length
+        || left.index - right.index
+    )).forEach((spec) => {
+        const worker = loads.reduce((best, load, index) => (
+            load < loads[best]!
+            || (load === loads[best]! && buckets[index]!.length < buckets[best]!.length)
+                ? index
+                : best
+        ), 0);
+        buckets[worker]!.push(spec);
+        loads[worker] += Math.max(1, spec.truths.length);
+    });
+    buckets.forEach((bucket) => bucket.sort((left, right) => left.index - right.index));
+    return buckets;
+};
+
 const runWorker = async (): Promise<void> => {
     if (workerIndex === null || !Number.isInteger(workerIndex)) {
         throw new Error("valid worker index required");
@@ -1051,7 +1074,10 @@ const runWorker = async (): Promise<void> => {
     const allCases = buildCapabilityCases(config, manifest);
     const selectedIds = new Set(plan.caseIds);
     const selectedCases = allCases.filter((spec) => selectedIds.has(spec.caseId));
-    const workerCases = selectedCases.filter((_, index) => index % plan.workerCount === workerIndex);
+    const workerCases = partitionCasesByEstimatedWork(
+        selectedCases,
+        plan.workerCount,
+    )[workerIndex]!;
     const workerDir = join(runDir, "workers", `worker-${workerIndex}`);
     mkdirSync(workerDir, { recursive: true });
     const caseRows: CaseRow[] = [];
