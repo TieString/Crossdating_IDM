@@ -8,6 +8,7 @@ import gzip
 import json
 from collections import defaultdict
 from pathlib import Path
+from collections.abc import Iterable
 from typing import Any
 
 import lightgbm as lgb
@@ -38,88 +39,92 @@ SPARSE_LOCATION_PREFIXES = (
 
 
 def load_operation_rows(
-    path: Path,
+    paths: Iterable[Path],
 ) -> tuple[pd.DataFrame, dict[str, dict[str, Any]]]:
     operation_rows: list[dict[str, Any]] = []
     attempts: dict[str, dict[str, Any]] = {}
-    with gzip.open(path, "rt", encoding="utf8") as handle:
-        for line in handle:
-            payload = json.loads(line)
-            attempt_id = str(payload["attemptId"])
-            file_id = str(payload["fileId"])
-            attempts[attempt_id] = {
-                "file_id": file_id,
-                "teacher_status": payload.get("teacherStatus", "truth_labeled"),
-                "label_mode": payload.get("labelMode", "teacher"),
-                "family": payload.get("family", "unknown"),
-                "target_year": payload.get("targetYear"),
-                "target_identity": payload["targetIdentity"],
-                "has_location_rows": bool(payload["locationRows"]),
-                "workflow_oracle": bool(payload.get("workflowOracle", True)),
-            }
-            for row in payload["operationRows"]:
-                operation_rows.append({
-                    "attempt_id": attempt_id,
+    for path in paths:
+        with gzip.open(path, "rt", encoding="utf8") as handle:
+            for line in handle:
+                payload = json.loads(line)
+                attempt_id = str(payload["attemptId"])
+                if attempt_id in attempts:
+                    raise ValueError(f"duplicate attempt id across inputs: {attempt_id}")
+                file_id = str(payload["fileId"])
+                attempts[attempt_id] = {
                     "file_id": file_id,
-                    "package_id": row["packageId"],
-                    "event_type": row["eventType"],
-                    "shift_years": int(row["shiftYears"]),
-                    "label": int(row["label"]),
-                    **row["features"],
-                })
+                    "teacher_status": payload.get("teacherStatus", "truth_labeled"),
+                    "label_mode": payload.get("labelMode", "teacher"),
+                    "family": payload.get("family", "unknown"),
+                    "target_year": payload.get("targetYear"),
+                    "target_identity": payload["targetIdentity"],
+                    "has_location_rows": bool(payload["locationRows"]),
+                    "workflow_oracle": bool(payload.get("workflowOracle", True)),
+                }
+                for row in payload["operationRows"]:
+                    operation_rows.append({
+                        "attempt_id": attempt_id,
+                        "file_id": file_id,
+                        "package_id": row["packageId"],
+                        "event_type": row["eventType"],
+                        "shift_years": int(row["shiftYears"]),
+                        "label": int(row["label"]),
+                        **row["features"],
+                    })
     return pd.DataFrame.from_records(operation_rows), attempts
 
 
 def load_location_rows(
-    path: Path,
+    paths: Iterable[Path],
     attempts: dict[str, dict[str, Any]],
     predicted_groups: dict[str, str],
 ) -> pd.DataFrame:
     location_rows: list[dict[str, Any]] = []
-    with gzip.open(path, "rt", encoding="utf8") as handle:
-        for line in handle:
-            payload = json.loads(line)
-            attempt_id = str(payload["attemptId"])
-            file_id = str(payload["fileId"])
-            metadata = attempts[attempt_id]
-            target = metadata["target_identity"]
-            exact_group = (
-                f"{attempt_id}|{target['eventType']}|{target['shiftYears']}"
-            )
-            equivalent_group = next((
-                str(row.get("locationGroup", attempt_id))
-                for row in payload["locationRows"]
-                if int(row["label"]) > 0
-                and str(row.get("eventType", "")) == "partialMove"
-            ), None)
-            allowed_groups = {
-                exact_group,
-                predicted_groups.get(attempt_id, ""),
-                equivalent_group or "",
-            }
-            for row in payload["locationRows"]:
-                location_group = str(row.get("locationGroup", attempt_id))
-                if location_group not in allowed_groups:
-                    continue
-                stable_features = {
-                    key: value
-                    for key, value in row["features"].items()
-                    if not key.startswith(SPARSE_LOCATION_PREFIXES)
+    for path in paths:
+        with gzip.open(path, "rt", encoding="utf8") as handle:
+            for line in handle:
+                payload = json.loads(line)
+                attempt_id = str(payload["attemptId"])
+                file_id = str(payload["fileId"])
+                metadata = attempts[attempt_id]
+                target = metadata["target_identity"]
+                exact_group = (
+                    f"{attempt_id}|{target['eventType']}|{target['shiftYears']}"
+                )
+                equivalent_group = next((
+                    str(row.get("locationGroup", attempt_id))
+                    for row in payload["locationRows"]
+                    if int(row["label"]) > 0
+                    and str(row.get("eventType", "")) == "partialMove"
+                ), None)
+                allowed_groups = {
+                    exact_group,
+                    predicted_groups.get(attempt_id, ""),
+                    equivalent_group or "",
                 }
-                location_rows.append({
-                    "attempt_id": attempt_id,
-                    "file_id": file_id,
-                    "package_id": row["packageId"],
-                    "location_group": location_group,
-                    "event_type": row.get("eventType", ""),
-                    "shift_years": int(row.get("shiftYears", 0)),
-                    "start_year": int(row["startYear"]),
-                    "end_year": int(row["endYear"]),
-                    "top_year": int(row["topYear"]),
-                    "width": int(row["width"]),
-                    "label": int(row["label"]),
-                    **stable_features,
-                })
+                for row in payload["locationRows"]:
+                    location_group = str(row.get("locationGroup", attempt_id))
+                    if location_group not in allowed_groups:
+                        continue
+                    stable_features = {
+                        key: value
+                        for key, value in row["features"].items()
+                        if not key.startswith(SPARSE_LOCATION_PREFIXES)
+                    }
+                    location_rows.append({
+                        "attempt_id": attempt_id,
+                        "file_id": file_id,
+                        "package_id": row["packageId"],
+                        "location_group": location_group,
+                        "event_type": row.get("eventType", ""),
+                        "shift_years": int(row.get("shiftYears", 0)),
+                        "start_year": int(row["startYear"]),
+                        "end_year": int(row["endYear"]),
+                        "top_year": int(row["topYear"]),
+                        "width": int(row["width"]),
+                        "label": int(row["label"]),
+                        **stable_features,
+                    })
     return pd.DataFrame.from_records(location_rows)
 
 
@@ -273,15 +278,15 @@ def model_payload(booster: lgb.Booster, features: list[str]) -> dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", required=True)
+    parser.add_argument("--input", action="append", required=True)
     parser.add_argument("--model-output", required=True)
     parser.add_argument("--report-output", required=True)
     parser.add_argument("--predictions-output")
     parser.add_argument("--seed", type=int, default=20260831)
     args = parser.parse_args()
 
-    input_path = Path(args.input)
-    operation, attempts = load_operation_rows(input_path)
+    input_paths = [Path(value) for value in args.input]
+    operation, attempts = load_operation_rows(input_paths)
     operation_features = feature_names(operation)
     operation = operation.replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
@@ -298,7 +303,7 @@ def main() -> None:
         if row["event_type"] not in {"noEvent", "wholeSeriesMove"}
     }
     location = load_location_rows(
-        input_path,
+        input_paths,
         attempts,
         predicted_location_groups,
     )
