@@ -62,14 +62,22 @@ def load_operation_rows(
                     "has_location_rows": bool(payload["locationRows"]),
                     "workflow_oracle": bool(payload.get("workflowOracle", True)),
                 }
+                target_identity = payload["targetIdentity"]
                 for row in payload["operationRows"]:
+                    workflow_label = int(row["label"])
+                    exact_identity = (
+                        str(row["eventType"]) == str(target_identity["eventType"])
+                        and int(row["shiftYears"]) == int(target_identity["shiftYears"])
+                    )
                     operation_rows.append({
                         "attempt_id": attempt_id,
                         "file_id": file_id,
                         "package_id": row["packageId"],
                         "event_type": row["eventType"],
                         "shift_years": int(row["shiftYears"]),
-                        "label": int(row["label"]),
+                        # Workflow-equivalent interpretations remain valid positives, but the
+                        # exact operation/shift must outrank them when both are available.
+                        "label": 2 if exact_identity else workflow_label,
                         **row["features"],
                     })
     return pd.DataFrame.from_records(operation_rows), attempts
@@ -298,7 +306,7 @@ def main() -> None:
     operation_rows_count = len(operation)
     operation_feature_count = len(operation_features)
     operation_package_oracle = float(
-        operation.groupby("attempt_id")["label"].max().mean()
+        operation.groupby("attempt_id")["label"].max().gt(0).mean()
     )
 
     operation_oof, operation_folds = fit_oof(

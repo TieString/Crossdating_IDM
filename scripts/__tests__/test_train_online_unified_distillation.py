@@ -56,3 +56,45 @@ def test_rejects_duplicate_attempt_ids_across_shards(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="duplicate attempt id"):
         MODULE.load_operation_rows([first, second])
+
+
+def test_prefers_exact_identity_over_workflow_equivalent_operation(tmp_path: Path) -> None:
+    path = tmp_path / "graded.ndjson.gz"
+    payload = {
+        "attemptId": "event:1",
+        "fileId": "file-a",
+        "family": "A",
+        "targetIdentity": {"eventType": "missingRing", "shiftYears": -1},
+        "workflowOracle": True,
+        "operationRows": [
+            {
+                "packageId": "exact",
+                "eventType": "missingRing",
+                "shiftYears": -1,
+                "label": 1,
+                "features": {"score": 1},
+            },
+            {
+                "packageId": "equivalent",
+                "eventType": "partialMove",
+                "shiftYears": -4,
+                "label": 1,
+                "features": {"score": 1},
+            },
+            {
+                "packageId": "wrong",
+                "eventType": "falseRing",
+                "shiftYears": 1,
+                "label": 0,
+                "features": {"score": 1},
+            },
+        ],
+        "locationRows": [],
+    }
+    with gzip.open(path, "wt", encoding="utf8") as handle:
+        handle.write(json.dumps(payload) + "\n")
+
+    rows, _ = MODULE.load_operation_rows([path])
+    relevance = dict(zip(rows["package_id"], rows["label"], strict=True))
+
+    assert relevance == {"exact": 2, "equivalent": 1, "wrong": 0}
