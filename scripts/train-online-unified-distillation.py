@@ -364,10 +364,12 @@ def main() -> None:
         predicted_shift = int(operation_prediction["shift_years"])
         is_local = predicted_type not in {"noEvent", "wholeSeriesMove"}
         local_hit = True
+        location_prediction: dict[str, Any] | None = None
         if is_local:
             local_attempts += 1
             location_group = f"{attempt_id}|{predicted_type}|{predicted_shift}"
-            local_hit = bool(location_top.get(location_group, {}).get("label", 0))
+            location_prediction = location_top.get(location_group)
+            local_hit = bool((location_prediction or {}).get("label", 0))
             location_correct += int(local_hit)
         success = operation_hit and local_hit
         combined_correct += int(success)
@@ -381,6 +383,20 @@ def main() -> None:
             "target_shift_years": metadata["target_identity"]["shiftYears"],
             "predicted_event_type": predicted_type,
             "predicted_shift_years": predicted_shift,
+            "operation_score": float(operation_prediction["score"]),
+            "target_year": metadata["target_year"],
+            "predicted_start_year": (
+                location_prediction.get("start_year") if location_prediction else None
+            ),
+            "predicted_end_year": (
+                location_prediction.get("end_year") if location_prediction else None
+            ),
+            "predicted_top_year": (
+                location_prediction.get("top_year") if location_prediction else None
+            ),
+            "location_score": (
+                float(location_prediction["score"]) if location_prediction else None
+            ),
             "operation_correct": int(operation_hit),
             "location_correct": int(local_hit),
             "combined_correct": int(success),
