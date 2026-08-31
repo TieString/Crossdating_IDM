@@ -23,7 +23,11 @@ import {
     diagnoseCrossdating,
     getDisplayedDiagnosisEvents,
 } from "@/features/crossdating/diagnosis";
+import { applyAuthoritativeModelDecision } from "@/features/crossdating/diagnosis/authoritativeModelProjection";
+import { buildOnlineUnifiedEvidenceForTarget } from "@/features/crossdating/diagnosis/onlineUnifiedEvidenceRuntime";
+import { inferOnlineUnifiedDiagnosis } from "@/features/crossdating/diagnosis/onlineUnifiedModel";
 import type { DiagnosisEvent } from "@/features/crossdating/diagnosis/types";
+import { createPairwiseBootstrapTargetReferenceConfig } from "@/features/crossdating/pairwiseBootstrap";
 import { createCofechaMasterReferenceConfig } from "@/features/crossdating/reference";
 import { formatTucson } from "@/features/rwl/parsers/tucson";
 import type { RwlSiteData } from "@/features/rwl/types";
@@ -34,6 +38,7 @@ import {
 } from "@/features/crossdating/diagnosis/__tests__/rdmFixture";
 
 type Protocol = "single" | "prefix" | "serial";
+type DecisionMode = "legacy" | "online-unified";
 
 type SeriesPlan = {
     target: RwlSeries;
@@ -71,6 +76,11 @@ type CaseRow = {
     elapsedMs: number;
     error: string | null;
     cofechaTargetFlagged: boolean;
+    decisionMode: DecisionMode;
+    modelStatus: string | null;
+    modelOperationCandidateCount: number | null;
+    modelLocationCandidateCount: number | null;
+    modelInferenceElapsedMs: number | null;
     response: boolean;
     primaryType: DiagnosisEvent["eventType"] | null;
     primaryShiftYears: number | null;
@@ -136,6 +146,10 @@ const selectedSeries = valueFor("--series")
     ?.split(",")
     .map((value) => value.trim().toLowerCase())
     .filter(Boolean) ?? null;
+const decisionMode = (valueFor("--decision-mode") ?? "legacy") as DecisionMode;
+if (!new Set<DecisionMode>(["legacy", "online-unified"]).has(decisionMode)) {
+    throw new Error(`invalid --decision-mode: ${decisionMode}`);
+}
 
 const assertSafeRunDirectory = (): void => {
     const rel = relative(outputRoot, runDir);
@@ -264,13 +278,44 @@ const executeCase = (item: MatrixCase): CaseRow => {
             rwlHash: item.caseId,
             masterDatingSeries: result.masterDatingSeries,
         });
-        const diagnosis = diagnoseCrossdating(siteData, {
+        const targetReferenceConfig = createPairwiseBootstrapTargetReferenceConfig(
+            siteData,
             referenceConfig,
+            item.target.id,
+        ) ?? referenceConfig;
+        let diagnosis = diagnoseCrossdating(siteData, {
+            referenceConfig: targetReferenceConfig,
             targetTrees: [item.target.id],
             cofechaText: outText,
             reviewWindowDisplayMode: "review",
             sharedZeroMarkerMode: "local2",
+            includeEventDecisionAudits: decisionMode === "online-unified",
         });
+        let modelStatus: string | null = null;
+        let modelOperationCandidateCount: number | null = null;
+        let modelLocationCandidateCount: number | null = null;
+        let modelInferenceElapsedMs: number | null = null;
+        if (decisionMode === "online-unified") {
+            const bundle = buildOnlineUnifiedEvidenceForTarget({
+                diagnosis,
+                siteData,
+                targetTree: item.target.id,
+                referenceConfig: targetReferenceConfig,
+            });
+            if (!bundle) throw new Error("online unified evidence bundle unavailable");
+            const inferenceStartedAt = performance.now();
+            const inference = inferOnlineUnifiedDiagnosis(bundle);
+            modelInferenceElapsedMs = performance.now() - inferenceStartedAt;
+            modelStatus = inference.decision.status;
+            modelOperationCandidateCount = inference.operationCandidateCount;
+            modelLocationCandidateCount = inference.locationCandidateCount;
+            diagnosis = applyAuthoritativeModelDecision(
+                diagnosis,
+                inference.decision,
+                item.target.id,
+                inference.selectedPackage?.event ?? null,
+            );
+        }
         const primary = getDisplayedDiagnosisEvents(diagnosis).find(
             (event) => event.seriesId === item.target.id,
         ) ?? null;
@@ -292,12 +337,12 @@ const executeCase = (item: MatrixCase): CaseRow => {
         const cumulativeWholeAlias = primary?.eventType === "wholeSeriesMove"
             && !endpointWholeBounded;
         const workflowSuggestionSuccess = workflowWindowCovered
-            && endpointWholeBounded;
+            && (decisionMode === "online-unified" || endpointWholeBounded);
         const failureReason = workflowSuggestionSuccess
             ? null
             : primary === null
                 ? "refused"
-                : cumulativeWholeAlias
+                : cumulativeWholeAlias && decisionMode === "legacy"
                     ? "cumulative_whole_alias"
                     : missingReview === null
                         ? "missing_review_unavailable"
@@ -309,6 +354,11 @@ const executeCase = (item: MatrixCase): CaseRow => {
             cofechaTargetFlagged: Array.from(flaggedIds).some(
                 (id) => id.toLowerCase() === item.target.id.toLowerCase(),
             ),
+            decisionMode,
+            modelStatus,
+            modelOperationCandidateCount,
+            modelLocationCandidateCount,
+            modelInferenceElapsedMs,
             response: primary !== null,
             primaryType: primary?.eventType ?? null,
             primaryShiftYears: primary?.shiftYears ?? null,
@@ -336,6 +386,11 @@ const executeCase = (item: MatrixCase): CaseRow => {
             elapsedMs: performance.now() - started,
             error: error instanceof Error ? error.stack ?? error.message : String(error),
             cofechaTargetFlagged: false,
+            decisionMode,
+            modelStatus: null,
+            modelOperationCandidateCount: null,
+            modelLocationCandidateCount: null,
+            modelInferenceElapsedMs: null,
             response: false,
             primaryType: null,
             primaryShiftYears: null,
@@ -361,33 +416,46 @@ const executeCase = (item: MatrixCase): CaseRow => {
 };
 
 const rate = (count: number, total: number): number => total > 0 ? count / total : 0;
-const summarizeRows = (rows: CaseRow[]) => ({
-    cases: rows.length,
-    responseRate: rate(rows.filter((row) => row.response).length, rows.length),
-    strictMissingSuccessRate: rate(
-        rows.filter((row) => row.strictMissingSuccess).length,
-        rows.length,
-    ),
-    workflowSuggestionSuccessRate: rate(
-        rows.filter((row) => row.workflowSuggestionSuccess).length,
-        rows.length,
-    ),
-    refusalRate: rate(rows.filter((row) => !row.response).length, rows.length),
-    cumulativeWholeAliasRate: rate(
-        rows.filter((row) => row.cumulativeWholeAlias).length,
-        rows.length,
-    ),
-    missingReviewAvailableRate: rate(
-        rows.filter((row) => row.hasMissingReviewInterpretation).length,
-        rows.length,
-    ),
-    failureReasons: Object.fromEntries(Array.from(new Set(
-        rows.map((row) => row.failureReason ?? "success"),
-    )).sort().map((reason) => [
-        reason,
-        rows.filter((row) => (row.failureReason ?? "success") === reason).length,
-    ])),
-});
+const summarizeRows = (rows: CaseRow[]) => {
+    const inferenceTimes = rows.flatMap((row) => (
+        row.modelInferenceElapsedMs === null ? [] : [row.modelInferenceElapsedMs]
+    )).sort((left, right) => left - right);
+    const medianInferenceElapsedMs = inferenceTimes.length > 0
+        ? inferenceTimes[Math.floor(inferenceTimes.length / 2)]!
+        : null;
+    return {
+        cases: rows.length,
+        responseRate: rate(rows.filter((row) => row.response).length, rows.length),
+        strictMissingSuccessRate: rate(
+            rows.filter((row) => row.strictMissingSuccess).length,
+            rows.length,
+        ),
+        workflowSuggestionSuccessRate: rate(
+            rows.filter((row) => row.workflowSuggestionSuccess).length,
+            rows.length,
+        ),
+        refusalRate: rate(rows.filter((row) => !row.response).length, rows.length),
+        cumulativeWholeAliasRate: rate(
+            rows.filter((row) => row.cumulativeWholeAlias).length,
+            rows.length,
+        ),
+        missingReviewAvailableRate: rate(
+            rows.filter((row) => row.hasMissingReviewInterpretation).length,
+            rows.length,
+        ),
+        modelSelectedRate: rate(
+            rows.filter((row) => row.modelStatus === "selected").length,
+            rows.length,
+        ),
+        medianModelInferenceElapsedMs: medianInferenceElapsedMs,
+        failureReasons: Object.fromEntries(Array.from(new Set(
+            rows.map((row) => row.failureReason ?? "success"),
+        )).sort().map((reason) => [
+            reason,
+            rows.filter((row) => (row.failureReason ?? "success") === reason).length,
+        ])),
+    };
+};
 
 const workerOutputPath = (index: number): string => join(
     runDir,
@@ -437,6 +505,10 @@ const aggregate = (): void => {
             0,
         ),
         protocols,
+        decisionMode,
+        workflowProtocol: decisionMode === "online-unified"
+            ? "equivalent-interpretation-v2"
+            : "legacy-endpoint-whole-v1",
         expectedCases: matrixCases.length,
         overall: summarizeRows(rows),
         byProtocol: Object.fromEntries(protocols.map((protocol) => [
@@ -462,6 +534,11 @@ const aggregate = (): void => {
         "elapsedMs",
         "error",
         "cofechaTargetFlagged",
+        "decisionMode",
+        "modelStatus",
+        "modelOperationCandidateCount",
+        "modelLocationCandidateCount",
+        "modelInferenceElapsedMs",
         "response",
         "primaryType",
         "primaryShiftYears",
@@ -520,6 +597,8 @@ const runParent = async (): Promise<void> => {
         "--worker-count", String(workers),
         "--workers", String(workers),
         "--protocols", protocols.join(","),
+        "--decision-mode", decisionMode,
+        "--cofecha-exe", cofechaExe,
         ...(selectedSeries ? ["--series", selectedSeries.join(",")] : []),
     ];
     await Promise.all(Array.from({ length: workers }, (_, index) => new Promise<void>(
@@ -552,6 +631,7 @@ console.log(`CO612_ZERO_FRONTIER_MATRIX_STATS ${JSON.stringify({
     seriesWithZeros: seriesPlans.length,
     naturalZeroCount: seriesPlans.reduce((sum, plan) => sum + plan.truthYears.length, 0),
     protocols,
+    decisionMode,
     cases: matrixCases.length,
     workers,
     runDir,
