@@ -269,15 +269,95 @@ const LOCATION_NUMERIC_FEATURES = [
     "profile_side_step_score",
     "profile_side_minimum_advantage",
     "profile_corrected_side_support",
+    ...[
+        "raw_gain",
+        "difference_gain",
+        "combined_gain",
+        "side_step_score",
+        "side_minimum_advantage",
+        "corrected_side_support",
+    ].flatMap((metric) => [
+        `profile_${metric}_delta_from_previous`,
+        `profile_${metric}_delta_to_next`,
+        `profile_${metric}_second_difference`,
+        `profile_${metric}_neighbor_advantage_2`,
+        `profile_${metric}_neighbor_advantage_4`,
+        `profile_${metric}_left_right_delta_4`,
+        `profile_${metric}_local_quantile_4`,
+    ]),
     ...SOURCE_TOKENS.flatMap((token) => [
         `source_${token}_within_2`,
         `source_${token}_within_6`,
     ]),
 ] as const;
 
+const PROFILE_LOCATION_METRICS = [
+    ["raw_gain", "rawGain"],
+    ["difference_gain", "differenceGain"],
+    ["combined_gain", "combinedGain"],
+    ["side_step_score", "sideStepScore"],
+    ["side_minimum_advantage", "sideMinimumAdvantage"],
+    ["corrected_side_support", "correctedSideSupport"],
+] as const satisfies readonly [
+    string,
+    Exclude<keyof OnlineUnifiedOperationYearProfile, "year">,
+][];
+
 const finite = (value: number | null | undefined, fallback = 0): number => (
     typeof value === "number" && Number.isFinite(value) ? value : fallback
 );
+
+const meanOr = (values: readonly number[], fallback: number): number => (
+    values.length > 0
+        ? values.reduce((sum, value) => sum + value, 0) / values.length
+        : fallback
+);
+
+const profileShapeFeatures = (
+    rows: readonly OnlineUnifiedOperationYearProfile[] | undefined,
+    year: number,
+): Record<string, number> => {
+    const current = rows?.find((row) => row.year === year);
+    if (!current || !rows) return {};
+    const previous = rows.find((row) => row.year === year - 1);
+    const next = rows.find((row) => row.year === year + 1);
+    const features: Record<string, number> = {};
+    PROFILE_LOCATION_METRICS.forEach(([name, key]) => {
+        const center = finite(current[key]);
+        const previousValue = finite(previous?.[key], center);
+        const nextValue = finite(next?.[key], center);
+        const neighbors2 = rows.filter((row) => (
+            row.year !== year && Math.abs(row.year - year) <= 2
+        )).map((row) => finite(row[key]));
+        const neighbors4 = rows.filter((row) => (
+            row.year !== year && Math.abs(row.year - year) <= 4
+        )).map((row) => finite(row[key]));
+        const left4 = rows.filter((row) => (
+            row.year < year && row.year >= year - 4
+        )).map((row) => finite(row[key]));
+        const right4 = rows.filter((row) => (
+            row.year > year && row.year <= year + 4
+        )).map((row) => finite(row[key]));
+        features[`profile_${name}_delta_from_previous`] = center - previousValue;
+        features[`profile_${name}_delta_to_next`] = center - nextValue;
+        features[`profile_${name}_second_difference`] = (
+            2 * center - previousValue - nextValue
+        );
+        features[`profile_${name}_neighbor_advantage_2`] = (
+            center - meanOr(neighbors2, center)
+        );
+        features[`profile_${name}_neighbor_advantage_4`] = (
+            center - meanOr(neighbors4, center)
+        );
+        features[`profile_${name}_left_right_delta_4`] = (
+            meanOr(left4, center) - meanOr(right4, center)
+        );
+        features[`profile_${name}_local_quantile_4`] = neighbors4.length > 0
+            ? neighbors4.filter((value) => value <= center).length / neighbors4.length
+            : 0.5;
+    });
+    return features;
+};
 
 export const effectiveOnlineShift = (
     eventType: DiagnosisEventType,
@@ -1016,6 +1096,7 @@ const locationFeatures = (
         profile_side_step_score: finite(profile?.sideStepScore),
         profile_side_minimum_advantage: finite(profile?.sideMinimumAdvantage),
         profile_corrected_side_support: finite(profile?.correctedSideSupport),
+        ...profileShapeFeatures(grid?.yearProfile, topYear),
     };
     SOURCE_TOKENS.forEach((token) => {
         const matching = anchors.filter((anchor) => anchor.source.toLowerCase().includes(token));

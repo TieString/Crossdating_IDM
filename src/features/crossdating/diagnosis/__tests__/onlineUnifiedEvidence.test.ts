@@ -177,15 +177,15 @@ describe("online unified location packages", () => {
 
     it("uses the selected identity full-year profile without widening its output window", () => {
         const evidence = bundle();
-        evidence.operations[0]!.yearProfile = [{
-            year: 1888,
-            rawGain: 0.1,
-            differenceGain: 0.4,
-            combinedGain: 0.325,
-            sideStepScore: 0.6,
-            sideMinimumAdvantage: 0.3,
-            correctedSideSupport: 0.8,
-        }];
+        evidence.operations[0]!.yearProfile = [1887, 1888, 1889].map((year) => ({
+            year,
+            rawGain: year === 1888 ? 0.1 : 0.05,
+            differenceGain: year === 1888 ? 0.4 : 0.1,
+            combinedGain: year === 1888 ? 0.325 : 0.08,
+            sideStepScore: year === 1888 ? 0.6 : 0.2,
+            sideMinimumAdvantage: year === 1888 ? 0.3 : 0.1,
+            correctedSideSupport: year === 1888 ? 0.8 : 0.3,
+        }));
         const locations = buildOnlineUnifiedLocationPackages(evidence, {
             eventType: "missingRing",
             shiftYears: -1,
@@ -196,6 +196,11 @@ describe("online unified location packages", () => {
 
         expect(profiled?.features.profile_difference_gain).toBe(0.4);
         expect(profiled?.features.profile_side_step_score).toBe(0.6);
+        expect(profiled?.features.profile_difference_gain_neighbor_advantage_2)
+            .toBeCloseTo(0.3);
+        expect(profiled?.features.profile_difference_gain_second_difference)
+            .toBeCloseTo(0.6);
+        expect(profiled?.features.profile_difference_gain_local_quantile_4).toBe(1);
         expect([5, 7, 9, 13]).toContain(profiled?.width);
     });
 });
