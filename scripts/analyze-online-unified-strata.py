@@ -67,7 +67,7 @@ def summarize(frame: pd.DataFrame, seed: int) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--predictions", required=True)
-    parser.add_argument("--cases", required=True)
+    parser.add_argument("--cases", action="append", required=True)
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--output-json", required=True)
     parser.add_argument("--output-md", required=True)
@@ -82,9 +82,14 @@ def main() -> None:
     args = parser.parse_args()
 
     predictions = pd.read_csv(args.predictions)
-    cases = pd.read_csv(args.cases)[[
-        "caseIndex", "fileId", "targetId", "masterCorrelation", "problemSegments",
-    ]]
+    cases = pd.concat([
+        pd.read_csv(path)[[
+            "caseIndex", "fileId", "targetId", "masterCorrelation", "problemSegments",
+        ]]
+        for path in args.cases
+    ], ignore_index=True)
+    if cases["caseIndex"].duplicated().any():
+        raise ValueError("caseIndex must be unique across case inputs")
     manifest = json.loads(Path(args.manifest).read_text(encoding="utf8"))
     file_correlation = {
         str(row["fileId"]): float(row["seriesIntercorrelation"])
