@@ -80,6 +80,35 @@ const projected = applyAuthoritativeModelDecision(
     targetId,
     inference.selectedPackage?.event ?? null,
 );
+const includeEvidence = argumentsByName["include-evidence"] === "true";
+const evidenceSummary = includeEvidence ? {
+    eventSources: (bundle.eventSources ?? []).map(({ stage, event }) => ({
+        stage,
+        type: event.eventType,
+        shiftYears: event.shiftYears ?? null,
+        range: [event.startYear, event.endYear],
+        topYear: event.rankedYears.slice().sort((left, right) => (
+            left.rank - right.rank || right.score - left.score
+        ))[0]?.year ?? null,
+        ambiguity: event.interpretationAmbiguity?.kind ?? null,
+        ledgerOperations: event.evidence.ledger?.entries.flatMap((entry) => (
+            entry.kind === "operation" ? [{
+                type: entry.operationType,
+                shiftYears: entry.shiftYears,
+                claims: entry.claims,
+            }] : []
+        )) ?? [],
+    })),
+    claims: bundle.claims.map((claim) => ({
+        stage: claim.stage,
+        type: claim.eventType,
+        shiftYears: claim.shiftYears,
+        range: [claim.startYear, claim.endYear],
+        topYear: claim.topYear,
+        score: claim.score,
+        scoreMargin: claim.scoreMargin,
+    })),
+} : undefined;
 
 console.log(JSON.stringify({
     targetId,
@@ -94,4 +123,5 @@ console.log(JSON.stringify({
     decision: inference.decision,
     projectedStatus: projected.authoritativeModelDecision?.status,
     projectedEvent: projected.reviewEvents?.[0] ?? null,
+    evidenceSummary,
 }, null, 2));

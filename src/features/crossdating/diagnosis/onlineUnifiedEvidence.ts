@@ -1349,10 +1349,12 @@ const bestFallbackLocalSource = (
 ).filter(({ event }) => (
     sourceEventIsPackageCompatible(event, bundle)
     && (
-        (event.eventType === "partialMove" && event.shiftYears === wholeShiftYears)
+        event.eventType === "partialMove"
         || event.eventType === "missingRing"
     )
 )).sort((left, right) => {
+    const leftPartial = Number(left.event.eventType === "partialMove");
+    const rightPartial = Number(right.event.eventType === "partialMove");
     const leftExactPartial = Number(
         left.event.eventType === "partialMove" && left.event.shiftYears === wholeShiftYears,
     );
@@ -1360,10 +1362,13 @@ const bestFallbackLocalSource = (
         right.event.eventType === "partialMove" && right.event.shiftYears === wholeShiftYears,
     );
     return rightExactPartial - leftExactPartial
+        || rightPartial - leftPartial
+        || STAGE_PRIORITY[right.stage] - STAGE_PRIORITY[left.stage]
+        || right.event.evidence.scoreMargin - left.event.evidence.scoreMargin
+        || right.event.evidence.score - left.event.evidence.score
         || (topYearOf(right.event) ?? Number.NEGATIVE_INFINITY)
             - (topYearOf(left.event) ?? Number.NEGATIVE_INFINITY)
-        || STAGE_PRIORITY[right.stage] - STAGE_PRIORITY[left.stage]
-        || right.event.evidence.score - left.event.evidence.score;
+        || right.event.startYear - left.event.startYear;
 })[0] ?? null;
 
 const attachExecutableInterpretations = (
@@ -1386,6 +1391,50 @@ const attachExecutableInterpretations = (
     const completedAlternative = clonedAlternative?.eventType === "partialMove"
         ? attachFallbackMissingInterpretation(clonedAlternative, bundle)
         : clonedAlternative;
+    if (primary.eventType === "wholeSeriesMove" && (primary.shiftYears ?? 0) < 0) {
+        const localSource = bestFallbackLocalSource(bundle, primary.shiftYears!);
+        const clonedLocal = localSource
+            ? cloneExecutableEquivalentEvent(
+                localSource.event,
+                bundle,
+                primary.id,
+                1,
+                new Set(source ? [source.event] : []),
+            )
+            : null;
+        const completedLocal = clonedLocal?.eventType === "partialMove"
+            ? attachFallbackMissingInterpretation(clonedLocal, bundle)
+            : clonedLocal;
+        // A local event owns its own operation identity. Requiring it to copy the whole-series
+        // shift discarded validated large-gap breakpoints and exposed only their unit-event
+        // children. The model's primary answer is unchanged; this only completes its review package.
+        const local = completedAlternative?.eventType === "partialMove"
+            ? completedAlternative
+            : completedLocal?.eventType === "partialMove"
+                ? completedLocal
+                : completedAlternative
+                    ?? completedLocal
+                    ?? makeEndpointMissingReviewFromWhole(primary);
+        if (!local) return primary;
+        return {
+            ...attachWholeLocalEventInterpretation(primary, local, {
+                wholeShiftYears: primary.shiftYears!,
+                localEventType: local.eventType as Exclude<
+                    DiagnosisEventType,
+                    "wholeSeriesMove"
+                >,
+                localWindowWidth: (
+                    local.endYear - local.startYear + 1
+                ) as 5 | 7 | 9 | 13,
+                localEvidenceSource: local === completedLocal || local === completedAlternative
+                    ? "diagnosed"
+                    : "syntheticEndpointReview",
+                operationScoreMargin: primary.evidence.scoreMargin,
+                finalEvidenceClaims: [],
+            }),
+            alternativeTypes: [local.eventType],
+        };
+    }
     if (sourceAmbiguity && completedAlternative) {
         return {
             ...primary,
@@ -1400,39 +1449,7 @@ const attachExecutableInterpretations = (
     if (primary.eventType === "partialMove") {
         return attachFallbackMissingInterpretation(primary, bundle);
     }
-    if (primary.eventType !== "wholeSeriesMove" || (primary.shiftYears ?? 0) >= 0) {
-        return primary;
-    }
-    const localSource = bestFallbackLocalSource(bundle, primary.shiftYears!);
-    const clonedLocal = localSource
-        ? cloneExecutableEquivalentEvent(
-            localSource.event,
-            bundle,
-            primary.id,
-            1,
-            new Set(),
-        )
-        : null;
-    const local = clonedLocal?.eventType === "partialMove"
-        ? attachFallbackMissingInterpretation(clonedLocal, bundle)
-        : clonedLocal ?? makeEndpointMissingReviewFromWhole(primary);
-    if (!local) return primary;
-    return {
-        ...attachWholeLocalEventInterpretation(primary, local, {
-            wholeShiftYears: primary.shiftYears!,
-            localEventType: local.eventType as Exclude<
-                DiagnosisEventType,
-                "wholeSeriesMove"
-            >,
-            localWindowWidth: (
-                local.endYear - local.startYear + 1
-            ) as 5 | 7 | 9 | 13,
-            localEvidenceSource: clonedLocal ? "diagnosed" : "syntheticEndpointReview",
-            operationScoreMargin: primary.evidence.scoreMargin,
-            finalEvidenceClaims: [],
-        }),
-        alternativeTypes: [local.eventType],
-    };
+    return primary;
 };
 
 /**

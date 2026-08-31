@@ -358,6 +358,102 @@ describe("online unified executable interpretation packages", () => {
         expect(missing?.reviewOnly).toBe(true);
     });
 
+    it("keeps an independently diagnosed local shift when the whole head chose another shift", () => {
+        const missing: DiagnosisEvent = {
+            id: "source-whole-missing-review",
+            seriesId: "TARGET",
+            eventType: "missingRing",
+            startYear: 1847,
+            endYear: 1859,
+            rankedYears: [{
+                year: 1853,
+                rank: 1,
+                score: 2,
+                evidenceTags: ["unit-frontier"],
+            }],
+            confidenceLevel: "medium",
+            evidence: eventEvidence(-1, "whole_missing_review"),
+            alternativeTypes: [],
+        };
+        const whole: DiagnosisEvent = {
+            ...missing,
+            id: "source-whole-with-direct-missing",
+            eventType: "wholeSeriesMove",
+            startYear: 1800,
+            endYear: 1900,
+            rankedYears: [],
+            shiftYears: -11,
+            interpretationAmbiguity: {
+                kind: "wholeSeriesMoveOrMissingRing",
+                alternative: missing,
+                evidence: {
+                    wholeShiftYears: -11,
+                    endpointDistanceYears: 40,
+                    missingWindowWidth: 13,
+                    operationScoreMargin: 0.02,
+                    finalEvidenceClaims: [],
+                },
+            },
+        };
+        const partial: DiagnosisEvent = {
+            id: "source-independent-partial",
+            seriesId: "TARGET",
+            eventType: "partialMove",
+            startYear: 1848,
+            endYear: 1860,
+            rankedYears: [{
+                year: 1854,
+                rank: 1,
+                score: 8,
+                evidenceTags: ["bounded-path-frontier"],
+            }],
+            confidenceLevel: "high",
+            evidence: eventEvidence(-41, "bounded_complete_lag_path"),
+            alternativeTypes: [],
+            shiftYears: -41,
+            shiftSide: "older",
+        };
+        const evidence = bundle();
+        evidence.eventSources = [
+            { stage: "strict", event: whole },
+            { stage: "strict", event: partial },
+        ];
+        const candidate: OnlineUnifiedOperationCandidate = {
+            packageId: "online-operation:TARGET|wholeSeriesMove:-11",
+            identityGroup: "TARGET|wholeSeriesMove:-11",
+            eventType: "wholeSeriesMove",
+            shiftYears: -11,
+            features: {},
+        };
+
+        const executable = buildOnlineUnifiedExecutablePackage({
+            bundle: evidence,
+            candidate,
+            score: 3,
+            scoreMargin: 0.3,
+        })?.event;
+        const local = executable?.interpretationAmbiguity?.alternative;
+        const unit = local?.interpretationAmbiguity?.alternative;
+
+        expect(executable).toMatchObject({
+            eventType: "wholeSeriesMove",
+            shiftYears: -11,
+            interpretationAmbiguity: {
+                kind: "wholeSeriesMoveOrLocalEvent",
+            },
+        });
+        expect(local).toMatchObject({
+            eventType: "partialMove",
+            shiftYears: -41,
+            startYear: 1848,
+            endYear: 1860,
+        });
+        expect(unit).toMatchObject({
+            eventType: "missingRing",
+            reviewOnly: true,
+        });
+    });
+
     it("always gives a selected whole move one local-event review", () => {
         const evidence = bundle();
         evidence.eventSources = [];
