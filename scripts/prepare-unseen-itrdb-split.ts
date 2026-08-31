@@ -21,6 +21,14 @@ import type {
     CapabilityManifest,
     CapabilityTarget,
 } from "./itrdb-operation-capability/types";
+import {
+    fileCorrelationBandFor,
+    hasTargetExcludedReferenceCapacity,
+    parseFileCorrelationBandCounts,
+} from "./itrdb-operation-capability/qualityProtocol";
+import type {
+    FileCorrelationBand,
+} from "./itrdb-operation-capability/qualityProtocol";
 
 type Pool = {
     schemaVersion: 1;
@@ -81,10 +89,24 @@ const maximumSeriesProblemSegments = Number(valueFor(
     "0",
 ));
 const targetsPerFile = Number(valueFor("--targets-per-file", "6"));
+const maximumTargetZeroCount = Number(valueFor(
+    "--maximum-target-zero-count",
+    String(Number.MAX_SAFE_INTEGER),
+));
+const minimumTargetExcludedReferenceCores = Number(valueFor(
+    "--minimum-target-excluded-reference-cores",
+    "5",
+));
+const correlationBandCounts = parseFileCorrelationBandCounts(
+    valueFor("--file-correlation-band-counts", ""),
+);
 const developmentFiles = Number(valueFor("--development-files", "18"));
 const calibrationFiles = Number(valueFor("--calibration-files", "10"));
 const finalFiles = Number(valueFor("--final-files", "17"));
-const desiredQualifiedFiles = Number(valueFor("--qualified-files", "60"));
+const requestedQualifiedFiles = Number(valueFor("--qualified-files", "60"));
+const desiredQualifiedFiles = correlationBandCounts
+    ? Object.values(correlationBandCounts).reduce((sum, count) => sum + count, 0)
+    : requestedQualifiedFiles;
 const timeoutSeconds = Number(valueFor("--cofecha-timeout-seconds", "60"));
 const splitSeed = valueFor(
     "--split-seed",
@@ -139,18 +161,30 @@ const requiredFiles = developmentFiles + calibrationFiles + finalFiles;
 if (desiredQualifiedFiles < requiredFiles) {
     throw new Error("qualified file target is smaller than the requested split");
 }
+if (correlationBandCounts && desiredQualifiedFiles !== requiredFiles) {
+    throw new Error("stratified file counts must equal the requested split size");
+}
 mkdirSync(outputDir, { recursive: true });
 mkdirSync(workDir, { recursive: true });
 
 const qualified: CapabilityFile[] = [];
 const excluded: CapabilityManifest["excludedFiles"] = [];
+const selectedBandCounts: Record<FileCorrelationBand, number> = {
+    from060To070: 0,
+    from070To080: 0,
+    atLeast080: 0,
+};
+const correlationBandsComplete = (): boolean => !correlationBandCounts
+    || Object.entries(correlationBandCounts).every(([band, count]) => (
+        selectedBandCounts[band as FileCorrelationBand] >= count
+    ));
 const preselectedCandidates = [...pool.candidates].sort((left, right) => (
     (right.approximateMedianCorrelation ?? -1)
         - (left.approximateMedianCorrelation ?? -1)
     || left.deterministicOrder.localeCompare(right.deterministicOrder)
 ));
 for (const [index, candidate] of preselectedCandidates.entries()) {
-    if (qualified.length >= desiredQualifiedFiles) break;
+    if (qualified.length >= desiredQualifiedFiles && correlationBandsComplete()) break;
     if (excludedFileIds.has(candidate.fileId.toLowerCase())) continue;
     const inputPath = resolve(itrdbRoot, candidate.relativePath);
     try {
@@ -177,12 +211,21 @@ for (const [index, candidate] of preselectedCandidates.entries()) {
                 `file_problem_segments_above_maximum:${result.possibleProblemsCount}`,
             );
         }
+        const correlationBand = fileCorrelationBandFor(result.seriesIntercorrelation);
+        if (correlationBandCounts
+            && (correlationBand === null
+                || selectedBandCounts[correlationBand] >= correlationBandCounts[correlationBand])) {
+            throw new Error(correlationBand === null
+                ? `file_intercorrelation_outside_stratified_bands:${result.seriesIntercorrelation}`
+                : `file_intercorrelation_band_full:${correlationBand}`);
+        }
         const eligibleBeforeLimit: CapabilityTarget[] = Array.from(loaded.series.values())
             .flatMap((series) => {
                 const id = normalizeCofechaSeriesId(series.id);
                 const masterCorrelation = result.masterCorrelations.get(id);
                 const problemSegments = result.seriesProblemCounts.get(id);
                 if (series.length < minimumSeriesYears
+                    || series.zeroCount > maximumTargetZeroCount
                     || masterCorrelation === undefined
                     || masterCorrelation < minimumMasterCorrelation
                     || problemSegments === undefined
@@ -197,6 +240,14 @@ for (const [index, candidate] of preselectedCandidates.entries()) {
                     problemSegments,
                 }];
             });
+        if (!hasTargetExcludedReferenceCapacity(
+            eligibleBeforeLimit.length,
+            minimumTargetExcludedReferenceCores,
+        )) {
+            throw new Error(
+                `target_excluded_reference_cores_below_minimum:${eligibleBeforeLimit.length - 1}`,
+            );
+        }
         if (eligibleBeforeLimit.length < targetsPerFile) {
             throw new Error(`eligible_targets_below_minimum:${eligibleBeforeLimit.length}`);
         }
@@ -219,12 +270,18 @@ for (const [index, candidate] of preselectedCandidates.entries()) {
             eligibleTargetsBeforeLimit: eligibleBeforeLimit.length,
             eligibleTargets,
         });
+        if (correlationBandCounts && correlationBand) selectedBandCounts[correlationBand] += 1;
         console.log(
             `UNSEEN_COFECHA accepted=${qualified.length}/${desiredQualifiedFiles}`
             + ` checked=${index + 1}/${preselectedCandidates.length}`
             + ` file=${candidate.fileId}`
             + ` r=${result.seriesIntercorrelation.toFixed(3)}`
-            + ` eligible=${eligibleBeforeLimit.length}`,
+            + ` eligible=${eligibleBeforeLimit.length}`
+            + (correlationBandCounts
+                ? ` bands=${selectedBandCounts.from060To070}/${correlationBandCounts.from060To070}`
+                    + `,${selectedBandCounts.from070To080}/${correlationBandCounts.from070To080}`
+                    + `,${selectedBandCounts.atLeast080}/${correlationBandCounts.atLeast080}`
+                : ""),
         );
     } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
@@ -243,6 +300,12 @@ if (qualified.length < requiredFiles) {
     throw new Error(
         `only ${qualified.length} clean high-quality files; ${requiredFiles} required`,
     );
+}
+if (!correlationBandsComplete()) {
+    throw new Error(`insufficient files for requested correlation bands: ${JSON.stringify({
+        requested: correlationBandCounts,
+        selected: selectedBandCounts,
+    })}`);
 }
 
 const ordered = [...qualified].sort((left, right) => (
@@ -277,8 +340,11 @@ const makeConfig = (
         minimumSeriesYears,
         minimumMasterCorrelation,
         maximumProblemSegments: maximumSeriesProblemSegments,
+        maximumTargetZeroCount,
+        minimumTargetExcludedReferenceCores,
         minimumFileIntercorrelation,
         maximumFileProblemSegments,
+        ...(correlationBandCounts ? { fileCorrelationBandCounts: correlationBandCounts } : {}),
         minimumOlderContextYears: 45,
         minimumNewerContextYears: 35,
         maximumTargetsPerFile: targetsPerFile,
@@ -397,6 +463,10 @@ const split = {
         minimumSeriesYears,
         minimumMasterCorrelation,
         maximumSeriesProblemSegments,
+        maximumTargetZeroCount,
+        minimumTargetExcludedReferenceCores,
+        correlationBandCounts,
+        selectedBandCounts,
         targetsPerFile,
     },
     counts: {

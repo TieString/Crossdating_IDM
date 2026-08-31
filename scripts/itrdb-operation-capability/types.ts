@@ -34,8 +34,15 @@ export type CapabilityConfig = {
         minimumSeriesYears: number;
         minimumMasterCorrelation: number;
         maximumProblemSegments: number;
+        maximumTargetZeroCount?: number;
+        minimumTargetExcludedReferenceCores?: number;
         minimumFileIntercorrelation?: number;
         maximumFileProblemSegments?: number;
+        fileCorrelationBandCounts?: {
+            from060To070: number;
+            from070To080: number;
+            atLeast080: number;
+        };
         minimumOlderContextYears: number;
         minimumNewerContextYears: number;
         maximumTargetsPerFile?: number;
