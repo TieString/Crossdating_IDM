@@ -22,6 +22,7 @@
     "validate:online-unified-model": "python scripts/validate-online-unified-model-parity.py",
     "validate:cofecha-js-report": "node scripts/run-validate-cofecha606-js-report-parts1-4.mjs",
     "benchmark:co612-zero-frontier-matrix": "node scripts/run-co612-zero-frontier-matrix.mjs",
+    "benchmark:online-unified-clean": "vite-node scripts/benchmark-online-unified-clean.ts",
     "export:tree-ring-scan-fixtures": "vite-node scripts/export-tree-ring-scan-fixtures.ts",
     "validate:tree-ring-scan-pair": "vite-node scripts/validate-tree-ring-scan-pair.ts",
     "tauri": "tauri"
