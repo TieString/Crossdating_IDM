@@ -5,9 +5,9 @@ import {
     buildOnlineUnifiedOperationCandidates,
     ONLINE_UNIFIED_MODEL_VERSION,
     onlineUnifiedFeatureVector,
+    shortlistOnlineUnifiedLocationPackages,
     type OnlineUnifiedEvidenceBundle,
     type OnlineUnifiedExecutablePackage,
-    type OnlineUnifiedOperationCandidate,
 } from "./onlineUnifiedEvidence";
 import type { AuthoritativeDiagnosisDecision } from "./types";
 
@@ -157,48 +157,6 @@ const scoreFeatures = (
     onlineUnifiedFeatureVector(features, head.featureNames),
 );
 
-const numericFeature = (
-    candidate: OnlineUnifiedOperationCandidate,
-    name: string,
-): number => {
-    const value = Number(candidate.features[name]);
-    return Number.isFinite(value) ? value : 0;
-};
-
-const operationPrefilterScore = (
-    candidate: OnlineUnifiedOperationCandidate,
-): number => numericFeature(candidate, "claim_max_stage") * 4
-    + Math.log1p(numericFeature(candidate, "claim_count"))
-    + numericFeature(candidate, "claim_max_confidence")
-    + numericFeature(candidate, "grid_available") * 0.4
-    + numericFeature(candidate, "dynamic_selected") * 3
-    + numericFeature(candidate, "unit_selected") * 2
-    + numericFeature(candidate, "raw_global_lag_match") * 2.5
-    + numericFeature(candidate, "cofecha_global_lag_match") * 2.5
-    + numericFeature(candidate, "grid_dynamic_score") * 3;
-
-/** Mirrors the frozen training contract: rank within a compact, truth-blind package set. */
-const operationShortlist = (
-    candidates: OnlineUnifiedOperationCandidate[],
-): OnlineUnifiedOperationCandidate[] => {
-    const ordered = [...candidates].sort((left, right) => (
-        operationPrefilterScore(right) - operationPrefilterScore(left)
-        || left.packageId.localeCompare(right.packageId)
-    ));
-    const family = [
-        "noEvent",
-        "missingRing",
-        "falseRing",
-        "partialMove",
-        "wholeSeriesMove",
-    ].flatMap((eventType) => ordered.filter(
-        (candidate) => candidate.eventType === eventType,
-    ).slice(0, 6));
-    return [...new Map([...family, ...ordered.slice(0, 32)].map((candidate) => (
-        [candidate.packageId, candidate]
-    ))).values()];
-};
-
 export const warmOnlineUnifiedModel = (): void => {
     compileHead(MODEL.operation);
     compileHead(MODEL.location);
@@ -245,9 +203,7 @@ export const inferOnlineUnifiedDiagnosis = (
         };
     }
     const operationStartedAt = performance.now();
-    const operationCandidates = operationShortlist(
-        buildOnlineUnifiedOperationCandidates(bundle),
-    );
+    const operationCandidates = buildOnlineUnifiedOperationCandidates(bundle);
     const rankedOperations = operationCandidates.map((candidate) => ({
         candidate,
         score: scoreFeatures(MODEL.operation, candidate.features),
@@ -303,7 +259,9 @@ export const inferOnlineUnifiedDiagnosis = (
     }
 
     const locationStartedAt = performance.now();
-    const locationCandidates = buildOnlineUnifiedLocationPackages(bundle, identity);
+    const locationCandidates = shortlistOnlineUnifiedLocationPackages(
+        buildOnlineUnifiedLocationPackages(bundle, identity),
+    );
     const rankedLocations = locationCandidates.map((candidate) => ({
         candidate,
         score: scoreFeatures(MODEL.location, candidate.features),

@@ -1337,6 +1337,33 @@ export const buildOnlineUnifiedLocationPackages = (
     ))).values()];
 };
 
+const locationPrefilterFeature = (
+    candidate: OnlineUnifiedLocationPackage,
+    name: string,
+): number => finite(candidate.features[name]);
+
+const locationPrefilterScore = (
+    candidate: OnlineUnifiedLocationPackage,
+): number => locationPrefilterFeature(candidate, "claim_exact_count") * 6
+    + locationPrefilterFeature(candidate, "claim_within_2_count") * 2
+    + locationPrefilterFeature(candidate, "claim_within_6_count")
+    + locationPrefilterFeature(candidate, "claim_window_top_exact_count") * 12
+    + locationPrefilterFeature(candidate, "claim_window_exact_count") * 8
+    + locationPrefilterFeature(candidate, "claim_window_max_overlap_ratio") * 3
+    + locationPrefilterFeature(candidate, "grid_exact") * 4
+    + locationPrefilterFeature(candidate, "dynamic_exact") * 3
+    + locationPrefilterFeature(candidate, "unit_exact") * 2
+    - locationPrefilterFeature(candidate, "claim_min_distance") * 0.2;
+
+/** Shared truth-blind shortlist used by both frozen-data export and Tauri inference. */
+export const shortlistOnlineUnifiedLocationPackages = (
+    candidates: readonly OnlineUnifiedLocationPackage[],
+    limit = 256,
+): OnlineUnifiedLocationPackage[] => [...candidates].sort((left, right) => {
+    return locationPrefilterScore(right) - locationPrefilterScore(left)
+        || left.packageId.localeCompare(right.packageId);
+}).slice(0, limit);
+
 export const onlineUnifiedFeatureVector = (
     features: Readonly<Record<string, number>>,
     names: readonly string[],

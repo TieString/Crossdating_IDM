@@ -8,6 +8,7 @@ import {
     buildOnlineUnifiedEvidenceBundle,
     buildOnlineUnifiedLocationPackages,
     buildOnlineUnifiedOperationCandidates,
+    shortlistOnlineUnifiedLocationPackages,
     type OnlineUnifiedLocationPackage,
     type OnlineUnifiedOperationCandidate,
     type OnlineUnifiedOperationIdentity,
@@ -113,33 +114,6 @@ const numeric = (value: unknown): number => {
     return Number.isFinite(converted) ? converted : 0;
 };
 
-const candidateHeuristic = (candidate: OnlineUnifiedOperationCandidate): number => {
-    const feature = candidate.features;
-    return numeric(feature.claim_max_stage) * 4
-        + Math.log1p(numeric(feature.claim_count))
-        + numeric(feature.claim_max_confidence)
-        + numeric(feature.grid_available) * 0.4
-        + numeric(feature.dynamic_selected) * 3
-        + numeric(feature.unit_selected) * 2
-        + numeric(feature.raw_global_lag_match) * 2.5
-        + numeric(feature.cofecha_global_lag_match) * 2.5
-        + numeric(feature.grid_dynamic_score) * 3;
-};
-
-const locationHeuristic = (candidate: OnlineUnifiedLocationPackage): number => {
-    const feature = candidate.features;
-    return numeric(feature.claim_exact_count) * 6
-        + numeric(feature.claim_within_2_count) * 2
-        + numeric(feature.claim_within_6_count)
-        + numeric(feature.claim_window_top_exact_count) * 12
-        + numeric(feature.claim_window_exact_count) * 8
-        + numeric(feature.claim_window_max_overlap_ratio) * 3
-        + numeric(feature.grid_exact) * 4
-        + numeric(feature.dynamic_exact) * 3
-        + numeric(feature.unit_exact) * 2
-        - numeric(feature.claim_min_distance) * 0.2;
-};
-
 const effectiveTeacherIdentity = (teacher: CsvRow): OnlineUnifiedOperationIdentity => ({
     eventType: teacher.event_type as OnlineUnifiedOperationIdentity["eventType"],
     shiftYears: numeric(teacher.shift_years),
@@ -163,52 +137,11 @@ const workflowIdentityMatches = (
 
 const sampleOperationRows = (
     candidates: OnlineUnifiedOperationCandidate[],
-    target: OnlineUnifiedOperationIdentity,
-    workflowLabels = false,
-): OnlineUnifiedOperationCandidate[] => {
-    const selected = candidates.find((candidate) => identityMatches(candidate, target));
-    const workflowCompatible = workflowLabels
-        ? candidates.filter((candidate) => workflowIdentityMatches(candidate, target))
-            .sort((left, right) => candidateHeuristic(right) - candidateHeuristic(left))
-            .slice(0, 6)
-        : [];
-    const familyWinners = ["noEvent", "missingRing", "falseRing", "partialMove", "wholeSeriesMove"]
-        .flatMap((eventType) => candidates
-            .filter((candidate) => candidate.eventType === eventType)
-            .sort((left, right) => candidateHeuristic(right) - candidateHeuristic(left))
-            .slice(0, 6));
-    const strongest = [...candidates]
-        .sort((left, right) => candidateHeuristic(right) - candidateHeuristic(left))
-        .slice(0, 32);
-    return [...new Map([selected, ...workflowCompatible, ...familyWinners, ...strongest]
-        .filter((candidate): candidate is OnlineUnifiedOperationCandidate => Boolean(candidate))
-        .map((candidate) => [candidate.packageId, candidate])).values()];
-};
+): OnlineUnifiedOperationCandidate[] => [...candidates];
 
 const sampleLocationRows = (
     candidates: OnlineUnifiedLocationPackage[],
-    targetYear: number,
-    teacher?: CsvRow,
-): OnlineUnifiedLocationPackage[] => {
-    const startYear = teacher ? numeric(teacher.start_year) : 0;
-    const endYear = teacher ? numeric(teacher.end_year) : 0;
-    const topYear = teacher ? numeric(teacher.top_year) : targetYear;
-    const exact = teacher ? candidates.find((candidate) => candidate.startYear === startYear
-        && candidate.endYear === endYear
-        && candidate.topYear === topYear) : undefined;
-    const covering = candidates.filter((candidate) => (
-        candidate.startYear <= targetYear && candidate.endYear >= targetYear
-    ));
-    const nearTruth = candidates.filter((candidate) => (
-        Math.abs(candidate.topYear - targetYear) <= 6
-    ));
-    const strongest = [...candidates]
-        .sort((left, right) => locationHeuristic(right) - locationHeuristic(left))
-        .slice(0, 96);
-    return [...new Map([exact, ...covering, ...nearTruth, ...strongest]
-        .filter((candidate): candidate is OnlineUnifiedLocationPackage => Boolean(candidate))
-        .map((candidate) => [candidate.packageId, candidate])).values()];
-};
+): OnlineUnifiedLocationPackage[] => shortlistOnlineUnifiedLocationPackages(candidates);
 
 const main = async (): Promise<void> => {
     const args = parseArgs();
@@ -355,11 +288,7 @@ const main = async (): Promise<void> => {
                 : identityMatches(candidate, targetIdentity)
         ));
         operationOracle += Number(operationHit);
-        const sampledOperations = sampleOperationRows(
-            allOperations,
-            targetIdentity,
-            workflowLabels,
-        );
+        const sampledOperations = sampleOperationRows(allOperations);
         const operationRows = sampledOperations.map(
             (candidate) => ({
                 packageId: candidate.packageId,
@@ -384,35 +313,13 @@ const main = async (): Promise<void> => {
         const locationOperations = positiveLocalOperations;
         if (locationOperations.length > 0) {
             locationRows = locationOperations.flatMap((operation) => {
-                const claimWindowKeys = new Set(bundle.claims.filter((claim) => (
-                    claim.eventType === operation.eventType
-                    && claim.shiftYears === operation.shiftYears
-                    && claim.topYear !== null
-                )).map((claim) => (
-                    `${claim.topYear}:${claim.startYear}:${claim.endYear}`
-                )));
                 const locations = buildOnlineUnifiedLocationPackages(bundle, operation, {
                     compactWindowPerYear: true,
                     searchRadiusYears,
                     includeProfilePeaks,
                     includeYearProfile: true,
-                    includeWindow: (candidate) => (
-                        !usesTruth
-                        || Math.abs(candidate.topYear - targetYear) <= 6
-                        || Math.abs(
-                            (candidate.startYear + candidate.endYear) / 2
-                            - candidate.topYear,
-                        ) <= 0.5
-                        || claimWindowKeys.has(
-                            `${candidate.topYear}:${candidate.startYear}:${candidate.endYear}`,
-                        )
-                    ),
                 });
-                const sampled = sampleLocationRows(
-                    locations,
-                    targetYear,
-                    labelMode === "teacher" ? teacher : undefined,
-                );
+                const sampled = sampleLocationRows(locations);
                 const locationGroup = [
                     teacher.attempt_id,
                     operation.eventType,

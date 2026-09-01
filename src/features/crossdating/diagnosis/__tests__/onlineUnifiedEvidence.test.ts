@@ -5,6 +5,7 @@ import {
     buildOnlineUnifiedExecutablePackage,
     buildOnlineUnifiedLocationPackages,
     buildOnlineUnifiedOperationCandidates,
+    shortlistOnlineUnifiedLocationPackages,
     type OnlineUnifiedEvidenceBundle,
     type OnlineUnifiedLocationPackage,
     type OnlineUnifiedOperationCandidate,
@@ -207,6 +208,23 @@ describe("online unified location packages", () => {
             .toBeCloseTo(0.6);
         expect(profiled?.features.profile_difference_gain_local_quantile_4).toBe(1);
         expect([5, 7, 9, 13]).toContain(profiled?.width);
+    });
+
+    it("uses the same truth-blind location shortlist in export and runtime", () => {
+        const evidence = bundle();
+        const locations = buildOnlineUnifiedLocationPackages(evidence, {
+            eventType: "missingRing",
+            shiftYears: -1,
+        }, {
+            compactWindowPerYear: false,
+        });
+        const shortlisted = shortlistOnlineUnifiedLocationPackages(locations, 4);
+
+        expect(shortlisted).toHaveLength(4);
+        expect(shortlisted.map((candidate) => candidate.packageId)).toEqual(
+            shortlistOnlineUnifiedLocationPackages([...locations].reverse(), 4)
+                .map((candidate) => candidate.packageId),
+        );
     });
 });
 
