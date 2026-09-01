@@ -38,20 +38,6 @@ SPARSE_LOCATION_PREFIXES = (
     "overlap_window_note_",
 )
 
-SPARSE_OPERATION_TYPE_PREFIXES = (
-    "note_",
-    "source_exact_",
-    "final_reason_",
-)
-
-OPERATION_TYPES = (
-    "noEvent",
-    "missingRing",
-    "falseRing",
-    "partialMove",
-    "wholeSeriesMove",
-)
-
 
 def load_operation_rows(
     paths: Iterable[Path],
@@ -158,37 +144,6 @@ def feature_names(frame: pd.DataFrame) -> list[str]:
 def compact_feature_storage(frame: pd.DataFrame, features: list[str]) -> None:
     frame.replace([np.inf, -np.inf], np.nan, inplace=True)
     frame[features] = frame[features].fillna(0.0).astype(np.float32)
-
-
-def aggregate_operation_type_rows(frame: pd.DataFrame) -> pd.DataFrame:
-    features = [
-        name for name in feature_names(frame)
-        if not name.startswith(SPARSE_OPERATION_TYPE_PREFIXES)
-    ]
-    grouped = frame.groupby(
-        ["attempt_id", "file_id", "event_type"],
-        sort=False,
-        observed=True,
-    )
-    maximum = grouped[features].max().add_suffix("__type_max")
-    mean = grouped[features].mean().add_suffix("__type_mean")
-    metadata = grouped.agg(
-        label=("label", "max"),
-        type_candidate_count=("package_id", "size"),
-    )
-    output = metadata.join(maximum).join(mean).reset_index()
-    output["package_id"] = (
-        "online-operation-type:"
-        + output["attempt_id"].astype(str)
-        + "|"
-        + output["event_type"].astype(str)
-    )
-    output["shift_years"] = 0
-    for event_type in OPERATION_TYPES:
-        output[f"type_identity_{event_type}"] = (
-            output["event_type"] == event_type
-        ).astype(np.float32)
-    return output
 
 
 def prepare_grouped(
@@ -315,30 +270,6 @@ def selected_by_attempt(frame: pd.DataFrame, scores: np.ndarray) -> dict[str, di
     }
 
 
-def selected_by_type_then_identity(
-    operation: pd.DataFrame,
-    operation_scores: np.ndarray,
-    operation_type: pd.DataFrame,
-    operation_type_scores: np.ndarray,
-) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
-    type_top = selected_by_attempt(operation_type, operation_type_scores)
-    predicted_type = {
-        attempt_id: str(row["event_type"])
-        for attempt_id, row in type_top.items()
-    }
-    scored = operation[[
-        column for column in META_COLUMNS if column in operation.columns
-    ]].copy()
-    scored["score"] = operation_scores
-    scored["selected_type"] = scored["attempt_id"].map(predicted_type)
-    within_type = scored[scored["event_type"] == scored["selected_type"]]
-    top = predict_group_top(within_type, within_type["score"].to_numpy())
-    return ({
-        str(row.attempt_id): row._asdict()
-        for row in top.itertuples(index=False)
-    }, type_top)
-
-
 def selected_by_location_group(
     frame: pd.DataFrame,
     scores: np.ndarray,
@@ -379,34 +310,13 @@ def main() -> None:
         operation.groupby("attempt_id")["label"].max().gt(0).mean()
     )
 
-    operation_type = aggregate_operation_type_rows(operation)
-    operation_type_features = feature_names(operation_type)
-    compact_feature_storage(operation_type, operation_type_features)
-    operation_type_oof, operation_type_folds = fit_oof(
-        operation_type,
-        operation_type_features,
-        args.seed + 50,
-        240,
-    )
-    operation_type_booster = fit_final(
-        operation_type,
-        operation_type_features,
-        args.seed + 50,
-        240,
-    )
-
     operation_oof, operation_folds = fit_oof(
         operation,
         operation_features,
         args.seed,
         260,
     )
-    operation_top, operation_type_top = selected_by_type_then_identity(
-        operation,
-        operation_oof,
-        operation_type,
-        operation_type_oof,
-    )
+    operation_top = selected_by_attempt(operation, operation_oof)
     operation_booster = fit_final(
         operation,
         operation_features,
@@ -418,10 +328,7 @@ def main() -> None:
         for attempt_id, row in operation_top.items()
         if row["event_type"] not in {"noEvent", "wholeSeriesMove"}
     }
-    operation_type_correct = sum(
-        int(bool(row["label"])) for row in operation_type_top.values()
-    )
-    del operation, operation_oof, operation_type, operation_type_oof
+    del operation, operation_oof
     gc.collect()
     location = load_location_rows(
         input_paths,
@@ -517,10 +424,6 @@ def main() -> None:
         "modelVersion": "online-unified-workflow-v3",
         "teacherModelVersion": "workflow-truth",
         "truthBlindRuntime": True,
-        "operationType": model_payload(
-            operation_type_booster,
-            operation_type_features,
-        ),
         "operation": model_payload(operation_booster, operation_features),
         "location": model_payload(location_booster, location_features),
     }
@@ -539,14 +442,12 @@ def main() -> None:
         "locationRows": location_rows_count,
         "locationTrainRows": len(location_train),
         "operationFeatures": operation_feature_count,
-        "operationTypeFeatures": len(operation_type_features),
         "locationFeatures": location_feature_count,
         "operationPackageOracle": operation_package_oracle,
         "workflowPackageOracle": float(np.mean([
             int(metadata["workflow_oracle"]) for metadata in attempts.values()
         ])),
         "locationPackageOracle": location_package_oracle,
-        "fileOofOperationTypeTop1": operation_type_correct / max(1, attempt_count),
         "fileOofOperationTop1": operation_correct / max(1, attempt_count),
         "fileOofLocationTop1GivenPackage": location_correct / max(1, local_attempts),
         "fileOofCombinedTeacherFidelity": combined_correct / max(1, attempt_count),
@@ -561,7 +462,6 @@ def main() -> None:
             }
             for family, values in sorted(per_family.items())
         },
-        "operationTypeFolds": operation_type_folds,
         "operationFolds": operation_folds,
         "locationFolds": location_folds,
     }
