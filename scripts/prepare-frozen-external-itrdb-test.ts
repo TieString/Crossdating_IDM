@@ -38,7 +38,7 @@ type Pool = {
     candidates: PoolCandidate[];
 };
 
-type FileCorrelationBand = "0.50-0.60" | "0.60-0.70" | "0.70-0.80" | "0.80+";
+type FileCorrelationBand = "0.60-0.70" | "0.70-0.80" | "0.80+";
 
 const repoRoot = resolve(
     process.env.CROSSDATING_REPO_ROOT
@@ -77,6 +77,10 @@ const frozenModelEvidenceCommit = valueFor(
 );
 const fileCount = Number(valueFor("--files", "50"));
 const targetsPerFile = Number(valueFor("--targets-per-file", "10"));
+const minimumTargetExcludedReferenceCores = Number(valueFor(
+    "--minimum-target-excluded-reference-cores",
+    "5",
+));
 const timeoutSeconds = Number(valueFor("--cofecha-timeout-seconds", "60"));
 const reuseCleanWork = valueFor("--reuse-clean-work", "true") !== "false";
 const scenarioSeed = valueFor(
@@ -96,24 +100,21 @@ const digest = (value: Buffer | string): string => createHash("sha256")
     .update(value).digest("hex");
 const slash = (value: string): string => value.replaceAll("\\", "/");
 const fileBand = (value: number): FileCorrelationBand | null => (
-    value < 0.5
+    value < 0.6
         ? null
-        : value < 0.6
-            ? "0.50-0.60"
-            : value < 0.7
-                ? "0.60-0.70"
-                : value < 0.8
-                    ? "0.70-0.80"
-                    : "0.80+"
+        : value < 0.7
+            ? "0.60-0.70"
+            : value < 0.8
+                ? "0.70-0.80"
+                : "0.80+"
 );
 const bands: FileCorrelationBand[] = [
-    "0.50-0.60", "0.60-0.70", "0.70-0.80", "0.80+",
+    "0.60-0.70", "0.70-0.80", "0.80+",
 ];
 const quotaBase = Math.floor(fileCount / bands.length);
 const quotas: Record<FileCorrelationBand, number> = {
-    "0.50-0.60": quotaBase + (fileCount % 4 > 0 ? 1 : 0),
-    "0.60-0.70": quotaBase + (fileCount % 4 > 1 ? 1 : 0),
-    "0.70-0.80": quotaBase + (fileCount % 4 > 2 ? 1 : 0),
+    "0.60-0.70": quotaBase + (fileCount % 3 > 0 ? 1 : 0),
+    "0.70-0.80": quotaBase + (fileCount % 3 > 1 ? 1 : 0),
     "0.80+": quotaBase,
 };
 
@@ -194,6 +195,14 @@ for (const [index, candidate] of orderedCandidates.entries()) {
                     problemSegments,
                 }];
             });
+        if (eligibleTargets.length - 1 < minimumTargetExcludedReferenceCores) {
+            throw new Error(
+                `target_excluded_reference_cores_below_minimum:${eligibleTargets.length - 1}`,
+            );
+        }
+        eligibleTargets.forEach((target) => {
+            target.targetExcludedReferenceCores = eligibleTargets.length - 1;
+        });
         if (eligibleTargets.length < targetsPerFile) {
             throw new Error(`zero_free_eligible_targets_below_${targetsPerFile}:${eligibleTargets.length}`);
         }
@@ -262,9 +271,9 @@ const gitCommit = execFileSync("git", ["rev-parse", "HEAD"], {
 }).trim();
 const config: CapabilityConfig = {
     schemaVersion: 1,
-    protocolVersion: "itrdb-frozen-external-v1",
+    protocolVersion: "itrdb-frozen-external-v2",
     scenarioGeneratorVersion: 6,
-    frozenDate: "2026-08-28",
+    frozenDate: "2026-09-01",
     seed: scenarioSeed,
     itrdbRoot: slash(itrdbRoot),
     fileIds: files.map((file) => file.fileId),
@@ -272,7 +281,9 @@ const config: CapabilityConfig = {
         minimumSeriesYears: 100,
         minimumMasterCorrelation: 0.6,
         maximumProblemSegments: 0,
-        minimumFileIntercorrelation: 0.5,
+        maximumTargetZeroCount: 0,
+        minimumTargetExcludedReferenceCores,
+        minimumFileIntercorrelation: 0.6,
         maximumFileProblemSegments: 0,
         minimumOlderContextYears: 45,
         minimumNewerContextYears: 15,
@@ -302,7 +313,7 @@ const config: CapabilityConfig = {
     },
     design: {
         scenarioSampling: "balancedOnePerFamily",
-        splitId: "frozen-external-50-files-2026-08-28-v1",
+        splitId: "frozen-external-50-files-double-quality-gate-v2",
         datasetRole: "externalFrozenTest",
         casesPerTargetPerFamily: 1,
         eventPositionWeights: { middle: 0.4, newer: 0.35, barkNear: 0.25 },

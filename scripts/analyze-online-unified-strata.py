@@ -98,13 +98,16 @@ def main() -> None:
     target_quality = {
         (str(file["fileId"]), str(target["targetId"])): {
             "targetZeroCount": int(target.get("zeroCount", 0)),
-            "targetExcludedReferenceCores": max(
-                0,
-                int(file.get(
-                    "eligibleTargetsBeforeLimit",
-                    len(file.get("eligibleTargets", [])),
-                )) - 1,
-            ),
+            "targetExcludedReferenceCores": int(target.get(
+                "targetExcludedReferenceCores",
+                max(
+                    0,
+                    int(file.get(
+                        "eligibleTargetsBeforeLimit",
+                        len(file.get("eligibleTargets", [])),
+                    )) - 1,
+                ),
+            )),
         }
         for file in manifest["files"]
         for target in file.get("eligibleTargets", [])

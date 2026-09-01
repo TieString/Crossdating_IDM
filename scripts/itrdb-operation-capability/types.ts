@@ -112,6 +112,8 @@ export type CapabilityTarget = {
     zeroCount: number;
     masterCorrelation: number;
     problemSegments: number;
+    /** Clean, eligible reference cores remaining after excluding this target. */
+    targetExcludedReferenceCores?: number;
 };
 
 export type CapabilityFile = {

@@ -73,16 +73,16 @@ const cofechaExeInput = valueFor(
 const cofechaExe = resolve(cofechaExeInput);
 const minimumFileIntercorrelation = Number(valueFor(
     "--minimum-file-intercorrelation",
-    "0.80",
+    "0.60",
 ));
 const maximumFileProblemSegments = Number(valueFor(
     "--maximum-file-problem-segments",
     "0",
 ));
-const minimumSeriesYears = Number(valueFor("--minimum-series-years", "200"));
+const minimumSeriesYears = Number(valueFor("--minimum-series-years", "100"));
 const minimumMasterCorrelation = Number(valueFor(
     "--minimum-master-correlation",
-    "0.80",
+    "0.60",
 ));
 const maximumSeriesProblemSegments = Number(valueFor(
     "--maximum-series-problem-segments",
@@ -251,6 +251,9 @@ for (const [index, candidate] of preselectedCandidates.entries()) {
         if (eligibleBeforeLimit.length < targetsPerFile) {
             throw new Error(`eligible_targets_below_minimum:${eligibleBeforeLimit.length}`);
         }
+        eligibleBeforeLimit.forEach((target) => {
+            target.targetExcludedReferenceCores = eligibleBeforeLimit.length - 1;
+        });
         const eligibleTargets = [...eligibleBeforeLimit]
             .sort((left, right) => (
                 digest(`${targetSeed}:${candidate.fileId}:${left.targetId}`)
@@ -346,7 +349,7 @@ const makeConfig = (
         maximumFileProblemSegments,
         ...(correlationBandCounts ? { fileCorrelationBandCounts: correlationBandCounts } : {}),
         minimumOlderContextYears: 45,
-        minimumNewerContextYears: 35,
+        minimumNewerContextYears: 15,
         maximumTargetsPerFile: targetsPerFile,
         targetSelectionSeed: targetSeed,
         excludeFilesWithoutEligibleTargets: true,
