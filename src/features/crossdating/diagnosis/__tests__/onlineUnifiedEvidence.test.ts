@@ -273,6 +273,30 @@ describe("online unified evidence boundary", () => {
     });
 });
 
+describe("online unified operation identity evidence", () => {
+    it("projects same-shift boundary evidence onto the whole-series identity", () => {
+        const evidence = bundle();
+        evidence.operations = [{
+            ...evidence.operations[0]!,
+            eventType: "partialMove",
+            shiftYears: -20,
+        }];
+        const operations = buildOnlineUnifiedOperationCandidates(evidence);
+        const partial = operations.find((row) => (
+            row.eventType === "partialMove" && row.shiftYears === -20
+        ));
+        const whole = operations.find((row) => (
+            row.eventType === "wholeSeriesMove" && row.shiftYears === -20
+        ));
+
+        expect(partial?.features.grid_best_difference_gain).toBe(0.3);
+        expect(whole?.features.same_shift_partial_grid_available).toBe(1);
+        expect(whole?.features.same_shift_partial_grid_best_difference_gain).toBe(0.3);
+        expect(whole?.features.same_shift_partial_grid_best_difference_gain__rank)
+            .toBeGreaterThan(0.5);
+    });
+});
+
 const eventEvidence = (
     lagBefore: number,
     source: string,

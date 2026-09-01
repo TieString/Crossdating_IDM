@@ -198,6 +198,24 @@ const PROFILE_PEAK_SOURCES = [
     "correctedSideSupport",
 ] as const;
 
+const SAME_SHIFT_PARTIAL_GRID_FEATURES = [
+    "grid_dynamic_score",
+    "grid_best_raw_gain",
+    "grid_best_difference_gain",
+    "grid_best_combined_gain",
+    "grid_top_three_difference_gain",
+    "grid_remote_difference_margin",
+    "grid_baseline_lag",
+    "grid_profile_peak_count",
+    "grid_profile_peak_year_spread",
+    "grid_profile_peak_max_score",
+    "grid_profile_peak_max_margin",
+    ...PROFILE_PEAK_SOURCES.flatMap((source) => [
+        `grid_profile_${source}_score`,
+        `grid_profile_${source}_margin`,
+    ]),
+] as const;
+
 const OPERATION_NUMERIC_FEATURES = [
     "claim_count",
     "claim_stage_count",
@@ -238,6 +256,10 @@ const OPERATION_NUMERIC_FEATURES = [
     "distance_to_cofecha_global_lag",
     "raw_global_lag_match",
     "cofecha_global_lag_match",
+    "same_shift_partial_grid_available",
+    ...SAME_SHIFT_PARTIAL_GRID_FEATURES.map((name) => (
+        `same_shift_partial_${name}`
+    )),
 ] as const;
 
 const LOCATION_NUMERIC_FEATURES = [
@@ -895,6 +917,22 @@ export const buildOnlineUnifiedOperationCandidates = (
             identityGroup,
             features: operationClaimFeatures(bundle, identity),
         };
+    });
+    const partialByShift = new Map(rows.filter((row) => (
+        row.eventType === "partialMove" && row.shiftYears < -1
+    )).map((row) => [row.shiftYears, row]));
+    rows.forEach((row) => {
+        if (row.eventType !== "wholeSeriesMove") return;
+        const partial = partialByShift.get(row.shiftYears);
+        if (!partial) return;
+        row.features.same_shift_partial_grid_available = finite(
+            partial.features.grid_available,
+        );
+        SAME_SHIFT_PARTIAL_GRID_FEATURES.forEach((name) => {
+            row.features[`same_shift_partial_${name}`] = finite(
+                partial.features[name],
+            );
+        });
     });
     return addRelativeFeatures(rows, OPERATION_NUMERIC_FEATURES);
 };
