@@ -120,19 +120,6 @@ def load_location_rows(
                         for key, value in row["features"].items()
                         if not key.startswith(SPARSE_LOCATION_PREFIXES)
                     }
-                    workflow_label = int(row["label"])
-                    target_year = metadata["target_year"]
-                    top_distance = (
-                        abs(int(row["topYear"]) - int(target_year))
-                        if workflow_label > 0 and target_year is not None
-                        else None
-                    )
-                    location_relevance = (
-                        4 if top_distance == 0
-                        else 3 if top_distance is not None and top_distance <= 2
-                        else 2 if top_distance is not None and top_distance <= 4
-                        else workflow_label
-                    )
                     location_rows.append({
                         "attempt_id": attempt_id,
                         "file_id": file_id,
@@ -144,10 +131,7 @@ def load_location_rows(
                         "end_year": int(row["endYear"]),
                         "top_year": int(row["topYear"]),
                         "width": int(row["width"]),
-                        # Every positive window covers the physical truth. Higher relevance
-                        # additionally teaches the ranker to center the unique window instead of
-                        # treating the full +/-6-year coverage plateau as interchangeable.
-                        "label": location_relevance,
+                        "label": int(row["label"]),
                         **stable_features,
                     })
     return pd.DataFrame.from_records(location_rows)
@@ -356,7 +340,7 @@ def main() -> None:
     location_rows_count = len(location)
     location_feature_count = len(location_features)
     location_package_oracle = float(
-        location.groupby("location_group")["label"].max().gt(0).mean()
+        location.groupby("location_group")["label"].max().mean()
     )
     location_valid_groups = set(
         location.groupby("location_group")["label"].max()
