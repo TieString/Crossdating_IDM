@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+import pandas as pd
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -98,3 +99,46 @@ def test_prefers_exact_identity_over_workflow_equivalent_operation(tmp_path: Pat
     relevance = dict(zip(rows["package_id"], rows["label"], strict=True))
 
     assert relevance == {"exact": 2, "equivalent": 1, "wrong": 0}
+
+
+def test_aggregates_operation_evidence_before_type_selection() -> None:
+    frame = pd.DataFrame.from_records([
+        {
+            "attempt_id": "event:1",
+            "file_id": "file-a",
+            "package_id": "whole:-4",
+            "event_type": "wholeSeriesMove",
+            "shift_years": -4,
+            "label": 2,
+            "grid_best_difference_gain": 0.2,
+        },
+        {
+            "attempt_id": "event:1",
+            "file_id": "file-a",
+            "package_id": "whole:-20",
+            "event_type": "wholeSeriesMove",
+            "shift_years": -20,
+            "label": 0,
+            "grid_best_difference_gain": 0.5,
+        },
+        {
+            "attempt_id": "event:1",
+            "file_id": "file-a",
+            "package_id": "partial:-20",
+            "event_type": "partialMove",
+            "shift_years": -20,
+            "label": 0,
+            "grid_best_difference_gain": 0.7,
+        },
+    ])
+
+    types = MODULE.aggregate_operation_type_rows(frame).set_index("event_type")
+
+    assert types.loc["wholeSeriesMove", "label"] == 2
+    assert types.loc["wholeSeriesMove", "type_candidate_count"] == 2
+    assert types.loc[
+        "wholeSeriesMove", "grid_best_difference_gain__type_max"
+    ] == pytest.approx(0.5)
+    assert types.loc[
+        "wholeSeriesMove", "grid_best_difference_gain__type_mean"
+    ] == pytest.approx(0.35)
