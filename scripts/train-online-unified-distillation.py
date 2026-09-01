@@ -137,6 +137,25 @@ def load_location_rows(
     return pd.DataFrame.from_records(location_rows)
 
 
+def require_location_candidate_contract(
+    location: pd.DataFrame,
+    attempts: dict[str, dict[str, Any]],
+    predicted_location_groups: dict[str, str],
+) -> None:
+    if not location.empty and "location_group" in location.columns:
+        return
+    local_attempt_count = sum(
+        metadata["target_identity"]["eventType"]
+        not in {"noEvent", "wholeSeriesMove"}
+        for metadata in attempts.values()
+    )
+    raise RuntimeError(
+        "location candidate contract produced no rows: "
+        f"attempts={len(attempts)}, local_attempts={local_attempt_count}, "
+        f"predicted_local_identities={len(predicted_location_groups)}"
+    )
+
+
 def feature_names(frame: pd.DataFrame) -> list[str]:
     return sorted(column for column in frame.columns if column not in META_COLUMNS)
 
@@ -335,6 +354,7 @@ def main() -> None:
         attempts,
         predicted_location_groups,
     )
+    require_location_candidate_contract(location, attempts, predicted_location_groups)
     location_features = feature_names(location)
     compact_feature_storage(location, location_features)
     location_rows_count = len(location)

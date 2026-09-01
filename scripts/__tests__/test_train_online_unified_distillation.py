@@ -5,6 +5,7 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 
@@ -98,3 +99,17 @@ def test_prefers_exact_identity_over_workflow_equivalent_operation(tmp_path: Pat
     relevance = dict(zip(rows["package_id"], rows["label"], strict=True))
 
     assert relevance == {"exact": 2, "equivalent": 1, "wrong": 0}
+
+
+def test_rejects_training_without_local_location_candidates() -> None:
+    attempts = {
+        "clean:1": {
+            "target_identity": {"eventType": "noEvent", "shiftYears": 0},
+        },
+    }
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"attempts=1, local_attempts=0, predicted_local_identities=0",
+    ):
+        MODULE.require_location_candidate_contract(pd.DataFrame(), attempts, {})
