@@ -114,6 +114,19 @@ const numeric = (value: unknown): number => {
     return Number.isFinite(converted) ? converted : 0;
 };
 
+const candidateHeuristic = (candidate: OnlineUnifiedOperationCandidate): number => {
+    const feature = candidate.features;
+    return numeric(feature.claim_max_stage) * 4
+        + Math.log1p(numeric(feature.claim_count))
+        + numeric(feature.claim_max_confidence)
+        + numeric(feature.grid_available) * 0.4
+        + numeric(feature.dynamic_selected) * 3
+        + numeric(feature.unit_selected) * 2
+        + numeric(feature.raw_global_lag_match) * 2.5
+        + numeric(feature.cofecha_global_lag_match) * 2.5
+        + numeric(feature.grid_dynamic_score) * 3;
+};
+
 const effectiveTeacherIdentity = (teacher: CsvRow): OnlineUnifiedOperationIdentity => ({
     eventType: teacher.event_type as OnlineUnifiedOperationIdentity["eventType"],
     shiftYears: numeric(teacher.shift_years),
@@ -282,35 +295,52 @@ const main = async (): Promise<void> => {
             ? numeric(step.diagnosedTruthYear)
             : numeric(teacher.top_year);
         const allOperations = buildOnlineUnifiedOperationCandidates(bundle);
-        const operationHit = allOperations.some((candidate) => (
-            workflowLabels
-                ? workflowIdentityMatches(candidate, targetIdentity)
-                : identityMatches(candidate, targetIdentity)
-        ));
-        operationOracle += Number(operationHit);
         const sampledOperations = sampleOperationRows(allOperations);
+        const exactLocalOperations = sampledOperations.filter((candidate) => (
+            candidate.eventType !== "noEvent"
+            && candidate.eventType !== "wholeSeriesMove"
+            && identityMatches(candidate, targetIdentity)
+        ));
+        const equivalentLocalOperations = workflowLabels
+            ? sampledOperations.filter((candidate) => (
+                candidate.eventType !== "noEvent"
+                && candidate.eventType !== "wholeSeriesMove"
+                && !identityMatches(candidate, targetIdentity)
+                && workflowIdentityMatches(candidate, targetIdentity)
+            )).sort((left, right) => (
+                candidateHeuristic(right) - candidateHeuristic(left)
+                || left.packageId.localeCompare(right.packageId)
+            )).slice(0, 6)
+            : [];
+        const locationOperations = [...new Map([
+            ...exactLocalOperations,
+            ...equivalentLocalOperations,
+        ].map((candidate) => [candidate.packageId, candidate])).values()];
+        const supportedWorkflowIds = new Set(locationOperations.map(
+            (candidate) => candidate.packageId,
+        ));
+        const operationLabel = (candidate: OnlineUnifiedOperationCandidate): boolean => (
+            identityMatches(candidate, targetIdentity)
+            || (
+                workflowLabels
+                && supportedWorkflowIds.has(candidate.packageId)
+                && workflowIdentityMatches(candidate, targetIdentity)
+            )
+        );
+        const operationHit = sampledOperations.some(operationLabel);
+        operationOracle += Number(operationHit);
         const operationRows = sampledOperations.map(
             (candidate) => ({
                 packageId: candidate.packageId,
                 eventType: candidate.eventType,
                 shiftYears: candidate.shiftYears,
-                label: Number(workflowLabels
-                    ? workflowIdentityMatches(candidate, targetIdentity)
-                    : identityMatches(candidate, targetIdentity)),
+                label: Number(operationLabel(candidate)),
                 features: candidate.features,
             }),
         );
         let locationRows: Array<Record<string, unknown>> = [];
         let locationHit = targetIdentity.eventType === "noEvent"
             || targetIdentity.eventType === "wholeSeriesMove";
-        const positiveLocalOperations = sampledOperations.filter((candidate) => (
-            candidate.eventType !== "noEvent"
-            && candidate.eventType !== "wholeSeriesMove"
-            && (workflowLabels
-                ? workflowIdentityMatches(candidate, targetIdentity)
-                : identityMatches(candidate, targetIdentity))
-        ));
-        const locationOperations = positiveLocalOperations;
         if (locationOperations.length > 0) {
             locationRows = locationOperations.flatMap((operation) => {
                 const locations = buildOnlineUnifiedLocationPackages(bundle, operation, {
