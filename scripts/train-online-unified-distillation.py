@@ -253,7 +253,8 @@ def fit_oof(
             "trainFiles": len(train_files),
             "testFiles": len(test_files),
             "attempts": int(top[group_column].nunique()),
-            "top1": float(top["label"].mean()),
+            "top1": float(top["label"].gt(0).mean()),
+            "meanRelevance": float(top["label"].mean()),
         })
     if np.isnan(predictions).any():
         raise RuntimeError("OOF prediction coverage is incomplete")
