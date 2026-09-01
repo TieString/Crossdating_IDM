@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import gc
 import gzip
 import json
@@ -37,6 +38,106 @@ SPARSE_LOCATION_PREFIXES = (
     "exact_window_note_",
     "overlap_window_note_",
 )
+
+OPERATION_TYPES = (
+    "noEvent",
+    "missingRing",
+    "falseRing",
+    "partialMove",
+    "wholeSeriesMove",
+)
+
+
+def optional_int(value: str | None) -> int | None:
+    if value is None or value.strip() == "":
+        return None
+    converted = float(value)
+    return int(converted) if np.isfinite(converted) else None
+
+
+def load_base_predictions(path: Path | None) -> dict[str, dict[str, Any]]:
+    if path is None:
+        return {}
+    output: dict[str, dict[str, Any]] = {}
+    with path.open("r", encoding="utf8", newline="") as handle:
+        for row in csv.DictReader(handle):
+            attempt_id = str(row["attempt_id"])
+            output[attempt_id] = {
+                "event_type": str(row["predicted_event_type"]),
+                "shift_years": int(float(row["predicted_shift_years"])),
+                "start_year": optional_int(row.get("predicted_start_year")),
+                "end_year": optional_int(row.get("predicted_end_year")),
+                "top_year": optional_int(row.get("predicted_top_year")),
+            }
+    return output
+
+
+def append_base_operation_features(
+    frame: pd.DataFrame,
+    predictions: dict[str, dict[str, Any]],
+) -> None:
+    if not predictions:
+        return
+    predicted_type = frame["attempt_id"].map(
+        {attempt_id: row["event_type"] for attempt_id, row in predictions.items()}
+    ).fillna("")
+    predicted_shift = frame["attempt_id"].map(
+        {attempt_id: row["shift_years"] for attempt_id, row in predictions.items()}
+    ).fillna(0).astype(np.int32)
+    frame["base_prediction_available"] = frame["attempt_id"].isin(predictions).astype(np.float32)
+    frame["base_event_type_match"] = (
+        frame["event_type"] == predicted_type
+    ).astype(np.float32)
+    frame["base_shift_match"] = (
+        frame["shift_years"] == predicted_shift
+    ).astype(np.float32)
+    frame["base_identity_match"] = (
+        (frame["event_type"] == predicted_type)
+        & (frame["shift_years"] == predicted_shift)
+    ).astype(np.float32)
+    frame["base_shift_distance"] = np.minimum(
+        100,
+        np.abs(frame["shift_years"].astype(np.int32) - predicted_shift),
+    ).astype(np.float32)
+    for candidate_type in OPERATION_TYPES:
+        for base_type in OPERATION_TYPES:
+            frame[f"base_pair_{candidate_type}_{base_type}"] = (
+                (frame["event_type"] == candidate_type)
+                & (predicted_type == base_type)
+            ).astype(np.float32)
+
+
+def append_base_location_features(
+    features: dict[str, Any],
+    row: dict[str, Any],
+    prediction: dict[str, Any] | None,
+) -> None:
+    if prediction is None:
+        return
+    identity_match = (
+        str(row.get("eventType", "")) == prediction["event_type"]
+        and int(row.get("shiftYears", 0)) == prediction["shift_years"]
+    )
+    features["base_location_identity_match"] = int(identity_match)
+    base_top = prediction["top_year"]
+    base_start = prediction["start_year"]
+    base_end = prediction["end_year"]
+    if not identity_match or base_top is None or base_start is None or base_end is None:
+        return
+    start_year = int(row["startYear"])
+    end_year = int(row["endYear"])
+    top_year = int(row["topYear"])
+    overlap = max(0, min(end_year, base_end) - max(start_year, base_start) + 1)
+    features["base_location_available"] = 1
+    features["base_top_distance"] = abs(top_year - base_top)
+    features["base_window_overlap"] = overlap
+    features["base_window_overlap_ratio"] = overlap / max(
+        1,
+        max(end_year, base_end) - min(start_year, base_start) + 1,
+    )
+    features["base_window_exact"] = int(
+        start_year == base_start and end_year == base_end
+    )
 
 
 def load_operation_rows(
@@ -87,6 +188,7 @@ def load_location_rows(
     paths: Iterable[Path],
     attempts: dict[str, dict[str, Any]],
     predicted_groups: dict[str, str],
+    base_predictions: dict[str, dict[str, Any]] | None = None,
 ) -> pd.DataFrame:
     location_rows: list[dict[str, Any]] = []
     for path in paths:
@@ -120,6 +222,11 @@ def load_location_rows(
                         for key, value in row["features"].items()
                         if not key.startswith(SPARSE_LOCATION_PREFIXES)
                     }
+                    append_base_location_features(
+                        stable_features,
+                        row,
+                        (base_predictions or {}).get(attempt_id),
+                    )
                     location_rows.append({
                         "attempt_id": attempt_id,
                         "file_id": file_id,
@@ -297,11 +404,16 @@ def main() -> None:
     parser.add_argument("--model-output", required=True)
     parser.add_argument("--report-output", required=True)
     parser.add_argument("--predictions-output")
+    parser.add_argument("--base-predictions")
     parser.add_argument("--seed", type=int, default=20260831)
     args = parser.parse_args()
 
     input_paths = [Path(value) for value in args.input]
+    base_predictions = load_base_predictions(
+        Path(args.base_predictions) if args.base_predictions else None
+    )
     operation, attempts = load_operation_rows(input_paths)
+    append_base_operation_features(operation, base_predictions)
     operation_features = feature_names(operation)
     compact_feature_storage(operation, operation_features)
     operation_rows_count = len(operation)
@@ -334,6 +446,7 @@ def main() -> None:
         input_paths,
         attempts,
         predicted_location_groups,
+        base_predictions,
     )
     location_features = feature_names(location)
     compact_feature_storage(location, location_features)
@@ -424,6 +537,7 @@ def main() -> None:
         "modelVersion": "online-unified-workflow-v3",
         "teacherModelVersion": "workflow-truth",
         "truthBlindRuntime": True,
+        "stackedBasePrediction": bool(base_predictions),
         "operation": model_payload(operation_booster, operation_features),
         "location": model_payload(location_booster, location_features),
     }

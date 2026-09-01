@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+import pandas as pd
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -98,3 +99,36 @@ def test_prefers_exact_identity_over_workflow_equivalent_operation(tmp_path: Pat
     relevance = dict(zip(rows["package_id"], rows["label"], strict=True))
 
     assert relevance == {"exact": 2, "equivalent": 1, "wrong": 0}
+
+
+def test_adds_only_base_prediction_outputs_as_stacking_features(tmp_path: Path) -> None:
+    path = tmp_path / "base.csv"
+    path.write_text(
+        "attempt_id,predicted_event_type,predicted_shift_years,"
+        "predicted_start_year,predicted_end_year,predicted_top_year,"
+        "target_event_type,target_year\n"
+        "event:1,missingRing,-1,1847,1853,1850,falseRing,1900\n",
+        encoding="utf8",
+    )
+    predictions = MODULE.load_base_predictions(path)
+    frame = pd.DataFrame.from_records([
+        {
+            "attempt_id": "event:1",
+            "event_type": "missingRing",
+            "shift_years": -1,
+        },
+        {
+            "attempt_id": "event:1",
+            "event_type": "falseRing",
+            "shift_years": 1,
+        },
+    ])
+
+    MODULE.append_base_operation_features(frame, predictions)
+
+    assert set(predictions["event:1"]) == {
+        "event_type", "shift_years", "start_year", "end_year", "top_year",
+    }
+    assert frame.loc[0, "base_identity_match"] == 1
+    assert frame.loc[1, "base_identity_match"] == 0
+    assert frame.loc[1, "base_pair_falseRing_missingRing"] == 1
