@@ -937,6 +937,45 @@ export const buildOnlineUnifiedOperationCandidates = (
     return addRelativeFeatures(rows, OPERATION_NUMERIC_FEATURES);
 };
 
+const operationPrefilterFeature = (
+    candidate: OnlineUnifiedOperationCandidate,
+    name: string,
+): number => finite(candidate.features[name]);
+
+const operationPrefilterScore = (
+    candidate: OnlineUnifiedOperationCandidate,
+): number => operationPrefilterFeature(candidate, "claim_max_stage") * 4
+    + Math.log1p(operationPrefilterFeature(candidate, "claim_count"))
+    + operationPrefilterFeature(candidate, "claim_max_confidence")
+    + operationPrefilterFeature(candidate, "grid_available") * 0.4
+    + operationPrefilterFeature(candidate, "dynamic_selected") * 3
+    + operationPrefilterFeature(candidate, "unit_selected") * 2
+    + operationPrefilterFeature(candidate, "raw_global_lag_match") * 2.5
+    + operationPrefilterFeature(candidate, "cofecha_global_lag_match") * 2.5
+    + operationPrefilterFeature(candidate, "grid_dynamic_score") * 3;
+
+/** Shared truth-blind operation shortlist used by frozen export and Tauri inference. */
+export const shortlistOnlineUnifiedOperationCandidates = (
+    candidates: readonly OnlineUnifiedOperationCandidate[],
+): OnlineUnifiedOperationCandidate[] => {
+    const ordered = [...candidates].sort((left, right) => (
+        operationPrefilterScore(right) - operationPrefilterScore(left)
+        || left.packageId.localeCompare(right.packageId)
+    ));
+    const family = [
+        "noEvent",
+        "missingRing",
+        "falseRing",
+        "partialMove",
+        "wholeSeriesMove",
+    ].flatMap((eventType) => ordered.filter(
+        (candidate) => candidate.eventType === eventType,
+    ).slice(0, 12));
+    return [...new Map([...family, ...ordered.slice(0, 64)].map((candidate) => (
+        [candidate.packageId, candidate]
+    ))).values()];
+};
+
 type LocationAnchor = {
     year: number;
     source: string;
@@ -1358,7 +1397,7 @@ const locationPrefilterScore = (
 /** Shared truth-blind shortlist used by both frozen-data export and Tauri inference. */
 export const shortlistOnlineUnifiedLocationPackages = (
     candidates: readonly OnlineUnifiedLocationPackage[],
-    limit = 256,
+    limit = 128,
 ): OnlineUnifiedLocationPackage[] => [...candidates].sort((left, right) => {
     return locationPrefilterScore(right) - locationPrefilterScore(left)
         || left.packageId.localeCompare(right.packageId);

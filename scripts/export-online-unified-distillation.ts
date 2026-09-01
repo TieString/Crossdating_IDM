@@ -9,6 +9,7 @@ import {
     buildOnlineUnifiedLocationPackages,
     buildOnlineUnifiedOperationCandidates,
     shortlistOnlineUnifiedLocationPackages,
+    shortlistOnlineUnifiedOperationCandidates,
     type OnlineUnifiedLocationPackage,
     type OnlineUnifiedOperationCandidate,
     type OnlineUnifiedOperationIdentity,
@@ -150,7 +151,7 @@ const workflowIdentityMatches = (
 
 const sampleOperationRows = (
     candidates: OnlineUnifiedOperationCandidate[],
-): OnlineUnifiedOperationCandidate[] => [...candidates];
+): OnlineUnifiedOperationCandidate[] => shortlistOnlineUnifiedOperationCandidates(candidates);
 
 const sampleLocationRows = (
     candidates: OnlineUnifiedLocationPackage[],

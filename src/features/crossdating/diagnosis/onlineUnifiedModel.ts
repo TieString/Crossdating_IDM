@@ -6,6 +6,7 @@ import {
     ONLINE_UNIFIED_MODEL_VERSION,
     onlineUnifiedFeatureVector,
     shortlistOnlineUnifiedLocationPackages,
+    shortlistOnlineUnifiedOperationCandidates,
     type OnlineUnifiedEvidenceBundle,
     type OnlineUnifiedExecutablePackage,
 } from "./onlineUnifiedEvidence";
@@ -203,7 +204,9 @@ export const inferOnlineUnifiedDiagnosis = (
         };
     }
     const operationStartedAt = performance.now();
-    const operationCandidates = buildOnlineUnifiedOperationCandidates(bundle);
+    const operationCandidates = shortlistOnlineUnifiedOperationCandidates(
+        buildOnlineUnifiedOperationCandidates(bundle),
+    );
     const rankedOperations = operationCandidates.map((candidate) => ({
         candidate,
         score: scoreFeatures(MODEL.operation, candidate.features),

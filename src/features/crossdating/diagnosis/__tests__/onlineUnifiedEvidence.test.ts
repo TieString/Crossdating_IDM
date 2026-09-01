@@ -6,6 +6,7 @@ import {
     buildOnlineUnifiedLocationPackages,
     buildOnlineUnifiedOperationCandidates,
     shortlistOnlineUnifiedLocationPackages,
+    shortlistOnlineUnifiedOperationCandidates,
     type OnlineUnifiedEvidenceBundle,
     type OnlineUnifiedLocationPackage,
     type OnlineUnifiedOperationCandidate,
@@ -312,6 +313,24 @@ describe("online unified operation identity evidence", () => {
         expect(whole?.features.same_shift_partial_grid_best_difference_gain).toBe(0.3);
         expect(whole?.features.same_shift_partial_grid_best_difference_gain__rank)
             .toBeGreaterThan(0.5);
+    });
+
+    it("uses a deterministic truth-blind operation shortlist", () => {
+        const evidence = bundle();
+        evidence.operations = Array.from({ length: 80 }, (_, index) => ({
+            ...evidence.operations[0]!,
+            eventType: "partialMove" as const,
+            shiftYears: -(index + 2),
+            dynamicScore: index / 80,
+        }));
+        const operations = buildOnlineUnifiedOperationCandidates(evidence);
+        const shortlisted = shortlistOnlineUnifiedOperationCandidates(operations);
+
+        expect(shortlisted.length).toBeLessThan(operations.length);
+        expect(shortlisted.map((candidate) => candidate.packageId)).toEqual(
+            shortlistOnlineUnifiedOperationCandidates([...operations].reverse())
+                .map((candidate) => candidate.packageId),
+        );
     });
 });
 
