@@ -96,6 +96,7 @@ Tauri + React + TypeScript 树轮交叉定年工作站。GitHub `main` 以本工
 ```text
 npm run build
 npm run test:production
+npm run test:legacy
 npx vitest run src/features/crossdating/diagnosis/__tests__/unifiedV5.test.ts
 npx vitest run src/features/crossdating/diagnosis/__tests__/signedWholeCandidates.test.ts
 npx vitest run src/features/crossdating/diagnosis/__tests__/eventApply.test.ts

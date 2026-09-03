@@ -134,9 +134,12 @@ Clean误报为29/2,924＝**0.99%**。低相关档C和D分别为88.22%和89.54%�
 yarn install
 yarn build
 yarn test:production
+yarn test:legacy
 yarn tauri dev
 yarn tauri build
 ```
+
+`test:production`是当前v5发布门。`test:legacy`保留旧诊断器的完整历史审计，其中含已知失败与需要本机COFECHA EXE的数据回归，不作为当前发布通过条件。
 
 常用验证：
 
