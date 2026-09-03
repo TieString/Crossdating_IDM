@@ -25,8 +25,13 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      // 3. tell vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // Research caches contain millions of files; .gitignore does not exclude
+      // them from Vite's root watcher. Keep source/public HMR enabled.
+      ignored: [
+        "**/src-tauri/**",
+        "**/.benchmark-results/**",
+        "**/__pycache__/**",
+      ],
     },
   },
   optimizeDeps: {

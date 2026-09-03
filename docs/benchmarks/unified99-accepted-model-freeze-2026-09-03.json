@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-09-03",
+  "acceptance": {
+    "source": "explicit-user-revision",
+    "userStatement": "修改目标，目前平均93%已经较好，可以算达标了",
+    "researchAccuracyAccepted": true,
+    "acceptedApproximateAccuracy": 0.93,
+    "stopAccuracyOptimization": true,
+    "supersededAccuracyTargets": [0.95, 0.99],
+    "unchangedRequirements": [
+      "coverage",
+      "clean-false-positive-rate-at-most-0.01",
+      "unique-9-to-13-year-local-window",
+      "exact-operation-and-displacement",
+      "current-frontier-event-once-per-denominator",
+      "directed-partial-to-missing-review-only",
+      "complete-RWL-file-isolation",
+      "preserve-failed-final-audits"
+    ]
+  },
+  "model": {
+    "version": "joint-explicit-global-v5",
+    "candidateFeatures": 207,
+    "leaves": 31,
+    "trees": 600,
+    "lambda": 20.0,
+    "rankCutoff": 1,
+    "calibrationGate": -0.5126752297719945,
+    "developmentGate": -0.5270998425757716,
+    "additionalConditionalHeads": false
+  },
+  "calibrationPrimaryABCD": {
+    "cases": 6121,
+    "eventOpportunities": 9038,
+    "answered": 9023,
+    "refused": 15,
+    "correct": 8426,
+    "coverage": 0.9983403407833592,
+    "windowAccuracy": 0.9322859039610534,
+    "firstDirectCorrect": 8381,
+    "partialToMissingSwitches": 72,
+    "recoveryCorrect": 45,
+    "operationDisplacementErrors": 273,
+    "windowErrors": 324,
+    "promptedOlderEvent": 33,
+    "cleanControls": 2924,
+    "cleanFalsePositives": 29,
+    "cleanFalsePositiveRate": 0.009917920656634747,
+    "windowWidths": {"13": 8375}
+  },
+  "developmentPrimaryABCD": {
+    "eventOpportunities": 9242,
+    "correct": 8458,
+    "windowAccuracy": 0.9151698766500758
+  },
+  "artifacts": [
+    {
+      "path": ".benchmark-results/unified99-joint-global-v5/model-v5.joblib",
+      "sha256": "ea06e86c66cf26eabe9a571a41e7088ca7d5146f217298a4b799df883dbd109c"
+    },
+    {
+      "path": ".benchmark-results/unified99-joint-global-v5/full-manifest.json",
+      "sha256": "41b17476e2dba417c43d95441a35784f9fb06a56b9e8eb379b127f91fbc2c74f"
+    },
+    {
+      "path": ".benchmark-results/unified99-joint-global-v5/frozen-scores-v5.npz",
+      "sha256": "961fd345aff430e12aaac1cc083fab50b59a650c89ae2119ab20c81e20de449d"
+    },
+    {
+      "path": "docs/benchmarks/unified99-joint-global-v5.json",
+      "sha256": "0f2d7f48119cb2a87640b3b17c6f50b32128bee9839818d0616d0f5ffb78a52c"
+    }
+  ],
+  "application": {
+    "integrationAcceptanceComplete": false,
+    "defaultModelReplaced": false,
+    "defaultModelSha256": "4ba085da6e27b9b27c6944abaa0107b932d50c02a0af3ddb2359f55d6eb1a6d8",
+    "remaining": [
+      "same-state-evidence-and-output-parity",
+      "typescript-integration",
+      "strict-typecheck-and-interaction-tests",
+      "build",
+      "ABCD-and-co612-regression"
+    ]
+  },
+  "newFinalConsumed": false,
+  "retrainedInThisAcceptanceRevision": false,
+  "cofechaRunsInThisAcceptanceRevision": 0
+}

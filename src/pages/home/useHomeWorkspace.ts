@@ -51,6 +51,9 @@ import { useSettings } from "@/features/settings/SettingsContext";
 import { ALL_OPTION_VALUE, CofechaVersion, formatTitle } from "./homeShared";
 import type { DiagnosisWorkerRequest, DiagnosisWorkerResponse } from "./diagnosisWorker";
 import { selectAutomaticDiagnosisReferenceConfig } from "./diagnosisReferencePolicy";
+import { planWholeSeriesDiagnosisMove } from "@/features/crossdating/diagnosis/eventApply";
+import { canReuseValidation, refreshReusedReference, type ValidationInput } from "./validationReuse";
+import { UNIFIED_V5_RUNTIME_VERSION } from "@/features/crossdating/diagnosis/unifiedV5Model";
 import {
     createBreadthDiagnosisSuggestion,
     createEmptyBreadthDiagnosisNavigator,
@@ -102,6 +105,7 @@ const BREADTH_SCAN_DELAY_MS = 140;
 
 type DiagnosisResultCache = {
     siteData: RwlSiteData;
+    sourceStopMarker: number;
     referenceConfig: ReferenceSeriesConfig | null;
     cofechaText: string | undefined;
     results: Map<string, CrossdatingDiagnosis>;
@@ -128,6 +132,7 @@ type BreadthScanRequest = {
 };
 
 type RunCofechaApplyOptions = {
+    reuseUnchanged?: boolean;
     version?: CofechaVersion;
     selectedPart?: string;
     inputData?: RwlSiteData;
@@ -243,7 +248,8 @@ export function useHomeWorkspace() {
     const diagnosisResultCacheRef = useRef<DiagnosisResultCache | null>(null);
     const referenceOperationCounterRef = useRef(0);
     // COFECHA .OUT 对应数据的签名 + 引擎版本。用于判断当前 .OUT 是否仍与编辑数据匹配（新鲜）。
-    const lastCofechaValidationRef = useRef<{ inputSignature: string; version: CofechaVersion } | null>(null);
+    const lastCofechaValidationRef = useRef<({ inputSignature: string; version: CofechaVersion } & Partial<ValidationInput>) | null>(null);
+    const pendingValidationRef = useRef<{ key: string; promise: Promise<void> } | null>(null);
     const latestDiagnosisCandidatesRef = useRef<DiagnosisCandidateOperation[]>([]);
     const latestDynamicReferenceConfigRef = useRef<ReferenceSeriesConfig | null>(null);
 
@@ -252,7 +258,7 @@ export function useHomeWorkspace() {
     const [deletionMarkers, setDeletionMarkers] = useState<RwlDeletionMarkers>(() => rwlEditorRef.current.getDeletionMarkers());
     const [operationLog, setOperationLog] = useState<RwlOperationLogEntry[]>(() => rwlEditorRef.current.getOperationLog());
     const [allRwlOperationLog, setAllRwlOperationLog] = useState<RwlOperationLogEntry[]>(
-        () => rwlEditorRef.current.getAllAppliedOperationLogEntries(),
+        () => rwlEditorRef.current.getAllAppliedOperationLogEntries(false),
     );
     const [treeRingScanState, setTreeRingScanState] = useState<PersistedTreeRingScanState>(
         createEmptyTreeRingScanState,
@@ -360,14 +366,14 @@ export function useHomeWorkspace() {
         editor.registerChangeCallback(() => {
             const nextData = editor.getData();
             setIsModified(!rwlDataEquals(originalDataRef.current, nextData));
-            setSiteData(nextData);
+            setSiteData(previous => rwlDataEquals(previous, nextData) ? previous : nextData);
             const nextTreeOptions = Array.from(nextData.keys());
             setTreeOptions((previous) => (
                 stringArraysEqual(previous, nextTreeOptions) ? previous : nextTreeOptions
             ));
             setDeletionMarkers(editor.getDeletionMarkers());
             setOperationLog(editor.getOperationLog());
-            setAllRwlOperationLog(editor.getAllAppliedOperationLogEntries());
+            setAllRwlOperationLog(editor.getAllAppliedOperationLogEntries(false));
             setHistoryStatus(editor.getHistoryStatus());
             setDynamicReferenceConfig((previous) => (
                 previous?.mode === "dynamic" && !previous.isStale
@@ -467,7 +473,7 @@ export function useHomeWorkspace() {
         setSiteData(nextData);
         setDeletionMarkers(nextEditor.getDeletionMarkers());
         setOperationLog(nextEditor.getOperationLog());
-        setAllRwlOperationLog(nextEditor.getAllAppliedOperationLogEntries());
+        setAllRwlOperationLog(nextEditor.getAllAppliedOperationLogEntries(false));
         setHistoryStatus(nextEditor.getHistoryStatus());
         setHistoryAnimation(null);
         setCrossdatingDiagnosis(createEmptyCrossdatingDiagnosis());
@@ -548,82 +554,100 @@ export function useHomeWorkspace() {
         const inputData = resolvedOptions?.inputData ?? rwlEditorRef.current.getData();
         const inputSignature = hashRwlSiteData(inputData);
         const workspaceGuard = resolvedOptions?.workspaceGuard;
-        const requestId = ++cofechaRequestIdRef.current;
-
-        setIsCofechaRunning(true);
-
-        try {
-            const baseName = sourcePath.split(/\\|\//).pop() || "INPUT.RWL";
-            const nextOutText = await cofechaQueueRef.current.enqueue(async () => {
-                if (requestId !== cofechaRequestIdRef.current) {
-                    return null;
-                }
-                return runCofecha(input, baseName, executablePath);
-            });
-            if (nextOutText === null) {
-                return;
-            }
-            const nextResult = parseCofechaResult(nextOutText);
-            const nextParts = splitReportByParts(nextOutText);
-            const cofechaRunId = `cofecha-${Date.now()}`;
-            const flaggedAIds = extractPart6FlaggedASeriesIds(nextParts.get("PART 6") ?? "");
-            const classification = classifyCofechaPart6Series(
-                Array.from(inputData.keys()),
-                flaggedAIds,
-                cofechaRunId,
-            );
-            const pairwiseBootstrapReference = classification.anchorPassIds.length < 3
-                ? createPairwiseBootstrapReferenceConfig({
-                    siteData: inputData,
-                    flaggedAIds,
-                    cofechaRunId,
-                    rwlHash: inputSignature,
-                })
-                : null;
-            // Preserve the current PART 3 master path when COFECHA has a usable pass group.
-            // A pairwise zero-lag cluster is used only for the all-flagged cold start.
-            const dynamicReferenceConfig = pairwiseBootstrapReference
-                ?? createCofechaMasterReferenceConfig({
-                    siteData: inputData,
-                    flaggedAIds,
-                    cofechaRunId,
-                    rwlHash: inputSignature,
-                    masterDatingSeries: nextResult.masterDatingSeries,
-                });
-            logCofechaReferenceComparison(nextResult.masterDatingSeries, dynamicReferenceConfig);
-
-            const isLatestRequest = requestId === cofechaRequestIdRef.current;
-            const matchesWorkspace = !workspaceGuard || (
-                rwlEditorRef.current === workspaceGuard.editor
-                && filePathRef.current === workspaceGuard.filePath
-                && hashRwlSiteData(rwlEditorRef.current.getData()) === workspaceGuard.inputHash
-            );
-            if (!isLatestRequest || !matchesWorkspace) {
-                return;
-            }
-            lastCofechaValidationRef.current = {
-                inputSignature,
-                version,
-            };
-            latestDynamicReferenceConfigRef.current = dynamicReferenceConfig;
-            setDynamicReferenceConfig(dynamicReferenceConfig);
-            setOutFileContent(nextOutText);
-            setCofechaResult(nextResult);
-            setPossibleProblemsDetail(nextResult.possibleProblemsDetail);
-            setCofechaParts(nextParts);
-            await persistCofechaState(
-                sourcePath,
-                nextOutText,
-                nextResult,
-                version,
-                selectedPartForPersistence,
-                inputSignature,
-            );
-        } finally {
-            if (requestId === cofechaRequestIdRef.current) {
-                setIsCofechaRunning(false);
-            }
+        const validationInput = { inputText: input, sourcePath, executablePath, version };
+        if (resolvedOptions?.reuseUnchanged && canReuseValidation(lastCofechaValidationRef.current, validationInput)) {
+            setDynamicReferenceConfig(previous => refreshReusedReference(previous, inputSignature));
+            console.info("[COFECHA耗时] 同一输入已有有效结果，本次保存复用校验。");
+            return;
         }
+        const validationKey = JSON.stringify([workspaceEpochRef.current, version, sourcePath, executablePath, input]);
+        if (pendingValidationRef.current?.key === validationKey) return pendingValidationRef.current.promise;
+        const perform = async () => {
+            const requestId = ++cofechaRequestIdRef.current;
+            const validationStarted = performance.now();
+
+            setIsCofechaRunning(true);
+
+            try {
+                const baseName = sourcePath.split(/\\|\//).pop() || "INPUT.RWL";
+                const nextOutText = await cofechaQueueRef.current.enqueue(async () => {
+                    if (requestId !== cofechaRequestIdRef.current) {
+                        return null;
+                    }
+                    return runCofecha(input, baseName, executablePath);
+                });
+                if (nextOutText === null) {
+                    return;
+                }
+                const executionFinished = performance.now();
+                const nextResult = parseCofechaResult(nextOutText);
+                const nextParts = splitReportByParts(nextOutText);
+                const cofechaRunId = `cofecha-${Date.now()}`;
+                const flaggedAIds = extractPart6FlaggedASeriesIds(nextParts.get("PART 6") ?? "");
+                const classification = classifyCofechaPart6Series(
+                    Array.from(inputData.keys()),
+                    flaggedAIds,
+                    cofechaRunId,
+                );
+                const pairwiseBootstrapReference = classification.anchorPassIds.length < 3
+                    ? createPairwiseBootstrapReferenceConfig({
+                        siteData: inputData,
+                        flaggedAIds,
+                        cofechaRunId,
+                        rwlHash: inputSignature,
+                    })
+                    : null;
+                // Preserve the current PART 3 master path when COFECHA has a usable pass group.
+                // A pairwise zero-lag cluster is used only for the all-flagged cold start.
+                const dynamicReferenceConfig = pairwiseBootstrapReference
+                    ?? createCofechaMasterReferenceConfig({
+                        siteData: inputData,
+                        flaggedAIds,
+                        cofechaRunId,
+                        rwlHash: inputSignature,
+                        masterDatingSeries: nextResult.masterDatingSeries,
+                    });
+                logCofechaReferenceComparison(nextResult.masterDatingSeries, dynamicReferenceConfig);
+
+                const isLatestRequest = requestId === cofechaRequestIdRef.current;
+                const matchesWorkspace = !workspaceGuard || (
+                    rwlEditorRef.current === workspaceGuard.editor
+                    && filePathRef.current === workspaceGuard.filePath
+                    && hashRwlSiteData(rwlEditorRef.current.getData()) === workspaceGuard.inputHash
+                );
+                if (!isLatestRequest || !matchesWorkspace) {
+                    return;
+                }
+                lastCofechaValidationRef.current = {
+                    inputSignature,
+                    ...validationInput,
+                };
+                latestDynamicReferenceConfigRef.current = dynamicReferenceConfig;
+                setDynamicReferenceConfig(dynamicReferenceConfig);
+                setOutFileContent(nextOutText);
+                setCofechaResult(nextResult);
+                setPossibleProblemsDetail(nextResult.possibleProblemsDetail);
+                setCofechaParts(nextParts);
+                await persistCofechaState(
+                    sourcePath,
+                    nextOutText,
+                    nextResult,
+                    version,
+                    selectedPartForPersistence,
+                    inputSignature,
+                );
+                console.info("[COFECHA耗时]", { executionAndQueueMs: Math.round(executionFinished - validationStarted),
+                    parseReferenceAndPersistMs: Math.round(performance.now() - executionFinished), totalMs: Math.round(performance.now() - validationStarted) });
+            } finally {
+                if (requestId === cofechaRequestIdRef.current) {
+                    setIsCofechaRunning(false);
+                }
+            }
+        };
+        const promise = perform();
+        pendingValidationRef.current = { key: validationKey, promise };
+        try { await promise; }
+        finally { if (pendingValidationRef.current?.promise === promise) pendingValidationRef.current = null; }
     }, [cofechaVersion, selectedPart, settings.cofecha.executablePath]);
 
     const handleLoad = useCallback(async () => {
@@ -804,7 +828,7 @@ export function useHomeWorkspace() {
         const currentData = rwlEditorRef.current.getData();
         const matchesSavedSnapshot = rwlDataEquals(savedData, currentData);
         originalDataRef.current = savedData;
-        setSiteData(currentData);
+        setSiteData(previous => rwlDataEquals(previous, currentData) ? previous : currentData);
         setIsModified(!matchesSavedSnapshot);
         return matchesSavedSnapshot;
     }, []);
@@ -905,6 +929,7 @@ export function useHomeWorkspace() {
 
             try {
                 await runCofechaAndApplyResult(rwlString, filePath, {
+                    reuseUnchanged: true,
                     inputData: savedData,
                     workspaceGuard: {
                         editor,
@@ -1364,15 +1389,11 @@ export function useHomeWorkspace() {
                 if (applied) markCurrentDiagnosisStale();
                 return applied;
             }
-            const shiftYears = event.shiftYears ?? 0;
             const treeData = rwlEditorRef.current.getData().get(event.seriesId);
-            if (!treeData || shiftYears >= 0) return false;
-            const editableYears = Array.from(treeData.entries()).flatMap(([year, value]) => (
-                value === stopMarker.value ? [] : [year]
-            ));
-            if (editableYears.length === 0) return false;
-            const startYear = Math.min(...editableYears);
-            const endYear = Math.max(...editableYears);
+            if (!treeData) return false;
+            const plan = planWholeSeriesDiagnosisMove(event, treeData, stopMarker.value);
+            if (!plan) return false;
+            const { startYear, endYear, shiftYears } = plan;
             rwlEditorRef.current.moveSeriesTailByOffset(
                 event.seriesId,
                 startYear,
@@ -1737,10 +1758,11 @@ export function useHomeWorkspace() {
             ))
     ), [fileName, operationLog]);
     const diagnosisReferenceConfig = selectAutomaticDiagnosisReferenceConfig(dynamicReferenceConfig);
+    const diagnosisReferenceReady = diagnosisReferenceConfig !== null;
+    const diagnosisSourceMarker = stopMarker.value;
     useEffect(() => {
         let cancelled = false;
         let startTimer: number | null = null;
-        let workerForRequest: Worker | null = null;
         const requestId = ++diagnosisRequestIdRef.current;
         const targetTree = selectedTree !== ALL_OPTION_VALUE && siteData.has(selectedTree)
             ? selectedTree
@@ -1754,7 +1776,7 @@ export function useHomeWorkspace() {
             return undefined;
         }
 
-        if (!diagnosisReferenceConfig) {
+        if (!diagnosisReferenceReady) {
             diagnosisWorkerRef.current?.terminate();
             diagnosisWorkerRef.current = null;
             setIsEventDiagnosisRunning(false);
@@ -1769,10 +1791,10 @@ export function useHomeWorkspace() {
         const diagnosisCofechaText = cofechaFresh ? outFileContent : undefined;
         let resultCache = diagnosisResultCacheRef.current;
         if (resultCache?.siteData !== siteData
-            || resultCache.referenceConfig !== diagnosisReferenceConfig
-            || resultCache.cofechaText !== diagnosisCofechaText) {
+            || resultCache.sourceStopMarker !== diagnosisSourceMarker) {
             resultCache = {
                 siteData,
+                sourceStopMarker: diagnosisSourceMarker,
                 referenceConfig: diagnosisReferenceConfig,
                 cofechaText: diagnosisCofechaText,
                 results: new Map(),
@@ -1783,7 +1805,7 @@ export function useHomeWorkspace() {
             resultCache.reviewResults = new Map();
         }
         const cachedDiagnosis = resultCache.results.get(targetTree);
-        if (cachedDiagnosis?.authoritativeModelDecision) {
+        if (cachedDiagnosis?.authoritativeModelDecision?.modelVersion === UNIFIED_V5_RUNTIME_VERSION) {
             setIsEventDiagnosisRunning(false);
             startTransition(() => setCrossdatingDiagnosis(cachedDiagnosis));
             return undefined;
@@ -1801,7 +1823,6 @@ export function useHomeWorkspace() {
             // the full diagnosis bundle and makes every series switch pay worker startup again.
             const worker = diagnosisWorkerRef.current
                 ?? new Worker(new URL("./diagnosisWorker.ts", import.meta.url), { type: "module" });
-            workerForRequest = worker;
             diagnosisWorkerRef.current = worker;
 
             worker.onmessage = (event: MessageEvent<DiagnosisWorkerResponse>) => {
@@ -1814,7 +1835,6 @@ export function useHomeWorkspace() {
                     return;
                 }
 
-                workerForRequest = null;
 
                 if ("error" in response) {
                     setIsEventDiagnosisRunning(false);
@@ -1842,22 +1862,19 @@ export function useHomeWorkspace() {
                 if (diagnosisWorkerRef.current === worker) {
                     worker.terminate();
                     diagnosisWorkerRef.current = null;
-                    workerForRequest = null;
                 }
                 setIsEventDiagnosisRunning(false);
                 console.warn("内部诊断 worker 运行失败:", event.message);
             };
 
-            // COFECHA 新鲜度门控：仅当 .OUT 对应的输入与当前编辑数据一致时，才把 COFECHA 文本传给诊断
-            // （驱动 [A] 段级 lag 候选）。编辑中、COFECHA 尚未重跑时不用过期的 .OUT，回退到内部诊断。
+            // v5 reads the current RWL only; the report supplies availability,
+            // not model features, so an OUT-only refresh cannot change this input.
             worker.postMessage({
                 id: requestId,
                 siteData,
-                referenceConfig: diagnosisReferenceConfig,
+                sourceStopMarker: diagnosisSourceMarker,
+                referenceReady: diagnosisReferenceReady,
                 targetTree,
-                cofechaText: diagnosisCofechaText,
-                reviewWindowDisplayMode: "review",
-                includeEventDecisionAudits: true,
             } satisfies DiagnosisWorkerRequest);
         };
 
@@ -1873,14 +1890,12 @@ export function useHomeWorkspace() {
             if (startTimer !== null) {
                 window.clearTimeout(startTimer);
             }
-            if (workerForRequest && diagnosisWorkerRef.current === workerForRequest) {
-                workerForRequest.terminate();
-                diagnosisWorkerRef.current = null;
-            }
+            // Keep preprocessing/model caches warm. The worker coalesces newer
+            // requests; request IDs above discard superseded responses.
         };
-        // outFileContent 加入依赖：COFECHA 重跑（保存后）更新 .OUT 时重新诊断，使 COFECHA 驱动候选与
-        // 逐个（bark-to-pith）迭代工作流生效。
-    }, [diagnosisReferenceConfig, historyAnimation?.id, markCurrentDiagnosisStale, outFileContent, selectedTree, settings.diagnosis.enabled, siteData, siteDataSignature]);
+        // v5 rebuilds its own evidence from RWL values. OUT/reference refreshes
+        // alone do not change inference inputs or invalidate the cached answer.
+    }, [diagnosisReferenceReady, diagnosisSourceMarker, markCurrentDiagnosisStale, selectedTree, settings.diagnosis.enabled, siteData]);
 
     const breadthScanTargets = useMemo(() => orderBreadthScanTargets(
         Array.from(siteData.keys()),
@@ -2076,12 +2091,11 @@ export function useHomeWorkspace() {
             activeTarget = targetTree;
             const currentCache = diagnosisResultCacheRef.current;
             const cacheMatches = currentCache?.siteData === context.siteData
-                && currentCache.referenceConfig === context.referenceConfig
-                && currentCache.cofechaText === context.cofechaText;
+                && currentCache.sourceStopMarker === stopMarker.value;
             const cachedDiagnosis = cacheMatches
                 ? currentCache.reviewResults?.get(targetTree)
                 : undefined;
-            if (cachedDiagnosis?.authoritativeModelDecision) {
+            if (cachedDiagnosis?.authoritativeModelDecision?.modelVersion === UNIFIED_V5_RUNTIME_VERSION) {
                 activeTarget = null;
                 processDiagnosis(targetTree, cachedDiagnosis);
                 scheduleNext(scanNext, 0);
@@ -2128,10 +2142,10 @@ export function useHomeWorkspace() {
 
                 let resultCache = diagnosisResultCacheRef.current;
                 if (resultCache?.siteData !== context.siteData
-                    || resultCache.referenceConfig !== context.referenceConfig
-                    || resultCache.cofechaText !== context.cofechaText) {
+                    || resultCache.sourceStopMarker !== stopMarker.value) {
                     resultCache = {
                         siteData: context.siteData,
+                        sourceStopMarker: stopMarker.value,
                         referenceConfig: context.referenceConfig,
                         cofechaText: context.cofechaText,
                         results: new Map(),
@@ -2170,10 +2184,9 @@ export function useHomeWorkspace() {
             worker.postMessage({
                 id: requestId,
                 siteData: context.siteData,
-                referenceConfig: context.referenceConfig,
+                sourceStopMarker: stopMarker.value,
+                referenceReady: context.referenceConfig !== null,
                 targetTree,
-                cofechaText: context.cofechaText,
-                reviewWindowDisplayMode: "review",
             } satisfies DiagnosisWorkerRequest);
         };
 

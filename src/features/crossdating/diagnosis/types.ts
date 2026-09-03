@@ -130,7 +130,7 @@ export type DiagnosisEventLocationAlternative = {
  * cumulative negative lag. The UI may switch between these two event objects, but must never
  * expose this as a general operation picker.
  */
-export type DiagnosisMissingPartialInterpretationEvidence = {
+export type DiagnosisLegacyMissingPartialInterpretationEvidence = {
     interpretationBasis?: "counterfactualTie"
         | "completedPartialMissingComposition"
         | "exactSequentialStaircaseAlternative"
@@ -172,6 +172,20 @@ export type DiagnosisMissingPartialInterpretationEvidence = {
     };
 };
 
+export type DiagnosisMissingPartialInterpretationEvidence = DiagnosisLegacyMissingPartialInterpretationEvidence | {
+    /** User-directed fracture check, not a claim that two models have tied. */
+    interpretationBasis: "frozenConditionalMissingReview";
+    missingRingCount: number;
+    cumulativeShiftYears: number;
+    missingYears: number[];
+    partialFirstFixedYear: number;
+    countEvidence: "cumulativeLagOnly";
+    frontierYear: number;
+    frontierLocalization: "multiReferenceCounterfactual";
+    referenceCount: number;
+    modelScoreMargin: number;
+};
+
 export type DiagnosisWholeMissingInterpretationEvidence = {
     wholeShiftYears: number;
     endpointDistanceYears: number;
@@ -189,6 +203,13 @@ export type DiagnosisWholeLocalInterpretationEvidence = {
     finalEvidenceClaims: DiagnosisEvidenceClaim[];
 };
 
+export type DiagnosisSequentialOperationRecoveryEvidence = {
+    protocol: "whole-partial-unit";
+    attempt: 1 | 2;
+    reason: "bark-check" | "fracture-check";
+    modelVersion: string;
+};
+
 export type DiagnosisEventInterpretationAmbiguity =
     | {
         kind: "missingRingsOrPartialMove";
@@ -204,6 +225,11 @@ export type DiagnosisEventInterpretationAmbiguity =
         kind: "wholeSeriesMoveOrLocalEvent";
         alternative: DiagnosisEvent;
         evidence: DiagnosisWholeLocalInterpretationEvidence;
+    }
+    | {
+        kind: "sequentialOperationRecovery";
+        alternative: DiagnosisEvent;
+        evidence: DiagnosisSequentialOperationRecoveryEvidence;
     };
 
 /** Internal path evidence only. It must never become a user-facing event or review window. */

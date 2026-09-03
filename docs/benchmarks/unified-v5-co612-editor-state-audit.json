@@ -1,0 +1,16 @@
+{
+  "passed": true,
+  "source": ".benchmark-results/co612-frozen-source/co612-original-5b1c4ba8.rwl",
+  "sourceSha256": "5b1c4ba81068a81c1a6b6f9dcd8da79f7c2bbbdc5a8d0e9d188267969472c864",
+  "sourceUnchanged": true,
+  "sourceStopMarker": -9999,
+  "applicationParser": "readRwlString",
+  "applicationEditor": "RwlEditor",
+  "checkedStates": 761,
+  "eventOpportunities": 716,
+  "cleanControls": 45,
+  "naturalZeros": 358,
+  "completeSerialReconstructions": 45,
+  "cofechaCalls": 0,
+  "modelInferences": 0
+}

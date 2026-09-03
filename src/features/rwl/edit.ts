@@ -260,11 +260,16 @@ const normalizeOperationLogEntry = (entry: RwlOperationLogEntry): RwlOperationLo
 
 const cloneOperationLogEntry = (entry: RwlOperationLogEntry): RwlOperationLogEntry => ({
     ...normalizeOperationLogEntry(entry),
+    affectedRange: entry.affectedRange ? { ...entry.affectedRange } : undefined,
     operation: cloneOperation(entry.operation),
     beforeTreeData: cloneSerializedTreeData(entry.beforeTreeData),
     afterTreeData: cloneSerializedTreeData(entry.afterTreeData),
     beforeDeletionMarkers: cloneSerializedTreeDeletionMarkers(entry.beforeDeletionMarkers),
     afterDeletionMarkers: cloneSerializedTreeDeletionMarkers(entry.afterDeletionMarkers),
+    metricsBefore: entry.metricsBefore ? { ...entry.metricsBefore } : undefined,
+    metricsAfter: entry.metricsAfter ? { ...entry.metricsAfter } : undefined,
+    cofechaBefore: entry.cofechaBefore ? { ...entry.cofechaBefore } : undefined,
+    cofechaAfter: entry.cofechaAfter ? { ...entry.cofechaAfter } : undefined,
 });
 
 const getOperationLogSeriesKey = (entry: RwlOperationLogEntry): string => (
@@ -293,8 +298,11 @@ const groupOperationLogBySeries = (operationLog: RwlOperationLogEntry[]): RwlOpe
     return grouped;
 };
 
-const cloneOperationLogBySeries = (operationLogBySeries: RwlOperationLogBySeries): RwlOperationLogBySeries => (
-    groupOperationLogBySeries(flattenOperationLogBySeries(operationLogBySeries))
+// Internal log entries are immutable: appends/removals/project-id updates replace
+// records. Undo snapshots share their large before/after payloads; public exports
+// still deep-copy them, so callers cannot mutate a retained undo state.
+const shareOperationLogSnapshot = (log: RwlOperationLogBySeries): RwlOperationLogBySeries => (
+    new Map(Array.from(log, ([seriesId, entries]) => [seriesId, [...entries]]))
 );
 
 const trimOperationLogBySeries = (operationLogBySeries: RwlOperationLogBySeries): RwlOperationLogBySeries => (
@@ -311,7 +319,7 @@ const serializeOperationLogBySeries = (
     operationLogBySeries: RwlOperationLogBySeries
 ): SerializedRwlOperationLogBySeries => (
     Array.from(trimOperationLogBySeries(operationLogBySeries).entries())
-        .map(([seriesId, entries]) => [seriesId, entries.map(cloneOperationLogEntry)])
+        .map(([seriesId, entries]) => [seriesId, entries])
 );
 
 const deserializeOperationLogBySeries = (
@@ -994,12 +1002,12 @@ export class RwlEditor {
     }
 
     private captureOperationLogSnapshot(): RwlOperationLogBySeries {
-        return cloneOperationLogBySeries(this.operationLogBySeries);
+        return shareOperationLogSnapshot(this.operationLogBySeries);
     }
 
     private restoreOperationLogSnapshot(snapshot: RwlOperationLogBySeries | undefined, counter?: number): void {
         if (!snapshot) return;
-        this.operationLogBySeries = cloneOperationLogBySeries(snapshot);
+        this.operationLogBySeries = shareOperationLogSnapshot(snapshot);
         this.operationLogCounter = counter ?? Math.max(
             ...flattenOperationLogBySeries(this.operationLogBySeries).map((entry) => entry.sequence),
             0,
@@ -1073,10 +1081,10 @@ export class RwlEditor {
             newYear: metadata.newYear ?? getOperationNewYear(operation),
             affectedRange: getOperationAffectedRange(operation),
             reason: metadata.reason,
-            metricsBefore: metadata.metricsBefore,
-            metricsAfter: metadata.metricsAfter,
-            cofechaBefore: metadata.cofechaBefore,
-            cofechaAfter: metadata.cofechaAfter,
+            metricsBefore: metadata.metricsBefore ? { ...metadata.metricsBefore } : undefined,
+            metricsAfter: metadata.metricsAfter ? { ...metadata.metricsAfter } : undefined,
+            cofechaBefore: metadata.cofechaBefore ? { ...metadata.cofechaBefore } : undefined,
+            cofechaAfter: metadata.cofechaAfter ? { ...metadata.cofechaAfter } : undefined,
             parentOperationId: metadata.parentOperationId,
             batchId: metadata.batchId,
             summary: description.summary,
@@ -1144,10 +1152,20 @@ export class RwlEditor {
      * Scan-image provenance uses this complete stream to avoid silently retaining an
      * invalid original/current year mapping after a text replacement.
      */
-    getAllAppliedOperationLogEntries(): RwlOperationLogEntry[] {
+    getAllAppliedOperationLogEntries(includeSnapshots = true): RwlOperationLogEntry[] {
         return flattenOperationLogBySeries(this.operationLogBySeries)
             .filter((entry) => entry.operation && !(entry.isReverted ?? entry.undone))
-            .map((entry) => this.cloneOperationLogEntryWithAvailability(entry));
+            .map((entry) => includeSnapshots ? this.cloneOperationLogEntryWithAvailability(entry) : {
+                ...entry, operation: cloneOperation(entry.operation),
+                affectedRange: entry.affectedRange ? { ...entry.affectedRange } : undefined,
+                metricsBefore: entry.metricsBefore ? { ...entry.metricsBefore } : undefined,
+                metricsAfter: entry.metricsAfter ? { ...entry.metricsAfter } : undefined,
+                cofechaBefore: entry.cofechaBefore ? { ...entry.cofechaBefore } : undefined,
+                cofechaAfter: entry.cofechaAfter ? { ...entry.cofechaAfter } : undefined,
+                beforeTreeData: undefined, afterTreeData: undefined,
+                beforeDeletionMarkers: undefined, afterDeletionMarkers: undefined,
+                canUndo: false, canUndoBatch: false, canRedo: false,
+            });
     }
 
     getHistoryStatus(): RwlHistoryStatus {

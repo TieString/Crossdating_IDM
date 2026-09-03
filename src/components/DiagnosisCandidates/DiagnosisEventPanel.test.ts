@@ -357,9 +357,7 @@ describe("DiagnosisEventPanel", () => {
     }));
 
     expect(html).toContain("可能缺轮");
-    expect(html).toContain("附近可能还有 1 个同方向缺轮事件");
-    expect(html).toContain("存在断裂，返回局部移动解释");
-    expect(html).toContain("缺轮/连续缺段参考芯支持 5/5");
+    expect(html).not.toContain("以缺轮形式复核");
     expect(html).not.toContain("可能局部移动");
     expect(html).not.toContain("1901–1907 · 7 年");
     expect(html).not.toContain("role=\"tab\"");
@@ -426,10 +424,18 @@ describe("DiagnosisEventPanel", () => {
     }));
 
     expect(html).toContain("可能局部移动");
-    expect(html).toContain("未见断裂，按缺轮逐轮复核");
+    expect(html).toContain("以缺轮形式复核");
     expect(html).toContain("累计约 2 次同方向单位转移");
     expect(html).not.toContain("可能缺轮");
     expect(html).not.toContain("1900–1906 · 7 年");
+
+    const switchedHtml = renderToStaticMarkup(createElement(DiagnosisEventPanel, {
+      events: [primary],
+      selectedEventId: missing.id,
+    }));
+    expect(switchedHtml).toContain("可能缺轮");
+    expect(switchedHtml).not.toContain("以缺轮形式复核");
+    expect(switchedHtml).not.toContain("返回局部移动解释");
   });
 
   it("keeps the missing-ring review available inside a whole-to-partial interpretation", () => {
@@ -510,7 +516,7 @@ describe("DiagnosisEventPanel", () => {
       selectedEventId: partial.id,
     }));
     expect(partialHtml).toContain("可能局部移动");
-    expect(partialHtml).toContain("未见断裂，按缺轮逐轮复核");
+    expect(partialHtml).not.toContain("以缺轮形式复核");
     expect(partialHtml).toContain("恢复整体移动解释");
 
     const missingHtml = renderToStaticMarkup(createElement(DiagnosisEventPanel, {
@@ -518,7 +524,7 @@ describe("DiagnosisEventPanel", () => {
       selectedEventId: missing.id,
     }));
     expect(missingHtml).toContain("可能缺轮");
-    expect(missingHtml).toContain("存在断裂，返回局部移动解释");
+    expect(missingHtml).not.toContain("以缺轮形式复核");
     expect(missingHtml).toContain("恢复整体移动解释");
   });
 

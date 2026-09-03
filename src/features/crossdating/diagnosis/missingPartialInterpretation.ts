@@ -17,7 +17,7 @@ import { locationEvidenceFor, withEvidenceLedger } from "./evidenceLedger";
 import type {
     DiagnosisEvent,
     DiagnosisLocalLagTransitionEvidence,
-    DiagnosisMissingPartialInterpretationEvidence,
+    DiagnosisLegacyMissingPartialInterpretationEvidence as DiagnosisMissingPartialInterpretationEvidence,
     SeriesCoreDiagnosis,
     YearRange,
 } from "./types";
@@ -744,6 +744,7 @@ export const promoteValidatedSequentialMissingInterpretation = (
     if (event.eventType !== "partialMove"
         || ambiguity?.kind !== "missingRingsOrPartialMove"
         || ambiguity.alternative.eventType !== "missingRing") return event;
+    if (ambiguity.evidence.interpretationBasis === "frozenConditionalMissingReview") return event;
     const virtual = ambiguity.evidence.virtualCountEvaluation;
     if (!virtual || virtual.validatedSteps < 1) return event;
 
@@ -1063,6 +1064,7 @@ export const attachUniversalPartialMissingWorkflow = (
         || (partial.shiftYears ?? 0) >= -1) return partial;
     if (partial.interpretationAmbiguity?.kind === "missingRingsOrPartialMove") {
         const ambiguity = partial.interpretationAmbiguity;
+        if (ambiguity.evidence.interpretationBasis === "frozenConditionalMissingReview") return partial;
         if (ambiguity.evidence.countEvidence === "multiReferenceStaircase"
             || ambiguity.evidence.virtualCountEvaluation) {
             return attachMissingPartialInterpretation(

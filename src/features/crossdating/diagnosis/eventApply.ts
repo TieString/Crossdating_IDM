@@ -5,6 +5,15 @@ import {
     partialMoveBreakpoint,
 } from "./partialMoveSemantics";
 import type { DiagnosisEvent } from "./types";
+import type { RwlTreeData } from "@/features/rwl/types";
+
+/** Whole corrections permit either sign; negative-only restrictions belong to partial moves. */
+export const planWholeSeriesDiagnosisMove = (event: DiagnosisEvent, tree: RwlTreeData, marker: number) => {
+    const shiftYears = event.shiftYears ?? 0;
+    if (event.stale || event.eventType !== "wholeSeriesMove" || !Number.isInteger(shiftYears) || shiftYears === 0) return null;
+    const years = [...tree].filter(([year, value]) => Number.isFinite(year) && value !== marker).map(([year]) => year);
+    return years.length ? { startYear: Math.min(...years), endYear: Math.max(...years), shiftYears } : null;
+};
 
 export type DiagnosisEventEditPlan =
     | {

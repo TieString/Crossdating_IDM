@@ -3,6 +3,7 @@ import { insertMissingYearAtSide, moveSeriesTailByOffset, deleteYearWithMode } f
 import {
     planDiagnosisEventEdit,
     planManuallyConfirmedDiagnosisEventEdit,
+    planWholeSeriesDiagnosisMove,
 } from "../eventApply";
 import type { DiagnosisEvent } from "../types";
 
@@ -43,6 +44,20 @@ const series = new Map([
 ]);
 
 describe("planDiagnosisEventEdit", () => {
+    it.each([-7, 7])("applies a whole correction of %i without selecting a local year", shiftYears => {
+        const tree = new Map([...series, [1904, -9999]]);
+        const plan = planWholeSeriesDiagnosisMove(event("wholeSeriesMove", { shiftYears }), tree, -9999);
+        expect(plan).toEqual({ startYear: 1899, endYear: 1903, shiftYears });
+        const updated = moveSeriesTailByOffset(tree, plan!.startYear, plan!.endYear, plan!.shiftYears);
+        for (const [year, width] of series) expect(updated.get(year + shiftYears)).toBe(width);
+    });
+
+    it("rejects zero, fractional, nonfinite and stale whole corrections", () => {
+        for (const shiftYears of [0, 0.5, NaN, Infinity]) {
+            expect(planWholeSeriesDiagnosisMove(event("wholeSeriesMove", { shiftYears }), series, -9999)).toBeNull();
+        }
+        expect(planWholeSeriesDiagnosisMove(event("wholeSeriesMove", { shiftYears: 7, stale: true }), series, -9999)).toBeNull();
+    });
     it("keeps the newer side fixed when applying a selected missing-ring year", () => {
         const plan = planDiagnosisEventEdit(event("missingRing"), 1902, 1899, 1903);
         expect(plan).toEqual({

@@ -1471,6 +1471,9 @@ const cloneAmbiguityEvidence = (
     ambiguity: DiagnosisEventInterpretationAmbiguity,
 ): DiagnosisEventInterpretationAmbiguity["evidence"] => {
     if (ambiguity.kind === "missingRingsOrPartialMove") {
+        if (ambiguity.evidence.interpretationBasis === "frozenConditionalMissingReview") {
+            return { ...ambiguity.evidence, missingYears: [...ambiguity.evidence.missingYears] };
+        }
         return {
             ...ambiguity.evidence,
             missingYears: [...ambiguity.evidence.missingYears],
@@ -1482,6 +1485,9 @@ const cloneAmbiguityEvidence = (
                 ? { ...ambiguity.evidence.completedComposition }
                 : undefined,
         };
+    }
+    if (ambiguity.kind === "sequentialOperationRecovery") {
+        return { ...ambiguity.evidence };
     }
     return {
         ...ambiguity.evidence,
@@ -1767,6 +1773,9 @@ export const buildOnlineUnifiedExecutablePackage = (input: {
     candidate: OnlineUnifiedOperationCandidate | OnlineUnifiedLocationPackage;
     score: number;
     scoreMargin: number;
+    modelVersion?: string;
+    /** A frozen model supplies its own directed review; never synthesize a chain. */
+    interpretationPolicy?: "legacy" | "model-owned";
 }): OnlineUnifiedExecutablePackage | null => {
     const { bundle, candidate, score, scoreMargin } = input;
     if (candidate.eventType === "noEvent") return null;
@@ -1805,7 +1814,7 @@ export const buildOnlineUnifiedExecutablePackage = (input: {
             candidateIds: [],
             notes: [
                 ...(claim?.notes ?? []),
-                `authoritative_model=${ONLINE_UNIFIED_MODEL_VERSION}`,
+                `authoritative_model=${input.modelVersion ?? ONLINE_UNIFIED_MODEL_VERSION}`,
                 `authoritative_identity=${candidate.identityGroup}`,
                 `authoritative_package=${candidate.packageId}`,
                 "executable_package=self_contained",
@@ -1820,7 +1829,7 @@ export const buildOnlineUnifiedExecutablePackage = (input: {
         reviewOnly: false,
         stale: false,
     };
-    const executableEvent = attachExecutableInterpretations(
+    const executableEvent = input.interpretationPolicy === "model-owned" ? event : attachExecutableInterpretations(
         event,
         bundle,
         candidate,

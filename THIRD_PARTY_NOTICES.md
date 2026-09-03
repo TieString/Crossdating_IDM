@@ -23,4 +23,6 @@ COFECHA 由 Richard L. Holmes 创建。推荐引用：Holmes, R. L. (1983). Comp
 
 ## 软件依赖
 
+`cofecha-js` 0.2.0 是独立的 COFECHA 6.06-compatible TypeScript 实现，按 `GPL-3.0-only` 发布；实验定年证据复用该包的报告预处理链。包内原有 `LICENSE` 与 `THIRD_PARTY_NOTICES.md` 保持有效，不包含或重新授权官方 COFECHA EXE。
+
 JavaScript/TypeScript 和 Rust 依赖继续适用其各自许可证。依赖清单与锁定版本记录在 `package.json`、`package-lock.json`、`yarn.lock`、`src-tauri/Cargo.toml` 和 `src-tauri/Cargo.lock` 中。将依赖与本项目一起使用或分发时，仍须遵守对应依赖的许可及声明要求。

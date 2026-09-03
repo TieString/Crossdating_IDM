@@ -47,6 +47,7 @@ export interface RwlReadResult {
     tucsonLong?: boolean;        // Tucson 格式：true 为 7 列，false 为 8 列
     edgeZeros?: boolean;         // 是否保留边界 0
     preserveNegativeMeasurements?: boolean; // 是否保留非终止负测量值
+    stopMarkerValue?: number;    // 显式读入精度，供隔离的评估/序列化链使用
     fhDataFormat?: "column" | "block";  // FH 数据格式
     fhUnit?: { multiplier: number; divisor: number };  // FH Unit 参数
   };

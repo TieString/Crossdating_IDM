@@ -136,7 +136,10 @@ const missingPartialAmbiguity = (event: DiagnosisEvent) => {
     if (!ambiguity || ambiguity.kind !== "missingRingsOrPartialMove") {
         throw new Error("expected missing/partial interpretation ambiguity");
     }
-    return ambiguity;
+    if (ambiguity.evidence.interpretationBasis === "frozenConditionalMissingReview") {
+        throw new Error("legacy interpretation fixture unexpectedly used the frozen model workflow");
+    }
+    return { ...ambiguity, evidence: ambiguity.evidence };
 };
 
 const buildDeterministicMissingSite = (

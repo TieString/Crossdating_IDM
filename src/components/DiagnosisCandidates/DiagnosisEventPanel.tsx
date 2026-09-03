@@ -210,27 +210,24 @@ export function DiagnosisEventPanel({
         const controlledInterpretation = selectedEventId === null
           ? null
           : interpretationChain.find((candidate) => candidate.id === selectedEventId) ?? null;
-        const selectedEvent = controlledInterpretation
-          ?? interpretationChain.find((candidate) => (
+        const lockedInterpretation = interpretationChain.find((candidate) => (
             candidate.id === selectedInterpretationIds[event.id]
-          ))
+          )) ?? null;
+        const selectedEvent = lockedInterpretation
+          ?? controlledInterpretation
           ?? event;
-        const selectedIndex = interpretationChain.findIndex((candidate) => (
-          candidate.id === selectedEvent.id
-        ));
-        const selectedPath = interpretationChain.slice(0, selectedIndex + 1);
         const rootInterpretation = event.interpretationAmbiguity;
+        const sequentialInterpretation = selectedEvent.interpretationAmbiguity?.kind
+          === "sequentialOperationRecovery"
+          ? selectedEvent.interpretationAmbiguity
+          : null;
         const wholeLocalInterpretation = rootInterpretation?.kind === "wholeSeriesMoveOrMissingRing"
           || rootInterpretation?.kind === "wholeSeriesMoveOrLocalEvent"
           ? rootInterpretation
           : null;
-        const missingPartialOwner = [...selectedPath].reverse().find((candidate) => (
-          candidate.interpretationAmbiguity?.kind === "missingRingsOrPartialMove"
-        )) ?? null;
-        const missingPartialCandidate = missingPartialOwner?.interpretationAmbiguity;
-        const missingPartialInterpretation = missingPartialCandidate?.kind
-          === "missingRingsOrPartialMove"
-          ? missingPartialCandidate
+        const missingPartialInterpretation = event.eventType === "partialMove"
+          && rootInterpretation?.kind === "missingRingsOrPartialMove"
+          ? rootInterpretation
           : null;
         const width = selectedEvent.endYear - selectedEvent.startYear + 1;
         const isWholeSeriesMove = selectedEvent.eventType === "wholeSeriesMove";
@@ -271,10 +268,9 @@ export function DiagnosisEventPanel({
         const missingPartialEvidence = missingPartialInterpretation?.evidence ?? null;
         const hasCalibratedMissingCount = missingPartialEvidence?.countEvidence
           === "multiReferenceStaircase";
-        const missingPartialTarget = missingPartialOwner && missingPartialInterpretation
-          ? selectedEvent.id === missingPartialOwner.id
-            ? missingPartialInterpretation.alternative
-            : missingPartialOwner
+        const missingPartialTarget = missingPartialInterpretation
+          && selectedEvent.id === event.id
+          ? missingPartialInterpretation.alternative
           : null;
         const reviewingWholePrimary = wholeLocalInterpretation !== null
           && selectedEvent.id === event.id;
@@ -284,7 +280,9 @@ export function DiagnosisEventPanel({
             : event
           : null;
         const missingPartialTitle = missingPartialEvidence
-          ? missingPartialEvidence.interpretationBasis === "completedPartialMissingComposition"
+          ? missingPartialEvidence.interpretationBasis === "frozenConditionalMissingReview"
+            ? "若样芯未见断裂，使用同一冻结证据独立复核缺轮；不会重新选择其他操作。"
+            : missingPartialEvidence.interpretationBasis === "completedPartialMissingComposition"
             ? `复合校正支持 ${
               missingPartialEvidence.completedComposition?.mixedReferenceSupport ?? "-"
             }/${
@@ -317,11 +315,17 @@ export function DiagnosisEventPanel({
           }`
           : null;
         const interpretationTitle = (
-          reviewingWholePrimary
+          sequentialInterpretation
+            ? `统一模型交互恢复第 ${sequentialInterpretation.evidence.attempt} 步`
+            : reviewingWholePrimary
             ? wholeInterpretationTitle
             : missingPartialTitle ?? wholeInterpretationTitle
         ) ?? undefined;
-        const interpretationDescription = reviewingWholePrimary
+        const interpretationDescription = sequentialInterpretation
+          ? sequentialInterpretation.evidence.reason === "bark-check"
+            ? "若实体样芯确认存在树皮，可排除整体移动并继续复核局部移动。"
+            : "若实体样芯未见断裂或连续缺段，可排除局部移动并继续复核单位事件。"
+          : reviewingWholePrimary
           ? "若树皮年或采样年已确认，可排除整条序列移动，重新检查局部缺轮、伪轮或连续缺段。"
           : missingPartialEvidence
             ? selectedEvent.eventType === "missingRing"
@@ -427,19 +431,30 @@ export function DiagnosisEventPanel({
                   className={style.interpretation}
                 >
                   <span>{interpretationDescription}</span>
+                  {sequentialInterpretation ? (
+                    <button
+                      type="button"
+                      disabled={event.stale === true}
+                      title={sequentialInterpretation.evidence.reason === "bark-check"
+                        ? "实体样芯存在树皮时排除整体移动"
+                        : "实体样芯未见断裂或连续缺段时排除局部移动"}
+                      onClick={() => activateInterpretation(sequentialInterpretation.alternative)}
+                      className={`${style.interpretationButton} ${event.stale ? style.disabledButton : ""}`}
+                    >
+                      {sequentialInterpretation.evidence.reason === "bark-check"
+                        ? "确认有树皮，继续局部复核"
+                        : "未见断裂，继续单位事件复核"}
+                    </button>
+                  ) : null}
                   {missingPartialTarget ? (
                     <button
                       type="button"
                       disabled={event.stale === true}
-                      title={missingPartialTarget.eventType === "missingRing"
-                        ? "实体样芯完整、未见断裂时，切换到单个前沿缺轮复核"
-                        : "实体样芯存在断裂、腐朽或连续缺段证据时返回局部移动解释"}
+                      title="实体样芯未见断裂时，在同一证据状态上切换到前沿缺轮复核"
                       onClick={() => activateInterpretation(missingPartialTarget)}
                       className={`${style.interpretationButton} ${event.stale ? style.disabledButton : ""}`}
                     >
-                      {missingPartialTarget.eventType === "missingRing"
-                        ? "未见断裂，按缺轮逐轮复核"
-                        : "存在断裂，返回局部移动解释"}
+                      以缺轮形式复核
                     </button>
                   ) : null}
                   {wholeInterpretationTarget ? (
