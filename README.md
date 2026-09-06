@@ -42,7 +42,7 @@ Crossdating IDM 把树轮宽度编辑、样芯图像、折线对照、COFECHA �
 Windows x64 用户可在 [Releases](https://github.com/TieString/Crossdating_IDM/releases/latest) 下载最新版安装程序：
 
 ```text
-Crossdating-IDM_1.5.0_x64-setup.exe
+Crossdating-IDM_1.6.0_x64-setup.exe
 ```
 
 安装完成后，示例 RWL 会随软件放入安装资源目录的 `test-data` 文件夹，也可直接使用仓库根目录中的 [`test-data`](test-data)。
