@@ -47,13 +47,13 @@ Crossdating-IDM_1.5.0_x64-setup.exe
 
 安装完成后，示例 RWL 会随软件放入安装资源目录的 `test-data` 文件夹，也可直接使用仓库根目录中的 [`test-data`](test-data)。
 
-COFECHA 由 LTRR 独立提供，不包含在 Crossdating IDM 的源码和安装包中。安装应用后：
+应用默认使用内置的`cofecha-js 0.2.0`在Web Worker中生成COFECHA兼容报告，不需要EXE。若需与官方程序对照，可选用LTRR独立提供的COFECHA：
 
 1. 前往 [LTRR Dendrochronology Program Library](https://www.ltrr.arizona.edu/pub/dpl/) 获取 COFECHA。
 2. 解压下载内容。
-3. 在 Crossdating IDM 的“运行 > 加载 COFECHA...”或“设置 > COFECHA”中选择需要使用的 EXE。
+3. 在“设置 > COFECHA”选择“官方 COFECHA”，并选择EXE。
 
-需要切换 COFECHA 版本时，直接加载另一个 EXE 即可。
+两种引擎都返回完整OUT并使用相同解析、动态参考和PART导航；加载未定年RWL后可在PART 8按相关R或年份调整D排序。
 
 从源码运行：
 
@@ -68,7 +68,7 @@ yarn tauri dev
 
 1. 打开 `.rwl` 文件，宽度网格会保留原始 Tucson 精度和编号格式。
 2. 选择一条样芯，在宽度表、树轮横条和折线图之间同步定位年份。
-3. 保存后运行 COFECHA，查看报告、问题段、动态参考和待复核序列。
+3. 打开或编辑后会自动刷新所选COFECHA报告引擎；查看报告、问题段、动态参考和待复核序列，无需先保存。
 4. 在“定年建议”中检查唯一主操作和13年窗口。
 5. 在图表中预览修正，选择窗口年份并应用；撤销、恢复和操作日志会完整记录编辑。
 6. 重新保存与验证，继续处理同一序列的下一个前沿事件。
@@ -81,7 +81,7 @@ yarn tauri dev
 - **高效宽度编辑**：网格选择、查找替换、文本多光标编辑、右键插入/删除、整体移动、局部移动以及稳定的撤销恢复。
 - **树轮与扫描影像**：按真实宽度生成树轮横条，可加载大型扫描图、裁切样芯、标定十年锚点并同步当前年份。
 - **交互式曲线对照**：多序列折线、参考序列、样本量、年份窗口、缩放、片段移动预览和双线错配分析。
-- **COFECHA 集成**：加载用户从 LTRR 获取的本机 EXE，一键运行、PART 导航、问题段定位、原始 OUT 导出和 COFECHA-pass 动态参考。
+- **COFECHA 双引擎**：默认由Web Worker中的cofecha-js生成完整报告，也可调用用户自行提供的官方EXE；两者统一支持PART导航、PART 8、原始OUT导出和COFECHA-pass动态参考。
 - **事件级定年建议**：识别缺轮、伪轮、局部移动和正/负整体移动，每次只显示当前最值得复核的一个事件。
 - **全文件导航**：按需扫描其他候选序列，优先呈现证据清晰、能够增强全文件共同年份结构的复核入口。
 
@@ -94,7 +94,7 @@ yarn tauri dev
 树轮实体证据拥有最终裁决权，但界面不会轮流展示固定操作链：
 
 - 默认只显示模型最终选择的唯一操作。
-- 只有模型选择局部移动时才显示“以缺轮形式复核”。用户确认没有断裂后，在同一冻结证据上调用缺轮定位器；不会重新遍历整体移动、伪轮或其他操作。
+- 模型选择整体移动时始终显示“以局部事件复核”；确认树皮后，同一冻结证据从partial、missing、false中选择最高分唯一操作。只有选中partial才继续显示“以缺轮形式复核”，用户确认无断裂后再调用missing定位器。整个过程不重跑family，每层都可恢复上一步解释。
 - 应用当前事件后重建RWL状态，再诊断更老事件。
 
 这种交互避免把内部候选列表变成需要用户逐一排除的建议菜单。
@@ -158,7 +158,8 @@ yarn benchmark:co612-zero-frontier-matrix --cofecha-exe "C:\path\to\COFECHA.exe"
 - [`src/features/crossdating/diagnosis.ts`](src/features/crossdating/diagnosis.ts)：JS 事件级诊断入口。
 - [`src/features/crossdating/diagnosis/eventEnsemble.ts`](src/features/crossdating/diagnosis/eventEnsemble.ts)：事件证据与前沿恢复。
 - [`src/features/crossdating/diagnosis/jointEventAdjudicator.ts`](src/features/crossdating/diagnosis/jointEventAdjudicator.ts)：操作、位移与位置的统一裁决。
-- [`src/services/cofecha/runner.ts`](src/services/cofecha/runner.ts)：用户所选 COFECHA EXE 的本地运行与 OUT 处理。
+- [`src/services/cofecha/index.ts`](src/services/cofecha/index.ts)：JavaScript/官方双引擎统一OUT入口。
+- [`src/services/cofecha/runner.ts`](src/services/cofecha/runner.ts)：用户所选官方COFECHA EXE的本地运行与OUT处理。
 
 ## 文档
 

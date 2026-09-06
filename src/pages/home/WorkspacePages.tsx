@@ -12,11 +12,12 @@ import type {
 } from "@/features/crossdating/diagnosis";
 import type { CrossdatingValidationSummary } from "@/features/crossdating/validation";
 import type { ReferenceSeriesConfig } from "@/features/crossdating/reference";
-import type { ICofechaResult } from "@/features/cofecha/types";
+import type { CofechaUndatedSort, ICofechaResult } from "@/features/cofecha/types";
 import type { DeleteMode, DeleteShift, MissingInsertSide, RwlOperationLogEntry } from "@/features/rwl/edit";
 import type { RwlSiteData } from "@/features/rwl/types";
 import type { ChartJumpTarget } from "@/components/Chart/chartNavigation";
 import { CofechaOutExportButton } from "./CofechaOutExportButton";
+import { CofechaUndatedControls } from "./CofechaUndatedControls";
 import styles from "./WorkspacePages.module.css";
 
 const LazyTreeChartManager = lazy(async () => {
@@ -326,9 +327,14 @@ type CofechaReportPageProps = {
     linkedReport: { html: string; count: number };
     partOptions: CofechaPartOption[];
     selectedPart: string;
+    undatedFileName: string | null;
+    undatedSort: CofechaUndatedSort;
     jumpTarget?: { id: number; tree: string };
     onSelectedPartChange: (part: string) => void;
     onRunValidation: () => void | Promise<void>;
+    onLoadUndated: () => void | Promise<void>;
+    onClearUndated: () => void | Promise<void>;
+    onUndatedSortChange: (sort: CofechaUndatedSort) => void | Promise<void>;
     onExportOut: () => void | Promise<unknown>;
     onTextClick: (event: MouseEvent<HTMLParagraphElement>) => void;
     onTextKeyDown: (event: KeyboardEvent<HTMLParagraphElement>) => void;
@@ -344,9 +350,14 @@ export function CofechaReportPage({
     linkedReport,
     partOptions,
     selectedPart,
+    undatedFileName,
+    undatedSort,
     jumpTarget,
     onSelectedPartChange,
     onRunValidation,
+    onLoadUndated,
+    onClearUndated,
+    onUndatedSortChange,
     onExportOut,
     onTextClick,
     onTextKeyDown,
@@ -399,6 +410,9 @@ export function CofechaReportPage({
                             </option>
                         ))}
                     </select>
+                    <CofechaUndatedControls fileName={undatedFileName} sort={undatedSort}
+                        disabled={!canRunValidation || isCofechaRunning} onLoad={onLoadUndated}
+                        onClear={onClearUndated} onSortChange={onUndatedSortChange} />
                     <span>{linkedReport.count} 跳转链接</span>
                     {isCofechaOutdated ? (
                         <span

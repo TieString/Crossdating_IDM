@@ -41,6 +41,7 @@ describe("settings", () => {
 
         expect(loadSettings().diagnosis.enabled).toBe(true);
         expect(loadSettings().treeRingImage.showGeneratedPreview).toBe(true);
+        expect(loadSettings().cofecha.engine).toBe("javascript");
         expect(loadSettings().cofecha.executablePath).toBe("");
     });
 
@@ -52,8 +53,16 @@ describe("settings", () => {
         }));
 
         expect(loadSettings().cofecha).toEqual({
+            engine: "official",
             executablePath: "C:\\LTRR\\COFECHA.EXE",
         });
+    });
+
+    it("persists JavaScript as the selected engine even when an EXE exists", () => {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ cofecha: {
+            engine: "javascript", executablePath: "C:\\LTRR\\COFECHA.EXE",
+        } }));
+        expect(loadSettings().cofecha.engine).toBe("javascript");
     });
 
     it("persists a disabled automatic dating-suggestion setting", () => {

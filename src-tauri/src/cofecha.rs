@@ -49,15 +49,50 @@ fn validate_runtime_input_name(value: &str) -> Result<&str, String> {
     Ok(trimmed)
 }
 
+fn validate_undated_sort(value: Option<&str>) -> Result<char, String> {
+    match value.unwrap_or("correlation") {
+        "correlation" => Ok('R'),
+        "adjustment" => Ok('D'),
+        _ => Err("未定年序列排序必须是 correlation 或 adjustment".to_string()),
+    }
+}
+
+fn build_prompt(
+    runtime_input_name: &str,
+    runtime_undated_input_name: Option<&str>,
+    undated_sort: Option<&str>,
+) -> Result<String, String> {
+    if let Some(undated_name) = runtime_undated_input_name {
+        return Ok(format!(
+            "very\n{}\n\n{}\n\n\n\n{}\n",
+            runtime_input_name,
+            undated_name,
+            validate_undated_sort(undated_sort)?
+        ));
+    }
+    Ok(format!("very\n{}\n\n\n\n\n\n", runtime_input_name))
+}
+
 fn execute_cofecha(
     executable_path: PathBuf,
     work_dir: PathBuf,
     runtime_input_name: String,
+    runtime_undated_input_name: Option<String>,
+    undated_sort: Option<String>,
 ) -> Result<CofechaProcessOutput, String> {
     let executable_path = validate_executable_path(&executable_path)?;
     let runtime_input_name = validate_runtime_input_name(&runtime_input_name)?;
-    fs::create_dir_all(&work_dir)
-        .map_err(|error| format!("无法创建 COFECHA 工作目录 {}: {}", work_dir.display(), error))?;
+    let runtime_undated_input_name = runtime_undated_input_name
+        .as_deref()
+        .map(validate_runtime_input_name)
+        .transpose()?;
+    fs::create_dir_all(&work_dir).map_err(|error| {
+        format!(
+            "无法创建 COFECHA 工作目录 {}: {}",
+            work_dir.display(),
+            error
+        )
+    })?;
 
     let mut command = Command::new(&executable_path);
     command
@@ -80,7 +115,11 @@ fn execute_cofecha(
             error
         )
     })?;
-    let prompt = format!("very\n{}\n\n\n\n\n\n", runtime_input_name);
+    let prompt = build_prompt(
+        runtime_input_name,
+        runtime_undated_input_name,
+        undated_sort.as_deref(),
+    )?;
     child
         .stdin
         .take()
@@ -103,6 +142,8 @@ pub async fn run_external_cofecha(
     app: AppHandle,
     executable_path: String,
     runtime_input_name: String,
+    runtime_undated_input_name: Option<String>,
+    undated_sort: Option<String>,
 ) -> Result<CofechaProcessOutput, String> {
     let work_dir = app
         .path()
@@ -112,7 +153,13 @@ pub async fn run_external_cofecha(
     let executable_path = PathBuf::from(executable_path);
 
     tauri::async_runtime::spawn_blocking(move || {
-        execute_cofecha(executable_path, work_dir, runtime_input_name)
+        execute_cofecha(
+            executable_path,
+            work_dir,
+            runtime_input_name,
+            runtime_undated_input_name,
+            undated_sort,
+        )
     })
     .await
     .map_err(|error| format!("COFECHA 执行任务异常结束: {}", error))?
@@ -120,14 +167,33 @@ pub async fn run_external_cofecha(
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_executable_path, validate_runtime_input_name};
+    use super::{build_prompt, validate_executable_path, validate_runtime_input_name};
     use std::fs;
     use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn accepts_a_safe_ascii_runtime_input_name() {
-        assert_eq!(validate_runtime_input_name("sample.rwl").unwrap(), "sample.rwl");
+        assert_eq!(
+            validate_runtime_input_name("sample.rwl").unwrap(),
+            "sample.rwl"
+        );
+    }
+
+    #[test]
+    fn builds_dated_and_part8_prompts_without_changing_the_dated_contract() {
+        assert_eq!(
+            build_prompt("DATED.RWL", None, None).unwrap(),
+            "very\nDATED.RWL\n\n\n\n\n\n"
+        );
+        assert_eq!(
+            build_prompt("DATED.RWL", Some("UNDATED.RWL"), Some("adjustment")).unwrap(),
+            "very\nDATED.RWL\n\nUNDATED.RWL\n\n\n\nD\n"
+        );
+        assert!(build_prompt("DATED.RWL", Some("UNDATED.RWL"), None)
+            .unwrap()
+            .ends_with("\nR\n"));
+        assert!(build_prompt("DATED.RWL", Some("UNDATED.RWL"), Some("bad")).is_err());
     }
 
     #[test]

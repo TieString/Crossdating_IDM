@@ -15,7 +15,7 @@ export type UnifiedV5Model = {
 type CompiledTree = { feature: Int32Array; threshold: Float64Array; left: Int32Array; right: Int32Array;
     defaultLeft: Uint8Array; missing: Uint8Array };
 export const UNIFIED_V5_MODEL_VERSION = "joint-explicit-global-v5";
-export const UNIFIED_V5_RUNTIME_VERSION = "joint-explicit-global-v5-sign-invariant-v1";
+export const UNIFIED_V5_RUNTIME_VERSION = "joint-explicit-global-v5-sign-invariant-local-review-v3";
 export const UNIFIED_V5_SOURCE_SHA256 = "ea06e86c66cf26eabe9a571a41e7088ca7d5146f217298a4b799df883dbd109c";
 export const UNIFIED_V5_EVENT_GATE = -0.5126752297719945;
 export const UNIFIED_V5_ASSET_SHA256 = "4a355af59c22a9cd53e20d233256d94b44b83aea222d7ace55e6cb7e9bbb5c1e";

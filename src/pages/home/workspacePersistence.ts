@@ -1,4 +1,4 @@
-import type { ICofechaResult } from "@/features/cofecha/types";
+import type { CofechaEngine, CofechaUndatedSort, ICofechaResult } from "@/features/cofecha/types";
 import type { ReferenceSeriesConfig } from "@/features/crossdating/reference";
 import { RwlEditor, type RwlOperationLogEntry } from "@/features/rwl/edit";
 import {
@@ -8,7 +8,6 @@ import {
 import { isTauri } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { exists, mkdir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
-import type { CofechaVersion } from "./homeShared";
 
 const COFECHA_STORAGE_PREFIX = "crossdating:cofecha-state:v1:";
 const REFERENCE_STORAGE_PREFIX = "crossdating:reference-state:v1:";
@@ -41,11 +40,18 @@ export type PersistedCofechaState = {
     savedAt: string;
     outFileContent: string;
     cofechaResult?: SerializedCofechaResult;
-    cofechaVersion: CofechaVersion;
+    cofechaEngine?: CofechaEngine;
+    /** Legacy v1 field; all historical values used the official executable. */
+    cofechaVersion?: "cofecha" | "cofecha12k" | "cofechawin";
     selectedPart: string;
     // 该 .OUT 对应数据的签名（hashRwlSiteData）。恢复后据此判断 .OUT 是否仍与当前数据匹配——
     // 匹配则可直接把 COFECHA 文本用于诊断（无需先重跑），不匹配则视为过期。
     cofechaInputSignature?: string;
+    cofechaUndatedInputSignature?: string;
+    cofechaJsVersion?: string;
+    reportExecutablePath?: string | null;
+    reportIsStale?: boolean;
+    undated?: { filePath: string; fileName: string; sort: CofechaUndatedSort };
 };
 
 export type PersistedReferenceState = {
@@ -249,13 +255,21 @@ export const loadPersistedCofechaState = (filePath: string) => (
     loadWorkspaceState("cofecha", filePath, isPersistedCofechaState, "COFECHA 状态")
 );
 
+export const getPersistedCofechaEngine = (state: PersistedCofechaState): CofechaEngine => (
+    state.cofechaEngine === "javascript" || state.cofechaEngine === "official"
+        ? state.cofechaEngine : "official"
+);
+
 export const persistCofechaState = (
     filePath: string,
     outFileContent: string,
     cofechaResult: ICofechaResult | undefined,
-    cofechaVersion: CofechaVersion,
+    cofechaEngine: CofechaEngine,
     selectedPart: string,
     cofechaInputSignature?: string,
+    undated?: PersistedCofechaState["undated"],
+    cofechaUndatedInputSignature?: string,
+    provenance?: { cofechaJsVersion?: string; reportExecutablePath?: string | null; reportIsStale?: boolean },
 ) => persistWorkspaceState(
     "cofecha",
     filePath,
@@ -264,9 +278,12 @@ export const persistCofechaState = (
         savedAt: new Date().toISOString(),
         outFileContent,
         cofechaResult: cofechaResult ? serializeCofechaResult(cofechaResult) : undefined,
-        cofechaVersion,
+        cofechaEngine,
         selectedPart,
         cofechaInputSignature,
+        ...(undated ? { undated } : {}),
+        ...(cofechaUndatedInputSignature ? { cofechaUndatedInputSignature } : {}),
+        ...provenance,
     } satisfies PersistedCofechaState,
     "COFECHA 状态",
 );

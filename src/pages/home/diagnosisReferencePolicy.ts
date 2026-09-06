@@ -5,6 +5,7 @@ export const selectAutomaticDiagnosisReferenceConfig = (
     referenceConfig: ReferenceSeriesConfig | null,
 ): ReferenceSeriesConfig | null => (
     referenceConfig?.mode === "dynamic"
+        && referenceConfig.isStale !== true
         && Boolean(referenceConfig.cofechaPassReference?.points.length)
         ? referenceConfig
         : null

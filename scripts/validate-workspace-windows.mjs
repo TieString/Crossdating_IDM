@@ -17,7 +17,9 @@ const server = await createServer({
     },
   },
   optimizeDeps: { noDiscovery: true },
-  server: { hmr: { port: hmrPort }, middlewareMode: true },
+  server: { hmr: { port: hmrPort }, middlewareMode: true, watch: {
+    ignored: ["**/src-tauri/**", "**/.benchmark-results/**", "**/__pycache__/**"],
+  } },
 });
 
 const assertIncludes = (html, value, message) => {
@@ -262,9 +264,14 @@ PART 7:
       { value: "PART 6", label: "PART 6" },
     ],
     selectedPart: "ALL",
+    undatedFileName: "UNDATED.RWL",
+    undatedSort: "correlation",
     jumpTarget: { id: 1, tree: "EBD011" },
     onSelectedPartChange() {},
     onRunValidation() {},
+    onLoadUndated() {},
+    onClearUndated() {},
+    onUndatedSortChange() {},
     onExportOut() {},
     onTextClick() {},
     onTextKeyDown() {},

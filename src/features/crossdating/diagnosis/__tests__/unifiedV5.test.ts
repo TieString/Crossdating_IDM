@@ -6,7 +6,7 @@ import { V5_LAG_COUNT, v5Forward } from "../unifiedV5Path";
 import { V5_PROPOSAL_SPEC } from "../unifiedV5Windows";
 import { UnifiedV5Predictor, UNIFIED_V5_MODEL_VERSION, UNIFIED_V5_SOURCE_SHA256, type UnifiedV5Model } from "../unifiedV5Model";
 import { lowerBound, quantile, roundEven } from "../unifiedV5Math";
-import { UnifiedV5Runtime, loadUnifiedV5Runtime } from "../unifiedV5Runtime";
+import { createUnifiedV5MinimalBundle, projectUnifiedV5Prediction, selectUnifiedV5LocalReviewIdentity, UnifiedV5Runtime, loadUnifiedV5Runtime } from "../unifiedV5Runtime";
 import { attachUniversalPartialMissingWorkflow, promoteValidatedSequentialMissingInterpretation } from "../missingPartialInterpretation";
 import { applyAuthoritativeModelDecision } from "../authoritativeModelProjection";
 import { createEmptyCrossdatingDiagnosis } from "../../../../pages/home/workspaceState";
@@ -79,7 +79,7 @@ describe("accepted v5 evidence and frozen operation/window decision", () => {
         }
     });
 
-    it("commits a single exact identity then chooses its window; partial alone gets one missing review", () => {
+    it("commits a single exact identity then chooses its window; partial and whole retain the missing locator", () => {
         const predictor = new UnifiedV5Predictor(tinyModel());
         const partial = V5_IDENTITIES.findIndex(([op, shift]) => op === "partial" && shift === -12);
         const missing = V5_IDENTITIES.findIndex(([op]) => op === "missing");
@@ -89,7 +89,34 @@ describe("accepted v5 evidence and frozen operation/window decision", () => {
         expect(result.windows[missing]).not.toBe(result.windows[partial]);
         const whole = V5_IDENTITIES.findIndex(([op, shift]) => op === "whole" && shift === 8);
         const entire = predictor.predict([a, b], Int16Array.from([0, whole]), Int32Array.from([0, 0]));
-        expect([entire.operation, entire.shift, entire.windowStart, entire.missingReviewStart]).toEqual(["whole", 8, null, null]);
+        expect([entire.operation, entire.shift, entire.windowStart, entire.windows[missing]]).toEqual(["whole", 8, null, 0]);
+
+        const falseRing = V5_IDENTITIES.findIndex(([op]) => op === "false");
+        const localScores = new Float64Array(V5_IDENTITIES.length).fill(-1e9);
+        localScores[missing] = 1; localScores[falseRing] = 2; localScores[partial] = 3;
+        expect(selectUnifiedV5LocalReviewIdentity(localScores)).toBe(partial);
+
+        const partialReview = predictor.predict([a, b, b, a, a],
+            Int16Array.from([0, whole, partial, missing, falseRing]),
+            Int32Array.from([0, 0, 1920, 1940, 1930]));
+        expect(partialReview.operation).toBe("whole");
+        const site = new Map([["target", new Map(Array.from({ length: 70 }, (_, i) => [1900 + i, 100 + i]))]]);
+        const bundle = createUnifiedV5MinimalBundle(site, "target")!;
+        const projected = projectUnifiedV5Prediction(bundle, partialReview, "state-local-review", 8);
+        const wholeReview = projected.selectedPackage?.event.interpretationAmbiguity;
+        expect(wholeReview?.kind).toBe("wholeSeriesMoveOrLocalEvent");
+        expect(wholeReview?.alternative.eventType).toBe("partialMove");
+        expect(wholeReview?.alternative.shiftYears).toBe(-12);
+        expect(wholeReview?.alternative.interpretationAmbiguity?.kind).toBe("missingRingsOrPartialMove");
+        expect(wholeReview?.alternative.interpretationAmbiguity?.alternative.eventType).toBe("missingRing");
+
+        const falseReview = predictor.predict([a, b, b, a, a],
+            Int16Array.from([0, whole, falseRing, missing, partial]),
+            Int32Array.from([0, 0, 1930, 1940, 1920]));
+        const falseProjected = projectUnifiedV5Prediction(bundle, falseReview, "state-false-review", 8);
+        const falseAlternative = falseProjected.selectedPackage?.event.interpretationAmbiguity?.alternative;
+        expect(falseAlternative?.eventType).toBe("falseRing");
+        expect(falseAlternative?.interpretationAmbiguity).toBeUndefined();
     });
 
     it("preserves missing-value tree routing and rejects changed field schemas", () => {
@@ -139,8 +166,18 @@ describe("accepted v5 evidence and frozen operation/window decision", () => {
             split.split_feature = V5_FEATURE_COLUMNS.indexOf(`is_${family}`); split.threshold = 0.5;
             const other = await new UnifiedV5Runtime(new UnifiedV5Predictor(otherModel)).infer(site, "target");
             expect(other.prediction?.operation).toBe(family);
-            expect(other.selectedPackage?.event.interpretationAmbiguity).toBeUndefined();
-            if (family !== "none") expect(other.selectedPackage?.event.alternativeTypes).toEqual([]);
+            if (family === "whole") {
+                const wholeReview = other.selectedPackage?.event.interpretationAmbiguity;
+                if (!wholeReview) throw new Error("Expected whole missing review");
+                expect(wholeReview?.kind).toBe("wholeSeriesMoveOrLocalEvent");
+                expect(wholeReview?.alternative.eventType).toBe("missingRing");
+                expect(wholeReview.alternative.endYear - wholeReview.alternative.startYear + 1).toBe(13);
+                expect(wholeReview?.alternative.interpretationAmbiguity).toBeUndefined();
+                expect(other.selectedPackage?.event.alternativeTypes).toEqual(["missingRing"]);
+            } else {
+                expect(other.selectedPackage?.event.interpretationAmbiguity).toBeUndefined();
+                if (family !== "none") expect(other.selectedPackage?.event.alternativeTypes).toEqual([]);
+            }
         }
     });
 });

@@ -1,0 +1,213 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Crossdating IDM 当前项目架构",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "viewBox": [1380, 820],
+    "repository": {
+      "url": "https://github.com/TieString/Crossdating_IDM",
+      "revision": "f2d48dd0393785cdf456dff78d4977a816626d0c"
+    },
+    "views": [
+      {
+        "id": "editing-flow",
+        "label": "编辑与保存",
+        "focus": ["rwl-input", "tauri-shell", "workspace", "rwl-editor", "visual-review", "local-state"],
+        "note": "从RWL和扫描图进入桌面工作区，经过可撤销编辑、视觉复核与本地持久化。"
+      },
+      {
+        "id": "diagnosis-flow",
+        "label": "自动定年建议",
+        "focus": ["workspace", "cofecha-service", "reference-evidence", "diagnosis-worker", "v5-runtime", "suggestion-ui"],
+        "note": "参考芯排除当前目标后，Worker在冻结v5模型中输出唯一操作、精确位移和13年窗口。"
+      },
+      {
+        "id": "external-boundary",
+        "label": "外部边界",
+        "focus": ["rwl-input", "cofecha-exe", "tauri-shell", "local-state"],
+        "note": "用户数据和官方COFECHA EXE位于应用边界之外；工作区状态只在本机持久化。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "rwl-input",
+      "type": "external",
+      "label": "RWL与扫描图",
+      "sublabel": "用户文件 · Tucson/影像",
+      "pos": [30, 140],
+      "size": [155, 76],
+      "sources": [{ "path": "src/services/fs/io.ts", "label": "文件读取" }]
+    },
+    {
+      "id": "tauri-shell",
+      "type": "frontend",
+      "label": "Tauri桌面壳",
+      "sublabel": "Rust命令 · 文件系统",
+      "pos": [220, 140],
+      "size": [155, 76],
+      "sources": [
+        { "path": "src-tauri/src/lib.rs", "label": "命令注册" },
+        { "path": "src-tauri/src/commands.rs", "label": "本机能力" }
+      ]
+    },
+    {
+      "id": "workspace",
+      "type": "frontend",
+      "label": "React工作区",
+      "sublabel": "Home状态与流程编排",
+      "pos": [410, 140],
+      "size": [165, 76],
+      "sources": [
+        { "path": "src/pages/Home.tsx", "label": "界面入口" },
+        { "path": "src/pages/home/useHomeWorkspace.ts", "label": "状态协调" }
+      ]
+    },
+    {
+      "id": "rwl-editor",
+      "type": "backend",
+      "label": "RwlEditor",
+      "sublabel": "编辑 · 撤销 · 操作日志",
+      "pos": [610, 140],
+      "size": [165, 76],
+      "sources": [
+        { "path": "src/features/rwl/edit.ts", "label": "编辑语义" },
+        { "path": "src/features/rwl/index.ts", "label": "格式解析" }
+      ]
+    },
+    {
+      "id": "visual-review",
+      "type": "frontend",
+      "label": "视觉复核层",
+      "sublabel": "宽度表 · 折线图 · 扫描图",
+      "pos": [810, 140],
+      "size": [180, 76],
+      "sources": [
+        { "path": "src/components/Chart/TreeChartManager.tsx", "label": "图表管理" },
+        { "path": "src/components/WidthContainer/WidthContainer.tsx", "label": "宽度工作区" }
+      ]
+    },
+    {
+      "id": "cofecha-exe",
+      "type": "external",
+      "label": "官方COFECHA EXE",
+      "sublabel": "用户单独获取",
+      "pos": [30, 520],
+      "size": [155, 76],
+      "sources": [{ "path": "src/services/cofecha/runner.ts", "label": "进程调用" }]
+    },
+    {
+      "id": "cofecha-service",
+      "type": "backend",
+      "label": "COFECHA服务",
+      "sublabel": "运行 · OUT解析 · PART 6",
+      "pos": [220, 520],
+      "size": [165, 76],
+      "sources": [
+        { "path": "src/services/cofecha/runner.ts", "label": "执行链" },
+        { "path": "src/features/cofecha/formatter.ts", "label": "报告解析" }
+      ]
+    },
+    {
+      "id": "reference-evidence",
+      "type": "backend",
+      "label": "参考与证据",
+      "sublabel": "动态master · 目标排除",
+      "pos": [420, 520],
+      "size": [180, 76],
+      "sources": [
+        { "path": "src/features/crossdating/reference.ts", "label": "动态参考" },
+        { "path": "src/features/crossdating/diagnosis/cofechaEngineEvidence.ts", "label": "预处理与缓存" }
+      ]
+    },
+    {
+      "id": "diagnosis-worker",
+      "type": "messagebus",
+      "label": "Diagnosis Worker",
+      "sublabel": "最新请求合并 · 异步隔离",
+      "pos": [640, 520],
+      "size": [170, 76],
+      "sources": [
+        { "path": "src/pages/home/diagnosisWorker.ts", "label": "Worker入口" },
+        { "path": "src/pages/home/latestRequestQueue.ts", "label": "请求合并" }
+      ]
+    },
+    {
+      "id": "v5-runtime",
+      "type": "backend",
+      "label": "统一v5运行时",
+      "sublabel": "207维证据 · 冻结排序模型",
+      "tag": "93.01% / 99.87%覆盖",
+      "pos": [840, 520],
+      "size": [185, 76],
+      "sources": [
+        { "path": "src/features/crossdating/diagnosis/unifiedV5Runtime.ts", "label": "运行时" },
+        { "path": "src/features/crossdating/diagnosis/unifiedV5Model.ts", "label": "模型推理" },
+        { "path": "public/models/unifiedV5Model.json", "label": "冻结资产" }
+      ]
+    },
+    {
+      "id": "suggestion-ui",
+      "type": "frontend",
+      "label": "定年建议UI",
+      "sublabel": "唯一操作 · 位移 · 13年窗",
+      "pos": [1065, 520],
+      "size": [195, 76],
+      "sources": [
+        { "path": "src/components/DiagnosisCandidates/DiagnosisEventPanel.tsx", "label": "复核面板" },
+        { "path": "src/features/crossdating/diagnosis/eventApply.ts", "label": "应用边界" }
+      ]
+    },
+    {
+      "id": "local-state",
+      "type": "database",
+      "label": "本地工作区状态",
+      "sublabel": "OUT · 参考 · 历史 · 扫描锚点",
+      "pos": [600, 300],
+      "size": [185, 76],
+      "sources": [{ "path": "src/pages/home/workspacePersistence.ts", "label": "本地持久化" }]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Crossdating IDM 本地桌面应用",
+      "wraps": ["tauri-shell", "workspace", "rwl-editor", "visual-review", "cofecha-service", "reference-evidence", "diagnosis-worker", "v5-runtime", "suggestion-ui", "local-state"],
+      "pad": 22
+    }
+  ],
+  "connections": [
+    { "id": "input-to-shell", "from": "rwl-input", "to": "tauri-shell", "label": "打开/保存文件", "labelAt": [203, 230], "variant": "emphasis" },
+    { "id": "shell-to-workspace", "from": "tauri-shell", "to": "workspace", "label": "Tauri命令", "labelAt": [393, 130] },
+    { "id": "workspace-to-editor", "from": "workspace", "to": "rwl-editor", "label": "working RWL", "labelAt": [593, 130] },
+    { "id": "workspace-to-cofecha", "from": "workspace", "to": "cofecha-service", "label": "保存后验证", "labelAt": [335, 345] },
+    { "id": "exe-to-service", "from": "cofecha-exe", "to": "cofecha-service", "label": "stdin / VERYCOF.OUT", "labelAt": [203, 510], "variant": "dashed" },
+    { "id": "cofecha-to-reference", "from": "cofecha-service", "to": "reference-evidence", "label": "PART 6分类与master", "labelAt": [403, 615] },
+    { "id": "workspace-to-reference", "from": "workspace", "to": "reference-evidence", "label": "当前RWL与目标ID", "labelAt": [535, 425], "fromSide": "bottom", "toSide": "top" },
+    { "id": "reference-to-worker", "from": "reference-evidence", "to": "diagnosis-worker", "label": "标准化证据", "labelAt": [620, 510] },
+    { "id": "worker-to-v5", "from": "diagnosis-worker", "to": "v5-runtime", "label": "冻结候选表", "labelAt": [825, 510] },
+    { "id": "v5-to-suggestion", "from": "v5-runtime", "to": "suggestion-ui", "label": "唯一决策", "labelAt": [1045, 615], "variant": "emphasis" },
+    { "id": "suggestion-to-review", "from": "suggestion-ui", "to": "visual-review", "label": "窗口定位与预览", "labelAt": [1045, 345] },
+    { "id": "review-to-editor", "from": "visual-review", "to": "rwl-editor", "label": "用户确认应用", "labelAt": [793, 230], "variant": "emphasis" },
+    { "id": "editor-to-state", "from": "rwl-editor", "to": "local-state", "label": "OUT/参考/历史", "labelAt": [750, 280], "fromSide": "bottom", "toSide": "top" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "主数据闭环",
+      "items": ["编辑不会直接自动改年", "建议经视觉与实体样芯复核后才进入RwlEditor", "应用一个事件后重建状态并继续向树芯诊断"]
+    },
+    {
+      "dot": "emerald",
+      "title": "模型边界",
+      "items": ["参考构建排除当前目标芯", "v5只读取运行时可得证据", "partial才允许一次同状态missing定向复核"]
+    },
+    {
+      "dot": "amber",
+      "title": "本地优先",
+      "items": ["RWL、COFECHA报告与历史保留在本机", "官方COFECHA EXE不随仓库分发", "Worker隔离计算并丢弃过时响应"]
+    }
+  ]
+}

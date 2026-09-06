@@ -208,9 +208,14 @@ export default function WorkspaceWindowPage() {
                 linkedReport={state.linkedReport}
                 partOptions={state.partOptions}
                 selectedPart={state.selectedPart}
+                undatedFileName={state.undatedFileName}
+                undatedSort={state.undatedSort}
                 jumpTarget={state.jumpTarget}
                 onSelectedPartChange={(part) => sendCommand({ kind: "cofecha", type: "select-part", part })}
                 onRunValidation={() => sendCommand({ kind: "cofecha", type: "run-validation" })}
+                onLoadUndated={() => sendCommand({ kind: "cofecha", type: "load-undated" })}
+                onClearUndated={() => sendCommand({ kind: "cofecha", type: "clear-undated" })}
+                onUndatedSortChange={(sort) => sendCommand({ kind: "cofecha", type: "set-undated-sort", sort })}
                 onExportOut={() => sendCommand({ kind: "cofecha", type: "export-out" })}
                 onTextClick={handleCofechaTextClick}
                 onTextKeyDown={handleCofechaTextKeyDown}

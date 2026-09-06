@@ -63,6 +63,12 @@ describe("selectAutomaticDiagnosisReferenceConfig", () => {
         expect(selectAutomaticDiagnosisReferenceConfig(unavailable)).toBeNull();
     });
 
+    it("rejects a dynamic reference as soon as its report identity becomes stale", () => {
+        const stale = makeReference("dynamic");
+        stale.isStale = true;
+        expect(selectAutomaticDiagnosisReferenceConfig(stale)).toBeNull();
+    });
+
     it("waits for an automatic reference instead of selecting leave-one-out", () => {
         expect(selectAutomaticDiagnosisReferenceConfig(null)).toBeNull();
     });

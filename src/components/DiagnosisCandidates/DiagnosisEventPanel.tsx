@@ -216,6 +216,10 @@ export function DiagnosisEventPanel({
         const selectedEvent = lockedInterpretation
           ?? controlledInterpretation
           ?? event;
+        const selectedInterpretationIndex = interpretationChain.findIndex((candidate) => candidate.id === selectedEvent.id);
+        const previousInterpretation = selectedInterpretationIndex > 0
+          ? interpretationChain[selectedInterpretationIndex - 1] ?? null
+          : null;
         const rootInterpretation = event.interpretationAmbiguity;
         const sequentialInterpretation = selectedEvent.interpretationAmbiguity?.kind
           === "sequentialOperationRecovery"
@@ -225,9 +229,9 @@ export function DiagnosisEventPanel({
           || rootInterpretation?.kind === "wholeSeriesMoveOrLocalEvent"
           ? rootInterpretation
           : null;
-        const missingPartialInterpretation = event.eventType === "partialMove"
-          && rootInterpretation?.kind === "missingRingsOrPartialMove"
-          ? rootInterpretation
+        const missingPartialInterpretation = selectedEvent.eventType === "partialMove"
+          && selectedEvent.interpretationAmbiguity?.kind === "missingRingsOrPartialMove"
+          ? selectedEvent.interpretationAmbiguity
           : null;
         const width = selectedEvent.endYear - selectedEvent.startYear + 1;
         const isWholeSeriesMove = selectedEvent.eventType === "wholeSeriesMove";
@@ -268,16 +272,20 @@ export function DiagnosisEventPanel({
         const missingPartialEvidence = missingPartialInterpretation?.evidence ?? null;
         const hasCalibratedMissingCount = missingPartialEvidence?.countEvidence
           === "multiReferenceStaircase";
-        const missingPartialTarget = missingPartialInterpretation
-          && selectedEvent.id === event.id
-          ? missingPartialInterpretation.alternative
+        const missingPartialTarget = missingPartialInterpretation?.alternative ?? null;
+        const missingPartialRestoreTarget = previousInterpretation?.eventType === "partialMove"
+          && previousInterpretation.interpretationAmbiguity?.kind === "missingRingsOrPartialMove"
+          && previousInterpretation.interpretationAmbiguity.alternative.id === selectedEvent.id
+          ? previousInterpretation
           : null;
         const reviewingWholePrimary = wholeLocalInterpretation !== null
           && selectedEvent.id === event.id;
-        const wholeInterpretationTarget = wholeLocalInterpretation
-          ? reviewingWholePrimary
-            ? wholeLocalInterpretation.alternative
-            : event
+        const wholeInterpretationTarget = wholeLocalInterpretation && reviewingWholePrimary
+          ? wholeLocalInterpretation.alternative
+          : null;
+        const wholeInterpretationRestoreTarget = previousInterpretation?.eventType === "wholeSeriesMove"
+          && wholeLocalInterpretation?.alternative.id === selectedEvent.id
+          ? previousInterpretation
           : null;
         const missingPartialTitle = missingPartialEvidence
           ? missingPartialEvidence.interpretationBasis === "frozenConditionalMissingReview"
@@ -326,8 +334,8 @@ export function DiagnosisEventPanel({
             ? "若实体样芯确认存在树皮，可排除整体移动并继续复核局部移动。"
             : "若实体样芯未见断裂或连续缺段，可排除局部移动并继续复核单位事件。"
           : reviewingWholePrimary
-          ? "若树皮年或采样年已确认，可排除整条序列移动，重新检查局部缺轮、伪轮或连续缺段。"
-          : missingPartialEvidence
+          ? "若实体样芯确认存在树皮，可排除整体移动，并在同一冻结证据中选择分数最高的唯一局部操作。"
+            : missingPartialEvidence
             ? selectedEvent.eventType === "missingRing"
               ? hasCalibratedMissingCount
                 ? `附近可能还有 ${Math.max(
@@ -342,8 +350,10 @@ export function DiagnosisEventPanel({
                 : `累计 lag 差约 ${Math.abs(
                   missingPartialEvidence.cumulativeShiftYears,
                 )} 年；具体缺轮数量尚未独立确认。`
+            : missingPartialRestoreTarget
+              ? "当前按缺轮窗口复核；可恢复同一冻结证据中的局部移动解释。"
             : wholeLocalInterpretation
-              ? `当前按${eventTypeLabels[selectedEvent.eventType]}窗口复核；切换只改变解释和预览，可随时恢复整体移动解释。`
+              ? `当前按${eventTypeLabels[selectedEvent.eventType]}窗口复核；可恢复上一步解释，应用或编辑后将重建状态。`
               : null;
 
         return (
@@ -457,19 +467,37 @@ export function DiagnosisEventPanel({
                       以缺轮形式复核
                     </button>
                   ) : null}
+                  {missingPartialRestoreTarget ? (
+                    <button
+                      type="button"
+                      disabled={event.stale === true}
+                      title="恢复同一冻结证据中的局部移动解释"
+                      onClick={() => activateInterpretation(missingPartialRestoreTarget)}
+                      className={`${style.interpretationButton} ${event.stale ? style.disabledButton : ""}`}
+                    >
+                      恢复局部移动解释
+                    </button>
+                  ) : null}
                   {wholeInterpretationTarget ? (
                     <button
                       type="button"
                       disabled={event.stale === true}
-                      title={reviewingWholePrimary
-                        ? "若树皮年或采样年已确认，排除整体移动并复核当前最强局部事件"
-                        : "恢复算法保留的整体移动解释"}
+                      title="实体样芯存在树皮时，排除整体移动并使用同状态统一局部选择器复核"
                       onClick={() => activateInterpretation(wholeInterpretationTarget)}
                       className={`${style.interpretationButton} ${event.stale ? style.disabledButton : ""}`}
                     >
-                      {reviewingWholePrimary
-                        ? "排除整体移动，复核局部事件"
-                        : "恢复整体移动解释"}
+                      以局部事件复核
+                    </button>
+                  ) : null}
+                  {wholeInterpretationRestoreTarget ? (
+                    <button
+                      type="button"
+                      disabled={event.stale === true}
+                      title="恢复同一冻结证据中的整体移动解释"
+                      onClick={() => activateInterpretation(wholeInterpretationRestoreTarget)}
+                      className={`${style.interpretationButton} ${event.stale ? style.disabledButton : ""}`}
+                    >
+                      恢复整体移动解释
                     </button>
                   ) : null}
                 </div>

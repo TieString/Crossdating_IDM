@@ -1,0 +1,78 @@
+.controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    height: 30px;
+}
+
+.controls-compact {
+    height: 24px;
+}
+
+.load-button,
+.clear-button,
+.sort-select {
+    flex: 0 0 auto;
+    height: 30px;
+    border: 1px solid #cbd5e1;
+    border-radius: 5px;
+    background: #fff;
+    color: #36566f;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-size: 12px;
+    box-shadow: none;
+}
+
+.controls-compact .load-button,
+.controls-compact .clear-button,
+.controls-compact .sort-select {
+    height: 24px;
+}
+
+.load-button {
+    padding: 0 9px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.load-button:hover:not(:disabled),
+.clear-button:hover:not(:disabled) {
+    background: #eef4f9;
+}
+
+.file-name {
+    min-width: 42px;
+    max-width: 120px;
+    overflow: hidden;
+    color: #52677a;
+    font-family: Consolas, monospace;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sort-select {
+    width: 104px;
+    padding: 0 4px;
+    cursor: pointer;
+}
+
+.clear-button {
+    display: inline-grid;
+    width: 28px;
+    padding: 0;
+    place-items: center;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.load-button:disabled,
+.clear-button:disabled,
+.sort-select:disabled {
+    color: #a4afbd;
+    background: #f5f7f9;
+    cursor: default;
+}

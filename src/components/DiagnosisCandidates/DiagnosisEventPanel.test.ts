@@ -435,7 +435,7 @@ describe("DiagnosisEventPanel", () => {
     }));
     expect(switchedHtml).toContain("可能缺轮");
     expect(switchedHtml).not.toContain("以缺轮形式复核");
-    expect(switchedHtml).not.toContain("返回局部移动解释");
+    expect(switchedHtml).toContain("恢复局部移动解释");
   });
 
   it("keeps the missing-ring review available inside a whole-to-partial interpretation", () => {
@@ -516,7 +516,7 @@ describe("DiagnosisEventPanel", () => {
       selectedEventId: partial.id,
     }));
     expect(partialHtml).toContain("可能局部移动");
-    expect(partialHtml).not.toContain("以缺轮形式复核");
+    expect(partialHtml).toContain("以缺轮形式复核");
     expect(partialHtml).toContain("恢复整体移动解释");
 
     const missingHtml = renderToStaticMarkup(createElement(DiagnosisEventPanel, {
@@ -525,7 +525,8 @@ describe("DiagnosisEventPanel", () => {
     }));
     expect(missingHtml).toContain("可能缺轮");
     expect(missingHtml).not.toContain("以缺轮形式复核");
-    expect(missingHtml).toContain("恢复整体移动解释");
+    expect(missingHtml).not.toContain("恢复整体移动解释");
+    expect(missingHtml).toContain("恢复局部移动解释");
   });
 
   it("offers one reviewed missing-ring interpretation for an endpoint whole alias", () => {
@@ -577,8 +578,9 @@ describe("DiagnosisEventPanel", () => {
       events: [whole],
     }));
 
-    expect(html).toContain("若树皮年或采样年已确认，可排除整条序列移动");
-    expect(html).toContain("排除整体移动，复核局部事件");
+    expect(html).toContain("若实体样芯确认存在树皮，可排除整体移动");
+    expect(html).toContain("选择分数最高的唯一局部操作");
+    expect(html).toContain("以局部事件复核");
     expect(html).not.toContain("按连续缺段处理");
     expect(html).toContain("整条序列向老年份移动 1 年");
     expect(html).not.toContain("1768-2002");
@@ -591,6 +593,7 @@ describe("DiagnosisEventPanel", () => {
       selectedEventId: missing.id,
     }));
     expect(alternativeHtml).toContain("恢复整体移动解释");
+    expect(alternativeHtml).toContain("可恢复上一步解释");
   });
 
   it.each([-2, -3, -4, -11, -50] as const)(
@@ -645,9 +648,9 @@ describe("DiagnosisEventPanel", () => {
       }));
       const count = Math.abs(shiftYears);
 
-      expect(html).toContain("排除整体移动，复核局部事件");
+      expect(html).toContain("以局部事件复核");
       expect(html).not.toContain(`（1/${count}）`);
-      expect(html).toContain("重新检查局部缺轮、伪轮或连续缺段");
+      expect(html).toContain("同一冻结证据中选择分数最高的唯一局部操作");
       expect(html).toContain(`整条序列向老年份移动 ${count} 年`);
     },
   );

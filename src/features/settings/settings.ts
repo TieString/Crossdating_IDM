@@ -1,3 +1,5 @@
+import type { CofechaEngine } from "@/features/cofecha/types";
+
 /** Animation used when an entire series is deleted. */
 export type DeleteSeriesAnimation = "shatter-rise" | "fade" | "none";
 /** Animation used when a single year is deleted. */
@@ -29,6 +31,8 @@ export interface AnimationSettings {
 }
 
 export interface CofechaSettings {
+    /** Report engine shared by the viewer, dynamic reference and freshness identity. */
+    engine: CofechaEngine;
     /** User-selected COFECHA executable, regardless of release family. */
     executablePath: string;
 }
@@ -65,6 +69,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
         historyAnim: "enabled",
     },
     cofecha: {
+        engine: "javascript",
         executablePath: "",
     },
     diagnosis: {
@@ -110,6 +115,10 @@ export function loadSettings(): AppSettings {
         const parsedDiagnosisEnabled = (parsedDiagnosis as Partial<DiagnosisSettings>).enabled;
         const parsedGeneratedPreview = (parsedTreeRingImage as Partial<TreeRingImageSettings>).showGeneratedPreview;
         const parsedExecutablePath = (parsedCofecha as Partial<CofechaSettings>).executablePath;
+        const executablePath = typeof parsedExecutablePath === "string" ? parsedExecutablePath.trim() : "";
+        const parsedEngine = (parsedCofecha as Partial<CofechaSettings>).engine;
+        const engine: CofechaEngine = parsedEngine === "official" || parsedEngine === "javascript"
+            ? parsedEngine : executablePath ? "official" : DEFAULT_SETTINGS.cofecha.engine;
 
         return {
             animation: {
@@ -118,9 +127,8 @@ export function loadSettings(): AppSettings {
                 speed: normalizeAnimationSpeed((parsedAnimation as Partial<AnimationSettings>).speed),
             },
             cofecha: {
-                executablePath: typeof parsedExecutablePath === "string"
-                    ? parsedExecutablePath.trim()
-                    : DEFAULT_SETTINGS.cofecha.executablePath,
+                engine,
+                executablePath,
             },
             diagnosis: {
                 enabled: typeof parsedDiagnosisEnabled === "boolean"

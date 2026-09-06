@@ -242,6 +242,43 @@
     line-height: 1.5;
 }
 
+.segmented-control {
+    display: inline-grid;
+    grid-template-columns: repeat(2, minmax(118px, 1fr));
+    width: min(100%, 320px);
+    min-height: 34px;
+    padding: 2px;
+    border: 1px solid #c8c8c8;
+    border-radius: 5px;
+    background: #f3f3f3;
+}
+
+.segment-button {
+    min-width: 0;
+    height: 28px;
+    padding: 4px 10px;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    color: #555;
+    font-family: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    box-shadow: none;
+}
+
+.segment-button:hover {
+    color: #222;
+}
+
+.segment-button-active,
+.segment-button-active:hover {
+    background: #fff;
+    color: #245f36;
+    font-weight: 700;
+    box-shadow: none;
+}
+
 .executable-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;

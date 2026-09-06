@@ -1,3 +1,7 @@
+export type CofechaEngine = "official" | "javascript";
+export type CofechaUndatedSort = "correlation" | "adjustment";
+export type CofechaUndatedInput = { rwlText: string; inputFileName: string; sort: CofechaUndatedSort };
+
 export interface ICofechaResult {
     masterSeriesYear: string,
     seriesIntercorrelation: number,

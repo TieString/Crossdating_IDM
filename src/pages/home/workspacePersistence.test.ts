@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+    getPersistedCofechaEngine,
     loadPersistedCofechaState,
     loadPersistedReferenceState,
     persistCofechaState,
@@ -57,17 +58,29 @@ describe("workspace persistence browser fallback", () => {
             filePath,
             "PART 6: smoke",
             undefined,
-            "cofecha",
+            "javascript",
             "PART 6",
             "hash-smoke",
+            { filePath: "D:/软件测试/undated.rwl", fileName: "undated.rwl", sort: "adjustment" },
+            "undated-hash",
+            { cofechaJsVersion: "0.2.0", reportExecutablePath: null, reportIsStale: false },
         );
 
         await expect(loadPersistedCofechaState(filePath)).resolves.toMatchObject({
             version: 1,
             outFileContent: "PART 6: smoke",
+            cofechaEngine: "javascript",
             selectedPart: "PART 6",
             cofechaInputSignature: "hash-smoke",
+            cofechaUndatedInputSignature: "undated-hash",
+            reportIsStale: false,
+            undated: { filePath: "D:/软件测试/undated.rwl", fileName: "undated.rwl", sort: "adjustment" },
         });
+    });
+
+    it("maps legacy persisted report versions to the official engine", () => {
+        expect(getPersistedCofechaEngine({ version: 1, savedAt: "2026-01-01T00:00:00Z",
+            outFileContent: "", cofechaVersion: "cofecha", selectedPart: "全部" })).toBe("official");
     });
 
     it("round-trips reference state without requiring Tauri", async () => {

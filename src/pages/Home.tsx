@@ -27,6 +27,7 @@ import style from "./Home.module.css";
 import {
     ALL_OPTION_VALUE,
     COLLAPSED_PANEL_RATIO,
+    COFECHA_PART8_OPTION,
     COFECHA_PART_OPTIONS,
     EMPTY_EXTERNAL_WORKSPACE_WINDOWS,
     isPanelRatioCollapsed,
@@ -95,6 +96,7 @@ import { useResizablePanels } from "./useResizablePanels";
 import { publishConsoleDataExport } from "./home/consoleDataExport";
 import { enhanceCofechaPart2View } from "./home/cofechaPart2View";
 import { CofechaOutExportButton } from "./home/CofechaOutExportButton";
+import { CofechaUndatedControls } from "./home/CofechaUndatedControls";
 import { hasCofechaSeriesMapValue } from "@/features/cofecha/seriesId";
 import type { ChartJumpTarget } from "@/components/Chart/chartNavigation";
 
@@ -381,7 +383,9 @@ export default function Home() {
         canResetToRawData,
         canExportCofechaOut,
         cofechaResult,
-        cofechaVersion,
+        cofechaUndatedFileName,
+        cofechaUndatedSort,
+        hasCofechaPart8,
         breadthDiagnosisNavigator,
         canRunBreadthDiagnosis,
         crossdatingValidationSummary,
@@ -412,6 +416,9 @@ export default function Home() {
         handleRemoveDeletionMarker,
         handleRestoreDeletion,
         handleExportCofechaOut,
+        handleLoadCofechaUndated,
+        handleClearCofechaUndated,
+        handleCofechaUndatedSortChange,
         handleRunBreadthDiagnosis,
         handleRunCofechaValidation,
         handleSave: handleStructuredSave,
@@ -438,7 +445,6 @@ export default function Home() {
         selectedPart,
         selectedProblemText,
         selectedTree,
-        setCofechaVersion,
         setSelectedPart,
         shouldShowProcessing,
         shouldShowWelcome,
@@ -447,6 +453,11 @@ export default function Home() {
         treeOptions,
         windowTitle,
     } = useHomeWorkspace();
+    const cofechaPartOptions = useMemo(() => (
+        hasCofechaPart8 || cofechaUndatedFileName
+            ? [...COFECHA_PART_OPTIONS, COFECHA_PART8_OPTION]
+            : COFECHA_PART_OPTIONS
+    ), [cofechaUndatedFileName, hasCofechaPart8]);
 
     useEffect(() => {
         const fileChanged = chartSelectionFileRef.current !== fileName;
@@ -994,8 +1005,10 @@ export default function Home() {
                 meanLength: cofechaResult.meanLength,
             } : undefined,
             linkedReport,
-            partOptions: COFECHA_PART_OPTIONS,
+            partOptions: cofechaPartOptions,
             selectedPart,
+            undatedFileName: cofechaUndatedFileName,
+            undatedSort: cofechaUndatedSort,
             jumpTarget: cofechaPart6JumpTarget ?? undefined,
         },
         "line-chart": {
@@ -1012,7 +1025,11 @@ export default function Home() {
             diagnosisBatchResult,
             cofechaPart6Trees: cofechaPart6TreeList,
         },
-    }), [activeDiagnosisEvent, canExportCofechaOut, canResetToRawData, chartJumpTarget, chartSelectedTrees, chartTreeOffsets, cofechaPart6JumpTarget, cofechaPart6TreeList, cofechaResult, crossdatingValidationSummary, diagnosisBatchResult, dynamicReferenceConfig, fileName, isCofechaOutdated, isCofechaRunning, linkedReport, operationLog, presentedCrossdatingDiagnosis, referenceConfig, selectedPart, selectedTree, siteData]);
+    }), [activeDiagnosisEvent, canExportCofechaOut, canResetToRawData, chartJumpTarget, chartSelectedTrees, chartTreeOffsets,
+        cofechaPart6JumpTarget, cofechaPart6TreeList, cofechaPartOptions, cofechaResult, cofechaUndatedFileName,
+        cofechaUndatedSort, crossdatingValidationSummary, diagnosisBatchResult, dynamicReferenceConfig, fileName,
+        isCofechaOutdated, isCofechaRunning, linkedReport, operationLog, presentedCrossdatingDiagnosis,
+        referenceConfig, selectedPart, selectedTree, siteData]);
 
     const handleCofechaTextClick = useCallback((event: MouseEvent<HTMLParagraphElement>) => {
         const target = event.target;
@@ -1119,6 +1136,12 @@ export default function Home() {
                     setSelectedPart(command.part);
                 } else if (command.type === "run-validation") {
                     void handleRunCofechaValidation();
+                } else if (command.type === "load-undated") {
+                    void handleLoadCofechaUndated();
+                } else if (command.type === "clear-undated") {
+                    void handleClearCofechaUndated();
+                } else if (command.type === "set-undated-sort") {
+                    void handleCofechaUndatedSortChange(command.sort);
                 } else if (command.type === "export-out") {
                     void handleExportCofechaOut();
                 } else if (command.type === "toggle-part2-age-sort") {
@@ -1173,6 +1196,9 @@ export default function Home() {
         handleChartSelectedTreesChange,
         handleChartTreeOffsetsChange,
         handleExportCofechaOut,
+        handleLoadCofechaUndated,
+        handleClearCofechaUndated,
+        handleCofechaUndatedSortChange,
         handleDiagnosisPreviewSelectionById,
         handleJumpToCofechaPart6,
         handleOpenRawEditorForTree,
@@ -1550,7 +1576,6 @@ export default function Home() {
         <>
             <HomeTitleBarBridge
                 title={chartTreeOffsets.size > 0 && !windowTitle.endsWith(" *") ? `${windowTitle} *` : windowTitle}
-                cofechaVersion={cofechaVersion}
                 onLoad={handleLoad}
                 onSave={handleSave}
                 onSaveAs={handleSaveAs}
@@ -1558,7 +1583,6 @@ export default function Home() {
                 onRedo={handleContextualRedo}
                 canUndo={isRawEditing ? rawEditorHistoryState.undoCount > 0 : historyStatus.undoCount > 0}
                 canRedo={isRawEditing ? rawEditorHistoryState.redoCount > 0 : historyStatus.redoCount > 0}
-                onCofechaVersionChange={setCofechaVersion}
                 onActiveMenuChange={setActiveMenu}
                 onOpenOperationLog={() => handleOpenWorkspaceWindow("operation-log")}
                 onOpenSettings={openSettingsWindow}
@@ -1903,12 +1927,16 @@ export default function Home() {
                                                     setSelectedPart(event.target.value);
                                                 }}
                                             >
-                                                {COFECHA_PART_OPTIONS.map((option) => (
+                                                {cofechaPartOptions.map((option) => (
                                                     <option key={option.value} value={option.value}>
                                                         {option.label}
                                                     </option>
                                                 ))}
                                             </select>
+                                            <CofechaUndatedControls compact fileName={cofechaUndatedFileName}
+                                                sort={cofechaUndatedSort} disabled={!fileName || isCofechaRunning}
+                                                onLoad={handleLoadCofechaUndated} onClear={handleClearCofechaUndated}
+                                                onSortChange={handleCofechaUndatedSortChange} />
                                             <button
                                                 type="button"
                                                 className={style["cofecha-validation-button"]}

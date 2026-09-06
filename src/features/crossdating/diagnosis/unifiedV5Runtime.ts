@@ -6,6 +6,7 @@ import { normalizeCofechaRuntimeUnits } from "./cofechaInputUnits";
 import { buildUnifiedV5Evidence } from "./unifiedV5Evidence";
 import { V5_IDENTITIES, type V5Operation } from "./unifiedV5Operations";
 import { UnifiedV5Predictor, UNIFIED_V5_RUNTIME_VERSION, UNIFIED_V5_SOURCE_SHA256, UNIFIED_V5_ASSET_SHA256, type UnifiedV5Model } from "./unifiedV5Model";
+import { attachWholeLocalEventInterpretation } from "./endpointWholeMissingInterpretation";
 import { buildOnlineUnifiedExecutablePackage, ONLINE_UNIFIED_EVIDENCE_VERSION,
     type OnlineUnifiedEvidenceBundle, type OnlineUnifiedExecutablePackage } from "./onlineUnifiedEvidence";
 
@@ -44,6 +45,16 @@ const eventType = (operation: Exclude<V5Operation, "none">): DiagnosisEvent["eve
     operation === "missing" ? "missingRing" : operation === "false" ? "falseRing" : operation === "partial" ? "partialMove" : "wholeSeriesMove"
 );
 
+export function selectUnifiedV5LocalReviewIdentity(identityScores: ArrayLike<number>): number {
+    let selected = -1;
+    for (let identity = 0; identity < V5_IDENTITIES.length; identity += 1) {
+        const [operation] = V5_IDENTITIES[identity]!;
+        if (operation !== "missing" && operation !== "false" && operation !== "partial") continue;
+        if (selected < 0 || identityScores[identity]! > identityScores[selected]!) selected = identity;
+    }
+    return selected;
+}
+
 function executable(bundle: OnlineUnifiedEvidenceBundle, operation: Exclude<V5Operation, "none">, shift: number,
     start: number | null, stateHash: string, score: number, margin: number) {
     const identityGroup = `${UNIFIED_V5_RUNTIME_VERSION}:${stateHash}:${operation}:${shift}`;
@@ -74,6 +85,49 @@ export function projectUnifiedV5Prediction(bundle: OnlineUnifiedEvidenceBundle, 
                 countEvidence: "cumulativeLagOnly", frontierYear: start + 6, frontierLocalization: "multiReferenceCounterfactual",
                 referenceCount, modelScoreMargin: prediction.identityScores[missing]! - prediction.identityScores[prediction.chosen]! },
         } };
+    } else if (prediction.operation === "whole") {
+        const missing = V5_IDENTITIES.findIndex(([op]) => op === "missing");
+        const localIdentity = selectUnifiedV5LocalReviewIdentity(prediction.identityScores);
+        const [localOperation, localShift] = V5_IDENTITIES[localIdentity]!;
+        const start = prediction.windows[localIdentity]!;
+        const localScore = prediction.identityScores[localIdentity]!;
+        const hasPhysicalWindow = localIdentity >= 0 && localOperation !== "none" && localOperation !== "whole"
+            && localScore > -1e8 && start >= bundle.targetRange.startYear && start + 12 <= bundle.targetRange.endYear;
+        if (hasPhysicalWindow) {
+            const review = executable(bundle, localOperation, localShift, start, stateHash, localScore,
+                localScore - prediction.identityScores[0]!);
+            if (review) {
+                let localEvent: DiagnosisEvent = { ...review.event, alternativeTypes: [], interpretationAmbiguity: undefined };
+                if (localOperation === "partial") {
+                    const missingStart = prediction.windows[missing]!;
+                    const missingScore = prediction.identityScores[missing]!;
+                    const missingReview = executable(bundle, "missing", -1, missingStart, stateHash, missingScore,
+                        missingScore - prediction.identityScores[0]!);
+                    if (missingReview && missingStart >= bundle.targetRange.startYear && missingStart + 12 <= bundle.targetRange.endYear) {
+                        localEvent = { ...localEvent, alternativeTypes: ["missingRing"], interpretationAmbiguity: {
+                            kind: "missingRingsOrPartialMove",
+                            alternative: { ...missingReview.event, alternativeTypes: [], interpretationAmbiguity: undefined },
+                            evidence: { interpretationBasis: "frozenConditionalMissingReview", missingRingCount: Math.abs(localShift),
+                                cumulativeShiftYears: localShift, missingYears: [], partialFirstFixedYear: start + 6,
+                                countEvidence: "cumulativeLagOnly", frontierYear: missingStart + 6,
+                                frontierLocalization: "multiReferenceCounterfactual", referenceCount,
+                                modelScoreMargin: missingScore - localScore },
+                        } };
+                    }
+                }
+                pkg.event = {
+                    ...attachWholeLocalEventInterpretation(pkg.event, localEvent, {
+                        wholeShiftYears: prediction.shift,
+                        localEventType: localEvent.eventType as Exclude<DiagnosisEvent["eventType"], "wholeSeriesMove">,
+                        localWindowWidth: 13,
+                        localEvidenceSource: "diagnosed",
+                        operationScoreMargin: prediction.identityScores[prediction.chosen]! - localScore,
+                        finalEvidenceClaims: [],
+                    }),
+                    alternativeTypes: [localEvent.eventType],
+                };
+            }
+        }
     }
     const decision: AuthoritativeDiagnosisDecision = { schemaVersion: 1, modelVersion: UNIFIED_V5_RUNTIME_VERSION,
         authority: "authoritative", status: "selected", eventType: eventType(prediction.operation), shiftYears: prediction.shift,
