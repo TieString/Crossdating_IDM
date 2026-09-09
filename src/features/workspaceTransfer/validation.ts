@@ -35,6 +35,14 @@ function options(value: unknown) {
     if (value.tucsonOutputMarkers !== undefined) {
         check(object(value.tucsonOutputMarkers) && Object.values(value.tucsonOutputMarkers).every((v) => v === 999 || v === -9999), "混合精度错误");
     }
+    if (value.tucsonSegments !== undefined) {
+        check(Array.isArray(value.tucsonSegments), "分段身份错误");
+        for (const s of value.tucsonSegments) {
+            check(object(s) && name(s.id) && year(s.startYear) && year(s.endYear) && year(s.terminalYear)
+                && Number(s.startYear) <= Number(s.endYear) && Number(s.terminalYear) > Number(s.endYear)
+                && (s.marker === 999 || s.marker === -9999), "分段边界或单位错误");
+        }
+    }
 }
 function markers(value: unknown, deletionCounter: number) {
     check(Array.isArray(value), "删除标记缺失");

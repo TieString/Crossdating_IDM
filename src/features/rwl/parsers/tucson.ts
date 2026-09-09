@@ -1,7 +1,7 @@
 import { stopMarker } from "@/shared/constants";
+import { decodeTucsonSegments, materializeTucsonSegments } from "cofecha-js";
 import { RwlReadOptions, RwlReadResult, RwlSiteData, RwlTreeData } from "../types";
 import {
-  ensureSeries,
   nonEmptyNonCommentLines,
   splitLines,
   stripBom,
@@ -72,7 +72,6 @@ export function parseTucson(text: string, opts: RwlReadOptions = {}): RwlReadRes
   if (header === "auto") skip = detectHeaderAuto(raw[0], long) ? 3 : 0;
 
   const lines = raw.slice(skip);
-  const data: RwlSiteData = new Map();
   const warnings: string[] = [];
   const widths = long
     ? [7, 5, ...Array(11).fill(6)]
@@ -110,73 +109,31 @@ export function parseTucson(text: string, opts: RwlReadOptions = {}): RwlReadRes
       continue;
     }
 
-    const mod = ((year0 % 10) + 10) % 10;
-    const fullPerRow = 10 - mod;
-    const maxColsAllowed = fullPerRow + 1;
-    const values = valFields.slice(0, maxColsAllowed).map(toIntOrNull);
+    if (line.slice(totalWidth).trim()) throw new RwlParseError(`tucson: extra fields on line ${lineIndex + 1}`, "tucson");
+    const values = valFields.map(field => {
+      const value = toIntOrNull(field);
+      if (field.trim() && value === null) throw new RwlParseError(`tucson: non-integer width on line ${lineIndex + 1}`, "tucson");
+      return value;
+    });
     while (values.length && values[values.length - 1] === null) values.pop();
     records.push({ id, year: year0, values });
   }
 
-  // Precision belongs to a terminated segment. In particular, a 999 at the
-  // end of a decade row can still be a measurement when that segment continues.
-  const segments: Array<{ id: string; marker: number; entries: Array<[number, number]> }> = [];
-  let pending: Array<[number, number]> = [];
-  let pendingId = "";
-  const flush = (marker: number) => {
-    if (pending.length) segments.push({ id: pendingId, marker, entries: pending });
-    pending = [];
-  };
-  records.forEach((record, recordIndex) => {
-    if (pending.length && pendingId !== record.id) flush(activeStopMarker);
-    pendingId = record.id;
-    const next = records[recordIndex + 1];
-    for (let i = 0; i < record.values.length; i++) {
-      const rawValue = record.values[i];
-      if (rawValue === null) continue;
-      const year = record.year + i;
-      const continues = next?.id === record.id && next.year === year + 1;
-      const terminal = rawValue === -9999 || (rawValue === 999
-        && i === record.values.length - 1 && !continues);
-      pending.push([year, rawValue]);
-      if (terminal) {
-        flush(rawValue);
-        break;
-      }
-    }
-  });
-  flush(activeStopMarker);
-
-  // The editor uses one unit for all maps. Normalize mixed input to 0.001 mm,
-  // retaining source precision for lossless per-series export and persistence.
-  const internalMarker = segments.some((segment) => segment.marker === -9999)
-    ? -9999 : activeStopMarker;
+  const { segments, warnings: boundaryWarnings } = decodeTucsonSegments(records, activeStopMarker === 999 ? 999 : -9999);
+  if (boundaryWarnings.length) throw new RwlParseError(boundaryWarnings.join("\n"), "tucson");
+  warnings.push(...boundaryWarnings);
+  // Always use a negative internal sentinel, including after editing a width to
+  // 999. Source units are retained separately; positive measurements cannot
+  // collide with a boundary in grids, history, diagnostics or serialization.
+  const { data, marker: internalMarker } = materializeTucsonSegments(segments, -9999);
   const outputMarkers: Record<string, number> = Object.create(null);
   for (const segment of segments) {
-    const series = ensureSeries(data, segment.id);
-    const scale = segment.marker === 999 && internalMarker === -9999 ? 10 : 1;
     outputMarkers[segment.id] = outputMarkers[segment.id] === undefined
       || outputMarkers[segment.id] === segment.marker ? segment.marker : internalMarker;
-    for (let i = 0; i < segment.entries.length; i++) {
-      const [year, rawValue] = segment.entries[i];
-      if (i === segment.entries.length - 1 && rawValue === segment.marker) {
-        series.set(year, internalMarker);
-        continue;
-      }
-      let value: number | null = rawValue;
-
-      if (edgeZeros) {
-        if (value < 0
-          && value !== activeStopMarker
-          && !preserveNegativeMeasurements) value = null;
-      } else {
-        if (value < 0
-          && value !== activeStopMarker
-          && !preserveNegativeMeasurements) value = null;
-        if (value === 0) value = null;
-      }
-
-      series.set(year, value === null ? null : value * scale);
+    const tree = data.get(segment.id)!;
+    for (const [year] of segment.entries) {
+      const value = tree.get(year)!;
+      if (value !== null && ((value < 0 && !preserveNegativeMeasurements) || (value === 0 && !edgeZeros))) tree.set(year, null);
     }
   }
 
@@ -194,6 +151,8 @@ export function parseTucson(text: string, opts: RwlReadOptions = {}): RwlReadRes
       preserveNegativeMeasurements,
       stopMarkerValue: internalMarker,
       tucsonOutputMarkers: outputMarkers,
+      tucsonSegments: segments.map(s => ({ id: s.id, startYear: s.entries[0][0],
+        endYear: s.entries[s.entries.length - 1][0], terminalYear: s.terminalYear, marker: s.marker })),
     },
   };
 }
@@ -203,9 +162,13 @@ export interface RwlSegment {
   values: Array<[number, number | null]>;
 }
 
-const toTucsonValueField = (width: number | null) => (
-  (width === null ? "" : width).toString().padStart(6, " ")
-);
+const toTucsonValueField = (width: number | null) => {
+  const field = width === null ? "" : String(width);
+  if (field.length > 6 || (width !== null && !Number.isSafeInteger(width))) {
+    throw new RwlParseError(`tucson: width ${field} cannot fit a six-column integer field`, "tucson");
+  }
+  return field.padStart(6, " ");
+};
 
 export function splitSeriesIntoRwlSegments(series: RwlTreeData, marker = stopMarker.value): RwlSegment[] {
   const segments: RwlSegment[] = [];
@@ -297,21 +260,27 @@ export function formatTucson(
 
   data.forEach((treeMap, treeCode) => {
     const internalMarker = readOptions?.stopMarkerValue ?? stopMarker.value;
-    let segments = splitSeriesIntoRwlSegments(treeMap, internalMarker);
-    let outputMarker = internalMarker;
+    const segments = splitSeriesIntoRwlSegments(treeMap, internalMarker);
     // Preserve 0.01 mm source precision only when every edited measurement can
     // still be represented exactly. Otherwise retain the finer working unit.
-    if (internalMarker === -9999 && readOptions?.tucsonOutputMarkers?.[treeCode] === 999
-      && segments.every((segment) => segment.values.every(([, value]) => value === null || value % 10 === 0))) {
-      outputMarker = 999;
-      segments = segments.map((segment) => ({ ...segment,
-        values: segment.values.map(([year, value]) => [year, value === null ? null : value / 10]),
-      }));
-    }
-    const formattedSeries = formatRwlSeries(treeCode, segments, long, outputMarker);
-
-    if (formattedSeries) {
-      seriesText.push(formattedSeries);
+    for (const segment of segments) {
+      const source = readOptions?.tucsonSegments?.find(s => s.id === treeCode
+        && s.startYear === segment.startYear && s.endYear === segment.values[segment.values.length - 1][0]);
+      const sourceMarker = source?.marker ?? readOptions?.tucsonOutputMarkers?.[treeCode];
+      let outputMarker = internalMarker;
+      let outputSegment = segment;
+      if (internalMarker === -9999 && sourceMarker === 999
+        && segment.values.every(([, value]) => value === null || value % 10 === 0)) {
+        outputMarker = 999;
+        outputSegment = { ...segment, values: segment.values.map(([year, value]) => [year, value === null ? null : value / 10]) };
+      }
+      // A lone 999 at a decade boundary followed by more data has no unambiguous
+      // spelling under the standalone-marker rule. Never silently export loss.
+      if (((outputSegment.startYear % 10 + 10) % 10) === 9 && outputSegment.values[0][1] === 999 && outputSegment.values.length > 1) {
+        throw new RwlParseError(`tucson: ${treeCode} starts with an ambiguous standalone 999 at ${outputSegment.startYear}`, "tucson");
+      }
+      const formattedSeries = formatRwlSeries(treeCode, [outputSegment], long, outputMarker);
+      if (formattedSeries) seriesText.push(formattedSeries);
     }
   });
 

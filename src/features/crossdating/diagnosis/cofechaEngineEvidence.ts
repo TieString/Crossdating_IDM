@@ -6,8 +6,8 @@ import {
 import type { RwlSiteData, RwlTreeData } from "../../rwl/types";
 import type { UnifiedV5Sample } from "./unifiedV5Types";
 
-export const COFECHA_ENGINE_EVIDENCE_VERSION = "cofecha-js-0.2.0-testing-values-v1";
-export const COFECHA_ENGINE_EXPLICIT_UNITS_VERSION = "cofecha-js-0.2.0-explicit-units-testing-values-v2";
+export const COFECHA_ENGINE_EVIDENCE_VERSION = "cofecha-js-0.2.1-testing-values-v1";
+export const COFECHA_ENGINE_EXPLICIT_UNITS_VERSION = "cofecha-js-0.2.1-explicit-units-testing-values-v2";
 
 const OPTIONS: Cofecha606SeriesAnalysisOptions = {
     splineRigidityYears: 32,

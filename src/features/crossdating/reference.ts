@@ -1274,10 +1274,11 @@ export const splitCofecha606SeriesSegments = (
         let previousYear: number | null = null;
         let segmentIndex = 0;
         const entries = [...tree.entries()].sort(([left], [right]) => left - right);
+        const internalMarker = entries.some(([, value]) => value === -9999) ? -9999 : stopMarker.value;
         entries.forEach(([year, value], index) => {
             const nextYear = entries[index + 1]?.[0];
             const isTerminal = value === -9999
-                || (value === 999 && (nextYear === undefined || nextYear !== year + 1));
+                || (internalMarker === 999 && value === 999 && (nextYear === undefined || nextYear !== year + 1));
             if (isTerminal) {
                 if (segment) segment.stopMarkerValue = value;
                 segment = null;
@@ -1295,7 +1296,7 @@ export const splitCofecha606SeriesSegments = (
                     seriesId,
                     segmentIndex,
                     data: new Map<number, number | null>(),
-                    stopMarkerValue: stopMarker.value,
+                    stopMarkerValue: internalMarker,
                 };
                 result.push(segment);
             }

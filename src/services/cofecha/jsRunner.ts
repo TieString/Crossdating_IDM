@@ -2,7 +2,9 @@ import { runCofecha, type CofechaArtifacts, type CofechaReport, type RunCofechaR
 import type { CofechaUndatedInput } from "@/features/cofecha/types";
 import type { CofechaJsWorkerRequest, CofechaJsWorkerResponse } from "./jsWorkerProtocol";
 
-export const COFECHA_JS_VERSION = "0.2.0" as const;
+export const COFECHA_JS_VERSION = "0.2.1" as const;
+// Published preprocessing version also invalidates pre-upgrade cached reports.
+export const COFECHA_RUNTIME_REVISION = COFECHA_JS_VERSION;
 let nextWorkerRequestId = 0;
 
 const jobNameFromFileName = (fileName: string) => {

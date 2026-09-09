@@ -6,8 +6,10 @@ import { stopMarker } from "@/shared/constants";
 // 绝对路径读取：要求 fs scope 放行该路径
 export async function readRwlFile(path: string, opts: RwlReadOptions = {}): Promise<RwlReadResult> {
   const text = await readTextFile(path);
-  stopMarker.value = await detectPrecision(text); // 更新全局停止标记
-  return readRwlString(text, opts);
+  const sourceMarker = await detectPrecision(text);
+  const parsed = await readRwlString(text, { ...opts, stopMarker: opts.stopMarker ?? sourceMarker });
+  stopMarker.value = parsed.readOptions?.stopMarkerValue ?? stopMarker.value;
+  return parsed;
 }
 
 export async function saveFile(path: string, content: string): Promise<void> {

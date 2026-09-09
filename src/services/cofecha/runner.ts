@@ -4,6 +4,7 @@ import { join } from "@tauri-apps/api/path";
 import { clearWorkDir, getCofechaWorkDir } from "@/services/fs";
 import { saveFile } from "../fs/io";
 import type { CofechaUndatedInput } from "@/features/cofecha/types";
+import { normalizeOfficialCofechaInput } from "./normalizedInput";
 
 interface CofechaProcessOutput {
   exitCode: number | null;
@@ -45,8 +46,8 @@ export async function runOfficialCofecha(
     : null;
   const undatedInputPath = runtimeUndatedInputName ? await join(workDir, runtimeUndatedInputName) : null;
 
-  await saveFile(inputPath, rwlText);
-  if (undated && undatedInputPath) await saveFile(undatedInputPath, undated.rwlText);
+  await saveFile(inputPath, normalizeOfficialCofechaInput(rwlText));
+  if (undated && undatedInputPath) await saveFile(undatedInputPath, normalizeOfficialCofechaInput(undated.rwlText));
 
   const processOutput = await invoke<CofechaProcessOutput>("run_external_cofecha", {
     executablePath: normalizedExecutablePath,

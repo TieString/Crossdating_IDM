@@ -617,6 +617,7 @@ function cloneReadOptions(options: RwlReadResult['readOptions']): RwlReadResult[
         ...options,
         fhUnit: options.fhUnit ? { ...options.fhUnit } : undefined,
         tucsonOutputMarkers: options.tucsonOutputMarkers ? { ...options.tucsonOutputMarkers } : undefined,
+        tucsonSegments: options.tucsonSegments?.map(segment => ({ ...segment })),
     };
 }
 
@@ -1877,6 +1878,9 @@ export class RwlEditor {
         if (!this.rwlData.has(tree)) return;
         let treeData = this.rwlData.get(tree)!;
         if (!treeData.has(year)) return;
+        if (width === stopMarker.value && treeData.get(year) !== stopMarker.value) {
+            throw new Error("该数值与当前工作区结束标记冲突。旧精度工作区请先保留工作进度，再重新导入RWL使用安全工作精度；不能把测量值写成结束标记。");
+        }
 
         const operation: RwlEditOperation = { type: "change-width", tree, year, width };
         const beforeState = this.captureTreeLogState(tree);

@@ -50,7 +50,7 @@ import {
     type PersistedTreeRingScanState,
     type TreeRingScanSeriesState,
 } from "@/features/treeRingScans";
-import { COFECHA_JS_VERSION, runCofechaReport } from "@/services/cofecha";
+import { COFECHA_RUNTIME_REVISION as COFECHA_JS_VERSION, runCofechaReport } from "@/services/cofecha";
 import { readRwlFile, saveFile } from "@/services/fs/io";
 import { stopMarker } from "@/shared/constants";
 import { useSettings } from "@/features/settings/SettingsContext";
@@ -93,6 +93,7 @@ import {
     stringArraysEqual,
 } from "./workspaceState";
 import { resolveWorkspaceDraft } from "./workspaceDraft";
+import { showRwlReadError } from "./rwlReadError";
 
 function syncStopMarkerFromSiteData(data: RwlSiteData): void {
     const trailingValues = Array.from(data.values()).flatMap((treeData) => {
@@ -514,6 +515,11 @@ export function useHomeWorkspace() {
         projectPath = filePathRef.current,
     ) => {
         nextEditor.setProjectId(projectPath);
+        // Only the editor actually installed as active may change global units.
+        // Temporary editors used to validate imports/drafts stay side-effect free.
+        const marker = nextEditor.getReadOptions()?.stopMarkerValue;
+        if (marker === 999 || marker === -9999) stopMarker.value = marker;
+        else syncStopMarkerFromSiteData(nextEditor.getData());
         rwlEditorRef.current = nextEditor;
         syncEditor(nextEditor);
         const nextData = nextEditor.getData();
@@ -760,6 +766,7 @@ export function useHomeWorkspace() {
             return;
         }
         isFileLoadingRef.current = true;
+        let loadingPath: string | undefined;
         try {
             const filePath = await open({
                 filters: [
@@ -772,6 +779,7 @@ export function useHomeWorkspace() {
             if (!filePath) {
                 return;
             }
+            loadingPath = filePath;
 
             setIsFileLoading(true);
             // Flush the previous file's debounced journal before reading any
@@ -924,6 +932,7 @@ export function useHomeWorkspace() {
             }
         } catch (error) {
             console.error("读取文件时出错:", error);
+            await showRwlReadError(error, loadingPath);
         } finally {
             isFileLoadingRef.current = false;
             setIsFileLoading(false);
@@ -981,8 +990,9 @@ export function useHomeWorkspace() {
     ), []);
 
     const applyParsedRwlText = useCallback(async (rawText: string) => {
-        stopMarker.value = await detectPrecision(rawText);
-        const rwlData = await readRwlString(rawText);
+        const sourceMarker = await detectPrecision(rawText);
+        const rwlData = await readRwlString(rawText, { stopMarker: sourceMarker });
+        syncStopMarkerFromSiteData(rwlData.data);
         const nextTreeOptions = Array.from(rwlData.data.keys());
 
         rwlEditorRef.current.replaceAllData(rwlData.data, rwlData.readOptions, rwlData.format);
@@ -1006,6 +1016,9 @@ export function useHomeWorkspace() {
     // 单序列文本编辑：只解析这段文本并把结果合并回指定序列，其余序列保持不变。
     const applyRawRwlTextForTree = useCallback(async (rawText: string, tree: string): Promise<RwlSiteData> => {
         const rwlData = await readRwlString(rawText);
+        if (rwlData.readOptions?.stopMarkerValue !== undefined && rwlData.readOptions.stopMarkerValue !== stopMarker.value) {
+            throw new Error("当前是旧精度工作区，请先保留工作进度并重新导入RWL，再使用单序列文本编辑，避免混用工作单位。");
+        }
         const parsedTreeData = rwlData.data.get(tree) ?? rwlData.data.values().next().value;
         if (parsedTreeData) {
             rwlEditorRef.current.replaceTreeData(tree, parsedTreeData);

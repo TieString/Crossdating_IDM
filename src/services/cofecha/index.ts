@@ -18,5 +18,5 @@ export async function runCofechaReport(options: RunCofechaReportOptions): Promis
   return runOfficialCofecha(options.rwlText, options.inputFileName, options.executablePath, options.undated);
 }
 
-export { COFECHA_JS_VERSION, runCofechaJs, runCofechaJsInline } from "./jsRunner";
+export { COFECHA_JS_VERSION, COFECHA_RUNTIME_REVISION, runCofechaJs, runCofechaJsInline } from "./jsRunner";
 export { runOfficialCofecha } from "./runner";

@@ -71,6 +71,8 @@ export async function readRwlString(text: string, opts: RwlReadOptions = {}): Pr
   }
 
   const detected = detectRwlFormat(text);
+  // A corrupt Tucson file must not be silently reinterpreted as another format.
+  if (detected === "tucson") return parseTucson(text, { ...opts, stopMarker: opts.stopMarker ?? stopMarker.value });
 
   // 先尝试命中的格式，其余格式作为回退顺序。
   const fallback: RwlFormat[] = ["tucson", "compact", "heidelberg", "csv", "tridas"];

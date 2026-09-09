@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseTucson } from "../parsers/tucson";
+import { formatTucson, parseTucson } from "../parsers/tucson";
 
 const line = (
     id: string,
@@ -22,10 +22,10 @@ describe("Tucson negative measurement preservation", () => {
             stopMarker: 999,
         });
         const tree = result.data.get("NEG001")!;
-        expect(tree.get(2000)).toBe(10);
+        expect(tree.get(2000)).toBe(100); // 0.1 mm, now in 0.001 mm working units
         expect(tree.get(2001)).toBeNull();
         expect(tree.get(2002)).toBe(0);
-        expect(tree.get(2004)).toBe(999);
+        expect(tree.get(2004)).toBe(-9999);
     });
 
     it("retains negative values only for the exact COFECHA view", () => {
@@ -36,8 +36,10 @@ describe("Tucson negative measurement preservation", () => {
             preserveNegativeMeasurements: true,
         });
         const tree = result.data.get("NEG001")!;
-        expect(tree.get(2001)).toBe(-8);
+        expect(tree.get(2001)).toBe(-80); // -0.08 mm, unchanged physical value
         expect(tree.get(2002)).toBe(0);
-        expect(tree.get(2004)).toBe(999);
+        expect(tree.get(2004)).toBe(-9999);
+        expect(formatTucson(result.data, false, undefined, result.readOptions).trim())
+            .toBe(line("NEG001", 2000, [10,-8,0,20,999]));
     });
 });

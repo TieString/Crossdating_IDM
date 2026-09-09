@@ -312,7 +312,7 @@ function AboutSection() {
             <h2 className={styles["section-title"]}>关于</h2>
 
             <Row label="应用名称"><span className={styles["about-text"]}>交叉定年 · IDM</span></Row>
-            <Row label="版本"><span className={styles["about-text"]}>1.6.1</span></Row>
+            <Row label="版本"><span className={styles["about-text"]}>1.6.2</span></Row>
             <Row label="技术栈"><span className={styles["about-text"]}>Tauri · React · TypeScript</span></Row>
             <Row label="COFECHA"><span className={styles["about-text"]}>Richard L. Holmes · LTRR Dendrochronology Program Library</span></Row>
             <Row label="研发团队" align="top">

@@ -25,6 +25,20 @@ const fixture = () => {
 const pack = (editor: RwlEditor) => exportWorkspacePackage({ fileName: "D:\\old\\BL1.rwl", editor, reference: null });
 
 describe("cdworkspace contract", () => {
+    it("preserves same-name boundaries, source units and real 999 through transfer and reopen", async () => {
+        const text = [line("A",1990,[100,999,120,999]),line("A",1994,[999,130,-9999])].join("\n");
+        const parsed = parseTucson(text);
+        const editor = new RwlEditor(parsed.data, parsed.readOptions, "tucson");
+        const bundle = await importWorkspacePackage(await pack(editor));
+        const restored = restoredWorkspaceEditor(bundle, "E:/new/A.rwl");
+        expect(restored.getData()).toEqual(editor.getData());
+        expect(restored.getReadOptions()?.tucsonSegments).toEqual(parsed.readOptions?.tucsonSegments);
+        expect(restored.exportAsRwlString().trim().split(/\r?\n/)).toEqual(text.split("\n"));
+        const reopened = new RwlEditor(parsed.data, parsed.readOptions, "tucson");
+        reopened.restorePersistedHistory(restored.toHistorySnapshot());
+        expect(reopened.getData()).toEqual(editor.getData());
+        expect(reopened.exportAsRwlString()).toBe(restored.exportAsRwlString());
+    });
     it.each(["ca646.rwl", "co589.rwl", "co612.rwl", "or093.rwl", "paki033.rwl", "ut529.rwl"])("migrates the real %s fixture without writing the source", async (file) => {
         const path = resolve("test-data", file), original = readFileSync(path);
         const parsed = parseTucson(original.toString("utf8"), { stopMarker: -9999 });

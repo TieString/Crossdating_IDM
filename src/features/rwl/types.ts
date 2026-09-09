@@ -49,6 +49,7 @@ export interface RwlReadResult {
     preserveNegativeMeasurements?: boolean; // 是否保留非终止负测量值
     stopMarkerValue?: number;    // 显式读入精度，供隔离的评估/序列化链使用
     tucsonOutputMarkers?: Record<string, number>; // 原始逐序列精度；工作数据统一为stopMarkerValue单位
+    tucsonSegments?: Array<{ id: string; startYear: number; endYear: number; terminalYear: number; marker: 999 | -9999 }>;
     fhDataFormat?: "column" | "block";  // FH 数据格式
     fhUnit?: { multiplier: number; divisor: number };  // FH Unit 参数
   };
