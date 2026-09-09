@@ -42,7 +42,7 @@ export interface RwlFormatHandler {
 export const formatHandlers: Record<RwlFormat, RwlFormatHandler | null> = {
   tucson: {
     parse: parseTucson,
-    format: (data, readOpts, selected) => formatTucson(data, readOpts?.tucsonLong ?? false, selected)
+    format: (data, readOpts, selected) => formatTucson(data, readOpts?.tucsonLong ?? false, selected, readOpts)
   },
   compact: { parse: parseCompact },
   csv: { parse: parseCsv },

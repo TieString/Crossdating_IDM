@@ -191,6 +191,7 @@ export default function WorkspaceWindowPage() {
                 onUndoEntry={(entryId) => sendCommand({ kind: "operation-log", type: "undo-log-entry", entryId })}
                 onJumpEntry={(tree, year) => sendCommand({ kind: "operation-log", type: "jump", tree, year })}
                 onResetToRawData={() => sendCommand({ kind: "operation-log", type: "reset-to-raw" })}
+                onExportEffectiveChanges={() => sendCommand({ kind: "operation-log", type: "export-effective-changes" })}
                 onClose={closeWindow}
             />
         );

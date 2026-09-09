@@ -1,6 +1,8 @@
 import { RwlFormat, RwlTreeData, RwlReadResult, RwlSiteData } from "./types";
 import { formatHandlers } from "./index";
 import { stopMarker } from "@/shared/constants";
+import type { ReferenceSeriesConfig } from "@/features/crossdating/reference";
+import type { PersistedTreeRingScanState } from "@/features/treeRingScans/types";
 
 // RWL 编辑器
 // ===========
@@ -38,7 +40,7 @@ export type RwlEditOperation =
     | { type: "delete-series"; tree: string }
     | { type: "change-width"; tree: string; year: number; width: number | null }
     | { type: "replace-tree-data"; tree: string }
-    | { type: "replace-all-data"; treeCount: number; format?: RwlFormat };
+    | { type: "replace-all-data"; treeCount: number; format?: RwlFormat; treeKeyMap?: Array<[string, string]> };
 
 export type RwlHistoryAnimation = RwlEditOperation & {
     direction: "undo" | "redo";
@@ -193,9 +195,16 @@ export type RwlPersistedHistorySnapshot = {
     operationLogBySeries?: SerializedRwlOperationLogBySeries;
     operationLogCounter: number;
     deletionOrderCounter: number;
+    comparisonBaseline?: RwlComparisonBaseline;
+    workspaceContext?: { referenceConfig: ReferenceSeriesConfig | null; scans: PersistedTreeRingScanState };
 };
 
-const MAX_OPERATION_LOG_ENTRIES = 500;
+export type RwlComparisonBaseline = {
+    data: SerializedRwlSiteData;
+    readOptions?: RwlReadResult['readOptions'];
+    format: string;
+    provenance: "initial" | "legacy-snapshot";
+};
 const BASIC_OPERATION_LOG_TYPES = new Set<RwlEditOperation["type"]>([
     "insert-missing",
     "move-selection",
@@ -221,6 +230,8 @@ const cloneOperation = (operation: RwlEditOperation | undefined): RwlEditOperati
     if (!operation) return undefined;
     return operation.type === "move-series-batch"
         ? { ...operation, moves: operation.moves.map((move) => ({ ...move })) }
+        : operation.type === "replace-all-data"
+            ? { ...operation, treeKeyMap: operation.treeKeyMap?.map(([from, to]) => [from, to]) }
         : { ...operation };
 };
 
@@ -305,20 +316,14 @@ const shareOperationLogSnapshot = (log: RwlOperationLogBySeries): RwlOperationLo
     new Map(Array.from(log, ([seriesId, entries]) => [seriesId, [...entries]]))
 );
 
-const trimOperationLogBySeries = (operationLogBySeries: RwlOperationLogBySeries): RwlOperationLogBySeries => (
-    groupOperationLogBySeries(flattenOperationLogBySeries(operationLogBySeries).slice(-MAX_OPERATION_LOG_ENTRIES))
-);
-
-const maybeTrimOperationLogBySeries = (operationLogBySeries: RwlOperationLogBySeries): RwlOperationLogBySeries => (
-    countOperationLogBySeries(operationLogBySeries) > MAX_OPERATION_LOG_ENTRIES
-        ? trimOperationLogBySeries(operationLogBySeries)
-        : operationLogBySeries
+const cloneGroupedOperationLog = (operationLogBySeries: RwlOperationLogBySeries): RwlOperationLogBySeries => (
+    groupOperationLogBySeries(flattenOperationLogBySeries(operationLogBySeries))
 );
 
 const serializeOperationLogBySeries = (
     operationLogBySeries: RwlOperationLogBySeries
 ): SerializedRwlOperationLogBySeries => (
-    Array.from(trimOperationLogBySeries(operationLogBySeries).entries())
+    Array.from(cloneGroupedOperationLog(operationLogBySeries).entries())
         .map(([seriesId, entries]) => [seriesId, entries])
 );
 
@@ -327,7 +332,7 @@ const deserializeOperationLogBySeries = (
     fallbackOperationLog: RwlOperationLogEntry[] | undefined,
 ): RwlOperationLogBySeries => {
     if (Array.isArray(operationLogBySeries)) {
-        return trimOperationLogBySeries(new Map(operationLogBySeries.map(([seriesId, entries]) => [
+        return cloneGroupedOperationLog(new Map(operationLogBySeries.map(([seriesId, entries]) => [
             seriesId,
             entries.map(cloneOperationLogEntry),
         ])));
@@ -611,6 +616,7 @@ function cloneReadOptions(options: RwlReadResult['readOptions']): RwlReadResult[
     return {
         ...options,
         fhUnit: options.fhUnit ? { ...options.fhUnit } : undefined,
+        tucsonOutputMarkers: options.tucsonOutputMarkers ? { ...options.tucsonOutputMarkers } : undefined,
     };
 }
 
@@ -845,6 +851,8 @@ function changeYearWidth(rwlData: RwlTreeData, year: number, width: number | nul
 export class RwlEditor {
     private rwlData: RwlSiteData;
     private rawData: RwlSiteData;
+    private comparisonBaseline: RwlComparisonBaseline;
+    private workspaceContext?: RwlPersistedHistorySnapshot['workspaceContext'];
     private readOptions?: RwlReadResult['readOptions'];
     private rawReadOptions?: RwlReadResult['readOptions'];
     private format: string = 'tucson'; // 记录原始读取格式
@@ -865,6 +873,8 @@ export class RwlEditor {
         this.rawReadOptions = cloneReadOptions(options);
         this.format = format || 'tucson'; // 默认 tucson
         this.rawFormat = this.format;
+        this.comparisonBaseline = { data: serializeSiteData(initialData), readOptions: cloneReadOptions(options),
+            format: this.format, provenance: "initial" };
     }
 
     static isPersistedHistorySnapshot(value: unknown): value is RwlPersistedHistorySnapshot {
@@ -1100,10 +1110,10 @@ export class RwlEditor {
 
         this.operationLogCounter = nextSequence;
         const seriesEntries = this.operationLogBySeries.get(tree) ?? [];
-        this.operationLogBySeries = maybeTrimOperationLogBySeries(new Map([
+        this.operationLogBySeries = new Map([
             ...this.operationLogBySeries,
             [tree, [...seriesEntries, nextEntry]],
-        ]));
+        ]);
     }
 
 
@@ -1114,6 +1124,10 @@ export class RwlEditor {
 
     getRawData(): RwlSiteData {
         return cloneSiteData(this.rawData);
+    }
+
+    setWorkspaceContext(context: NonNullable<RwlPersistedHistorySnapshot['workspaceContext']>): void {
+        this.workspaceContext = structuredClone(context);
     }
 
     hasRawDataChanges(): boolean {
@@ -1190,10 +1204,19 @@ export class RwlEditor {
             operationLogBySeries: serializeOperationLogBySeries(this.operationLogBySeries),
             operationLogCounter: this.operationLogCounter,
             deletionOrderCounter: this.deletionOrderCounter,
+            comparisonBaseline: structuredClone(this.comparisonBaseline),
+            workspaceContext: this.workspaceContext ? structuredClone(this.workspaceContext) : undefined,
         };
     }
 
     restorePersistedHistory(snapshot: RwlPersistedHistorySnapshot): void {
+        this.workspaceContext = snapshot.workspaceContext ? structuredClone(snapshot.workspaceContext) : undefined;
+        this.comparisonBaseline = structuredClone(snapshot.comparisonBaseline ?? {
+            data: snapshot.rawData ?? serializeSiteData(this.rawData),
+            readOptions: snapshot.rawReadOptions ?? this.rawReadOptions,
+            format: snapshot.rawFormat ?? this.rawFormat,
+            provenance: "legacy-snapshot",
+        });
         this.undoStack = [];
         this.redoStack = [];
         this.operationLogBySeries = deserializeOperationLogBySeries(snapshot.operationLogBySeries, snapshot.operationLog);
@@ -1227,7 +1250,7 @@ export class RwlEditor {
     restoreOperationLog(operationLog: RwlOperationLogEntry[]): void {
         this.undoStack = [];
         this.redoStack = [];
-        this.operationLogBySeries = trimOperationLogBySeries(groupOperationLogBySeries(operationLog));
+        this.operationLogBySeries = groupOperationLogBySeries(operationLog);
         this.operationLogCounter = Math.max(
             ...flattenOperationLogBySeries(this.operationLogBySeries).map((entry) => entry.sequence),
             0,
@@ -1796,7 +1819,8 @@ export class RwlEditor {
         format?: RwlFormat,
         replaceOptions?: RwlReplaceAllDataOptions,
     ): void {
-        const operation: RwlEditOperation = { type: "replace-all-data", treeCount: data.size, format };
+        const operation: RwlEditOperation = { type: "replace-all-data", treeCount: data.size, format,
+            treeKeyMap: replaceOptions?.treeKeyMap ? Array.from(replaceOptions.treeKeyMap) : undefined };
         const previousData = cloneSiteData(this.rwlData);
         const previousMarkers = cloneDeletionMarkers(this.deletionMarkers);
         this.saveToUndoStack(operation);

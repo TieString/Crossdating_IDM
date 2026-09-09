@@ -1,5 +1,6 @@
 import { ask, message, open, save } from "@tauri-apps/plugin-dialog";
 import { readTextFile } from "@tauri-apps/plugin-fs";
+import { effectiveChangesCsv } from "@/features/rwl/effectiveChanges";
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { extractPart6FlaggedASeriesIds, parseCofechaResult, splitReportByParts } from "@/features/cofecha/formatter";
 import { getCofechaSeriesMapValue } from "@/features/cofecha/seriesId";
@@ -2483,7 +2484,19 @@ export function useHomeWorkspace() {
     const windowTitle = formatTitle(fileName, isModified);
     const canRunBreadthDiagnosis = diagnosisReferenceConfig !== null && siteData.size > 0;
 
+    const handleExportEffectiveChanges = useCallback(async () => {
+        if (isFileLoadingRef.current) return;
+        try {
+            if (!filePathRef.current) throw new Error("请先打开RWL文件");
+            const csv = effectiveChangesCsv(rwlEditorRef.current.toHistorySnapshot());
+            const path = await save({ title: "导出有效修改记录", defaultPath: "有效修改记录.csv",
+                filters: [{ name: "CSV（UTF-8，Excel兼容）", extensions: ["csv"] }] });
+            if (path) await saveFile(path.toLowerCase().endsWith(".csv") ? path : `${path}.csv`, csv);
+        } catch (error) { await message(String(error), { title: "导出失败", kind: "error" }); }
+    }, []);
+
     return {
+        handleExportEffectiveChanges,
         cofechaResult,
         cofechaEngine: settings.cofecha.engine,
         cofechaUndatedFileName: cofechaUndatedSource?.fileName ?? null,

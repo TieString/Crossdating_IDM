@@ -109,6 +109,7 @@ type OperationLogPageProps = {
     onUndoEntry: (entryId: string) => void | Promise<void>;
     onJumpEntry: (tree: string, year?: number) => void | Promise<void>;
     onResetToRawData: () => void | Promise<void>;
+    onExportEffectiveChanges: () => void | Promise<void>;
     onClose: () => void;
 };
 
@@ -119,6 +120,7 @@ export function OperationLogPage({
     onUndoEntry,
     onJumpEntry,
     onResetToRawData,
+    onExportEffectiveChanges,
     onClose,
 }: OperationLogPageProps) {
     const [logQuery, setLogQuery] = useState("");
@@ -192,6 +194,8 @@ export function OperationLogPage({
                         <span>可撤销</span><strong>{editableCount}</strong>
                     </div>
                     <div className={styles["summary-actions"]}>
+                        <button type="button" className={styles["command-button"]} disabled={!fileName}
+                            onClick={() => { void onExportEffectiveChanges(); }}>导出有效修改记录</button>
                         <button
                             type="button"
                             className={styles["command-button"]}

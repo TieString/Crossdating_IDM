@@ -416,6 +416,7 @@ export default function Home() {
         handleRemoveDeletionMarker,
         handleRestoreDeletion,
         handleExportCofechaOut,
+        handleExportEffectiveChanges,
         handleLoadCofechaUndated,
         handleClearCofechaUndated,
         handleCofechaUndatedSortChange,
@@ -1123,7 +1124,9 @@ export default function Home() {
     const handleWorkspaceWindowCommand = useCallback((command: WorkspaceWindowCommand) => {
         switch (command.kind) {
             case "operation-log":
-                if (command.type === "undo-log-entry") {
+                if (command.type === "export-effective-changes") {
+                    void handleExportEffectiveChanges();
+                } else if (command.type === "undo-log-entry") {
                     handleUndoOperationLogEntry(command.entryId);
                 } else if (command.type === "reset-to-raw") {
                     handleResetToRawData();
@@ -1196,6 +1199,7 @@ export default function Home() {
         handleChartSelectedTreesChange,
         handleChartTreeOffsetsChange,
         handleExportCofechaOut,
+        handleExportEffectiveChanges,
         handleLoadCofechaUndated,
         handleClearCofechaUndated,
         handleCofechaUndatedSortChange,
