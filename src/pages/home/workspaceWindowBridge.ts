@@ -12,6 +12,7 @@ import type { ReferenceSeriesConfig } from "@/features/crossdating/reference";
 import type { DeleteMode, DeleteShift, MissingInsertSide, RwlOperationLogEntry, SerializedRwlTreeData } from "@/features/rwl/edit";
 import type { CofechaUndatedSort, ICofechaResult } from "@/features/cofecha/types";
 import type { RwlSiteData } from "@/features/rwl/types";
+import type { RwlDisplayUnits } from "@/features/rwl/displayUnits";
 import type { ChartJumpTarget } from "@/components/Chart/chartNavigation";
 
 export type WorkspaceWindowKind = "operation-log" | "cofecha" | "line-chart";
@@ -125,6 +126,7 @@ export type CofechaWindowResult = Pick<
 >;
 
 export type OperationLogWindowState = {
+    displayUnits?: RwlDisplayUnits;
     kind: "operation-log";
     fileName: string | null;
     operationLog: RwlOperationLogEntry[];
@@ -149,6 +151,7 @@ export type CofechaWindowState = {
 };
 
 export type LineChartWindowState = {
+    displayUnits?: RwlDisplayUnits;
     kind: "line-chart";
     siteData: SerializedRwlSiteData;
     selectedTrees: string[];

@@ -1,4 +1,5 @@
 import type { RwlSiteData } from "@/features/rwl/types";
+import { displayUnitFor, displayWidth, workingWidth, type RwlDisplayUnits } from "@/features/rwl/displayUnits";
 
 export type GridFindMatch =
     | { kind: "series"; tree: string }
@@ -14,6 +15,7 @@ export interface GridReplacementResult {
     data: RwlSiteData;
     changed: boolean;
     nextStopMarkerValue?: number;
+    nextDisplayMarkerValue?: number;
 }
 
 /** Match series identifiers and exact grid values, including the format-wide stop marker. */
@@ -21,6 +23,7 @@ export function findGridMatches(
     siteData: RwlSiteData,
     query: string,
     stopMarkerValue: number,
+    units?: RwlDisplayUnits,
 ): GridFindMatch[] {
     const trimmed = query.trim();
     if (!trimmed) return [];
@@ -38,7 +41,8 @@ export function findGridMatches(
 
         const entries = Array.from(treeData.entries()).sort(([left], [right]) => left - right);
         entries.forEach(([year, value]) => {
-            if ((searchesNumbers && value === numericQuery) || (searchesMissing && value === null)) {
+            const shown = units ? displayWidth(value,displayUnitFor(units,tree,year),stopMarkerValue) : value;
+            if ((searchesNumbers && shown === numericQuery) || (searchesMissing && value === null)) {
                 matches.push({
                     kind: "cell",
                     tree,
@@ -102,6 +106,7 @@ export function replaceGridMatches(
     query: string,
     replacement: string,
     stopMarkerValue: number,
+    units?: RwlDisplayUnits,
 ): GridReplacementResult {
     if (matches.length === 0) return { data: siteData, changed: false };
 
@@ -113,14 +118,20 @@ export function replaceGridMatches(
     );
     let changed = false;
     let nextStopMarkerValue: number | undefined;
+    let nextDisplayMarkerValue: number | undefined;
 
     const replacesStopMarker = matches.some((match) => match.kind === "cell" && match.isStopMarker);
     if (
         replacesStopMarker
         && hasNumericReplacement
         && (replacementNumber === 999 || replacementNumber === -9999)
-        && replacementNumber !== stopMarkerValue
+        && (units ? matches.some(m => m.kind === "cell" && m.isStopMarker
+            && displayUnitFor(units,m.tree,m.year).marker !== replacementNumber) : replacementNumber !== stopMarkerValue)
     ) {
+      if (units) {
+        nextDisplayMarkerValue = replacementNumber;
+        changed = true;
+      } else {
         nextData.forEach((treeData) => {
             treeData.forEach((value, year) => {
                 if (value === stopMarkerValue) treeData.set(year, replacementNumber);
@@ -128,12 +139,15 @@ export function replaceGridMatches(
         });
         nextStopMarkerValue = replacementNumber;
         changed = true;
+      }
     }
 
     if (hasNumericReplacement) {
         matches.forEach((match) => {
-            if (match.kind !== "cell" || match.isStopMarker || match.value === replacementNumber) return;
-            nextData.get(match.tree)?.set(match.year, replacementNumber);
+            if (match.kind !== "cell" || match.isStopMarker) return;
+            const value = units ? workingWidth(replacementNumber,displayUnitFor(units,match.tree,match.year)) : replacementNumber;
+            if (match.value === value) return;
+            nextData.get(match.tree)?.set(match.year, value);
             changed = true;
         });
     }
@@ -164,6 +178,7 @@ export function replaceGridMatches(
             return {
                 data: renamedData,
                 changed: true,
+                nextDisplayMarkerValue,
                 ...(nextStopMarkerValue === undefined ? {} : { nextStopMarkerValue }),
             };
         }
@@ -172,6 +187,7 @@ export function replaceGridMatches(
     return {
         data: changed ? nextData : siteData,
         changed,
+        nextDisplayMarkerValue,
         ...(nextStopMarkerValue === undefined ? {} : { nextStopMarkerValue }),
     };
 }

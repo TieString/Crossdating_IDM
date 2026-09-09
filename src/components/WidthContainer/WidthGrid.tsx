@@ -1,4 +1,6 @@
-import { useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useContext, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { RwlDisplayUnitsContext } from "@/features/rwl/DisplayUnitsContext";
+import { displayUnitFor, displayWidth, workingWidth, unitLabel } from "@/features/rwl/displayUnits";
 import { motion, useReducedMotion, type TargetAndTransition, type Transition } from "motion/react";
 import { callChangeYearWidth } from "@/features/rwl/edit";
 import { RollingNumber } from "@/components/RollingNumber/RollingNumber";
@@ -357,6 +359,10 @@ export default function WidthGrid({
     ...rest
 }: WidthGridProps) {
     const { title, onMouseEnter, onMouseMove, onMouseLeave, ...restWithoutTitle } = rest;
+    const units = useContext(RwlDisplayUnitsContext);
+    const unit = displayUnitFor(units, tree ?? "", year ?? NaN);
+    const projectValue = (value: number) => units && tree !== undefined && year !== undefined
+        ? displayWidth(value, unit, units.workingMarker) : value;
     const [isEditing, setIsEditing] = useState(false);
     const [editText, setEditText] = useState("");
     const [hoverPlusSide, setHoverPlusSide] = useState<PlusSide | null>(null);
@@ -415,13 +421,20 @@ export default function WidthGrid({
             : normalizedText === "missing"
                 ? 0
                 : Number(text);
-        const newWidth = typeof parsedWidth === "number" && Number.isNaN(parsedWidth) ? null : parsedWidth;
-
-        setIsEditing(false);
+        if (typeof parsedWidth === "number" && !Number.isFinite(parsedWidth)) {
+            window.alert("请输入有效的轮宽数值。"); return;
+        }
+        const newWidth = parsedWidth;
 
         if (tree !== undefined && year !== undefined) {
-            callChangeYearWidth(tree, year, newWidth);
+            try {
+                callChangeYearWidth(tree, year, units ? workingWidth(newWidth, unit) : newWidth);
+            } catch (error) {
+                window.alert(error instanceof Error ? error.message : String(error));
+                return;
+            }
         }
+        setIsEditing(false);
     };
 
     const handleEditKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
@@ -511,8 +524,8 @@ export default function WidthGrid({
 
     const masterText = masterSeriesValue !== undefined ? masterSeriesValue.toString() : "";
     const widthTitle = `${year !== undefined ? year.toString() : ""}\n${masterText}`;
-    const finalTitle = title || widthTitle;
-    const displayedValue = isMissing ? "missing" : gridValue;
+    const finalTitle = `${title || widthTitle}${units && tree !== undefined && year !== undefined ? `\n单位：${unitLabel(unit.marker)}` : ""}`;
+    const displayedValue = isMissing ? "missing" : typeof gridValue === "number" ? projectValue(gridValue) : gridValue;
     const plusButtonClassName = hoverPlusSide
         ? `${style["insert-missing-button"]} ${style[`insert-missing-button-${hoverPlusSide}`]} ${style["insert-missing-button-visible"]}`
         : style["insert-missing-button"];
@@ -568,7 +581,7 @@ export default function WidthGrid({
             />
         )
         : rollingDigits && typeof displayedValue === "number"
-            ? <RollingNumber value={displayedValue} fromValue={rollingFromValue} speed={animationSpeed} />
+            ? <RollingNumber value={displayedValue} fromValue={rollingFromValue === undefined ? undefined : projectValue(rollingFromValue) ?? undefined} speed={animationSpeed} />
             : displayedValue;
 
     return (

@@ -2,6 +2,7 @@ import { ask, message, open, save } from "@tauri-apps/plugin-dialog";
 import { readTextFile, readFile, writeFile, exists, lstat } from "@tauri-apps/plugin-fs";
 import { invoke } from "@tauri-apps/api/core";
 import { effectiveChangesCsv } from "@/features/rwl/effectiveChanges";
+import { buildRwlDisplayUnits } from "@/features/rwl/displayUnits";
 import { exportWorkspacePackage, importWorkspacePackage, matchWorkspaceRwl,
     workspaceRwl, MAX_PACKAGE_BYTES } from "@/features/workspaceTransfer/package";
 import { commitWorkspaceImport } from "./workspaceImport";
@@ -1965,7 +1966,7 @@ export function useHomeWorkspace() {
         rwlEditorRef.current.replaceTreeData(tree, data);
     }, []);
 
-    const handleReplaceSiteData = useCallback((data: RwlSiteData, nextStopMarkerValue?: number) => {
+    const handleReplaceSiteData = useCallback((data: RwlSiteData, nextStopMarkerValue?: number, nextDisplayMarkerValue?: number) => {
         const editor = rwlEditorRef.current;
         const previousTrees = Array.from(editor.getData().keys());
         const nextTrees = Array.from(data.keys());
@@ -1984,7 +1985,10 @@ export function useHomeWorkspace() {
             stopMarkerValue: precisionChanged ? nextStopMarkerValue : previousReadOptions.stopMarkerValue,
             // Explicit whole-file precision replacement overrides source markers;
             // ordinary renaming carries the source precision to the new ID.
-            tucsonOutputMarkers: precisionChanged ? undefined : previousReadOptions.tucsonOutputMarkers
+            tucsonSegments: previousReadOptions.tucsonSegments?.map(s => ({ ...s, id: treeKeyMap.get(s.id) ?? s.id,
+                marker: nextDisplayMarkerValue === 999 || nextDisplayMarkerValue === -9999 ? nextDisplayMarkerValue : s.marker })),
+            tucsonOutputMarkers: nextDisplayMarkerValue === 999 || nextDisplayMarkerValue === -9999
+                ? Object.fromEntries(nextTrees.map(id => [id,nextDisplayMarkerValue])) : precisionChanged ? undefined : previousReadOptions.tucsonOutputMarkers
                 ? Object.fromEntries(Object.entries(previousReadOptions.tucsonOutputMarkers)
                     .map(([id, marker]) => [treeKeyMap.get(id) ?? id, marker])) : undefined,
         } : undefined;
@@ -2659,7 +2663,9 @@ export function useHomeWorkspace() {
         finally { transferRunningRef.current = false; isFileLoadingRef.current = false; setIsFileLoading(false); }
     }, [exportCurrentWorkspace, referenceConfig, treeRingScanState, replaceEditor, runCofechaAndApplyResult]);
 
+    const displayUnits = useMemo(() => buildRwlDisplayUnits(siteData, rwlEditorRef.current.getReadOptions()), [siteData, operationLog]);
     return {
+        displayUnits,
         handleExportEffectiveChanges,
         handleExportWorkspace,
         handleImportWorkspace,

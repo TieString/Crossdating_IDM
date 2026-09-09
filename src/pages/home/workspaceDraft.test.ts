@@ -4,6 +4,7 @@ import { resolveWorkspaceDraft } from "./workspaceDraft";
 import { loadPersistedHistorySnapshot, persistHistorySnapshot } from "./workspacePersistence";
 import { commitWorkspaceImport } from "./workspaceImport";
 import { exportWorkspacePackage, importWorkspacePackage } from "@/features/workspaceTransfer/package";
+import { buildRwlDisplayUnits, displayUnitFor, displayWidth } from "@/features/rwl/displayUnits";
 
 const backend = vi.hoisted(() => ({
     native: true,
@@ -51,6 +52,26 @@ afterEach(() => { vi.unstubAllGlobals(); });
 
 describe.each([true, false])("draft conflict resolution (native=%s)", (native) => {
     beforeEach(() => { backend.native = native; });
+    it("uses disk display units when values match a stale-unit cache, preserving its baseline and logs", async () => {
+        const source = new Map([["TEST",new Map([[1960,7050],[1961,8150],[1962,-9999]])]]);
+        const cached = new RwlEditor(source,{stopMarkerValue:-9999,tucsonOutputMarkers:{TEST:-9999}},"tucson");
+        cached.setProjectId("units.rwl");
+        cached.changeYearWidth("TEST",1960,7060);
+        const before=cached.toHistorySnapshot();
+        const disk=new RwlEditor(cached.getData(),{stopMarkerValue:-9999,tucsonOutputMarkers:{TEST:999},
+            tucsonSegments:[{id:"TEST",startYear:1960,endYear:1961,terminalYear:1962,marker:999}]},"tucson");
+        const choose=vi.fn(async()=>false);
+        const restored=await resolveWorkspaceDraft("units.rwl",disk,before,choose);
+        const units=buildRwlDisplayUnits(restored.getData(),restored.getReadOptions());
+        expect(displayWidth(restored.getData().get("TEST")!.get(1960)!,displayUnitFor(units,"TEST",1960),units.workingMarker)).toBe(706);
+        expect(restored.toHistorySnapshot().comparisonBaseline).toEqual(before.comparisonBaseline);
+        expect(restored.toHistorySnapshot().operationLogBySeries).toEqual(before.operationLogBySeries);
+        const saved=(await loadPersistedHistorySnapshot("units.rwl"))!;
+        expect(saved.readOptions).toEqual(disk.getReadOptions());
+        const reopened=await resolveWorkspaceDraft("units.rwl",disk,saved,choose);
+        expect(reopened.getReadOptions()).toEqual(disk.getReadOptions());
+        expect(choose).not.toHaveBeenCalled();
+    });
 
     it("persists a disk choice without needing an edit/save and does not prompt on later opens", async () => {
         const path = "site.rwl";

@@ -1,4 +1,5 @@
 import type { RwlOperationLogEntry, RwlPersistedHistorySnapshot, SerializedRwlTreeData } from "./edit";
+import { buildRwlDisplayUnits, displayUnitFor, physicalUnit, unitLabel } from "./displayUnits";
 
 export type EffectiveChange = { series: string; type: string; original: string; current: string;
     oldValue: string; newValue: string; shift: string; unit: string; note: string };
@@ -23,6 +24,8 @@ export function effectiveChanges(snapshot: RwlPersistedHistorySnapshot): Effecti
     const unit = marker === 999 ? "0.01 mm" : "0.001 mm";
     const originals = new Map(baseline.data);
     const current = new Map(snapshot.workingData);
+    const beforeUnits = buildRwlDisplayUnits(new Map(baseline.data.map(([id,rows]) => [id,new Map(rows)])), baseline.readOptions);
+    const afterUnits = buildRwlDisplayUnits(new Map(snapshot.workingData.map(([id,rows]) => [id,new Map(rows)])), snapshot.readOptions);
     const cores = new Map<string, Core>();
     for (const [id, entries] of originals) cores.set(id, { originalId: id, id, unit, uncertain: marker !== baseMarker,
         rings: ordered(entries, baseMarker).map(([year, value]) => ({ origin: year, initial: value, year, value, move: 0 })) });
@@ -117,8 +120,20 @@ export function effectiveChanges(snapshot: RwlPersistedHistorySnapshot): Effecti
         const base = ordered(originals.get(core.originalId), baseMarker);
         const now = ordered(current.get(core.id), marker);
         if (same(base, now) && core.id === core.originalId && marker === baseMarker) continue;
-        const add = (type: string, original = "", present = "", oldValue = "", newValue = "", shift = "", note = "") => output.push({
-            series: core.id, type, original, current: present, oldValue, newValue, shift, unit: core.unit, note });
+        const add = (type: string, original = "", present = "", oldValue = "", newValue = "", shift = "", note = "") => {
+            let rowUnit = core.unit;
+            const numeric = (s: string) => s !== "" && Number.isFinite(Number(s));
+            if ((numeric(oldValue) || numeric(newValue)) && (!original || numeric(original)) && (!present || numeric(present))) {
+                const oldUnit = displayUnitFor(beforeUnits, core.originalId, Number(original));
+                const newUnit = displayUnitFor(afterUnits, core.id, Number(present));
+                const target = !oldValue ? newUnit.marker : !newValue ? oldUnit.marker
+                    : oldUnit.marker === newUnit.marker ? oldUnit.marker : marker;
+                if (numeric(oldValue)) oldValue = String(Number(oldValue) / (physicalUnit(target) / physicalUnit(baseMarker)));
+                if (numeric(newValue)) newValue = String(Number(newValue) / (physicalUnit(target) / physicalUnit(marker)));
+                rowUnit = unitLabel(target);
+            }
+            output.push({ series: core.id, type, original, current: present, oldValue, newValue, shift, unit: rowUnit, note });
+        };
         const blocks = (type: string, oldEntries: SerializedRwlTreeData, newEntries: SerializedRwlTreeData, note = "") => {
             const count = Math.max(1, Math.ceil(Math.max(oldEntries.length, newEntries.length) / 200));
             for (let i = 0; i < count; i++) {

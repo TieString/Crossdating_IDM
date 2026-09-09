@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { RwlDisplayUnitsContext } from "@/features/rwl/DisplayUnitsContext";
+import { stopMarker } from "@/shared/constants";
 import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
@@ -69,7 +71,9 @@ export default function WorkspaceWindowPage() {
                     if (!isMounted || event.payload.kind !== kind) return;
                     hasState = true;
                     stopRetry();
-                    setState(event.payload.state);
+                    const next = event.payload.state;
+                    if (next.kind === "line-chart" && next.displayUnits) stopMarker.value = next.displayUnits.workingMarker;
+                    setState(next);
                 },
             ));
             unlisteners.push(await currentWindow.onCloseRequested(async () => {
@@ -184,6 +188,7 @@ export default function WorkspaceWindowPage() {
 
     if (state.kind === "operation-log") {
         return (
+            <RwlDisplayUnitsContext.Provider value={state.displayUnits}>
             <OperationLogPage
                 fileName={state.fileName}
                 operationLog={state.operationLog}
@@ -194,6 +199,7 @@ export default function WorkspaceWindowPage() {
                 onExportEffectiveChanges={() => sendCommand({ kind: "operation-log", type: "export-effective-changes" })}
                 onClose={closeWindow}
             />
+            </RwlDisplayUnitsContext.Provider>
         );
     }
 
@@ -226,6 +232,7 @@ export default function WorkspaceWindowPage() {
     }
 
     return (
+        <RwlDisplayUnitsContext.Provider value={state.displayUnits}>
         <ExpandedChartPage
             siteData={chartData}
             selectedTrees={state.selectedTrees}
@@ -299,5 +306,6 @@ export default function WorkspaceWindowPage() {
             cofechaPart6Trees={state.cofechaPart6Trees}
             onClose={closeWindow}
         />
+        </RwlDisplayUnitsContext.Provider>
     );
 }

@@ -8,6 +8,7 @@ import {
   toIntOrNull,
 } from "../normalize";
 import { RwlParseError } from "../errors";
+import { segmentOutputMarker } from "../displayUnits";
 
 // Tucson/ITRDB parser and formatter. Explicit 0 values are missing-ring years
 // and are written as values; year gaps are exported as separate same-name segments.
@@ -264,14 +265,10 @@ export function formatTucson(
     // Preserve 0.01 mm source precision only when every edited measurement can
     // still be represented exactly. Otherwise retain the finer working unit.
     for (const segment of segments) {
-      const source = readOptions?.tucsonSegments?.find(s => s.id === treeCode
-        && s.startYear === segment.startYear && s.endYear === segment.values[segment.values.length - 1][0]);
-      const sourceMarker = source?.marker ?? readOptions?.tucsonOutputMarkers?.[treeCode];
-      let outputMarker = internalMarker;
+      const outputMarker = segmentOutputMarker(treeCode, segment.startYear, segment.values[segment.values.length - 1][0],
+        segment.values.map(([,value]) => value), readOptions, internalMarker);
       let outputSegment = segment;
-      if (internalMarker === -9999 && sourceMarker === 999
-        && segment.values.every(([, value]) => value === null || value % 10 === 0)) {
-        outputMarker = 999;
+      if (internalMarker === -9999 && outputMarker === 999) {
         outputSegment = { ...segment, values: segment.values.map(([year, value]) => [year, value === null ? null : value / 10]) };
       }
       // A lone 999 at a decade boundary followed by more data has no unambiguous

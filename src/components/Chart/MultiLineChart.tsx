@@ -16,7 +16,9 @@ import {
   Chart as ChartJSInstance,
   Plugin,
 } from 'chart.js'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { RwlDisplayUnitsContext } from '@/features/rwl/DisplayUnitsContext'
+import { displayUnitFor, physicalUnit, unitLabel } from '@/features/rwl/displayUnits'
 import WidthGridContextMenu from '@/components/WidthContainer/WidthGridContextMenu'
 import type { WholeSeriesMoveDirection } from '@/components/WidthContainer/manualMovePlan'
 import type { DiagnosisEventType, LocalCrossdatingSimulation } from '@/features/crossdating/diagnosis'
@@ -524,6 +526,7 @@ export function makePersistentTooltipPlugin(): Plugin<'line'> & { activeIndex: n
         const raw = ds.data[idx]
         if (raw == null) return
         const referenceMeta = ds as {
+          displayWidths?: Array<string | null>
           referenceDepth?: Array<number | null>
           referenceSd?: Array<number | null>
           referenceSe?: Array<number | null>
@@ -535,11 +538,11 @@ export function makePersistentTooltipPlugin(): Plugin<'line'> & { activeIndex: n
         const referenceSd = referenceMeta.referenceSd?.[idx]
         const referenceSe = referenceMeta.referenceSe?.[idx]
         const referenceActual = referenceMeta.referenceActual?.[idx]
-        const value = typeof raw === 'number'
+        const value = referenceMeta.displayWidths?.[idx] ?? (typeof raw === 'number'
           ? referenceMeta.referenceMode === 'dynamic'
             ? `${(referenceActual ?? raw).toFixed(3)}${referenceDepth != null ? ` (n=${referenceDepth}` : ''}${referenceSd != null ? `, sd=${referenceSd.toFixed(3)}` : ''}${referenceSe != null ? `, se=${referenceSe.toFixed(3)}` : ''}${referenceDepth != null ? ')' : ''}${referenceMeta.referenceDisplayScaled ? ' · 已按宽度轴缩放显示' : ''}`
             : `${Math.round(raw)}${referenceDepth != null ? ` (n=${referenceDepth})` : ''}`
-          : String(raw)
+          : String(raw))
         const name = (ds.label ?? '').slice(0, MAX_LABEL_CHARS)
         const color = ds.borderColor as string
         rows.push({ color, name, value })
@@ -812,6 +815,7 @@ function makeYearIndicatorPlugin(): Plugin<'line'> & { activeIndex: number | nul
 }
 
 type Props = {
+  displayYearOffsets?: ReadonlyMap<string, number>
   data: Map<string, Map<number, number>>
   seriesColors?: ReadonlyMap<string, string>
   diagnosisEventRanges?: readonly ChartDiagnosisEventRange[]
@@ -846,6 +850,7 @@ export const colorPalette = DEFAULT_SERIES_COLOR_PALETTE
 const CHART_FONT_FAMILY = "'Arial', 'Helvetica', sans-serif"
 
 export function MultiLineChart({
+  displayYearOffsets,
   data,
   seriesColors,
   diagnosisEventRanges = [],
@@ -877,6 +882,7 @@ export function MultiLineChart({
   const isDragged = useRef(false)
   // Y 轴视觉缩放窗口（Shift + 滚轮）：仅改变 Y 轴显示范围，不改原始数据/年份/算法结果。null 表示自动范围。
   const [yViewWindow, setYViewWindow] = useState<{ min: number; max: number } | null>(null)
+  const displayUnits = useContext(RwlDisplayUnitsContext)
   const tooltipPlugin = useMemo(() => makePersistentTooltipPlugin(), [])
   const yearIndicatorPlugin = useMemo(() => makeYearIndicatorPlugin(), [])
   const markerLinesPlugin = useMemo(() => makeMarkerLinesPlugin(), [])
@@ -963,6 +969,11 @@ export function MultiLineChart({
       const transparentColor = color + '99'
       nextDatasets.push({
         label: treeCode,
+        ...{ displayWidths: displayUnits ? allYears.map(year => {
+          const value = yearMap.get(year)
+          const unit = displayUnitFor(displayUnits,treeCode,year - (displayYearOffsets?.get(treeCode) ?? 0))
+          return value === undefined || value === null ? null : `${value / unit.multiplier} (${unitLabel(unit.marker)})`
+        }) : undefined },
         data: yData,
         borderColor: highlightedIndex === -1 || isHighlighted ? color : transparentColor,
         backgroundColor: color,
@@ -1030,7 +1041,7 @@ export function MultiLineChart({
     }
 
     return nextDatasets
-  }, [allYears, data, fallbackSeriesColorMap, highlightedIndex, referenceDisplayData, referenceSeries, sampleSize, seriesColors, showSampleSize])
+  }, [displayUnits, displayYearOffsets, allYears, data, fallbackSeriesColorMap, highlightedIndex, referenceDisplayData, referenceSeries, sampleSize, seriesColors, showSampleSize])
 
   // 记忆化 chartData，避免每次渲染（含鼠标移动）都生成新引用导致 react-chartjs-2 重复 update 卡顿。
   const chartData: ChartData<'line'> = useMemo(() => ({
@@ -1313,7 +1324,7 @@ export function MultiLineChart({
           font: { family: CHART_FONT_FAMILY, size: 12 },
           color: '#333',
           padding: 6,
-          callback: (value) => Math.round(Number(value)).toLocaleString(),
+            callback: (value) => Number((Number(value) * physicalUnit(displayUnits?.workingMarker ?? stopMarker.value)).toFixed(3)).toLocaleString(),
         },
         title: {
           display: true,
@@ -1356,7 +1367,7 @@ export function MultiLineChart({
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [allYears.length, sampleSize.max, yMin, yMax, showSampleSize])
+  }), [displayUnits, allYears.length, sampleSize.max, yMin, yMax, showSampleSize])
 
   // 点击折线时切换高亮，并保存当前缩放状态。
   const getClosestTreeAtPoint = useCallback((

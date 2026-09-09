@@ -1,5 +1,6 @@
 import type { ICofechaResult } from "@/features/cofecha/types";
 import type { RwlSiteData } from "@/features/rwl/types";
+import { displayUnitFor, displayWidth, type RwlDisplayUnits } from "@/features/rwl/displayUnits";
 
 type ExportCell = string | number | null;
 type ExportRow = ExportCell[];
@@ -51,7 +52,10 @@ export const publishConsoleDataExport = (
     fileName: string | null,
     siteData: RwlSiteData,
     cofechaResult: ICofechaResult | undefined,
+    displayUnits?: RwlDisplayUnits,
 ) => {
+    const visible = (tree: string, year: number, value: number | null) => displayUnits
+        ? displayWidth(value, displayUnitFor(displayUnits, tree, year), displayUnits.workingMarker) : value;
     const masterSeries = cofechaResult?.masterDatingSeries;
 
     const master = (): ExportRow[] => [
@@ -63,7 +67,7 @@ export const publishConsoleDataExport = (
         const [tree, treeData] = resolveTree(siteData, requestedTree);
         return [
             ["year", tree],
-            ...Array.from(treeData.entries()).sort(([a], [b]) => a - b),
+            ...Array.from(treeData.entries()).sort(([a], [b]) => a - b).map(([year,value]) => [year,visible(tree,year,value)]),
         ];
     };
 
@@ -81,7 +85,7 @@ export const publishConsoleDataExport = (
                 .map((year): ExportRow => [
                     year,
                     masterSeries?.get(year) ?? null,
-                    treeData.get(year) ?? null,
+                    visible(tree,year,treeData.get(year) ?? null),
                 ]),
         ];
     };

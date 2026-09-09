@@ -94,6 +94,7 @@ import {
 } from "./home/workspaceWindowBridge";
 import { useResizablePanels } from "./useResizablePanels";
 import { publishConsoleDataExport } from "./home/consoleDataExport";
+import { RwlDisplayUnitsContext } from "@/features/rwl/DisplayUnitsContext";
 import { enhanceCofechaPart2View } from "./home/cofechaPart2View";
 import { CofechaOutExportButton } from "./home/CofechaOutExportButton";
 import { CofechaUndatedControls } from "./home/CofechaUndatedControls";
@@ -438,6 +439,7 @@ export default function Home() {
         isEventDiagnosisRunning,
         isFileLoading,
         operationLog,
+        displayUnits,
         rwlOperationLog,
         possibleProblemsDetail,
         problemTextColor,
@@ -532,8 +534,8 @@ export default function Home() {
     }, []);
 
     useEffect(() => {
-        publishConsoleDataExport(fileName, siteData, cofechaResult);
-    }, [cofechaResult, fileName, siteData]);
+        publishConsoleDataExport(fileName, siteData, cofechaResult, displayUnits);
+    }, [cofechaResult, fileName, siteData, displayUnits]);
 
     const presentedCrossdatingDiagnosis = useMemo(() => {
         if (!dismissedDiagnosisTree) return crossdatingDiagnosis;
@@ -989,6 +991,7 @@ export default function Home() {
     const workspaceWindowState = useMemo<Record<WorkspaceWindowKind, WorkspaceWindowState>>(() => ({
         "operation-log": {
             kind: "operation-log",
+            displayUnits,
             fileName,
             operationLog,
             canResetToRawData,
@@ -1016,6 +1019,7 @@ export default function Home() {
         },
         "line-chart": {
             kind: "line-chart",
+            displayUnits,
             siteData: serializeRwlSiteData(siteData),
             selectedTrees: chartSelectedTrees,
             treeOffsets: Array.from(chartTreeOffsets.entries()),
@@ -1028,7 +1032,7 @@ export default function Home() {
             diagnosisBatchResult,
             cofechaPart6Trees: cofechaPart6TreeList,
         },
-    }), [activeDiagnosisEvent, canExportCofechaOut, canResetToRawData, chartJumpTarget, chartSelectedTrees, chartTreeOffsets,
+    }), [displayUnits, activeDiagnosisEvent, canExportCofechaOut, canResetToRawData, chartJumpTarget, chartSelectedTrees, chartTreeOffsets,
         cofechaPart6JumpTarget, cofechaPart6TreeList, cofechaPartOptions, cofechaResult, cofechaUndatedFileName,
         cofechaUndatedSort, crossdatingValidationSummary, diagnosisBatchResult, dynamicReferenceConfig, fileName,
         isCofechaOutdated, isCofechaRunning, linkedReport, operationLog, presentedCrossdatingDiagnosis,
@@ -1301,8 +1305,8 @@ export default function Home() {
 
     // 左侧宽度模块同时匹配序列名、数值格、missing 与格式终止分隔符。
     const gridMatches = useMemo(
-        () => findGridMatches(siteData, findQuery, stopMarker.value),
-        [findQuery, siteData],
+        () => findGridMatches(siteData, findQuery, stopMarker.value, displayUnits),
+        [findQuery, siteData, displayUnits],
     );
 
     const matchCount = isRawEditing ? rawEditorSearchState.count : gridMatches.length;
@@ -1391,8 +1395,8 @@ export default function Home() {
         const afterKeys = Array.from(result.data.keys());
         const seriesNamesChanged = beforeKeys.length !== afterKeys.length
             || beforeKeys.some((tree, index) => tree !== afterKeys[index]);
-        if (seriesNamesChanged || result.nextStopMarkerValue !== undefined) {
-            handleReplaceSiteData(result.data, result.nextStopMarkerValue);
+        if (seriesNamesChanged || result.nextStopMarkerValue !== undefined || result.nextDisplayMarkerValue !== undefined) {
+            handleReplaceSiteData(result.data, result.nextStopMarkerValue, result.nextDisplayMarkerValue);
             return;
         }
 
@@ -1416,31 +1420,23 @@ export default function Home() {
         }
         const match = gridMatches[effectiveMatchIndex];
         if (!match) return;
-        const result = replaceGridMatches(
-            siteData,
-            [match],
-            findQuery,
-            replaceValue,
-            stopMarker.value,
-        );
-        commitGridReplacement([match], result);
-    }, [commitGridReplacement, effectiveMatchIndex, findQuery, gridMatches, isRawEditing, replaceValue, siteData]);
+        try {
+            const result = replaceGridMatches(siteData,[match],findQuery,replaceValue,stopMarker.value,displayUnits);
+            commitGridReplacement([match], result);
+        } catch (error) { window.alert(error instanceof Error ? error.message : String(error)); }
+    }, [displayUnits, commitGridReplacement, effectiveMatchIndex, findQuery, gridMatches, isRawEditing, replaceValue, siteData]);
 
     const handleReplaceAll = useCallback(() => {
         if (isRawEditing) {
             rawEditorRef.current?.replaceAll();
             return;
         }
-        const result = replaceGridMatches(
-            siteData,
-            gridMatches,
-            findQuery,
-            replaceValue,
-            stopMarker.value,
-        );
-        commitGridReplacement(gridMatches, result);
+        try {
+            const result = replaceGridMatches(siteData,gridMatches,findQuery,replaceValue,stopMarker.value,displayUnits);
+            commitGridReplacement(gridMatches, result);
+        } catch (error) { window.alert(error instanceof Error ? error.message : String(error)); }
         setFindMatchIndex(0);
-    }, [commitGridReplacement, findQuery, gridMatches, isRawEditing, replaceValue, siteData]);
+    }, [displayUnits, commitGridReplacement, findQuery, gridMatches, isRawEditing, replaceValue, siteData]);
 
     const getRawEditorText = useCallback(() => (
         rawEditorRef.current?.getValue() ?? rawEditorInitialText
@@ -1589,7 +1585,7 @@ export default function Home() {
     }, []);
 
     return (
-        <>
+        <RwlDisplayUnitsContext.Provider value={displayUnits}>
             <HomeTitleBarBridge
                 title={chartTreeOffsets.size > 0 && !windowTitle.endsWith(" *") ? `${windowTitle} *` : windowTitle}
                 onLoad={handleLoad}
@@ -2083,6 +2079,6 @@ export default function Home() {
                 items={panelContextMenuItems}
                 onClose={closePanelContextMenu}
             />
-        </>
+        </RwlDisplayUnitsContext.Provider>
     );
 }

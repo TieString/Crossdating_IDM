@@ -5,11 +5,12 @@ import style from './SeriesTextEditor.module.css';
 // ── Data conversion ────────────────────────────────────────────────────────
 
 /** Converts a series map into the line-oriented text format used by SeriesTextEditor. */
-export function seriesDataToText(data: Map<number, number | null>, stopMarkerValue: number): string {
+export function seriesDataToText(data: Map<number, number | null>, stopMarkerValue: number,
+    display?: (year: number, value: number) => number): string {
     return Array.from(data.entries())
         .filter(([, v]) => v !== stopMarkerValue)
         .sort(([a], [b]) => a - b)
-        .map(([year, width]) => `${year}\t${width === null ? 'missing' : width}`)
+        .map(([year, width]) => `${year}\t${width === null ? 'missing' : display ? display(year,width) : width}`)
         .join('\n');
 }
 
@@ -17,6 +18,7 @@ export function seriesDataToText(data: Map<number, number | null>, stopMarkerVal
 export function textToSeriesData(
     text: string,
     stopMarkerValue: number,
+    toWorking?: (year: number, value: number) => number,
 ): Map<number, number | null> | null {
     const data = new Map<number, number | null>();
 
@@ -37,6 +39,7 @@ export function textToSeriesData(
         } else {
             value = Number(valueStr);
             if (!Number.isInteger(value) || !Number.isFinite(value)) return null;
+            if (toWorking) value = toWorking(year, value);
         }
 
         data.set(year, value);

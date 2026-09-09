@@ -1,4 +1,6 @@
-import { Suspense, lazy, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { Suspense, lazy, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { RwlDisplayUnitsContext } from "@/features/rwl/DisplayUnitsContext";
+import { displayUnitFor, unitLabel, type RwlDisplayUnits } from "@/features/rwl/displayUnits";
 import { motion } from "motion/react";
 import { FloatingScrollArea } from "@/components/FloatingScrollArea/FloatingScrollArea";
 import { cofechaReportShowsPart6, findCofechaPart6Anchor, scrollCofechaAnchorIntoView } from "./cofechaReportAnchor";
@@ -92,9 +94,11 @@ const formatLogValue = (value: number | null | undefined) => {
     return formatMetricValue(value);
 };
 
-const formatValueChange = (entry: RwlOperationLogEntry) => {
+const formatValueChange = (entry: RwlOperationLogEntry, units?: RwlDisplayUnits) => {
     if (entry.oldValue === undefined && entry.newValue === undefined) return null;
-    return `值 ${formatLogValue(entry.oldValue)} -> ${formatLogValue(entry.newValue)}`;
+    const unit = displayUnitFor(units, entry.tree ?? entry.seriesId ?? "", entry.targetYear ?? entry.newYear ?? entry.oldYear ?? NaN);
+    const show = (value: number | null | undefined) => formatLogValue(typeof value === "number" ? value / unit.multiplier : value);
+    return `值 ${show(entry.oldValue)} -> ${show(entry.newValue)}${units ? `（${unitLabel(unit.marker)}）` : ""}`;
 };
 
 const formatYearChange = (entry: RwlOperationLogEntry) => {
@@ -123,6 +127,7 @@ export function OperationLogPage({
     onExportEffectiveChanges,
     onClose,
 }: OperationLogPageProps) {
+    const displayUnits = useContext(RwlDisplayUnitsContext);
     const [logQuery, setLogQuery] = useState("");
     const filteredOperationLog = useMemo(() => {
         const query = logQuery.trim().toLowerCase();
@@ -144,13 +149,13 @@ export function OperationLogPage({
                 entry.oldYear,
                 entry.newYear,
                 formatAffectedRange(entry),
-                formatValueChange(entry),
+                formatValueChange(entry, displayUnits),
                 formatYearChange(entry),
             ].filter((value) => value !== undefined && value !== null).join(" ").toLowerCase();
 
             return searchable.includes(query);
         });
-    }, [logQuery, operationLog]);
+    }, [logQuery, operationLog, displayUnits]);
 
     const sequenceGroups = useMemo(() => {
         const groups = new Map<string, RwlOperationLogEntry[]>();
@@ -238,7 +243,7 @@ export function OperationLogPage({
                                         const range = formatAffectedRange(entry);
                                         const jumpYear = entry.targetYear ?? entry.affectedRange?.startYear;
                                         const auditLabels = [
-                                            formatValueChange(entry),
+                                            formatValueChange(entry, displayUnits),
                                             formatYearChange(entry),
                                             entry.targetIndex === undefined ? null : `index ${entry.targetIndex}`,
                                         ].filter((label): label is string => Boolean(label));
@@ -259,7 +264,8 @@ export function OperationLogPage({
                                                         <div className={styles["log-entry-title-row"]}>
                                                             <h3>{entry.summary}</h3>
                                                         </div>
-                                                        <p>{entry.detail}</p>
+                                                        <p>{entry.operation?.type === "change-width" && displayUnits
+                                                            ? `${entry.tree} · ${entry.operation.year} · ${formatValueChange(entry, displayUnits)}` : entry.detail}</p>
                                                         {(entry.operationType || range || auditLabels.length > 0) ? (
                                                             <p className={styles["log-entry-details"]}>
                                                                 {entry.operationType ? <span>{entry.operationType}</span> : null}

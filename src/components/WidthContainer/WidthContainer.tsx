@@ -1,4 +1,6 @@
-import { memo, ReactNode, RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, ReactNode, RefObject, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { RwlDisplayUnitsContext } from '@/features/rwl/DisplayUnitsContext';
+import { displayUnitFor, workingWidth, unitLabel } from '@/features/rwl/displayUnits';
 import { createPortal, flushSync } from 'react-dom';
 import { RwlSiteData } from '@/features/rwl';
 import {
@@ -958,6 +960,7 @@ function WidthContainer({
     scrollContainerRef,
     scrollElement
 }: WidthContainerProps): ReactNode {
+    const displayUnits = useContext(RwlDisplayUnitsContext);
     const visibleSite = useMemo(() => (
         selected && site.has(selected)
             ? (() => {
@@ -2588,10 +2591,11 @@ function WidthContainer({
         if (newText === undefined) return;
         const treeData = visibleSite.get(tree);
         if (!treeData) return;
-        const parsed = textToSeriesData(newText, stopMarker.value);
+        const parsed = textToSeriesData(newText, stopMarker.value,
+            (year,value) => workingWidth(value,displayUnitFor(displayUnits,tree,year))!);
         if (!parsed) return;
         onReplaceTreeData?.(tree, parsed);
-    }, [visibleSite, onReplaceTreeData]);
+    }, [visibleSite, onReplaceTreeData, displayUnits]);
 
     const handleContextMenuDeleteSeries = useCallback((tree: string) => {
         setContextMenu(null);
@@ -3013,7 +3017,8 @@ function WidthContainer({
                     {textEditTree === series.treeCode ? (
                         <SeriesTextEditor
                             treeCode={series.treeCode}
-                            initialText={seriesDataToText(seriesData, stopMarker.value)}
+                            initialText={seriesDataToText(seriesData, stopMarker.value,
+                                (year,value) => value / displayUnitFor(displayUnits,series.treeCode,year).multiplier)}
                             stopMarkerValue={stopMarker.value}
                             onClose={(newText) => handleTextEditorClose(series.treeCode, newText)}
                         />
@@ -3025,6 +3030,7 @@ function WidthContainer({
                                     {yearRange && (
                                         <span className={style["series-header-range"]}>
                                             {yearRange[0]}–{yearRange[1]} · {yearRange[1] - yearRange[0] + 1} 年
+                                            {displayUnits?.series[series.treeCode] ? ` · ${[...new Set(displayUnits.series[series.treeCode].ranges.map(r => unitLabel(r.marker)))].join(" / ")}` : ""}
                                         </span>
                                     )}
                                 </span>
@@ -3319,7 +3325,7 @@ function WidthContainer({
                         >
                             {info.deletedWidth === null
                                 ? <span>missing</span>
-                                : <RollingNumber value={info.deletedWidth} speed={animationSpeed} />}
+                                : <RollingNumber value={info.deletedWidth / displayUnitFor(displayUnits,hoveredMarker?.tree ?? "",item.year).multiplier} speed={animationSpeed} />}
                             {stackSize > 1 ? (
                                 <span className={style["deletion-preview-ghost-count"]}>×{stackSize}</span>
                             ) : null}

@@ -1118,6 +1118,7 @@ function TreeChartManagerBase({
       <div style={{ flex: '1 1 auto', minHeight: 0 }}>
         <MultiLineChart
           data={filteredData}
+          displayYearOffsets={treeOffsets}
           seriesColors={seriesColorMap}
           diagnosisEventRanges={diagnosisEventRanges}
           missingRingYears={missingRingYears}
