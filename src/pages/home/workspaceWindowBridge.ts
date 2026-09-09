@@ -184,6 +184,7 @@ export type WorkspaceWindowClosedPayload = {
 };
 
 export type WorkspaceWindowCommand =
+    | { kind: "transfer"; type: "export-workspace" | "import-workspace" }
     | { kind: "operation-log"; type: "export-effective-changes" }
     | { kind: "operation-log"; type: "undo-log-entry"; entryId: string }
     | { kind: "operation-log"; type: "reset-to-raw" }

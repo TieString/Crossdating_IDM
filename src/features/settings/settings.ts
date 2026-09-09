@@ -45,6 +45,13 @@ export interface DiagnosisSettings {
 export interface TreeRingImageSettings {
     /** Show generated tree-ring artwork inside the series header button. */
     showGeneratedPreview: boolean;
+    /** Soft disk cache budget; active reads may temporarily exceed it. */
+    scanCacheLimitGiB: number;
+}
+
+export const SCAN_CACHE_LIMITS_GIB = [2, 4, 8, 16, 32, 64, 128] as const;
+export function normalizeScanCacheLimitGiB(value: unknown): number {
+    return typeof value === "number" && (SCAN_CACHE_LIMITS_GIB as readonly number[]).includes(value) ? value : 16;
 }
 
 /** Persisted application settings shape. */
@@ -77,6 +84,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     },
     treeRingImage: {
         showGeneratedPreview: true,
+        scanCacheLimitGiB: 16,
     },
 };
 
@@ -136,6 +144,7 @@ export function loadSettings(): AppSettings {
                     : DEFAULT_SETTINGS.diagnosis.enabled,
             },
             treeRingImage: {
+                scanCacheLimitGiB: normalizeScanCacheLimitGiB((parsedTreeRingImage as Partial<TreeRingImageSettings>).scanCacheLimitGiB),
                 showGeneratedPreview: typeof parsedGeneratedPreview === "boolean"
                     ? parsedGeneratedPreview
                     : DEFAULT_SETTINGS.treeRingImage.showGeneratedPreview,

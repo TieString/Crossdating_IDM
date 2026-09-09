@@ -4,6 +4,7 @@ import App from "./App";
 import { SettingsProvider } from "@/features/settings/SettingsContext";
 import SettingsPage from "@/pages/settings/SettingsPage";
 import WorkspaceWindowPage from "@/pages/workspace/WorkspaceWindowPage";
+import { runPendingCacheCleanup } from "@/services/fs/cacheMaintenance";
 
 const page = new URLSearchParams(window.location.search).get("page");
 const isSettingsPage = page === "settings";
@@ -25,7 +26,12 @@ if (isSettingsPage || isWorkspaceWindowPage) {
     }
 }
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+async function mountApplication() {
+    if (!isSettingsPage && !isWorkspaceWindowPage) {
+        try { await runPendingCacheCleanup(); }
+        catch (error) { console.warn("缓存清理未完成，保留任务供下次启动重试:", error); }
+    }
+    ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
         {isSettingsPage ? (
             <SettingsProvider>
@@ -40,3 +46,5 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
         )}
     </React.StrictMode>,
 );
+}
+void mountApplication();

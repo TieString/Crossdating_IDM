@@ -417,6 +417,8 @@ export default function Home() {
         handleRestoreDeletion,
         handleExportCofechaOut,
         handleExportEffectiveChanges,
+        handleExportWorkspace,
+        handleImportWorkspace,
         handleLoadCofechaUndated,
         handleClearCofechaUndated,
         handleCofechaUndatedSortChange,
@@ -1122,7 +1124,14 @@ export default function Home() {
     }, []);
 
     const handleWorkspaceWindowCommand = useCallback((command: WorkspaceWindowCommand) => {
+        if (isFileLoading) return;
         switch (command.kind) {
+            case "transfer":
+                if (command.type === "export-workspace") void handleExportWorkspace();
+                else void handleImportWorkspace().then((imported) => {
+                    if (imported) { setChartTreeOffsets(new Map()); setChartSelectedTrees([]); }
+                });
+                break;
             case "operation-log":
                 if (command.type === "export-effective-changes") {
                     void handleExportEffectiveChanges();
@@ -1195,11 +1204,14 @@ export default function Home() {
     }, [
         handleCofechaCellReferenceClick,
         handleChartLocateWidth,
+        handleExportEffectiveChanges,
+        handleExportWorkspace,
+        handleImportWorkspace,
+        isFileLoading,
         handleChartSeriesVisibilityChange,
         handleChartSelectedTreesChange,
         handleChartTreeOffsetsChange,
         handleExportCofechaOut,
-        handleExportEffectiveChanges,
         handleLoadCofechaUndated,
         handleClearCofechaUndated,
         handleCofechaUndatedSortChange,

@@ -7,7 +7,7 @@ import {
 } from "@/features/treeRingScans";
 import { isTauri } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
-import { exists, mkdir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { exists, mkdir, readTextFile, writeTextFile, rename } from "@tauri-apps/plugin-fs";
 
 const COFECHA_STORAGE_PREFIX = "crossdating:cofecha-state:v1:";
 const REFERENCE_STORAGE_PREFIX = "crossdating:reference-state:v1:";
@@ -112,11 +112,16 @@ const getWorkspaceStateFilePath = async (kind: WorkspaceStateKind, filePath: str
     return join(stateDir, `${kind}-${stablePathHash(filePath)}.json`);
 };
 
-const enqueueWorkspaceFileWrite = async (path: string, content: string) => {
+const enqueueWorkspaceFileWrite = async (path: string, content: string, atomic = false) => {
     const previous = workspaceWriteQueues.get(path) ?? Promise.resolve();
     const current = previous
         .catch(() => undefined)
-        .then(() => writeTextFile(path, content));
+        .then(async () => {
+            if (!atomic) return writeTextFile(path, content);
+            const staging = `${path}.import-tmp`;
+            await writeTextFile(staging, content);
+            await rename(staging, path);
+        });
     workspaceWriteQueues.set(path, current);
     try {
         await current;
@@ -158,6 +163,7 @@ const persistWorkspaceState = async <T>(
     filePath: string,
     value: T,
     label: string,
+    requireDurable = false,
 ) => {
     const legacyKey = getLegacyStorageKey(kind, filePath);
     if (runningInTauri()) {
@@ -168,10 +174,11 @@ const persistWorkspaceState = async <T>(
                 filePath,
                 value,
             };
-            await enqueueWorkspaceFileWrite(statePath, JSON.stringify(envelope));
+            await enqueueWorkspaceFileWrite(statePath, JSON.stringify(envelope), requireDurable);
             removeLegacyState(legacyKey);
             return;
         } catch (error) {
+            if (requireDurable) throw error;
             console.warn(`保存${label}到应用数据目录失败，回退到浏览器缓存:`, error);
         }
     }
@@ -180,6 +187,7 @@ const persistWorkspaceState = async <T>(
     try {
         window.localStorage.setItem(legacyKey, JSON.stringify(value));
     } catch (error) {
+        if (requireDurable) throw error;
         console.warn(`保存${label}失败:`, error);
     }
 };
@@ -318,6 +326,11 @@ export const loadPersistedHistorySnapshot = (filePath: string) => (
 
 export const persistHistorySnapshot = (filePath: string, editor: RwlEditor) => (
     persistWorkspaceState("history", filePath, editor.toHistorySnapshot(), "操作日志")
+);
+
+/** Import commits one complete state before the active editor is replaced. */
+export const persistImportedHistorySnapshot = (filePath: string, editor: RwlEditor) => (
+    persistWorkspaceState("history", filePath, editor.toHistorySnapshot(), "导入工作区", true)
 );
 
 export const loadPersistedTreeRingScanState = (filePath: string) => (

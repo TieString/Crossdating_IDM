@@ -5,6 +5,8 @@ use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::BufReader;
+use std::io::Read;
+use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 use tauri::command;
@@ -12,12 +14,29 @@ use tauri::{AppHandle, Manager};
 use tiff::decoder::{ChunkType, Decoder, DecodingResult, Limits as TiffLimits};
 use tiff::ColorType as TiffColorType;
 
+/// Hash explicitly selected files in bounded memory, including GB-sized scans.
+#[command]
+pub async fn workspace_file_sha256(path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut input = fs::File::open(&path).map_err(|error| error.to_string())?;
+        let mut hash = Sha256::new();
+        let mut buffer = vec![0_u8; 1024 * 1024];
+        loop {
+            let count = input.read(&mut buffer).map_err(|error| error.to_string())?;
+            if count == 0 { break; }
+            hash.update(&buffer[..count]);
+        }
+        Ok(format!("{:x}", hash.finalize()))
+    }).await.map_err(|error| error.to_string())?
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreparedTreeRingScanImage {
     path: String,
     mime_type: String,
     crop_applied: bool,
+    lease_id: String,
 }
 
 #[derive(Clone, Copy, serde::Deserialize)]
@@ -29,7 +48,6 @@ pub struct TreeRingScanCrop {
     height_ratio: f64,
 }
 
-const TREE_RING_SCAN_CACHE_MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const TREE_RING_TIFF_PREVIEW_MAX_EDGE: u32 = 4096;
 const TREE_RING_TIFF_PREVIEW_MAX_PIXELS: u64 = 12 * 1024 * 1024;
 const TREE_RING_TIFF_CROP_MAX_PIXELS: u64 = 128 * 1024 * 1024;
@@ -309,49 +327,42 @@ fn convert_tree_ring_tiff_to_png(
         .map_err(|error| format!("无法缓存 TIFF 扫描影像 {}: {}", source.display(), error))
 }
 
-fn prune_tree_ring_scan_cache(cache_dir: &Path, protected_path: &Path) {
-    let Ok(entries) = fs::read_dir(cache_dir) else {
-        return;
-    };
-    let mut files = entries
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let metadata = entry.metadata().ok()?;
-            if !metadata.is_file() {
-                return None;
-            }
-            let modified = metadata
-                .modified()
-                .ok()
-                .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
-                .map(|value| value.as_secs())
-                .unwrap_or(0);
-            Some((entry.path(), metadata.len(), modified))
-        })
-        .collect::<Vec<_>>();
-    let mut total = files.iter().map(|(_, size, _)| *size).sum::<u64>();
-    files.sort_by_key(|(_, _, modified)| *modified);
-    for (path, size, _) in files {
-        if total <= TREE_RING_SCAN_CACHE_MAX_BYTES {
-            break;
-        }
-        if path == protected_path {
-            continue;
-        }
-        if fs::remove_file(&path).is_ok() {
-            total = total.saturating_sub(size);
-        }
-    }
-}
-
 #[command]
 /// Lazily copies one externally selected scan into app cache. TIFF is converted to PNG
 /// so WebView2 can display it, while all other supported formats remain byte-identical.
-pub fn prepare_tree_ring_scan_image(
+pub async fn prepare_tree_ring_scan_image(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    source_path: String,
+    crop: Option<TreeRingScanCrop>,
+    cache_limit_gib: Option<u64>,
+) -> Result<PreparedTreeRingScanImage, String> {
+    let owner = window.label().to_owned();
+    tauri::async_runtime::spawn_blocking(move || {
+        prepare_scan_image(app, &source_path, crop, cache_limit_gib, &owner)
+    }).await.map_err(|error| error.to_string())?
+}
+
+#[command]
+pub async fn release_tree_ring_scan_image(window: tauri::WebviewWindow, lease_id: String) -> Result<(), String> {
+    let owner = window.label().to_owned();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut cache = crate::scan_cache::state().lock().map_err(|error| error.to_string())?;
+        cache.release(&lease_id, &owner);
+        Ok(())
+    }).await.map_err(|error| error.to_string())?
+}
+
+fn prepare_scan_image(
     app: AppHandle,
     source_path: &str,
     crop: Option<TreeRingScanCrop>,
+    cache_limit_gib: Option<u64>,
+    owner: &str,
 ) -> Result<PreparedTreeRingScanImage, String> {
+    // All windows share this creation/eviction lock. Expensive TIFF work runs
+    // off the UI thread, and duplicate preparations cannot write the same file.
+    let mut cache = crate::scan_cache::state().lock().map_err(|error| error.to_string())?;
     let source = Path::new(source_path);
     let metadata = source
         .metadata()
@@ -414,19 +425,29 @@ pub fn prepare_tree_ring_scan_image(
     let output_path = cache_dir.join(format!("{:016x}.{}", cache_key, output_extension));
 
     if !output_path.exists() {
-        if is_tiff {
-            convert_tree_ring_tiff_to_png(source, &output_path, crop.as_ref())?;
+        // Publish only complete files. A failed conversion/copy must not leave
+        // a truncated cache hit for the next attempt.
+        let staging_path = output_path.with_extension(format!("{output_extension}.partial"));
+        let prepared = if is_tiff {
+            convert_tree_ring_tiff_to_png(source, &staging_path, crop.as_ref())
         } else {
-            fs::copy(source, &output_path)
-                .map_err(|error| format!("无法缓存扫描影像 {}: {}", source.display(), error))?;
+            fs::copy(source, &staging_path).map(|_| ())
+                .map_err(|error| format!("无法缓存扫描影像 {}: {}", source.display(), error))
+        };
+        if let Err(error) = prepared {
+            let _ = fs::remove_file(&staging_path);
+            return Err(error);
         }
+        fs::rename(&staging_path, &output_path).map_err(|error| format!("写入完整扫描影像缓存失败: {error}"))?;
     }
-    prune_tree_ring_scan_cache(&cache_dir, &output_path);
+    if app.get_webview_window(owner).is_none() { return Err("影像窗口已关闭".to_string()); }
+    let lease_id = cache.acquire(&output_path, owner, crate::scan_cache::limit_bytes(cache_limit_gib))?;
 
     Ok(PreparedTreeRingScanImage {
         path: output_path.to_string_lossy().into_owned(),
         mime_type: mime_type.to_string(),
         crop_applied: is_tiff && crop.is_some(),
+        lease_id,
     })
 }
 
@@ -451,6 +472,18 @@ mod tree_ring_tiff_tests {
             std::process::id(),
             suffix
         ))
+    }
+
+    #[test]
+    fn workspace_hash_preserves_original_file() {
+        let dir = temporary_test_directory("workspace-hash");
+        fs::create_dir(&dir).unwrap();
+        let path = dir.join("original.rwl");
+        fs::write(&path, b"abc").unwrap();
+        let hash = tauri::async_runtime::block_on(super::workspace_file_sha256(path.to_string_lossy().into_owned())).unwrap();
+        assert_eq!(hash, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        assert_eq!(fs::read(&path).unwrap(), b"abc");
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

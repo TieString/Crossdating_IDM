@@ -3,6 +3,7 @@ import { join } from "@tauri-apps/api/path";
 import { readDir, readFile } from "@tauri-apps/plugin-fs";
 import type { TreeRingScanCrop, TreeRingScanFile } from "./types";
 import { normalizeTreeRingScanSeriesKey } from "./types";
+import { loadSettings } from "@/features/settings/settings";
 
 const SUPPORTED_SCAN_EXTENSIONS = new Set([
     "svg",
@@ -41,12 +42,14 @@ interface CachedScanImage {
     cropApplied: boolean;
     referenceCount: number;
     lastUsed: number;
+    retired: boolean;
 }
 
 interface PreparedTreeRingScanImage {
     path: string;
     mimeType: string;
     cropApplied?: boolean;
+    leaseId?: string;
 }
 
 export function isFullResolutionTreeRingScanCrop(
@@ -68,7 +71,8 @@ export interface AcquiredTreeRingScanImage {
 }
 
 const scanImageCache = new Map<string, CachedScanImage>();
-const pendingScanImages = new Map<string, Promise<CachedScanImage>>();
+const pendingScanImages = new Map<string, { promise: Promise<CachedScanImage>; users: number }>();
+let cacheGeneration = 0;
 const MAX_SCAN_IMAGE_CACHE_ENTRIES = 12;
 const MAX_SCAN_IMAGE_CACHE_BYTES = 384 * 1024 * 1024;
 
@@ -173,6 +177,7 @@ async function prepareScanImageIfAvailable(
         return await invoke<PreparedTreeRingScanImage>(PREPARE_SCAN_COMMAND, {
             sourcePath: path,
             crop: crop ?? null,
+            cacheLimitGib: loadSettings().treeRingImage.scanCacheLimitGiB,
         });
     } catch (error) {
         if (isMissingTreeRingScanPrepareCommandError(error)) return null;
@@ -193,20 +198,38 @@ async function loadScanImage(
 ): Promise<CachedScanImage> {
     const cacheKey = scanImageCacheKey(path, crop);
     const existing = scanImageCache.get(cacheKey);
-    if (existing) return existing;
+    if (existing) {
+        existing.referenceCount += 1;
+        return existing;
+    }
 
     const pending = pendingScanImages.get(cacheKey);
-    if (pending) return pending;
+    if (pending) {
+        pending.users += 1;
+        return pending.promise;
+    }
 
+    const generation = cacheGeneration;
+    const reservation = { users: 1, promise: null! as Promise<CachedScanImage> };
     const promise = (async () => {
         const prepared = await prepareScanImageIfAvailable(path, crop);
-        if (!isFullResolutionTreeRingScanCrop(extension, crop, prepared)) {
-            throw new Error(
-                "当前程序仍在使用旧版扫描影像后端，选框只能读取低分辨率总览；请完全退出并重新启动软件后再打开该截面。",
-            );
+        let bytes: Uint8Array;
+        try {
+            if (!isFullResolutionTreeRingScanCrop(extension, crop, prepared)) {
+                throw new Error(
+                    "当前程序仍在使用旧版扫描影像后端，选框只能读取低分辨率总览；请完全退出并重新启动软件后再打开该截面。",
+                );
+            }
+            const readablePath = prepared?.path ?? path;
+            bytes = await readFile(readablePath);
+        } finally {
+            // Backend eviction must not delete a prepared file between invoke
+            // returning its path and readFile completing in this window.
+            if (prepared?.leaseId) {
+                void invoke("release_tree_ring_scan_image", { leaseId: prepared.leaseId })
+                    .catch((error) => console.warn("释放扫描影像读取保护失败:", error));
+            }
         }
-        const readablePath = prepared?.path ?? path;
-        const bytes = await readFile(readablePath);
         const mime = prepared?.mimeType
             ?? MIME_BY_EXTENSION[extension.toLocaleLowerCase()]
             ?? "application/octet-stream";
@@ -216,16 +239,18 @@ async function loadScanImage(
             url,
             byteLength: bytes.byteLength,
             cropApplied: prepared?.cropApplied ?? false,
-            referenceCount: 0,
+            referenceCount: reservation.users,
             lastUsed: Date.now(),
+            retired: generation !== cacheGeneration,
         };
-        scanImageCache.set(cacheKey, loaded);
+        if (!loaded.retired) scanImageCache.set(cacheKey, loaded);
         trimScanImageCache();
         return loaded;
     })().finally(() => {
-        pendingScanImages.delete(cacheKey);
+        if (pendingScanImages.get(cacheKey) === reservation) pendingScanImages.delete(cacheKey);
     });
-    pendingScanImages.set(cacheKey, promise);
+    reservation.promise = promise;
+    pendingScanImages.set(cacheKey, reservation);
     return promise;
 }
 
@@ -243,7 +268,6 @@ export async function acquireTreeRingScanImage(
         };
     }
     const entry = await loadScanImage(file.path, file.extension, crop);
-    entry.referenceCount += 1;
     entry.lastUsed = Date.now();
     let released = false;
     return {
@@ -255,13 +279,18 @@ export async function acquireTreeRingScanImage(
             released = true;
             entry.referenceCount = Math.max(0, entry.referenceCount - 1);
             entry.lastUsed = Date.now();
+            if (entry.retired && entry.referenceCount === 0) URL.revokeObjectURL(entry.url);
             trimScanImageCache();
         },
     };
 }
 
 export function clearTreeRingScanImageCache(): void {
-    scanImageCache.forEach((entry) => URL.revokeObjectURL(entry.url));
+    cacheGeneration += 1;
+    scanImageCache.forEach((entry) => {
+        entry.retired = true;
+        if (entry.referenceCount === 0) URL.revokeObjectURL(entry.url);
+    });
     scanImageCache.clear();
     pendingScanImages.clear();
 }

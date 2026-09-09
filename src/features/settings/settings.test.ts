@@ -4,6 +4,7 @@ import {
     loadSettings,
     saveSettings,
     STORAGE_KEY,
+    normalizeScanCacheLimitGiB,
 } from "./settings";
 
 const createMemoryStorage = (): Storage => {
@@ -25,6 +26,14 @@ const createMemoryStorage = (): Storage => {
 };
 
 describe("settings", () => {
+    it("uses a safe disk budget for old/invalid settings and persists larger budgets", () => {
+        for (const value of [undefined, null, -1, 0, Infinity, "128", 500]) {
+            expect(normalizeScanCacheLimitGiB(value)).toBe(16);
+        }
+        expect(normalizeScanCacheLimitGiB(128)).toBe(128);
+        saveSettings({ ...DEFAULT_SETTINGS, treeRingImage: { ...DEFAULT_SETTINGS.treeRingImage, scanCacheLimitGiB: 64 } });
+        expect(loadSettings().treeRingImage.scanCacheLimitGiB).toBe(64);
+    });
     beforeEach(() => {
         vi.stubGlobal("localStorage", createMemoryStorage());
     });
@@ -77,7 +86,7 @@ describe("settings", () => {
     it("persists a hidden generated tree-ring preview setting", () => {
         saveSettings({
             ...DEFAULT_SETTINGS,
-            treeRingImage: { showGeneratedPreview: false },
+            treeRingImage: { ...DEFAULT_SETTINGS.treeRingImage, showGeneratedPreview: false },
         });
 
         expect(loadSettings().treeRingImage.showGeneratedPreview).toBe(false);

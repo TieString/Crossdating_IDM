@@ -9,14 +9,18 @@ import {
     type AnimationSettings,
 } from "@/features/settings/settings";
 import styles from "./SettingsPage.module.css";
+import { CacheSection } from "./CacheSection";
+import { WorkspaceTransferSection } from "./WorkspaceTransferSection";
 
-type SectionId = "animation" | "tree-ring-image" | "diagnosis" | "cofecha" | "about";
+type SectionId = "animation" | "tree-ring-image" | "diagnosis" | "cofecha" | "cache" | "transfer" | "about";
 
 const SECTIONS: { id: SectionId; label: string }[] = [
     { id: "animation", label: "动画" },
     { id: "tree-ring-image", label: "年轮图像" },
     { id: "diagnosis", label: "定年建议" },
     { id: "cofecha", label: "COFECHA" },
+    { id: "cache", label: "缓存管理" },
+    { id: "transfer", label: "工作区迁移" },
     { id: "about", label: "关于" },
 ];
 
@@ -308,7 +312,7 @@ function AboutSection() {
             <h2 className={styles["section-title"]}>关于</h2>
 
             <Row label="应用名称"><span className={styles["about-text"]}>交叉定年 · IDM</span></Row>
-            <Row label="版本"><span className={styles["about-text"]}>1.6.0</span></Row>
+            <Row label="版本"><span className={styles["about-text"]}>1.6.1</span></Row>
             <Row label="技术栈"><span className={styles["about-text"]}>Tauri · React · TypeScript</span></Row>
             <Row label="COFECHA"><span className={styles["about-text"]}>Richard L. Holmes · LTRR Dendrochronology Program Library</span></Row>
             <Row label="研发团队" align="top">
@@ -363,6 +367,8 @@ export default function SettingsPage() {
                     {activeSection === "tree-ring-image" && <TreeRingImageSection />}
                     {activeSection === "diagnosis" && <DiagnosisSection />}
                     {activeSection === "cofecha" && <CofechaSection />}
+                    {activeSection === "cache" && <CacheSection />}
+                    {activeSection === "transfer" && <WorkspaceTransferSection />}
                     {activeSection === "about" && <AboutSection />}
                 </FloatingScrollArea>
             </div>

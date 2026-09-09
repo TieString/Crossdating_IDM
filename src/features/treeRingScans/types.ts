@@ -35,6 +35,8 @@ export interface TreeRingScanSeriesState {
     crop?: TreeRingScanCrop;
     /** Prevents anchors from being silently reused for a different same-named image. */
     imagePath?: string;
+    /** Portable image identity; rebind anchors only after matching the image bytes. */
+    imageSha256?: string;
     /** The working calendar range when the first anchor was placed. */
     baselineStartYear?: number;
     baselineEndYear?: number;
