@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "repository": "TieString/Crossdating_IDM",
+  "channel": "stable",
+  "version": "1.6.3",
+  "tag": "v1.6.3",
+  "name": "Crossdating IDM 1.6.3",
+  "body": "Crossdating IDM 1.6.3 is the latest published stable release.",
+  "releaseUrl": "https://github.com/TieString/Crossdating_IDM/releases/tag/v1.6.3",
+  "publishedAt": "2026-09-11T19:44:11Z"
+}
