@@ -1,0 +1,82 @@
+name: Publish v1.6.4
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish-v1.6.4.yml
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install JavaScript dependencies
+        shell: pwsh
+        run: yarn install --frozen-lockfile --non-interactive
+
+      - name: Verify release versions
+        shell: pwsh
+        run: |
+          node -e "const p=require('./package.json');const t=require('./src-tauri/tauri.conf.json');if(p.version!=='1.6.4'||t.version!=='1.6.4')process.exit(1)"
+          $cargo = Get-Content src-tauri/Cargo.toml -Raw
+          if ($cargo -notmatch 'version = "1\.6\.4"') { throw 'Cargo version mismatch' }
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Run production tests
+        run: npm run test:production
+
+      - name: Run localization tests
+        run: npm run test:i18n
+
+      - name: Run update tests
+        run: npm run test:update
+
+      - name: Check Tauri backend lockfile
+        run: cargo check --locked --manifest-path src-tauri/Cargo.toml
+
+      - name: Build Windows NSIS installer
+        run: npm run tauri build -- --bundles nsis
+
+      - name: Locate installer
+        id: installer
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path src-tauri/target/release/bundle/nsis -Filter "*1.6.4*x64-setup.exe" | Select-Object -First 1
+          if (-not $installer) { throw 'v1.6.4 NSIS installer not found' }
+          "path=$($installer.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Installer: $($installer.FullName)"
+
+      - name: Create GitHub Release v1.6.4
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = @"
+          # Crossdating IDM 1.6.4
+
+          本版本修复 v1.6.3 的 GitHub 更新检测在 Windows Tauri 应用内可能提示“无法连接 GitHub 检查更新”的问题。
+
+          - 更新检测改为通过 Tauri Rust 后端 HTTP 客户端访问 GitHub Releases API，不再依赖 WebView 浏览器网络栈。
+          - capability 仅允许访问本仓库的 `releases/latest` API。
+          - 保留浏览器开发环境的标准 `fetch` 回退。
+          - 已通过 Windows 原生 Tauri/Rust 编译、前端构建、production / i18n / update 测试和 NSIS 打包。
+
+          注意：v1.6.3 的更新检查器本身存在连接问题，因此 v1.6.3 用户需要手动下载安装一次 v1.6.4。从 v1.6.4 起，后续版本检测使用 Tauri 原生 HTTP 客户端。
+
+          Windows 安装包：`Crossdating-IDM_1.6.4_x64-setup.exe`
+          "@
+          gh release create v1.6.4 "${{ steps.installer.outputs.path }}" --repo TieString/Crossdating_IDM --target 42e80ba784794664a45dad289a475ded61fba301 --title "Crossdating IDM 1.6.4" --notes $notes
