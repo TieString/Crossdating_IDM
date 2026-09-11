@@ -1,3 +1,6 @@
+import { localizeOperationDetail } from '@/i18n/operationLog';
+import { t, localizeMessage, getLocale } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import { Suspense, lazy, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { RwlDisplayUnitsContext } from "@/features/rwl/DisplayUnitsContext";
 import { displayUnitFor, unitLabel, type RwlDisplayUnits } from "@/features/rwl/displayUnits";
@@ -44,6 +47,7 @@ type PageShellProps = {
 // 因此这里不再渲染页面内自定义页头；title/subtitle/onClose 等仍保留在
 // 类型中以兼容调用方，但不再展示。
 function PageShell({ children }: PageShellProps) {
+    useLocale();
     return (
         <motion.section
             className={styles["workspace-page"]}
@@ -62,7 +66,7 @@ function PageShell({ children }: PageShellProps) {
 const formatLogTime = (value: string) => {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
-    return new Intl.DateTimeFormat("zh-CN", {
+    return new Intl.DateTimeFormat(getLocale(), {
         month: "2-digit",
         day: "2-digit",
         hour: "2-digit",
@@ -89,8 +93,8 @@ const formatMetricValue = (value: number | string | null) => {
 };
 
 const formatLogValue = (value: number | null | undefined) => {
-    if (value === undefined) return "未记录";
-    if (value === null) return "缺失";
+    if (value === undefined) return t("未记录");
+    if (value === null) return t("缺失");
     return formatMetricValue(value);
 };
 
@@ -98,12 +102,12 @@ const formatValueChange = (entry: RwlOperationLogEntry, units?: RwlDisplayUnits)
     if (entry.oldValue === undefined && entry.newValue === undefined) return null;
     const unit = displayUnitFor(units, entry.tree ?? entry.seriesId ?? "", entry.targetYear ?? entry.newYear ?? entry.oldYear ?? NaN);
     const show = (value: number | null | undefined) => formatLogValue(typeof value === "number" ? value / unit.multiplier : value);
-    return `值 ${show(entry.oldValue)} -> ${show(entry.newValue)}${units ? `（${unitLabel(unit.marker)}）` : ""}`;
+    return t("值 {0} -> {1}{2}", [show(entry.oldValue), show(entry.newValue), units ? `（${unitLabel(unit.marker)}）` : ""]);
 };
 
 const formatYearChange = (entry: RwlOperationLogEntry) => {
     if (entry.oldYear === undefined || entry.newYear === undefined || entry.oldYear === entry.newYear) return null;
-    return `年份 ${entry.oldYear} -> ${entry.newYear}`;
+    return t("年份 {0} -> {1}", [entry.oldYear, entry.newYear]);
 };
 
 type OperationLogPageProps = {
@@ -127,6 +131,7 @@ export function OperationLogPage({
     onExportEffectiveChanges,
     onClose,
 }: OperationLogPageProps) {
+    const locale = useLocale();
     const displayUnits = useContext(RwlDisplayUnitsContext);
     const [logQuery, setLogQuery] = useState("");
     const filteredOperationLog = useMemo(() => {
@@ -138,10 +143,10 @@ export function OperationLogPage({
             const searchable = [
                 entry.sequence,
                 entry.tree,
-                entry.summary,
-                entry.detail,
+                localizeMessage(entry.summary),
+                localizeOperationDetail(entry),
                 entry.operationType,
-                entry.reason,
+                entry.reason ? localizeMessage(entry.reason) : entry.reason,
                 entry.targetYear,
                 entry.targetIndex,
                 entry.oldValue,
@@ -155,61 +160,60 @@ export function OperationLogPage({
 
             return searchable.includes(query);
         });
-    }, [logQuery, operationLog, displayUnits]);
+    }, [locale, logQuery, operationLog, displayUnits]);
 
     const sequenceGroups = useMemo(() => {
         const groups = new Map<string, RwlOperationLogEntry[]>();
         filteredOperationLog.forEach((entry) => {
-            const tree = entry.tree ?? "未分组";
+            const tree = entry.tree ?? t("未分组");
             groups.set(tree, [...(groups.get(tree) ?? []), entry]);
         });
         return Array.from(groups.entries())
             .map(([tree, entries]) => ({ tree, entries: [...entries].reverse() }))
             .sort((a, b) => a.tree.localeCompare(b.tree));
-    }, [filteredOperationLog]);
+    }, [locale, filteredOperationLog]);
 
     const editableCount = operationLog.filter((entry) => entry.canUndo).length;
 
     return (
         <PageShell
-            title="操作日志"
-            subtitle={fileName ?? "未打开文件"}
+            title={t("操作日志")}
+            subtitle={fileName ?? t("未打开文件")}
             onClose={onClose}
         >
             <div className={styles["log-layout"]}>
                 <aside className={styles["log-summary"]}>
                     <div className={styles["summary-number"]}>
-                        <span>显示 / 总计</span>
+                        <span>{t("显示 / 总计")}</span>
                         <strong>{filteredOperationLog.length}</strong>
-                        <small>{operationLog.length} 条编辑记录</small>
+                        <small>{operationLog.length} {t(" 条编辑记录")}</small>
                     </div>
                     <div className={styles["log-filter-panel"]}>
                         <label>
-                            <span>搜索</span>
+                            <span>{t("搜索")}</span>
                             <input
                                 type="search"
                                 value={logQuery}
-                                placeholder="序列、年份、操作或数值"
+                                placeholder={t("序列、年份、操作或数值")}
                                 onChange={(event) => setLogQuery(event.target.value)}
                             />
                         </label>
                     </div>
                     <div className={styles["summary-grid"]}>
-                        <span>序列</span><strong>{sequenceGroups.length}</strong>
-                        <span>可撤销</span><strong>{editableCount}</strong>
+                        <span>{t("序列")}</span><strong>{sequenceGroups.length}</strong>
+                        <span>{t("可撤销")}</span><strong>{editableCount}</strong>
                     </div>
                     <div className={styles["summary-actions"]}>
                         <button type="button" className={styles["command-button"]} disabled={!fileName}
-                            onClick={() => { void onExportEffectiveChanges(); }}>导出有效修改记录</button>
+                            onClick={() => { void onExportEffectiveChanges(); }}>{t("导出有效修改记录")}</button>
                         <button
                             type="button"
                             className={styles["command-button"]}
                             disabled={!canResetToRawData}
-                            title="恢复到首次加载该文件时的原始序列"
+                            title={t("恢复到首次加载该文件时的原始序列")}
                             onClick={() => { void onResetToRawData(); }}
                         >
-                            回到原始
-                        </button>
+                            {t("回到原始")}</button>
                     </div>
                     <FloatingScrollArea className={styles["sequence-list"]}>
                         {sequenceGroups.map((group) => (
@@ -228,7 +232,7 @@ export function OperationLogPage({
                             initial={{ opacity: 0, y: 8 }}
                             animate={{ opacity: 1, y: 0 }}
                         >
-                            {operationLog.length === 0 ? "还没有序列编辑记录。" : "没有匹配的编辑记录。"}
+                            {operationLog.length === 0 ? t("还没有序列编辑记录。") : t("没有匹配的编辑记录。")}
                         </motion.div>
                     ) : (
                         <div className={styles["log-list"]}>
@@ -258,14 +262,13 @@ export function OperationLogPage({
                                             >
                                                 <div className={styles["log-entry-main"]}>
                                                     <span className={styles["action-badge"] + " " + styles["action-apply"]}>
-                                                        编辑
-                                                    </span>
+                                                        {t("编辑")}</span>
                                                     <div className={styles["log-entry-copy"]}>
                                                         <div className={styles["log-entry-title-row"]}>
-                                                            <h3>{entry.summary}</h3>
+                                                            <h3>{localizeMessage(entry.summary)}</h3>
                                                         </div>
                                                         <p>{entry.operation?.type === "change-width" && displayUnits
-                                                            ? `${entry.tree} · ${entry.operation.year} · ${formatValueChange(entry, displayUnits)}` : entry.detail}</p>
+                                                            ? `${entry.tree} · ${entry.operation.year} · ${formatValueChange(entry, displayUnits)}` : localizeOperationDetail(entry)}</p>
                                                         {(entry.operationType || range || auditLabels.length > 0) ? (
                                                             <p className={styles["log-entry-details"]}>
                                                                 {entry.operationType ? <span>{entry.operationType}</span> : null}
@@ -275,7 +278,7 @@ export function OperationLogPage({
                                                         ) : null}
                                                         {entry.reason ? (
                                                             <p className={styles["log-entry-details"]}>
-                                                                <span>{entry.reason}</span>
+                                                                <span>{localizeMessage(entry.reason)}</span>
                                                             </p>
                                                         ) : null}
                                                     </div>
@@ -285,7 +288,7 @@ export function OperationLogPage({
                                                         <button
                                                             type="button"
                                                             disabled={!entry.tree}
-                                                            title={jumpYear == null ? "定位到序列" : `定位到 ${entry.tree} ${jumpYear}`}
+                                                            title={jumpYear == null ? t("定位到序列") : t("定位到 {0} {1}", [entry.tree, jumpYear])}
                                                             onClick={() => {
                                                                 if (entry.tree) {
                                                                     void onJumpEntry(entry.tree, jumpYear);
@@ -297,7 +300,7 @@ export function OperationLogPage({
                                                         <button
                                                             type="button"
                                                             disabled={!entry.canUndo}
-                                                            title="撤销该条操作"
+                                                            title={t("撤销该条操作")}
                                                             onClick={() => { void onUndoEntry(entry.id); }}
                                                         >
                                                             ↩
@@ -373,6 +376,7 @@ export function CofechaReportPage({
     onTextKeyDown,
     onClose,
 }: CofechaReportPageProps) {
+    useLocale();
     const reportScrollRef = useRef<HTMLDivElement | null>(null);
     const handledJumpIdRef = useRef<number | null>(null);
 
@@ -398,7 +402,7 @@ export function CofechaReportPage({
     return (
         <PageShell
             title="COFECHA"
-            subtitle={isCofechaOutdated ? "VERYCOF.OUT · 上次结果" : "VERYCOF.OUT"}
+            subtitle={isCofechaOutdated ? t("VERYCOF.OUT · 上次结果") : "VERYCOF.OUT"}
             onClose={onClose}
         >
             <div className={styles["report-layout"]}>
@@ -416,30 +420,29 @@ export function CofechaReportPage({
                     >
                         {partOptions.map((option) => (
                             <option key={option.value} value={option.value}>
-                                {option.label}
+                                {localizeMessage(option.label)}
                             </option>
                         ))}
                     </select>
                     <CofechaUndatedControls fileName={undatedFileName} sort={undatedSort}
                         disabled={!canRunValidation || isCofechaRunning} onLoad={onLoadUndated}
                         onClear={onClearUndated} onSortChange={onUndatedSortChange} />
-                    <span>{linkedReport.count} 跳转链接</span>
+                    <span>{linkedReport.count} {t(" 跳转链接")}</span>
                     {isCofechaOutdated ? (
                         <span
                             className={styles["report-status"]}
-                            title="当前 RWL 工作数据或 COFECHA 版本已变化，可以手动重新验证当前工作数据。"
+                            title={t("当前 RWL 工作数据或 COFECHA 版本已变化，可以手动重新验证当前工作数据。")}
                         >
-                            待验证
-                        </span>
+                            {t("待验证")}</span>
                     ) : null}
                     <button
                         type="button"
                         className={styles["report-command"]}
                         disabled={!canRunValidation || isCofechaRunning}
-                        title={canRunValidation ? "用当前工作数据重新运行 COFECHA" : "打开 RWL 文件后才能运行 COFECHA"}
+                        title={canRunValidation ? t("用当前工作数据重新运行 COFECHA") : t("打开 RWL 文件后才能运行 COFECHA")}
                         onClick={() => { void onRunValidation(); }}
                     >
-                        {isCofechaRunning ? "验证中" : "重新验证"}
+                        {isCofechaRunning ? t("验证中") : t("重新验证")}
                     </button>
                     <CofechaOutExportButton
                         disabled={!canExportOut}
@@ -519,6 +522,7 @@ export function ExpandedChartPage({
     cofechaPart6Trees,
     onClose,
 }: ExpandedChartPageProps) {
+    useLocale();
     const stats = useMemo(() => {
         let pointCount = 0;
         let minYear = Number.POSITIVE_INFINITY;
@@ -542,17 +546,17 @@ export function ExpandedChartPage({
 
     const activeEventCount = diagnosis.events.filter((event) => !event.stale).length;
     const diagnosisSubtitle = activeEventCount > 0
-        ? ` · 统一诊断模型 ${activeEventCount} 个窗口`
-        : " · 统一诊断模型未发现复核窗口";
+        ? t(" · 统一诊断模型 {0} 个窗口", [activeEventCount])
+        : t(" · 统一诊断模型未发现复核窗口");
 
     return (
         <PageShell
             title="Line Chart"
-            subtitle={`${stats.seriesCount} 条序列 · ${stats.pointCount} 个观测 · ${stats.yearSpan}${diagnosisSubtitle}`}
+            subtitle={t("{0} 条序列 · {1} 个观测 · {2}{3}", [stats.seriesCount, stats.pointCount, stats.yearSpan, diagnosisSubtitle])}
             onClose={onClose}
         >
             <div className={styles["chart-page"]}>
-                <Suspense fallback={<div className={styles["chart-loading"]}>正在加载折线图...</div>}>
+                <Suspense fallback={<div className={styles["chart-loading"]}>{t("正在加载折线图...")}</div>}>
                     <LazyTreeChartManager
                         variant="expanded"
                         showPersistentTooltip={showPersistentTooltip}

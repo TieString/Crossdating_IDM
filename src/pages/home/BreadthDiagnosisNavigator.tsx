@@ -1,3 +1,5 @@
+import { t } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import type { MouseEventHandler } from "react";
 import { FloatingScrollArea } from "@/components/FloatingScrollArea/FloatingScrollArea";
 import {
@@ -18,15 +20,15 @@ type Props = {
 const getPauseText = (navigator: BreadthDiagnosisNavigatorState) => {
     switch (navigator.pauseReason) {
         case "file-load":
-            return "读取文件时暂停后台扫描";
+            return t("读取文件时暂停后台扫描");
         case "save":
-            return "保存数据时暂停后台扫描";
+            return t("保存数据时暂停后台扫描");
         case "cofecha":
-            return "COFECHA 运行时暂停后台扫描";
+            return t("COFECHA 运行时暂停后台扫描");
         case "selected-diagnosis":
-            return "当前序列诊断优先，后台扫描已暂停";
+            return t("当前序列诊断优先，后台扫描已暂停");
         default:
-            return "后台扫描暂时暂停";
+            return t("后台扫描暂时暂停");
     }
 };
 
@@ -34,21 +36,21 @@ const getStatusText = (
     navigator: BreadthDiagnosisNavigatorState,
     scanAvailable: boolean,
 ) => {
-    if (!scanAvailable) return "等待 COFECHA 自动参考";
-    if (navigator.totalCount === 0) return "当前没有待扫描序列";
+    if (!scanAvailable) return t("等待 COFECHA 自动参考");
+    if (navigator.totalCount === 0) return t("当前没有待扫描序列");
     switch (navigator.status) {
         case "idle":
-            return "点击扫描待复核序列";
+            return t("点击扫描待复核序列");
         case "stale":
-            return "扫描结果已过期，点击重新扫描";
+            return t("扫描结果已过期，点击重新扫描");
         case "paused":
             return getPauseText(navigator);
         case "scanning":
-            return `后台扫描 ${navigator.scannedCount} / ${navigator.totalCount}`;
+            return t("后台扫描 {0} / {1}", [navigator.scannedCount, navigator.totalCount]);
         case "complete":
             return navigator.suggestions.length > 0
-                ? `另有 ${navigator.suggestions.length} 条序列需要复核`
-                : "暂未发现复核窗口";
+                ? t("另有 {0} 条序列需要复核", [navigator.suggestions.length])
+                : t("暂未发现复核窗口");
     }
 };
 
@@ -68,14 +70,15 @@ export function BreadthDiagnosisNavigator({
     onRunScan,
     onSelectSuggestion,
 }: Props) {
+    useLocale();
     const scanIsRunning = navigator.status === "scanning" || navigator.status === "paused";
     const scanButtonLabel = navigator.status === "paused"
-        ? "已暂停"
+        ? t("已暂停")
         : navigator.status === "scanning"
-            ? "扫描中"
+            ? t("扫描中")
         : navigator.status === "complete"
-            ? "重新扫描"
-            : "扫描";
+            ? t("重新扫描")
+            : t("扫描");
     const makeClickHandler = (
         suggestion: BreadthDiagnosisSuggestion,
     ): MouseEventHandler<HTMLButtonElement> => () => onSelectSuggestion(suggestion);
@@ -83,21 +86,20 @@ export function BreadthDiagnosisNavigator({
     return (
         <section
             className={`${styles["validation-summary"]} ${styles["breadth-navigator"]} ${getSeverityClass(navigator)}`}
-            aria-label="待复核序列提示器"
+            aria-label={t("待复核序列提示器")}
         >
             <div className={styles["breadth-summary"]}>
                 <strong>
-                    待复核序列
-                    <span className={styles["breadth-count"]}>{navigator.suggestions.length}</span>
+                    {t("待复核序列")}<span className={styles["breadth-count"]}>{navigator.suggestions.length}</span>
                     <button
                         type="button"
                         className={styles["breadth-scan-button"]}
                         disabled={!scanAvailable || scanIsRunning || navigator.totalCount === 0}
                         title={!scanAvailable
-                            ? "等待 COFECHA 自动参考生成完成"
+                            ? t("等待 COFECHA 自动参考生成完成")
                             : navigator.totalCount === 0
-                                ? "当前没有待扫描序列"
-                                : "扫描待复核序列"}
+                                ? t("当前没有待扫描序列")
+                                : t("扫描待复核序列")}
                         onClick={onRunScan}
                     >
                         {scanButtonLabel}
@@ -109,7 +111,7 @@ export function BreadthDiagnosisNavigator({
                     <span
                         className={styles["breadth-progress-track"]}
                         role="progressbar"
-                        aria-label="诊断扫描进度"
+                        aria-label={t("诊断扫描进度")}
                         aria-valuemin={0}
                         aria-valuemax={navigator.totalCount}
                         aria-valuenow={navigator.scannedCount}
@@ -126,7 +128,7 @@ export function BreadthDiagnosisNavigator({
                 viewportClassName={styles["breadth-suggestion-viewport"]}
                 className={styles["breadth-suggestion-list"]}
                 viewportStyle={{ flex: "0 0 55px", height: 55, maxHeight: 55 }}
-                aria-label="待复核序列滚动列表"
+                aria-label={t("待复核序列滚动列表")}
                 data-visible-rows="2"
                 tabIndex={navigator.suggestions.length > 2 ? 0 : -1}
                 scrollbarRevision={navigator.suggestions.length}
@@ -138,10 +140,10 @@ export function BreadthDiagnosisNavigator({
                             type="button"
                             className={styles["breadth-suggestion"]}
                             title={[
-                                `选择 ${suggestion.seriesId} 并定位到 ${suggestion.topYear} 年`,
+                                t("选择 {0} 并定位到 {1} 年", [suggestion.seriesId, suggestion.topYear]),
                                 getBreadthPriorityLabel(suggestion),
                                 suggestion.priority.sharedOverlapYears > 0
-                                    ? `预计可重新对齐约 ${suggestion.priority.sharedOverlapYears} 个重叠年`
+                                    ? t("预计可重新对齐约 {0} 个重叠年", [suggestion.priority.sharedOverlapYears])
                                     : "",
                             ].filter(Boolean).join("；")}
                             onClick={makeClickHandler(suggestion)}

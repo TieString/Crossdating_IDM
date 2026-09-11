@@ -1,3 +1,5 @@
+import { t, localizeMessage } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import { Line } from 'react-chartjs-2'
 import { buildSampleDepthSeries } from './sampleDepth'
 import crosshairPlugin from 'chartjs-plugin-crosshair'
@@ -540,7 +542,7 @@ export function makePersistentTooltipPlugin(): Plugin<'line'> & { activeIndex: n
         const referenceActual = referenceMeta.referenceActual?.[idx]
         const value = referenceMeta.displayWidths?.[idx] ?? (typeof raw === 'number'
           ? referenceMeta.referenceMode === 'dynamic'
-            ? `${(referenceActual ?? raw).toFixed(3)}${referenceDepth != null ? ` (n=${referenceDepth}` : ''}${referenceSd != null ? `, sd=${referenceSd.toFixed(3)}` : ''}${referenceSe != null ? `, se=${referenceSe.toFixed(3)}` : ''}${referenceDepth != null ? ')' : ''}${referenceMeta.referenceDisplayScaled ? ' · 已按宽度轴缩放显示' : ''}`
+            ? `${(referenceActual ?? raw).toFixed(3)}${referenceDepth != null ? ` (n=${referenceDepth}` : ''}${referenceSd != null ? `, sd=${referenceSd.toFixed(3)}` : ''}${referenceSe != null ? `, se=${referenceSe.toFixed(3)}` : ''}${referenceDepth != null ? ')' : ''}${referenceMeta.referenceDisplayScaled ? t(" · 已按宽度轴缩放显示") : ''}`
             : `${Math.round(raw)}${referenceDepth != null ? ` (n=${referenceDepth})` : ''}`
           : String(raw))
         const name = (ds.label ?? '').slice(0, MAX_LABEL_CHARS)
@@ -877,6 +879,7 @@ export function MultiLineChart({
   onMoveOlderSide,
   onDeleteSeries,
 }: Props) {
+    const locale = useLocale();
   const chartRef = useRef<ChartJSInstance<'line'> | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const isDragged = useRef(false)
@@ -990,7 +993,7 @@ export function MultiLineChart({
 
     if (referenceSeries && referenceSeries.data.size > 0) {
       nextDatasets.push({
-        label: referenceSeries.label,
+        label: localizeMessage(referenceSeries.label),
         data: allYears.map(year => referenceDisplayData?.get(year) ?? referenceSeries.data.get(year) ?? null),
         borderColor: MANUAL_REFERENCE_COLOR,
         backgroundColor: MANUAL_REFERENCE_COLOR,
@@ -1024,7 +1027,7 @@ export function MultiLineChart({
 
     if (showSampleSize && sampleSize.counts.length > 0) {
       nextDatasets.push({
-        label: SAMPLE_SIZE_LABEL,
+        label: t(SAMPLE_SIZE_LABEL),
         data: sampleSize.counts,
         yAxisID: SAMPLE_SIZE_AXIS_ID,
         borderColor: SAMPLE_SIZE_COLOR,
@@ -1041,7 +1044,7 @@ export function MultiLineChart({
     }
 
     return nextDatasets
-  }, [displayUnits, displayYearOffsets, allYears, data, fallbackSeriesColorMap, highlightedIndex, referenceDisplayData, referenceSeries, sampleSize, seriesColors, showSampleSize])
+  }, [locale, displayUnits, displayYearOffsets, allYears, data, fallbackSeriesColorMap, highlightedIndex, referenceDisplayData, referenceSeries, sampleSize, seriesColors, showSampleSize])
 
   // 记忆化 chartData，避免每次渲染（含鼠标移动）都生成新引用导致 react-chartjs-2 重复 update 卡顿。
   const chartData: ChartData<'line'> = useMemo(() => ({
@@ -1669,7 +1672,7 @@ export function MultiLineChart({
         {hoverSimulation.segmentStartYear}-{hoverSimulation.segmentEndYear}
       </div>
       <div style={{ color: '#111827', fontWeight: 650, marginBottom: 4 }}>
-        {hoverSimulation.bestOption.label}
+        {localizeMessage(hoverSimulation.bestOption.label)}
       </div>
       <div style={{ color: '#5b6b7f' }}>
         r {formatSimulationCorrelation(hoverSimulation.bestOption.currentCorrelation)}
@@ -1719,7 +1722,7 @@ export function MultiLineChart({
         onContextMenu={(event) => event.stopPropagation()}
       >
         <label
-          title="样本量曲线"
+          title={t("样本量曲线")}
           style={{
             display: 'inline-flex',
             alignItems: 'center',
@@ -1739,7 +1742,7 @@ export function MultiLineChart({
           <input
             type="checkbox"
             checked={showSampleSize}
-            aria-label="显示样本量曲线"
+            aria-label={t("显示样本量曲线")}
             onChange={(event) => setShowSampleSize(event.target.checked)}
             style={{
               width: 12,
@@ -1757,11 +1760,11 @@ export function MultiLineChart({
               borderTop: `2px dashed ${SAMPLE_SIZE_COLOR}`,
             }}
           />
-          <span>{SAMPLE_SIZE_LABEL}</span>
+          <span>{t(SAMPLE_SIZE_LABEL)}</span>
         </label>
         {yViewWindow && (
           <div
-            title="Shift + 滚轮缩放 Y 轴显示范围（双击图表外或继续向反方向滚动可复位）"
+            title={t("Shift + 滚轮缩放 Y 轴显示范围（双击图表外或继续向反方向滚动可复位）")}
             style={{
               display: 'inline-flex',
               alignItems: 'center',

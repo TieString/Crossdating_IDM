@@ -1,3 +1,5 @@
+import { t, localizeError } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import { useContext, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { RwlDisplayUnitsContext } from "@/features/rwl/DisplayUnitsContext";
 import { displayUnitFor, displayWidth, workingWidth, unitLabel } from "@/features/rwl/displayUnits";
@@ -358,6 +360,7 @@ export default function WidthGrid({
     style: customStyle = {},
     ...rest
 }: WidthGridProps) {
+    useLocale();
     const { title, onMouseEnter, onMouseMove, onMouseLeave, ...restWithoutTitle } = rest;
     const units = useContext(RwlDisplayUnitsContext);
     const unit = displayUnitFor(units, tree ?? "", year ?? NaN);
@@ -422,7 +425,7 @@ export default function WidthGrid({
                 ? 0
                 : Number(text);
         if (typeof parsedWidth === "number" && !Number.isFinite(parsedWidth)) {
-            window.alert("请输入有效的轮宽数值。"); return;
+            window.alert(t("请输入有效的轮宽数值。")); return;
         }
         const newWidth = parsedWidth;
 
@@ -430,7 +433,7 @@ export default function WidthGrid({
             try {
                 callChangeYearWidth(tree, year, units ? workingWidth(newWidth, unit) : newWidth);
             } catch (error) {
-                window.alert(error instanceof Error ? error.message : String(error));
+                window.alert(localizeError(error));
                 return;
             }
         }
@@ -524,7 +527,7 @@ export default function WidthGrid({
 
     const masterText = masterSeriesValue !== undefined ? masterSeriesValue.toString() : "";
     const widthTitle = `${year !== undefined ? year.toString() : ""}\n${masterText}`;
-    const finalTitle = `${title || widthTitle}${units && tree !== undefined && year !== undefined ? `\n单位：${unitLabel(unit.marker)}` : ""}`;
+    const finalTitle = `${title || widthTitle}${units && tree !== undefined && year !== undefined ? t("\n单位：{0}", [unitLabel(unit.marker)]) : ""}`;
     const displayedValue = isMissing ? "missing" : typeof gridValue === "number" ? projectValue(gridValue) : gridValue;
     const plusButtonClassName = hoverPlusSide
         ? `${style["insert-missing-button"]} ${style[`insert-missing-button-${hoverPlusSide}`]} ${style["insert-missing-button-visible"]}`

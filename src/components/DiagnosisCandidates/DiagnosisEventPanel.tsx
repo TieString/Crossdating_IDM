@@ -1,3 +1,5 @@
+import { t } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import { useEffect, useState } from "react";
 import {
   diagnosisEventInterpretationChain,
@@ -53,16 +55,16 @@ const noteNumber = (notes: readonly string[], prefixes: readonly string[]) => {
 
 const yearEvidenceLabel = (event: DiagnosisEvent) => {
   const topYear = event.rankedYears[0]?.year;
-  if (topYear === undefined) return "不足";
+  if (topYear === undefined) return t("不足");
   const evidenceYears = yearEvidenceFamilies
     .map((prefixes) => noteNumber(event.evidence.notes, prefixes))
     .filter((year): year is number => year !== null);
-  if (evidenceYears.length === 0) return "不足";
+  if (evidenceYears.length === 0) return t("不足");
   const nearby = evidenceYears.filter((year) => Math.abs(year - topYear) <= 1).length;
   const spread = Math.max(...evidenceYears) - Math.min(...evidenceYears);
-  if (nearby >= 3 && spread <= 3) return "较一致";
-  if (nearby >= 2) return "一般";
-  return "分散";
+  if (nearby >= 3 && spread <= 3) return t("较一致");
+  if (nearby >= 2) return t("一般");
+  return t("分散");
 };
 
 const formatCorrelation = (value: number | null) => (
@@ -82,30 +84,30 @@ const formatAlgorithmSource = (sources: readonly string[]) => {
     dense_lag_profile: "dense lag",
     segmented_lag_path: "segmented lag",
     candidate_ranking: "ranking",
-    pairwise_mismatch: "双线错配",
-    counterfactual_operation_verification: "反事实编辑",
+    pairwise_mismatch: t("双线错配"),
+    counterfactual_operation_verification: t("反事实编辑"),
   };
   return sources.map((source) => labels[source] ?? source).join(" + ");
 };
 
 const applyPreview = (event: DiagnosisEvent, selectedYear: number) => {
   if (event.eventType === "missingRing") {
-    return `在 ${selectedYear} 年插入缺轮，并将该年及较老侧统一向老年份移动 1 年。`;
+    return t("在 {0} 年插入缺轮，并将该年及较老侧统一向老年份移动 1 年。", [selectedYear]);
   }
   if (event.eventType === "falseRing") {
-    return `删除 ${selectedYear} 年，并将较老侧统一向新年份移动 1 年。`;
+    return t("删除 {0} 年，并将较老侧统一向新年份移动 1 年。", [selectedYear]);
   }
   if (event.eventType === "partialMove" && event.shiftYears) {
     const lastMovedYear = selectedYear - 1;
     const movedStartYear = event.seriesRange?.startYear;
     const gapStartYear = selectedYear + event.shiftYears;
     return [
-      `断点 ${selectedYear}；${selectedYear} 年起保持不动。`,
-      `${movedStartYear === undefined ? "较老侧" : `${movedStartYear}-${lastMovedYear} 年`}向老年份移动 ${Math.abs(event.shiftYears)} 年。`,
-      `移动后 ${gapStartYear}-${lastMovedYear} 年为空白。`,
+      t("断点 {0}；{1} 年起保持不动。", [selectedYear, selectedYear]),
+      t("{0}向老年份移动 {1} 年。", [movedStartYear === undefined ? t("较老侧") : t("{0}-{1} 年", [movedStartYear, lastMovedYear]), Math.abs(event.shiftYears)]),
+      t("移动后 {0}-{1} 年为空白。", [gapStartYear, lastMovedYear]),
     ].join(" ");
   }
-  return "按已验证的整体移动候选应用整条序列。";
+  return t("按已验证的整体移动候选应用整条序列。");
 };
 
 type InterpretationSelection = "primary" | "alternative";
@@ -174,6 +176,7 @@ export function DiagnosisEventPanel({
   onApplyEvent,
   onDismiss,
 }: Props) {
+    useLocale();
   const [selectedYears, setSelectedYears] = useState<Record<string, number>>({});
   const [selectedInterpretationIds, setSelectedInterpretationIds] = useState<
     Record<string, string>
@@ -195,14 +198,13 @@ export function DiagnosisEventPanel({
   if (events.length === 0) {
     return (
       <div className={style.empty}>
-        该序列暂无事件级诊断建议
-      </div>
+        {t("该序列暂无事件级诊断建议")}</div>
     );
   }
 
   return (
     <section
-      aria-label="定年建议"
+      aria-label={t("定年建议")}
       className={style.panel}
     >
       {events.map((event, eventIndex) => {
@@ -263,11 +265,11 @@ export function DiagnosisEventPanel({
           );
         };
         const shiftText = selectedEvent.eventType === "partialMove" && selectedEvent.shiftYears
-          ? ` · 较老侧向老年份移动 ${Math.abs(selectedEvent.shiftYears)} 年`
+          ? t(" · 较老侧向老年份移动 {0} 年", [Math.abs(selectedEvent.shiftYears)])
           : "";
         const wholeShiftText = isWholeSeriesMove && selectedEvent.shiftYears
-          ? `整条序列向${selectedEvent.shiftYears < 0 ? "老" : "新"}年份移动 ${Math.abs(selectedEvent.shiftYears)} 年`
-          : "整条序列位移";
+          ? t("整条序列向{0}年份移动 {1} 年", [selectedEvent.shiftYears < 0 ? t("老") : t("新"), Math.abs(selectedEvent.shiftYears)])
+          : t("整条序列位移");
         const yearEvidence = yearEvidenceLabel(selectedEvent);
         const missingPartialEvidence = missingPartialInterpretation?.evidence ?? null;
         const hasCalibratedMissingCount = missingPartialEvidence?.countEvidence
@@ -289,71 +291,49 @@ export function DiagnosisEventPanel({
           : null;
         const missingPartialTitle = missingPartialEvidence
           ? missingPartialEvidence.interpretationBasis === "frozenConditionalMissingReview"
-            ? "若样芯未见断裂，使用同一冻结证据独立复核缺轮；不会重新选择其他操作。"
+            ? t("若样芯未见断裂，使用同一冻结证据独立复核缺轮；不会重新选择其他操作。")
             : missingPartialEvidence.interpretationBasis === "completedPartialMissingComposition"
-            ? `复合校正支持 ${
-              missingPartialEvidence.completedComposition?.mixedReferenceSupport ?? "-"
-            }/${
-              missingPartialEvidence.completedComposition?.mixedReferenceCount ?? "-"
-            }；事件顺序支持 ${
-              missingPartialEvidence.completedComposition?.orientationReferenceSupport ?? "-"
-            }/${
-              missingPartialEvidence.completedComposition?.orientationReferenceCount ?? "-"
-            }`
+            ? t("复合校正支持 {0}/{1}；事件顺序支持 {2}/{3}", [missingPartialEvidence.completedComposition?.mixedReferenceSupport ?? "-", missingPartialEvidence.completedComposition?.mixedReferenceCount ?? "-", missingPartialEvidence.completedComposition?.orientationReferenceSupport ?? "-", missingPartialEvidence.completedComposition?.orientationReferenceCount ?? "-"])
             : missingPartialEvidence.interpretationBasis === "exactSequentialStaircaseAlternative"
-              ? `精确单位阶梯支持 ${
-                missingPartialEvidence.missingReferenceSupport
-              }/${missingPartialEvidence.referenceCount}；连续缺段支持 ${
-                missingPartialEvidence.partialReferenceSupport
-              }/${missingPartialEvidence.referenceCount}`
+              ? t("精确单位阶梯支持 {0}/{1}；连续缺段支持 {2}/{3}", [missingPartialEvidence.missingReferenceSupport, missingPartialEvidence.referenceCount, missingPartialEvidence.partialReferenceSupport, missingPartialEvidence.referenceCount])
               : missingPartialEvidence.interpretationBasis
                 === "structuredLocatorCumulativeLagAlternative"
-                ? `结构化定位已确认同一区域；累计位移对应 ${
-                  missingPartialEvidence.missingRingCount
-                } 个缺轮，连续缺段与逐轮缺轮收益接近`
-                : `完整反事实收益差 ${
-                  missingPartialEvidence.normalizedCounterfactualGainDifference.toFixed(2)
-                }；缺轮/连续缺段参考芯支持 ${
-                  missingPartialEvidence.missingReferenceSupport
-                }/${missingPartialEvidence.partialReferenceSupport}`
+                ? t("结构化定位已确认同一区域；累计位移对应 {0} 个缺轮，连续缺段与逐轮缺轮收益接近", [missingPartialEvidence.missingRingCount])
+                : t("完整反事实收益差 {0}；缺轮/连续缺段参考芯支持 {1}/{2}", [missingPartialEvidence.normalizedCounterfactualGainDifference.toFixed(2), missingPartialEvidence.missingReferenceSupport, missingPartialEvidence.partialReferenceSupport])
           : null;
         const wholeInterpretationTitle = wholeLocalInterpretation
-          ? `整体移动 ${Math.abs(wholeLocalInterpretation.evidence.wholeShiftYears)} 年；局部复核操作分差 ${
-            wholeLocalInterpretation.evidence.operationScoreMargin?.toFixed(2) ?? "-"
-          }`
+          ? t("整体移动 {0} 年；局部复核操作分差 {1}", [Math.abs(wholeLocalInterpretation.evidence.wholeShiftYears), wholeLocalInterpretation.evidence.operationScoreMargin?.toFixed(2) ?? "-"])
           : null;
         const interpretationTitle = (
           sequentialInterpretation
-            ? `统一模型交互恢复第 ${sequentialInterpretation.evidence.attempt} 步`
+            ? t("统一模型交互恢复第 {0} 步", [sequentialInterpretation.evidence.attempt])
             : reviewingWholePrimary
             ? wholeInterpretationTitle
             : missingPartialTitle ?? wholeInterpretationTitle
         ) ?? undefined;
         const interpretationDescription = sequentialInterpretation
           ? sequentialInterpretation.evidence.reason === "bark-check"
-            ? "若实体样芯确认存在树皮，可排除整体移动并继续复核局部移动。"
-            : "若实体样芯未见断裂或连续缺段，可排除局部移动并继续复核单位事件。"
+            ? t("若实体样芯确认存在树皮，可排除整体移动并继续复核局部移动。")
+            : t("若实体样芯未见断裂或连续缺段，可排除局部移动并继续复核单位事件。")
           : reviewingWholePrimary
-          ? "若实体样芯确认存在树皮，可排除整体移动，并在同一冻结证据中选择分数最高的唯一局部操作。"
+          ? t("若实体样芯确认存在树皮，可排除整体移动，并在同一冻结证据中选择分数最高的唯一局部操作。")
             : missingPartialEvidence
             ? selectedEvent.eventType === "missingRing"
               ? hasCalibratedMissingCount
-                ? `附近可能还有 ${Math.max(
+                ? t("附近可能还有 {0} 个同方向缺轮事件；当前只复核最靠树皮侧的一处。", [Math.max(
                   0,
                   missingPartialEvidence.missingRingCount - 1,
-                )} 个同方向缺轮事件；当前只复核最靠树皮侧的一处。`
-                : "当前只复核最靠树皮侧的一个缺轮；应用后重新诊断其余累计 lag。"
+                )])
+                : t("当前只复核最靠树皮侧的一个缺轮；应用后重新诊断其余累计 lag。")
               : hasCalibratedMissingCount
-                ? `多参考芯支持该区域累计约 ${
-                  missingPartialEvidence.missingRingCount
-                } 次同方向单位转移；实体样芯决定按连续缺段还是逐轮缺轮复核。`
-                : `累计 lag 差约 ${Math.abs(
+                ? t("多参考芯支持该区域累计约 {0} 次同方向单位转移；实体样芯决定按连续缺段还是逐轮缺轮复核。", [missingPartialEvidence.missingRingCount])
+                : t("累计 lag 差约 {0} 年；具体缺轮数量尚未独立确认。", [Math.abs(
                   missingPartialEvidence.cumulativeShiftYears,
-                )} 年；具体缺轮数量尚未独立确认。`
+                )])
             : missingPartialRestoreTarget
-              ? "当前按缺轮窗口复核；可恢复同一冻结证据中的局部移动解释。"
+              ? t("当前按缺轮窗口复核；可恢复同一冻结证据中的局部移动解释。")
             : wholeLocalInterpretation
-              ? `当前按${eventTypeLabels[selectedEvent.eventType]}窗口复核；可恢复上一步解释，应用或编辑后将重建状态。`
+              ? t("当前按{0}窗口复核；可恢复上一步解释，应用或编辑后将重建状态。", [eventTypeLabels[selectedEvent.eventType]])
               : null;
 
         return (
@@ -364,22 +344,22 @@ export function DiagnosisEventPanel({
             <div className={style.body}>
               <div className={style.heading}>
                 <strong className={style.eventType}>
-                  {eventTypeLabels[selectedEvent.eventType]}
+                  {t(eventTypeLabels[selectedEvent.eventType])}
                 </strong>
                 <span className={style.range}>
                   {isWholeSeriesMove
                     ? wholeShiftText
-                    : `${selectedEvent.startYear}–${selectedEvent.endYear} · ${width} 年`}
+                    : t("{0}–{1} · {2} 年", [selectedEvent.startYear, selectedEvent.endYear, width])}
                 </span>
                 <span className={style.metadata}>
                   <span
-                    title="表示事件级证据强度，不代表首选年份正确概率"
+                    title={t("表示事件级证据强度，不代表首选年份正确概率")}
                   >
-                    置信度 {confidenceLabels[selectedEvent.confidenceLevel]}
+                    {t("置信度 ")}{t(confidenceLabels[selectedEvent.confidenceLevel])}
                   </span>
                   {!isWholeSeriesMove ? (
-                    <span title="表示不同定位证据是否聚集，不是该年份的正确概率">
-                      年份证据 {yearEvidence}
+                    <span title={t("表示不同定位证据是否聚集，不是该年份的正确概率")}>
+                      {t("年份证据 ")}{yearEvidence}
                     </span>
                   ) : null}
                 </span>
@@ -391,7 +371,7 @@ export function DiagnosisEventPanel({
                   className={style.yearSelector}
                 >
                   <span className={style.yearLabel}>
-                    {selectedEvent.eventType === "partialMove" ? "断点年份" : "复核年份"}
+                    {selectedEvent.eventType === "partialMove" ? t("断点年份") : t("复核年份")}
                   </span>
                   <div className={style.yearOptions}>
                     {selectableYears.map((row) => {
@@ -402,8 +382,8 @@ export function DiagnosisEventPanel({
                           key={row.year}
                           aria-pressed={selected}
                           title={selectedEvent.eventType === "partialMove"
-                            ? `选择断点 ${row.year}；${row.year} 年起保持不动`
-                            : `选择年份 ${row.year} 作为应用边界`}
+                            ? t("选择断点 {0}；{1} 年起保持不动", [row.year, row.year])
+                            : t("选择年份 {0} 作为应用边界", [row.year])}
                           onClick={() => {
                             setSelectedYears((previous) => ({
                               ...previous,
@@ -431,9 +411,8 @@ export function DiagnosisEventPanel({
               </div>
               {selectedEvent.eventType === "partialMove" && selectedEvent.shiftYears ? (
                 <div className={style.detailLine}>
-                  断点 {selectedYear} · {selectedYear} 年起保持不动 · 移动后{" "}
-                  {selectedYear + selectedEvent.shiftYears}-{selectedYear - 1} 年为空白
-                </div>
+                  {t("断点 ")}{selectedYear} · {selectedYear} {t(" 年起保持不动 · 移动后")}{" "}
+                  {selectedYear + selectedEvent.shiftYears}-{selectedYear - 1} {t(" 年为空白")}</div>
               ) : null}
               {interpretationDescription ? (
                 <div
@@ -446,70 +425,66 @@ export function DiagnosisEventPanel({
                       type="button"
                       disabled={event.stale === true}
                       title={sequentialInterpretation.evidence.reason === "bark-check"
-                        ? "实体样芯存在树皮时排除整体移动"
-                        : "实体样芯未见断裂或连续缺段时排除局部移动"}
+                        ? t("实体样芯存在树皮时排除整体移动")
+                        : t("实体样芯未见断裂或连续缺段时排除局部移动")}
                       onClick={() => activateInterpretation(sequentialInterpretation.alternative)}
                       className={`${style.interpretationButton} ${event.stale ? style.disabledButton : ""}`}
                     >
                       {sequentialInterpretation.evidence.reason === "bark-check"
-                        ? "确认有树皮，继续局部复核"
-                        : "未见断裂，继续单位事件复核"}
+                        ? t("确认有树皮，继续局部复核")
+                        : t("未见断裂，继续单位事件复核")}
                     </button>
                   ) : null}
                   {missingPartialTarget ? (
                     <button
                       type="button"
                       disabled={event.stale === true}
-                      title="实体样芯未见断裂时，在同一证据状态上切换到前沿缺轮复核"
+                      title={t("实体样芯未见断裂时，在同一证据状态上切换到前沿缺轮复核")}
                       onClick={() => activateInterpretation(missingPartialTarget)}
                       className={`${style.interpretationButton} ${event.stale ? style.disabledButton : ""}`}
                     >
-                      以缺轮形式复核
-                    </button>
+                      {t("以缺轮形式复核")}</button>
                   ) : null}
                   {missingPartialRestoreTarget ? (
                     <button
                       type="button"
                       disabled={event.stale === true}
-                      title="恢复同一冻结证据中的局部移动解释"
+                      title={t("恢复同一冻结证据中的局部移动解释")}
                       onClick={() => activateInterpretation(missingPartialRestoreTarget)}
                       className={`${style.interpretationButton} ${event.stale ? style.disabledButton : ""}`}
                     >
-                      恢复局部移动解释
-                    </button>
+                      {t("恢复局部移动解释")}</button>
                   ) : null}
                   {wholeInterpretationTarget ? (
                     <button
                       type="button"
                       disabled={event.stale === true}
-                      title="实体样芯存在树皮时，排除整体移动并使用同状态统一局部选择器复核"
+                      title={t("实体样芯存在树皮时，排除整体移动并使用同状态统一局部选择器复核")}
                       onClick={() => activateInterpretation(wholeInterpretationTarget)}
                       className={`${style.interpretationButton} ${event.stale ? style.disabledButton : ""}`}
                     >
-                      以局部事件复核
-                    </button>
+                      {t("以局部事件复核")}</button>
                   ) : null}
                   {wholeInterpretationRestoreTarget ? (
                     <button
                       type="button"
                       disabled={event.stale === true}
-                      title="恢复同一冻结证据中的整体移动解释"
+                      title={t("恢复同一冻结证据中的整体移动解释")}
                       onClick={() => activateInterpretation(wholeInterpretationRestoreTarget)}
                       className={`${style.interpretationButton} ${event.stale ? style.disabledButton : ""}`}
                     >
-                      恢复整体移动解释
-                    </button>
+                      {t("恢复整体移动解释")}</button>
                   ) : null}
                 </div>
               ) : null}
               <div className={style.correlationRow}>
                 <span>
-                  相关性 r {formatCorrelation(selectedEvent.evidence.baselineCorrelation)} → {formatCorrelation(selectedEvent.evidence.correctedCorrelation)}
+                  {t("相关性 r ")}{formatCorrelation(selectedEvent.evidence.baselineCorrelation)} → {formatCorrelation(selectedEvent.evidence.correctedCorrelation)}
                 </span>
                 <details className={style.evidenceDetails}>
-                  <summary>诊断依据</summary>
+                  <summary>{t("诊断依据")}</summary>
                   <div className={style.evidenceText}>
-                    {formatAlgorithmSource(selectedEvent.evidence.algorithmSources) || "暂无来源信息"}
+                    {formatAlgorithmSource(selectedEvent.evidence.algorithmSources) || t("暂无来源信息")}
                   </div>
                 </details>
               </div>
@@ -519,12 +494,11 @@ export function DiagnosisEventPanel({
               <button
                 type="button"
                 disabled={!onFocusEvent}
-                title={isWholeSeriesMove ? "定位整条序列" : `定位到所选年份 ${selectedYear}`}
+                title={isWholeSeriesMove ? t("定位整条序列") : t("定位到所选年份 {0}", [selectedYear])}
                 onClick={() => onFocusEvent?.(selectedEvent, selectedYear)}
                 className={`${style.button} ${style.secondaryButton} ${!onFocusEvent ? style.disabledButton : ""}`}
               >
-                定位
-              </button>
+                {t("定位")}</button>
               {onApplyEvent ? (
                 <button
                   type="button"
@@ -533,14 +507,13 @@ export function DiagnosisEventPanel({
                   onClick={() => onApplyEvent(selectedEvent, selectedYear)}
                   className={`${style.button} ${style.primaryButton} ${selectedEvent.stale || event.stale ? style.disabledButton : ""}`}
                 >
-                  应用
-                </button>
+                  {t("应用")}</button>
               ) : null}
               {eventIndex === 0 && onDismiss ? (
                 <button
                   type="button"
-                  aria-label="暂时关闭本次定年建议"
-                  title="暂时关闭本次定年建议；下次编辑后自动恢复"
+                  aria-label={t("暂时关闭本次定年建议")}
+                  title={t("暂时关闭本次定年建议；下次编辑后自动恢复")}
                   onClick={onDismiss}
                   className={style.closeButton}
                 >

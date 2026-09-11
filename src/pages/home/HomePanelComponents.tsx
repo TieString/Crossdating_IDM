@@ -1,3 +1,5 @@
+import { t, localizeMessage } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import { RollingNumber } from "@/components/RollingNumber/RollingNumber";
 import style from "./HomePanelComponents.module.css";
 
@@ -9,12 +11,14 @@ type CofechaStatValueProps = {
 };
 
 export function CofechaStatValue({ value, showSkeleton }: CofechaStatValueProps) {
+    useLocale();
     return showSkeleton
         ? <span className={style["stat-value-skeleton"]} aria-hidden="true" />
         : <RollingNumber value={value} />;
 }
 
 export function CofechaToolbarSkeleton() {
+    useLocale();
     return (
         <div className={style["cofecha-toolbar-skeleton"]} aria-hidden="true">
             <span className={`${style["skeleton-block"]} ${style["skeleton-select"]}`} />
@@ -25,6 +29,7 @@ export function CofechaToolbarSkeleton() {
 }
 
 export function CofechaEmptySkeleton() {
+    useLocale();
     return (
         <div className={style["cofecha-empty-skeleton"]} aria-hidden="true">
             <span className={`${style["skeleton-block"]} ${style["cofecha-skeleton-title"]}`} />
@@ -43,6 +48,7 @@ export function CofechaEmptySkeleton() {
 }
 
 export function LineChartEmptySkeleton() {
+    useLocale();
     return (
         <div className={style["chart-empty-skeleton"]} aria-hidden="true">
             <div className={style["chart-skeleton-toolbar"]}>
@@ -70,16 +76,16 @@ type WorkspaceWindowPlaceholderProps = {
 };
 
 export function WorkspaceWindowPlaceholder({ message, onFocusWindow }: WorkspaceWindowPlaceholderProps) {
+    useLocale();
     return (
         <div className={style["external-window-placeholder"]}>
-            <span>{message}</span>
+            <span>{localizeMessage(message)}</span>
             <button
                 type="button"
                 className={style["placeholder-button"]}
                 onClick={onFocusWindow}
             >
-                聚焦窗口
-            </button>
+                {t("聚焦窗口")}</button>
         </div>
     );
 }

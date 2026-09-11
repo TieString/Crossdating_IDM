@@ -1,3 +1,5 @@
+import { t } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import type { TreeRingGeometry } from "./treeRingArtwork";
 import { getTreeRingFeature } from "./treeRingArtwork";
 
@@ -8,6 +10,7 @@ interface TreeRingSvgOverlayProps {
 
 /** Lightweight dynamic markers layered over the cached SVG artwork. */
 export function TreeRingSvgOverlay({ geometry, highlightedYear }: TreeRingSvgOverlayProps) {
+    useLocale();
     const centre = geometry.radiusMm;
     const highlighted = getTreeRingFeature(geometry, highlightedYear);
 
@@ -17,8 +20,8 @@ export function TreeRingSvgOverlay({ geometry, highlightedYear }: TreeRingSvgOve
                 <g key={`gap-${gap.startYear}-${gap.endYear}`}>
                     <title>
                         {gap.startYear === gap.endYear
-                            ? `${gap.startYear} 年缺少宽度记录`
-                            : `${gap.startYear}–${gap.endYear} 共 ${gap.yearCount} 年缺少宽度记录`}
+                            ? t("{0} 年缺少宽度记录", [gap.startYear])
+                            : t("{0}–{1} 共 {2} 年缺少宽度记录", [gap.startYear, gap.endYear, gap.yearCount])}
                     </title>
                     <circle
                         cx={centre}
@@ -54,7 +57,7 @@ export function TreeRingSvgOverlay({ geometry, highlightedYear }: TreeRingSvgOve
                     strokeDasharray="2 2"
                     vectorEffect="non-scaling-stroke"
                 >
-                    <title>{ring.year} 年为显式 0 宽缺轮</title>
+                    <title>{ring.year} {t(" 年为显式 0 宽缺轮")}</title>
                 </circle>
             ))}
 

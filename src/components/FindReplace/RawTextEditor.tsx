@@ -1,3 +1,5 @@
+import { t } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { EditorState, Prec } from "@codemirror/state";
 import { EditorView, keymap, drawSelection, rectangularSelection } from "@codemirror/view";
@@ -97,6 +99,7 @@ export const RawTextEditor = forwardRef<RawEditorHandle, RawTextEditorProps>(fun
     onApply,
     onCancel,
 }, ref) {
+    useLocale();
     const hostRef = useRef<HTMLDivElement>(null);
     const scrollTargetRef = useRef<HTMLElement | null>(null);
     const viewRef = useRef<EditorView | null>(null);
@@ -198,7 +201,7 @@ export const RawTextEditor = forwardRef<RawEditorHandle, RawTextEditorProps>(fun
                     auxclick: (event) => event.button === 1,
                 })),
                 EditorView.contentAttributes.of({
-                    "aria-label": "RWL 文本编辑器",
+                    "aria-label": t("RWL 文本编辑器"),
                     "aria-multiline": "true",
                 }),
                 EditorView.theme({

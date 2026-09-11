@@ -1,3 +1,5 @@
+import { t } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -61,6 +63,7 @@ export function HomeTitleBarBridge({
     onOpenFind,
     onOpenReplace,
 }: HomeTitleBarBridgeProps) {
+    const locale = useLocale();
     const { settings, updateCofechaSettings } = useSettings();
     const [activeMenu, setActiveMenu] = useState<TitleMenuKind | null>(null);
     const [menuElements, setMenuElements] = useState<MenuElements>(EMPTY_MENU_ELEMENTS);
@@ -80,12 +83,12 @@ export function HomeTitleBarBridge({
     }, [activeMenu, onActiveMenuChange]);
 
     useEffect(() => {
-        void getCurrentWindow().setTitle(title);
+        void getCurrentWindow().setTitle(title).catch(() => {});
         const menuTitle = document.getElementById("menu-title");
         if (menuTitle) {
             menuTitle.textContent = title;
         }
-    }, [title]);
+    }, [locale, title]);
 
     const closeAnd = useCallback((action?: () => void | Promise<void>) => async () => {
         try {
@@ -96,26 +99,26 @@ export function HomeTitleBarBridge({
     }, []);
 
     const fileItems = useMemo<MenuItem[]>(() => ([
-        { label: "\u6253\u5f00\u6587\u4ef6", onClick: closeAnd(onLoad) },
-        { label: "\u4fdd\u5b58", onClick: closeAnd(onSave) },
-        { label: "\u53e6\u5b58\u4e3a", onClick: closeAnd(onSaveAs) },
-        { label: "\u8bbe\u7f6e", onClick: closeAnd(onOpenSettings) },
-    ]), [closeAnd, onLoad, onSave, onSaveAs, onOpenSettings]);
+        { label: t("打开文件"), onClick: closeAnd(onLoad) },
+        { label: t("保存"), onClick: closeAnd(onSave) },
+        { label: t("另存为"), onClick: closeAnd(onSaveAs) },
+        { label: t("设置"), onClick: closeAnd(onOpenSettings) },
+    ]), [locale, closeAnd, onLoad, onSave, onSaveAs, onOpenSettings]);
 
     const editItems = useMemo<MenuItem[]>(() => ([
-        { label: "\u64a4\u9500", onClick: closeAnd(onUndo), disabled: !canUndo },
-        { label: "\u6062\u590d", onClick: closeAnd(onRedo), disabled: !canRedo },
-        { label: "\u64cd\u4f5c\u65e5\u5fd7", onClick: closeAnd(onOpenOperationLog) },
-        { label: "\u67e5\u627e", onClick: closeAnd(onOpenFind) },
-        { label: "\u66ff\u6362", onClick: closeAnd(onOpenReplace) },
-    ]), [closeAnd, canRedo, canUndo, onOpenFind, onOpenOperationLog, onOpenReplace, onRedo, onUndo]);
+        { label: t("撤销"), onClick: closeAnd(onUndo), disabled: !canUndo },
+        { label: t("恢复"), onClick: closeAnd(onRedo), disabled: !canRedo },
+        { label: t("操作日志"), onClick: closeAnd(onOpenOperationLog) },
+        { label: t("查找"), onClick: closeAnd(onOpenFind) },
+        { label: t("替换"), onClick: closeAnd(onOpenReplace) },
+    ]), [locale, closeAnd, canRedo, canUndo, onOpenFind, onOpenOperationLog, onOpenReplace, onRedo, onUndo]);
 
     const selectCofechaExecutable = useCallback(async () => {
         const selected = await open({
-            title: "加载 COFECHA 可执行文件",
+            title: t("加载 COFECHA 可执行文件"),
             multiple: false,
             directory: false,
-            filters: [{ name: "Windows 可执行文件", extensions: ["exe"] }],
+            filters: [{ name: t("Windows 可执行文件"), extensions: ["exe"] }],
         });
         if (typeof selected !== "string") return;
         updateCofechaSettings({ executablePath: selected });
@@ -123,10 +126,10 @@ export function HomeTitleBarBridge({
 
     const runItems = useMemo<MenuItem[]>(() => ([
         {
-            label: settings.cofecha.executablePath ? "更换 COFECHA..." : "加载 COFECHA...",
+            label: settings.cofecha.executablePath ? t("更换 COFECHA...") : t("加载 COFECHA..."),
             onClick: closeAnd(selectCofechaExecutable),
         },
-    ]), [closeAnd, selectCofechaExecutable, settings.cofecha.executablePath]);
+    ]), [locale, closeAnd, selectCofechaExecutable, settings.cofecha.executablePath]);
 
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
@@ -189,13 +192,13 @@ export function HomeTitleBarBridge({
 
         if (undoButton) {
             undoButton.disabled = !canUndo;
-            undoButton.title = canUndo ? "撤销" : "没有可撤销的操作";
+            undoButton.title = canUndo ? t("撤销") : t("没有可撤销的操作");
         }
         if (redoButton) {
             redoButton.disabled = !canRedo;
-            redoButton.title = canRedo ? "恢复" : "没有可恢复的操作";
+            redoButton.title = canRedo ? t("恢复") : t("没有可恢复的操作");
         }
-    }, [canRedo, canUndo]);
+    }, [locale, canRedo, canUndo]);
 
     useEffect(() => {
         const undoButton = document.getElementById("title-submenu-undo-button");

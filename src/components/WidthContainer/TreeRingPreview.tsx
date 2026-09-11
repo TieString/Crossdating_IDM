@@ -1,3 +1,5 @@
+import { t, localizeMessage } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { RwlTreeData } from "@/features/rwl";
@@ -81,6 +83,7 @@ function TreeRingPreviewComponent({
     onOpen,
     onContextMenu,
 }: TreeRingPreviewProps) {
+    useLocale();
     const artwork = useMemo<TreeRingPreviewModel | null>(() => {
         const geometry = buildTreeRingGeometry(series, stopMarkerValue);
         return geometry ? {
@@ -219,14 +222,14 @@ function TreeRingPreviewComponent({
     }, [geometry, highlightedYear, previewSize.height, previewSize.width, showArtwork, viewHeight, viewTop, viewWidth, viewport.startX]);
 
     if (!artwork || !geometry) {
-        return <span className={styles.unavailable} title="该序列没有可绘制的正宽度年轮">无截面</span>;
+        return <span className={styles.unavailable} title={t("该序列没有可绘制的正宽度年轮")}>{t("无截面")}</span>;
     }
     const gapYearCount = geometry.gaps.reduce((sum, gap) => sum + gap.yearCount, 0);
     const title = showArtwork
-        ? `1 cm 树轮窗口 · ${artwork.ringCount} 个年轮 · 半径 ${artwork.radiusMm.toFixed(3)} mm`
-            + `${gapYearCount > 0 ? ` · 中间缺少 ${gapYearCount} 年记录` : ""}`
-            + "（滚轮缩放，放大后左右拖动，单击选择年份，双击打开 1 cm 视图）"
-        : "绘制图片已在设置中隐藏；双击打开 1 cm 视图，右键管理影像";
+        ? t("1 cm 树轮窗口 · {0} 个年轮 · 半径 {1} mm", [artwork.ringCount, artwork.radiusMm.toFixed(3)])
+            + `${gapYearCount > 0 ? t(" · 中间缺少 {0} 年记录", [gapYearCount]) : ""}`
+            + t("（滚轮缩放，放大后左右拖动，单击选择年份，双击打开 1 cm 视图）")
+        : t("绘制图片已在设置中隐藏；双击打开 1 cm 视图，右键管理影像");
 
     const resolveFeatureAtClientX = (
         clientX: number,
@@ -262,7 +265,7 @@ function TreeRingPreviewComponent({
         setHoveredYear({
             left,
             label: feature.kind === "gap"
-                ? `${feature.startYear === feature.endYear ? feature.startYear : `${feature.startYear}–${feature.endYear}`} 缺`
+                ? t("{0} 缺", [feature.startYear === feature.endYear ? feature.startYear : `${feature.startYear}–${feature.endYear}`])
                 : String(feature.startYear),
         });
     };
@@ -332,8 +335,8 @@ function TreeRingPreviewComponent({
                 className={`${styles.previewButton}${viewport.zoom > TREE_RING_MIN_ZOOM ? ` ${styles.zoomed}` : ""}${isPanning ? ` ${styles.panning}` : ""}`}
                 title={title}
                 aria-label={showArtwork
-                    ? `${seriesId} 的 1 cm 树轮窗口；可滚轮缩放和左右拖动，单击选择年份，双击打开 1 cm 视图`
-                    : `${seriesId} 的绘制图片按钮；图片已隐藏，双击打开 1 cm 视图`}
+                    ? t("{0} 的 1 cm 树轮窗口；可滚轮缩放和左右拖动，单击选择年份，双击打开 1 cm 视图", [seriesId])
+                    : t("{0} 的绘制图片按钮；图片已隐藏，双击打开 1 cm 视图", [seriesId])}
                 onContextMenu={onContextMenu}
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}
@@ -373,7 +376,7 @@ function TreeRingPreviewComponent({
                     style={showArtwork ? undefined : { visibility: "hidden" }}
                     data-panel-resize-heavy-preview="true"
                     role="img"
-                    aria-label={`${seriesId} 从树心到三点钟方向的树轮窗口`}
+                    aria-label={t("{0} 从树心到三点钟方向的树轮窗口", [seriesId])}
                 />
                 {showArtwork && viewport.zoom > TREE_RING_MIN_ZOOM ? (
                     <span className={styles.zoomBadge} aria-hidden="true">×{viewport.zoom.toFixed(1)}</span>
@@ -385,7 +388,7 @@ function TreeRingPreviewComponent({
                     style={{ left: `${hoveredYear.left}px` }}
                     aria-hidden="true"
                 >
-                    {hoveredYear.label}
+                    {localizeMessage(hoveredYear.label)}
                 </span>
             ) : null}
         </div>

@@ -1,3 +1,5 @@
+import { t, localizeMessage, localizeError } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { RwlTreeData } from "@/features/rwl";
@@ -98,6 +100,7 @@ export function TreeRingScanViewer({
     onChange,
     onYearSelect,
 }: TreeRingScanViewerProps) {
+    useLocale();
     const rotation = scanState.rotation ?? 0;
     const [tool, setTool] = useState<ViewerTool>(() => (
         !scanState.crop ? "crop" : (scanState.anchors.length < 2 ? "point" : "pan")
@@ -374,8 +377,8 @@ export function TreeRingScanViewer({
             left: resolved.left,
             top: resolved.top,
             label: resolved.currentYear === resolved.originalYear
-                ? `${resolved.originalYear} 年`
-                : `原 ${resolved.originalYear} 年 · ${resolved.currentYear === null ? "已删除" : `现 ${resolved.currentYear} 年`}`,
+                ? t("{0} 年", [resolved.originalYear])
+                : t("原 {0} 年 · {1}", [resolved.originalYear, resolved.currentYear === null ? t("已删除") : t("现 {0} 年", [resolved.currentYear])]),
         });
     };
 
@@ -541,12 +544,12 @@ export function TreeRingScanViewer({
     if (image.loading) {
         return (
             <div className={styles.message}>
-                {displayedCrop ? "正在从原始影像提取最高分辨率截面…" : "正在生成扫描影像总览…"}
+                {displayedCrop ? t("正在从原始影像提取最高分辨率截面…") : t("正在生成扫描影像总览…")}
             </div>
         );
     }
     if (image.error || !image.url) {
-        return <div className={styles.error}>扫描影像读取失败：{image.error ?? "未知错误"}</div>;
+        return <div className={styles.error}>{t("扫描影像读取失败：")}{image.error ? localizeError(image.error) : t("未知错误")}</div>;
     }
 
     const visibleCrop = draftCrop ?? (tool === "crop" && scanState.crop
@@ -574,7 +577,7 @@ export function TreeRingScanViewer({
                 ref={canvasRef}
                 className={styles.scanCanvas}
                 role="img"
-                aria-label={`${seriesId} 扫描影像`}
+                aria-label={t("{0} 扫描影像", [seriesId])}
             />
             <div
                 className={styles.imageStage}
@@ -644,7 +647,7 @@ export function TreeRingScanViewer({
                     className={styles.hoverYear}
                     style={{ left: `${hoveredMappedYear.left}px`, top: `${hoveredMappedYear.top}px` }}
                 >
-                    {hoveredMappedYear.label}
+                    {localizeMessage(hoveredMappedYear.label)}
                 </span>
             ) : null}
             <div className={styles.toolbar} onPointerDown={(event) => event.stopPropagation()}>
@@ -654,8 +657,7 @@ export function TreeRingScanViewer({
                     aria-pressed={tool === "crop"}
                     onClick={() => selectTool("crop")}
                 >
-                    选框
-                </button>
+                    {t("选框")}</button>
                 <button
                     type="button"
                     className={tool === "point" ? styles.activeTool : undefined}
@@ -663,8 +665,7 @@ export function TreeRingScanViewer({
                     disabled={!scanState.crop}
                     onClick={() => selectTool("point")}
                 >
-                    点工具
-                </button>
+                    {t("点工具")}</button>
                 <button
                     type="button"
                     className={tool === "pan" ? styles.activeTool : undefined}
@@ -672,16 +673,15 @@ export function TreeRingScanViewer({
                     disabled={!scanState.crop}
                     onClick={() => selectTool("pan")}
                 >
-                    平移
-                </button>
-                <button type="button" aria-label="向左旋转 90°" onClick={() => rotateImage(-90)}>↶</button>
-                <button type="button" aria-label="向右旋转 90°" onClick={() => rotateImage(90)}>↷</button>
+                    {t("平移")}</button>
+                <button type="button" aria-label={t("向左旋转 90°")} onClick={() => rotateImage(-90)}>↶</button>
+                <button type="button" aria-label={t("向右旋转 90°")} onClick={() => rotateImage(90)}>↷</button>
                 {scanState.crop ? (
                     <span className={styles.nextAnchor}>
-                        下一点 {nextAnchorYear} · {"•".repeat(nextMarkerCount)}
+                        {t("下一点 ")}{nextAnchorYear} · {"•".repeat(nextMarkerCount)}
                     </span>
                 ) : null}
-                <button type="button" disabled={scanState.anchors.length === 0} onClick={removeLastAnchor}>撤销点</button>
+                <button type="button" disabled={scanState.anchors.length === 0} onClick={removeLastAnchor}>{t("撤销点")}</button>
                 <button
                     type="button"
                     disabled={scanState.anchors.length === 0}
@@ -695,26 +695,23 @@ export function TreeRingScanViewer({
                         baselineWidths: undefined,
                     })}
                 >
-                    清空点
-                </button>
+                    {t("清空点")}</button>
                 <span className={styles.zoom}>×{zoom.toFixed(1)}</span>
             </div>
             {tool === "pan" && yearMapping?.valid ? (
-                <span className={styles.linkHint}>单击定位宽度格</span>
+                <span className={styles.linkHint}>{t("单击定位宽度格")}</span>
             ) : null}
             {displayedCrop && image.cropApplied ? (
                 <span className={styles.fullResolution}>
-                    原图截面 {naturalSize.width}×{naturalSize.height} px
+                    {t("原图截面 ")}{naturalSize.width}×{naturalSize.height} px
                 </span>
             ) : null}
             {tool === "crop" ? (
                 <div className={styles.guide}>
-                    在总览上拖出长方形，只框选磨平后的样芯截面；松开后会从 TIFF 原图提取该区域。
-                </div>
+                    {t("在总览上拖出长方形，只框选磨平后的样芯截面；松开后会从 TIFF 原图提取该区域。")}</div>
             ) : (scanState.anchors.length < 2 ? (
                 <div className={styles.guide}>
-                    从最新的整十年标记开始，按年代向前依次点击；至少标注两个点后才会显示在 header。
-                </div>
+                    {t("从最新的整十年标记开始，按年代向前依次点击；至少标注两个点后才会显示在 header。")}</div>
             ) : null)}
         </div>
     );

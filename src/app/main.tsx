@@ -1,4 +1,6 @@
+import { getLocale, t } from '@/i18n/core';
 import React from "react";
+import { LanguageBridge } from "@/i18n/react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { SettingsProvider } from "@/features/settings/SettingsContext";
@@ -27,12 +29,19 @@ if (isSettingsPage || isWorkspaceWindowPage) {
 }
 
 async function mountApplication() {
+    // Apply the saved language before potentially slow pre-mount cache maintenance.
+    document.documentElement.lang = getLocale();
+    for (const [id, key] of [["title-submenu-file-button", "文件(F)"], ["title-submenu-edit-button", "编辑(E)"], ["title-submenu-run-button", "运行(R)"]]) {
+        const button = document.getElementById(id);
+        if (button) button.textContent = t(key);
+    }
     if (!isSettingsPage && !isWorkspaceWindowPage) {
         try { await runPendingCacheCleanup(); }
         catch (error) { console.warn("缓存清理未完成，保留任务供下次启动重试:", error); }
     }
     ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
+        <LanguageBridge />
         {isSettingsPage ? (
             <SettingsProvider>
                 <SettingsPage />

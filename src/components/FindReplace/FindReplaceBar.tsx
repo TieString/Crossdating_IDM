@@ -1,3 +1,5 @@
+import { t } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { motion } from "motion/react";
 import styles from "./FindReplaceBar.module.css";
@@ -56,6 +58,7 @@ export function FindReplaceBar({
     onReplaceAll,
     onClose,
 }: FindReplaceBarProps) {
+    useLocale();
     const queryInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
@@ -83,7 +86,7 @@ export function FindReplaceBar({
     const canReplace = matchCount > 0 && (textMode || replaceValue.trim() !== "");
     const hasQuery = query.trim() !== "";
     const noResults = hasQuery && matchCount === 0;
-    const matchLabel = matchCount > 0 ? `${matchIndex + 1}/${matchCount}` : (hasQuery ? "无结果" : "0/0");
+    const matchLabel = matchCount > 0 ? `${matchIndex + 1}/${matchCount}` : (hasQuery ? t("无结果") : "0/0");
 
     const handleQueryKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
         if (event.key === "Enter") {
@@ -109,7 +112,7 @@ export function FindReplaceBar({
         <motion.div
             className={styles["find-replace-bar"]}
             role="dialog"
-            aria-label={isReplace ? "查找和替换" : "查找"}
+            aria-label={isReplace ? t("查找和替换") : t("查找")}
             initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
@@ -118,8 +121,8 @@ export function FindReplaceBar({
             <button
                 type="button"
                 className={styles["expand-toggle"]}
-                title={isReplace ? "切换到查找" : "切换到替换"}
-                aria-label={isReplace ? "切换到查找" : "切换到替换"}
+                title={isReplace ? t("切换到查找") : t("切换到替换")}
+                aria-label={isReplace ? t("切换到查找") : t("切换到替换")}
                 aria-expanded={isReplace}
                 onClick={() => onModeChange(isReplace ? "find" : "replace")}
             >
@@ -137,11 +140,11 @@ export function FindReplaceBar({
                             className={styles["text-input"]}
                             type="text"
                             value={query}
-                            placeholder={textMode ? "查找宽度、分隔符或序列名" : "查找宽度值"}
+                            placeholder={textMode ? t("查找宽度、分隔符或序列名") : t("查找宽度值")}
                             spellCheck={false}
                             onChange={(event) => onQueryChange(event.target.value)}
                             onKeyDown={handleQueryKeyDown}
-                            aria-label="查找内容"
+                            aria-label={t("查找内容")}
                         />
                         <span className={`${styles["match-count"]} ${noResults ? styles["match-count-empty"] : ""}`}>
                             {matchLabel}
@@ -152,8 +155,8 @@ export function FindReplaceBar({
                         <button
                             type="button"
                             className={styles["icon-button"]}
-                            title="上一处 (Shift+Enter)"
-                            aria-label="上一处"
+                            title={t("上一处 (Shift+Enter)")}
+                            aria-label={t("上一处")}
                             disabled={matchCount === 0}
                             onClick={onPrev}
                         >
@@ -162,8 +165,8 @@ export function FindReplaceBar({
                         <button
                             type="button"
                             className={styles["icon-button"]}
-                            title="下一处 (Enter)"
-                            aria-label="下一处"
+                            title={t("下一处 (Enter)")}
+                            aria-label={t("下一处")}
                             disabled={matchCount === 0}
                             onClick={onNext}
                         >
@@ -174,8 +177,8 @@ export function FindReplaceBar({
                     <button
                         type="button"
                         className={`${styles["icon-button"]} ${styles["close-button"]}`}
-                        title="关闭 (Esc)"
-                        aria-label="关闭"
+                        title={t("关闭 (Esc)")}
+                        aria-label={t("关闭")}
                         onClick={onClose}
                     >
                         <span className={`${styles["fr-icon"]} ${styles["icon-close"]}`} aria-hidden="true" />
@@ -189,32 +192,30 @@ export function FindReplaceBar({
                                 className={styles["text-input"]}
                                 type="text"
                                 value={replaceValue}
-                                placeholder={textMode ? "替换内容" : "替换为宽度值"}
+                                placeholder={textMode ? t("替换内容") : t("替换为宽度值")}
                                 spellCheck={false}
                                 onChange={(event) => onReplaceValueChange(event.target.value)}
                                 onKeyDown={handleReplaceKeyDown}
-                                aria-label="替换内容"
+                                aria-label={t("替换内容")}
                             />
                         </div>
                         <div className={styles["action-group"]}>
                             <button
                                 type="button"
                                 className={styles["text-button"]}
-                                title="替换当前 (Enter)"
+                                title={t("替换当前 (Enter)")}
                                 disabled={!canReplace}
                                 onClick={onReplaceOne}
                             >
-                                替换
-                            </button>
+                                {t("替换")}</button>
                             <button
                                 type="button"
                                 className={styles["text-button"]}
-                                title="全部替换"
+                                title={t("全部替换")}
                                 disabled={!canReplace}
                                 onClick={onReplaceAll}
                             >
-                                全部
-                            </button>
+                                {t("全部")}</button>
                         </div>
                     </div>
                 ) : null}

@@ -1,3 +1,4 @@
+import { t } from '@/i18n/core';
 import { Window } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type {
@@ -243,7 +244,7 @@ export async function openWorkspaceWindow(kind: WorkspaceWindowKind) {
     const { width, height } = workspaceWindowSizes[kind];
     const window = new WebviewWindow(label, {
         url: `/?page=${kind}`,
-        title: workspaceWindowTitles[kind],
+        title: t(workspaceWindowTitles[kind]),
         width,
         height,
         // 除主窗口外统一使用系统原生标题栏（与设置窗口一致）

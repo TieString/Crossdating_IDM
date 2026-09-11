@@ -1,3 +1,5 @@
+import { t, localizeMessage, setLocale, type Locale } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import { useId, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -12,9 +14,10 @@ import styles from "./SettingsPage.module.css";
 import { CacheSection } from "./CacheSection";
 import { WorkspaceTransferSection } from "./WorkspaceTransferSection";
 
-type SectionId = "animation" | "tree-ring-image" | "diagnosis" | "cofecha" | "cache" | "transfer" | "about";
+type SectionId = "language" | "animation" | "tree-ring-image" | "diagnosis" | "cofecha" | "cache" | "transfer" | "about";
 
 const SECTIONS: { id: SectionId; label: string }[] = [
+    { id: "language", label: "语言" },
     { id: "animation", label: "动画" },
     { id: "tree-ring-image", label: "年轮图像" },
     { id: "diagnosis", label: "定年建议" },
@@ -44,6 +47,7 @@ interface RowProps {
 
 /** Typora-style preferences row: bold label on the left, control(s) on the right. */
 function Row({ label, htmlFor, align = "center", children }: RowProps) {
+    useLocale();
     return (
         <div className={`${styles["row"]} ${align === "top" ? styles["row-top"] : ""}`}>
             <label className={styles["row-label"]} htmlFor={htmlFor}>{label}</label>
@@ -61,6 +65,7 @@ interface SelectProps {
 }
 
 function Select({ id, value, disabled = false, onChange, options }: SelectProps) {
+    useLocale();
     return (
         <span className={styles["select-wrap"]}>
             <select
@@ -71,14 +76,32 @@ function Select({ id, value, disabled = false, onChange, options }: SelectProps)
                 onChange={(event) => onChange(event.currentTarget.value)}
             >
                 {options.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
+                    <option key={option.value} value={option.value}>{localizeMessage(option.label)}</option>
                 ))}
             </select>
         </span>
     );
 }
 
+function LanguageSection() {
+    const locale = useLocale();
+    const [saveFailed, setSaveFailed] = useState(false);
+    const id = useId();
+    return <div>
+        <h2 className={styles["section-title"]}>{t("语言设置")}</h2>
+        <Row label={t("界面语言")} htmlFor={id} align="top">
+            <Select id={id} value={locale}
+                onChange={(value) => setSaveFailed(!setLocale(value as Locale))}
+                options={[{ value: "zh-CN", label: "简体中文" }, { value: "en-US", label: "English" }]} />
+            <div className={styles["setting-note"]}>{t("切换立即生效，并同步到所有已打开窗口；不会关闭文件或丢失未保存的编辑。")}</div>
+            <div className={styles["setting-note"]}>{t("所选语言会在下次启动时保留。")}</div>
+            {saveFailed && <div role="status">{t("语言偏好无法保存；本次切换仍然有效。")}</div>}
+        </Row>
+    </div>;
+}
+
 function AnimationSection() {
+    useLocale();
     const { settings, updateAnimationSettings } = useSettings();
     const anim = settings.animation;
     const groupId = useId();
@@ -94,9 +117,9 @@ function AnimationSection() {
 
     return (
         <div>
-            <h2 className={styles["section-title"]}>动画</h2>
+            <h2 className={styles["section-title"]}>{t("动画")}</h2>
 
-            <Row label="动画效果">
+            <Row label={t("动画效果")}>
                 <label className={styles["check"]}>
                     <input
                         type="checkbox"
@@ -105,11 +128,11 @@ function AnimationSection() {
                             enabled: event.currentTarget.checked ? "enabled" : "disabled",
                         })}
                     />
-                    <span>启用动画</span>
+                    <span>{t("启用动画")}</span>
                 </label>
             </Row>
 
-            <Row label="动画速度" htmlFor={`${groupId}-speed`}>
+            <Row label={t("动画速度")} htmlFor={`${groupId}-speed`}>
                 <Select
                     id={`${groupId}-speed`}
                     value={String(nearestSpeed)}
@@ -119,58 +142,58 @@ function AnimationSection() {
                 />
             </Row>
 
-            <Row label="删除序列动画" htmlFor={`${groupId}-del-series`}>
+            <Row label={t("删除序列动画")} htmlFor={`${groupId}-del-series`}>
                 <Select
                     id={`${groupId}-del-series`}
                     value={anim.deleteSeries}
                     disabled={disabled}
                     onChange={update("deleteSeries")}
                     options={[
-                        { value: "fade", label: "淡出消散（默认）" },
-                        { value: "shatter-rise", label: "粉碎上升" },
-                        { value: "none", label: "无动画" },
+                        { value: "fade", label: t("淡出消散（默认）") },
+                        { value: "shatter-rise", label: t("粉碎上升") },
+                        { value: "none", label: t("无动画") },
                     ]}
                 />
             </Row>
 
-            <Row label="删除年份动画" htmlFor={`${groupId}-del-year`}>
+            <Row label={t("删除年份动画")} htmlFor={`${groupId}-del-year`}>
                 <Select
                     id={`${groupId}-del-year`}
                     value={anim.deleteYear}
                     disabled={disabled}
                     onChange={update("deleteYear")}
                     options={[
-                        { value: "pixel-burst", label: "像素爆炸（默认）" },
-                        { value: "none", label: "无动画" },
+                        { value: "pixel-burst", label: t("像素爆炸（默认）") },
+                        { value: "none", label: t("无动画") },
                     ]}
                 />
             </Row>
 
-            <Row label="插入年份动画" htmlFor={`${groupId}-ins-year`}>
+            <Row label={t("插入年份动画")} htmlFor={`${groupId}-ins-year`}>
                 <Select
                     id={`${groupId}-ins-year`}
                     value={anim.insertYear}
                     disabled={disabled}
                     onChange={update("insertYear")}
                     options={[
-                        { value: "slide-shift", label: "底层浮现（默认）" },
-                        { value: "pulse-shift", label: "脉冲浮现" },
-                        { value: "side-pop-shift", label: "侧向弹入" },
-                        { value: "flight-shift", label: "跨行飞入" },
-                        { value: "none", label: "无动画" },
+                        { value: "slide-shift", label: t("底层浮现（默认）") },
+                        { value: "pulse-shift", label: t("脉冲浮现") },
+                        { value: "side-pop-shift", label: t("侧向弹入") },
+                        { value: "flight-shift", label: t("跨行飞入") },
+                        { value: "none", label: t("无动画") },
                     ]}
                 />
             </Row>
 
-            <Row label="撤销 / 恢复动画" htmlFor={`${groupId}-history`}>
+            <Row label={t("撤销 / 恢复动画")} htmlFor={`${groupId}-history`}>
                 <Select
                     id={`${groupId}-history`}
                     value={anim.historyAnim}
                     disabled={disabled}
                     onChange={update("historyAnim")}
                     options={[
-                        { value: "enabled", label: "启用（默认）" },
-                        { value: "disabled", label: "禁用" },
+                        { value: "enabled", label: t("启用（默认）") },
+                        { value: "disabled", label: t("禁用") },
                     ]}
                 />
             </Row>
@@ -179,15 +202,16 @@ function AnimationSection() {
 }
 
 export function CofechaSection() {
+    useLocale();
     const { settings, updateCofechaSettings } = useSettings();
     const executablePath = settings.cofecha.executablePath;
 
     const selectExecutable = async () => {
         const selected = await open({
-            title: "加载 COFECHA 可执行文件",
+            title: t("加载 COFECHA 可执行文件"),
             multiple: false,
             directory: false,
-            filters: [{ name: "Windows 可执行文件", extensions: ["exe"] }],
+            filters: [{ name: t("Windows 可执行文件"), extensions: ["exe"] }],
         });
         if (typeof selected !== "string") return;
 
@@ -202,66 +226,64 @@ export function CofechaSection() {
         <div>
             <h2 className={styles["section-title"]}>COFECHA</h2>
 
-            <Row label="报告引擎" align="top">
-                <div className={styles["segmented-control"]} role="group" aria-label="COFECHA 报告引擎">
+            <Row label={t("报告引擎")} align="top">
+                <div className={styles["segmented-control"]} role="group" aria-label={t("COFECHA 报告引擎")}>
                     <button className={`${styles["segment-button"]} ${settings.cofecha.engine === "javascript" ? styles["segment-button-active"] : ""}`}
                         type="button" aria-pressed={settings.cofecha.engine === "javascript"}
                         onClick={() => updateCofechaSettings({ engine: "javascript" })}>JavaScript</button>
                     <button className={`${styles["segment-button"]} ${settings.cofecha.engine === "official" ? styles["segment-button-active"] : ""}`}
                         type="button" aria-pressed={settings.cofecha.engine === "official"}
-                        onClick={() => updateCofechaSettings({ engine: "official" })}>官方 COFECHA</button>
+                        onClick={() => updateCofechaSettings({ engine: "official" })}>{t("官方 COFECHA")}</button>
                 </div>
-                <div className={styles["setting-note"]}>报告、动态参考和自动定年建议共享该引擎生成的当前报告。</div>
+                <div className={styles["setting-note"]}>{t("报告、动态参考和自动定年建议共享该引擎生成的当前报告。")}</div>
             </Row>
 
-            <Row label="可执行文件" align="top">
+            <Row label={t("可执行文件")} align="top">
                 <div className={styles["executable-row"]}>
                     <input
                         className={styles["path-input"]}
                         value={executablePath}
                         readOnly
-                        placeholder="尚未选择 COFECHA EXE"
-                        aria-label="COFECHA 可执行文件路径"
+                        placeholder={t("尚未选择 COFECHA EXE")}
+                        aria-label={t("COFECHA 可执行文件路径")}
                     />
                     <button className={styles["action-button"]} type="button" onClick={() => void selectExecutable()}>
-                        选择 EXE
-                    </button>
+                        {t("选择 EXE")}</button>
                     {executablePath && (
                         <button className={styles["secondary-button"]} type="button" onClick={clearExecutable}>
-                            清除
-                        </button>
+                            {t("清除")}</button>
                     )}
                 </div>
                 <div className={executablePath ? styles["configured-status"] : styles["unconfigured-status"]}>
-                    {executablePath ? "官方 COFECHA 已配置" : "官方 COFECHA 尚未配置"}
+                    {executablePath ? t("官方 COFECHA 已配置") : t("官方 COFECHA 尚未配置")}
                 </div>
             </Row>
 
-            <Row label="官方获取" align="top">
+            <Row label={t("官方获取")} align="top">
                 <button
                     className={styles["download-button"]}
                     type="button"
                     onClick={() => void openUrl(LTRR_COFECHA_DOWNLOAD_URL)}
                 >
                     <img className={styles["website-icon"]} src={ltrrFavicon} alt="" aria-hidden="true" />
-                    <span>下载</span>
+                    <span>{t("下载")}</span>
                 </button>
                 <div className={styles["setting-note"]}>
-                    Crossdating IDM 不附带 COFECHA。
-                </div>
+                    {t("Crossdating IDM 不附带 COFECHA。")}</div>
             </Row>
         </div>
     );
 }
 
 function DiagnosisSection() {
+    useLocale();
     const { settings, updateDiagnosisSettings } = useSettings();
 
     return (
         <div>
-            <h2 className={styles["section-title"]}>定年建议</h2>
+            <h2 className={styles["section-title"]}>{t("定年建议")}</h2>
 
-            <Row label="自动分析" align="top">
+            <Row label={t("自动分析")} align="top">
                 <label className={styles["check"]}>
                     <input
                         type="checkbox"
@@ -270,24 +292,24 @@ function DiagnosisSection() {
                             enabled: event.currentTarget.checked,
                         })}
                     />
-                    <span>选择序列或编辑数据后自动生成定年建议</span>
+                    <span>{t("选择序列或编辑数据后自动生成定年建议")}</span>
                 </label>
                 <div className={styles["setting-note"]}>
-                    关闭后会停止当前自动分析并隐藏建议；COFECHA 验证与已有编辑记录不受影响。
-                </div>
+                    {t("关闭后会停止当前自动分析并隐藏建议；COFECHA 验证与已有编辑记录不受影响。")}</div>
             </Row>
         </div>
     );
 }
 
 function TreeRingImageSection() {
+    useLocale();
     const { settings, updateTreeRingImageSettings } = useSettings();
 
     return (
         <div>
-            <h2 className={styles["section-title"]}>年轮图像</h2>
+            <h2 className={styles["section-title"]}>{t("年轮图像")}</h2>
 
-            <Row label="绘制图片" align="top">
+            <Row label={t("绘制图片")} align="top">
                 <label className={styles["check"]}>
                     <input
                         type="checkbox"
@@ -296,42 +318,42 @@ function TreeRingImageSection() {
                             showGeneratedPreview: event.currentTarget.checked,
                         })}
                     />
-                    <span>在序列 header 中显示绘制年轮图</span>
+                    <span>{t("在序列 header 中显示绘制年轮图")}</span>
                 </label>
                 <div className={styles["setting-note"]}>
-                    关闭后不生成或显示 header 绘制图，但保留原按钮、右键菜单和双击打开功能；扫描影像不受影响。
-                </div>
+                    {t("关闭后不生成或显示 header 绘制图，但保留原按钮、右键菜单和双击打开功能；扫描影像不受影响。")}</div>
             </Row>
         </div>
     );
 }
 
 function AboutSection() {
+    useLocale();
     return (
         <div>
-            <h2 className={styles["section-title"]}>关于</h2>
+            <h2 className={styles["section-title"]}>{t("关于")}</h2>
 
-            <Row label="应用名称"><span className={styles["about-text"]}>交叉定年 · IDM</span></Row>
-            <Row label="版本"><span className={styles["about-text"]}>1.6.2</span></Row>
-            <Row label="技术栈"><span className={styles["about-text"]}>Tauri · React · TypeScript</span></Row>
+            <Row label={t("应用名称")}><span className={styles["about-text"]}>{t("交叉定年 · IDM")}</span></Row>
+            <Row label={t("版本")}><span className={styles["about-text"]}>1.6.2</span></Row>
+            <Row label={t("技术栈")}><span className={styles["about-text"]}>Tauri · React · TypeScript</span></Row>
             <Row label="COFECHA"><span className={styles["about-text"]}>Richard L. Holmes · LTRR Dendrochronology Program Library</span></Row>
-            <Row label="研发团队" align="top">
+            <Row label={t("研发团队")} align="top">
                 <span className={styles["about-text"]}>
-                    何志浩、张同文、张瑞波<br />
-                    靳春寒、喻树龙、尚华明、秦莉
-                </span>
+                    {t("何志浩、张同文、张瑞波")}<br />
+                    {t("靳春寒、喻树龙、尚华明、秦莉")}</span>
             </Row>
         </div>
     );
 }
 
 export default function SettingsPage() {
-    const [activeSection, setActiveSection] = useState<SectionId>("animation");
+    useLocale();
+    const [activeSection, setActiveSection] = useState<SectionId>("language");
     const [query, setQuery] = useState("");
 
     const normalizedQuery = query.trim().toLowerCase();
     const visibleSections = normalizedQuery
-        ? SECTIONS.filter((section) => section.label.toLowerCase().includes(normalizedQuery))
+        ? SECTIONS.filter((section) => localizeMessage(section.label).toLowerCase().includes(normalizedQuery))
         : SECTIONS;
 
     return (
@@ -341,7 +363,7 @@ export default function SettingsPage() {
                     <input
                         className={styles["search"]}
                         type="text"
-                        placeholder="查找..."
+                        placeholder={t("查找...")}
                         value={query}
                         onChange={(event) => setQuery(event.currentTarget.value)}
                     />
@@ -356,13 +378,14 @@ export default function SettingsPage() {
                                 className={`${styles["sidebar-item"]} ${activeSection === section.id ? styles["sidebar-item-active"] : ""}`}
                                 onClick={() => setActiveSection(section.id)}
                             >
-                                {section.label}
+                                {localizeMessage(section.label)}
                             </button>
                         ))}
                     </FloatingScrollArea>
                 </div>
 
                 <FloatingScrollArea className={styles["content"]}>
+                    {activeSection === "language" && <LanguageSection />}
                     {activeSection === "animation" && <AnimationSection />}
                     {activeSection === "tree-ring-image" && <TreeRingImageSection />}
                     {activeSection === "diagnosis" && <DiagnosisSection />}

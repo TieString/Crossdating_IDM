@@ -15,6 +15,14 @@ Crossdating IDM 把树轮宽度编辑、样芯图像、折线对照、COFECHA �
 
 产品名为 **Crossdating IDM**；GitHub 仓库名保留为 `Crossdating_IDM`，本地工程目录名 `Crossdating_Tauri` 用于体现桌面技术栈。
 
+## 界面语言 / Interface language
+
+在 **文件 → 设置 → 语言** 中选择 **简体中文** 或 **English**。切换立即生效，并同步至设置、操作日志、COFECHA 与图表独立窗口；下次启动保留所选语言。切换不关闭 RWL、不重置编辑器，不修改样芯编号、文件路径、测量值、编辑历史或定年模型。
+
+Choose **File → Settings → Language → English** for the English interface. The setting applies immediately across open windows and is retained on the next launch. Application menus, tooltips, dialogs, diagnostic explanations and effective-change CSV headings are localized. User data and original COFECHA OUT content remain unchanged. Operating-system file-picker controls follow the OS language.
+
+实现边界、扩展方法与验收步骤见 [语言切换说明](docs/i18n.md)。
+
 ## 内容列表
 
 - [背景](#背景)

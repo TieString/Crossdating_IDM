@@ -1,3 +1,4 @@
+import { t, localizeMessage, getLocale, type Locale } from '@/i18n/core';
 import type { RwlOperationLogEntry, RwlPersistedHistorySnapshot, SerializedRwlTreeData } from "./edit";
 import { buildRwlDisplayUnits, displayUnitFor, physicalUnit, unitLabel } from "./displayUnits";
 
@@ -173,9 +174,13 @@ export function effectiveChanges(snapshot: RwlPersistedHistorySnapshot): Effecti
     return output.sort((a, b) => a.series.localeCompare(b.series, "zh-CN", { numeric: true }));
 }
 
-export function effectiveChangesCsv(snapshot: RwlPersistedHistorySnapshot): string {
+export function effectiveChangesCsv(snapshot: RwlPersistedHistorySnapshot, locale: Locale = getLocale()): string {
     const quote = (value: string) => `"${(/^[=+@\t\r]/.test(value) || /^-[^\d]/.test(value) ? "'" : "") + value.replace(/"/g, '""')}"`;
-    const rows = effectiveChanges(snapshot).map((row) => [row.series, row.type, row.original, row.current, row.oldValue, row.newValue, row.shift, row.unit, row.note]);
-    return "\uFEFF" + [["序列编号", "修改类型", "原年份/范围", "现年份/范围", "原值", "现值", "位移量", "单位", "说明"], ...rows]
+    // Notes can append a block descriptor. Localize those app-owned sentences
+    // independently; do not apply replacements to series IDs or numeric payloads.
+    const note = (value: string) => value.split(/(?= 分块\d+\/\d+（)/)
+        .map((part) => localizeMessage(part, locale)).join(" ");
+    const rows = effectiveChanges(snapshot).map((row) => [row.series, localizeMessage(row.type, locale), row.original, row.current, row.oldValue, row.newValue, row.shift, row.unit, note(row.note)]);
+    return "\uFEFF" + [["序列编号", "修改类型", "原年份/范围", "现年份/范围", "原值", "现值", "位移量", "单位", "说明"].map((label) => t(label, [], locale)), ...rows]
         .map((row) => row.map(quote).join(",")).join("\r\n") + "\r\n";
 }

@@ -1,3 +1,5 @@
+import { t, localizeMessage } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import { createPortal } from "react-dom";
 import { useMemo, useState } from "react";
 import type { CofechaPassReference } from "@/features/crossdating/reference";
@@ -68,6 +70,7 @@ function ResultPopover({
     onClose: () => void;
     onApply: (candidate: BayesianDatingCandidate) => void;
 }) {
+    useLocale();
     const [selectedStartYear, setSelectedStartYear] = useState<number | null>(null);
     const best = result?.best ?? null;
     const selectedCandidate = useMemo(() => (
@@ -83,45 +86,45 @@ function ResultPopover({
                 className={styles.popover}
                 role="dialog"
                 aria-modal="true"
-                aria-label="贝叶斯定年结果"
+                aria-label={t("贝叶斯定年结果")}
                 onMouseDown={(event) => event.stopPropagation()}
             >
                 <div className={styles.header}>
                     <div>
-                        <h3 className={styles.title}>贝叶斯定年</h3>
-                        <p className={styles.subtitle}>{result?.targetSeriesId ?? "当前序列"}</p>
+                        <h3 className={styles.title}>{t("贝叶斯定年")}</h3>
+                        <p className={styles.subtitle}>{result?.targetSeriesId ?? t("当前序列")}</p>
                     </div>
-                    <button type="button" className={styles.close} onClick={onClose} aria-label="关闭">×</button>
+                    <button type="button" className={styles.close} onClick={onClose} aria-label={t("关闭")}>×</button>
                 </div>
                 <div className={styles.body}>
-                    {error ? <p className={styles.error}>{error}</p> : null}
+                    {error ? <p className={styles.error}>{localizeMessage(error)}</p> : null}
                     {result ? (
                         <>
                             <span className={statusClassName(result.decision.status)}>
-                                {result.decision.status} · {result.decision.reason}
+                                {result.decision.status} · {localizeMessage(result.decision.reason)}
                             </span>
 
                             <section className={styles.section}>
                                 <h4 className={styles.sectionTitle}>Posterior</h4>
                                 <div className={styles.metrics}>
                                     <div className={styles.metric}>
-                                        <span className={styles.metricLabel}>最佳起始年</span>
+                                        <span className={styles.metricLabel}>{t("最佳起始年")}</span>
                                         <span className={styles.metricValue}>{best?.startYear ?? "—"}</span>
                                     </div>
                                     <div className={styles.metric}>
-                                        <span className={styles.metricLabel}>最佳结束年</span>
+                                        <span className={styles.metricLabel}>{t("最佳结束年")}</span>
                                         <span className={styles.metricValue}>{best?.endYear ?? "—"}</span>
                                     </div>
                                     <div className={styles.metric}>
-                                        <span className={styles.metricLabel}>后验概率</span>
+                                        <span className={styles.metricLabel}>{t("后验概率")}</span>
                                         <span className={styles.metricValue}>{formatPercent(best?.posterior)}</span>
                                     </div>
                                     <div className={styles.metric}>
-                                        <span className={styles.metricLabel}>第二候选</span>
+                                        <span className={styles.metricLabel}>{t("第二候选")}</span>
                                         <span className={styles.metricValue}>{summarizeCandidate(result.secondBest)}</span>
                                     </div>
                                     <div className={styles.metric}>
-                                        <span className={styles.metricLabel}>95% HPD 候选数</span>
+                                        <span className={styles.metricLabel}>{t("95% HPD 候选数")}</span>
                                         <span className={styles.metricValue}>{result.hpd95.length}</span>
                                     </div>
                                     <div className={styles.metric}>
@@ -197,7 +200,7 @@ function ResultPopover({
                                 </div>
                                 {warningItems.length > 0 ? (
                                     <ul className={styles.warnings}>
-                                        {warningItems.map((warning) => <li key={warning}>{warning}</li>)}
+                                        {warningItems.map((warning) => <li key={warning}>{localizeMessage(warning)}</li>)}
                                     </ul>
                                 ) : null}
                             </section>
@@ -224,7 +227,7 @@ function ResultPopover({
                                                     key={candidate.startYear}
                                                     className={`${styles.candidateRow}${selectedCandidate?.startYear === candidate.startYear ? ` ${styles.candidateRowSelected}` : ""}`}
                                                     onClick={() => setSelectedStartYear(candidate.startYear)}
-                                                    title={`选择 ${candidate.startYear}-${candidate.endYear}`}
+                                                    title={t("选择 {0}-{1}", [candidate.startYear, candidate.endYear])}
                                                 >
                                                     <td>
                                                         {selectedCandidate?.startYear === candidate.startYear ? (
@@ -252,12 +255,11 @@ function ResultPopover({
                                     disabled={!selectedCandidate}
                                     onClick={() => selectedCandidate && onApply(selectedCandidate)}
                                 >
-                                    应用选中候选
-                                </button>
+                                    {t("应用选中候选")}</button>
                             </div>
                         </>
                     ) : !error ? (
-                        <p className={styles.subtitle}>定年中…</p>
+                        <p className={styles.subtitle}>{t("定年中…")}</p>
                     ) : null}
                 </div>
             </div>
@@ -273,25 +275,26 @@ export function BayesianDateButton({
     disabled = false,
     onApplyStartYear,
 }: BayesianDateButtonProps) {
+    const locale = useLocale();
     const [running, setRunning] = useState(false);
     const [result, setResult] = useState<BayesianMcmcDatingResult | null>(null);
     const [error, setError] = useState("");
     const [open, setOpen] = useState(false);
 
     const disabledReason = useMemo(() => {
-        if (disabled) return "当前序列不可定年";
-        if (!reference) return "需要先生成动态 COFECHA 参考序列";
+        if (disabled) return t("当前序列不可定年");
+        if (!reference) return t("需要先生成动态 COFECHA 参考序列");
         if (reference.source !== "cofecha_pass_anchor" && reference.source !== "cofecha_master_series") {
-            return "需要使用动态 COFECHA 参考序列";
+            return t("需要使用动态 COFECHA 参考序列");
         }
-        if (reference.points.length === 0) return "动态 COFECHA 参考序列没有可用点";
+        if (reference.points.length === 0) return t("动态 COFECHA 参考序列没有可用点");
         return "";
-     }, [disabled, reference]);
+     }, [locale, disabled, reference]);
 
     const handleRun = async () => {
         if (!reference || disabledReason || running) return;
         if (globalBayesianDatingRunning) {
-            setError("已有贝叶斯定年任务正在运行，请等待当前任务完成。");
+            setError(t("已有贝叶斯定年任务正在运行，请等待当前任务完成。"));
             setResult(null);
             setOpen(true);
             return;
@@ -330,10 +333,10 @@ export function BayesianDateButton({
                 type="button"
                 className={styles.button}
                 disabled={running || Boolean(disabledReason)}
-                title={disabledReason || `贝叶斯定年 默认 MCMC：${DEFAULT_BAYESIAN_MCMC_CONFIG.chains} chains × ${DEFAULT_BAYESIAN_MCMC_CONFIG.iterations} iterations`}
+                title={disabledReason || t("贝叶斯定年 默认 MCMC：{0} chains × {1} iterations", [DEFAULT_BAYESIAN_MCMC_CONFIG.chains, DEFAULT_BAYESIAN_MCMC_CONFIG.iterations])}
                 onClick={() => { void handleRun(); }}
             >
-                {running ? "确定中…" : "年代确定"}
+                {running ? t("确定中…") : t("年代确定")}
             </button>
             {open ? (
                 <ResultPopover

@@ -1,3 +1,5 @@
+import { t, localizeMessage } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import type {
@@ -44,6 +46,7 @@ export function TreeRingImageContextMenu({
     onOpenScan,
     onClose,
 }: TreeRingImageContextMenuProps) {
+    useLocale();
     const [status, setStatus] = useState<string | null>(null);
     const menuRef = useRef<HTMLDivElement | null>(null);
     const [position, setPosition] = useState({ left: x, top: y, flipX: false, flipY: false });
@@ -86,12 +89,12 @@ export function TreeRingImageContextMenu({
 
     const mode = scanState?.mode ?? "generated";
     const scanDisabledTitle = !scanFile
-        ? "当前文件夹中没有与该序列同名的影像"
+        ? t("当前文件夹中没有与该序列同名的影像")
         : !scanState?.crop
-            ? "请先打开扫描影像并框选长方形样芯截面"
+            ? t("请先打开扫描影像并框选长方形样芯截面")
         : !calibrated
-            ? "请在选定截面上至少标注两个年代锚点"
-            : mappingInvalidReason ?? "扫描影像年份映射不可用";
+            ? t("请在选定截面上至少标注两个年代锚点")
+            : mappingInvalidReason ?? t("扫描影像年份映射不可用");
     const menuStyle = {
         left: position.left,
         top: position.top,
@@ -105,25 +108,25 @@ export function TreeRingImageContextMenu({
             className={`${menuStyles["menu-root"]} ${styles.menuOverlay}`}
             style={menuStyle}
             role="menu"
-            aria-label={`${seriesId} 年轮影像菜单`}
+            aria-label={t("{0} 年轮影像菜单", [seriesId])}
             onPointerDown={(event) => event.stopPropagation()}
             onContextMenu={(event) => event.preventDefault()}
         >
             <div className={styles.heading}>
                 <span>{seriesId}</span>
-                <span className={styles.headingHint}>年轮影像</span>
+                <span className={styles.headingHint}>{t("年轮影像")}</span>
             </div>
             <button
                 type="button"
                 className={`${menuStyles["menu-row"]} ${styles.menuButton}`}
                 role="menuitem"
                 onClick={async () => {
-                    setStatus("正在读取文件名…");
+                    setStatus(t("正在读取文件名…"));
                     try {
                         const count = await onLoadFolder();
-                        setStatus(count > 0 ? `已匹配 ${count} 条序列` : "没有找到同名影像");
+                        setStatus(count > 0 ? t("已匹配 {0} 条序列", [count]) : t("没有找到同名影像"));
                     } catch (error) {
-                        setStatus(error instanceof Error ? error.message : "读取文件夹失败");
+                        setStatus(error instanceof Error ? error.message : t("读取文件夹失败"));
                     }
                 }}
             >
@@ -133,7 +136,7 @@ export function TreeRingImageContextMenu({
                         <path d="M3 10h18" />
                     </svg>
                 </span>
-                <span className={menuStyles["menu-row-label"]}>加载扫描影像文件夹</span>
+                <span className={menuStyles["menu-row-label"]}>{t("加载扫描影像文件夹")}</span>
             </button>
             <div className={menuStyles["menu-separator"]} role="separator" />
             <button
@@ -149,7 +152,7 @@ export function TreeRingImageContextMenu({
                 <span className={`${menuStyles["menu-row-icon"]} ${styles.radioIcon}`} aria-hidden="true">
                     <span className={mode === "generated" ? styles.radioSelected : styles.radioEmpty} />
                 </span>
-                <span className={menuStyles["menu-row-label"]}>年轮模拟图</span>
+                <span className={menuStyles["menu-row-label"]}>{t("年轮模拟图")}</span>
             </button>
             <button
                 type="button"
@@ -157,7 +160,7 @@ export function TreeRingImageContextMenu({
                 role="menuitemradio"
                 aria-checked={mode === "scan"}
                 disabled={!scanModeAvailable}
-                title={!scanModeAvailable ? scanDisabledTitle : "在序列 header 中显示扫描影像"}
+                title={!scanModeAvailable ? scanDisabledTitle : t("在序列 header 中显示扫描影像")}
                 onClick={() => {
                     onSetMode("scan");
                     onClose();
@@ -166,14 +169,14 @@ export function TreeRingImageContextMenu({
                 <span className={`${menuStyles["menu-row-icon"]} ${styles.radioIcon}`} aria-hidden="true">
                     <span className={mode === "scan" ? styles.radioSelected : styles.radioEmpty} />
                 </span>
-                <span className={menuStyles["menu-row-label"]}>扫描影像</span>
+                <span className={menuStyles["menu-row-label"]}>{t("扫描影像")}</span>
             </button>
             <button
                 type="button"
                 className={`${menuStyles["menu-row"]} ${styles.menuButton}`}
                 role="menuitem"
                 disabled={!scanFile}
-                title={scanFile ? "框选高分辨率样芯截面并标注年代锚点" : "当前序列没有同名影像"}
+                title={scanFile ? t("框选高分辨率样芯截面并标注年代锚点") : t("当前序列没有同名影像")}
                 onClick={() => {
                     onOpenScan();
                     onClose();
@@ -187,25 +190,25 @@ export function TreeRingImageContextMenu({
                 </span>
                 <span className={menuStyles["menu-row-label"]}>
                     {calibrated
-                        ? "查看影像"
-                        : (scanState?.crop ? "打开并标注年份锚点…" : "打开并框选样芯截面…")}
+                        ? t("查看影像")
+                        : (scanState?.crop ? t("打开并标注年份锚点…") : t("打开并框选样芯截面…"))}
                 </span>
             </button>
             <div className={styles.footer}>
                 {scanFile ? (
                     <>
                         <span title={scanFile.path}>{scanFile.name}</span>
-                        <span>{scanState?.crop ? "已选截面" : "未选截面"} · {scanState?.anchors.length ?? 0} 个锚点</span>
+                        <span>{scanState?.crop ? t("已选截面") : t("未选截面")} · {scanState?.anchors.length ?? 0} {t(" 个锚点")}</span>
                     </>
                 ) : folderPath ? (
-                    <span>已匹配 {matchedCount}/{totalSeriesCount}，本序列无同名影像</span>
+                    <span>{t("已匹配 ")}{matchedCount}/{totalSeriesCount}{t("，本序列无同名影像")}</span>
                 ) : (
-                    <span>尚未加载扫描影像文件夹</span>
+                    <span>{t("尚未加载扫描影像文件夹")}</span>
                 )}
                 {mappingInvalidReason && calibrated ? (
-                    <span className={styles.warning}>{mappingInvalidReason}</span>
+                    <span className={styles.warning}>{localizeMessage(mappingInvalidReason)}</span>
                 ) : null}
-                {status ? <span className={styles.status}>{status}</span> : null}
+                {status ? <span className={styles.status}>{localizeMessage(status)}</span> : null}
             </div>
         </div>,
         document.body,

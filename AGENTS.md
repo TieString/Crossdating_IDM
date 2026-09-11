@@ -82,7 +82,7 @@ Tauri + React + TypeScript 树轮交叉定年工作站。GitHub `main` 以本工
 - 有效修改CSV只用于导出，不修改内部日志；使用持久化comparisonBaseline和日志重放的年轮身份，无法归因则列区间差异。comparisonBaseline不随普通保存/另存更新；旧快照缺失基线时必须标明legacy来源，不伪造历史。
 - 设置页工作区迁移使用版本化.cdworkspace（ZIP内仅manifest.json/workspace.json）。导入先完成结构和SHA-256校验，再按原始/当前内容身份匹配用户选择的RWL；完整状态原子持久化后才替换编辑器。包内路径不能触发文件操作。扫描标注必须在用户重选文件夹且影像指纹匹配后关联；导入不复用COFECHA报告或旧动态参考。
 - COFECHA结果保存在工作区状态；OUT只通过显式导出写到用户选择的位置。
-- cofecha-js 0.2.1是默认报告引擎并在Web Worker中运行；官方引擎需要用户提供EXE。两者均返回完整OUT，PART 8只修改查看副本。RWL读取复用该版本的段边界解析器，完整999规则见README；读取失败必须显示中文弹框。
+- cofecha-js 0.2.1是默认报告引擎并在Web Worker中运行；官方引擎需要用户提供EXE。两者均返回完整OUT，PART 8只修改查看副本。RWL读取复用该版本的段边界解析器，完整999规则见README；读取失败必须按当前界面语言显示弹框。
 - 测试和研究脚本不得改写输入RWL。
 
 ## 参考、图表和扫描图
@@ -115,3 +115,10 @@ node scripts/validate-vite-dev-watch.mjs --seconds 150
 ```
 
 完整legacy诊断测试包含已知失败审计，不能用它覆盖当前v5专项结果；也不能删除失败记录后宣称全量通过。
+
+## 界面语言
+
+- 语言切换在 `src/i18n/`；中文源消息是键，`en.json` 是离线英文目录。使用 `t("中文", [参数])`，参数不得再次翻译。
+- 组件通过 `useLocale()` 订阅；只把 locale 加入生成文案的 memo/effect 依赖，不得以语言作为编辑器 key、重新载入工作区、重建图表插件或重新运行诊断。
+- 历史日志/诊断保持原始语义，通过显示适配器翻译；不得全局替换 DOM、路径、样芯名、原始 RWL 或 COFECHA OUT。
+- 新增/修改文案必须运行 `npm run test:i18n` 和生产测试。原生标题/系统文件对话框在目标桌面平台额外验收。

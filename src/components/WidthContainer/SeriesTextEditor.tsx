@@ -1,3 +1,5 @@
+import { t } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { FloatingScrollbar } from '@/components/FloatingScrollbar/FloatingScrollbar';
 import style from './SeriesTextEditor.module.css';
@@ -130,6 +132,7 @@ export interface SeriesTextEditorProps {
 
 /** Text-mode editor for one width series, including multi-cursor shortcuts. */
 export default function SeriesTextEditor({ treeCode, initialText, stopMarkerValue, onClose }: SeriesTextEditorProps) {
+    useLocale();
     const containerRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const [charWidth, setCharWidth] = useState(7.8);
@@ -544,8 +547,8 @@ export default function SeriesTextEditor({ treeCode, initialText, stopMarkerValu
         >
             <div className={style['header']}>
                 <span className={style['header-title']}>{treeCode}</span>
-                <span className={style['header-label']}> — 文本编辑模式</span>
-                <span className={style['header-hint']}>Ctrl+Enter 提交 · Esc 取消</span>
+                <span className={style['header-label']}> {t(" — 文本编辑模式")}</span>
+                <span className={style['header-hint']}>{t("Ctrl+Enter 提交 · Esc 取消")}</span>
             </div>
 
             <div className={style['editor-area']}>
@@ -573,20 +576,16 @@ export default function SeriesTextEditor({ treeCode, initialText, stopMarkerValu
 
             {parseError && (
                 <div className={style['parse-error']}>
-                    格式错误：每行应为 "年份  宽度值" 或 "年份  missing"
-                </div>
+                    {t("格式错误：每行应为 \"年份  宽度值\" 或 \"年份  missing\"")}</div>
             )}
 
             <div className={style['footer']}>
                 <span className={style['footer-hint']}>
-                    <kbd className={style['kbd']}>Ctrl+Shift+L</kbd> 选择所有相同词
-                </span>
+                    <kbd className={style['kbd']}>Ctrl+Shift+L</kbd> {t(" 选择所有相同词")}</span>
                 <span className={style['footer-hint']}>
-                    <kbd className={style['kbd']}>Alt+Click</kbd> 添加光标
-                </span>
+                    <kbd className={style['kbd']}>Alt+Click</kbd> {t(" 添加光标")}</span>
                 <span className={style['footer-hint']}>
-                    <kbd className={style['kbd']}>中键拖动</kbd> 列选择
-                </span>
+                    <kbd className={style['kbd']}>{t("中键拖动")}</kbd> {t(" 列选择")}</span>
             </div>
         </div>
     );

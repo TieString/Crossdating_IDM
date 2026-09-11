@@ -1,3 +1,4 @@
+import { t, localizeError } from '@/i18n/core';
 import { ask, message, open, save } from "@tauri-apps/plugin-dialog";
 import { readTextFile, readFile, writeFile, exists, lstat } from "@tauri-apps/plugin-fs";
 import { invoke } from "@tauri-apps/api/core";
@@ -556,7 +557,7 @@ export function useHomeWorkspace() {
         const folderPath = await open({
             directory: true,
             multiple: false,
-            title: "选择树轮扫描影像文件夹",
+            title: t("选择树轮扫描影像文件夹"),
         });
         if (!folderPath || typeof folderPath !== "string") return 0;
 
@@ -612,7 +613,7 @@ export function useHomeWorkspace() {
     ) => {
         const engine = options?.engine ?? settings.cofecha.engine;
         const executablePath = engine === "official" ? settings.cofecha.executablePath.trim() : null;
-        if (engine === "official" && !executablePath) throw new Error("尚未配置 COFECHA 可执行文件");
+        if (engine === "official" && !executablePath) throw new Error(t("尚未配置 COFECHA 可执行文件"));
         const undatedSource = options?.undated === undefined ? cofechaUndatedSource : options.undated;
         const undatedInput: CofechaUndatedInput | undefined = undatedSource ? {
             rwlText: undatedSource.rwlText,
@@ -772,7 +773,7 @@ export function useHomeWorkspace() {
             const filePath = await open({
                 filters: [
                     { name: "Tucson Files", extensions: ["rwl"] },
-                    { name: "所有文件", extensions: ["*"] },
+                    { name: t("所有文件"), extensions: ["*"] },
                 ],
                 multiple: false,
             });
@@ -825,12 +826,12 @@ export function useHomeWorkspace() {
                 nextEditor = await resolveWorkspaceDraft(filePath, nextEditor, persistedHistory, async () => {
                     const baseName = filePath.split(/\\|\//).pop() || filePath;
                     return ask(
-                        `“${baseName}” 存在未保存的本地编辑缓存，且与磁盘文件内容不一致。\n\n要载入哪一个版本？`,
+                        t("“{0}” 存在未保存的本地编辑缓存，且与磁盘文件内容不一致。\n\n要载入哪一个版本？", [baseName]),
                         {
-                            title: "本地缓存与磁盘文件不一致",
+                            title: t("本地缓存与磁盘文件不一致"),
                             kind: "warning",
-                            okLabel: "本地缓存（保留未保存的编辑）",
-                            cancelLabel: "磁盘文件（放弃缓存）",
+                            okLabel: t("本地缓存（保留未保存的编辑）"),
+                            cancelLabel: t("磁盘文件（放弃缓存）"),
                         },
                     );
                 });
@@ -1018,7 +1019,7 @@ export function useHomeWorkspace() {
     const applyRawRwlTextForTree = useCallback(async (rawText: string, tree: string): Promise<RwlSiteData> => {
         const rwlData = await readRwlString(rawText);
         if (rwlData.readOptions?.stopMarkerValue !== undefined && rwlData.readOptions.stopMarkerValue !== stopMarker.value) {
-            throw new Error("当前是旧精度工作区，请先保留工作进度并重新导入RWL，再使用单序列文本编辑，避免混用工作单位。");
+            throw new Error(t("当前是旧精度工作区，请先保留工作进度并重新导入RWL，再使用单序列文本编辑，避免混用工作单位。"));
         }
         const parsedTreeData = rwlData.data.get(tree) ?? rwlData.data.values().next().value;
         if (parsedTreeData) {
@@ -1044,7 +1045,7 @@ export function useHomeWorkspace() {
                 : error instanceof Error
                     ? error.message
                     : String(error);
-            window.alert(`无法应用图表偏移，保存已取消：\n${detail}`);
+            window.alert(t("无法应用图表偏移，保存已取消：\n{0}", [localizeError(detail)]));
             return false;
         }
     }, [markCurrentDiagnosisStale]);
@@ -1108,8 +1109,8 @@ export function useHomeWorkspace() {
             return;
         }
         if (settings.cofecha.engine === "official" && !settings.cofecha.executablePath.trim()) {
-            await message("请先通过“运行 > 加载 COFECHA...”或“设置 > COFECHA”选择从 LTRR 获取的 EXE 文件。", {
-                title: "需要加载 COFECHA",
+            await message(t("请先通过“运行 > 加载 COFECHA...”或“设置 > COFECHA”选择从 LTRR 获取的 EXE 文件。"), {
+                title: t("需要加载 COFECHA"),
                 kind: "info",
             });
             return;
@@ -1134,8 +1135,8 @@ export function useHomeWorkspace() {
             );
         } catch (error) {
             console.error("cofecha 执行失败", error);
-            await message(error instanceof Error ? error.message : String(error), {
-                title: "COFECHA 运行失败",
+            await message(localizeError(error), {
+                title: t("COFECHA 运行失败"),
                 kind: "error",
             });
         }
@@ -1173,8 +1174,8 @@ export function useHomeWorkspace() {
         const filePath = filePathRef.current;
         if (!filePath || isFileLoadingRef.current || isCofechaRunning) return false;
         if (settings.cofecha.engine === "official" && !settings.cofecha.executablePath.trim()) {
-            await message("请先在设置中选择官方 COFECHA EXE，或切换到 JavaScript 引擎。", {
-                title: "需要 COFECHA 引擎", kind: "info",
+            await message(t("请先在设置中选择官方 COFECHA EXE，或切换到 JavaScript 引擎。"), {
+                title: t("需要 COFECHA 引擎"), kind: "info",
             });
             return false;
         }
@@ -1201,11 +1202,11 @@ export function useHomeWorkspace() {
 
     const handleLoadCofechaUndated = useCallback(async () => {
         if (!filePathRef.current || isCofechaRunning) return;
-        const selected = await open({ title: "加载未定年 RWL", multiple: false, directory: false,
-            filters: [{ name: "Tucson RWL", extensions: ["rwl"] }, { name: "所有文件", extensions: ["*"] }] });
+        const selected = await open({ title: t("加载未定年 RWL"), multiple: false, directory: false,
+            filters: [{ name: "Tucson RWL", extensions: ["rwl"] }, { name: t("所有文件"), extensions: ["*"] }] });
         if (typeof selected !== "string") return;
         if (selected.toLowerCase() === filePathRef.current.toLowerCase()) {
-            await message("未定年输入不能与当前dated工作区使用同一文件。", { title: "请选择另一份 RWL", kind: "info" });
+            await message(t("未定年输入不能与当前dated工作区使用同一文件。"), { title: t("请选择另一份 RWL"), kind: "info" });
             return;
         }
         try {
@@ -1219,7 +1220,7 @@ export function useHomeWorkspace() {
                 setSelectedPart("PART 8");
             }
         } catch (error) {
-            await message(error instanceof Error ? error.message : String(error), { title: "未定年分析失败", kind: "error" });
+            await message(localizeError(error), { title: t("未定年分析失败"), kind: "error" });
         }
     }, [cofechaUndatedSource?.sort, isCofechaRunning, markCofechaInputsStale, runCurrentCofechaWithUndated]);
 
@@ -1248,7 +1249,7 @@ export function useHomeWorkspace() {
         const sourceStem = sourceName.replace(/\.[^.]+$/, "") || "VERYCOF";
         try {
             const exportPath = await save({
-                title: "导出 COFECHA OUT",
+                title: t("导出 COFECHA OUT"),
                 defaultPath: `${sourceStem}.OUT`,
                 filters: [{ name: "COFECHA OUT", extensions: ["out"] }],
             });
@@ -1257,7 +1258,7 @@ export function useHomeWorkspace() {
             return exportPath;
         } catch (error) {
             console.error("导出 COFECHA OUT 失败:", error);
-            window.alert(`导出 COFECHA OUT 失败：${error instanceof Error ? error.message : String(error)}`);
+            window.alert(t("导出 COFECHA OUT 失败：{0}", [localizeError(error)]));
             return null;
         }
     }, [outFileContent]);
@@ -1509,7 +1510,7 @@ export function useHomeWorkspace() {
             );
         } catch (error) {
             if (error instanceof RwlMoveConflictError) {
-                window.alert(error.message);
+                window.alert(localizeError(error));
                 return;
             }
             throw error;
@@ -1629,8 +1630,8 @@ export function useHomeWorkspace() {
                 label: getDiagnosisCandidateLabel(candidate),
                 status: applied ? "applied" : "skipped",
                 reason: applied
-                    ? `已应用；${staleCandidates.length} 个旧候选在内存中标记为 stale，诊断会随当前工作序列重新计算。`
-                    : "当前候选未产生可应用编辑。",
+                    ? t("已应用；{0} 个旧候选在内存中标记为 stale，诊断会随当前工作序列重新计算。", [staleCandidates.length])
+                    : t("当前候选未产生可应用编辑。"),
             }],
         });
     }, [applyDiagnosisCandidate, markCurrentDiagnosisStale]);
@@ -1788,7 +1789,7 @@ export function useHomeWorkspace() {
                     targetTree: candidate.targetTree,
                     label: getDiagnosisCandidateLabel(candidate),
                     status: applied ? "applied" : "skipped",
-                    reason: applied ? undefined : "当前候选未产生可应用编辑，已跳过。",
+                    reason: applied ? undefined : t("当前候选未产生可应用编辑，已跳过。"),
                 };
             } catch (error) {
                 return {
@@ -1796,7 +1797,7 @@ export function useHomeWorkspace() {
                     targetTree: candidate.targetTree,
                     label: getDiagnosisCandidateLabel(candidate),
                     status: "failed",
-                    reason: error instanceof Error ? error.message : String(error),
+                    reason: localizeError(error),
                 };
             }
         });
@@ -1904,7 +1905,7 @@ export function useHomeWorkspace() {
                 );
             } catch (error) {
                 if (error instanceof RwlMoveConflictError) {
-                    window.alert(error.message);
+                    window.alert(localizeError(error));
                     return;
                 }
                 throw error;
@@ -2529,7 +2530,7 @@ export function useHomeWorkspace() {
     const hasChart = siteData.size > 0;
     const shouldShowWelcome = !fileName && !isFileLoading;
     const shouldShowProcessing = isFileLoading || isCofechaRunning;
-    const processingText = isFileLoading ? "正在读取并解析 RWL..." : "正在运行 COFECHA...";
+    const processingText = isFileLoading ? t("正在读取并解析 RWL...") : t("正在运行 COFECHA...");
     const problemTextColor = cofechaResult?.possibleProblemsCount !== undefined && cofechaResult.possibleProblemsCount >= 100
         ? "red"
         : "black";
@@ -2542,13 +2543,13 @@ export function useHomeWorkspace() {
 
     const exportCurrentWorkspace = useCallback(async (): Promise<boolean> => {
         const path = filePathRef.current;
-        if (!path) throw new Error("请先在主窗口打开RWL文件");
+        if (!path) throw new Error(t("请先在主窗口打开RWL文件"));
         const frozen = new RwlEditor(new Map());
         frozen.restorePersistedHistory(rwlEditorRef.current.toHistorySnapshot());
         const scans = structuredClone(treeRingScanState);
         const reference = referenceConfig ? structuredClone(referenceConfig) : null;
-        const chosen = await save({ title: "导出当前文件工作区", defaultPath: (path.split(/[\\/]/).pop() ?? "workspace.rwl").replace(/\.rwl$/i, ".cdworkspace"),
-            filters: [{ name: "Crossdating 工作区", extensions: ["cdworkspace"] }] });
+        const chosen = await save({ title: t("导出当前文件工作区"), defaultPath: (path.split(/[\\/]/).pop() ?? "workspace.rwl").replace(/\.rwl$/i, ".cdworkspace"),
+            filters: [{ name: t("Crossdating 工作区"), extensions: ["cdworkspace"] }] });
         if (!chosen) return false;
         const destination = chosen.toLowerCase().endsWith(".cdworkspace") ? chosen : `${chosen}.cdworkspace`;
         const hashes = new Map<string, string>();
@@ -2557,9 +2558,9 @@ export function useHomeWorkspace() {
             const original = scans.filesBySeries[key]?.path;
             if (original && state.imagePath === original) {
                 if (!hashes.has(original)) hashes.set(original, await invoke<string>("workspace_file_sha256", { path: original }));
-                if (state.imageSha256 && state.imageSha256 !== hashes.get(original)) throw new Error("扫描原图内容已改变，不能将旧标注绑定到新图；请重新校准该影像");
+                if (state.imageSha256 && state.imageSha256 !== hashes.get(original)) throw new Error(t("扫描原图内容已改变，不能将旧标注绑定到新图；请重新校准该影像"));
                 state.imageSha256 = hashes.get(original)!;
-            } else if (!state.imageSha256) throw new Error("扫描标注缺少原图校验信息，请先重新关联扫描文件夹");
+            } else if (!state.imageSha256) throw new Error(t("扫描标注缺少原图校验信息，请先重新关联扫描文件夹"));
         }
         const bytes = await exportWorkspacePackage({ fileName: path, editor: frozen, reference, scans });
         await writeFile(destination, bytes);
@@ -2569,8 +2570,8 @@ export function useHomeWorkspace() {
     const handleExportWorkspace = useCallback(async () => {
         if (transferRunningRef.current || isFileLoadingRef.current) return;
         transferRunningRef.current = true;
-        try { if (await exportCurrentWorkspace()) await message("工作区已导出，包含当前未保存修改及原始对比基线。", { title: "导出完成" }); }
-        catch (error) { await message(String(error), { title: "工作区导出失败", kind: "error" }); }
+        try { if (await exportCurrentWorkspace()) await message(t("工作区已导出，包含当前未保存修改及原始对比基线。"), { title: t("导出完成") }); }
+        catch (error) { await message(localizeError(error), { title: t("工作区导出失败"), kind: "error" }); }
         finally { transferRunningRef.current = false; }
     }, [exportCurrentWorkspace]);
 
@@ -2578,12 +2579,12 @@ export function useHomeWorkspace() {
         if (transferRunningRef.current || isFileLoadingRef.current) return;
         transferRunningRef.current = true;
         try {
-            if (!filePathRef.current) throw new Error("请先打开RWL文件");
+            if (!filePathRef.current) throw new Error(t("请先打开RWL文件"));
             const csv = effectiveChangesCsv(rwlEditorRef.current.toHistorySnapshot());
-            const path = await save({ title: "导出有效修改记录", defaultPath: "有效修改记录.csv",
-                filters: [{ name: "CSV（UTF-8，Excel兼容）", extensions: ["csv"] }] });
+            const path = await save({ title: t("导出有效修改记录"), defaultPath: t("有效修改记录.csv"),
+                filters: [{ name: t("CSV（UTF-8，Excel兼容）"), extensions: ["csv"] }] });
             if (path) await saveFile(path.toLowerCase().endsWith(".csv") ? path : `${path}.csv`, csv);
-        } catch (error) { await message(String(error), { title: "导出失败", kind: "error" }); }
+        } catch (error) { await message(localizeError(error), { title: t("导出失败"), kind: "error" }); }
         finally { transferRunningRef.current = false; }
     }, []);
 
@@ -2592,42 +2593,42 @@ export function useHomeWorkspace() {
         transferRunningRef.current = true;
         const originalEpoch = workspaceEpochRef.current;
         try {
-            const selected = await open({ title: "导入工作区", multiple: false, filters: [{ name: "Crossdating 工作区", extensions: ["cdworkspace"] }] });
+            const selected = await open({ title: t("导入工作区"), multiple: false, filters: [{ name: t("Crossdating 工作区"), extensions: ["cdworkspace"] }] });
             if (typeof selected !== "string") return false;
-            if ((await lstat(selected)).size > MAX_PACKAGE_BYTES) throw new Error("工作区包超过64 MiB");
+            if ((await lstat(selected)).size > MAX_PACKAGE_BYTES) throw new Error(t("工作区包超过64 MiB"));
             const bundle = await importWorkspacePackage(await readFile(selected));
             const fingerprint = () => JSON.stringify({ ...rwlEditorRef.current.toHistorySnapshot(), savedAt: undefined });
             const protectedState = fingerprint();
             // Validation has completed; only now ask the user to protect/replace work.
             if (filePathRef.current && !rwlDataEquals(originalDataRef.current, rwlEditorRef.current.getData())) {
-                if (!await ask("当前文件存在未保存修改。先导出当前工作区备份，再继续导入？", {
-                    title: "保护当前工作", okLabel: "导出备份并继续", cancelLabel: "取消导入", kind: "warning" })) return false;
+                if (!await ask(t("当前文件存在未保存修改。先导出当前工作区备份，再继续导入？"), {
+                    title: t("保护当前工作"), okLabel: t("导出备份并继续"), cancelLabel: t("取消导入"), kind: "warning" })) return false;
                 if (!await exportCurrentWorkspace()) return false;
             }
             let targetPath: string | null = null;
             let matches: "current" | "baseline" | "both" | "mismatch" = "mismatch";
             let newFile = false;
             while (!targetPath) {
-                const chosen = await open({ title: "选择原始基线或当前版本RWL（取消可将包内数据另存）", multiple: false,
+                const chosen = await open({ title: t("选择原始基线或当前版本RWL（取消可将包内数据另存）"), multiple: false,
                     filters: [{ name: "RWL", extensions: ["rwl"] }] });
                 if (typeof chosen === "string") {
                     matches = await matchWorkspaceRwl(bundle, await readTextFile(chosen));
                     if (matches !== "mismatch") { targetPath = chosen; break; }
-                    if (await ask("该文件的内容既不是包内原始基线，也不是包内当前版本。重新选择RWL文件？", {
-                        title: "文件内容不匹配", okLabel: "重新选择", cancelLabel: "使用包内版本", kind: "warning" })) continue;
+                    if (await ask(t("该文件的内容既不是包内原始基线，也不是包内当前版本。重新选择RWL文件？"), {
+                        title: t("文件内容不匹配"), okLabel: t("重新选择"), cancelLabel: t("使用包内版本"), kind: "warning" })) continue;
                 }
-                if (!await ask("将包内当前版本另存为一个新的RWL文件，并恢复完整工作区？", {
-                    title: "打开包内版本", okLabel: "选择新文件位置", cancelLabel: "取消导入" })) return false;
-                const location = await save({ title: "为包内当前版本选择新RWL文件", defaultPath: bundle.manifest.fileName,
+                if (!await ask(t("将包内当前版本另存为一个新的RWL文件，并恢复完整工作区？"), {
+                    title: t("打开包内版本"), okLabel: t("选择新文件位置"), cancelLabel: t("取消导入") })) return false;
+                const location = await save({ title: t("为包内当前版本选择新RWL文件"), defaultPath: bundle.manifest.fileName,
                     filters: [{ name: "RWL", extensions: ["rwl"] }] });
                 if (!location) return false;
                 targetPath = location.toLowerCase().endsWith(".rwl") ? location : `${location}.rwl`;
-                if (await exists(targetPath)) throw new Error("为保护原始文件，请为包内版本选择尚不存在的新文件名");
+                if (await exists(targetPath)) throw new Error(t("为保护原始文件，请为包内版本选择尚不存在的新文件名"));
                 matches = "current"; newFile = true;
             }
-            if (!await ask(`将工作区导入到“${targetPath.split(/[\\/]/).pop()}”。匹配版本：${matches === "baseline" ? "原始基线" : matches === "both" ? "原始与当前版本一致" : "当前版本"}。\n将替换该文件的本地草稿、操作记录和标注；已有RWL文件不会修改。继续？`, {
-                title: "确认工作区导入", okLabel: "导入完整状态", cancelLabel: "取消", kind: "warning" })) return false;
-            if (workspaceEpochRef.current !== originalEpoch || fingerprint() !== protectedState) throw new Error("确认期间当前工作区发生变化，请重新导入以保护最新修改");
+            if (!await ask(t("将工作区导入到“{0}”。匹配版本：{1}。\n将替换该文件的本地草稿、操作记录和标注；已有RWL文件不会修改。继续？", [targetPath.split(/[\\/]/).pop(), matches === "baseline" ? t("原始基线") : matches === "both" ? t("原始与当前版本一致") : t("当前版本")]), {
+                title: t("确认工作区导入"), okLabel: t("导入完整状态"), cancelLabel: t("取消"), kind: "warning" })) return false;
+            if (workspaceEpochRef.current !== originalEpoch || fingerprint() !== protectedState) throw new Error(t("确认期间当前工作区发生变化，请重新导入以保护最新修改"));
             isFileLoadingRef.current = true; setIsFileLoading(true);
             if (historyPersistTimerRef.current !== null) {
                 window.clearTimeout(historyPersistTimerRef.current); historyPersistTimerRef.current = null;
@@ -2657,9 +2658,9 @@ export function useHomeWorkspace() {
             isFileLoadingRef.current = false; setIsFileLoading(false);
             try { await runCofechaAndApplyResult(editor.exportAsRwlString(), targetPath, { inputData: editor.getData(), undated: null,
                 workspaceGuard: { editor, filePath: targetPath, inputHash: hashRwlSiteData(editor.getData()) } }); }
-            catch (error) { await message(`工作区已导入；报告需重新验证：${String(error)}`, { title: "工作区已恢复", kind: "warning" }); }
+            catch (error) { await message(t("工作区已导入；报告需重新验证：{0}", [localizeError(error)]), { title: t("工作区已恢复"), kind: "warning" }); }
             return true;
-        } catch (error) { await message(String(error), { title: "工作区导入失败", kind: "error" }); return false; }
+        } catch (error) { await message(localizeError(error), { title: t("工作区导入失败"), kind: "error" }); return false; }
         finally { transferRunningRef.current = false; isFileLoadingRef.current = false; setIsFileLoading(false); }
     }, [exportCurrentWorkspace, referenceConfig, treeRingScanState, replaceEditor, runCofechaAndApplyResult]);
 
