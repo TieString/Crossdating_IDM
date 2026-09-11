@@ -19,12 +19,6 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
-      - name: Archive reproducible test environment
-        run: tar -czf localization-test-environment.tar.gz node_modules package-lock.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: localization-test-environment
-          path: localization-test-environment.tar.gz
-          retention-days: 1
       - run: npm run build
       - run: npm run test:production
+      - run: npm run test:i18n
