@@ -1,7 +1,7 @@
 {
   "name": "Crossdating-IDM",
   "private": true,
-  "version": "1.6.3",
+  "version": "1.6.4",
   "description": "面向树轮 RWL 数据的可视化编辑、COFECHA 验证与事件级交叉定年桌面工作站。",
   "license": "GPL-3.0-only",
   "type": "module",
@@ -36,6 +36,7 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "~2",
     "@tauri-apps/plugin-fs": "~2",
+    "@tauri-apps/plugin-http": "~2",
     "@tauri-apps/plugin-opener": "^2",
     "chart.js": "^4.4.9",
     "chartjs-plugin-crosshair": "^2.0.0",
