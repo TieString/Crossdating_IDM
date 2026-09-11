@@ -1,0 +1,87 @@
+name: Publish v1.6.3
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish-v1.6.3.yml
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install JavaScript dependencies
+        shell: pwsh
+        run: |
+          npm install --no-audit --no-fund
+          npm install --global yarn@1.22.22
+
+      - name: Verify release versions
+        shell: pwsh
+        run: |
+          $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tauriVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $cargoVersion = ((Select-String -Path src-tauri/Cargo.toml -Pattern '^version = "([^"]+)"').Matches[0].Groups[1].Value)
+          if ($packageVersion -ne '1.6.3' -or $tauriVersion -ne '1.6.3' -or $cargoVersion -ne '1.6.3') {
+            throw "Version mismatch: package=$packageVersion tauri=$tauriVersion cargo=$cargoVersion"
+          }
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Run production tests
+        run: npm run test:production
+
+      - name: Run localization tests
+        run: npm run test:i18n
+
+      - name: Run update tests
+        run: npm run test:update
+
+      - name: Build Windows NSIS installer
+        run: npx tauri build --bundles nsis
+
+      - name: Locate installer
+        id: installer
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path src-tauri/target/release/bundle/nsis -Filter '*1.6.3*x64-setup.exe' -File | Select-Object -First 1
+          if (-not $installer) { throw 'Could not find the v1.6.3 NSIS installer.' }
+          "path=$($installer.FullName)" >> $env:GITHUB_OUTPUT
+          "name=$($installer.Name)" >> $env:GITHUB_OUTPUT
+          Get-FileHash -Algorithm SHA256 $installer.FullName
+
+      - name: Create GitHub Release v1.6.3
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INSTALLER_PATH: ${{ steps.installer.outputs.path }}
+        run: |
+          @'
+          # Crossdating IDM 1.6.3
+
+          本版本在 1.6.2 基础上新增：
+
+          - 完整的简体中文 / English 界面切换，语言即时生效并跨窗口同步。
+          - GitHub Release 新版本检测：启动时可自动检查，也可在“设置 → 关于”手动检查。
+          - 发现新版本后可查看官方 GitHub Release；不会自动下载或静默安装更新。
+          - 改进 CI 触发策略，避免开发中的连续提交产生大量无意义失败通知。
+
+          保留 1.6.2 已有的 RWL 读取、单位修复及 cofecha-js 0.2.1 相关改进。
+
+          Windows 安装包：`Crossdating-IDM_1.6.3_x64-setup.exe`
+          '@ | Set-Content -Path release-notes.md -Encoding utf8
+
+          gh release create v1.6.3 "$env:INSTALLER_PATH" --repo TieString/Crossdating_IDM --target "$env:GITHUB_SHA" --title "Crossdating IDM 1.6.3" --notes-file release-notes.md
