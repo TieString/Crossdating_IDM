@@ -1,0 +1,64 @@
+name: Validate v1.6.4 update transport
+
+on:
+  push:
+    branches: [fix/github-update-http-client]
+    paths:
+      - .github/workflows/finalize-update-http.yml
+
+permissions:
+  contents: write
+
+jobs:
+  windows-native-check:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install JavaScript dependencies and refresh lockfile
+        shell: pwsh
+        run: yarn install --non-interactive
+
+      - name: Verify v1.6.4 versions
+        shell: pwsh
+        run: |
+          node -e "const p=require('./package.json');const t=require('./src-tauri/tauri.conf.json');if(p.version!=='1.6.4'||t.version!=='1.6.4')process.exit(1)"
+          $cargo = Get-Content src-tauri/Cargo.toml -Raw
+          if ($cargo -notmatch 'version = "1\.6\.4"') { throw 'Cargo version mismatch' }
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Run production tests
+        run: npm run test:production
+
+      - name: Run localization tests
+        run: npm run test:i18n
+
+      - name: Run update tests
+        run: npm run test:update
+
+      - name: Compile Tauri backend with HTTP plugin
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
+      - name: Commit generated lockfiles and remove one-time workflow
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add yarn.lock src-tauri/Cargo.lock
+          git rm .github/workflows/finalize-update-http.yml
+          git diff --cached --quiet
+          if ($LASTEXITCODE -ne 0) {
+            git commit -m "chore: lock v1.6.4 update transport dependencies"
+            git push origin HEAD:fix/github-update-http-client
+          }
