@@ -1,0 +1,94 @@
+--- a/src/pages/settings/SettingsPage.tsx
++++ b/src/pages/settings/SettingsPage.tsx
+@@ -5,6 +5,13 @@
+ import { openUrl } from "@tauri-apps/plugin-opener";
+ import { FloatingScrollArea } from "@/components/FloatingScrollArea/FloatingScrollArea";
+ import { useSettings } from "@/features/settings/SettingsContext";
++import {
++    CURRENT_APP_VERSION,
++    checkGitHubRelease,
++    readAutoUpdateCheckEnabled,
++    writeAutoUpdateCheckEnabled,
++    type UpdateCheckResult,
++} from "@/features/update/githubRelease";
+ import ltrrFavicon from "@/assets/ltrr-favicon.ico";
+ import {
+     normalizeAnimationSpeed,
+@@ -329,12 +336,76 @@
+ 
+ function AboutSection() {
+     useLocale();
++    const [checking, setChecking] = useState(false);
++    const [checkResult, setCheckResult] = useState<UpdateCheckResult | null>(null);
++    const [checkError, setCheckError] = useState(false);
++    const [autoCheck, setAutoCheck] = useState(() => readAutoUpdateCheckEnabled());
++    const [preferenceSaveFailed, setPreferenceSaveFailed] = useState(false);
++
++    const checkForUpdate = async () => {
++        setChecking(true);
++        setCheckError(false);
++        try {
++            setCheckResult(await checkGitHubRelease());
++        } catch {
++            setCheckResult(null);
++            setCheckError(true);
++        } finally {
++            setChecking(false);
++        }
++    };
++
++    const changeAutoCheck = (enabled: boolean) => {
++        setAutoCheck(enabled);
++        setPreferenceSaveFailed(!writeAutoUpdateCheckEnabled(enabled));
++    };
++
+     return (
+         <div>
+             <h2 className={styles["section-title"]}>{t("关于")}</h2>
+ 
+             <Row label={t("应用名称")}><span className={styles["about-text"]}>{t("交叉定年 · IDM")}</span></Row>
+-            <Row label={t("版本")}><span className={styles["about-text"]}>1.6.2</span></Row>
++            <Row label={t("版本")}><span className={styles["about-text"]}>{CURRENT_APP_VERSION}</span></Row>
++            <Row label={t("软件更新")} align="top">
++                <div className={styles["update-controls"]}>
++                    <button className={styles["action-button"]} type="button" disabled={checking} onClick={() => void checkForUpdate()}>
++                        {checking ? t("正在检查...") : t("检查更新")}
++                    </button>
++                    {checkResult?.status === "available" && (
++                        <button className={styles["download-button"]} type="button" onClick={() => void openUrl(checkResult.latest.htmlUrl)}>
++                            {t("查看 GitHub Release")}
++                        </button>
++                    )}
++                </div>
++                {checkResult?.status === "available" && (
++                    <div className={styles["update-result"]} role="status">
++                        <strong>{t("发现新版本 {0}", [checkResult.latest.version])}</strong>
++                        <span>{t("当前版本：{0}", [checkResult.currentVersion])}</span>
++                        {checkResult.latest.body && <pre className={styles["release-notes"]}>{checkResult.latest.body}</pre>}
++                    </div>
++                )}
++                {checkResult?.status === "current" && (
++                    <div className={styles["configured-status"]} role="status">
++                        {t("已是最新版（{0}）", [checkResult.currentVersion])}
++                    </div>
++                )}
++                {checkError && (
++                    <div className={styles["unconfigured-status"]} role="status">
++                        {t("无法连接 GitHub 检查更新，请稍后重试。")}
++                    </div>
++                )}
++                <label className={styles["check"]}>
++                    <input type="checkbox" checked={autoCheck} onChange={(event) => changeAutoCheck(event.currentTarget.checked)} />
++                    <span>{t("启动时自动检查更新")}</span>
++                </label>
++                <div className={styles["setting-note"]}>
++                    {t("自动检查最多每 12 小时访问一次公开的 GitHub Releases；只读取版本信息，不会自动下载或安装。")}</div>
++                {preferenceSaveFailed && (
++                    <div className={styles["unconfigured-status"]} role="status">
++                        {t("自动检查更新偏好无法保存；本次设置仍然有效。")}
++                    </div>
++                )}
++            </Row>
+             <Row label={t("技术栈")}><span className={styles["about-text"]}>Tauri · React · TypeScript</span></Row>
+             <Row label="COFECHA"><span className={styles["about-text"]}>Richard L. Holmes · LTRR Dendrochronology Program Library</span></Row>
+             <Row label={t("研发团队")} align="top">
