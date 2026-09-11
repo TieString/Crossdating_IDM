@@ -2,9 +2,9 @@ name: Localization checks
 
 on:
   push:
-    branches: [feat/english-language-switch]
+    branches: [feat/english-language-switch, feat/github-release-update-check]
   pull_request:
-    branches: [main]
+    branches: [main, feat/english-language-switch]
 
 permissions:
   contents: read
