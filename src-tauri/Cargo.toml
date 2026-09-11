@@ -1,6 +1,6 @@
 [package]
 name = "crossdating_tauri"
-version = "1.6.2"
+version = "1.6.3"
 description = "面向树轮 RWL 数据的可视化编辑、COFECHA 验证与事件级交叉定年桌面工作站。"
 authors = ["TieString"]
 license = "GPL-3.0-only"
