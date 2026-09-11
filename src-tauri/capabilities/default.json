@@ -42,6 +42,14 @@
         }
       ]
     },
+    {
+      "identifier": "http:default",
+      "allow": [
+        {
+          "url": "https://api.github.com/repos/TieString/Crossdating_IDM/releases/latest"
+        }
+      ]
+    },
     "core:webview:allow-create-webview-window",
     "core:window:allow-start-dragging",
     "core:window:allow-set-focus",
