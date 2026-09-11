@@ -1,3 +1,5 @@
+import { t } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import styles from "./CofechaOutExportButton.module.css";
 
 interface CofechaOutExportButtonProps {
@@ -7,13 +9,14 @@ interface CofechaOutExportButtonProps {
 
 /** Explicitly export the complete raw COFECHA OUT currently held by the workspace. */
 export function CofechaOutExportButton({ disabled, onExport }: CofechaOutExportButtonProps) {
+    useLocale();
     return (
         <button
             type="button"
             className={styles.button}
             disabled={disabled}
-            aria-label="导出 COFECHA OUT"
-            title={disabled ? "当前没有可导出的 COFECHA OUT" : "导出完整 COFECHA OUT"}
+            aria-label={t("导出 COFECHA OUT")}
+            title={disabled ? t("当前没有可导出的 COFECHA OUT") : t("导出完整 COFECHA OUT")}
             onClick={() => { void onExport(); }}
         >
             <svg

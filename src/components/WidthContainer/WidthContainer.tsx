@@ -1,3 +1,5 @@
+import { t } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import { memo, ReactNode, RefObject, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { RwlDisplayUnitsContext } from '@/features/rwl/DisplayUnitsContext';
 import { displayUnitFor, workingWidth, unitLabel } from '@/features/rwl/displayUnits';
@@ -787,10 +789,11 @@ interface DeletionMarkerContextMenuState {
 }
 
 function WidthGridHeader(): ReactNode {
+    useLocale();
     return (
         <div className={style["grid-header"]} data-grid-header aria-hidden="true">
-            <div className={`${style["grid-header-cell"]} ${style["grid-header-sid"]}`}>序列</div>
-            <div className={`${style["grid-header-cell"]} ${style["grid-header-yr"]}`}>年份</div>
+            <div className={`${style["grid-header-cell"]} ${style["grid-header-sid"]}`}>{t("序列")}</div>
+            <div className={`${style["grid-header-cell"]} ${style["grid-header-yr"]}`}>{t("年份")}</div>
             {Array.from({ length: VALUE_COLUMN_COUNT }, (_, i) => (
                 <div key={i} className={`${style["grid-header-cell"]} ${style["grid-header-val"]}`}>
                     <span>{i}</span>
@@ -808,6 +811,7 @@ export interface WidthGridSkeletonProps {
 
 /** Width-grid loading skeleton using the same header spacing as WidthContainer. */
 export function WidthGridSkeleton({ showRows = false }: WidthGridSkeletonProps = {}): ReactNode {
+    useLocale();
     return (
         <WidthGridSkeletonView
             header={<WidthGridHeader />}
@@ -960,6 +964,7 @@ function WidthContainer({
     scrollContainerRef,
     scrollElement
 }: WidthContainerProps): ReactNode {
+    useLocale();
     const displayUnits = useContext(RwlDisplayUnitsContext);
     const visibleSite = useMemo(() => (
         selected && site.has(selected)
@@ -2369,7 +2374,7 @@ function WidthContainer({
             yearCount,
         );
         if (!plan) {
-            window.alert(`断点年份必须位于 ${range[0] + 1} 至 ${range[1]}；断点年及较新侧保持不动。`);
+            window.alert(t("断点年份必须位于 {0} 至 {1}；断点年及较新侧保持不动。", [range[0] + 1, range[1]]));
             return;
         }
         applyContextMenuMovePlan(tree, plan, true);
@@ -3029,8 +3034,7 @@ function WidthContainer({
                                     <span className={style["series-header-name"]}>{series.treeCode}</span>
                                     {yearRange && (
                                         <span className={style["series-header-range"]}>
-                                            {yearRange[0]}–{yearRange[1]} · {yearRange[1] - yearRange[0] + 1} 年
-                                            {displayUnits?.series[series.treeCode] ? ` · ${[...new Set(displayUnits.series[series.treeCode].ranges.map(r => unitLabel(r.marker)))].join(" / ")}` : ""}
+                                            {yearRange[0]}–{yearRange[1]} · {yearRange[1] - yearRange[0] + 1} {t(" 年")}{displayUnits?.series[series.treeCode] ? ` · ${[...new Set(displayUnits.series[series.treeCode].ranges.map(r => unitLabel(r.marker)))].join(" / ")}` : ""}
                                         </span>
                                     )}
                                 </span>
@@ -3065,7 +3069,7 @@ function WidthContainer({
                                             {typeof problemCount === "number" && (
                                                 <span
                                                     className={`${style["series-header-problems"]}${problemCount > 0 ? ` ${style["series-header-problems-flagged"]}` : ""}`}
-                                                    title="该样芯被标记为潜在问题（A/B）的分段数"
+                                                    title={t("该样芯被标记为潜在问题（A/B）的分段数")}
                                                 >
                                                     problem count：{problemCount}
                                                 </span>
@@ -3073,7 +3077,7 @@ function WidthContainer({
                                             {typeof masterCorrelation === "number" && (
                                                 <span
                                                     className={style["series-header-corr"]}
-                                                    title="该序列与主序列的整体相关性"
+                                                    title={t("该序列与主序列的整体相关性")}
                                                 >
                                                     r={masterCorrelation.toFixed(3)}
                                                 </span>
@@ -3300,10 +3304,10 @@ function WidthContainer({
                                 height: `${item.anchorHeight}px`,
                             }}
                             title={info.operationGroupId
-                                ? "双击恢复本次删除的全部标记"
+                                ? t("双击恢复本次删除的全部标记")
                                 : stackSize > 1
-                                    ? `双击恢复最近一次删除（此处共 ${stackSize} 层）`
-                                    : "双击恢复"}
+                                    ? t("双击恢复最近一次删除（此处共 {0} 层）", [stackSize])
+                                    : t("双击恢复")}
                             onMouseEnter={cancelHoverClear}
                             onMouseLeave={scheduleHoverClear}
                             onDoubleClick={(event) => {
@@ -3384,7 +3388,7 @@ function WidthContainer({
                 y={deletionMarkerContextMenu?.y ?? 0}
                 items={[{
                     key: "remove-deletion-marker",
-                    label: "删除该标记",
+                    label: t("删除该标记"),
                     danger: true,
                     disabled: !onRemoveDeletionMarker,
                     onSelect: () => {

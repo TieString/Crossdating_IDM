@@ -1,3 +1,5 @@
+import { t, localizeMessage } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { DeleteMode, DeleteRangeFill, DeleteShift, MissingInsertSide } from "@/features/rwl/edit";
@@ -106,6 +108,7 @@ export default function WidthGridContextMenu({
     onPreviewYearRangeChange,
     onClose,
 }: WidthGridContextMenuProps) {
+    useLocale();
     const resolvedDefaultDeleteStartYear = defaultDeleteStartYear ?? defaultYear;
     const resolvedDefaultDeleteEndYear = defaultDeleteEndYear ?? defaultYear;
     const isRangeDelete = resolvedDefaultDeleteStartYear !== resolvedDefaultDeleteEndYear;
@@ -565,7 +568,7 @@ export default function WidthGridContextMenu({
                             <path d="M3 10h18"/><path d="M8 2v4"/>
                         </svg>
                     </span>
-                    <span className={style["menu-row-label"]}>插入</span>
+                    <span className={style["menu-row-label"]}>{t("插入")}</span>
                     <input
                         className={`${style["menu-row-input"]} ${parsedInsertYear === null ? style["menu-row-input-invalid"] : ""}`}
                         type="text"
@@ -584,7 +587,7 @@ export default function WidthGridContextMenu({
                         onPointerDown={(event) => event.stopPropagation()}
                         spellCheck={false}
                         inputMode="numeric"
-                        aria-label="插入年份"
+                        aria-label={t("插入年份")}
                     />
                     <button
                         ref={insertChipRef}
@@ -597,7 +600,7 @@ export default function WidthGridContextMenu({
                             toggleDropdown("insert");
                         }}
                     >
-                        <span>{insertChipLabel}</span>
+                        <span>{localizeMessage(insertChipLabel)}</span>
                         <span className={style["menu-row-mode-chip-arrow"]} aria-hidden="true">▾</span>
                     </button>
                 </div>
@@ -623,7 +626,7 @@ export default function WidthGridContextMenu({
                             <path d="M3 10h18"/><path d="M8 2v4"/>
                         </svg>
                     </span>
-                    <span className={style["menu-row-label"]}>删除</span>
+                    <span className={style["menu-row-label"]}>{t("删除")}</span>
                     {isRangeDelete ? (
                         <span className={style["menu-row-range"]}>
                             <input
@@ -644,7 +647,7 @@ export default function WidthGridContextMenu({
                                 onPointerDown={(event) => event.stopPropagation()}
                                 spellCheck={false}
                                 inputMode="numeric"
-                                aria-label="删除起始年份"
+                                aria-label={t("删除起始年份")}
                             />
                             <span className={style["menu-row-range-separator"]}>-</span>
                             <input
@@ -665,7 +668,7 @@ export default function WidthGridContextMenu({
                                 onPointerDown={(event) => event.stopPropagation()}
                                 spellCheck={false}
                                 inputMode="numeric"
-                                aria-label="删除结束年份"
+                                aria-label={t("删除结束年份")}
                             />
                         </span>
                     ) : (
@@ -688,9 +691,9 @@ export default function WidthGridContextMenu({
                                 onPointerDown={(event) => event.stopPropagation()}
                                 spellCheck={false}
                                 inputMode="numeric"
-                                aria-label="删除年份"
+                                aria-label={t("删除年份")}
                             />
-                            <span className={style["menu-row-label"]}>后</span>
+                            <span className={style["menu-row-label"]}>{t("后")}</span>
                         </>
                     )}
                     <span className={style["menu-row-chip-group"]}>
@@ -701,7 +704,7 @@ export default function WidthGridContextMenu({
                             aria-haspopup={isRangeDelete ? undefined : "menu"}
                             aria-expanded={isRangeDelete ? undefined : dropdown === "delete"}
                             disabled={isRangeDelete}
-                            title="删除后的分配"
+                            title={t("删除后的分配")}
                             onClick={(event) => {
                                 event.stopPropagation();
                                 if (isRangeDelete) {
@@ -710,7 +713,7 @@ export default function WidthGridContextMenu({
                                 toggleDropdown("delete");
                             }}
                         >
-                            <span>{deleteChipLabel}</span>
+                            <span>{localizeMessage(deleteChipLabel)}</span>
                             {isRangeDelete ? null : (
                                 <span className={style["menu-row-mode-chip-arrow"]} aria-hidden="true">▾</span>
                             )}
@@ -721,13 +724,13 @@ export default function WidthGridContextMenu({
                             className={`${style["menu-row-mode-chip"]} ${dropdown === "shift" ? style["menu-row-mode-chip-open"] : ""}`}
                             aria-haspopup="menu"
                             aria-expanded={dropdown === "shift"}
-                            title={isRangeDelete ? "删除范围后的补位" : "删除后的填补方向"}
+                            title={isRangeDelete ? t("删除范围后的补位") : t("删除后的填补方向")}
                             onClick={(event) => {
                                 event.stopPropagation();
                                 toggleDropdown("shift");
                             }}
                         >
-                            <span>{shiftChipLabel}</span>
+                            <span>{localizeMessage(shiftChipLabel)}</span>
                             <span className={style["menu-row-mode-chip-arrow"]} aria-hidden="true">▾</span>
                         </button>
                     </span>
@@ -749,7 +752,7 @@ export default function WidthGridContextMenu({
                             <path d="M8 7 3 12l5 5"/><path d="M3 12h18"/><path d="m16 7 5 5-5 5"/>
                         </svg>
                     </span>
-                    <span className={style["menu-row-label"]}>整体移动</span>
+                    <span className={style["menu-row-label"]}>{t("整体移动")}</span>
                     <input
                         className={`${style["menu-row-input"]} ${style["menu-row-input-amount"]} ${parsedWholeMoveYears === null ? style["menu-row-input-invalid"] : ""}`}
                         type="number"
@@ -767,9 +770,9 @@ export default function WidthGridContextMenu({
                         onClick={(event) => event.stopPropagation()}
                         onPointerDown={(event) => event.stopPropagation()}
                         inputMode="numeric"
-                        aria-label="整体移动年份数量"
+                        aria-label={t("整体移动年份数量")}
                     />
-                    <span className={style["menu-row-field-label"]}>年</span>
+                    <span className={style["menu-row-field-label"]}>{t("年")}</span>
                     <button
                         ref={wholeMoveChipRef}
                         type="button"
@@ -781,7 +784,7 @@ export default function WidthGridContextMenu({
                             toggleDropdown("whole-move");
                         }}
                     >
-                        <span>{wholeMoveChipLabel}</span>
+                        <span>{localizeMessage(wholeMoveChipLabel)}</span>
                         <span className={style["menu-row-mode-chip-arrow"]} aria-hidden="true">▾</span>
                     </button>
                 </div>
@@ -802,8 +805,8 @@ export default function WidthGridContextMenu({
                             <path d="M14 4v16"/><path d="M10 8 6 12l4 4"/><path d="M6 12h6"/><path d="M18 7v10"/>
                         </svg>
                     </span>
-                    <span className={style["menu-row-label"]}>局部移动</span>
-                    <span className={style["menu-row-field-label"]}>断点</span>
+                    <span className={style["menu-row-label"]}>{t("局部移动")}</span>
+                    <span className={style["menu-row-field-label"]}>{t("断点")}</span>
                     <input
                         className={`${style["menu-row-input"]} ${parsedPartialFirstFixedYear === null ? style["menu-row-input-invalid"] : ""}`}
                         type="text"
@@ -822,9 +825,9 @@ export default function WidthGridContextMenu({
                         onPointerDown={(event) => event.stopPropagation()}
                         spellCheck={false}
                         inputMode="numeric"
-                        aria-label="局部移动断点年份"
+                        aria-label={t("局部移动断点年份")}
                     />
-                    <span className={style["menu-row-label"]}>移动</span>
+                    <span className={style["menu-row-label"]}>{t("移动")}</span>
                     <input
                         className={`${style["menu-row-input"]} ${style["menu-row-input-amount"]} ${parsedPartialMoveYears === null ? style["menu-row-input-invalid"] : ""}`}
                         type="number"
@@ -842,9 +845,9 @@ export default function WidthGridContextMenu({
                         onClick={(event) => event.stopPropagation()}
                         onPointerDown={(event) => event.stopPropagation()}
                         inputMode="numeric"
-                        aria-label="局部移动年份数量"
+                        aria-label={t("局部移动年份数量")}
                     />
-                    <span className={style["menu-row-field-label"]}>年</span>
+                    <span className={style["menu-row-field-label"]}>{t("年")}</span>
                 </div>
 
                 <div className={style["menu-separator"]} role="separator" />
@@ -853,7 +856,7 @@ export default function WidthGridContextMenu({
                     <div
                         className={style["menu-row"]}
                         role="menuitem"
-                        title={`在宽度模块中定位 ${tree} ${defaultYear}`}
+                        title={t("在宽度模块中定位 {0} {1}", [tree, defaultYear])}
                         onClick={() => {
                             onJumpToWidth(tree, defaultYear);
                             onClose();
@@ -865,7 +868,7 @@ export default function WidthGridContextMenu({
                                 <circle cx="12" cy="12" r="4"/>
                             </svg>
                         </span>
-                        <span className={style["menu-row-label"]}>在宽度模块中定位</span>
+                        <span className={style["menu-row-label"]}>{t("在宽度模块中定位")}</span>
                     </div>
                 ) : null}
 
@@ -873,7 +876,7 @@ export default function WidthGridContextMenu({
                     <div
                         className={style["menu-row"]}
                         role="menuitem"
-                        title={`在折线图中定位 ${tree} ${defaultYear}`}
+                        title={t("在折线图中定位 {0} {1}", [tree, defaultYear])}
                         onClick={() => {
                             onJumpToChart(tree, defaultYear);
                             onClose();
@@ -885,7 +888,7 @@ export default function WidthGridContextMenu({
                                 <path d="M12 3v18"/><path d="M9 6h6"/>
                             </svg>
                         </span>
-                        <span className={style["menu-row-label"]}>在图表中定位</span>
+                        <span className={style["menu-row-label"]}>{t("在图表中定位")}</span>
                     </div>
                 ) : null}
 
@@ -893,7 +896,7 @@ export default function WidthGridContextMenu({
                     <div
                         className={style["menu-row"]}
                         role="menuitem"
-                        title="跳转到 COFECHA 报告 PART 6 的对应序列"
+                        title={t("跳转到 COFECHA 报告 PART 6 的对应序列")}
                         onClick={() => {
                             onJumpToCofecha(tree);
                             onClose();
@@ -906,7 +909,7 @@ export default function WidthGridContextMenu({
                                 <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/>
                             </svg>
                         </span>
-                        <span className={style["menu-row-label"]}>在 COFECHA 中定位</span>
+                        <span className={style["menu-row-label"]}>{t("在 COFECHA 中定位")}</span>
                     </div>
                 ) : null}
 
@@ -925,7 +928,7 @@ export default function WidthGridContextMenu({
                                 <path d="m15 5 4 4"/>
                             </svg>
                         </span>
-                        <span className={style["menu-row-label"]}>转为文本编辑</span>
+                        <span className={style["menu-row-label"]}>{t("转为文本编辑")}</span>
                     </div>
                 ) : null}
 
@@ -947,7 +950,7 @@ export default function WidthGridContextMenu({
                             <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
                         </svg>
                     </span>
-                    <span className={style["menu-row-label"]}>删除此序列</span>
+                    <span className={style["menu-row-label"]}>{t("删除此序列")}</span>
                 </div>
 
             </div>
@@ -973,7 +976,7 @@ export default function WidthGridContextMenu({
                                 setDropdown(null);
                             }}
                         >
-                            <span className={style["dropdown-item-label"]}>{option.label}</span>
+                            <span className={style["dropdown-item-label"]}>{localizeMessage(option.label)}</span>
                         </div>
                     ))}
                 </div>
@@ -1000,7 +1003,7 @@ export default function WidthGridContextMenu({
                                 setDropdown(null);
                             }}
                         >
-                            <span className={style["dropdown-item-label"]}>{option.label}</span>
+                            <span className={style["dropdown-item-label"]}>{localizeMessage(option.label)}</span>
                         </div>
                     ))}
                 </div>
@@ -1028,7 +1031,7 @@ export default function WidthGridContextMenu({
                                     setDropdown(null);
                                 }}
                             >
-                                <span className={style["dropdown-item-label"]}>{option.label}</span>
+                                <span className={style["dropdown-item-label"]}>{localizeMessage(option.label)}</span>
                             </div>
                         ))
                         : SHIFT_OPTIONS.map((option) => (
@@ -1042,7 +1045,7 @@ export default function WidthGridContextMenu({
                                     setDropdown(null);
                                 }}
                             >
-                                <span className={style["dropdown-item-label"]}>{option.label}</span>
+                                <span className={style["dropdown-item-label"]}>{localizeMessage(option.label)}</span>
                             </div>
                         ))}
                 </div>
@@ -1069,7 +1072,7 @@ export default function WidthGridContextMenu({
                                 setDropdown(null);
                             }}
                         >
-                            <span className={style["dropdown-item-label"]}>{option.label}</span>
+                            <span className={style["dropdown-item-label"]}>{localizeMessage(option.label)}</span>
                         </div>
                     ))}
                 </div>

@@ -1,3 +1,5 @@
+import { t, localizeMessage } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
     KeyboardEvent as ReactKeyboardEvent,
@@ -162,6 +164,7 @@ export function TreeRingFloatingViewer({
     onContextMenu,
     onClose,
 }: TreeRingFloatingViewerProps) {
+    useLocale();
     const artwork = useMemo(() => {
         const geometry = buildTreeRingGeometry(series, stopMarkerValue);
         return geometry ? {
@@ -468,8 +471,8 @@ export function TreeRingFloatingViewer({
             left: resolved.left,
             top: resolved.top,
             label: feature.kind === "gap"
-                ? `${feature.startYear === feature.endYear ? feature.startYear : `${feature.startYear}–${feature.endYear}`} 年缺测`
-                : `${feature.startYear} 年`,
+                ? t("{0} 年缺测", [feature.startYear === feature.endYear ? feature.startYear : `${feature.startYear}–${feature.endYear}`])
+                : t("{0} 年", [feature.startYear]),
         });
     };
 
@@ -581,7 +584,7 @@ export function TreeRingFloatingViewer({
                 width: `${imageSize}px`,
             }}
             role="dialog"
-            aria-label={`${seriesId} 的树轮影像查看器`}
+            aria-label={t("{0} 的树轮影像查看器", [seriesId])}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
             onDoubleClick={(event) => event.stopPropagation()}
@@ -600,8 +603,8 @@ export function TreeRingFloatingViewer({
             >
                 <span className={styles.title}>
                     {seriesId} · {viewerMode === "scan"
-                        ? "扫描影像"
-                        : "1 cm 窗口"}
+                        ? t("扫描影像")
+                        : t("1 cm 窗口")}
                 </span>
                 <span className={styles.modeSwitch}>
                     <button
@@ -621,7 +624,7 @@ export function TreeRingFloatingViewer({
                         type="button"
                         className={viewerMode === "scan" ? styles.modeActive : undefined}
                         aria-pressed={viewerMode === "scan"}
-                        aria-label={scanFile ? "切换到扫描影像" : "扫描影像不可用"}
+                        aria-label={scanFile ? t("切换到扫描影像") : t("扫描影像不可用")}
                         disabled={!scanFile}
                         onPointerDown={(event) => event.stopPropagation()}
                         onClick={(event) => {
@@ -629,18 +632,17 @@ export function TreeRingFloatingViewer({
                             showScanViewer();
                         }}
                     >
-                        扫描
-                    </button>
+                        {t("扫描")}</button>
                 </span>
                 <span className={styles.meta}>
                     {viewerMode === "scan"
-                        ? (scanFile?.name ?? "无同名影像")
-                        : `${artwork.ringCount} 年 · ×${stripViewport.zoom.toFixed(1)}`}
+                        ? (scanFile?.name ?? t("无同名影像"))
+                        : t("{0} 年 · ×{1}", [artwork.ringCount, stripViewport.zoom.toFixed(1)])}
                 </span>
                 <button
                     type="button"
                     className={styles.closeButton}
-                    aria-label="关闭树轮影像查看器"
+                    aria-label={t("关闭树轮影像查看器")}
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => {
                         event.stopPropagation();
@@ -699,7 +701,7 @@ export function TreeRingFloatingViewer({
                             ref={generatedCanvasRef}
                             className={styles.generatedCanvas}
                             role="img"
-                            aria-label={`${seriesId} 的 1 cm 树轮窗口`}
+                            aria-label={t("{0} 的 1 cm 树轮窗口", [seriesId])}
                         />
                         {hoveredGeneratedYear ? (
                             <span
@@ -709,17 +711,17 @@ export function TreeRingFloatingViewer({
                                     top: `${hoveredGeneratedYear.top}px`,
                                 }}
                             >
-                                {hoveredGeneratedYear.label}
+                                {localizeMessage(hoveredGeneratedYear.label)}
                             </span>
                         ) : null}
-                        <span className={styles.linkHint}>单击定位宽度格</span>
+                        <span className={styles.linkHint}>{t("单击定位宽度格")}</span>
                     </div>
                 )}
             </div>
             <button
                 type="button"
                 className={styles.resizeHandle}
-                aria-label="调节树轮影像窗口大小"
+                aria-label={t("调节树轮影像窗口大小")}
                 onPointerDown={handleResizeStart}
                 onPointerUp={finishResize}
                 onPointerCancel={finishResize}

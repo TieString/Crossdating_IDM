@@ -1,3 +1,5 @@
+import { t, localizeMessage, localizeError } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -106,25 +108,25 @@ const isTreeBoundary = (value: string | undefined) => (
 );
 
 const makeCofechaCellLinkHtml = (tree: string, rawYear: string, label = rawYear) => (
-    `<span class="${style["cofecha-year-link"]}" data-cofecha-link="true" data-tree="${escapeHtml(tree)}" data-year="${escapeHtml(rawYear)}" role="button" tabindex="0" title="跳转到 ${escapeHtml(tree)} ${escapeHtml(rawYear)}" style="color:#0f5f9e;background-color:rgba(47,95,147,0.08);font-weight:700;text-decoration:underline;text-underline-offset:2px;cursor:pointer;border-radius:3px;padding:0 2px;">${escapeHtml(label)}</span>`
+    `<span class="${style["cofecha-year-link"]}" data-cofecha-link="true" data-tree="${escapeHtml(tree)}" data-year="${escapeHtml(rawYear)}" role="button" tabindex="0" title="${escapeHtml(t("跳转到 {0} {1}", [tree, rawYear]))}" style="color:#0f5f9e;background-color:rgba(47,95,147,0.08);font-weight:700;text-decoration:underline;text-underline-offset:2px;cursor:pointer;border-radius:3px;padding:0 2px;">${escapeHtml(label)}</span>`
 );
 
 const makeCofechaSeriesLinkHtml = (tree: string) => (
-    `<span class="${style["cofecha-year-link"]}" data-cofecha-link="true" data-tree="${escapeHtml(tree)}" role="button" tabindex="0" title="跳转到 ${escapeHtml(tree)}" style="color:#0f5f9e;background-color:rgba(47,95,147,0.08);font-weight:700;text-decoration:underline;text-underline-offset:2px;cursor:pointer;border-radius:3px;padding:0 2px;">${escapeHtml(tree)}</span>`
+    `<span class="${style["cofecha-year-link"]}" data-cofecha-link="true" data-tree="${escapeHtml(tree)}" role="button" tabindex="0" title="${escapeHtml(t("跳转到 {0}", [tree]))}" style="color:#0f5f9e;background-color:rgba(47,95,147,0.08);font-weight:700;text-decoration:underline;text-underline-offset:2px;cursor:pointer;border-radius:3px;padding:0 2px;">${escapeHtml(tree)}</span>`
 );
 
 const makeCofechaPart2SortLinkHtml = (sorted: boolean) => (
-    `<span class="${style["cofecha-year-link"]}" data-cofecha-part2-action="toggle-age-sort" role="button" tabindex="0" title="${sorted ? "恢复 PART 2 原始顺序" : "按完整年龄从大到小排序"}" style="color:#0f5f9e;background-color:rgba(47,95,147,0.08);font-family:'Microsoft YaHei','微软雅黑',sans-serif;font-size:14px;line-height:inherit;font-weight:700;text-decoration:underline;text-underline-offset:2px;cursor:pointer;border-radius:3px;padding:0 2px;">${sorted ? "恢复原顺序" : "按年龄排序"}</span>`
+    `<span class="${style["cofecha-year-link"]}" data-cofecha-part2-action="toggle-age-sort" role="button" tabindex="0" title="${sorted ? t("恢复 PART 2 原始顺序") : t("按完整年龄从大到小排序")}" style="color:#0f5f9e;background-color:rgba(47,95,147,0.08);font-family:'Microsoft YaHei',sans-serif;font-size:14px;line-height:inherit;font-weight:700;text-decoration:underline;text-underline-offset:2px;cursor:pointer;border-radius:3px;padding:0 2px;">${sorted ? t("恢复原顺序") : t("按年龄排序")}</span>`
 );
 
 const makeCofechaPart2CheckboxHtml = (tree: string, checked: boolean) => (
-    `<span style="display:inline-block;width:4ch;text-align:center;"><input type="checkbox" data-cofecha-part2-action="toggle-series" data-tree="${escapeHtml(tree)}" ${checked ? "checked " : ""}aria-label="${escapeHtml(tree)} 在图表中显示" title="${checked ? "从图表隐藏" : "在图表显示"} ${escapeHtml(tree)}" style="width:12px;height:12px;margin:0;vertical-align:-2px;accent-color:#2e6da4;cursor:pointer;box-shadow:none;" /></span>`
+    `<span style="display:inline-block;width:4ch;text-align:center;"><input type="checkbox" data-cofecha-part2-action="toggle-series" data-tree="${escapeHtml(tree)}" ${checked ? "checked " : ""}aria-label="${escapeHtml(t("{0} 在图表中显示", [tree]))}" title="${checked ? t("从图表隐藏") : t("在图表显示")} ${escapeHtml(tree)}" style="width:12px;height:12px;margin:0;vertical-align:-2px;accent-color:#2e6da4;cursor:pointer;box-shadow:none;" /></span>`
 );
 
 // PART 6 序列标题里的序列名：除了普通的跳转链接，还带上锚点属性，便于从年轮网格右键
 // “在 COFECHA 中定位”反向跳转到该序列的潜在问题块。命中跳转时附加高亮类。
 const makeCofechaPart6HeaderHtml = (tree: string, highlighted: boolean) => (
-    `<span class="${style["cofecha-year-link"]}${highlighted ? ` ${style["cofecha-part6-active"]}` : ""}" data-cofecha-link="true" ${COFECHA_PART6_ANCHOR_ATTR}="${escapeHtml(tree)}" data-tree="${escapeHtml(tree)}" role="button" tabindex="0" title="跳转到 ${escapeHtml(tree)}" style="color:#0f5f9e;background-color:rgba(47,95,147,0.08);font-weight:700;text-decoration:underline;text-underline-offset:2px;cursor:pointer;border-radius:3px;padding:0 2px;">${escapeHtml(tree)}</span>`
+    `<span class="${style["cofecha-year-link"]}${highlighted ? ` ${style["cofecha-part6-active"]}` : ""}" data-cofecha-link="true" ${COFECHA_PART6_ANCHOR_ATTR}="${escapeHtml(tree)}" data-tree="${escapeHtml(tree)}" role="button" tabindex="0" title="${escapeHtml(t("跳转到 {0}", [tree]))}" style="color:#0f5f9e;background-color:rgba(47,95,147,0.08);font-weight:700;text-decoration:underline;text-underline-offset:2px;cursor:pointer;border-radius:3px;padding:0 2px;">${escapeHtml(tree)}</span>`
 );
 
 const linkCofechaTreesInText = (text: string, knownTrees: readonly string[]) => {
@@ -338,6 +340,7 @@ const renderCofechaHtmlWithLinks = (
 };
 
 export default function Home() {
+    const locale = useLocale();
     const homeContainerRef = useRef<HTMLDivElement>(null);
     const rawEditorRef = useRef<RawEditorHandle>(null);
     const leftPanelsRef = useRef<HTMLDivElement>(null);
@@ -669,11 +672,11 @@ export default function Home() {
         return [
             {
                 key: "open-window",
-                label: isOpen ? "聚焦独立窗口" : "在独立窗口中打开",
+                label: isOpen ? t("聚焦独立窗口") : t("在独立窗口中打开"),
                 onSelect: () => handleOpenWorkspaceWindow(panelContextMenu.kind),
             },
         ];
-    }, [panelContextMenu, externalWorkspaceWindows, handleOpenWorkspaceWindow]);
+    }, [locale, panelContextMenu, externalWorkspaceWindows, handleOpenWorkspaceWindow]);
 
     const handleJumpToChart = useCallback((
         tree: string,
@@ -914,7 +917,7 @@ export default function Home() {
             chartSelectedTrees,
             cofechaPart2SortByAge,
         )
-    ), [chartSelectedTrees, cofechaPart2SortByAge, cofechaPart6JumpTarget, reportText, treeOptions]);
+    ), [locale, chartSelectedTrees, cofechaPart2SortByAge, cofechaPart6JumpTarget, reportText, treeOptions]);
 
     // 拥有 PART 6 潜在问题块的序列集合（小写），用于决定右键菜单是否显示
     // “在 COFECHA 中定位”。可用 possibleProblemsDetail 不够：它只收录带 [A] Segment
@@ -1032,11 +1035,7 @@ export default function Home() {
             diagnosisBatchResult,
             cofechaPart6Trees: cofechaPart6TreeList,
         },
-    }), [displayUnits, activeDiagnosisEvent, canExportCofechaOut, canResetToRawData, chartJumpTarget, chartSelectedTrees, chartTreeOffsets,
-        cofechaPart6JumpTarget, cofechaPart6TreeList, cofechaPartOptions, cofechaResult, cofechaUndatedFileName,
-        cofechaUndatedSort, crossdatingValidationSummary, diagnosisBatchResult, dynamicReferenceConfig, fileName,
-        isCofechaOutdated, isCofechaRunning, linkedReport, operationLog, presentedCrossdatingDiagnosis,
-        referenceConfig, selectedPart, selectedTree, siteData]);
+    }), [displayUnits, activeDiagnosisEvent, canExportCofechaOut, canResetToRawData, chartJumpTarget, chartSelectedTrees, chartTreeOffsets, cofechaPart6JumpTarget, cofechaPart6TreeList, cofechaPartOptions, cofechaResult, cofechaUndatedFileName, cofechaUndatedSort, crossdatingValidationSummary, diagnosisBatchResult, dynamicReferenceConfig, fileName, isCofechaOutdated, isCofechaRunning, linkedReport, operationLog, presentedCrossdatingDiagnosis, referenceConfig, selectedPart, selectedTree, siteData]);
 
     const handleCofechaTextClick = useCallback((event: MouseEvent<HTMLParagraphElement>) => {
         const target = event.target;
@@ -1423,7 +1422,7 @@ export default function Home() {
         try {
             const result = replaceGridMatches(siteData,[match],findQuery,replaceValue,stopMarker.value,displayUnits);
             commitGridReplacement([match], result);
-        } catch (error) { window.alert(error instanceof Error ? error.message : String(error)); }
+        } catch (error) { window.alert(localizeError(error)); }
     }, [displayUnits, commitGridReplacement, effectiveMatchIndex, findQuery, gridMatches, isRawEditing, replaceValue, siteData]);
 
     const handleReplaceAll = useCallback(() => {
@@ -1434,7 +1433,7 @@ export default function Home() {
         try {
             const result = replaceGridMatches(siteData,gridMatches,findQuery,replaceValue,stopMarker.value,displayUnits);
             commitGridReplacement(gridMatches, result);
-        } catch (error) { window.alert(error instanceof Error ? error.message : String(error)); }
+        } catch (error) { window.alert(localizeError(error)); }
         setFindMatchIndex(0);
     }, [displayUnits, commitGridReplacement, findQuery, gridMatches, isRawEditing, replaceValue, siteData]);
 
@@ -1587,7 +1586,7 @@ export default function Home() {
     return (
         <RwlDisplayUnitsContext.Provider value={displayUnits}>
             <HomeTitleBarBridge
-                title={chartTreeOffsets.size > 0 && !windowTitle.endsWith(" *") ? `${windowTitle} *` : windowTitle}
+                title={chartTreeOffsets.size > 0 && !windowTitle.endsWith(" *") ? `${(fileName ? windowTitle : t("交叉定年-IDM"))} *` : (fileName ? windowTitle : t("交叉定年-IDM"))}
                 onLoad={handleLoad}
                 onSave={handleSave}
                 onSaveAs={handleSaveAs}
@@ -1634,8 +1633,8 @@ export default function Home() {
                                 <button
                                     type="button"
                                     className={style["raw-editor-button"]}
-                                    title="应用文本编辑"
-                                    aria-label="应用文本编辑"
+                                    title={t("应用文本编辑")}
+                                    aria-label={t("应用文本编辑")}
                                     onClick={handleApplyRawEditor}
                                 >
                                     ✓
@@ -1643,8 +1642,8 @@ export default function Home() {
                                 <button
                                     type="button"
                                     className={style["raw-editor-button"]}
-                                    title="取消文本编辑"
-                                    aria-label="取消文本编辑"
+                                    title={t("取消文本编辑")}
+                                    aria-label={t("取消文本编辑")}
                                     onClick={handleCancelRawEditor}
                                 >
                                     ×
@@ -1666,7 +1665,7 @@ export default function Home() {
 
                             {rawEditorError ? (
                                 <div className={style["raw-editor-error"]}>
-                                    {rawEditorError}
+                                    {localizeMessage(rawEditorError)}
                                 </div>
                             ) : null}
                         </div>
@@ -1682,7 +1681,7 @@ export default function Home() {
                                     }}
                                 >
                                     <option key={ALL_OPTION_VALUE} value={ALL_OPTION_VALUE}>
-                                        {TREE_ALL_OPTION_LABEL}
+                                        {t(TREE_ALL_OPTION_LABEL)}
                                     </option>
                                     {treeOptions.map((tree) => (
                                         <option key={tree} value={tree}>
@@ -1696,20 +1695,16 @@ export default function Home() {
                                     <div aria-hidden="true" style={{ display: "contents" }}>
                                         <span className={style["legend-item"]}>
                                             <span className={`${style["legend-swatch"]} ${style["legend-swatch-narrow"]}`} />
-                                            窄年
-                                        </span>
+                                            {t("窄年")}</span>
                                         <span className={style["legend-item"]}>
                                             <span className={`${style["legend-swatch"]} ${style["legend-swatch-false-ring"]}`} />
-                                            伪轮
-                                        </span>
+                                            {t("伪轮")}</span>
                                         <span className={style["legend-item"]}>
                                             <span className={`${style["legend-swatch"]} ${style["legend-swatch-absent"]}`} />
-                                            缺轮
-                                        </span>
+                                            {t("缺轮")}</span>
                                         <span className={style["legend-item"]}>
                                             <span className={`${style["legend-swatch"]} ${style["legend-swatch-missing"]}`} />
-                                            缺测
-                                        </span>
+                                            {t("缺测")}</span>
                                     </div>,
                                     legendContainer,
                                 )
@@ -1732,7 +1727,7 @@ export default function Home() {
                                                     {shouldShowWelcome ? (
                                                         <div className={style["width-empty-state"]}>
                                                             <img src="IDM.png" className={style["width-empty-state-image"]} alt="IDM" />
-                                                            <p className={style["width-empty-state-developers"]}>{WELCOME_TEXT}</p>
+                                                            <p className={style["width-empty-state-developers"]}>{t(WELCOME_TEXT)}</p>
                                                         </div>
                                                     ) : null}
                                                 </>
@@ -1785,7 +1780,7 @@ export default function Home() {
                                         <div
                                             role="separator"
                                             aria-orientation="horizontal"
-                                            aria-label="调整数据区和问题区高度"
+                                            aria-label={t("调整数据区和问题区高度")}
                                             className={`${nestedDividerClassName} ${draggingKey === "leftBottomRatio" ? style["panel-divider-active"] : ""} ${leftBottomDividerCollapsed ? style["panel-divider-collapsed"] : ""}`}
                                             onPointerDown={startResize({
                                                 key: "leftBottomRatio",
@@ -1803,29 +1798,26 @@ export default function Home() {
                                                     className={`${style["problem-tab"]} ${activeProblemTab === "problems" ? style["problem-tab-active"] : ""}`}
                                                     disabled={!problemTabAvailable}
                                                     aria-pressed={activeProblemTab === "problems"}
-                                                    title={problemTabAvailable ? "查看当前序列的可能问题" : "当前序列没有可能问题"}
+                                                    title={problemTabAvailable ? t("查看当前序列的可能问题") : t("当前序列没有可能问题")}
                                                     onClick={() => setProblemTab("problems")}
                                                 >
-                                                    可能问题
-                                                </button>
+                                                    {t("可能问题")}</button>
                                                 <button
                                                     type="button"
                                                     className={`${style["problem-tab"]} ${activeProblemTab === "candidates" ? style["problem-tab-active"] : ""}`}
                                                     disabled={!candidateTabAvailable}
                                                     aria-pressed={activeProblemTab === "candidates"}
-                                                    title={candidateTabAvailable ? "查看当前序列的定年建议" : "当前序列没有定年建议"}
+                                                    title={candidateTabAvailable ? t("查看当前序列的定年建议") : t("当前序列没有定年建议")}
                                                     onClick={() => setProblemTab("candidates")}
                                                 >
-                                                    定年建议
-                                                    {isEventDiagnosisRunning ? " · 计算中" : ""}
+                                                    {t("定年建议")}{isEventDiagnosisRunning ? t(" · 计算中") : ""}
                                                 </button>
                                             </div>
 
                                             <FloatingScrollArea className={style["problem-tab-body"]}>
                                                 {activeProblemTab === null ? (
                                                     <div className={style["problem-tab-empty"]}>
-                                                        当前序列没有可能问题或定年建议
-                                                    </div>
+                                                        {t("当前序列没有可能问题或定年建议")}</div>
                                                 ) : activeProblemTab === "candidates" ? (
                                                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                                                         {selectedTreeEvents.length > 0 ? (
@@ -1841,8 +1833,7 @@ export default function Home() {
                                                         ) : null}
                                                         {isEventDiagnosisRunning && selectedTreeEvents.length === 0 ? (
                                                             <div style={{ padding: "8px 6px", color: "#6b7280", fontSize: 12 }}>
-                                                                正在分析当前序列...
-                                                            </div>
+                                                                {t("正在分析当前序列...")}</div>
                                                         ) : null}
                                                     </div>
                                                 ) : (
@@ -1862,7 +1853,7 @@ export default function Home() {
                 <div
                     role="separator"
                     aria-orientation="vertical"
-                    aria-label="调整年轮数据区和 COFECHA 区宽度"
+                    aria-label={t("调整年轮数据区和 COFECHA 区宽度")}
                     className={mainDividerClassName}
                     onPointerDown={startResize({
                         key: "mainSplitRatio",
@@ -1924,7 +1915,7 @@ export default function Home() {
                         >
                             {externalWorkspaceWindows.cofecha ? (
                                 <WorkspaceWindowPlaceholder
-                                    message="COFECHA 已在独立窗口打开"
+                                    message={t("COFECHA 已在独立窗口打开")}
                                     onFocusWindow={() => handleOpenWorkspaceWindow("cofecha")}
                                 />
                             ) : (
@@ -1941,7 +1932,7 @@ export default function Home() {
                                             >
                                                 {cofechaPartOptions.map((option) => (
                                                     <option key={option.value} value={option.value}>
-                                                        {option.label}
+                                                        {localizeMessage(option.label)}
                                                     </option>
                                                 ))}
                                             </select>
@@ -1953,23 +1944,22 @@ export default function Home() {
                                                 type="button"
                                                 className={style["cofecha-validation-button"]}
                                                 disabled={!fileName || isCofechaRunning}
-                                                title={fileName ? "用当前工作数据重新运行 COFECHA" : "打开 RWL 文件后才能运行 COFECHA"}
+                                                title={fileName ? t("用当前工作数据重新运行 COFECHA") : t("打开 RWL 文件后才能运行 COFECHA")}
                                                 onClick={() => { void handleRunCofechaValidation(); }}
                                             >
-                                                {isCofechaRunning ? "正在验证" : "重新验证"}
+                                                {isCofechaRunning ? t("正在验证") : t("重新验证")}
                                             </button>
                                             {linkedReport.count > 0 ? (
                                                 <span className={style["cofecha-link-count"]}>
-                                                    跳转链接 {linkedReport.count}
+                                                    {t("跳转链接 ")}{linkedReport.count}
                                                 </span>
                                             ) : null}
                                             {isCofechaOutdated ? (
                                                 <span
                                                     className={style["cofecha-outdated-badge"]}
-                                                    title="当前 RWL 工作数据或 COFECHA 版本已变化，可以手动重新验证当前工作数据。"
+                                                    title={t("当前 RWL 工作数据或 COFECHA 版本已变化，可以手动重新验证当前工作数据。")}
                                                 >
-                                                    COFECHA 待验证
-                                                </span>
+                                                    {t("COFECHA 待验证")}</span>
                                             ) : null}
                                             <CofechaOutExportButton
                                                 disabled={!canExportCofechaOut}
@@ -2008,7 +1998,7 @@ export default function Home() {
                                 <div
                                     role="separator"
                                     aria-orientation="horizontal"
-                                    aria-label="调整 COFECHA 文本和折线图高度"
+                                    aria-label={t("调整 COFECHA 文本和折线图高度")}
                                     className={`${nestedDividerClassName} ${draggingKey === "rightBottomRatio" ? style["panel-divider-active"] : ""} ${rightBottomDividerCollapsed ? style["panel-divider-collapsed"] : ""}`}
                                     onPointerDown={startResize({
                                         key: "rightBottomRatio",
@@ -2026,7 +2016,7 @@ export default function Home() {
                                     {externalWorkspaceWindows["line-chart"] ? (
                                         <div className={`${style["cofecha-panel-content"]} ${style["line-chart-content"]}`}>
                                             <WorkspaceWindowPlaceholder
-                                                message="Line Chart 已在独立窗口打开"
+                                                message={t("Line Chart 已在独立窗口打开")}
                                                 onFocusWindow={() => handleOpenWorkspaceWindow("line-chart")}
                                             />
                                         </div>

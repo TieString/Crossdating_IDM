@@ -1,3 +1,5 @@
+import { t, localizeMessage, localizeError } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChartZoomWindow, MultiLineChart, colorPalette, type ChartDiagnosisEventRange } from './MultiLineChart.tsx'
 import { PairwiseMismatchNotice } from './PairwiseMismatchNotice'
@@ -149,6 +151,7 @@ function TreeChartManagerBase({
   onDiagnosisPreviewChange,
   cofechaPart6Trees,
 }: Props) {
+    const locale = useLocale();
   const [localSelectedTrees, setLocalSelectedTrees] = useState<string[]>([])
   const [isReferenceMode, setIsReferenceMode] = useState(false)
   const [referenceDraftTrees, setReferenceDraftTrees] = useState<string[]>([])
@@ -407,7 +410,7 @@ function TreeChartManagerBase({
     const sourceFirstFixedYear = firstFixedYear - (treeOffsets.get(tree) ?? 0)
     const plan = createOlderSidePartialMovePlan(range[0], range[1], sourceFirstFixedYear, yearCount)
     if (!plan) {
-      window.alert(`断点年份必须位于 ${range[0] + 1} 至 ${range[1]}；断点年及较新侧保持不动。`)
+      window.alert(t("断点年份必须位于 {0} 至 {1}；断点年及较新侧保持不动。", [range[0] + 1, range[1]]))
       return
     }
 
@@ -577,18 +580,18 @@ function TreeChartManagerBase({
       const total = referenceConfig.classification?.allSeriesIds.length ?? allTreeCodes.length
       const anchorCount = referenceConfig.classification?.anchorPassIds.length ?? referenceConfig.selectedTrees.length
       const candidateCount = referenceConfig.classification?.candidateFlaggedIds.length ?? 0
-      const stale = referenceConfig.isStale ? ' · 参考序列过期' : ''
-      const invalid = referenceConfig.unavailableReason ? ` · ${referenceConfig.unavailableReason}` : ''
+      const stale = referenceConfig.isStale ? t(" · 参考序列过期") : ''
+      const invalid = referenceConfig.unavailableReason ? ` · ${localizeMessage(referenceConfig.unavailableReason)}` : ''
       const range = referenceSummary?.startYear != null && referenceSummary.endYear != null
         ? ` · ${referenceSummary.startYear}-${referenceSummary.endYear}`
         : ''
       const replication = referenceSummary?.meanReplication != null
-        ? ` · 平均 n=${referenceSummary.meanReplication.toFixed(1)}`
+        ? t(" · 平均 n={0}", [referenceSummary.meanReplication.toFixed(1)])
         : ''
-      return `COFECHA 无 A 参考组 ${anchorCount} / ${total} · 待检查 ${candidateCount}${range}${replication}${stale}${invalid}`
+      return t("COFECHA 无 A 参考组 {0} / {1} · 待检查 {2}{3}{4}{5}{6}", [anchorCount, total, candidateCount, range, replication, stale, invalid])
     }
     return null
-  }, [allTreeCodes.length, referenceConfig, referenceSummary])
+  }, [locale, allTreeCodes.length, referenceConfig, referenceSummary])
 
   const diagnosisEventCountByTree = useMemo(() => {
     const counts = new Map<string, number>()
@@ -641,13 +644,7 @@ function TreeChartManagerBase({
     highlightedTreeId: highlightedTreeCode,
     referenceSeries,
     referenceConfig,
-  }), [
-    fullData,
-    highlightedTreeCode,
-    pairwiseVisibleTreeIds,
-    referenceConfig,
-    referenceSeries,
-  ])
+  }), [fullData, highlightedTreeCode, pairwiseVisibleTreeIds, referenceConfig, referenceSeries])
 
   useEffect(() => {
     pairwiseRequestIdRef.current += 1
@@ -689,7 +686,7 @@ function TreeChartManagerBase({
         setPairwiseRun({ analysis, context })
       } catch (error) {
         if (requestId !== pairwiseRequestIdRef.current) return
-        const message = error instanceof Error ? error.message : String(error)
+        const message = localizeError(error)
         console.warn('双线错配分析失败:', error)
         setPairwiseError(message)
       } finally {
@@ -888,10 +885,10 @@ function TreeChartManagerBase({
     || isPairwiseAnalyzing
     || pairwiseAvailability.context === null
   const pairwiseButtonTitle = isReferenceMode
-    ? '请先完成或取消参考序列选择'
+    ? t("请先完成或取消参考序列选择")
     : pairwiseAvailability.context
-      ? `比较 ${pairwiseAvailability.context.targetTree} 与 ${pairwiseAvailability.context.comparatorLabel}，定位持续错配的起点`
-      : pairwiseAvailability.reason
+      ? t("比较 {0} 与 {1}，定位持续错配的起点", [pairwiseAvailability.context.targetTree, pairwiseAvailability.context.comparatorKind === "reference" ? localizeMessage(pairwiseAvailability.context.comparatorLabel) : pairwiseAvailability.context.comparatorLabel])
+      : localizeMessage(pairwiseAvailability.reason)
 
   const matchingLocalEvent = localSimulation
     ? chartDiagnosisEvents.find((event) => (
@@ -906,12 +903,12 @@ function TreeChartManagerBase({
   const displayedReviewEvent = pairwiseRun ? pairwiseRun.analysis.event : resolvedActiveDiagnosisEvent
   const activeReviewLabel = displayedReviewEvent
     ? displayedReviewEvent.eventType === 'wholeSeriesMove'
-      ? `${displayedReviewEvent.seriesId} · 整体移动 ${displayedReviewEvent.shiftYears ?? 0} 年`
-      : `${displayedReviewEvent.seriesId} · 复核窗口 ${displayedReviewEvent.startYear}-${displayedReviewEvent.endYear}`
+      ? t("{0} · 整体移动 {1} 年", [displayedReviewEvent.seriesId, displayedReviewEvent.shiftYears ?? 0])
+      : t("{0} · 复核窗口 {1}-{2}", [displayedReviewEvent.seriesId, displayedReviewEvent.startYear, displayedReviewEvent.endYear])
     : null
   const localYearStatus = !matchingLocalEvent
-    ? '诊断事件'
-    : matchingLocalEvent.eventType === 'partialMove' ? '已选断点' : '已选复核年份'
+    ? t("诊断事件")
+    : matchingLocalEvent.eventType === 'partialMove' ? t("已选断点") : t("已选复核年份")
   const selectedOptionIsRecommended = !!selectedLocalOption
     && localSimulation?.bestOption.operationType !== 'NO_ACTION'
     && localOptionKey(selectedLocalOption) === localOptionKey(localSimulation?.bestOption ?? null)
@@ -920,12 +917,12 @@ function TreeChartManagerBase({
   )
   const localApplyDescription = localSimulation && selectedLocalOption
     ? selectedLocalOption.operationType === 'INSERT_MISSING_RING'
-      ? `${localSimulation.year} 年插入缺轮，较老侧左移 1 年`
+      ? t("{0} 年插入缺轮，较老侧左移 1 年", [localSimulation.year])
       : selectedLocalOption.operationType === 'DELETE_FALSE_RING'
-        ? `${localSimulation.year} 年删除伪轮，较老侧右移 1 年`
+        ? t("{0} 年删除伪轮，较老侧右移 1 年", [localSimulation.year])
         : selectedLocalOption.operationType === 'SHIFT_RANGE'
-          ? `${localSimulation.selectedStartYear}-${localSimulation.selectedEndYear} 年移动 ${selectedLocalOption.shift && selectedLocalOption.shift > 0 ? '+' : ''}${selectedLocalOption.shift ?? 0} 年`
-          : '保持原状'
+          ? t("{0}-{1} 年移动 {2}{3} 年", [localSimulation.selectedStartYear, localSimulation.selectedEndYear, selectedLocalOption.shift && selectedLocalOption.shift > 0 ? '+' : '', selectedLocalOption.shift ?? 0])
+          : t("保持原状")
     : ''
 
   const applySelectedLocalSimulation = () => {
@@ -957,7 +954,7 @@ function TreeChartManagerBase({
     }}>
       <div
         role="toolbar"
-        aria-label="建议预览"
+        aria-label={t("建议预览")}
         style={{
           flex: '0 0 auto',
           display: 'flex',
@@ -973,10 +970,10 @@ function TreeChartManagerBase({
           lineHeight: 1.3,
         }}
       >
-        <strong style={{ color: '#24352a', fontSize: 12 }}>建议预览</strong>
+        <strong style={{ color: '#24352a', fontSize: 12 }}>{t("建议预览")}</strong>
         {!localSimulation || !selectedLocalOption ? (
           <span style={{ color: activeReviewLabel ? '#315d36' : '#7b8490', fontWeight: activeReviewLabel ? 650 : 400 }}>
-            {activeReviewLabel ?? '未预览建议'}
+            {activeReviewLabel ?? t("未预览建议")}
           </span>
         ) : (
           <>
@@ -985,8 +982,8 @@ function TreeChartManagerBase({
             </span>
             <span
               title={matchingLocalEvent
-                ? `当前年份位于 ${matchingLocalEvent.startYear}-${matchingLocalEvent.endYear} 诊断窗口`
-                : '当前预览未关联有效诊断事件'}
+                ? t("当前年份位于 {0}-{1} 诊断窗口", [matchingLocalEvent.startYear, matchingLocalEvent.endYear])
+                : t("当前预览未关联有效诊断事件")}
               style={{
                 padding: '1px 6px',
                 border: '1px solid #cbd5cf',
@@ -999,7 +996,7 @@ function TreeChartManagerBase({
               {localYearStatus}
             </span>
             <span
-              title={selectedLocalOption.reason}
+              title={localizeMessage(selectedLocalOption.reason)}
               style={{
                 padding: '2px 7px',
                 border: '1px solid #397342',
@@ -1009,22 +1006,22 @@ function TreeChartManagerBase({
                 fontWeight: 700,
               }}
             >
-              {selectedLocalOption.label}
+              {localizeMessage(selectedLocalOption.label)}
             </span>
             {matchingLocalEvent ? (
               <span
-                title={`证据分 ${matchingLocalEvent.evidence.score.toFixed(3)}；来源 ${matchingLocalEvent.evidence.algorithmSources.join('、') || '-'}`}
+                title={t("证据分 {0}；来源 {1}", [matchingLocalEvent.evidence.score.toFixed(3), matchingLocalEvent.evidence.algorithmSources.join('、') || '-'])}
                 style={{ color: '#45694a', fontWeight: 650 }}
               >
-                置信 {matchingLocalEvent.confidenceLevel === 'high'
-                  ? '高'
+                {t("置信 ")}{matchingLocalEvent.confidenceLevel === 'high'
+                  ? t("高")
                   : matchingLocalEvent.confidenceLevel === 'medium'
-                    ? '中'
-                    : '低'}
+                    ? t("中")
+                    : t("低")}
               </span>
             ) : null}
             <span
-              title="相关性变化是最终事件的反事实预览证据，不是正确概率"
+              title={t("相关性变化是最终事件的反事实预览证据，不是正确概率")}
               style={{ color: selectedOptionIsRecommended ? '#315d36' : '#667084' }}
             >
               r {formatLocalCorrelation(selectedLocalOption.currentCorrelation)}
@@ -1035,7 +1032,7 @@ function TreeChartManagerBase({
                 : ` (${selectedLocalOption.delta >= 0 ? '+' : ''}${selectedLocalOption.delta.toFixed(2)})`}
             </span>
             {localSimulation.bestOption.operationType === 'NO_ACTION' ? (
-              <span style={{ color: '#8a5a21' }}>算法未发现明确改善</span>
+              <span style={{ color: '#8a5a21' }}>{t("算法未发现明确改善")}</span>
             ) : null}
             <span style={{ flex: '1 1 auto' }} />
             {isConfirmingLocalApply ? (
@@ -1046,8 +1043,7 @@ function TreeChartManagerBase({
                   onClick={() => setIsConfirmingLocalApply(false)}
                   style={{ ...btnBase, padding: '2px 8px', fontSize: 11 }}
                 >
-                  返回
-                </button>
+                  {t("返回")}</button>
                 <button
                   type="button"
                   onClick={applySelectedLocalSimulation}
@@ -1061,8 +1057,7 @@ function TreeChartManagerBase({
                     fontWeight: 700,
                   }}
                 >
-                  确认应用
-                </button>
+                  {t("确认应用")}</button>
               </>
             ) : (
               <>
@@ -1071,8 +1066,7 @@ function TreeChartManagerBase({
                   onClick={clearLocalSimulation}
                   style={{ ...btnBase, padding: '2px 8px', fontSize: 11 }}
                 >
-                  取消预览
-                </button>
+                  {t("取消预览")}</button>
                 <button
                   type="button"
                   disabled={!onApplyLocalSimulation || selectedLocalOption.operationType === 'NO_ACTION'}
@@ -1088,8 +1082,7 @@ function TreeChartManagerBase({
                       fontWeight: 700,
                     }}
                 >
-                  应用
-                </button>
+                  {t("应用")}</button>
               </>
             )}
           </>
@@ -1112,7 +1105,7 @@ function TreeChartManagerBase({
           fontFamily: 'Segoe UI, Microsoft YaHei, system-ui, sans-serif',
           fontSize: 12,
         }}>
-          双线分析失败：{pairwiseError}
+          {t("双线分析失败：")}{localizeMessage(pairwiseError)}
         </div>
       ) : null}
       <div style={{ flex: '1 1 auto', minHeight: 0 }}>
@@ -1157,7 +1150,7 @@ function TreeChartManagerBase({
       fontFamily: 'Segoe UI, system-ui, sans-serif',
       fontSize: 13,
     }}>
-      {isReferenceMode ? '选择参考序列' : '未选择序列'}
+      {isReferenceMode ? t("选择参考序列") : t("未选择序列")}
     </div>
   )
 
@@ -1171,7 +1164,7 @@ function TreeChartManagerBase({
         marginBottom: 6,
       }}>
         <button onClick={() => isReferenceMode ? setReferenceDraftTrees(allTreeCodes) : updateSelectedTrees(allTreeCodes)} disabled={allSelected}
-          style={allSelected ? btnDisabled : btnBase}>全选</button>
+          style={allSelected ? btnDisabled : btnBase}>{t("全选")}</button>
         <button onClick={() => {
           if (isReferenceMode) {
             setReferenceDraftTrees([])
@@ -1179,16 +1172,16 @@ function TreeChartManagerBase({
             updateSelectedTrees([])
           }
         }} disabled={activeSelection.length === 0}
-          style={activeSelection.length === 0 ? btnDisabled : btnBase}>全不选</button>
+          style={activeSelection.length === 0 ? btnDisabled : btnBase}>{t("全不选")}</button>
         {isReferenceMode ? (
           <button
             onClick={selectCofechaNoATrees}
             disabled={cofechaNoATrees.length === 0}
             title={cofechaClassification
               ? dynamicReferenceConfig?.cofechaPassReference?.source === 'pairwise_bootstrap'
-                ? '选择冷启动时样芯间 lag=0 最大相互一致簇中的全部序列'
-                : `${dynamicReferenceConfig?.isStale ? '基于最近一次已过期的 COFECHA 结果；' : ''}选择 PART 6 中没有 A 标记的全部序列`
-              : '请先运行 COFECHA，以获得 PART 6 A 标记分类'}
+                ? t("选择冷启动时样芯间 lag=0 最大相互一致簇中的全部序列")
+                : t("{0}选择 PART 6 中没有 A 标记的全部序列", [dynamicReferenceConfig?.isStale ? t("基于最近一次已过期的 COFECHA 结果；") : ''])
+              : t("请先运行 COFECHA，以获得 PART 6 A 标记分类")}
             style={cofechaNoATrees.length === 0 ? btnDisabled : {
               ...btnBase,
               borderColor: '#b7dec7',
@@ -1196,15 +1189,15 @@ function TreeChartManagerBase({
               fontWeight: 650,
             }}
           >
-            可靠序列{cofechaClassification ? ` (${cofechaNoATrees.length})` : ''}
+            {t("可靠序列")}{cofechaClassification ? ` (${cofechaNoATrees.length})` : ''}
           </button>
         ) : null}
         {isExpanded ? (
           <>
             <button onClick={invertSelection} disabled={allTreeCodes.length === 0}
-              style={allTreeCodes.length === 0 ? btnDisabled : btnBase}>反选</button>
+              style={allTreeCodes.length === 0 ? btnDisabled : btnBase}>{t("反选")}</button>
             <button onClick={selectLongestTrees} disabled={allTreeCodes.length === 0}
-              style={allTreeCodes.length === 0 ? btnDisabled : btnBase}>最长10条</button>
+              style={allTreeCodes.length === 0 ? btnDisabled : btnBase}>{t("最长10条")}</button>
           </>
         ) : null}
 
@@ -1217,7 +1210,7 @@ function TreeChartManagerBase({
             type="search"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="搜索序列"
+            placeholder={t("搜索序列")}
             style={{
               width: '100%', fontSize: 12, padding: '4px 8px 4px 26px',
               border: '1px solid #d0d0d0', borderRadius: 5, outline: 'none',
@@ -1228,25 +1221,25 @@ function TreeChartManagerBase({
         </div>
         {isReferenceMode ? (
           <>
-            <button onClick={applyReferenceSelection} disabled={referenceDraftTrees.length === 0} title='在下方选择多个序列进行平均'
-              style={referenceDraftTrees.length === 0 ? btnDisabled : { ...btnBase, borderColor: '#111827', color: '#111827', fontWeight: 650 }}>生成参考</button>
-            <button onClick={cancelReferenceSelection} style={btnBase}>取消</button>
+            <button onClick={applyReferenceSelection} disabled={referenceDraftTrees.length === 0} title={t("在下方选择多个序列进行平均")}
+              style={referenceDraftTrees.length === 0 ? btnDisabled : { ...btnBase, borderColor: '#111827', color: '#111827', fontWeight: 650 }}>{t("生成参考")}</button>
+            <button onClick={cancelReferenceSelection} style={btnBase}>{t("取消")}</button>
           </>
         ) : (
           <button
             onClick={referenceSeries ? clearReferenceSelection : beginReferenceSelection}
             disabled={allTreeCodes.length === 0}
-            title={referenceSeries ? "清除当前手动参考" : "选择多个可靠序列生成手动参考"}
+            title={referenceSeries ? t("清除当前手动参考") : t("选择多个可靠序列生成手动参考")}
             style={allTreeCodes.length === 0 ? btnDisabled : referenceSeries ? { ...btnBase, borderColor: '#111827', color: '#111827', fontWeight: 650 } : btnBase}
           >
-            {referenceSeries ? `清除参考(${referenceSeries.selectedTrees.length})` : '参考'}
+            {referenceSeries ? t("清除参考({0})", [referenceSeries.selectedTrees.length]) : t("参考")}
           </button>
         )}
         <button
           type="button"
           onClick={runPairwiseAnalysis}
           disabled={pairwiseButtonDisabled}
-          title={pairwiseError ? `上次分析失败：${pairwiseError}` : pairwiseButtonTitle}
+          title={pairwiseError ? t("上次分析失败：{0}", [localizeMessage(pairwiseError)]) : pairwiseButtonTitle}
           aria-pressed={pairwiseRun !== null}
           style={pairwiseButtonDisabled ? btnDisabled : pairwiseRun ? {
             ...btnBase,
@@ -1256,22 +1249,21 @@ function TreeChartManagerBase({
             fontWeight: 650,
           } : btnBase}
         >
-          {isPairwiseAnalyzing ? '分析中…' : '双线分析'}
+          {isPairwiseAnalyzing ? t("分析中…") : t("双线分析")}
         </button>
         <button
           type="button"
           onClick={resetChartView}
           disabled={treeOffsets.size === 0}
-          title="清除所有折线的手动年份偏移"
+          title={t("清除所有折线的手动年份偏移")}
           style={treeOffsets.size === 0 ? btnDisabled : btnBase}
         >
-          重置
-        </button>
+          {t("重置")}</button>
         <span style={{
           fontSize: 11, color: '#fff', background: '#2e6da4',
           borderRadius: 10, padding: '1px 8px', fontWeight: 600, whiteSpace: 'nowrap',
         }}>
-          {isReferenceMode ? `${referenceDraftTrees.length} 参考` : `${selectedTrees.length} / ${allTreeCodes.length}`}
+          {isReferenceMode ? t("{0} 参考", [referenceDraftTrees.length]) : `${selectedTrees.length} / ${allTreeCodes.length}`}
         </span>
         {treeOffsets.size > 0 ? (
           <span style={{
@@ -1284,7 +1276,7 @@ function TreeChartManagerBase({
             fontWeight: 600,
             whiteSpace: 'nowrap',
           }}>
-            保存时应用 {treeOffsets.size}
+            {t("保存时应用 ")}{treeOffsets.size}
           </span>
         ) : null}
       </div>
@@ -1311,7 +1303,7 @@ function TreeChartManagerBase({
             {referenceStatusLabel}
           </span>
           {referenceSummary?.minReplication != null ? (
-            <span style={{ color: '#6b7280' }}>最低 n={referenceSummary.minReplication}</span>
+            <span style={{ color: '#6b7280' }}>{t("最低 n=")}{referenceSummary.minReplication}</span>
           ) : null}
         </div>
       ) : null}
@@ -1327,11 +1319,11 @@ function TreeChartManagerBase({
           fontSize: 12,
           lineHeight: 1.25,
         }}>
-          <span>观测 {selectedStats.pointCount}</span>
-          <span>跨度 {selectedStats.yearSpan}</span>
-          <span>匹配 {filteredTreeCodes.length}</span>
-          <span>偏移 {treeOffsets.size}</span>
-          <span>事件窗口 {selectedDiagnosisStats.eventCount}</span>
+          <span>{t("观测 ")}{selectedStats.pointCount}</span>
+          <span>{t("跨度 ")}{selectedStats.yearSpan}</span>
+          <span>{t("匹配 ")}{filteredTreeCodes.length}</span>
+          <span>{t("偏移 ")}{treeOffsets.size}</span>
+          <span>{t("事件窗口 ")}{selectedDiagnosisStats.eventCount}</span>
         </div>
       ) : null}
 
@@ -1355,7 +1347,7 @@ function TreeChartManagerBase({
         {filteredTreeCodes.length === 0
           ? allTreeCodes.length === 0
             ? null
-            : <span style={{ fontSize: 12, color: '#bbb', padding: '4px 6px', fontStyle: 'italic' }}>无匹配结果</span>
+            : <span style={{ fontSize: 12, color: '#bbb', padding: '4px 6px', fontStyle: 'italic' }}>{t("无匹配结果")}</span>
           : filteredTreeCodes.map(treeCode => {
             const checked = selectedTrees.includes(treeCode)
             const referenceChecked = referenceDraftTrees.includes(treeCode)
@@ -1370,7 +1362,7 @@ function TreeChartManagerBase({
                 onClick={() => toggleTree(treeCode)}
                 title={yearOffset === 0
                   ? treeCode
-                  : `${treeCode} 当前手动偏移 ${yearOffset > 0 ? '+' : ''}${yearOffset} 年`}
+                  : t("{0} 当前手动偏移 {1}{2} 年", [treeCode, yearOffset > 0 ? '+' : '', yearOffset])}
                 style={{
                   fontSize: 11, padding: '2px 9px', borderRadius: 6,
                   border: activeChecked ? `1px solid ${isReferenceMode ? '#111827' : '#2e6da4'}` : isReferenceSource ? '1px dashed #111827' : '1px solid #d8d8d8',
@@ -1425,8 +1417,8 @@ function TreeChartManagerBase({
         <div
           role="separator"
           aria-orientation="horizontal"
-          aria-label="拖动调整序列选择器高度"
-          title="上下拖动调整序列选择器高度"
+          aria-label={t("拖动调整序列选择器高度")}
+          title={t("上下拖动调整序列选择器高度")}
           onPointerDown={startPickerResize}
           style={{
             flex: '0 0 auto',
@@ -1499,7 +1491,7 @@ function TreeChartManagerBase({
             color: '#5f6d7c',
           }}>
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {highlightedTreeCode ? `高亮 ${highlightedTreeCode}` : '未高亮'}
+              {highlightedTreeCode ? t("高亮 {0}", [highlightedTreeCode]) : t("未高亮")}
             </span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '0 0 auto' }}>
               <button onClick={() => highlightedTreeCode && shiftHighlightedTree(highlightedTreeCode, -1)}
@@ -1511,8 +1503,7 @@ function TreeChartManagerBase({
                 disabled={treeOffsets.size === 0}
                 style={treeOffsets.size === 0 ? btnDisabled : btnBase}
               >
-                重置
-              </button>
+                {t("重置")}</button>
             </div>
           </div>
           <div style={{ flex: '1 1 auto', minHeight: 0, padding: 10, boxSizing: 'border-box' }}>

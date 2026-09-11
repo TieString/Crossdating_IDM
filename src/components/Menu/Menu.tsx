@@ -1,3 +1,5 @@
+import { localizeMessage } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import React, { useState } from 'react';
 import MenuItem from './MenuItem/MenuItem';
 import styles from './Menu.module.css';
@@ -28,6 +30,7 @@ export interface MenuProps {
 
 /** Renders the top menu and coordinates active submenu state. */
 const Menu: React.FC<MenuProps> = ({ items }) => {
+    useLocale();
   const [activeMenuItem, setActiveMenuItem] = useState<string | null>(null);
   
   const handleMenuClick = (onClick?: () => void | Promise<void>, hasChildren?: boolean) => {
@@ -55,7 +58,7 @@ const Menu: React.FC<MenuProps> = ({ items }) => {
           <MenuItem
             isActive={activeMenuItem === item.label}
             key={index}
-            label={item.label}
+            label={localizeMessage(item.label)}
             disabled={item.disabled}
             checked={item.checked}
             onClick={() => handleMenuClick(item.onClick, hasChildren)}

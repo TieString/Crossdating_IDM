@@ -1,3 +1,5 @@
+import { t } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import type { CofechaUndatedSort } from "@/features/cofecha/types";
 import styles from "./CofechaUndatedControls.module.css";
 
@@ -20,16 +22,17 @@ export function CofechaUndatedControls({
     onClear,
     onSortChange,
 }: Props) {
+    useLocale();
     return (
         <div className={`${styles.controls} ${compact ? styles["controls-compact"] : ""}`}>
             <button
                 type="button"
                 className={styles["load-button"]}
                 disabled={disabled}
-            title={fileName ? "更换未定年 RWL" : "加载未定年 RWL 并生成 PART 8"}
+            title={fileName ? t("更换未定年 RWL") : t("加载未定年 RWL 并生成 PART 8")}
                 onClick={() => { void onLoad(); }}
             >
-                {fileName ? "更换未定年" : "加载未定年"}
+                {fileName ? t("更换未定年") : t("加载未定年")}
             </button>
             {fileName ? (
                 <>
@@ -38,21 +41,21 @@ export function CofechaUndatedControls({
                         className={styles["sort-select"]}
                         value={sort}
                         disabled={disabled}
-                        aria-label="未定年匹配排序"
-                        title="PART 8 排序"
+                        aria-label={t("未定年匹配排序")}
+                        title={t("PART 8 排序")}
                         onChange={(event) => {
                             void onSortChange(event.currentTarget.value as CofechaUndatedSort);
                         }}
                     >
-                        <option value="correlation">最高相关 R</option>
-                        <option value="adjustment">年份调整 D</option>
+                        <option value="correlation">{t("最高相关 R")}</option>
+                        <option value="adjustment">{t("年份调整 D")}</option>
                     </select>
                     <button
                         type="button"
                         className={styles["clear-button"]}
                         disabled={disabled}
-                        aria-label="清除未定年 RWL"
-                        title="清除未定年 RWL"
+                        aria-label={t("清除未定年 RWL")}
+                        title={t("清除未定年 RWL")}
                         onClick={() => { void onClear(); }}
                     >
                         ×

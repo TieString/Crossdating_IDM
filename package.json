@@ -24,7 +24,8 @@
     "benchmark:online-unified-clean": "vite-node scripts/benchmark-online-unified-clean.ts",
     "export:tree-ring-scan-fixtures": "vite-node scripts/export-tree-ring-scan-fixtures.ts",
     "validate:tree-ring-scan-pair": "vite-node scripts/validate-tree-ring-scan-pair.ts",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test:i18n": "vitest run src/i18n"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.3",

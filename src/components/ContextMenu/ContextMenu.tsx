@@ -1,3 +1,5 @@
+import { localizeMessage } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import style from "./ContextMenu.module.css";
@@ -37,6 +39,7 @@ const VIEWPORT_MARGIN = 8;
  * 在外部点击、Esc、滚动或窗口缩放时自动关闭。
  */
 export default function ContextMenu({ open, x, y, items, onClose }: ContextMenuProps) {
+    useLocale();
     const menuRef = useRef<HTMLDivElement | null>(null);
     const [position, setPosition] = useState({ left: x, top: y, flipX: false, flipY: false });
 
@@ -164,7 +167,7 @@ export default function ContextMenu({ open, x, y, items, onClose }: ContextMenuP
                     {item.icon ? (
                         <span className={style["menu-item-icon"]} aria-hidden="true">{item.icon}</span>
                     ) : null}
-                    <span className={style["menu-item-label"]}>{item.label}</span>
+                    <span className={style["menu-item-label"]}>{localizeMessage(item.label)}</span>
                 </button>
             ))}
         </div>,

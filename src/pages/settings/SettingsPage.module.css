@@ -380,3 +380,11 @@
     color: #444;
     line-height: 1.6;
 }
+
+/* English labels must wrap rather than cover controls in small native windows. */
+:global(html[lang="en-US"]) .sidebar { flex-basis: 172px; }
+:global(html[lang="en-US"]) .row { grid-template-columns: 120px minmax(0, 1fr); }
+.row-label, .setting-note, .sidebar-item { overflow-wrap: break-word; }
+@media (max-width: 700px) {
+    :global(html[lang="en-US"]) .row { grid-template-columns: 1fr; row-gap: 8px; }
+}

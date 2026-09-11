@@ -1,3 +1,5 @@
+import { t } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import { useCallback, useEffect, useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { RwlDisplayUnitsContext } from "@/features/rwl/DisplayUnitsContext";
 import { stopMarker } from "@/shared/constants";
@@ -35,6 +37,7 @@ async function sendCommand(command: WorkspaceWindowCommand) {
 }
 
 export default function WorkspaceWindowPage() {
+    useLocale();
     const page = new URLSearchParams(window.location.search).get("page");
     const kind = isWorkspaceWindowKind(page) ? page : null;
     const [state, setState] = useState<WorkspaceWindowState | null>(null);
@@ -179,11 +182,11 @@ export default function WorkspaceWindowPage() {
     ), [state]);
 
     if (!kind) {
-        return <div className={styles["workspace-loading"]}>未知窗口</div>;
+        return <div className={styles["workspace-loading"]}>{t("未知窗口")}</div>;
     }
 
     if (!state || state.kind !== kind) {
-        return <div className={styles["workspace-loading"]}>正在连接主窗口...</div>;
+        return <div className={styles["workspace-loading"]}>{t("正在连接主窗口...")}</div>;
     }
 
     if (state.kind === "operation-log") {

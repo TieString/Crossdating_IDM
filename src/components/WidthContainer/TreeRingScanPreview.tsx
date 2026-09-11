@@ -1,3 +1,5 @@
+import { t, localizeError } from '@/i18n/core';
+import { useLocale } from '@/i18n/react';
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type {
     MouseEvent as ReactMouseEvent,
@@ -66,6 +68,7 @@ function TreeRingScanPreviewComponent({
     onOpen,
     onContextMenu,
 }: TreeRingScanPreviewProps) {
+    useLocale();
     const image = useTreeRingScanImage(file, scanState.crop);
     const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
     const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
@@ -384,9 +387,9 @@ function TreeRingScanPreviewComponent({
         }
     };
 
-    if (image.loading) return <span className={styles.status}>加载扫描影像…</span>;
+    if (image.loading) return <span className={styles.status}>{t("加载扫描影像…")}</span>;
     if (image.error || !image.url) {
-        return <span className={styles.error} title={image.error ?? undefined}>扫描影像不可用</span>;
+        return <span className={styles.error} title={image.error ? localizeError(image.error) : undefined}>{t("扫描影像不可用")}</span>;
     }
 
     const selectedOriginalYear = highlightedYear === undefined
@@ -437,7 +440,7 @@ function TreeRingScanPreviewComponent({
                     className={styles.previewCanvas}
                     data-panel-resize-heavy-preview="true"
                     role="img"
-                    aria-label={`${seriesId} 的扫描影像 1 cm 窗口`}
+                    aria-label={t("{0} 的扫描影像 1 cm 窗口", [seriesId])}
                 />
                 {selectedScreenX !== null && selectedScreenX >= 0 && selectedScreenX <= previewSize.width ? (
                     <span className={styles.selectedLine} style={{ left: `${selectedScreenX}px` }} />
@@ -446,11 +449,11 @@ function TreeRingScanPreviewComponent({
             {hoveredYear ? (
                 <span className={styles.hoverYear} style={{ left: `${hoveredYear.left}px` }}>
                     {hoveredYear.currentYear === hoveredYear.originalYear ? (
-                        `${hoveredYear.originalYear} 年`
+                        t("{0} 年", [hoveredYear.originalYear])
                     ) : (
                         <>
-                            原 {hoveredYear.originalYear} 年<br />
-                            现 {hoveredYear.currentYear === null ? "已删除" : `${hoveredYear.currentYear} 年`}
+                            {t("原 ")}{hoveredYear.originalYear} {t(" 年")}<br />
+                            {t("现 ")}{hoveredYear.currentYear === null ? t("已删除") : t("{0} 年", [hoveredYear.currentYear])}
                         </>
                     )}
                 </span>
