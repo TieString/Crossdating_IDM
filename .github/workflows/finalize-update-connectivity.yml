@@ -1,0 +1,46 @@
+name: Validate resilient update connectivity
+
+on:
+  push:
+    branches: [fix/update-connectivity-resilience]
+    paths:
+      - .github/workflows/finalize-update-connectivity.yml
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Apply update settings UI patch
+        run: python scripts/_patch_update_ui.py
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build frontend
+        run: npm run build
+      - name: Run production tests
+        run: npm run test:production
+      - name: Run localization tests
+        run: npm run test:i18n
+      - name: Run update tests
+        run: npm run test:update
+      - name: Compile Tauri backend
+        run: cargo check --locked --manifest-path src-tauri/Cargo.toml
+      - name: Finalize validated branch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm scripts/_patch_update_ui.py .github/workflows/finalize-update-connectivity.yml
+          git add src/pages/settings/SettingsPage.tsx src/pages/settings/SettingsPage.module.css src/i18n/en.json
+          git commit -m "fix: add proxy fallback and update diagnostics"
+          git push origin HEAD:fix/update-connectivity-resilience
