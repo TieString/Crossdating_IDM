@@ -47,6 +47,15 @@
       "allow": [
         {
           "url": "https://api.github.com/repos/TieString/Crossdating_IDM/releases/latest"
+        },
+        {
+          "url": "https://github.com/TieString/Crossdating_IDM/releases/latest"
+        },
+        {
+          "url": "https://github.com/TieString/Crossdating_IDM/releases/tag/*"
+        },
+        {
+          "url": "https://cdn.jsdelivr.net/gh/TieString/Crossdating_IDM@main/update.json"
         }
       ]
     },

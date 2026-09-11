@@ -7,10 +7,19 @@ import { FloatingScrollArea } from "@/components/FloatingScrollArea/FloatingScro
 import { useSettings } from "@/features/settings/SettingsContext";
 import {
     CURRENT_APP_VERSION,
+    GITHUB_RELEASES_URL,
+    UpdateCheckError,
     checkGitHubRelease,
+    normalizeUpdateProxyUrl,
     readAutoUpdateCheckEnabled,
+    readCdnFallbackEnabled,
+    readUpdateProxyUrl,
     writeAutoUpdateCheckEnabled,
+    writeCdnFallbackEnabled,
+    writeUpdateProxyUrl,
+    type UpdateAttempt,
     type UpdateCheckResult,
+    type UpdateSource,
 } from "@/features/update/githubRelease";
 import ltrrFavicon from "@/assets/ltrr-favicon.ico";
 import {
@@ -334,25 +343,68 @@ function TreeRingImageSection() {
     );
 }
 
+function updateSourceLabel(source: UpdateSource): string {
+    if (source === "github-api") return "GitHub API";
+    if (source === "github-web") return t("GitHub Release 页面");
+    return t("jsDelivr 备用清单");
+}
+
+function updateFailureLabel(attempt: UpdateAttempt): string {
+    if (attempt.reason === "timeout") return t("连接超时");
+    if (attempt.reason === "network") return t("网络连接失败");
+    if (attempt.reason === "http") return t("HTTP 状态码 {0}", [String(attempt.status ?? "?")]);
+    if (attempt.reason === "invalid-data") return t("返回的版本信息无效");
+    if (attempt.reason === "permission") return t("请求被应用网络权限拒绝");
+    return t("未知错误");
+}
+
 function AboutSection() {
     useLocale();
     const [checking, setChecking] = useState(false);
     const [checkResult, setCheckResult] = useState<UpdateCheckResult | null>(null);
-    const [checkError, setCheckError] = useState(false);
+    const [checkError, setCheckError] = useState<UpdateCheckError | null>(null);
     const [autoCheck, setAutoCheck] = useState(() => readAutoUpdateCheckEnabled());
+    const [proxyUrl, setProxyUrl] = useState(() => readUpdateProxyUrl());
+    const [cdnFallback, setCdnFallback] = useState(() => readCdnFallbackEnabled());
     const [preferenceSaveFailed, setPreferenceSaveFailed] = useState(false);
+    const [networkSaveState, setNetworkSaveState] = useState<"idle" | "saved" | "failed" | "invalid" | "auth">("idle");
+
+    const normalizedProxyOrNull = (): string | null => {
+        try {
+            const normalized = normalizeUpdateProxyUrl(proxyUrl);
+            setNetworkSaveState("idle");
+            return normalized;
+        } catch (error) {
+            setNetworkSaveState(error instanceof Error && error.message === "proxy-auth-not-supported" ? "auth" : "invalid");
+            return null;
+        }
+    };
 
     const checkForUpdate = async () => {
+        const normalizedProxy = normalizedProxyOrNull();
+        if (normalizedProxy === null) return;
+
         setChecking(true);
-        setCheckError(false);
+        setCheckError(null);
+        setCheckResult(null);
         try {
-            setCheckResult(await checkGitHubRelease());
-        } catch {
-            setCheckResult(null);
-            setCheckError(true);
+            setCheckResult(await checkGitHubRelease(CURRENT_APP_VERSION, {
+                proxyUrl: normalizedProxy,
+                useCdnFallback: cdnFallback,
+            }));
+        } catch (error) {
+            setCheckError(error instanceof UpdateCheckError ? error : new UpdateCheckError([]));
         } finally {
             setChecking(false);
         }
+    };
+
+    const saveNetworkSettings = () => {
+        const normalizedProxy = normalizedProxyOrNull();
+        if (normalizedProxy === null) return;
+        const saved = writeUpdateProxyUrl(normalizedProxy) && writeCdnFallbackEnabled(cdnFallback);
+        setProxyUrl(normalizedProxy);
+        setNetworkSaveState(saved ? "saved" : "failed");
     };
 
     const changeAutoCheck = (enabled: boolean) => {
@@ -371,12 +423,16 @@ function AboutSection() {
                     <button className={styles["action-button"]} type="button" disabled={checking} onClick={() => void checkForUpdate()}>
                         {checking ? t("正在检查...") : t("检查更新")}
                     </button>
+                    <button className={styles["secondary-button"]} type="button" onClick={() => void openUrl(GITHUB_RELEASES_URL)}>
+                        {t("打开 GitHub Releases")}
+                    </button>
                     {checkResult?.status === "available" && (
                         <button className={styles["download-button"]} type="button" onClick={() => void openUrl(checkResult.latest.htmlUrl)}>
                             {t("查看 GitHub Release")}
                         </button>
                     )}
                 </div>
+
                 {checkResult?.status === "available" && (
                     <div className={styles["update-result"]} role="status">
                         <strong>{t("发现新版本 {0}", [checkResult.latest.version])}</strong>
@@ -389,11 +445,71 @@ function AboutSection() {
                         {t("已是最新版（{0}）", [checkResult.currentVersion])}
                     </div>
                 )}
-                {checkError && (
-                    <div className={styles["unconfigured-status"]} role="status">
-                        {t("无法连接 GitHub 检查更新，请稍后重试。")}
+                {checkResult && (
+                    <div className={styles["setting-note"]}>
+                        {t("更新信息来源：{0}", [updateSourceLabel(checkResult.source)])}
                     </div>
                 )}
+                {checkError && (
+                    <div className={styles["update-error"]} role="status">
+                        <strong>{t("无法完成更新检查。")}</strong>
+                        {checkError.attempts.length > 0 && (
+                            <>
+                                <span>{t("更新检查尝试：")}</span>
+                                <ul className={styles["update-attempts"]}>
+                                    {checkError.attempts.map((attempt) => (
+                                        <li key={attempt.source}>
+                                            {updateSourceLabel(attempt.source)}：{updateFailureLabel(attempt)}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </>
+                        )}
+                        <span>{t("如果当前网络无法直连 GitHub，可填写本机 HTTP/HTTPS 代理地址。")}</span>
+                    </div>
+                )}
+
+                <div className={styles["network-settings"]}>
+                    <label className={styles["network-label"]}>
+                        <span>{t("代理地址（可选）")}</span>
+                        <input
+                            className={styles["network-input"]}
+                            value={proxyUrl}
+                            onChange={(event) => {
+                                setProxyUrl(event.currentTarget.value);
+                                setNetworkSaveState("idle");
+                            }}
+                            placeholder={t("例如 http://127.0.0.1:7890")}
+                            spellCheck={false}
+                            autoCapitalize="off"
+                            autoCorrect="off"
+                        />
+                    </label>
+                    <label className={styles["check"]}>
+                        <input
+                            type="checkbox"
+                            checked={cdnFallback}
+                            onChange={(event) => {
+                                setCdnFallback(event.currentTarget.checked);
+                                setNetworkSaveState("idle");
+                            }}
+                        />
+                        <span>{t("允许使用 jsDelivr 只读版本清单作为备用更新源")}</span>
+                    </label>
+                    <div className={styles["setting-note"]}>
+                        {t("备用源只读取版本元数据，不会下载或执行安装包；可随时关闭。")}
+                    </div>
+                    <div className={styles["update-controls"]}>
+                        <button className={styles["secondary-button"]} type="button" onClick={saveNetworkSettings}>
+                            {t("保存网络设置")}
+                        </button>
+                        {networkSaveState === "saved" && <span className={styles["configured-status"]}>{t("网络设置已保存。")}</span>}
+                        {networkSaveState === "failed" && <span className={styles["unconfigured-status"]}>{t("无法保存网络设置。")}</span>}
+                        {networkSaveState === "invalid" && <span className={styles["unconfigured-status"]}>{t("代理地址无效，请使用 http:// 或 https:// 地址。")}</span>}
+                        {networkSaveState === "auth" && <span className={styles["unconfigured-status"]}>{t("代理地址暂不支持在 URL 中保存用户名或密码。")}</span>}
+                    </div>
+                </div>
+
                 <label className={styles["check"]}>
                     <input type="checkbox" checked={autoCheck} onChange={(event) => changeAutoCheck(event.currentTarget.checked)} />
                     <span>{t("启动时自动检查更新")}</span>
