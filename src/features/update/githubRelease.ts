@@ -1,3 +1,5 @@
+import { isTauri } from "@tauri-apps/api/core";
+import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import packageMetadata from "../../../package.json";
 
 export const CURRENT_APP_VERSION = packageMetadata.version;
@@ -44,6 +46,11 @@ interface ParsedVersion {
 }
 
 const VERSION_PATTERN = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
+
+const defaultUpdateFetch: FetchLike = async (input, init) => {
+    if (isTauri()) return tauriFetch(input, init);
+    return globalThis.fetch(input, init);
+};
 
 function parseVersion(value: string): ParsedVersion | null {
     const match = value.trim().match(VERSION_PATTERN);
@@ -114,7 +121,7 @@ function parseRelease(payload: unknown): GitHubReleaseInfo {
 /** Queries GitHub metadata only; it never downloads or installs release assets. */
 export async function checkGitHubRelease(
     currentVersion = CURRENT_APP_VERSION,
-    fetcher: FetchLike = globalThis.fetch.bind(globalThis),
+    fetcher: FetchLike = defaultUpdateFetch,
     timeoutMs = 8_000,
 ): Promise<UpdateCheckResult> {
     const controller = new AbortController();
