@@ -1,13 +1,16 @@
 name: Localization checks
 
 on:
-  push:
-    branches: [feat/english-language-switch]
   pull_request:
-    branches: [main]
+    branches: [main, feat/english-language-switch]
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: localization-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   frontend:
