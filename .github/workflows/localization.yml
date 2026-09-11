@@ -1,0 +1,30 @@
+name: Localization checks
+
+on:
+  push:
+    branches: [feat/english-language-switch]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Archive tracked source for reproducible review
+        run: git archive --format=tar.gz --output=source-snapshot.tar.gz HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: localization-source-snapshot
+          path: source-snapshot.tar.gz
+          retention-days: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm run build
+      - run: npm run test:production
