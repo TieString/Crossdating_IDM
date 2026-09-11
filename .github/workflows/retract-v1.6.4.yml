@@ -1,0 +1,19 @@
+name: Retract v1.6.4
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/retract-v1.6.4.yml
+
+permissions:
+  contents: write
+
+jobs:
+  retract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete v1.6.4 release and tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete v1.6.4 --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
