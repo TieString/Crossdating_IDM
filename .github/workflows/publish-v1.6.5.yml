@@ -1,0 +1,122 @@
+name: Publish v1.6.5
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish-v1.6.5.yml
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install JavaScript dependencies
+        shell: pwsh
+        run: yarn install --frozen-lockfile --non-interactive
+
+      - name: Verify release versions
+        shell: pwsh
+        run: |
+          node -e "const p=require('./package.json');const t=require('./src-tauri/tauri.conf.json');if(p.version!=='1.6.5'||t.version!=='1.6.5')process.exit(1)"
+          $cargo = Get-Content src-tauri/Cargo.toml -Raw
+          if ($cargo -notmatch 'version = "1\.6\.5"') { throw 'Cargo version mismatch' }
+
+      - name: Refresh Rust lockfile for v1.6.5
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
+      - name: Commit refreshed Cargo.lock if needed
+        shell: bash
+        run: |
+          if ! git diff --quiet -- src-tauri/Cargo.lock; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add src-tauri/Cargo.lock
+            git commit -m "chore: lock v1.6.5 Rust package"
+            git push origin HEAD:main
+          fi
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Run production tests
+        run: npm run test:production
+
+      - name: Run localization tests
+        run: npm run test:i18n
+
+      - name: Run update tests
+        run: npm run test:update
+
+      - name: Check Tauri backend lockfile
+        run: cargo check --locked --manifest-path src-tauri/Cargo.toml
+
+      - name: Build Windows NSIS installer
+        run: npm run tauri build -- --bundles nsis
+
+      - name: Locate installer
+        id: installer
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path src-tauri/target/release/bundle/nsis -Filter "*1.6.5*x64-setup.exe" | Select-Object -First 1
+          if (-not $installer) { throw 'v1.6.5 NSIS installer not found' }
+          "path=$($installer.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Installer: $($installer.FullName)"
+
+      - name: Create GitHub Release v1.6.5
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $target = git rev-parse HEAD
+          $notes = @"
+          # Crossdating IDM 1.6.5
+
+          本版本重点完善受限网络环境下的更新检测，并替代已撤回的 v1.6.4。
+
+          - 更新检测依次尝试 GitHub Releases API、GitHub Releases 网页和可选的 jsDelivr 只读版本清单。
+          - 设置 → 关于 → 软件更新新增 HTTP/HTTPS 代理地址，可使用本机代理软件实际提供的 HTTP 或 mixed 端口。
+          - 更新失败会逐项显示超时、网络错误、HTTP 状态、无效数据或应用权限问题，便于判断是 GitHub API、GitHub 网站还是备用源不可达。
+          - 成功检查会显示实际使用的版本信息来源。
+          - jsDelivr 备用源只读取版本元数据，不下载、不运行任何安装包，并可随时关闭。
+          - 更新检测仍不会自动下载或静默安装；安装包始终发布在官方 GitHub Release。
+          - 已通过 Windows Tauri/Rust 编译、锁定依赖检查、前端构建、production / i18n / update 测试和 NSIS 打包。
+
+          如果所在网络无法直接访问 GitHub，可在软件内填写本机 HTTP/HTTPS 代理；例如 `http://127.0.0.1:7890` 仅在你的代理软件确实使用该端口时才适用。
+
+          Windows 安装包：`Crossdating-IDM_1.6.5_x64-setup.exe`
+          "@
+          gh release create v1.6.5 "${{ steps.installer.outputs.path }}" --repo TieString/Crossdating_IDM --target $target --title "Crossdating IDM 1.6.5" --notes $notes
+
+      - name: Publish v1.6.5 fallback manifest and clean workflow
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $published = gh api repos/TieString/Crossdating_IDM/releases/tags/v1.6.5 --jq .published_at
+          $env:PUBLISHED_AT = $published
+          node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('update.json','utf8'));Object.assign(p,{version:'1.6.5',tag:'v1.6.5',name:'Crossdating IDM 1.6.5',body:'Crossdating IDM 1.6.5 improves update checks for restricted networks with GitHub web/CDN fallbacks, diagnostics, and optional HTTP/HTTPS proxy support.',releaseUrl:'https://github.com/TieString/Crossdating_IDM/releases/tag/v1.6.5',publishedAt:process.env.PUBLISHED_AT});fs.writeFileSync('update.json',JSON.stringify(p,null,2)+'\n')"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/publish-v1.6.5.yml
+          git add update.json
+          git commit -m "chore: publish v1.6.5 update manifest"
+          git push origin HEAD:main
+
+      - name: Best-effort purge jsDelivr manifest cache
+        continue-on-error: true
+        shell: pwsh
+        run: curl.exe -fsS "https://purge.jsdelivr.net/gh/TieString/Crossdating_IDM@main/update.json"
